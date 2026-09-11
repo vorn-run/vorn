@@ -12,8 +12,10 @@ import {
   Loader2,
   Square,
   Upload,
-  X
+  X,
+  ListTree
 } from 'lucide-react'
+import { pruneCanvasViews, readOutlineOpen, writeOutlineOpen } from '../../lib/canvas-views'
 import { ICON_MAP } from '../project-sidebar/icon-map'
 import { PROJECT_ICON_OPTIONS, ICON_COLOR_PALETTE } from '../../lib/project-icons'
 import { Tooltip } from '../Tooltip'
@@ -138,6 +140,13 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId)
 
   const [name, setName] = useState('New Workflow')
+  // The canvas is told which workflow its steps belong to only once they have loaded.
+  const [loadedKey, setLoadedKey] = useState<string | null>(null)
+  const [showOutline, setShowOutline] = useState(readOutlineOpen)
+  const allWorkflows = useAppStore((s) => s.config?.workflows)
+  useEffect(() => {
+    if (allWorkflows) pruneCanvasViews(new Set(allWorkflows.map((w) => w.id)))
+  }, [allWorkflows])
   const [icon, setIcon] = useState('Workflow')
   const [iconColor, setIconColor] = useState('#3b82f6')
   const [nodes, setNodes] = useState<WorkflowNode[]>([])
@@ -433,6 +442,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       setEnabled(existingWorkflow.enabled)
       setStaggerDelayMs(existingWorkflow.staggerDelayMs)
       setAutoCleanupWorktrees(existingWorkflow.autoCleanupWorktrees ?? false)
+      setLoadedKey(existingWorkflow.id)
     } else if (!editingId) {
       // New workflow — an empty canvas, offered a template before the first pick.
       setName('New Workflow')
@@ -445,6 +455,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       // Settings are the previous workflow's until they are put back too.
       setAutoCleanupWorktrees(false)
       setShowStartFrom(true)
+      setLoadedKey(null)
     }
     // Saving hands back a new workflow object; only an actual switch resets the panels.
     if (loadedEditorIdRef.current !== editingId) {
@@ -1319,6 +1330,24 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             </Tooltip>
           )}
 
+          <Tooltip label="Steps" position="bottom">
+            <button
+              onClick={() => {
+                setShowOutline(!showOutline)
+                writeOutlineOpen(!showOutline)
+              }}
+              aria-label="Steps"
+              aria-pressed={showOutline}
+              className={`p-1.5 rounded-md transition-colors ${
+                showOutline
+                  ? 'text-white bg-white/[0.08]'
+                  : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
+              }`}
+            >
+              <ListTree size={15} />
+            </button>
+          </Tooltip>
+
           {editingId && (
             <Tooltip
               label={`Run history${executionHistory.length > 0 ? ` (${executionHistory.length})` : ''}`}
@@ -1427,7 +1456,8 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
         <WorkflowCanvas
           nodes={nodes}
           edges={edges}
-          loadKey={editingId}
+          loadKey={loadedKey}
+          showOutline={showOutline}
           onNodeClick={handleNodeClick}
           onOpenLibrary={handleOpenLibrary}
           libraryAnchor={pendingInsert}

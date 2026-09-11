@@ -1,6 +1,7 @@
 import { getBezierPath, Position, type Edge, type Node } from '@xyflow/react'
 import { LoopConfig, WorkflowEdge, WorkflowNode, WorkflowNodePosition } from '../../shared/types'
 import { stepPreview } from '../components/workflow-editor/node-visuals'
+import type { CanvasView } from './canvas-views'
 import {
   CARD_WIDTH,
   computeFlowLayout,
@@ -392,4 +393,37 @@ export function canConnect(
     queue.push(...(successors.get(current) ?? []))
   }
   return true
+}
+
+/** How far the first step sits below the top of the canvas when a workflow opens. */
+const OPENING_TOP = 48
+
+type PlacedNode = Pick<Node, 'position' | 'type' | 'width' | 'measured'>
+
+/** Whether to open this workflow's view now: once per workflow, and only once its own steps have arrived. */
+export function needsOpening(
+  opened: string | null | undefined,
+  key: string | null,
+  nodes: PlacedNode[]
+): boolean {
+  if (opened === key || nodes.length === 0) return false
+  return key === null || nodes.some((n) => n.type !== 'addStep' && n.type !== 'addTrigger')
+}
+
+/** Where a workflow's view opens: where it was left, else at 100% with its steps centred and the first near the top. */
+export function openingViewport(
+  nodes: PlacedNode[],
+  width: number,
+  saved?: CanvasView | null
+): CanvasView {
+  if (saved) return saved
+  const steps = nodes.filter((n) => n.type !== 'addStep' && n.type !== 'addTrigger')
+  const drawn = steps.length > 0 ? steps : nodes
+  if (drawn.length === 0) return { x: width / 2, y: OPENING_TOP, zoom: 1 }
+  const widthOf = (n: PlacedNode): number =>
+    n.measured?.width ?? n.width ?? (n.type === 'loop' ? LOOP_WIDTH : CARD_WIDTH)
+  const minX = Math.min(...drawn.map((n) => n.position.x))
+  const maxX = Math.max(...drawn.map((n) => n.position.x + widthOf(n)))
+  const minY = Math.min(...drawn.map((n) => n.position.y))
+  return { x: width / 2 - (minX + maxX) / 2, y: OPENING_TOP - minY, zoom: 1 }
 }

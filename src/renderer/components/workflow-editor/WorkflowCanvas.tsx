@@ -19,7 +19,8 @@ import {
   type EdgeProps,
   type Node,
   type NodeChange,
-  type NodeProps
+  type NodeProps,
+  type Viewport
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { AlignVerticalSpaceAround, Repeat, Replace, StepForward, Trash2, Zap } from 'lucide-react'
@@ -29,12 +30,16 @@ import {
   CanvasEdgeData,
   canConnect,
   estimateNodeHeight,
+  needsOpening,
+  openingViewport,
   stepEdgePath,
   toCanvasElements,
   TRIGGER_ANCHOR,
   TRIGGER_ANCHOR_ID
 } from '../../lib/workflow-canvas-layout'
-import { REPLACEABLE_NODE_TYPES } from '../../lib/workflow-helpers'
+import { CARD_WIDTH, REPLACEABLE_NODE_TYPES, flowOrder } from '../../lib/workflow-helpers'
+import { readCanvasView, writeCanvasView } from '../../lib/canvas-views'
+import { StepOutline } from './StepOutline'
 import { NODE_GLYPH, NODE_SELECTED, NODE_UNSELECTED } from './node-visuals'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
@@ -87,8 +92,10 @@ interface Props {
   selectedNodeId: string | null
   /** What each node is doing in live runs; absent when nothing is running. */
   nodeStatus?: Record<string, NodeExecutionStatus>
-  /** Changes when a different workflow loads; re-fits the view top-aligned. */
+  /** The workflow these steps belong to; it changes only once they have loaded. */
   loadKey?: string | null
+  /** Shows the list of steps beside the canvas. */
+  showOutline?: boolean
 }
 
 /** Kept in context so selection/status churn re-renders cards without rebuilding the node array. */
@@ -507,9 +514,10 @@ function WorkflowCanvasInner({
   onTidyUp,
   selectedNodeId,
   nodeStatus,
-  loadKey
+  loadKey,
+  showOutline = false
 }: Props) {
-  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView, getViewport, setViewport } =
+  const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView, setViewport, setCenter } =
     useReactFlow()
   const wrapperRef = useRef<HTMLDivElement>(null)
 
@@ -523,26 +531,85 @@ function WorkflowCanvasInner({
     setRfNodes(elements.nodes)
   }
 
-  // The flow is vertical: on load, keep fitView's zoom and centering but pin
-  // the topmost node near the top instead of vertically centering the chain.
-  const elementsRef = useRef(elements)
+  const steps = useMemo(() => flowOrder(nodes, edges), [nodes, edges])
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+  // Adjust-state-while-rendering: the keys start from the top of each workflow.
+  const [focusKey, setFocusKey] = useState(loadKey)
+  if (focusKey !== loadKey) {
+    setFocusKey(loadKey)
+    setFocusedId(null)
+  }
+  const [visibleIds, setVisibleIds] = useState<ReadonlySet<string>>(() => new Set())
+  const rfNodesRef = useRef(rfNodes)
   useEffect(() => {
-    elementsRef.current = elements
-  }, [elements])
-  const alignTopView = useCallback(async () => {
-    const drawn = elementsRef.current.nodes
-    if (drawn.length === 0) return
-    await fitView({ padding: 0.2, maxZoom: 1 })
-    const { x, zoom } = getViewport()
-    const minY = Math.min(...drawn.map((n) => n.position.y))
-    setViewport({ x, y: 48 - minY * zoom, zoom })
-  }, [fitView, getViewport, setViewport])
+    rfNodesRef.current = rfNodes
+  }, [rfNodes])
 
+  const markVisible = useCallback(
+    (view: Viewport) => {
+      const el = wrapperRef.current
+      if (!el) return
+      const inView = new Set<string>()
+      for (const n of rfNodesRef.current) {
+        if (n.type === 'addStep' || n.type === 'addTrigger') continue
+        const left = n.position.x * view.zoom + view.x
+        const top = n.position.y * view.zoom + view.y
+        const width = (n.measured?.width ?? n.width ?? CARD_WIDTH) * view.zoom
+        const height = (n.measured?.height ?? n.height ?? 60) * view.zoom
+        const shown =
+          left < el.clientWidth && left + width > 0 && top < el.clientHeight && top + height > 0
+        if (shown) inView.add(n.id)
+      }
+      for (const step of steps) if (step.within && inView.has(step.within)) inView.add(step.node.id)
+      setVisibleIds(inView)
+    },
+    [steps]
+  )
+
+  const focusStep = useCallback(
+    (nodeId: string) => {
+      const within = steps.find((s) => s.node.id === nodeId)?.within
+      const target = rfNodesRef.current.find((n) => n.id === (within ?? nodeId))
+      if (!target) return
+      setFocusedId(nodeId)
+      const width = target.measured?.width ?? target.width ?? CARD_WIDTH
+      const height = target.measured?.height ?? target.height ?? 60
+      void setCenter(target.position.x + width / 2, target.position.y + height / 2, {
+        zoom: 1,
+        duration: 200
+      })
+    },
+    [steps, setCenter]
+  )
+
+  // A workflow opens where it was left, or at 100% on its trigger, once its own steps have arrived.
+  const openedKey = useRef<string | null | undefined>(undefined)
+  const openedAt = useRef(0)
   const [rfReady, setRfReady] = useState(false)
   useEffect(() => {
     if (!rfReady) return
-    void alignTopView()
-  }, [rfReady, loadKey, alignTopView])
+    const key = loadKey ?? null
+    if (!needsOpening(openedKey.current, key, elements.nodes)) return
+    openedKey.current = key
+    const view = openingViewport(
+      elements.nodes,
+      wrapperRef.current?.clientWidth ?? 0,
+      key ? readCanvasView(key) : null
+    )
+    openedAt.current = Date.now()
+    void setViewport(view)
+    markVisible(view)
+  }, [rfReady, loadKey, elements, setViewport, markVisible])
+
+  const handleMoveEnd = useCallback(
+    (_event: MouseEvent | TouchEvent | null, view: Viewport) => {
+      markVisible(view)
+      // The opening view is where the workflow already was, not a new place to remember.
+      if (Date.now() - openedAt.current < 250) return
+      if (loadKey) writeCanvasView(loadKey, view)
+    },
+    [loadKey, markVisible]
+  )
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     // The canvas owns position only; selection and structure stay the editor's.
@@ -631,6 +698,16 @@ function WorkflowCanvasInner({
         void zoomTo(1)
       } else if (e.key === '1') {
         void fitView({ padding: 0.2, maxZoom: 1 })
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (steps.length === 0) return
+        e.preventDefault()
+        const at = steps.findIndex((s) => s.node.id === (focusedId ?? selectedNodeId))
+        const move = e.key === 'ArrowDown' ? 1 : -1
+        const next = at === -1 ? 0 : Math.min(steps.length - 1, Math.max(0, at + move))
+        focusStep(steps[next].node.id)
+      } else if (e.key === 'Enter' && focusedId) {
+        e.preventDefault()
+        onNodeClick(focusedId)
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
         const node = nodes.find((n) => n.id === selectedNodeId)
         if (node && onDeleteNode) {
@@ -648,7 +725,11 @@ function WorkflowCanvasInner({
       fitView,
       selectedNodeId,
       nodes,
-      onDeleteNode
+      onDeleteNode,
+      steps,
+      focusedId,
+      focusStep,
+      onNodeClick
     ]
   )
 
@@ -678,66 +759,80 @@ function WorkflowCanvasInner({
 
   return (
     <InteractionsContext.Provider value={interactions}>
-      <div
-        ref={wrapperRef}
-        className="flex-1 h-full relative outline-none"
-        tabIndex={0}
-        onKeyDown={handleKeyDown}
-      >
-        <ReactFlow
-          nodes={rfNodes}
-          edges={elements.edges}
-          nodeTypes={NODE_TYPES}
-          edgeTypes={EDGE_TYPES}
-          onNodesChange={handleNodesChange}
-          onNodeDragStop={handleDragStop}
-          onConnect={handleConnect}
-          onConnectStart={handleConnectStart}
-          onConnectEnd={handleConnectEnd}
-          isValidConnection={isValidConnection}
-          onPaneClick={() => onNodeClick('')}
-          onInit={() => setRfReady(true)}
-          minZoom={0.2}
-          maxZoom={1.75}
-          snapToGrid
-          snapGrid={[8, 8]}
-          connectionRadius={60}
-          panOnScroll
-          deleteKeyCode={null}
-          selectionKeyCode={null}
-          multiSelectionKeyCode={null}
-          nodesFocusable={false}
-          edgesFocusable={false}
-          colorMode="dark"
-          style={{ background: 'var(--color-surface-base)' }}
-          defaultEdgeOptions={{ type: 'step' }}
-          proOptions={{ hideAttribution: true }}
+      <div className="flex-1 h-full flex min-w-0">
+        {showOutline && (
+          <StepOutline
+            steps={steps}
+            focusedId={focusedId ?? selectedNodeId}
+            visibleIds={visibleIds}
+            onFocus={(nodeId) => {
+              focusStep(nodeId)
+              wrapperRef.current?.focus()
+            }}
+          />
+        )}
+        <div
+          ref={wrapperRef}
+          className="flex-1 h-full relative outline-none min-w-0"
+          tabIndex={0}
+          onKeyDown={handleKeyDown}
         >
-          <Background
-            variant={BackgroundVariant.Dots}
-            gap={20}
-            size={1}
-            color="rgba(255,255,255,0.05)"
-            bgColor="var(--color-surface-base)"
-          />
-          <MiniMap
-            pannable
-            zoomable
-            className="!bg-surface-panel !border !border-white/[0.12] !rounded"
-            maskColor="rgba(0,0,0,0.55)"
-            nodeColor="rgba(255,255,255,0.25)"
-            style={{ width: 96, height: 64 }}
-          />
-          <Controls
-            showInteractive={false}
-            className="!bg-surface-overlay !border !border-white/[0.12] !rounded-md !shadow-none
-                       [&_button]:!bg-transparent [&_button]:!border-white/[0.08] [&_button]:!fill-gray-400"
+          <ReactFlow
+            nodes={rfNodes}
+            edges={elements.edges}
+            nodeTypes={NODE_TYPES}
+            edgeTypes={EDGE_TYPES}
+            onNodesChange={handleNodesChange}
+            onNodeDragStop={handleDragStop}
+            onConnect={handleConnect}
+            onConnectStart={handleConnectStart}
+            onConnectEnd={handleConnectEnd}
+            isValidConnection={isValidConnection}
+            onPaneClick={() => onNodeClick('')}
+            onInit={() => setRfReady(true)}
+            onMoveEnd={handleMoveEnd}
+            minZoom={0.2}
+            maxZoom={1.75}
+            snapToGrid
+            snapGrid={[8, 8]}
+            connectionRadius={60}
+            panOnScroll
+            deleteKeyCode={null}
+            selectionKeyCode={null}
+            multiSelectionKeyCode={null}
+            nodesFocusable={false}
+            edgesFocusable={false}
+            colorMode="dark"
+            style={{ background: 'var(--color-surface-base)' }}
+            defaultEdgeOptions={{ type: 'step' }}
+            proOptions={{ hideAttribution: true }}
           >
-            <ControlButton onClick={onTidyUp} title="Tidy up">
-              <AlignVerticalSpaceAround size={12} className="!fill-none stroke-gray-400" />
-            </ControlButton>
-          </Controls>
-        </ReactFlow>
+            <Background
+              variant={BackgroundVariant.Dots}
+              gap={20}
+              size={1}
+              color="rgba(255,255,255,0.05)"
+              bgColor="var(--color-surface-base)"
+            />
+            <MiniMap
+              pannable
+              zoomable
+              className="!bg-surface-panel !border !border-white/[0.12] !rounded"
+              maskColor="rgba(0,0,0,0.55)"
+              nodeColor="rgba(255,255,255,0.25)"
+              style={{ width: 96, height: 64 }}
+            />
+            <Controls
+              showInteractive={false}
+              className="!bg-surface-overlay !border !border-white/[0.12] !rounded-md !shadow-none
+                       [&_button]:!bg-transparent [&_button]:!border-white/[0.08] [&_button]:!fill-gray-400"
+            >
+              <ControlButton onClick={onTidyUp} title="Tidy up">
+                <AlignVerticalSpaceAround size={12} className="!fill-none stroke-gray-400" />
+              </ControlButton>
+            </Controls>
+          </ReactFlow>
+        </div>
       </div>
     </InteractionsContext.Provider>
   )
