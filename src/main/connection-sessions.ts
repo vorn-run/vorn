@@ -35,6 +35,10 @@ export interface SignInResult {
 const prepared = new Set<string>()
 /** Hidden pages, one per connection and origin, that make the signed-in calls. */
 const runners = new Map<string, BrowserWindow>()
+/** A runner still loading its page, shared by every call that arrives meanwhile. */
+const opening = new Map<string, Promise<BrowserWindow>>()
+/** Calls in flight on each runner; it only starts idling once the last one ends. */
+const inFlight = new Map<string, number>()
 const idle = new Map<string, NodeJS.Timeout>()
 const signInWindows = new Map<string, BrowserWindow>()
 const signing = new Map<string, Promise<SignInResult>>()
@@ -73,11 +77,23 @@ function originOf(url: string): string | null {
 
 async function runner(connectionId: string, origin: string): Promise<BrowserWindow> {
   const key = `${connectionId} ${origin}`
+  const pending = opening.get(key)
+  if (pending) return pending
   const existing = runners.get(key)
   if (existing && !existing.isDestroyed() && originOf(existing.webContents.getURL()) === origin) {
     return existing
   }
   existing?.destroy()
+  const open = openRunner(key, connectionId, origin).finally(() => opening.delete(key))
+  opening.set(key, open)
+  return open
+}
+
+async function openRunner(
+  key: string,
+  connectionId: string,
+  origin: string
+): Promise<BrowserWindow> {
   const win = new BrowserWindow({
     show: false,
     webPreferences: { ...webPreferences(connectionId), backgroundThrottling: false }
@@ -91,7 +107,14 @@ async function runner(connectionId: string, origin: string): Promise<BrowserWind
   return win
 }
 
-function rest(key: string, win: BrowserWindow): void {
+function rest(key: string, win: BrowserWindow | undefined): void {
+  const left = (inFlight.get(key) ?? 1) - 1
+  if (left > 0) {
+    inFlight.set(key, left)
+    return
+  }
+  inFlight.delete(key)
+  if (!win) return
   clearTimeout(idle.get(key))
   const timer = setTimeout(() => {
     idle.delete(key)
@@ -112,8 +135,13 @@ export async function fetchInSession(
     throw new Error(`${request.url} is not on one of this connection's origins`)
   }
   const origin = originOf(request.url)!
-  const win = await runner(connectionId, origin)
+  const key = `${connectionId} ${origin}`
+  clearTimeout(idle.get(key))
+  idle.delete(key)
+  inFlight.set(key, (inFlight.get(key) ?? 0) + 1)
+  let win: BrowserWindow | undefined
   try {
+    win = await runner(connectionId, origin)
     if (originOf(win.webContents.getURL()) !== origin) {
       throw new Error(`The signed-in window for ${origin} ended up somewhere else`)
     }
@@ -123,7 +151,7 @@ export async function fetchInSession(
     )) as SessionAnswer
     return { ...answer, body: answer.body.slice(0, MAX_SESSION_BODY) }
   } finally {
-    rest(`${connectionId} ${origin}`, win)
+    rest(key, win)
   }
 }
 
@@ -240,6 +268,7 @@ function closeRunners(connectionId?: string): void {
   for (const [key, win] of runners) {
     if (connectionId !== undefined && !key.startsWith(`${connectionId} `)) continue
     runners.delete(key)
+    opening.delete(key)
     clearTimeout(idle.get(key))
     idle.delete(key)
     if (!win.isDestroyed()) win.destroy()
