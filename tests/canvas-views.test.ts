@@ -1,11 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import {
-  readCanvasView,
-  readOutlineOpen,
-  writeCanvasView,
-  writeOutlineOpen
-} from '../src/renderer/lib/canvas-views'
+import { readCanvasView, writeCanvasView } from '../src/renderer/lib/canvas-views'
 
 beforeEach(() => localStorage.clear())
 
@@ -30,15 +25,5 @@ describe('the view each workflow is left at', () => {
     expect(readCanvasView('wf')).toBeNull()
     localStorage.setItem('vorn:canvasViews', 'not json')
     expect(readCanvasView('wf')).toBeNull()
-  })
-})
-
-describe('the step outline', () => {
-  it('shows until it is closed, and stays the way it was left', () => {
-    expect(readOutlineOpen()).toBe(true)
-    writeOutlineOpen(false)
-    expect(readOutlineOpen()).toBe(false)
-    writeOutlineOpen(true)
-    expect(readOutlineOpen()).toBe(true)
   })
 })

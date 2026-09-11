@@ -174,14 +174,6 @@ export const SHORTCUTS: ShortcutDef[] = [
   },
   // Workflow canvas
   {
-    id: 'workflow-steps',
-    key: 'ArrowDown',
-    display: '\u2191 \u2193',
-    requireNoFocus: true,
-    category: 'navigation',
-    description: 'Move between workflow steps'
-  },
-  {
     id: 'workflow-fit',
     key: '1',
     display: '1',

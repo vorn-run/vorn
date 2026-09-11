@@ -13,7 +13,6 @@ import {
   ReactFlowProvider,
   applyNodeChanges,
   useReactFlow,
-  useStore,
   useUpdateNodeInternals,
   type Connection,
   type Edge,
@@ -21,7 +20,6 @@ import {
   type Node,
   type NodeChange,
   type NodeProps,
-  type ReactFlowState,
   type Viewport
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -39,9 +37,8 @@ import {
   TRIGGER_ANCHOR,
   TRIGGER_ANCHOR_ID
 } from '../../lib/workflow-canvas-layout'
-import { REPLACEABLE_NODE_TYPES, flowOrder } from '../../lib/workflow-helpers'
+import { REPLACEABLE_NODE_TYPES } from '../../lib/workflow-helpers'
 import { readCanvasView, writeCanvasView } from '../../lib/canvas-views'
-import { StepOutline } from './StepOutline'
 import { NODE_GLYPH, NODE_SELECTED, NODE_UNSELECTED } from './node-visuals'
 import { WORKFLOW_STATUS_DOT_PULSE } from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
@@ -96,7 +93,6 @@ interface Props {
   nodeStatus?: Record<string, NodeExecutionStatus>
   /** The workflow these steps belong to, whose view is remembered. */
   loadKey?: string | null
-  showOutline?: boolean
 }
 
 /** Kept in context so selection/status churn re-renders cards without rebuilding the node array. */
@@ -515,8 +511,7 @@ function WorkflowCanvasInner({
   onTidyUp,
   selectedNodeId,
   nodeStatus,
-  loadKey,
-  showOutline = false
+  loadKey
 }: Props) {
   const { screenToFlowPosition, zoomIn, zoomOut, zoomTo, fitView, setViewport } = useReactFlow()
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -530,51 +525,6 @@ function WorkflowCanvasInner({
     setSyncedElements(elements)
     setRfNodes(elements.nodes)
   }
-
-  const steps = useMemo(() => flowOrder(nodes, edges), [nodes, edges])
-  // The keys' place lasts until a card is picked some other way.
-  const [focus, setFocus] = useState<{ id: string; from: string | null } | null>(null)
-  const focusedId = focus?.from === selectedNodeId ? focus.id : null
-  const currentId = focusedId ?? selectedNodeId
-
-  // Joined into a string so a pan re-renders only when a step comes into or goes out of view.
-  const shownKey = useStore(
-    useCallback(
-      (s: ReactFlowState) => {
-        if (!showOutline) return ''
-        const [x, y, zoom] = s.transform
-        const shown: string[] = []
-        for (const n of s.nodeLookup.values()) {
-          if (isPlaceholder(n)) continue
-          const { x: left, y: top } = n.internals.positionAbsolute
-          const right = left + (n.measured.width ?? 0)
-          const bottom = top + (n.measured.height ?? 0)
-          const inside =
-            left * zoom + x < s.width &&
-            right * zoom + x > 0 &&
-            top * zoom + y < s.height &&
-            bottom * zoom + y > 0
-          if (inside) shown.push(n.id)
-        }
-        return shown.join('\n')
-      },
-      [showOutline]
-    )
-  )
-  const visibleIds = useMemo(() => {
-    const shown = new Set(shownKey.split('\n'))
-    for (const step of steps) if (step.within && shown.has(step.within)) shown.add(step.node.id)
-    return shown
-  }, [shownKey, steps])
-
-  const focusStep = useCallback(
-    (nodeId: string) => {
-      setFocus({ id: nodeId, from: selectedNodeId })
-      const within = steps.find((s) => s.node.id === nodeId)?.within
-      void fitView({ nodes: [{ id: within ?? nodeId }], minZoom: 1, maxZoom: 1, duration: 200 })
-    },
-    [steps, fitView, selectedNodeId]
-  )
 
   // The canvas mounts once per workflow, so it opens once: where it was left, or at 100% on its trigger.
   const openedView = useRef<Viewport | null>(null)
@@ -682,16 +632,6 @@ function WorkflowCanvasInner({
         void zoomTo(1)
       } else if (e.key === '1') {
         void fitView({ padding: 0.2, maxZoom: 1 })
-      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        if (steps.length === 0) return
-        e.preventDefault()
-        const at = steps.findIndex((s) => s.node.id === currentId)
-        const move = e.key === 'ArrowDown' ? 1 : -1
-        const next = at === -1 ? 0 : Math.min(steps.length - 1, Math.max(0, at + move))
-        focusStep(steps[next].node.id)
-      } else if (e.key === 'Enter' && focusedId) {
-        e.preventDefault()
-        onNodeClick(focusedId)
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
         const node = nodes.find((n) => n.id === selectedNodeId)
         if (node && onDeleteNode) {
@@ -709,12 +649,7 @@ function WorkflowCanvasInner({
       fitView,
       selectedNodeId,
       nodes,
-      onDeleteNode,
-      steps,
-      currentId,
-      focusedId,
-      focusStep,
-      onNodeClick
+      onDeleteNode
     ]
   )
 
@@ -744,80 +679,67 @@ function WorkflowCanvasInner({
 
   return (
     <InteractionsContext.Provider value={interactions}>
-      <div className="flex-1 h-full flex min-w-0">
-        {showOutline && (
-          <StepOutline
-            steps={steps}
-            focusedId={currentId}
-            visibleIds={visibleIds}
-            onFocus={(nodeId) => {
-              focusStep(nodeId)
-              wrapperRef.current?.focus()
-            }}
-          />
-        )}
-        <div
-          ref={wrapperRef}
-          className="flex-1 h-full relative outline-none min-w-0"
-          tabIndex={0}
-          onKeyDown={handleKeyDown}
+      <div
+        ref={wrapperRef}
+        className="flex-1 h-full relative outline-none"
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+      >
+        <ReactFlow
+          nodes={rfNodes}
+          edges={elements.edges}
+          nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
+          onNodesChange={handleNodesChange}
+          onNodeDragStop={handleDragStop}
+          onConnect={handleConnect}
+          onConnectStart={handleConnectStart}
+          onConnectEnd={handleConnectEnd}
+          isValidConnection={isValidConnection}
+          onPaneClick={() => onNodeClick('')}
+          onInit={openView}
+          onMoveEnd={handleMoveEnd}
+          minZoom={0.2}
+          maxZoom={1.75}
+          snapToGrid
+          snapGrid={[8, 8]}
+          connectionRadius={60}
+          panOnScroll
+          deleteKeyCode={null}
+          selectionKeyCode={null}
+          multiSelectionKeyCode={null}
+          nodesFocusable={false}
+          edgesFocusable={false}
+          colorMode="dark"
+          style={{ background: 'var(--color-surface-base)' }}
+          defaultEdgeOptions={{ type: 'step' }}
+          proOptions={{ hideAttribution: true }}
         >
-          <ReactFlow
-            nodes={rfNodes}
-            edges={elements.edges}
-            nodeTypes={NODE_TYPES}
-            edgeTypes={EDGE_TYPES}
-            onNodesChange={handleNodesChange}
-            onNodeDragStop={handleDragStop}
-            onConnect={handleConnect}
-            onConnectStart={handleConnectStart}
-            onConnectEnd={handleConnectEnd}
-            isValidConnection={isValidConnection}
-            onPaneClick={() => onNodeClick('')}
-            onInit={openView}
-            onMoveEnd={handleMoveEnd}
-            minZoom={0.2}
-            maxZoom={1.75}
-            snapToGrid
-            snapGrid={[8, 8]}
-            connectionRadius={60}
-            panOnScroll
-            deleteKeyCode={null}
-            selectionKeyCode={null}
-            multiSelectionKeyCode={null}
-            nodesFocusable={false}
-            edgesFocusable={false}
-            colorMode="dark"
-            style={{ background: 'var(--color-surface-base)' }}
-            defaultEdgeOptions={{ type: 'step' }}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background
-              variant={BackgroundVariant.Dots}
-              gap={20}
-              size={1}
-              color="rgba(255,255,255,0.05)"
-              bgColor="var(--color-surface-base)"
-            />
-            <MiniMap
-              pannable
-              zoomable
-              className="!bg-surface-panel !border !border-white/[0.12] !rounded"
-              maskColor="rgba(0,0,0,0.55)"
-              nodeColor="rgba(255,255,255,0.25)"
-              style={{ width: 96, height: 64 }}
-            />
-            <Controls
-              showInteractive={false}
-              className="!bg-surface-overlay !border !border-white/[0.12] !rounded-md !shadow-none
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={20}
+            size={1}
+            color="rgba(255,255,255,0.05)"
+            bgColor="var(--color-surface-base)"
+          />
+          <MiniMap
+            pannable
+            zoomable
+            className="!bg-surface-panel !border !border-white/[0.12] !rounded"
+            maskColor="rgba(0,0,0,0.55)"
+            nodeColor="rgba(255,255,255,0.25)"
+            style={{ width: 96, height: 64 }}
+          />
+          <Controls
+            showInteractive={false}
+            className="!bg-surface-overlay !border !border-white/[0.12] !rounded-md !shadow-none
                        [&_button]:!bg-transparent [&_button]:!border-white/[0.08] [&_button]:!fill-gray-400"
-            >
-              <ControlButton onClick={onTidyUp} title="Tidy up">
-                <AlignVerticalSpaceAround size={12} className="!fill-none stroke-gray-400" />
-              </ControlButton>
-            </Controls>
-          </ReactFlow>
-        </div>
+          >
+            <ControlButton onClick={onTidyUp} title="Tidy up">
+              <AlignVerticalSpaceAround size={12} className="!fill-none stroke-gray-400" />
+            </ControlButton>
+          </Controls>
+        </ReactFlow>
       </div>
     </InteractionsContext.Provider>
   )

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, cleanup, screen, fireEvent, within } from '@testing-library/react'
+import { render, cleanup, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
 vi.hoisted(() => {
@@ -233,61 +233,5 @@ describe('the tidy up control', () => {
     const { onTidyUp } = renderCanvas()
     fireEvent.click(screen.getByRole('button', { name: 'Tidy up' }))
     expect(onTidyUp).toHaveBeenCalled()
-  })
-})
-
-describe('walking the steps from the keyboard', () => {
-  it('moves along the outline with the arrow keys, and opens the step with Enter', () => {
-    const { container, onNodeClick } = renderCanvas({ showOutline: true })
-    const canvas = container.querySelector('div[tabindex="0"]') as HTMLElement
-    const outline = screen.getByRole('navigation', { name: 'Steps' })
-    fireEvent.keyDown(canvas, { key: 'ArrowDown' })
-    expect(within(outline).getByRole('button', { name: 'Manual' })).toHaveAttribute(
-      'aria-current',
-      'step'
-    )
-    fireEvent.keyDown(canvas, { key: 'ArrowDown' })
-    expect(within(outline).getByRole('button', { name: 'First step' })).toHaveAttribute(
-      'aria-current',
-      'step'
-    )
-    fireEvent.keyDown(canvas, { key: 'Enter' })
-    expect(onNodeClick).toHaveBeenCalledWith('a')
-  })
-
-  it('follows a card picked on the canvas after the keys have moved', () => {
-    const drawn = renderCanvas({ showOutline: true })
-    const canvas = drawn.container.querySelector('div[tabindex="0"]') as HTMLElement
-    fireEvent.keyDown(canvas, { key: 'ArrowDown' })
-    drawn.rerender(
-      <WorkflowCanvas
-        nodes={nodes}
-        edges={edges}
-        selectedNodeId="a"
-        libraryAnchor={null}
-        showOutline
-        onNodeClick={drawn.onNodeClick}
-        onOpenLibrary={drawn.onOpenLibrary}
-        onConnectEdge={drawn.onConnectEdge}
-        onPositionsCommit={drawn.onPositionsCommit}
-        onDeleteNode={drawn.onDeleteNode}
-        onTidyUp={drawn.onTidyUp}
-      />
-    )
-    const outline = screen.getByRole('navigation', { name: 'Steps' })
-    expect(within(outline).getByRole('button', { name: 'First step' })).toHaveAttribute(
-      'aria-current',
-      'step'
-    )
-    expect(within(outline).getByRole('button', { name: 'Manual' })).not.toHaveAttribute(
-      'aria-current'
-    )
-    fireEvent.keyDown(canvas, { key: 'Enter' })
-    expect(drawn.onNodeClick).not.toHaveBeenCalled()
-  })
-
-  it('shows no outline unless the editor asks for one', () => {
-    renderCanvas()
-    expect(screen.queryByRole('navigation', { name: 'Steps' })).toBeNull()
   })
 })

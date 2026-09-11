@@ -12,10 +12,8 @@ import {
   Loader2,
   Square,
   Upload,
-  X,
-  ListTree
+  X
 } from 'lucide-react'
-import { readOutlineOpen, writeOutlineOpen } from '../../lib/canvas-views'
 import { ICON_MAP } from '../project-sidebar/icon-map'
 import { PROJECT_ICON_OPTIONS, ICON_COLOR_PALETTE } from '../../lib/project-icons'
 import { Tooltip } from '../Tooltip'
@@ -142,7 +140,6 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
   const [name, setName] = useState('New Workflow')
   // The canvas remounts per workflow, and only once that workflow's steps have loaded.
   const [loadedKey, setLoadedKey] = useState<string | null>(null)
-  const [showOutline, setShowOutline] = useState(readOutlineOpen)
   const [icon, setIcon] = useState('Workflow')
   const [iconColor, setIconColor] = useState('#3b82f6')
   const [nodes, setNodes] = useState<WorkflowNode[]>([])
@@ -1326,24 +1323,6 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             </Tooltip>
           )}
 
-          <Tooltip label="Steps" position="bottom">
-            <button
-              onClick={() => {
-                setShowOutline(!showOutline)
-                writeOutlineOpen(!showOutline)
-              }}
-              aria-label="Steps"
-              aria-pressed={showOutline}
-              className={`p-1.5 rounded-md transition-colors ${
-                showOutline
-                  ? 'text-white bg-white/[0.08]'
-                  : 'text-gray-400 hover:text-white hover:bg-white/[0.06]'
-              }`}
-            >
-              <ListTree size={15} />
-            </button>
-          </Tooltip>
-
           {editingId && (
             <Tooltip
               label={`Run history${executionHistory.length > 0 ? ` (${executionHistory.length})` : ''}`}
@@ -1454,7 +1433,6 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
           nodes={nodes}
           edges={edges}
           loadKey={loadedKey}
-          showOutline={showOutline}
           onNodeClick={handleNodeClick}
           onOpenLibrary={handleOpenLibrary}
           libraryAnchor={pendingInsert}

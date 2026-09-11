@@ -996,39 +996,3 @@ export function addParallelBranch(
 
   return { nodes: placeNewNodes(nodes, newNodes, newEdges), edges: newEdges }
 }
-
-/** One entry of a workflow's outline: the step, how deep it is nested, and the loop drawn around it. */
-export interface OutlineStep {
-  node: WorkflowNode
-  depth: number
-  /** The loop on the canvas this step is drawn inside, since a body step has no canvas node of its own. */
-  within?: string
-}
-
-/** Every step in the order the canvas draws it, loop bodies and branches one level in. */
-export function flowOrder(nodes: WorkflowNode[], edges: WorkflowEdge[]): OutlineStep[] {
-  const byId = new Map(nodes.map((n) => [n.id, n]))
-  const out: OutlineStep[] = []
-  const seen = new Set<string>()
-  const add = (node: WorkflowNode | undefined, depth: number, within?: string): void => {
-    if (!node || seen.has(node.id)) return
-    seen.add(node.id)
-    out.push({ node, depth, ...(within && { within }) })
-  }
-  const walk = (rows: FlowRow[], depth: number, within?: string): void => {
-    for (const row of rows) {
-      if (row.kind === 'node') add(row.node, depth, within)
-      else if (row.kind === 'loop') {
-        add(row.loopNode, depth, within)
-        walk(row.body, depth + 1, within ?? row.loopNode.id)
-      } else {
-        add(byId.get(row.forkNodeId), depth, within)
-        for (const branch of row.branches) walk(branch, depth + 1, within)
-        add(row.joinNodeId ? byId.get(row.joinNodeId) : undefined, depth, within)
-      }
-    }
-  }
-  walk(computeFlowLayout(nodes, edges), 0)
-  for (const node of nodes) add(node, 0)
-  return out
-}

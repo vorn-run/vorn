@@ -1,7 +1,6 @@
 import type { Viewport } from '@xyflow/react'
 
 const VIEWS_KEY = 'vorn:canvasViews'
-const OUTLINE_KEY = 'vorn:workflowOutline'
 /** How many workflows keep a remembered view; the one looked at longest ago goes first. */
 const KEPT_VIEWS = 50
 
@@ -38,22 +37,5 @@ export function writeCanvasView(workflowId: string, view: Viewport): void {
     localStorage.setItem(VIEWS_KEY, JSON.stringify(kept))
   } catch {
     /* a full or blocked store only costs the remembered view */
-  }
-}
-
-/** Whether the step outline is showing beside the canvas; it is until someone closes it. */
-export function readOutlineOpen(): boolean {
-  try {
-    return localStorage.getItem(OUTLINE_KEY) !== '0'
-  } catch {
-    return true
-  }
-}
-
-export function writeOutlineOpen(open: boolean): void {
-  try {
-    localStorage.setItem(OUTLINE_KEY, open ? '1' : '0')
-  } catch {
-    /* the outline just opens again next time */
   }
 }
