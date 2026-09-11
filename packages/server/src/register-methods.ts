@@ -81,8 +81,7 @@ import type {
 } from '@vornrun/shared/types'
 import {
   connectionConnectorId,
-  DEFAULT_ARTIFACT_DIRS,
-  SDK_FILTER_KEYS
+  DEFAULT_ARTIFACT_DIRS
 } from '@vornrun/shared/types'
 import * as gitUtils from './git-utils'
 import { detectRepoSlug } from './git-utils'
