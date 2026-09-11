@@ -29,6 +29,8 @@ import {
 } from './register-methods'
 import { registerWebhookRoute } from './webhook-trigger'
 import { registerExtensionBridge, type ExtensionRouteDeps } from './extensions/bridge'
+import { registerSessionBridge, setSessionBridgeOrigin } from './connectors/session-bridge'
+import { sessionGrantFor } from './connectors/mcp-clients'
 import { setExtensionBridgeOrigin, stopAllHosts } from './extensions/hosts'
 import { startExtensionPageServer, stopExtensionPageServer } from './extensions/page-server'
 import { stopAllFooters } from './extensions/footers'
@@ -282,6 +284,7 @@ export async function startServer(
   // was started with. The pages its panes are drawn from are served on their own
   // origin instead, so a page shares neither storage nor a socket with the app.
   registerExtensionBridge(app, extensionRouteDeps)
+  registerSessionBridge(app, sessionGrantFor)
 
   /**
    * Pairing, the phone's half.
@@ -498,6 +501,7 @@ export async function startServer(
   setServerPort(actualPort)
   // The address the extension children are given, known only once a port is won.
   setExtensionBridgeOrigin(`http://127.0.0.1:${actualPort}`)
+  setSessionBridgeOrigin(`http://127.0.0.1:${actualPort}`)
 
   // Pane pages, on a port of their own. The app frames them, so the app's origins
   // are the only ones allowed to; a page that fails to start costs its panes, not

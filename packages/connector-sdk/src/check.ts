@@ -1,3 +1,4 @@
+import { SessionUnavailableError } from './session'
 import { existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
@@ -351,7 +352,8 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
       try {
         await runAction(connector, action.type, args, {
           config,
-          ...(options.now && { now: options.now })
+          ...(options.now && { now: options.now }),
+          sessionFetchImpl: globalThis.fetch
         })
         return undefined
       } catch (error) {
@@ -595,6 +597,13 @@ export function liveExamines(connector: Connector): boolean {
   return connector.preflight !== undefined || connector.actions.some(liveRunnable)
 }
 
+function needsWindow(error: unknown): boolean {
+  return (
+    error instanceof SessionUnavailableError ||
+    (error instanceof Error && error.cause instanceof SessionUnavailableError)
+  )
+}
+
 /**
  * Ask the connector, against the real service, the questions only it can answer.
  *
@@ -638,6 +647,8 @@ async function liveFindings(connector: Connector, options: CheckOptions): Promis
         ...(options.now && { now: options.now })
       })
     } catch (error) {
+      // A signed-in call needs a Vorn window, which a live check run from a terminal does not have.
+      if (needsWindow(error)) continue
       const reason = error instanceof Error ? error.message : String(error)
       // A service can refuse for reasons that are not the connector's fault —
       // an empty sandbox, a rate limit — so only a refusal to let it in at all

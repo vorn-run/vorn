@@ -1,6 +1,7 @@
 import type {
   ActivationPredicate,
   AuthRung,
+  BrowserSignIn,
   Connector,
   ConnectorConfig,
   ConnectorDefinition,
@@ -13,6 +14,7 @@ import type {
   ExtensionPlatform,
   PaneContribution
 } from './types'
+import { ORIGIN_PATTERN, withinOrigins } from './origins'
 
 const KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 
@@ -27,7 +29,7 @@ const KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 const PATH_DATA_PATTERN = /^[MmZzLlHhVvCcSsQqTtAa0-9\s,.\-+eE]+$/
 const VIEW_BOX_PATTERN = /^-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+$/
 const DEDUPE_STRATEGIES: DedupeStrategy[] = ['timestamp', 'lastItem']
-const AUTH_RUNGS: AuthRung[] = ['none', 'cli', 'key', 'oauth']
+const AUTH_RUNGS: AuthRung[] = ['none', 'cli', 'key', 'browser', 'oauth']
 
 /** Everything an extension may ask the host for; anything else is not grantable. */
 export const EXTENSION_PERMISSIONS: ExtensionPermission[] = [
@@ -178,13 +180,51 @@ function assertAuth(definition: ConnectorDefinition): void {
     }
   }
 
-  if (auth.rung === 'none') {
+  if (auth.rung === 'browser') assertBrowserSignIn(id, auth.browser)
+
+  if (auth.rung === 'none' || auth.rung === 'browser') {
     const secret = (definition.config ?? []).find((field) => field.secret === true)
     if (secret) {
+      const claim = auth.rung === 'none' ? 'needs no sign-in' : 'signs in through a Vorn window'
       throw new Error(
-        `Connector ${id} claims it needs no sign-in but declares secret field "${secret.key}"`
+        `Connector ${id} claims it ${claim} but declares secret field "${secret.key}"`
       )
     }
+  }
+}
+
+/** The window, the origins it may act on, and the check that says who is signed in. */
+function assertBrowserSignIn(id: string, browser: BrowserSignIn | undefined): void {
+  if (!browser) {
+    throw new Error(
+      `Connector ${id} signs in through a Vorn window but declares no browser sign-in`
+    )
+  }
+  const origins = Array.isArray(browser.origins) ? browser.origins : []
+  const bad = origins.find((origin) => typeof origin !== 'string' || !ORIGIN_PATTERN.test(origin))
+  if (origins.length === 0 || bad !== undefined) {
+    throw new Error(
+      `Connector ${id} must name its origins as https://host or https://*.host` +
+        (bad !== undefined ? `; ${JSON.stringify(bad)} is neither` : '')
+    )
+  }
+  const places: Array<[string, unknown]> = [
+    ['sign-in page', browser.signInUrl],
+    ['signed-in check', browser.check?.url]
+  ]
+  for (const [what, url] of places) {
+    if (typeof url !== 'string' || !withinOrigins(origins, url)) {
+      throw new Error(
+        `Connector ${id} puts its ${what} ${JSON.stringify(url ?? '')} outside its origins`
+      )
+    }
+  }
+  const identity = browser.check?.identity
+  if (
+    !Array.isArray(identity) ||
+    identity.some((path) => typeof path !== 'string' || !path.trim())
+  ) {
+    throw new Error(`Connector ${id} must name its identity fields as non-empty strings`)
   }
 }
 

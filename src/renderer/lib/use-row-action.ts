@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 
 // What a row's own actions report while they run: a phrase while busy, and a refusal that lands where the press was.
-export type RowAction = 'backfill' | 'delete' | 'run' | 'rollback' | 'remove'
+export type RowAction = 'backfill' | 'delete' | 'run' | 'rollback' | 'remove' | 'signIn' | 'signOut'
 
 /** Present tense, so a row says what is happening rather than what was pressed. */
 const PHRASES: Record<RowAction, string> = {
@@ -9,7 +9,9 @@ const PHRASES: Record<RowAction, string> = {
   delete: 'Removing…',
   run: 'Polling…',
   rollback: 'Rolling back…',
-  remove: 'Removing…'
+  remove: 'Removing…',
+  signIn: 'Waiting for the sign-in window…',
+  signOut: 'Signing out…'
 }
 
 /** A call that answers with a refusal rather than throwing one. */

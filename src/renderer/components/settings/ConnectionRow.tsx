@@ -1,3 +1,5 @@
+import { originLabel } from '@vornrun/shared/connector-origins'
+import { isElectron } from '../../lib/platform'
 import { useState } from 'react'
 import { Play, Trash2, AlertCircle, Workflow, Import, Activity } from 'lucide-react'
 import { Tooltip } from '../Tooltip'
@@ -11,6 +13,7 @@ import { BusyIcon } from './BusyIcon'
 import {
   isImplicitConnection,
   type ConnectorManifest,
+  type SdkBrowserSignIn,
   type SourceConnection,
   type WorkflowDefinition
 } from '../../../shared/types'
@@ -37,10 +40,13 @@ export function ConnectionRow({
   onDelete,
   onResetWorkflow,
   onOpenWorkflow,
-  onRefresh
+  onRefresh,
+  browserSignIn
 }: {
   conn: SourceConnection
   manifest?: ConnectorManifest
+  /** Set when the connector signs in through a Vorn window. */
+  browserSignIn?: SdkBrowserSignIn
   seededWorkflows: WorkflowDefinition[]
   missingEvents: Array<{ name: string; event: string }>
   activity: RowActivity
@@ -56,11 +62,28 @@ export function ConnectionRow({
   const backfilling = Boolean(activity.state(conn.id, ['backfill']).phrase)
   const deleting = Boolean(activity.state(conn.id, ['delete']).phrase)
   // One line for whichever of this connection's actions is working or last failed.
-  const reporting = activity.state(conn.id, ['backfill', 'delete'])
+  const reporting = activity.state(conn.id, ['backfill', 'delete', 'signIn', 'signOut'])
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean | null; message?: string } | null>(
     null
   )
+
+  const [link, setLink] = useState<string | null>(null)
+  const signingIn = Boolean(activity.state(conn.id, ['signIn']).phrase)
+
+  const signIn = (withLink?: string) =>
+    activity.run('signIn', conn.id, async () => {
+      const result = await window.api.signInConnection(conn.id, withLink)
+      setLink(null)
+      onRefresh()
+      return result.ok ? { ok: true } : { ok: false, error: result.error ?? 'Not signed in.' }
+    })
+
+  const signOut = () =>
+    activity.run('signOut', conn.id, async () => {
+      await window.api.signOutConnection(conn.id)
+      onRefresh()
+    })
 
   const runTest = async () => {
     setTesting(true)
@@ -126,6 +149,65 @@ export function ConnectionRow({
           </Tooltip>
         </div>
       </div>
+
+      {browserSignIn && (
+        <div className="mt-1 space-y-1 text-[11px]">
+          <div className="flex items-center gap-2">
+            <span
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${conn.signedInAt ? 'bg-status-sage' : 'bg-ink-ghost'}`}
+            />
+            <span className={conn.signedInAt ? 'text-gray-300' : 'text-gray-500'}>
+              {conn.signedInAt
+                ? `Signed in${conn.signedInAs ? ` as ${conn.signedInAs}` : ''}`
+                : 'Not signed in'}
+            </span>
+            {!isElectron && (
+              <span className="text-gray-600">· sign in from the Vorn desktop app</span>
+            )}
+            {isElectron && (
+              <>
+                <button
+                  onClick={() => void signIn()}
+                  disabled={signingIn}
+                  className="text-gray-500 hover:text-gray-200 transition-colors disabled:opacity-50"
+                >
+                  {conn.signedInAt ? 'Sign in again' : 'Sign in'}
+                </button>
+                {!signingIn && link === null && (
+                  <button
+                    onClick={() => setLink('')}
+                    className="text-gray-600 hover:text-gray-300 transition-colors"
+                  >
+                    Use a sign-in link
+                  </button>
+                )}
+                {conn.signedInAt && !signingIn && (
+                  <button
+                    onClick={() => void signOut()}
+                    className="text-gray-500 hover:text-gray-200 transition-colors"
+                  >
+                    Sign out
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+          {isElectron && link !== null && (
+            <input
+              autoFocus
+              value={link}
+              onChange={(e) => setLink(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && link.trim()) void signIn(link.trim())
+                if (e.key === 'Escape') setLink(null)
+              }}
+              placeholder={`Paste the sign-in link emailed by ${originLabel(browserSignIn.origins[0] ?? '')}`}
+              aria-label="Sign-in link"
+              className="w-full px-2 py-1 bg-white/[0.05] border border-white/[0.1] rounded-sm text-[11px] text-gray-200 font-mono focus:border-white/[0.2] outline-none"
+            />
+          )}
+        </div>
+      )}
 
       {testResult && (
         <div className={`mt-1 text-[11px] ${testResult.ok ? 'text-green-400' : 'text-red-400'}`}>

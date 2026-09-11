@@ -120,6 +120,7 @@ import {
   dbGetSourceConnection,
   dbInsertSourceConnection,
   dbUpdateSourceConnection,
+  dbSetConnectionSignIn,
   dbDeleteSourceConnection,
   dbGetTaskSourceLink,
   dbGetTaskSourceLinkByExternalId,
@@ -166,6 +167,7 @@ import {
   backfillMcpConnection,
   preflightMcpConnection
 } from './connectors/mcp'
+import { sdkIdOf } from './connectors/mcp-clients'
 import {
   httpConnector,
   httpProfileError,
@@ -179,7 +181,9 @@ import {
   executeWorkflow,
   rerunWorkflowRun,
   retryRunFromFailure,
-  stopWorkflowRun
+  stopWorkflowRun,
+  resumeSignInWaits,
+  runWaitsForSignIn
 } from './workflows/engine'
 import { listKeys, passwordFields } from './connectors/keys'
 import { installedPack } from './connectors/packs'
@@ -189,6 +193,7 @@ import {
 } from './connectors/implicit-connection'
 import { probeAuth, type BorrowSource } from './connectors/auth-rung'
 import { resolveConnectorAuth } from './connectors/connector-auth'
+import { markSignedOut } from './connectors/session-bridge'
 import { probeSdkConnector, type SdkProbeRequest } from './connectors/sdk-probe'
 import { isImplicitConnection, type ConnectorPackSource } from '@vornrun/shared/types'
 import { catalogEvents, catalogSnapshot, refreshCatalog } from './connectors/catalog'
@@ -358,6 +363,8 @@ function deleteConnectionRecord(id: string): void {
   dbDeleteSourceConnection(id)
   // Forget any decrypted plaintext for this connection.
   clearDecryptedCreds(id)
+  // Its signed-in profile goes too; the desktop that holds it may not be connected right now.
+  void browserBridge.request('session:forget', id).catch(() => {})
   // Terminate any live MCP stdio child for this connection.
   void stopMcpClient(id).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
   dbSignalChange()
@@ -808,6 +815,8 @@ export function registerAllMethods(): void {
   })
 
   registerMethod('workflow:resolveGate', ({ runId, nodeId, decision }) => {
+    // A sign-in wait ends when the connection signs in again, never by approval.
+    if (decision === 'approve' && runWaitsForSignIn(runId, nodeId)) return { accepted: false }
     // Applied here, where the run is. It used to be broadcast for whichever
     // window held the run to apply, which is why answering from a phone with
     // nothing open did nothing at all.
@@ -1713,6 +1722,26 @@ export function registerAllMethods(): void {
     }
     deleteConnectionRecord(id)
   })
+
+  registerMethod('connection:browserAuth', async (id) => {
+    const conn = dbGetSourceConnection(id)
+    const sdkId = conn ? sdkIdOf(conn) : ''
+    if (!conn || !sdkId) return null
+    const auth = (await resolveConnectorAuth(sdkId))?.auth
+    return auth?.rung === 'browser' && auth.browser
+      ? { name: conn.name, browser: auth.browser }
+      : null
+  })
+
+  registerMethod('connection:signedIn', ({ connectionId, identity }) => {
+    dbSetConnectionSignIn(connectionId, identity, new Date().toISOString())
+    dbSignalChange()
+    void resumeSignInWaits(connectionId, listRunsWithWaitingGates('signIn')).catch((err) =>
+      log.warn({ err }, '[workflow] resuming after a sign-in failed')
+    )
+  })
+
+  registerMethod('connection:signedOut', (id) => markSignedOut(id))
 
   registerMethod('workflow:runManual', ({ workflowId, inputs }) => {
     const wf = dbGetWorkflow(workflowId)

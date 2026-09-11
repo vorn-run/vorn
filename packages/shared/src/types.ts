@@ -418,6 +418,36 @@ export interface ActionResult {
   success: boolean
   output?: Record<string, unknown>
   error?: string
+  /** Why a browser connection's call failed, when Vorn can tell. */
+  errorKind?: 'needs-sign-in' | 'app-offline'
+  /** The calls it made through its signed-in window, kept for the step's log. */
+  sessionCalls?: SessionCall[]
+}
+
+/** Where a tool call's key travels: in the call's MCP metadata, then on each request the child makes through its window. */
+export const SESSION_CALL_META = 'vorn/sessionCall'
+export const SESSION_CALL_HEADER = 'x-vorn-session-call'
+
+/** A call a connector asks its signed-in window to make. */
+export interface SessionRequest {
+  url: string
+  method: string
+  headers?: Record<string, string>
+  body?: string
+}
+
+/** How the site answered a call made in the signed-in window. */
+export interface SessionAnswer {
+  status: number
+  headers: Record<string, string>
+  body: string
+}
+
+/** One call a browser connection made through its window: what, where, and how it was answered. */
+export interface SessionCall {
+  method: string
+  path: string
+  status: number | 'app-offline' | 'failed'
 }
 
 export interface ConnectorConfigField {
@@ -530,6 +560,9 @@ export interface SourceConnection {
   lastSyncError?: string
   syncCursor?: string
   createdAt: string
+  /** Who the connection's Vorn window is signed in as, for a connector that signs in through one. */
+  signedInAs?: string
+  signedInAt?: string
 }
 
 /** One stored secret on a connection, described without being disclosed. */
@@ -1087,6 +1120,8 @@ export interface NodeExecutionState {
   status: NodeExecutionStatus
   /** Why a skipped node was skipped: a condition branch or a partial run's target slice. */
   skipReason?: 'branch' | 'target'
+  /** Why a waiting step waits: absent for an approval gate, `signIn` for a connection signed out. */
+  waitingFor?: 'signIn'
   startedAt?: string
   completedAt?: string
   sessionId?: string
@@ -1895,6 +1930,8 @@ export const IPC = {
   CONNECTION_CREATE: 'connection:create',
   CONNECTION_UPDATE: 'connection:update',
   CONNECTION_DELETE: 'connection:delete',
+  CONNECTION_SIGN_IN: 'connection:signIn',
+  CONNECTION_SIGN_OUT: 'connection:signOut',
   CONNECTION_GET_SOURCE_LINK: 'connection:getSourceLink',
   CONNECTOR_DETECT_REPO: 'connector:detectRepo',
   CONNECTOR_SEED_WORKFLOW: 'connector:seedWorkflow',
@@ -2172,7 +2209,23 @@ export interface ConnectorCatalogSnapshot {
  * installed, and show an identity instead of a token field where one is
  * already signed in.
  */
-export type ConnectorAuthRung = 'none' | 'cli' | 'key' | 'oauth'
+export type ConnectorAuthRung = 'none' | 'cli' | 'key' | 'browser' | 'oauth'
+
+/** Every rung this build can describe, lowest first; the SDK keeps its own copy. */
+export const CONNECTOR_AUTH_RUNGS: readonly ConnectorAuthRung[] = [
+  'none',
+  'cli',
+  'key',
+  'browser',
+  'oauth'
+]
+
+/** Where a `browser` connector signs in, the only origins it may act on, and how to tell who is signed in. */
+export interface SdkBrowserSignIn {
+  signInUrl: string
+  origins: string[]
+  check: { url: string; identity: string[] }
+}
 
 export interface SdkConnectorAuth {
   rung: ConnectorAuthRung
@@ -2182,6 +2235,8 @@ export interface SdkConnectorAuth {
   borrow?: { env?: string[]; tokenArgs?: string[]; tokenEnv?: string }
   /** Config field keys holding the credential. Present for `key`. */
   keys?: string[]
+  /** Present for `browser`. */
+  browser?: SdkBrowserSignIn
 }
 
 /** An argument a packaged connector's action takes. */
@@ -2569,6 +2624,14 @@ export interface BrowserNetworkRequest {
  */
 export function browserPartition(sessionId: string): string {
   return `persist:vorn-browser-${sessionId}`
+}
+
+/** The browser profile a connection signs in through; it is that connection's secret. */
+/** The folder name every connection's profile starts with under the app's Partitions. */
+export const CONNECTION_PROFILE_PREFIX = 'vorn-connection-'
+
+export function connectionPartition(connectionId: string): string {
+  return `persist:${CONNECTION_PROFILE_PREFIX}${connectionId}`
 }
 
 /**

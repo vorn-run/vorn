@@ -1,3 +1,4 @@
+import { CONNECTOR_AUTH_RUNGS } from '../../shared/types'
 import type {
   ConnectorAuthRung,
   ConnectorCatalogActionInput,
@@ -473,17 +474,23 @@ export const AUTH_RUNG: Record<
     detail: 'Signs in with a CLI'
   },
   key: { label: 'Needs a key', badge: 'key', detail: 'Needs a key' },
+  browser: {
+    label: 'Signs in through a Vorn window',
+    badge: 'browser',
+    detail: 'Signs in through a Vorn window'
+  },
   oauth: {
-    label: 'Signs in through a browser',
+    label: 'Signs in with OAuth',
     badge: 'OAuth',
-    detail: 'Signs in through a browser'
+    detail: 'Signs in with OAuth'
   }
 }
 
 /** The rungs actually present, so the filter never offers an empty answer. */
 export function connectorAuthRungs(listings: ConnectorListing[]): ConnectorAuthRung[] {
-  const order: ConnectorAuthRung[] = ['none', 'cli', 'key', 'oauth']
-  return order.filter((rung) => listings.some((listing) => listing.authRung === rung))
+  return CONNECTOR_AUTH_RUNGS.filter((rung) =>
+    listings.some((listing) => listing.authRung === rung)
+  )
 }
 
 /** What a kind is called where a person picks one. */

@@ -252,6 +252,11 @@ export function stopsRunOnError(node: Partial<Pick<WorkflowNode, 'onError'>>): b
 }
 
 /** A step the engine wrote off rather than ran: the reconciler never saw it start. */
+/** A step parked until its connection signs in again, not on an approval. */
+export function isSignInWait(state: { status: string; waitingFor?: string }): boolean {
+  return state.status === 'waiting' && state.waitingFor === 'signIn'
+}
+
 export const ABANDONED = 'Run abandoned (no session id recorded)'
 
 /** A step that never ran, so no policy of its own has anything to say about it. */

@@ -121,8 +121,10 @@ vi.mock('../packages/server/src/logger', () => ({
 
 const {
   adoptConnectorInboxLease,
+  applyGateDecision,
   approveWorkflowGate,
   executeWorkflow,
+  resumeSignInWaits,
   reconcileRunningExecutions,
   rejectWorkflowGate,
   stopWorkflowRun
@@ -948,5 +950,111 @@ describe('step diagnostics', () => {
     expect(agent?.status).toBe('error')
     // The timeline survives the throw path, so it still says how far it got.
     expect(agent?.diagnostics).toContain('Could not start: git worktree add failed')
+  })
+})
+
+describe('a step whose connection signed out', () => {
+  function postWorkflow(): WorkflowDefinition {
+    return {
+      id: 'wf-post',
+      name: 'Post to Substack',
+      icon: 'Rocket',
+      enabled: true,
+      nodes: [
+        { id: 'trigger', type: 'trigger', label: 'Trigger', position: { x: 0, y: 0 }, config: {} },
+        {
+          id: 'draft',
+          type: 'callConnectorAction',
+          label: 'Draft',
+          position: { x: 0, y: 1 },
+          config: { connectionId: 'conn-sub', action: 'createDraft', args: {} }
+        },
+        {
+          id: 'tell',
+          type: 'callConnectorAction',
+          label: 'Tell',
+          position: { x: 0, y: 2 },
+          config: { connectionId: 'conn-other', action: 'post', args: {} }
+        }
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'draft' },
+        { id: 'e2', source: 'draft', target: 'tell' }
+      ]
+    } as unknown as WorkflowDefinition
+  }
+
+  const signedOut = {
+    success: false,
+    error: 'Substack was signed out. Sign in again, and this step runs again.',
+    errorKind: 'needs-sign-in'
+  }
+  const stateOf = (run: WorkflowExecution, nodeId: string) =>
+    run.nodeStates.find((ns) => ns.nodeId === nodeId)
+
+  it('waits for the sign-in instead of failing, and runs nothing after it', async () => {
+    const workflow = postWorkflow()
+    mockState.config.workflows = [workflow]
+    hostApi.executeConnectorAction = vi.fn().mockResolvedValue(signedOut)
+    const run = await executeWorkflow(workflow)
+    expect(stateOf(run, 'draft')).toMatchObject({ status: 'waiting', waitingFor: 'signIn' })
+    expect(stateOf(run, 'tell')?.status).toBe('pending')
+    expect(run.status).toBe('running')
+  })
+
+  it('cannot be approved past, since only signing in again ends it', async () => {
+    const workflow = postWorkflow()
+    mockState.config.workflows = [workflow]
+    const execute = vi.fn().mockResolvedValue(signedOut)
+    hostApi.executeConnectorAction = execute
+    const run = await executeWorkflow(workflow)
+    await applyGateDecision(run.runId, 'draft', 'approve')
+    expect(stateOf(mockState.workflowExecutions.get(run.runId)!, 'draft')?.status).toBe('waiting')
+    expect(execute).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails inside a loop, which cannot wait, and says to run the workflow again', async () => {
+    const base = postWorkflow()
+    const loop = {
+      id: 'loop',
+      type: 'loop',
+      label: 'Each draft',
+      position: { x: 0, y: 1 },
+      config: { nodeType: 'loop', bodyNodeIds: ['draft'], maxIterations: 1 }
+    }
+    const workflow = {
+      ...base,
+      id: 'wf-post-loop',
+      nodes: [base.nodes[0], loop, base.nodes[1]],
+      edges: [{ id: 'e1', source: 'trigger', target: 'loop' }]
+    } as unknown as WorkflowDefinition
+    mockState.config.workflows = [workflow]
+    hostApi.executeConnectorAction = vi.fn().mockResolvedValue(signedOut)
+    const run = await executeWorkflow(workflow)
+    expect(stateOf(run, 'draft')).toMatchObject({ status: 'error' })
+    expect(stateOf(run, 'draft')?.waitingFor).toBeUndefined()
+    expect(stateOf(run, 'draft')?.error).toMatch(/inside a loop/)
+    expect(run.status).not.toBe('running')
+  })
+
+  it('runs the step again once its connection signs in, and carries on from there', async () => {
+    const workflow = postWorkflow()
+    mockState.config.workflows = [workflow]
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce(signedOut)
+      .mockResolvedValue({ success: true, output: { id: 7 } })
+    hostApi.executeConnectorAction = execute
+    const run = await executeWorkflow(workflow)
+
+    await resumeSignInWaits('conn-other', [run])
+    expect(execute).toHaveBeenCalledTimes(1)
+
+    await resumeSignInWaits('conn-sub', [run])
+    const finished = mockState.workflowExecutions.get(run.runId)!
+    expect(stateOf(finished, 'draft')?.status).toBe('success')
+    expect(stateOf(finished, 'draft')?.waitingFor).toBeUndefined()
+    expect(stateOf(finished, 'tell')?.status).toBe('success')
+    expect(execute).toHaveBeenCalledTimes(3)
   })
 })

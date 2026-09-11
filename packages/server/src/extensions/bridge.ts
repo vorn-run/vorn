@@ -1,6 +1,7 @@
 import { createReadStream, existsSync, realpathSync, statSync } from 'node:fs'
 import { dirname, extname, resolve, sep } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { refuse } from '../plain-refusal'
 import type {
   ExtensionPermission,
   InstalledConnectorPack,
@@ -94,11 +95,6 @@ interface Caller {
 function sessionOf(sessionId: unknown): TerminalSession | undefined {
   if (typeof sessionId !== 'string' || sessionId === '') return undefined
   return ptyManager.getLiveSessions().find((session) => session.id === sessionId)
-}
-
-function refuse(reply: FastifyReply, code: number, reason: string): FastifyReply {
-  // Plain text: the SDK reads a refusal's body verbatim into the error it raises.
-  return reply.code(code).type('text/plain; charset=utf-8').send(reason)
 }
 
 /** The extension's own reads, once the caller and the session are settled. */

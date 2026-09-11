@@ -12,10 +12,12 @@ import {
   runSummaryText,
   type RunWorkflowRef
 } from '../../lib/run-presentation'
-import { hasFailedStep } from '@vornrun/shared/workflow-graph'
+import { hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import { RunStepsList, StatusDot } from '../workflow-editor/RunEntry'
 import { RunIcon } from './RunIcon'
 import { useConnectorLook } from '../../lib/use-connections'
+import { nodeConnectionId } from '../workflow-editor/node-visuals'
+import { SignInButton } from './SignInButton'
 import { StopRunButton } from './StopRunButton'
 import { workflowRunId, type TaskConfig } from '../../../shared/types'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
@@ -43,6 +45,11 @@ interface Props {
   onViewFullOutput?: (logs: string) => void
 }
 
+const WAIT_LABELS = {
+  approval: { status: 'waiting for approval', paused: 'paused for review' },
+  signIn: { status: 'waiting for sign-in', paused: 'paused until signed in' }
+} as const
+
 export function RunDetailPane({
   run,
   workflow,
@@ -65,14 +72,16 @@ export function RunDetailPane({
   const stages = runStages(run, nodes)
   const done = completedStageCount(stages)
   const summary = runSummaryText(run)
-  const waitingGate = run.nodeStates.find((ns) => ns.status === 'waiting')
+  const waitingStep = run.nodeStates.find((ns) => ns.status === 'waiting')
+  const signInWait = waitingStep !== undefined && isSignInWait(waitingStep)
+  const wait = WAIT_LABELS[signInWait ? 'signIn' : 'approval']
 
   // Keyboard approval mirrors the two visible actions, and only while a gate is
   // actually open — otherwise a stray "r" in the app would resolve nothing.
   // `shortcutsEnabled` lets the view mute them behind a modal, and `repeat` is
   // ignored so holding a key can't reject the run that auto-selects next.
   useEffect(() => {
-    if (!waitingGate || !shortcutsEnabled) return undefined
+    if (!waitingStep || signInWait || !shortcutsEnabled) return undefined
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.repeat) return
       const target = e.target as HTMLElement | null
@@ -83,21 +92,21 @@ export function RunDetailPane({
         e.preventDefault()
         void window.api.resolveWorkflowGate({
           runId: run.runId,
-          nodeId: waitingGate.nodeId,
+          nodeId: waitingStep.nodeId,
           decision: 'approve'
         })
       } else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'r') {
         e.preventDefault()
         void window.api.resolveWorkflowGate({
           runId: run.runId,
-          nodeId: waitingGate.nodeId,
+          nodeId: waitingStep.nodeId,
           decision: 'reject'
         })
       }
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [run, waitingGate, shortcutsEnabled])
+  }, [run, waitingStep, signInWait, shortcutsEnabled])
 
   return (
     <div className="h-full flex flex-col min-h-0 overflow-y-auto">
@@ -159,12 +168,12 @@ export function RunDetailPane({
       <div className="px-5 pb-4 shrink-0">
         <div className="rounded-md border border-white/[0.06] bg-white/[0.02] px-4 py-3">
           <div className="flex items-center gap-2">
-            <StatusDot status={waitingGate ? 'waiting' : run.status} />
-            {(waitingGate || outcome.label) && (
+            <StatusDot status={waitingStep ? 'waiting' : run.status} />
+            {(waitingStep || outcome.label) && (
               <span
-                className={`text-[12.5px] ${waitingGate ? WORKFLOW_STATUS_TEXT.waiting : WORKFLOW_STATUS_TEXT[run.status]}`}
+                className={`text-[12.5px] ${waitingStep ? WORKFLOW_STATUS_TEXT.waiting : WORKFLOW_STATUS_TEXT[run.status]}`}
               >
-                {waitingGate ? 'waiting for approval' : outcome.label}
+                {waitingStep ? wait.status : outcome.label}
               </span>
             )}
           </div>
@@ -173,7 +182,7 @@ export function RunDetailPane({
               ? 'ran end to end'
               : `${done} of ${stages.length} stages`}
             {' · '}
-            {ranUninterrupted(run) ? 'never paused' : 'paused for review'}
+            {ranUninterrupted(run) ? 'never paused' : wait.paused}
             {' · '}
             {formatRelativeTime(run.startedAt)}
           </p>
@@ -185,32 +194,38 @@ export function RunDetailPane({
         </div>
       </div>
 
-      {waitingGate && (
+      {waitingStep && (
         <div className="px-5 pb-4 shrink-0 flex flex-col gap-1.5">
+          {signInWait ? (
+            <SignInButton
+              connectionId={nodeConnectionId(nodes.find((n) => n.id === waitingStep.nodeId))}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                void window.api.resolveWorkflowGate({
+                  runId: run.runId,
+                  nodeId: waitingStep.nodeId,
+                  decision: 'approve'
+                })
+              }
+              className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_APPROVE}`}
+            >
+              <Check size={14} strokeWidth={2} />
+              Approve &amp; continue
+              <span className="flex-1" />
+              <kbd className="text-[10px] font-mono text-gray-500 border border-white/[0.08] rounded px-1 py-0.5">
+                ⌘↵
+              </kbd>
+            </button>
+          )}
           <button
             type="button"
             onClick={() =>
               void window.api.resolveWorkflowGate({
                 runId: run.runId,
-                nodeId: waitingGate.nodeId,
-                decision: 'approve'
-              })
-            }
-            className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_APPROVE}`}
-          >
-            <Check size={14} strokeWidth={2} />
-            Approve &amp; continue
-            <span className="flex-1" />
-            <kbd className="text-[10px] font-mono text-gray-500 border border-white/[0.08] rounded px-1 py-0.5">
-              ⌘↵
-            </kbd>
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              void window.api.resolveWorkflowGate({
-                runId: run.runId,
-                nodeId: waitingGate.nodeId,
+                nodeId: waitingStep.nodeId,
                 decision: 'reject'
               })
             }
@@ -219,9 +234,11 @@ export function RunDetailPane({
             <X size={14} strokeWidth={2} />
             Reject run
             <span className="flex-1" />
-            <kbd className="text-[10px] font-mono text-gray-500 border border-white/[0.08] rounded px-1 py-0.5">
-              R
-            </kbd>
+            {!signInWait && (
+              <kbd className="text-[10px] font-mono text-gray-500 border border-white/[0.08] rounded px-1 py-0.5">
+                R
+              </kbd>
+            )}
           </button>
         </div>
       )}

@@ -17,6 +17,8 @@ export interface HarnessOptions {
   now?: () => string
   /** Answer the connector's calls from the test rather than the network. */
   fetchImpl?: typeof fetch
+  /** Answer its signed-in calls; defaults to `fetchImpl`, so one stub serves both. */
+  sessionFetchImpl?: typeof fetch
   /** Fake clock for backoff, so a retry test costs no real time. */
   sleep?: (ms: number) => Promise<void>
 }
@@ -182,10 +184,12 @@ export function createConnectorHarness(
   connector: Connector,
   harnessOptions: HarnessOptions = {}
 ): ConnectorHarness {
+  const signedIn = harnessOptions.sessionFetchImpl ?? harnessOptions.fetchImpl
   const defaults = (options: RunPollOptions = {}): RunPollOptions => ({
     ...(harnessOptions.config && { config: harnessOptions.config }),
     ...(harnessOptions.now && { now: harnessOptions.now }),
     ...(harnessOptions.fetchImpl && { fetchImpl: harnessOptions.fetchImpl }),
+    ...(signedIn && { sessionFetchImpl: signedIn }),
     ...(harnessOptions.sleep && { sleep: harnessOptions.sleep }),
     ...options
   })
@@ -198,6 +202,7 @@ export function createConnectorHarness(
         ...(harnessOptions.config && { config: harnessOptions.config }),
         ...(harnessOptions.now && { now: harnessOptions.now }),
         ...(harnessOptions.fetchImpl && { fetchImpl: harnessOptions.fetchImpl }),
+        ...(signedIn && { sessionFetchImpl: signedIn }),
         ...(harnessOptions.sleep && { sleep: harnessOptions.sleep })
       }),
     manifest: () => connectorManifest(connector),

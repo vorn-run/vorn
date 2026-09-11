@@ -106,3 +106,13 @@ describe('listRunsWithWaitingGates', () => {
     expect(got.triggerTaskId).toBe('trig-1')
   })
 })
+
+describe('a step waiting for a sign-in', () => {
+  it('comes back from storage still saying what it waits for', () => {
+    saveWorkflowRun({
+      ...run('wf-9', 'running', 'waiting'),
+      nodeStates: [{ nodeId: 'draft', status: 'waiting', waitingFor: 'signIn' }]
+    })
+    expect(listRunsWithWaitingGates()[0]?.nodeStates[0]?.waitingFor).toBe('signIn')
+  })
+})

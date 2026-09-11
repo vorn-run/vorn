@@ -96,3 +96,34 @@ describe('RunEntry — approval gate controls', () => {
     expect(queryByText('Approve')).toBeNull()
   })
 })
+
+describe('RunEntry — a step waiting for a sign-in', () => {
+  const draftNode = {
+    id: 'draft',
+    type: 'callConnectorAction',
+    label: 'Draft',
+    position: { x: 0, y: 0 },
+    config: { connectionId: 'conn-sub', action: 'createDraft', args: {} }
+  } as unknown as WorkflowNode
+  const signedOut = 'Substack was signed out. Sign in again, and this step runs again.'
+  const exec = makeExec({
+    nodeStates: [{ nodeId: 'draft', status: 'waiting', waitingFor: 'signIn', error: signedOut }]
+  })
+
+  it('offers the sign-in window instead of an approval', () => {
+    const signInConnection = vi.fn()
+    ;(window as unknown as { api: unknown }).api = {
+      resolveWorkflowGate,
+      stopWorkflowRun: vi.fn(),
+      signInConnection
+    }
+    const { getAllByText, getByText, queryByText } = render(
+      <RunEntry execution={exec} nodes={[draftNode]} />
+    )
+    expect(getAllByText(signedOut).length).toBeGreaterThan(0)
+    expect(queryByText('Approve')).toBeNull()
+    fireEvent.click(getByText(/^Sign in to/))
+    expect(signInConnection).toHaveBeenCalledWith('conn-sub')
+    expect(resolveWorkflowGate).not.toHaveBeenCalled()
+  })
+})

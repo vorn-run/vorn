@@ -64,3 +64,59 @@ describe('what each rung has to back up', () => {
     expect(() => withAuth({ rung: 'oauth' })).not.toThrow()
   })
 })
+
+describe('a connector that signs in through a Vorn window', () => {
+  const browser = {
+    signInUrl: 'https://substack.com/sign-in',
+    origins: ['https://substack.com', 'https://*.substack.com'],
+    check: { url: 'https://substack.com/api/v1/user/profile/self', identity: ['name', 'handle'] }
+  }
+
+  it('reaches the manifest whole, so the app knows where to sign in and what to check', () => {
+    expect(connectorManifest(withAuth({ rung: 'browser', browser })).auth).toEqual({
+      rung: 'browser',
+      browser
+    })
+  })
+
+  it('has to say where it signs in', () => {
+    expect(() => withAuth({ rung: 'browser' })).toThrow(/declares no browser sign-in/)
+  })
+
+  it('names its origins as https hosts', () => {
+    expect(() => withAuth({ rung: 'browser', browser: { ...browser, origins: [] } })).toThrow(
+      /must name its origins/
+    )
+    expect(() =>
+      withAuth({ rung: 'browser', browser: { ...browser, origins: ['http://substack.com'] } })
+    ).toThrow(/"http:\/\/substack\.com" is neither/)
+  })
+
+  it('keeps its sign-in page and its check inside those origins', () => {
+    expect(() =>
+      withAuth({ rung: 'browser', browser: { ...browser, signInUrl: 'https://evil.io/login' } })
+    ).toThrow(/sign-in page .* outside its origins/)
+    expect(() =>
+      withAuth({
+        rung: 'browser',
+        browser: { ...browser, check: { ...browser.check, url: 'https://evil.io/me' } }
+      })
+    ).toThrow(/signed-in check .* outside its origins/)
+  })
+
+  it('names the fields that say who is signed in as words', () => {
+    expect(() =>
+      withAuth({
+        rung: 'browser',
+        browser: { ...browser, check: { ...browser.check, identity: [' '] } }
+      })
+    ).toThrow(/identity fields/)
+  })
+
+  it('keeps no secret of its own, since the signed-in window is the secret', () => {
+    const secret: ConnectorConfigField = { key: 'apiToken', label: 'API token', secret: true }
+    expect(() => withAuth({ rung: 'browser', browser }, [secret])).toThrow(
+      /signs in through a Vorn window but declares secret field "apiToken"/
+    )
+  })
+})

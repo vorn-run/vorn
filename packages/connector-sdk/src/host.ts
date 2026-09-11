@@ -1,3 +1,4 @@
+import { loopbackEndpoint } from './loopback'
 import type { ExtensionHost, ExtensionHostMethod, ExtensionUsage } from './types'
 
 /**
@@ -41,31 +42,13 @@ export interface HostBridgeOptions {
 /** Long enough for a git read on a large tree, short enough to fail a wedged host. */
 const HOST_TIMEOUT_MS = 15_000
 
-/** The bridge is served on this machine, so a token never leaves it; a URL keeps IPv6 in brackets. */
-const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '[::1]']
-
 function endpoint(env: NodeJS.ProcessEnv): { url: string; token: string } {
-  const url = env[HOST_URL_ENV]?.trim()
-  const token = env[HOST_TOKEN_ENV]?.trim()
-  if (!url || !token) {
-    throw new Error(
-      `This extension was started without a host bridge; ${HOST_URL_ENV} and ${HOST_TOKEN_ENV} are set by Vorn`
-    )
-  }
-  // Checked before the token is sent: a bridge address that is not this machine
-  // would hand the grant to whoever set the variable.
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    throw new Error(`${HOST_URL_ENV} is ${JSON.stringify(url)}, which is not a URL`)
-  }
-  if (parsed.protocol !== 'http:' || !LOOPBACK_HOSTS.includes(parsed.hostname)) {
-    throw new Error(
-      `${HOST_URL_ENV} is ${JSON.stringify(url)}; the bridge is served on this machine, over http on ${LOOPBACK_HOSTS.join(', ')}`
-    )
-  }
-  return { url: url.replace(/\/$/, ''), token }
+  return loopbackEndpoint(env, {
+    urlVar: HOST_URL_ENV,
+    tokenVar: HOST_TOKEN_ENV,
+    missing: `This extension was started without a host bridge; ${HOST_URL_ENV} and ${HOST_TOKEN_ENV} are set by Vorn`,
+    served: 'the bridge is served on this machine'
+  })
 }
 
 /** The host as an extension process reaches it, over the bridge Vorn served it. */

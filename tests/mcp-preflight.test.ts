@@ -9,6 +9,7 @@ const listTools = vi.fn()
 const callTool = vi.fn()
 
 vi.mock('../packages/server/src/connectors/mcp-clients', () => ({
+  sessionGrantFor: () => undefined,
   getOrStartClient: vi.fn(async () => ({ listTools, callTool })),
   stopClient: vi.fn(),
   stopAllClients: vi.fn()

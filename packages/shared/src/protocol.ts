@@ -1,5 +1,8 @@
 import type { AgentModelRequest, AgentModelCatalog } from './agent-models'
 import type {
+  ActionResult,
+  SessionAnswer,
+  SessionRequest,
   AuthProbeReport,
   CreateTerminalPayload,
   RestoredSession,
@@ -68,7 +71,8 @@ import type {
   SdkProbeResult,
   InstalledShell,
   TailscaleStatus,
-  RemoteHost
+  RemoteHost,
+  SdkBrowserSignIn
 } from './types'
 
 // ─── Runtime Protocol Version ───────────────────────────────────
@@ -904,6 +908,34 @@ export interface RequestMethods {
     params: string
     result: void
   }
+  'connection:browserAuth': {
+    params: string
+    result: { name: string; browser: SdkBrowserSignIn } | null
+  }
+  'connection:signedIn': {
+    params: { connectionId: string; identity: string | null }
+    result: void
+  }
+  'connection:signedOut': {
+    params: string
+    result: void
+  }
+  'session:forget': {
+    params: string
+    result: void
+  }
+  'session:fetch': {
+    params: {
+      connectionId: string
+      origins: string[]
+      request: SessionRequest
+    }
+    result: SessionAnswer
+  }
+  'session:check': {
+    params: { connectionId: string; browser: SdkBrowserSignIn }
+    result: { signedIn: boolean; identity: string | null }
+  }
   /** Trigger a workflow manually via the scheduler — same dispatch path as
    *  cron, so connectorPoll triggers do their full poll+fan-out. */
   'workflow:runManual': {
@@ -971,7 +1003,7 @@ export interface RequestMethods {
       action: string
       args: Record<string, unknown>
     }
-    result: { success: boolean; output?: Record<string, unknown>; error?: string }
+    result: ActionResult
   }
   /** One-shot backfill of existing items for a connection — bypasses the
    *  "since" cursor that poll() uses, calling listItems() directly. Respects

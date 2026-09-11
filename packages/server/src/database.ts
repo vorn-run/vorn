@@ -466,6 +466,7 @@ function createSchema(): void {
       worktree_path TEXT,
       worktree_name TEXT,
       worktree_origin TEXT,
+      waiting_for TEXT,
       FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
     );
 
@@ -762,7 +763,9 @@ function migrateSchema(d: Database.Database): void {
           last_sync_at TEXT,
           last_sync_error TEXT,
           sync_cursor TEXT,
-          created_at TEXT NOT NULL
+          created_at TEXT NOT NULL,
+          signed_in_as TEXT,
+          signed_in_at TEXT
         )
       `)
 
@@ -1087,6 +1090,24 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 19 (worktrees on run steps)')
   }
+
+  if (version < 20) {
+    d.transaction(() => {
+      const cols = d.prepare('PRAGMA table_info(source_connections)').all() as Array<{
+        name: string
+      }>
+      for (const column of ['signed_in_as', 'signed_in_at']) {
+        if (!cols.some((c) => c.name === column)) {
+          d.exec(`ALTER TABLE source_connections ADD COLUMN ${column} TEXT`)
+        }
+      }
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '20')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 20 (who a connection is signed in as)')
+  }
 }
 
 /** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */
@@ -1186,6 +1207,7 @@ function verifySchema(d: Database.Database): void {
       }
     ],
     workflow_run_nodes: [
+      { column: 'waiting_for', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN waiting_for TEXT' },
       { column: 'agent_type', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN agent_type TEXT' },
       {
         column: 'project_name',
@@ -2066,6 +2088,8 @@ interface SourceConnectionRow {
   last_sync_error: string | null
   sync_cursor: string | null
   created_at: string
+  signed_in_as: string | null
+  signed_in_at: string | null
 }
 
 function rowToSourceConnection(r: SourceConnectionRow): SourceConnection {
@@ -2080,7 +2104,9 @@ function rowToSourceConnection(r: SourceConnectionRow): SourceConnection {
     ...(r.last_sync_at != null && { lastSyncAt: r.last_sync_at }),
     ...(r.last_sync_error != null && { lastSyncError: r.last_sync_error }),
     ...(r.sync_cursor != null && { syncCursor: r.sync_cursor }),
-    createdAt: r.created_at
+    createdAt: r.created_at,
+    ...(r.signed_in_as != null && { signedInAs: r.signed_in_as }),
+    ...(r.signed_in_at != null && { signedInAt: r.signed_in_at })
   }
 }
 
@@ -2106,8 +2132,8 @@ export function dbGetSourceConnection(id: string): SourceConnection | null {
 export function dbInsertSourceConnection(conn: SourceConnection): void {
   getDb()
     .prepare(
-      `INSERT INTO source_connections (id, connector_id, name, filters, sync_interval_minutes, status_mapping, execution_project, last_sync_at, last_sync_error, sync_cursor, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO source_connections (id, connector_id, name, filters, sync_interval_minutes, status_mapping, execution_project, last_sync_at, last_sync_error, sync_cursor, created_at, signed_in_as, signed_in_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       conn.id,
@@ -2120,7 +2146,9 @@ export function dbInsertSourceConnection(conn: SourceConnection): void {
       conn.lastSyncAt ?? null,
       conn.lastSyncError ?? null,
       conn.syncCursor ?? null,
-      conn.createdAt
+      conn.createdAt,
+      conn.signedInAs ?? null,
+      conn.signedInAt ?? null
     )
 }
 
@@ -2164,6 +2192,17 @@ export function dbUpdateSourceConnection(id: string, updates: Partial<SourceConn
   getDb()
     .prepare(`UPDATE source_connections SET ${sets.join(', ')} WHERE id = ?`)
     .run(...params)
+}
+
+/** Who a connection's window is signed in as; both null once it is signed out. */
+export function dbSetConnectionSignIn(
+  id: string,
+  signedInAs: string | null,
+  signedInAt: string | null
+): void {
+  getDb()
+    .prepare('UPDATE source_connections SET signed_in_as = ?, signed_in_at = ? WHERE id = ?')
+    .run(signedInAs, signedInAt, id)
 }
 
 export function dbDeleteSourceConnection(id: string): void {
@@ -3533,8 +3572,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
     d.prepare('DELETE FROM workflow_run_nodes WHERE run_id = ?').run(runId)
 
     const insertNode = d.prepare(
-      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration, worktree_path, worktree_name, worktree_origin)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration, worktree_path, worktree_name, worktree_origin, waiting_for)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const ns of execution.nodeStates) {
       insertNode.run(
@@ -3560,7 +3599,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
         ns.iteration ?? null,
         ns.worktreePath ?? null,
         ns.worktreeName ?? null,
-        ns.worktreeOrigin ?? null
+        ns.worktreeOrigin ?? null,
+        ns.waitingFor ?? null
       )
     }
 
@@ -3618,6 +3658,7 @@ type WorkflowRunNodeRow = {
   worktree_path: string | null
   worktree_name: string | null
   worktree_origin: string | null
+  waiting_for: string | null
 }
 
 function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
@@ -3649,7 +3690,8 @@ function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
     ...(n.worktree_name != null && { worktreeName: n.worktree_name }),
     ...((n.worktree_origin === 'created' || n.worktree_origin === 'inherited') && {
       worktreeOrigin: n.worktree_origin
-    })
+    }),
+    ...(n.waiting_for === 'signIn' && { waitingFor: 'signIn' as const })
   }
 }
 
@@ -3841,14 +3883,14 @@ export function listRunningRuns(): WorkflowExecution[] {
 // because gates pause execution. No LIMIT is intentional so the badge count
 // matches the real backlog. If this ever grows, cap with a LIMIT here and
 // chunk `fetchNodesByRunIds` to stay under SQLite's IN-clause variable cap.
-export function listRunsWithWaitingGates(): WorkflowExecution[] {
+export function listRunsWithWaitingGates(kind?: 'signIn'): WorkflowExecution[] {
   const d = getDb()
   const rows = d
     .prepare(
       `SELECT DISTINCT wr.*
        FROM workflow_runs wr
        JOIN workflow_run_nodes wrn ON wrn.run_id = wr.id
-       WHERE wrn.status = 'waiting'
+       WHERE wrn.status = 'waiting'${kind === 'signIn' ? " AND wrn.waiting_for = 'signIn'" : ''}
        ORDER BY wr.started_at DESC`
     )
     .all() as RunRow[]

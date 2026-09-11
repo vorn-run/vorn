@@ -455,6 +455,27 @@ describe('how a probed connector says it signs in', () => {
     })
   })
 
+  const browser = {
+    rung: 'browser',
+    browser: {
+      signInUrl: 'https://substack.com/sign-in',
+      origins: ['https://substack.com', 'https://*.substack.com'],
+      check: { url: 'https://substack.com/api/v1/user/profile/self', identity: ['name', 'handle'] }
+    }
+  }
+
+  it('carries a browser sign-in whole, so the app knows where to sign in and what to check', async () => {
+    expect(await probeAuth(browser)).toEqual(browser)
+  })
+
+  it('drops a browser sign-in whose pages sit outside its own origins', async () => {
+    expect(await probeAuth({ rung: 'browser' })).toBeUndefined()
+    const elsewhere = { ...browser.browser, signInUrl: 'https://evil.io/login' }
+    expect(await probeAuth({ ...browser, browser: elsewhere })).toBeUndefined()
+    const plainHttp = { ...browser.browser, origins: ['http://substack.com'] }
+    expect(await probeAuth({ ...browser, browser: plainHttp })).toBeUndefined()
+  })
+
   it('carries what to borrow, since the token is fetched fresh at spawn', async () => {
     const auth = { ...cli, borrow: { env: ['GITLAB_HOST'], tokenArgs: ['auth', 'token'] } }
     expect(await probeAuth(auth)).toEqual(auth)

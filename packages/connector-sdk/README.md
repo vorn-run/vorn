@@ -202,6 +202,25 @@ Two rules make a pull trigger reliable, and the SDK enforces both:
    it. Use `>=` when filtering on `since` and sort ascending; returning a few
    items again is free, because the SDK drops anything already delivered.
 
+## Act through a signed-in window
+
+A service with no API to key can still be reached as the person using it. Declare the `browser` rung with the page to sign in on, the origins the connector may act on, and a check that answers 2xx only while someone is signed in:
+
+```ts
+auth: {
+  rung: 'browser',
+  browser: {
+    signInUrl: 'https://example.com/login',
+    origins: ['https://example.com', 'https://*.example.com'],
+    check: { url: 'https://example.com/api/me', identity: ['name', 'handle'] }
+  }
+}
+```
+
+Vorn opens a window on a browser profile that belongs to one connection, and the person signs in there. The connector's code then gets `ctx.session.fetch` beside `ctx.fetch`. A call through `ctx.session.fetch` runs inside that signed-in window as a same-origin request, so the service sees its own page asking and no cookie reaches the connector. Calls outside `origins` are refused. `ctx.fetch` stays a plain fetch for public reads, such as a feed, which work before anyone signs in. A `browser` connector's declared `request` actions go through the window.
+
+`--mock` serves signed-in calls from the same routes as every other call. A `--live` run from a terminal has no window, so it skips them.
+
 ## Dedupe strategies
 
 `dedupe` tells the SDK how to recognize new items, and it then owns the cursor

@@ -260,3 +260,40 @@ describe('a connector that asks for a key', () => {
     expect(probeConnectorAuth).not.toHaveBeenCalled()
   })
 })
+
+describe('a connector that signs in through a Vorn window', () => {
+  const signInConnection = vi.fn()
+
+  beforeEach(() => {
+    signInConnection.mockReset().mockResolvedValue({ ok: true })
+    ;(window as unknown as { api: Record<string, unknown> }).api.signInConnection = signInConnection
+    probeSdkConnector.mockResolvedValue({
+      ok: true,
+      manifest: {
+        ...manifest({
+          rung: 'browser',
+          browser: {
+            signInUrl: 'https://substack.com/sign-in',
+            origins: ['https://substack.com', 'https://*.substack.com'],
+            check: { url: 'https://substack.com/api/v1/user/profile/self', identity: ['name'] }
+          }
+        }),
+        env: []
+      }
+    })
+  })
+
+  it('says a window will open and which sites the connection acts on', async () => {
+    const { findByText, getByText } = setup()
+    await findByText('Signs in through a Vorn window')
+    expect(getByText(/a window opens on substack\.com/)).toBeInTheDocument()
+    expect(getByText(/acts as you on substack\.com, \*\.substack\.com/)).toBeInTheDocument()
+  })
+
+  it('opens the sign-in window for the connection it just made', async () => {
+    const { findByRole, onDone } = setup()
+    fireEvent.click(await findByRole('button', { name: 'Connect and sign in' }))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    expect(signInConnection).toHaveBeenCalledWith('c1')
+  })
+})

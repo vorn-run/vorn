@@ -1,5 +1,6 @@
 import {
   IPC,
+  type ActionResult,
   type AppConfig,
   type ConnectorItemContext,
   type CreateTerminalPayload,
@@ -58,8 +59,7 @@ export const api = {
     connectionId: string
     action: string
     args: Record<string, unknown>
-  }): Promise<{ success: boolean; output?: Record<string, unknown>; error?: string }> =>
-    callMethod('connection:executeAction', params),
+  }): Promise<ActionResult> => callMethod('connection:executeAction', params),
 
   httpRequest: (params: {
     profileConnectionId?: string

@@ -1,6 +1,7 @@
 import type { WorkflowExecution } from '../../shared/types'
+import { isSignInWait } from '@vornrun/shared/workflow-graph'
 import { useAppStore } from '../stores'
-import { sendWorkflowGateNotification } from './notifications'
+import { sendWorkflowGateNotification, sendWorkflowSignInNotification } from './notifications'
 
 /**
  * The window's half of a run that is happening somewhere else.
@@ -30,16 +31,29 @@ export function announceRun(execution: WorkflowExecution): void {
     for (const nodeId of waiting) {
       if (previous?.waiting.has(nodeId)) continue
       const node = workflow.nodes.find((n) => n.id === nodeId)
+      const openWorkflow = () => {
+        useAppStore.getState().setEditingWorkflowId(workflow.id)
+        useAppStore.getState().setWorkflowEditorOpen(true)
+      }
+      const state = execution.nodeStates.find((ns) => ns.nodeId === nodeId)
+      if (state && isSignInWait(state)) {
+        sendWorkflowSignInNotification(
+          workflow,
+          nodeId,
+          node?.label ?? 'A step',
+          state.error,
+          store.config ?? null,
+          openWorkflow
+        )
+        continue
+      }
       sendWorkflowGateNotification(
         workflow,
         nodeId,
         node?.label ?? 'Approval',
         (node?.config as { message?: string } | undefined)?.message,
         store.config ?? null,
-        () => {
-          useAppStore.getState().setEditingWorkflowId(workflow.id)
-          useAppStore.getState().setWorkflowEditorOpen(true)
-        }
+        openWorkflow
       )
     }
   }

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { isSignInWait } from '@vornrun/shared/workflow-graph'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { V } from '../validation'
@@ -489,6 +490,12 @@ export function annotateWaitingGates<T extends WorkflowExecution>(
       ...run,
       nodeStates: run.nodeStates.map((state) => {
         if (state.status !== 'waiting') return state
+        if (isSignInWait(state)) {
+          return {
+            ...state,
+            asks: 'Sign in to its connection in the Vorn app, and this step runs again'
+          }
+        }
         const asks = gateMessage(workflow, state.nodeId)
         return asks ? { ...state, asks } : state
       })
@@ -508,10 +515,20 @@ async function runById(
 // Which gate a decision answers: one waiting node needs no naming, several would make picking a guess.
 export function resolveGateTarget(
   run: Pick<WorkflowExecution, 'nodeStates'>,
-  nodeId?: string
+  nodeId?: string,
+  decision: 'approve' | 'reject' = 'approve'
 ): { nodeId: string } | { error: string } {
-  const waiting = run.nodeStates.filter((n) => n.status === 'waiting').map((n) => n.nodeId)
+  const parked = run.nodeStates.filter((n) => n.status === 'waiting')
+  // Rejecting a sign-in wait ends the run; approving one would skip the step it waits to run.
+  const answerable = parked.filter((n) => decision === 'reject' || !isSignInWait(n))
+  const waiting = answerable.map((n) => n.nodeId)
+  const signIns = parked.filter((n) => !answerable.includes(n)).map((n) => n.nodeId)
   if (nodeId) {
+    if (signIns.includes(nodeId)) {
+      return {
+        error: `node "${nodeId}" is waiting for a sign-in in the Vorn app, not for an approval`
+      }
+    }
     if (waiting.includes(nodeId)) return { nodeId }
     return {
       error: waiting.length
@@ -520,7 +537,13 @@ export function resolveGateTarget(
     }
   }
   if (waiting.length === 1) return { nodeId: waiting[0] }
-  if (waiting.length === 0) return { error: 'no node in this run is waiting on a gate' }
+  if (waiting.length === 0) {
+    return {
+      error: signIns.length
+        ? 'this run is waiting for a sign-in in the Vorn app, not for an approval'
+        : 'no node in this run is waiting on a gate'
+    }
+  }
   return { error: `${waiting.length} nodes are waiting — pass node_id: ${waiting.join(', ')}` }
 }
 
@@ -837,7 +860,7 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
-      const target = resolveGateTarget(run, args.node_id)
+      const target = resolveGateTarget(run, args.node_id, args.decision)
       if ('error' in target) {
         return {
           content: [{ type: 'text', text: `Error: ${target.error}` }],

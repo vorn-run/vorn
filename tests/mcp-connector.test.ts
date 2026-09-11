@@ -7,6 +7,7 @@ vi.mock('../packages/server/src/logger', () => ({
 
 const getOrStartClientMock = vi.fn()
 vi.mock('../packages/server/src/connectors/mcp-clients', () => ({
+  sessionGrantFor: () => undefined,
   getOrStartClient: (...args: unknown[]) => getOrStartClientMock(...args),
   stopClient: vi.fn(),
   stopAllClients: vi.fn(),

@@ -14,6 +14,7 @@
  * token.
  * The decrypted values are merged in at spawn time via `getOrStartClient`.
  */
+import { openSessionCall, sessionOutcome, type OpenSessionCall } from './session-bridge'
 import type {
   VornConnector,
   ConnectorManifest,
@@ -25,9 +26,9 @@ import type {
   ExternalItem,
   SourceConnection
 } from '@vornrun/shared/types'
-import { SDK_FILTER_KEYS } from '@vornrun/shared/types'
+import { SDK_FILTER_KEYS, SESSION_CALL_META } from '@vornrun/shared/types'
 import { schemaProperties, schemaTypeHint, schemaRequired } from '@vornrun/shared/json-schema-utils'
-import { getOrStartClient } from './mcp-clients'
+import { getOrStartClient, sessionGrantFor } from './mcp-clients'
 import { PREFLIGHT_TOOL, isReservedSdkTool } from './sdk-tools'
 import { describePack } from './packs'
 
@@ -251,16 +252,24 @@ export async function invokeMcpTool(
   toolName: string,
   args: Record<string, unknown>
 ): Promise<ActionResult> {
+  let call: OpenSessionCall | undefined
+  let outcome: ActionResult
   try {
     const client = await getOrStartClient(conn)
+    const grant = sessionGrantFor(conn.id)
+    if (grant) call = openSessionCall(grant)
     // Look up this tool's discovered inputSchema so we can coerce string form
     // values back to the types the tool actually expects.
     const tools = conn.filters.discoveredTools
     const tool = Array.isArray(tools)
       ? (tools as McpDiscoveredTool[]).find((t) => t.name === toolName)
       : undefined
-    const callArgs = coerceMcpArgs(tool?.inputSchema, args)
-    const result = await client.callTool({ name: toolName, arguments: callArgs })
+    const params = { name: toolName, arguments: coerceMcpArgs(tool?.inputSchema, args) }
+    const result = call
+      ? await client.callTool({ ...params, _meta: { [SESSION_CALL_META]: call.key } }, undefined, {
+          timeout: BROWSER_TOOL_TIMEOUT_MS
+        })
+      : await client.callTool(params)
     // When the tool declared an outputSchema, MCP returns the typed payload
     // under `structuredContent`. Surface that as `output` so downstream
     // workflow steps can reference the declared fields directly
@@ -272,18 +281,21 @@ export async function invokeMcpTool(
       string,
       unknown
     >
-    if (result.isError) {
-      return {
-        success: false,
-        error: extractTextError(result.content) ?? `MCP tool ${toolName} reported an error`,
-        output
-      }
-    }
-    return { success: true, output }
+    outcome = result.isError
+      ? {
+          success: false,
+          error: extractTextError(result.content) ?? `MCP tool ${toolName} reported an error`,
+          output
+        }
+      : { success: true, output }
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) }
+    outcome = { success: false, error: err instanceof Error ? err.message : String(err) }
   }
+  return call ? await sessionOutcome(conn, call, outcome) : outcome
 }
+
+/** A tool may make several calls through its window, each up to twenty seconds. */
+const BROWSER_TOOL_TIMEOUT_MS = 120_000
 
 // --- Poll / trigger support -------------------------------------------------
 

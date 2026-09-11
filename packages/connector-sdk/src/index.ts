@@ -7,6 +7,17 @@ export {
   HOST_PERMISSIONS
 } from './define'
 export { createExtensionHost, PermissionDeniedError, HOST_URL_ENV, HOST_TOKEN_ENV } from './host'
+export {
+  createSessionFetch,
+  SessionUnavailableError,
+  SessionRefusedError,
+  BROWSER_HOST_ENV,
+  BROWSER_TOKEN_ENV,
+  SESSION_CALL_HEADER,
+  SESSION_CALL_META
+} from './session'
+export { ORIGIN_PATTERN, withinOrigins } from './origins'
+export type { SessionFetchOptions } from './session'
 export type { HostBridgeOptions } from './host'
 export { checkConnector, formatFindings, runConformance, CHECK_OWNERS } from './check'
 export type {
@@ -83,6 +94,8 @@ export type {
   ActionOutputField,
   ActionRequest,
   AuthRung,
+  BrowserSignIn,
+  SessionContext,
   PaginationStrategy,
   PostReceiveOp,
   Connector,

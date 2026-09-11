@@ -14,6 +14,7 @@ vi.mock('../packages/server/src/logger', () => ({
 
 const getOrStartClient = vi.fn()
 vi.mock('../packages/server/src/connectors/mcp-clients', () => ({
+  sessionGrantFor: () => undefined,
   getOrStartClient: (conn: SourceConnection) => getOrStartClient(conn)
 }))
 

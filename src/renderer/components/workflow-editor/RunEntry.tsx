@@ -14,10 +14,11 @@ import {
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
 import { Tooltip } from '../Tooltip'
-import { hasFailedStep } from '@vornrun/shared/workflow-graph'
+import { hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
 import { ConnectorIcon } from '../ConnectorIcon'
 import { connectorLookFor, useConnections, type ConnectorLook } from '../../lib/use-connections'
+import { SignInButton } from '../workflow-runs/SignInButton'
 import {
   NODE_TYPE_ICON,
   TASK_CHIP,
@@ -241,6 +242,7 @@ export function RunStepsList({
           const timeline = isExpanded ? stepTimeline(ns.logs, ns.diagnostics) : []
 
           const isWaitingGate = ns.status === 'waiting' && node?.type === 'approval'
+          const signInWait = isSignInWait(ns)
           const approvalMessage =
             node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
 
@@ -353,6 +355,15 @@ export function RunStepsList({
                       <X size={11} strokeWidth={2.5} />
                       Reject
                     </button>
+                  </div>
+                )}
+
+                {signInWait && (
+                  <div className="px-3 pb-3 -mt-0.5 flex items-start gap-2">
+                    <div className="flex-1 min-w-0 text-[11px] text-bronzo">
+                      {ns.error || 'Signed out. Sign in, and this step runs again.'}
+                    </div>
+                    <SignInButton connectionId={nodeConnectionId(node)} compact />
                   </div>
                 )}
 

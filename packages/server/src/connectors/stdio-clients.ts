@@ -36,6 +36,7 @@ export interface StdioClientCache<Meta> {
   stopWhere(matches: (meta: Meta) => boolean): Promise<void>
   stopAll(): Promise<void>
   has(key: string): boolean
+  get(key: string): Meta | undefined
   find(matches: (meta: Meta) => boolean): Meta | undefined
   entries(): Meta[]
 }
@@ -118,6 +119,7 @@ export function createStdioClientCache<Meta>(label: string): StdioClientCache<Me
       await Promise.allSettled([...live.keys()].map(stop))
     },
     has: (key) => live.has(key),
+    get: (key) => live.get(key)?.meta,
     find: (matches) => [...live.values()].map((entry) => entry.meta).find(matches),
     entries: () => [...live.values()].map((entry) => entry.meta)
   }

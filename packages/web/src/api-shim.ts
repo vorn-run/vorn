@@ -854,6 +854,9 @@ export function createApiShim(wsUrl: string) {
     getConnector: (id: string) => rpc.invoke('connector:get', id),
     getConnectorStatus: () => rpc.invoke('connector:status'),
     probeConnectorAuth: (connectorId: string) => rpc.invoke('connector:probeAuth', connectorId),
+    // A connection's signed-in profile lives on the desktop, so the web client cannot open one.
+    signInConnection: async () => ({ ok: false, error: 'Sign in from the Vorn desktop app.' }),
+    signOutConnection: async () => {},
     listConnectorCatalog: () => rpc.invoke('connector:catalog'),
     refreshConnectorCatalog: () => rpc.invoke('connector:catalogRefresh'),
     probeSdkConnector: (request: unknown) => rpc.invoke('connector:probeSdk', request),
