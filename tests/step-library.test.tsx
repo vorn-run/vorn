@@ -114,7 +114,9 @@ describe('the step library', () => {
   it('opens and folds a group from the keys', async () => {
     const { root } = renderLibrary()
     const github = await group(/GitHub/)
-    const reachable = screen.getAllByRole('button').filter((b) => b.ariaLabel !== 'Close')
+    const reachable = screen
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('aria-label') !== 'Close')
     for (let i = 0; i < reachable.indexOf(github); i++) {
       fireEvent.keyDown(root, { key: 'ArrowDown' })
     }
