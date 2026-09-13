@@ -15,7 +15,7 @@ export {
   BROWSER_TOKEN_ENV,
   SESSION_CALL_HEADER
 } from './session'
-export { ActionArgumentError, UpstreamStatusError, protocolError } from './errors'
+export { ActionArgumentError, UpstreamStatusError } from './errors'
 export { ORIGIN_PATTERN, withinOrigins } from './origins'
 export {
   PROTOCOL_VERSION,

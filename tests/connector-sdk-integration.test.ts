@@ -4,7 +4,7 @@ import {
   defineExtension,
   type TriggerPollResult
 } from '../packages/connector-sdk/src/index'
-import { greeted } from './helpers/connector-server'
+import { greeted, type Greeted } from './helpers/connector-server'
 
 const NOW = '2026-08-05T00:00:00.000Z'
 
@@ -45,7 +45,7 @@ const connector = defineConnector({
   ]
 })
 
-const poll = (server: Awaited<ReturnType<typeof greeted>>, cursor?: string) =>
+const poll = (server: Greeted, cursor?: string) =>
   server.call<TriggerPollResult>('trigger/poll', {
     trigger: 'newOrder',
     ...(cursor !== undefined && { cursor })

@@ -1,4 +1,5 @@
 import { SessionUnavailableError } from './session'
+import { causes } from './errors'
 import { existsSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
@@ -628,10 +629,7 @@ export function liveExamines(connector: Connector): boolean {
 }
 
 function needsWindow(error: unknown): boolean {
-  return (
-    error instanceof SessionUnavailableError ||
-    (error instanceof Error && error.cause instanceof SessionUnavailableError)
-  )
+  return [...causes(error)].some((at) => at instanceof SessionUnavailableError)
 }
 
 /**

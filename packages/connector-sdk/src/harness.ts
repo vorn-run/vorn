@@ -1,4 +1,5 @@
 import { HOST_PERMISSIONS } from './define'
+import { causes } from './errors'
 import { PermissionDeniedError } from './host'
 import { drainPoll, runAction, runPoll, type PollPage, type RunPollOptions } from './runtime'
 import { connectorManifest, type ConnectorManifest } from './setup'
@@ -119,10 +120,10 @@ export class MockRouteMissError extends Error {
 
 /** Whether a call escaped the stub, however many times it was rethrown. */
 export function escapedMockHttp(error: unknown): boolean {
-  for (let current: unknown = error; current instanceof Error; current = current.cause) {
-    if (current instanceof MockRouteMissError) return true
+  for (const at of causes(error)) {
+    if (at instanceof MockRouteMissError) return true
     // A connector that rethrew without a cause still leaves the sentence.
-    if (current.message.includes('No mock route for ')) return true
+    if (at instanceof Error && at.message.includes('No mock route for ')) return true
   }
   return false
 }
@@ -176,10 +177,7 @@ export async function withMockHttp<T>(
   }
 }
 
-/**
- * Run a connector in-process, exactly as the stdio server would, without
- * spawning anything. Authors get real assertions in a plain unit test.
- */
+/** Run a connector in-process through the runtime the stdio server uses, so a plain unit test can assert on it. */
 export function createConnectorHarness(
   connector: Connector,
   harnessOptions: HarnessOptions = {}

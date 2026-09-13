@@ -86,8 +86,8 @@ await serveConnector(connector)
 Publish it like any other package (`"bin": { "acme-connector": "dist/bin.js" }`).
 
 stdout carries only replies to Vorn. Once `serveConnector` has started,
-`console.log`, `console.info` and `console.debug` go to stderr, so call it
-before printing anything.
+anything else written to stdout goes to stderr, so call it before printing
+anything.
 
 `vorn-connector new acme` writes all of the above — package, entry, definition,
 a test that needs no network — already building, checking and packing.
@@ -383,7 +383,11 @@ and fills in the connection settings from the answer. All that is left on
 screen is the connector's own name, its triggers, and the config it declared.
 Polls are `trigger/poll` and actions are `action/run`, each carrying typed
 arguments; a failure comes back with a kind (`validation`, `app-offline`,
-`signed-out`, `upstream` or `internal`) that decides what Vorn tells you.
+`signed-out`, `upstream` or `internal`) that decides what Vorn tells you. A
+declared request sorts its own failures; a `run()` that reads a failing status
+can `throw new UpstreamStatusError(status, message, viaSession)`, where
+`viaSession` says the call went through `ctx.session.fetch`, so a 401 or 403
+reads as signed out.
 
 Vorn hands the connector back its own cursor on every poll and fires for
 whatever it returns, rather than re-filtering by timestamp itself — which is

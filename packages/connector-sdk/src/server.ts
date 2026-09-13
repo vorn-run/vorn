@@ -1,7 +1,8 @@
-import { Console } from 'node:console'
 import { EXTENSION_AGENTS, resolveConfig } from './define'
-import { protocolError } from './errors'
+import { UnknownNameError, messageOf, protocolError } from './errors'
 import { createExtensionHost } from './host'
+import { lineReader } from './lines'
+import { isRecord } from './post-receive'
 import {
   MAX_FRAME_BYTES,
   PROTOCOL_ERROR_CODES,
@@ -41,14 +42,8 @@ export interface ConnectorServer {
 
 type Params = Record<string, unknown>
 
-/** A request whose params, or the name it gives, do not fit this connector. */
+/** A request whose params do not fit the method. */
 class InvalidParams extends Error {}
-
-const isRecord = (value: unknown): value is Params =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-const messageOf = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error)
 
 function text(params: Params, key: string): string {
   const value = params[key]
@@ -62,6 +57,15 @@ function optionalText(params: Params, key: string): string | undefined {
   const value = params[key]
   if (value === undefined || value === null) return undefined
   if (typeof value !== 'string') throw new InvalidParams(`"${key}" must be a string`)
+  return value
+}
+
+function optionalNumber(params: Params, key: string): number | undefined {
+  const value = params[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new InvalidParams(`"${key}" must be a number`)
+  }
   return value
 }
 
@@ -82,17 +86,13 @@ export function createConnectorServer(
   let cached: ConnectorConfig | undefined = options.config
   const config = (): ConnectorConfig => (cached ??= resolveConfig(connector))
   const now = options.now
-  const signedIn = connector.auth?.rung === 'browser'
   let greeted = false
 
-  const runtime = (params: Params) => {
-    const sessionCall = optionalText(params, 'sessionCall')
-    return {
-      config: config(),
-      ...(now && { now }),
-      ...(sessionCall !== undefined && { sessionCall })
-    }
-  }
+  const runtime = (params: Params) => ({
+    config: config(),
+    now,
+    sessionCall: optionalText(params, 'sessionCall')
+  })
 
   const hostFor = (sessionId: string): ExtensionHost =>
     options.host?.(sessionId) ?? createExtensionHost({ sessionId })
@@ -125,38 +125,20 @@ export function createConnectorServer(
       }
     },
 
-    [PROTOCOL_METHODS.options]: async (params) => {
-      const name = text(params, 'name')
-      if (!connector.options?.[name]) {
-        throw new InvalidParams(`${connector.id} serves no options set "${name}"`)
-      }
-      return { options: await runOptions(connector, name, runtime(params)) }
-    },
+    [PROTOCOL_METHODS.options]: async (params) => ({
+      options: await runOptions(connector, text(params, 'name'), runtime(params))
+    }),
 
-    [PROTOCOL_METHODS.poll]: (params) => {
-      const trigger = text(params, 'trigger')
-      if (!connector.triggers.some((entry) => entry.type === trigger)) {
-        throw new InvalidParams(`${connector.id} has no trigger "${trigger}"`)
-      }
-      const { limit } = params
-      if (limit != null && (typeof limit !== 'number' || !Number.isFinite(limit))) {
-        throw new InvalidParams('"limit" must be a number')
-      }
-      const cursor = optionalText(params, 'cursor')
-      const since = optionalText(params, 'since')
-      return runPoll(connector, trigger, {
+    [PROTOCOL_METHODS.poll]: (params) =>
+      runPoll(connector, text(params, 'trigger'), {
         ...runtime(params),
-        ...(cursor !== undefined && { cursor }),
-        ...(since !== undefined && { since }),
-        ...(typeof limit === 'number' && { limit })
-      })
-    },
+        cursor: optionalText(params, 'cursor'),
+        since: optionalText(params, 'since'),
+        limit: optionalNumber(params, 'limit')
+      }),
 
     [PROTOCOL_METHODS.action]: (params) => {
       const action = text(params, 'action')
-      if (!connector.actions.some((entry) => entry.type === action)) {
-        throw new InvalidParams(`${connector.id} has no action "${action}"`)
-      }
       const args = params.args ?? {}
       if (!isRecord(args)) throw new InvalidParams('"args" must be an object')
       return runAction(connector, action, args, runtime(params))
@@ -223,10 +205,10 @@ export function createConnectorServer(
       try {
         return { jsonrpc: '2.0', id, result: await run(params) } as ProtocolResponse
       } catch (error) {
-        if (error instanceof InvalidParams) {
+        if (error instanceof InvalidParams || error instanceof UnknownNameError) {
           return refusal(id, PROTOCOL_ERROR_CODES.invalidParams, error.message)
         }
-        return failure(id, protocolError(error, signedIn))
+        return failure(id, protocolError(error))
       }
     }
   }
@@ -234,59 +216,36 @@ export function createConnectorServer(
 
 /** One reply as one line, or an error in its place when the result cannot travel. */
 function frame(response: ProtocolResponse): string {
-  let line: string
   try {
-    line = JSON.stringify(response)
+    const line = JSON.stringify(response)
+    if (Buffer.byteLength(line) > MAX_FRAME_BYTES) {
+      throw new Error(`The answer is over ${MAX_FRAME_BYTES} bytes`)
+    }
+    return line
   } catch (error) {
     return JSON.stringify(failure(response.id, protocolError(error)))
-  }
-  if (Buffer.byteLength(line) <= MAX_FRAME_BYTES) return line
-  return JSON.stringify(
-    failure(response.id, protocolError(new Error(`The answer is over ${MAX_FRAME_BYTES} bytes`)))
-  )
-}
-
-/** Split a byte stream into lines, decoding each only once it is whole; `overflow` fires past the frame limit. */
-function lineReader(onLine: (line: string) => void, overflow: () => void): (chunk: Buffer) => void {
-  let pending: Buffer[] = []
-  let size = 0
-  return (chunk) => {
-    let start = 0
-    for (let end = chunk.indexOf(0x0a); end !== -1; end = chunk.indexOf(0x0a, start)) {
-      const part = chunk.subarray(start, end)
-      if (size + part.length > MAX_FRAME_BYTES) return overflow()
-      const line = Buffer.concat([...pending, part]).toString('utf8')
-      pending = []
-      size = 0
-      start = end + 1
-      onLine(line.endsWith('\r') ? line.slice(0, -1) : line)
-    }
-    const rest = chunk.subarray(start)
-    size += rest.length
-    if (size > MAX_FRAME_BYTES) return overflow()
-    if (rest.length > 0) pending.push(rest)
   }
 }
 
 // A pack's generated entry and a connector's own entry both call this in one process; only the first serves.
-let serving = false
+const SERVING = Symbol.for('@vornrun/connector-sdk/serving')
 
 /** Serve a connector on stdio. This is the one line a connector's bin needs. */
 export async function serveConnector(
   connector: Connector,
   options: ConnectorServerOptions = {}
 ): Promise<void> {
-  if (serving) return
-  serving = true
-  // stdout carries only replies, so whatever the connector prints goes to stderr.
-  const toStderr = new Console({ stdout: process.stderr, stderr: process.stderr })
-  const { log, info, debug, dir, dirxml, table } = toStderr
-  Object.assign(console, { log, info, debug, dir, dirxml, table })
+  const shared = globalThis as { [SERVING]?: boolean }
+  if (shared[SERVING]) return
+  shared[SERVING] = true
+  // stdout carries only replies, so anything else written there goes to stderr.
+  const reply = process.stdout.write.bind(process.stdout) as typeof process.stdout.write
+  process.stdout.write = process.stderr.write.bind(process.stderr) as typeof process.stdout.write
   const server = createConnectorServer(connector, options)
   let inFlight = 0
   let ended = false
   const finish = (): void => {
-    if (ended && inFlight === 0) process.stdout.write('', () => process.exit(0))
+    if (ended && inFlight === 0) reply('', () => process.exit(0))
   }
 
   const onLine = (line: string): void => {
@@ -302,7 +261,7 @@ export async function serveConnector(
     void server
       .handle(message)
       .then((response) => {
-        if (response) process.stdout.write(`${frame(response)}\n`)
+        if (response) reply(`${frame(response)}\n`)
       })
       .finally(() => {
         inFlight--

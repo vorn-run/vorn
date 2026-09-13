@@ -13,34 +13,44 @@ export class ActionArgumentError extends Error {
   }
 }
 
-/** An upstream answer with a failing status, kept so a sign-out reads apart from an outage. */
+/** An upstream answer with a failing status; `viaSession` marks one that came through the signed-in window. */
 export class UpstreamStatusError extends Error {
   readonly status: number
+  readonly viaSession: boolean
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, viaSession = false) {
     super(message)
     this.name = 'UpstreamStatusError'
     this.status = status
+    this.viaSession = viaSession
   }
 }
 
-/** How deep a chain of wrapped errors is followed before giving up on it. */
-const MAX_CAUSES = 8
+/** A trigger, action or options set the connector does not have. */
+export class UnknownNameError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UnknownNameError'
+  }
+}
 
-function* causes(error: unknown): Generator<unknown> {
+export const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error)
+
+/** An error and each error it wraps, followed eight causes deep at most. */
+export function* causes(error: unknown): Generator<unknown> {
   let at = error
-  for (let depth = 0; at !== undefined && depth < MAX_CAUSES; depth++) {
+  for (let depth = 0; at !== undefined && depth < 8; depth++) {
     yield at
     at = at instanceof Error ? at.cause : undefined
   }
 }
 
-/** A failed call as the wire carries it; `signedIn` says the connector's calls go through a Vorn window. */
-export function protocolError(error: unknown, signedIn = false): ProtocolError {
-  const message = error instanceof Error ? error.message : String(error)
+/** A failed call as the wire carries it. */
+export function protocolError(error: unknown): ProtocolError {
   const failed = (data: ProtocolErrorData): ProtocolError => ({
     code: PROTOCOL_ERROR_CODES.connectorError,
-    message,
+    message: messageOf(error),
     data
   })
   for (const at of causes(error)) {
@@ -49,7 +59,7 @@ export function protocolError(error: unknown, signedIn = false): ProtocolError {
       return failed({ kind: 'app-offline', retryable: false })
     }
     if (at instanceof UpstreamStatusError) {
-      if (signedIn && (at.status === 401 || at.status === 403)) {
+      if (at.viaSession && (at.status === 401 || at.status === 403)) {
         return failed({ kind: 'signed-out', retryable: false })
       }
       return failed({ kind: 'upstream', retryable: RETRYABLE_STATUS.has(at.status) })

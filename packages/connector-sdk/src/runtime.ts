@@ -1,5 +1,5 @@
 import { pollWithDedupe } from './dedupe'
-import { ActionArgumentError } from './errors'
+import { ActionArgumentError, UnknownNameError } from './errors'
 import { normalizeItems } from './normalize'
 import { executeRequest } from './request'
 import { resilientFetch, type RetryPolicy } from './resilience'
@@ -29,7 +29,7 @@ export interface RunPollOptions {
   fetchImpl?: typeof fetch
   /** Replaced by the harness and by tests; defaults to the signed-in window Vorn serves. */
   sessionFetchImpl?: typeof fetch
-  /** The key Vorn gave this tool call, carried on each request through the window. */
+  /** The key Vorn gave this call, carried on each request through the window. */
   sessionCall?: string
   retry?: RetryPolicy
   /** Replaced in tests so backoff costs no real time. */
@@ -79,7 +79,7 @@ export async function runPoll(
 ): Promise<PollPage> {
   const trigger = connector.triggers.find((entry) => entry.type === triggerType)
   if (!trigger) {
-    throw new Error(`Connector ${connector.id} has no trigger "${triggerType}"`)
+    throw new UnknownNameError(`${connector.id} has no trigger "${triggerType}"`)
   }
 
   const now = options.now ?? (() => new Date().toISOString())
@@ -148,7 +148,7 @@ export interface RunActionOptions {
   fetchImpl?: typeof fetch
   /** Replaced by the harness and by tests; defaults to the signed-in window Vorn serves. */
   sessionFetchImpl?: typeof fetch
-  /** The key Vorn gave this tool call, carried on each request through the window. */
+  /** The key Vorn gave this call, carried on each request through the window. */
   sessionCall?: string
   retry?: RetryPolicy
   /** Replaced in tests so backoff costs no real time. */
@@ -171,7 +171,7 @@ export async function runOptions(
 ): Promise<ActionInputOption[]> {
   const loader = connector.options?.[name]
   if (!loader) {
-    throw new Error(`Connector ${connector.id} serves no options set "${name}"`)
+    throw new UnknownNameError(`${connector.id} serves no options set "${name}"`)
   }
 
   const session = sessionFor(connector, options, true)
@@ -236,7 +236,7 @@ export async function runAction(
 ): Promise<Record<string, unknown>> {
   const action = connector.actions.find((entry) => entry.type === actionType)
   if (!action) {
-    throw new Error(`Connector ${connector.id} has no action "${actionType}"`)
+    throw new UnknownNameError(`${connector.id} has no action "${actionType}"`)
   }
 
   const coerced: Record<string, unknown> = { ...args }
@@ -277,7 +277,7 @@ export async function runAction(
         action.request,
         action.postReceive,
         { args: coerced, config },
-        { fetchImpl: session?.fetch ?? fetchImpl }
+        { fetchImpl: session?.fetch ?? fetchImpl, viaSession: session !== undefined }
       )
     } catch (error) {
       // Which action failed is the first thing a reader needs; the message

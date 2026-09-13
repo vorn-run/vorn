@@ -5,7 +5,13 @@ import { cp, mkdtemp, readdir, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { CheckCode, CheckFinding } from './check'
-import { PROTOCOL_VERSION } from './protocol'
+import { lineReader } from './lines'
+import {
+  MAX_FRAME_BYTES,
+  PROTOCOL_METHODS,
+  SUPPORTED_PROTOCOLS,
+  type VornHelloParams
+} from './protocol'
 import { connectorManifest } from './setup'
 import type { Connector } from './types'
 
@@ -397,39 +403,34 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 /** Resolves once the child answers `vorn/hello` with a protocol, and rejects on any other ending. */
 function helloAnswer(child: ChildProcessWithoutNullStreams): Promise<void> {
   return new Promise((resolve, reject) => {
-    let buffered = ''
-    child.stdout.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => {
-      buffered += chunk
-      for (let end = buffered.indexOf('\n'); end !== -1; end = buffered.indexOf('\n')) {
-        const line = buffered.slice(0, end)
-        buffered = buffered.slice(end + 1)
-        let reply: { id?: unknown; result?: { protocol?: unknown }; error?: { message?: unknown } }
-        try {
-          reply = JSON.parse(line)
-        } catch {
-          continue
-        }
-        if (reply?.id !== 1) continue
-        if (typeof reply.result?.protocol === 'number') return resolve()
-        return reject(
-          new Error(`answered vorn/hello with ${String(reply.error?.message ?? 'no protocol')}`)
-        )
+    const onLine = (line: string): void => {
+      let reply: { id?: unknown; result?: { protocol?: unknown }; error?: { message?: unknown } }
+      try {
+        reply = JSON.parse(line)
+      } catch {
+        return
       }
-    })
+      if (reply?.id !== 1) return
+      if (typeof reply.result?.protocol === 'number') return resolve()
+      reject(
+        new Error(
+          `answered ${PROTOCOL_METHODS.hello} with ${String(reply.error?.message ?? 'no protocol')}`
+        )
+      )
+    }
+    child.stdout.on(
+      'data',
+      lineReader(onLine, () => reject(new Error(`wrote a line over ${MAX_FRAME_BYTES} bytes`)))
+    )
     child.once('error', reject)
     child.once('exit', (code) => reject(new Error(`exited with code ${code} before answering`)))
     child.stdin.on('error', () => {})
+    const params: VornHelloParams = {
+      protocols: [...SUPPORTED_PROTOCOLS],
+      host: { name: 'vorn-connector-check', version: '1' }
+    }
     child.stdin.write(
-      `${JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'vorn/hello',
-        params: {
-          protocols: [PROTOCOL_VERSION],
-          host: { name: 'vorn-connector-check', version: '1' }
-        }
-      })}\n`
+      `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: PROTOCOL_METHODS.hello, params })}\n`
     )
   })
 }

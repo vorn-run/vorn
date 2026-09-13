@@ -40,8 +40,14 @@ function native(mode: string, source: LaunchSource = 'command', protocol?: numbe
   }
 }
 
-function sdk(source: LaunchSource = 'command'): SdkLaunch {
-  return { command: process.execPath, args: ['--import', 'tsx', SDK], source, env: {}, cwd: REPO }
+function sdk(): SdkLaunch {
+  return {
+    command: process.execPath,
+    args: ['--import', 'tsx', SDK],
+    source: 'checkout',
+    env: {},
+    cwd: REPO
+  }
 }
 
 async function connect(
@@ -243,7 +249,7 @@ describe('a checkout or a stored command', () => {
 
 describe('a connector built with the SDK', () => {
   it('is spoken to natively from a checkout, with typed values both ways', async () => {
-    const client = await connect(sdk('checkout'), { key: 'sdk-fixture' })
+    const client = await connect(sdk(), { key: 'sdk-fixture' })
     expect(client.protocol).toBe(1)
     expect(client.hello).toMatchObject({
       sdk: { name: '@vornrun/connector-sdk' },

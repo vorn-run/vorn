@@ -198,6 +198,8 @@ function describeFailure(response: Response, body: unknown): string {
 
 export interface SendOptions {
   fetchImpl: typeof fetch
+  /** Whether `fetchImpl` is the signed-in window, so a 401 or 403 reads as signed out. */
+  viaSession?: boolean
 }
 
 /** Send one resolved request and read its body, throwing on a failed status. */
@@ -211,7 +213,13 @@ export async function sendRequest(
     ...(resolved.body !== undefined && { body: resolved.body })
   })
   const body = await readBody(response)
-  if (!response.ok) throw new UpstreamStatusError(response.status, describeFailure(response, body))
+  if (!response.ok) {
+    throw new UpstreamStatusError(
+      response.status,
+      describeFailure(response, body),
+      options.viaSession
+    )
+  }
   return { response, body }
 }
 

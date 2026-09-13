@@ -6,9 +6,9 @@ import {
   connectionSetup,
   connectorManifest,
   createConnectorServer,
-  defineConnector,
-  protocolError
+  defineConnector
 } from '../packages/connector-sdk/src/index'
+import { protocolError } from '../packages/connector-sdk/src/errors'
 import { isEntryPoint, runCli } from '../packages/connector-sdk/src/cli'
 import type { Connector } from '../packages/connector-sdk/src/types'
 import { greeted } from './helpers/connector-server'
@@ -294,9 +294,10 @@ describe('how a failure reads on the wire', () => {
       kind: 'app-offline',
       retryable: false
     })
-    const unauthorized = new UpstreamStatusError(401, 'Request failed with 401')
-    expect(protocolError(unauthorized, true).data).toEqual({ kind: 'signed-out', retryable: false })
-    expect(protocolError(unauthorized, false).data).toEqual({ kind: 'upstream', retryable: false })
+    const throughWindow = new UpstreamStatusError(401, 'Request failed with 401', true)
+    const plain = new UpstreamStatusError(401, 'Request failed with 401')
+    expect(protocolError(throughWindow).data).toEqual({ kind: 'signed-out', retryable: false })
+    expect(protocolError(plain).data).toEqual({ kind: 'upstream', retryable: false })
     const wrapped = new Error('Action post: Request failed with 503', {
       cause: new UpstreamStatusError(503, 'Request failed with 503')
     })
