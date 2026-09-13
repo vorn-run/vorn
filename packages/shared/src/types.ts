@@ -603,8 +603,13 @@ export const SDK_FILTER_KEYS = {
   connectorId: 'sdkConnectorId',
   version: 'sdkVersion',
   icon: 'sdkIcon',
-  implicit: 'implicit'
+  implicit: 'implicit',
+  /** The trigger a connection polls when its workflow fires on the generic poll event. */
+  trigger: 'sdkTrigger'
 } as const
+
+/** The connector every connection to a package built with `@vornrun/connector-sdk` belongs to. */
+export const SDK_CONNECTOR_ID = 'sdk'
 
 /** Whether the app made this connection itself for a connector that asks for nothing. */
 export function isImplicitConnection(connection: {
@@ -672,7 +677,7 @@ export interface AuthProbeReport {
   installHint?: string
 }
 
-/** The connector a connection belongs to, which for a package is not `mcp`. */
+/** The connector a connection belongs to, which for a package is not `sdk`. */
 export function connectionConnectorId(connection: {
   connectorId: string
   filters: SourceConnection['filters']
@@ -2245,6 +2250,7 @@ export interface SdkActionInput {
   label: string
   type: string
   required: boolean
+  description?: string
   /** Fixed choices, when the action declared a `select` with known values. */
   options?: Array<{ value: string; label?: string }>
   /** An options set the connector serves, resolved against a live connection. */

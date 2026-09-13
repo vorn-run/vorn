@@ -249,6 +249,7 @@ function toActionInputs(value: unknown): SdkActionInput[] {
         label: str(input.label, str(input.key)),
         type: str(input.type, 'string'),
         required: input.required === true,
+        ...(typeof input.description === 'string' && { description: input.description }),
         // A select is undrawable without its choices, or without the name of
         // the set that supplies them.
         ...(options.length > 0 && { options }),

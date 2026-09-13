@@ -22,15 +22,27 @@ import {
 import { dbListSourceConnections } from '../database'
 import { getDecryptedCreds } from './decrypted-creds'
 import { localLaunchSpec } from './catalog'
-import { installedLaunch } from './packs'
+import { installedLaunch, installedPack } from './packs'
 import { borrowedSecrets } from './auth-rung'
 import { resolveConnectorAuth } from './connector-auth'
 import { openMcpChild, type McpChild } from './mcp-child'
+import { connectSdkClient, type SdkClient, type SdkLaunch } from './sdk-client'
 import { createChildCache } from './stdio-clients'
 
-const clients = createChildCache<McpChild, { connectionId: string; grant?: SessionGrant }>(
-  'mcp-clients',
-  (config, key) => openMcpChild(config, key, 'mcp-clients')
+interface ChildMeta {
+  connectionId: string
+  grant?: SessionGrant
+}
+
+const clients = createChildCache<McpChild, ChildMeta>('mcp-clients', (config, key) =>
+  openMcpChild(config, key, 'mcp-clients')
+)
+
+/** An SDK connection's launch, with the name its messages give it. */
+type SdkSpawn = SdkLaunch & { name: string }
+
+const sdkClients = createChildCache<SdkClient, ChildMeta, SdkSpawn>('connectors', (spawn) =>
+  connectSdkClient(spawn, { label: 'connectors', key: spawn.name })
 )
 
 function tryParseJson<T>(raw: unknown, guard: (v: unknown) => v is T, fallback: T): T {
@@ -146,21 +158,39 @@ export async function getOrStartClient(conn: SourceConnection): Promise<Client> 
   return child.client
 }
 
+/** An SDK connection's child, started on first use and spoken to in Vorn's connector protocol. */
+export async function getOrStartSdkClient(conn: SourceConnection): Promise<SdkClient> {
+  return sdkClients.getOrStart(conn.id, async () => {
+    const launch = resolveLaunchSource(conn)
+    const { env, browser } = await buildSpawnConfig(conn)
+    const session = browser && mintSessionGrant(conn.id, browser)
+    const sdkId = sdkIdOf(conn)
+    return {
+      config: {
+        ...launch,
+        env: { ...env, ...session?.env },
+        name: (sdkId && installedPack(sdkId)?.name) || conn.name
+      },
+      meta: { connectionId: conn.id, ...(session && { grant: session.grant }) }
+    }
+  })
+}
+
 /** The signed-in window grant of a connection's running child, if it has one. */
 export function sessionGrantFor(connectionId: string): SessionGrant | undefined {
-  return clients.get(connectionId)?.grant
+  return clients.get(connectionId)?.grant ?? sdkClients.get(connectionId)?.grant
 }
 
 export async function stopClient(connectionId: string): Promise<void> {
-  await clients.stop(connectionId)
+  await Promise.all([clients.stop(connectionId), sdkClients.stop(connectionId)])
 }
 
 export async function stopAllClients(): Promise<void> {
-  await clients.stopAll()
+  await Promise.all([clients.stopAll(), sdkClients.stopAll()])
 }
 
 export function hasClient(connectionId: string): boolean {
-  return clients.has(connectionId)
+  return clients.has(connectionId) || sdkClients.has(connectionId)
 }
 
 /** Which connections a pack change affects, which for a package is not by `connectorId`. */
