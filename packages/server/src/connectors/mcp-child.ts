@@ -9,16 +9,11 @@ export interface McpChild extends ChildHandle {
   client: Client
 }
 
-export async function openMcpChild(
-  config: SpawnConfig,
-  key: string,
-  label: string
-): Promise<McpChild> {
+export async function openMcpChild(config: SpawnConfig, key: string): Promise<McpChild> {
   // The same sanitized base every child gets; what a caller names still wins.
   const transport = new StdioClientTransport({
     command: config.command,
     args: config.args,
-    ...(config.cwd !== undefined && { cwd: config.cwd }),
     env: { ...getSafeEnv(), ...config.env }
   })
   const client = new Client({ name: 'vorn', version: '0.1.0' }, { capabilities: {} })
@@ -39,7 +34,7 @@ export async function openMcpChild(
     exited = true
     for (const listener of listeners) listener()
   }
-  transport.onerror = (err) => log.warn(`[${label}] ${key}: ${err}`)
+  transport.onerror = (err) => log.warn(`[mcp-clients] ${key}: ${err}`)
   return {
     client,
     close: () => client.close(),

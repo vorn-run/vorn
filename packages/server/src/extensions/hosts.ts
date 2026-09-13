@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import type { InstalledConnectorPack } from '@vornrun/shared/types'
-import { installedLaunch, installedPack, listInstalledPacks } from '../connectors/packs'
-import { connectSdkClient, type SdkClient, type SdkLaunch } from '../connectors/sdk-client'
-import { createChildCache } from '../connectors/stdio-clients'
+import { installedPack, listInstalledPacks } from '../connectors/packs'
+import { packLaunchSpec } from '../connectors/mcp-clients'
+import { createSdkChildCache, type SdkClient } from '../connectors/sdk-client'
 import { constantTimeEqual } from '../token-manager'
 
 /**
@@ -24,12 +24,7 @@ export interface ExtensionHost {
   projectPath: string
 }
 
-/** An extension's launch, with the name its messages give it. */
-type HostSpawn = SdkLaunch & { name: string }
-
-const hosts = createChildCache<SdkClient, ExtensionHost, HostSpawn>('extensions', (spawn) =>
-  connectSdkClient(spawn, { label: 'extensions', key: spawn.name })
-)
+const hosts = createSdkChildCache<ExtensionHost>('extensions')
 
 /** Where the bridge answers, learned once the server knows the port it won. */
 let bridgeOrigin = ''
@@ -86,18 +81,15 @@ export async function getOrStartHost(extensionId: string, projectPath: string): 
     if (!pack || pack.kind !== 'extension') {
       throw new Error(`No extension "${extensionId}" is installed`)
     }
-    const launch = installedLaunch(extensionId)
+    const launch = packLaunchSpec(extensionId)
     if (!launch) throw new Error(`The extension "${extensionId}" has no files to run`)
     if (!bridgeOrigin) throw new Error('The extension bridge has no address yet')
 
     const token = randomBytes(32).toString('base64url')
     return {
       config: {
+        ...launch,
         name: pack.name,
-        command: launch.command,
-        args: launch.args,
-        source: 'pack',
-        ...(launch.protocol !== undefined && { protocol: launch.protocol }),
         cwd: projectPath,
         // The two names the SDK's bridge client reads, and nothing else about this machine.
         env: {

@@ -66,6 +66,8 @@ function CustomIcon({
     </svg>
   )
 }
+// Every connection to an installed package belongs to `sdk`, which draws the same plug.
+CONNECTOR_ICONS.sdk = CONNECTOR_ICONS.mcp
 
 export function ConnectorIcon({
   connectorId,

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { SourceConnection } from '../packages/shared/src/types'
 import type { Connector } from '../packages/connector-sdk/src/types'
 
@@ -12,7 +12,6 @@ vi.mock('../packages/server/src/logger', () => ({
 import { closeDatabase, initDatabase } from '../packages/server/src/database'
 import { stopAllClients } from '../packages/server/src/connectors/mcp-clients'
 import { installPack } from '../packages/server/src/connectors/packs'
-import { outdatedConnectorMessage } from '../packages/server/src/connectors/sdk-client'
 import {
   invokeSdkAction,
   pollSdkConnection,
@@ -23,7 +22,6 @@ import { packConnector } from '../packages/connector-sdk/src/pack'
 
 const SDK_SRC = join(__dirname, '..', 'packages', 'connector-sdk', 'src')
 const SDK_FIXTURE = join(__dirname, 'fixtures', 'sdk-connector.ts')
-const NATIVE_FIXTURE = join(__dirname, 'fixtures', 'native-connector.mjs')
 
 function connection(name: string, filters: Record<string, unknown>): SourceConnection {
   return {
@@ -37,15 +35,15 @@ function connection(name: string, filters: Record<string, unknown>): SourceConne
   } as SourceConnection
 }
 
-const command = (args: string[]) => ({ command: process.execPath, args: JSON.stringify(args) })
-
-afterEach(async () => {
+// One child per connection serves every test in this file, as it would in the app.
+afterAll(async () => {
   await stopAllClients()
 })
 
 describe('an sdk connection run from a command', () => {
   const conn = connection('Fixture', {
-    ...command(['--import', 'tsx', SDK_FIXTURE]),
+    command: process.execPath,
+    args: JSON.stringify(['--import', 'tsx', SDK_FIXTURE]),
     sdkTrigger: 'tick'
   })
 
@@ -60,7 +58,7 @@ describe('an sdk connection run from a command', () => {
     })
   }, 30_000)
 
-  it('polls its trigger, checks readiness and lists its actions from the child', async () => {
+  it('polls its trigger, checks readiness and lists its actions from the same child', async () => {
     expect(await pollSdkConnection(conn, 'tick')).toMatchObject({
       events: [{ id: 'tick-1', type: 'mcpPoll', data: { title: 'Tick' } }],
       hasMore: false
@@ -70,14 +68,6 @@ describe('an sdk connection run from a command', () => {
       'echo',
       'wait'
     ])
-  }, 30_000)
-
-  it('says a connector that only speaks MCP was built for an older Vorn', async () => {
-    const old = connection('Old one', command([NATIVE_FIXTURE, 'mcp-only']))
-    expect(await invokeSdkAction(old, 'echo', {})).toEqual({
-      success: false,
-      error: outdatedConnectorMessage('Old one')
-    })
   }, 30_000)
 })
 

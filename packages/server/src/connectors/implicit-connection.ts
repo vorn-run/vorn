@@ -3,6 +3,7 @@ import {
   SDK_FILTER_KEYS,
   connectionConnectorId,
   isImplicitConnection,
+  sdkConnectionFilters,
   type InstalledConnectorPack,
   type SourceConnection
 } from '@vornrun/shared/types'
@@ -43,12 +44,7 @@ export function syncImplicitConnection(
   return deps.create({
     connectorId: SDK_CONNECTOR_ID,
     name: pack.name,
-    filters: {
-      [SDK_FILTER_KEYS.connectorId]: pack.id,
-      [SDK_FILTER_KEYS.version]: pack.version,
-      ...(pack.icon && { [SDK_FILTER_KEYS.icon]: JSON.stringify(pack.icon) }),
-      [SDK_FILTER_KEYS.implicit]: true
-    },
+    filters: { ...sdkConnectionFilters(pack), [SDK_FILTER_KEYS.implicit]: true },
     // Nothing polls a connector that only serves actions.
     syncIntervalMinutes: 0,
     statusMapping: {}

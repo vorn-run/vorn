@@ -15,8 +15,11 @@ vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
 
-vi.mock('../packages/server/src/connectors/sdk-client', () => ({
-  connectSdkClient: async (launch: Started['launch'], options: { key: string }) => {
+vi.mock('../packages/server/src/connectors/sdk-client', async () => {
+  const { createChildCache } = await vi.importActual<
+    typeof import('../packages/server/src/connectors/stdio-clients')
+  >('../packages/server/src/connectors/stdio-clients')
+  const connectSdkClient = async (launch: Started['launch'], options: { key: string }) => {
     const listeners: Array<() => void> = []
     const child: Started = {
       launch,
@@ -32,7 +35,14 @@ vi.mock('../packages/server/src/connectors/sdk-client', () => ({
       onExit: (listener: () => void) => listeners.push(listener)
     }
   }
-}))
+  return {
+    connectSdkClient,
+    createSdkChildCache: (label: string) =>
+      createChildCache(label, (spawn: Started['launch']) =>
+        connectSdkClient(spawn, { key: spawn.name })
+      )
+  }
+})
 
 const packs: InstalledConnectorPack[] = []
 

@@ -26,11 +26,10 @@ import {
   type ChildExit,
   type NativeClient
 } from './native-client'
+import { createChildCache, type ChildCache } from './stdio-clients'
 
-/** One connector child. */
+/** One connector child; `hello.protocol` is the protocol it agreed to. */
 export interface SdkClient {
-  /** The protocol agreed in `vorn/hello`. */
-  readonly protocol: number
   readonly hello: VornHelloResult
   readonly exited: boolean
   manifest(): Promise<Record<string, unknown>>
@@ -94,6 +93,9 @@ export interface SdkLaunch extends LaunchSpec {
   cwd?: string
 }
 
+/** A launch with the name its messages give it. */
+export type SdkSpawn = SdkLaunch & { name: string }
+
 export interface ConnectSdkOptions {
   label: string
   key: string
@@ -101,7 +103,8 @@ export interface ConnectSdkOptions {
   timeouts?: Partial<SdkTimeouts>
 }
 
-const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+export const messageOf = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err)
 
 function needsNewerVorn(key: string, protocol?: number): SdkDetectionError {
   const spoken =
@@ -154,17 +157,24 @@ export async function connectSdkClient(
   return new NativeSdkClient(native, hello as VornHelloResult, timeouts, options.key)
 }
 
+/** Children spoken to in the connector protocol, one per key, each named by its spawn. */
+export function createSdkChildCache<Meta>(label: string): ChildCache<SdkClient, Meta, SdkSpawn> {
+  return createChildCache<SdkClient, Meta, SdkSpawn>(label, (spawn) =>
+    connectSdkClient(spawn, { label, key: spawn.name })
+  )
+}
+
 class NativeSdkClient implements SdkClient {
-  readonly protocol: number
   readonly hello: VornHelloResult
   private readonly client: NativeClient
   private readonly timeouts: SdkTimeouts
   private readonly key: string
+  // Asked once per child: a manifest does not change while its files are running.
+  private manifestRead: Promise<Record<string, unknown>> | undefined
 
   constructor(client: NativeClient, hello: VornHelloResult, timeouts: SdkTimeouts, key: string) {
     this.client = client
     this.hello = hello
-    this.protocol = hello.protocol
     this.timeouts = timeouts
     this.key = key
   }
@@ -196,13 +206,17 @@ class NativeSdkClient implements SdkClient {
   }
 
   manifest(): Promise<Record<string, unknown>> {
-    return this.call(
+    this.manifestRead ??= this.call(
       PROTOCOL_METHODS.manifest,
       {},
       this.timeouts.manifest,
       (r) => typeof r.id === 'string',
       'a manifest'
-    )
+    ).catch((err: unknown) => {
+      this.manifestRead = undefined
+      throw err
+    })
+    return this.manifestRead
   }
 
   async preflight(): Promise<ConnectorPreflightResult> {

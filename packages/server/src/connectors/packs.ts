@@ -638,12 +638,13 @@ export function listInstalledPacks(options: PackOptions = {}): InstalledConnecto
 export function installedLaunch(
   id: string,
   options: PackOptions = {}
-): { command: string; args: string[]; protocol?: number } | undefined {
+): { command: string; args: string[]; protocol?: number; name: string } | undefined {
   const pack = describePack(id, options)
   if (!pack) return undefined
   return {
     command: 'node',
     args: [join(pack.path, ENTRY_FILE)],
+    name: pack.name,
     ...(pack.protocol !== undefined && { protocol: pack.protocol })
   }
 }

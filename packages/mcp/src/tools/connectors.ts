@@ -27,7 +27,11 @@ import type {
   SourceConnection
 } from '@vornrun/shared/types'
 import { rpcCall } from '@vornrun/server/rpc-client'
-import { SDK_CONNECTOR_ID, SDK_FILTER_KEYS, connectionConnectorId } from '@vornrun/shared/types'
+import {
+  SDK_CONNECTOR_ID,
+  connectionConnectorId,
+  sdkConnectionFilters
+} from '@vornrun/shared/types'
 
 /**
  * Starting a connector package downloads it first, so the probe is allowed
@@ -40,6 +44,7 @@ interface ConnectorListEntry {
   id: string
   name: string
   capabilities: string[]
+  addable?: boolean
   manifest: ConnectorManifest
 }
 
@@ -113,9 +118,8 @@ export function registerConnectorTools(server: McpServer): void {
       const packFor = (id: string) => packs.find((pack) => pack.id === id)
 
       const entries = [
-        // `sdk` is how installed packages run, never something to add by hand.
         ...builtIns
-          .filter((c) => c.id !== SDK_CONNECTOR_ID)
+          .filter((c) => c.addable !== false)
           .map((c) => ({
             id: c.id,
             name: c.name,
@@ -221,10 +225,13 @@ export function registerConnectorTools(server: McpServer): void {
       'run_connector_action or before adding a callConnectorAction node to a workflow.',
     { connection_id: V.id.describe('Connection ID') },
     async (args) => {
-      const actions = await rpcCall<ConnectorActionDef[]>(
-        'connection:listActions',
-        args.connection_id
-      )
+      let actions: ConnectorActionDef[]
+      try {
+        actions = await rpcCall<ConnectorActionDef[]>('connection:listActions', args.connection_id)
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        return failure(`Could not list actions for connection "${args.connection_id}": ${reason}`)
+      }
       if (actions.length === 0) {
         return failure(
           `No actions for connection "${args.connection_id}". Either the connection does not ` +
@@ -409,10 +416,7 @@ export function registerConnectorTools(server: McpServer): void {
           command: launch.command,
           args: JSON.stringify(launch.args),
           env: JSON.stringify(supplied),
-          [SDK_FILTER_KEYS.connectorId]: manifest.id,
-          [SDK_FILTER_KEYS.version]: manifest.version,
-          ...(manifest.icon && { [SDK_FILTER_KEYS.icon]: JSON.stringify(manifest.icon) }),
-          ...(trigger && { [SDK_FILTER_KEYS.trigger]: trigger.type })
+          ...sdkConnectionFilters(manifest, trigger?.type)
         },
         syncIntervalMinutes: args.sync_interval_minutes ?? 5,
         statusMapping: {},

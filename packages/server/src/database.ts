@@ -1110,8 +1110,7 @@ function migrateSchema(d: Database.Database): void {
   }
 
   if (version < 21) {
-    // A package's connections move from `mcp` to `sdk`, keeping their ids so sign-ins, secrets and cursors survive.
-    // A catalog MCP server also records `sdkConnectorId` but never `sdkVersion`, so it stays `mcp`.
+    // A package's connections move to `sdk` under the same ids; a catalog MCP server never records `sdkVersion`, so it stays.
     const packaged = `connector_id = 'mcp'
        AND coalesce(json_extract(filters, '$.sdkConnectorId'), '') <> ''
        AND coalesce(json_extract(filters, '$.sdkVersion'), '') <> ''`

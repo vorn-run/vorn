@@ -533,6 +533,8 @@ export interface VornConnector {
   readonly name: string
   readonly icon: string
   readonly capabilities: ('tasks' | 'triggers' | 'actions')[]
+  /** False for a connector whose connections come from somewhere else, such as installing a package. */
+  readonly addable?: boolean
 
   listItems?(filters: Record<string, unknown>): Promise<ExternalItem[]>
   /** Bounded reconciliation page. Connectors that implement this let manual
@@ -541,6 +543,21 @@ export interface VornConnector {
   getItem?(externalId: string, filters: Record<string, unknown>): Promise<ExternalItem | null>
   poll?(triggerType: string, config: Record<string, unknown>, cursor?: string): Promise<PollResult>
   execute?(actionType: string, args: Record<string, unknown>): Promise<ActionResult>
+
+  // A connector that runs a child per connection is handed the connection itself.
+  runAction?(
+    conn: SourceConnection,
+    action: string,
+    args: Record<string, unknown>
+  ): Promise<ActionResult>
+  actionsFor?(conn: SourceConnection): ConnectorActionDef[] | Promise<ConnectorActionDef[]>
+  /** A pager for the connection's trigger, or why it has nothing to poll. */
+  pollConnection?(
+    conn: SourceConnection,
+    event: string
+  ): ((cursor?: string) => Promise<PollResult>) | string
+  backfill?(conn: SourceConnection, visit: (item: ExternalItem) => void): Promise<void>
+  preflight?(conn: SourceConnection): Promise<{ ok: boolean | null; message?: string }>
 
   describe(): ConnectorManifest
 }
@@ -580,24 +597,14 @@ export interface ConnectorKeyField {
 export interface ConnectorKey {
   connectionId: string
   name: string
-  /** The real connector id, unwrapped from the `mcp` a package is stored as. */
+  /** The real connector id, unwrapped from the `sdk` a package's connection belongs to. */
   connectorId: string
   fields: ConnectorKeyField[]
   /** Workflow steps that run against this connection. */
   usageCount: number
 }
 
-/**
- * Where a packaged connector records itself on the connection that runs it.
- *
- * A connector installed from a package is stored as an `mcp` connection, so
- * `connectorId` is `mcp` for every one of them and its real identity, version
- * and icon have to travel in `filters` instead. Both the desktop app and the
- * MCP server create these connections, so the key names live here rather than
- * being spelled out at each site — a disagreement between a writer and a
- * reader is invisible until a connection shows the wrong icon or is counted
- * against the wrong connector.
- */
+/** Where a packaged connector records itself on its `sdk` connection; every writer and reader shares these names. */
 export const SDK_FILTER_KEYS = {
   connectorId: 'sdkConnectorId',
   version: 'sdkVersion',
@@ -609,6 +616,49 @@ export const SDK_FILTER_KEYS = {
 
 /** The connector every connection to a package built with `@vornrun/connector-sdk` belongs to. */
 export const SDK_CONNECTOR_ID = 'sdk'
+
+/** The event a package connection's poll fires on; the connection names the trigger it polls. */
+export const CONNECTOR_POLL_EVENT = 'mcpPoll'
+
+/** The filters that tie a connection to the package it runs, and to the trigger it polls. */
+export function sdkConnectionFilters(
+  manifest: { id: string; version: string; icon?: unknown },
+  trigger?: string
+): Record<string, unknown> {
+  return {
+    [SDK_FILTER_KEYS.connectorId]: manifest.id,
+    [SDK_FILTER_KEYS.version]: manifest.version,
+    ...(manifest.icon ? { [SDK_FILTER_KEYS.icon]: JSON.stringify(manifest.icon) } : {}),
+    ...(trigger ? { [SDK_FILTER_KEYS.trigger]: trigger } : {})
+  }
+}
+
+/** An action argument as a step form draws it: a select only with choices, JSON in a textarea, the rest as text. */
+export function actionInputField(input: {
+  key: string
+  label: string
+  type: string
+  required: boolean
+  description?: string
+  options?: Array<{ value: string; label?: string }>
+}): ConnectorConfigField {
+  const base = {
+    key: input.key,
+    label: input.label,
+    required: input.required,
+    supportsTemplates: true,
+    ...(input.description ? { description: input.description } : {})
+  }
+  if (input.type === 'select' && input.options && input.options.length > 0) {
+    const options = input.options.map((option) => ({
+      value: option.value,
+      label: option.label ?? option.value
+    }))
+    return { ...base, type: 'select', options }
+  }
+  if (input.type === 'json') return { ...base, type: 'textarea', placeholder: '{} or []' }
+  return { ...base, type: 'text' }
+}
 
 /** Whether the app made this connection itself for a connector that asks for nothing. */
 export function isImplicitConnection(connection: {

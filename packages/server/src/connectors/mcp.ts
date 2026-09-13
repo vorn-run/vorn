@@ -14,28 +14,27 @@
  * token.
  * The decrypted values are merged in at spawn time via `getOrStartClient`.
  */
-import type {
-  VornConnector,
-  ConnectorManifest,
-  ConnectorActionDef,
-  ConnectorConfigField,
-  ActionResult,
-  PollResult,
-  TriggerEvent,
-  ExternalItem,
-  SourceConnection
+import {
+  CONNECTOR_POLL_EVENT,
+  type VornConnector,
+  type ConnectorManifest,
+  type ConnectorActionDef,
+  type ConnectorConfigField,
+  type ActionResult,
+  type PollResult,
+  type TriggerEvent,
+  type ExternalItem,
+  type SourceConnection
 } from '@vornrun/shared/types'
 import { schemaProperties, schemaTypeHint, schemaRequired } from '@vornrun/shared/json-schema-utils'
-import { getOrStartClient } from './mcp-clients'
+import { getOrStartClient, launchAuthFields } from './mcp-clients'
 
 /** Stable id for the generic MCP connector. Used everywhere the server
  *  needs to distinguish MCP from static connectors. */
 export const MCP_CONNECTOR_ID = 'mcp'
 
-/** The single trigger type the MCP connector exposes. Its behavior is driven
- *  entirely by the connection's poll config (pollTool/itemsPath/…), so one
- *  static event covers every MCP server rather than a per-server manifest. */
-export const MCP_POLL_EVENT = 'mcpPoll'
+/** The single trigger type the MCP connector exposes; the connection's poll config drives it. */
+export const MCP_POLL_EVENT = CONNECTOR_POLL_EVENT
 
 export interface McpDiscoveredTool {
   name: string
@@ -160,8 +159,7 @@ export async function discoverTools(conn: SourceConnection): Promise<McpDiscover
   })
 }
 
-/** Return the actions a given MCP connection exposes, in the same shape as
- *  any other connector's static manifest. Empty until discovery completes. */
+/** The actions an MCP connection exposes, in every connector's shape; empty until discovery completes. */
 export function mcpConnectionActions(conn: SourceConnection): ConnectorActionDef[] {
   return visibleMcpTools(conn).map(mcpToolToConnectorAction)
 }
@@ -289,12 +287,6 @@ function fieldString(item: Record<string, unknown>, field: string | undefined): 
 /**
  * Poll an MCP connection: invoke its configured `pollTool`, pull the array at
  * `itemsPath` out of the result, and emit one `TriggerEvent` per new item.
- *
- * Kept as a standalone function (not `mcpConnector.poll`) because — like
- * `invokeMcpTool` — it needs the full `SourceConnection` to spawn/address the
- * per-connection stdio client, which the generic `poll(config)` signature (a
- * flattened filters object) can't provide. The scheduler special-cases MCP to
- * call this directly.
  *
  * Cursor semantics come in two flavours. When `cursorArg` is configured the
  * tool owns dedup: the stored cursor is passed through as that argument, every
@@ -533,39 +525,30 @@ export const mcpConnector: VornConnector = {
   // pollMcpConnection and backfillMcpConnection).
   capabilities: ['actions', 'triggers', 'tasks'],
 
+  runAction: invokeMcpTool,
+  actionsFor: mcpConnectionActions,
+  pollConnection(conn, event) {
+    if (event !== MCP_POLL_EVENT) return `got unexpected event "${event}"`
+    return (cursor) => pollMcpConnection(conn, cursor)
+  },
+  backfill: backfillMcpConnection,
+
   describe(): ConnectorManifest {
     return {
       auth: [
-        {
-          key: 'command',
-          label: 'Command',
-          type: 'text',
-          required: true,
-          placeholder: 'npx',
-          description: 'Executable to run the MCP server (npx, node, uv, python, …).'
-        },
-        {
-          key: 'args',
-          label: 'Arguments (JSON array)',
-          type: 'textarea',
-          required: true,
-          placeholder: '["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]',
-          description: 'JSON array of args passed to the command.'
-        },
-        {
-          key: 'env',
-          label: 'Environment (JSON object)',
-          type: 'textarea',
-          placeholder: '{"MCP_LOG_LEVEL": "info"}',
-          description: 'Non-secret env vars. JSON object of string values.'
-        },
-        {
-          key: 'secretEnv',
-          label: 'Secret env (JSON object)',
-          type: 'password',
-          placeholder: '{"AZURE_DEVOPS_EXT_PAT": "<token>"}',
-          description: 'Secret env vars encrypted via OS keychain. JSON object of string values.'
-        },
+        ...launchAuthFields({
+          command: {
+            required: true,
+            placeholder: 'npx',
+            description: 'Executable to run the MCP server (npx, node, uv, python, …).'
+          },
+          args: {
+            required: true,
+            placeholder: '["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]'
+          },
+          env: { placeholder: '{"MCP_LOG_LEVEL": "info"}' },
+          secretEnv: { placeholder: '{"AZURE_DEVOPS_EXT_PAT": "<token>"}' }
+        }),
         // --- Poll trigger (optional) ---
         // Setting `pollTool` turns this connection into a trigger source: a
         // `connectorPoll` trigger with event `mcpPoll` runs the tool on a cron
@@ -659,17 +642,6 @@ export const mcpConnector: VornConnector = {
       // Actions are per-connection (discovered via tools/list). The static
       // list stays empty; callers query `connection:listActions` instead.
       actions: []
-    }
-  },
-
-  /** VornConnector.execute is the generic entry point. The MCP execute path
-   *  is routed through `invokeMcpTool` at the IPC layer because it needs the
-   *  full SourceConnection to spawn/address the per-connection stdio client.
-   *  This stub exists only so capabilities include 'actions'. */
-  async execute(actionType: string): Promise<ActionResult> {
-    return {
-      success: false,
-      error: `MCP actions must be invoked via connection:executeAction (tried ${actionType}).`
     }
   }
 }

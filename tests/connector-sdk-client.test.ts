@@ -96,7 +96,7 @@ describe('deciding how to talk to a connector', () => {
 describe('an installed pack', () => {
   it('that names protocol 1 is spoken to natively', async () => {
     const client = await connect(native('normal', 'pack', 1))
-    expect(client.protocol).toBe(1)
+    expect(client.hello.protocol).toBe(1)
     expect(client.hello.connector.id).toBe('native-fixture')
     expect(client.exited).toBe(false)
     expect(await client.manifest()).toMatchObject({ id: 'native-fixture', protocol: 1 })
@@ -139,7 +139,7 @@ describe('an installed pack', () => {
 describe('a checkout or a stored command', () => {
   it('is spoken to natively when it answers the hello', async () => {
     const client = await connect(native('normal'))
-    expect(client.protocol).toBe(1)
+    expect(client.hello.protocol).toBe(1)
     expect(await client.preflight()).toEqual({ ok: true, message: 'ready' })
     expect(await client.options({ name: 'any' })).toEqual({ options: [{ value: 'a', label: 'A' }] })
     expect(await client.poll({ trigger: 'tick', cursor: 'c1' })).toMatchObject({
@@ -216,7 +216,7 @@ describe('a checkout or a stored command', () => {
 describe('a connector built with the SDK', () => {
   it('is spoken to natively from a checkout, with typed values both ways', async () => {
     const client = await connect(sdk(), { key: 'sdk-fixture' })
-    expect(client.protocol).toBe(1)
+    expect(client.hello.protocol).toBe(1)
     expect(client.hello).toMatchObject({
       sdk: { name: '@vornrun/connector-sdk' },
       connector: { id: 'sdk-fixture', version: '1.0.0', kind: 'connector' }

@@ -147,17 +147,7 @@ function sourceOf(
   return 'manual'
 }
 
-/**
- * GitHub numbers issues and pull requests in one sequence, and the connector
- * flattens both into the same item shape — the item URL is the only thing that
- * survives the poll to tell them apart (`/pull/<n>` vs `/issues/<n>`).
- *
- * Keyed on that URL and not on the connector id, because a packaged connector
- * does not have its own id here: those connections are stored as `sdk` with
- * the real id in `filters.sdkConnectorId`, so an `id === 'github'` test would
- * quietly stop matching the day GitHub ships as a package and every run would
- * read `sdk 123`.
- */
+/** GitHub issues and pull requests share one number sequence, so the item URL (`/pull/` or `/issues/`) tells them apart. */
 function connectorTitle(execution: WorkflowExecution, connectorId: string): string | undefined {
   const item = execution.connectorItem
   if (!item) return undefined

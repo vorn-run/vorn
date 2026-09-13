@@ -5,6 +5,7 @@ import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
 import { BusyIcon } from './BusyIcon'
 import {
   borrowableFromManifest,
+  sdkConnectionFilters,
   type AuthProbeReport,
   type ConnectorCatalogItem,
   type InstalledConnectorPack,
@@ -15,7 +16,7 @@ import {
 import { useAppStore } from '../../stores'
 import { parseLaunchSpec } from './parse-launch-spec'
 import { ConnectorIcon } from '../ConnectorIcon'
-import { SDK_CONNECTOR_ID, SDK_FILTER_KEYS } from '../../lib/connection-icon'
+import { SDK_CONNECTOR_ID } from '../../lib/connection-icon'
 import { packLaunch } from '../../lib/pack-status'
 
 const INPUT_CLASS =
@@ -165,14 +166,8 @@ export function SdkConnectorForm({
         command: launch.command,
         args: JSON.stringify(launch.args),
         env: JSON.stringify(plain),
-        // Recorded so the connection can be re-probed later without the user
-        // retyping what they installed.
-        [SDK_FILTER_KEYS.connectorId]: manifest.id,
-        [SDK_FILTER_KEYS.version]: manifest.version,
-        // Carried on the connection: every package's connection belongs to `sdk`, so no connector id keys its glyph.
-        ...(manifest.icon && { [SDK_FILTER_KEYS.icon]: JSON.stringify(manifest.icon) }),
-        // The trigger this connection polls when its workflow fires.
-        ...(trigger && { [SDK_FILTER_KEYS.trigger]: trigger.type })
+        // What it installed, the glyph it draws and the trigger it polls, so nobody retypes them.
+        ...sdkConnectionFilters(manifest, trigger?.type)
       }
 
       if (Object.keys(secret).length > 0) {
@@ -248,7 +243,7 @@ export function SdkConnectorForm({
             <div className="flex items-center gap-1.5 text-sm text-gray-200">
               {manifest.icon ? (
                 <ConnectorIcon
-                  connectorId="mcp"
+                  connectorId={SDK_CONNECTOR_ID}
                   icon={manifest.icon}
                   size={13}
                   className="text-gray-200 shrink-0"

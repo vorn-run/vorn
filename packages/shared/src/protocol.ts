@@ -866,6 +866,8 @@ export interface RequestMethods {
       name: string
       icon: string
       capabilities: string[]
+      /** False for a connector whose connections come from somewhere else. */
+      addable?: boolean
       manifest: ConnectorManifest
     }>
   }

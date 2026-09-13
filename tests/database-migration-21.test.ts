@@ -9,18 +9,12 @@ vi.mock('../packages/server/src/logger', () => ({
 }))
 
 import { initDatabase, closeDatabase } from '../packages/server/src/database'
+import { queryDb } from './helpers/database'
 
 let dataDir: string
 let dbFile: string
 
-function query<T>(fn: (d: Database.Database) => T): T {
-  const d = new Database(dbFile)
-  try {
-    return fn(d)
-  } finally {
-    d.close()
-  }
-}
+const query = <T>(fn: (d: Database.Database) => T): T => queryDb(dbFile, fn)
 
 const POLL_FILTERS = {
   itemsPath: 'items',

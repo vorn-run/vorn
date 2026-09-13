@@ -15,7 +15,7 @@ import type {
   SourceConnection
 } from '../../shared/types'
 import { isImplicitConnection } from '../../shared/types'
-import { SDK_CONNECTOR_ID, connectionConnectorId, connectionIcon } from './connection-icon'
+import { connectionConnectorId, connectionIcon } from './connection-icon'
 import { EXTENSION_PERMISSION } from './extension-copy'
 
 /**
@@ -92,6 +92,8 @@ export interface BuiltInConnector {
   id: string
   name: string
   capabilities: string[]
+  /** False for a connector whose connections come from somewhere else. */
+  addable?: boolean
   manifest?: {
     triggers?: Array<{ type: string; label: string; description?: string }>
     actions?: Array<{ type: string; label: string; description?: string }>
@@ -235,9 +237,8 @@ export function buildConnectorListings(
   const packFor = (id: string) => packs.find((pack) => pack.id === id)
 
   const listings: ConnectorListing[] = [
-    // `sdk` is how installed packages run, never something to add by hand.
     ...builtIns
-      .filter((c) => c.id !== SDK_CONNECTOR_ID)
+      .filter((c) => c.addable !== false)
       .map((c) => ({
         key: c.id,
         id: c.id,

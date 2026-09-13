@@ -24,12 +24,25 @@ import {
   dbRenewConnectorInboxLease,
   dbRetryConnectorInbox
 } from './database'
+import type { PollResult, SourceConnection } from '@vornrun/shared/types'
 import { connectorRegistry, applyDecryptedCreds } from './connectors'
-import { MCP_CONNECTOR_ID, MCP_POLL_EVENT, pollMcpConnection } from './connectors/mcp'
-import { SDK_CONNECTOR_ID, pollSdkConnection, sdkTriggerOf } from './connectors/sdk'
 import log from './logger'
 import { runConnectorItem, runScheduled } from './workflows/dispatch'
 import { stopWorkflowRun } from './workflows/engine'
+
+/** How a connection is polled page by page, or why it cannot be. */
+function connectionPager(
+  conn: SourceConnection,
+  event: string
+): ((cursor?: string) => Promise<PollResult>) | string {
+  const connector = connectorRegistry.get(conn.connectorId)
+  if (connector?.pollConnection) return connector.pollConnection(conn, event)
+  if (connector?.poll) {
+    const found = connector
+    return (cursor) => found.poll!(event, applyDecryptedCreds(conn), cursor)
+  }
+  return 'has no poll()'
+}
 
 const LOCK_DIR = path.join(os.homedir(), '.vorn')
 const INBOX_LEASE_MS = 5 * 60_000
@@ -333,30 +346,9 @@ class Scheduler extends EventEmitter {
       log.warn(`[scheduler] connectorPoll: connection ${trigger.connectionId} not found — skipping`)
       return
     }
-    const connector = connectorRegistry.get(conn.connectorId)
-    // MCP and SDK connections poll through their own child, which needs the whole connection rather than flattened filters.
-    const isMcp = conn.connectorId === MCP_CONNECTOR_ID
-    const isSdk = conn.connectorId === SDK_CONNECTOR_ID
-    if (!isMcp && !isSdk && !connector?.poll) {
-      log.warn(`[scheduler] connectorPoll: connector ${conn.connectorId} has no poll() — skipping`)
-      return
-    }
-    // MCP defines exactly one event; reject a misconfigured trigger rather than
-    // fan out on an event the connector never emits.
-    if (isMcp && trigger.event !== MCP_POLL_EVENT) {
-      log.warn(
-        `[scheduler] connectorPoll: MCP connection ${conn.id} got unexpected event "${trigger.event}" — skipping`
-      )
-      return
-    }
-    // A seeded workflow fires on the generic event and polls the connection's trigger; a template names the trigger itself.
-    const sdkTrigger = !isSdk
-      ? ''
-      : trigger.event === MCP_POLL_EVENT
-        ? sdkTriggerOf(conn)
-        : trigger.event
-    if (isSdk && !sdkTrigger) {
-      log.warn(`[scheduler] connectorPoll: connection ${conn.id} has no trigger to poll — skipping`)
+    const pager = connectionPager(conn, trigger.event)
+    if (typeof pager === 'string') {
+      log.warn(`[scheduler] connectorPoll: connection ${conn.id} ${pager} — skipping`)
       return
     }
 
@@ -364,11 +356,7 @@ class Scheduler extends EventEmitter {
     const now = new Date().toISOString()
     try {
       for (let page = 0; page < MAX_POLL_PAGES_PER_TICK; page++) {
-        const result = isMcp
-          ? await pollMcpConnection(conn, cursor)
-          : isSdk
-            ? await pollSdkConnection(conn, sdkTrigger, cursor)
-            : await connector!.poll!(trigger.event, applyDecryptedCreds(conn), cursor)
+        const result = await pager(cursor)
         const nextCursor = result.nextCursor ?? cursor
         if (result.hasMore && nextCursor === cursor) {
           throw new Error(

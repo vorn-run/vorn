@@ -388,6 +388,7 @@ describe('installPack', () => {
     expect(installedLaunch('acme', { root })).toEqual({
       command: 'node',
       args: [join(root, 'acme', '1.2.0', 'index.js')],
+      name: 'Acme',
       protocol: 1
     })
     expect(listInstalledPacks({ root }).map((pack) => pack.id)).toEqual(['acme'])
@@ -734,6 +735,7 @@ describe('the protocol an installed pack speaks', () => {
     expect(installedLaunch('acme', { root })).toEqual({
       command: 'node',
       args: [join(root, 'acme', '1.2.0', 'index.js')],
+      name: 'Acme',
       protocol: 1
     })
   })

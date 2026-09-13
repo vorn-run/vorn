@@ -147,9 +147,7 @@ import {
   setDecryptedCreds,
   clearDecryptedCreds,
   applyDecryptedCreds,
-  invokeMcpTool,
   discoverTools,
-  mcpConnectionActions,
   visibleMcpTools,
   stopMcpClient,
   stopClientsForConnector,
@@ -160,15 +158,9 @@ import {
   rollbackPack,
   listInstalledPacks
 } from './connectors'
-import { MCP_CONNECTOR_ID, MCP_POLL_EVENT, backfillMcpConnection } from './connectors/mcp'
+import { MCP_CONNECTOR_ID } from './connectors/mcp'
 import { sdkIdOf } from './connectors/mcp-clients'
-import {
-  SDK_CONNECTOR_ID,
-  backfillSdkConnection,
-  invokeSdkAction,
-  preflightSdkConnection,
-  sdkConnectionActions
-} from './connectors/sdk'
+import { CONNECTOR_POLL_EVENT, SDK_CONNECTOR_ID } from '@vornrun/shared/types'
 import {
   httpConnector,
   httpProfileError,
@@ -310,7 +302,7 @@ function createConnectionRecord(
       ? [
           {
             name: params.seedWorkflow.name,
-            event: MCP_POLL_EVENT,
+            event: CONNECTOR_POLL_EVENT,
             defaultCronFromMinutes: params.seedWorkflow.defaultCronFromMinutes,
             downstream: 'createTaskFromItem' as const
           }
@@ -1660,6 +1652,7 @@ export function registerAllMethods(): void {
       name: c.name,
       icon: c.icon,
       capabilities: [...c.capabilities],
+      ...(c.addable === false && { addable: false }),
       manifest: c.describe()
     }))
   })
@@ -1827,16 +1820,8 @@ export function registerAllMethods(): void {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn) return { success: false, error: `Connection ${connectionId} not found` }
 
-    // MCP and SDK connections run through their own child, which needs the
-    // SourceConnection itself, not just the merged args the generic path provides.
-    if (conn.connectorId === MCP_CONNECTOR_ID) {
-      return invokeMcpTool(conn, action, args ?? {})
-    }
-    if (conn.connectorId === SDK_CONNECTOR_ID) {
-      return invokeSdkAction(conn, action, args ?? {})
-    }
-
     const connector = connectorRegistry.get(conn.connectorId)
+    if (connector?.runAction) return connector.runAction(conn, action, args ?? {})
     if (!connector?.execute) {
       return {
         success: false,
@@ -1870,16 +1855,10 @@ export function registerAllMethods(): void {
   registerMethod('connection:listActions', async (connectionId: string) => {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn) return []
-    if (conn.connectorId === MCP_CONNECTOR_ID) return mcpConnectionActions(conn)
-    if (conn.connectorId === SDK_CONNECTOR_ID) {
-      // A checkout or command is asked by starting it; one that will not start offers nothing yet.
-      return sdkConnectionActions(conn).catch((err) => {
-        log.warn(`[connectors] could not list actions for ${conn.id}: ${err}`)
-        return []
-      })
-    }
     const connector = connectorRegistry.get(conn.connectorId)
-    return connector?.describe().actions ?? []
+    return connector?.actionsFor
+      ? connector.actionsFor(conn)
+      : (connector?.describe().actions ?? [])
   })
 
   registerMethod('connection:listMcpTools', (connectionId: string) => {
@@ -1917,11 +1896,11 @@ export function registerAllMethods(): void {
       if (!result.success) return { ok: false, message: result.error }
       return { ok: (status ?? 500) < 400, message: `HTTP ${status}` }
     }
-    // A built-in connector genuinely declares no preflight, so this really is
-    // "nothing to check".
-    if (conn.connectorId !== SDK_CONNECTOR_ID) return { ok: null }
+    const connector = connectorRegistry.get(conn.connectorId)
+    // A connector without a preflight genuinely has nothing to check.
+    if (!connector?.preflight) return { ok: null }
     try {
-      return await preflightSdkConnection(conn)
+      return await connector.preflight(conn)
     } catch (err) {
       // Starting the connector at all is itself part of what preflight
       // answers: a package that will not launch is exactly the state the
@@ -2026,11 +2005,8 @@ export function registerAllMethods(): void {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn) return { imported: 0, updated: 0, error: 'Connection not found' }
     const connector = connectorRegistry.get(conn.connectorId)
-    // MCP and SDK connections drain through their own child, which the generic
-    // listItemsPage(filters) signature cannot address.
-    const isMcp = conn.connectorId === MCP_CONNECTOR_ID
-    const isSdk = conn.connectorId === SDK_CONNECTOR_ID
-    if (!isMcp && !isSdk && !connector?.listItems && !connector?.listItemsPage) {
+    const backfill = connector?.backfill?.bind(connector)
+    if (!backfill && !connector?.listItems && !connector?.listItemsPage) {
       return {
         imported: 0,
         updated: 0,
@@ -2044,12 +2020,10 @@ export function registerAllMethods(): void {
     const projectName = conn.executionProject || conn.name
 
     try {
-      const drain = isMcp
-        ? (visit: (item: ExternalItem) => void) => backfillMcpConnection(conn, visit)
-        : isSdk
-          ? (visit: (item: ExternalItem) => void) => backfillSdkConnection(conn, visit)
-          : (visit: (item: ExternalItem) => void) =>
-              forEachConnectorItem(connector!, applyDecryptedCreds(conn), visit)
+      const drain = (visit: (item: ExternalItem) => void): Promise<void> =>
+        backfill
+          ? backfill(conn, visit)
+          : forEachConnectorItem(connector!, applyDecryptedCreds(conn), visit)
 
       await drain((item) => {
         const initialStatus = conn.statusMapping?.[item.status] || ('todo' as TaskStatus)

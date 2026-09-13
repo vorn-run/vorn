@@ -3,6 +3,8 @@ import type { SdkConnectorAuth, SourceConnection } from '../packages/shared/src/
 
 const transportInstances: unknown[] = []
 const clientConnect = vi.fn()
+const sdkSpawns: Array<{ env: Record<string, string> }> = []
+const sdkExits: Array<() => void> = []
 
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -28,6 +30,25 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
   }
 }))
 
+// An SDK child is recorded as it is spawned, and can be made to exit.
+vi.mock('../packages/server/src/connectors/sdk-client', async () => {
+  const { createChildCache } = await vi.importActual<
+    typeof import('../packages/server/src/connectors/stdio-clients')
+  >('../packages/server/src/connectors/stdio-clients')
+  return {
+    createSdkChildCache: (label: string) =>
+      createChildCache(label, async (spawn: { env: Record<string, string> }) => {
+        sdkSpawns.push(spawn)
+        return {
+          close: async () => {},
+          onExit: (listener: () => void) => {
+            sdkExits.push(listener)
+          }
+        }
+      })
+  }
+})
+
 // What a packaged connector's child is started with.
 
 const pack = {
@@ -38,7 +59,7 @@ const decrypted = { current: {} as Record<string, string> }
 function connection(filters: Record<string, unknown>): SourceConnection {
   return {
     id: 'conn-1',
-    connectorId: 'mcp',
+    connectorId: 'sdk',
     name: 'Acme',
     filters,
     syncIntervalMinutes: 0,
@@ -166,28 +187,39 @@ describe('a connector that signs in through a Vorn window', () => {
     env: []
   }
 
-  const spawnedEnv = (): Record<string, string> =>
-    (transportInstances.at(-1) as { opts: { env: Record<string, string> } }).opts.env
+  const bridgeAt = async (origin: string): Promise<void> => {
+    const { setSessionBridgeOrigin } =
+      await import('../packages/server/src/connectors/session-bridge')
+    setSessionBridgeOrigin(origin)
+  }
 
   it('is handed the address and a token for its own window, kept beside its child', async () => {
     pack.current = BROWSER_PACK
-    const { getOrStartClient, sessionGrantFor } = await load()
-    const { setSessionBridgeOrigin } =
-      await import('../packages/server/src/connectors/session-bridge')
-    setSessionBridgeOrigin('http://127.0.0.1:4100')
-    await getOrStartClient(connection({ sdkConnectorId: 'acme' }))
-    expect(spawnedEnv().VORN_BROWSER_HOST).toBe('http://127.0.0.1:4100/connections/conn-1/browser')
-    expect(spawnedEnv().VORN_BROWSER_TOKEN).toBe(sessionGrantFor('conn-1')?.token)
+    const { getOrStartSdkClient, sessionGrantFor } = await load()
+    await bridgeAt('http://127.0.0.1:4100')
+    await getOrStartSdkClient(connection({ sdkConnectorId: 'acme' }))
+    const env = sdkSpawns.at(-1)!.env
+    expect(env.VORN_BROWSER_HOST).toBe('http://127.0.0.1:4100/connections/conn-1/browser')
+    expect(env.VORN_BROWSER_TOKEN).toBe(sessionGrantFor('conn-1')?.token)
   })
 
   it('loses its token when its child exits', async () => {
     pack.current = BROWSER_PACK
+    const { getOrStartSdkClient, sessionGrantFor } = await load()
+    await bridgeAt('http://127.0.0.1:4100')
+    await getOrStartSdkClient(connection({ sdkConnectorId: 'acme' }))
+    sdkExits.at(-1)!()
+    expect(sessionGrantFor('conn-1')).toBeUndefined()
+  })
+
+  it('gives an MCP server no window, whatever a pack of the same id says', async () => {
+    pack.current = BROWSER_PACK
+    clientConnect.mockResolvedValue(undefined)
     const { getOrStartClient, sessionGrantFor } = await load()
-    const { setSessionBridgeOrigin } =
-      await import('../packages/server/src/connectors/session-bridge')
-    setSessionBridgeOrigin('http://127.0.0.1:4100')
-    await getOrStartClient(connection({ sdkConnectorId: 'acme' }))
-    ;(transportInstances.at(-1) as { onclose: () => void }).onclose()
+    await bridgeAt('http://127.0.0.1:4100')
+    await getOrStartClient({ ...connection({ sdkConnectorId: 'acme' }), connectorId: 'mcp' })
+    const env = (transportInstances.at(-1) as { opts: { env: Record<string, string> } }).opts.env
+    expect(env.VORN_BROWSER_HOST).toBeUndefined()
     expect(sessionGrantFor('conn-1')).toBeUndefined()
   })
 
