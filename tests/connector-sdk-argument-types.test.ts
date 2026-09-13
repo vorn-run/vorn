@@ -77,6 +77,17 @@ describe('the kinds of value an argument arrives as', () => {
     expect(await take(inputs, { id: 42, level: true })).toEqual({ id: '42', level: 'true' })
   })
 
+  it('reads a list or an object handed to a text field as its JSON text', async () => {
+    const inputs: ActionInputField[] = [
+      { key: 'ids', label: 'Ids' },
+      { key: 'filter', label: 'Filter' }
+    ]
+    expect(await take(inputs, { ids: [1, 2], filter: { tag: 'ai' } })).toEqual({
+      ids: '[1,2]',
+      filter: '{"tag":"ai"}'
+    })
+  })
+
   it('names the field whose value is not the type it declares', async () => {
     const inputs: ActionInputField[] = [
       { key: 'count', label: 'Count', type: 'number' },

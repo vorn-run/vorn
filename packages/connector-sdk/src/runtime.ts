@@ -222,8 +222,9 @@ function coerceArg(value: unknown, type: string | undefined): unknown {
       throw new Error(`Expected JSON, got ${shown(value)}`)
     }
   }
-  // A number or a flag handed to a text field is still that text.
-  return typeof value === 'number' || typeof value === 'boolean' ? String(value) : value
+  // Whatever a text field is handed is still text: a number or flag as written, a list or object as JSON.
+  if (typeof value === 'string') return value
+  return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 
 /** Run an action with its declared inputs validated and read as their declared types. */

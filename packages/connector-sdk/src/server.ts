@@ -1,3 +1,4 @@
+import { Console } from 'node:console'
 import { EXTENSION_AGENTS, resolveConfig } from './define'
 import { protocolError } from './errors'
 import { createExtensionHost } from './host'
@@ -275,10 +276,12 @@ export async function serveConnector(
   connector: Connector,
   options: ConnectorServerOptions = {}
 ): Promise<void> {
-  // stdout carries only replies, so whatever the connector prints goes to stderr.
   if (serving) return
   serving = true
-  console.log = console.info = console.debug = console.error
+  // stdout carries only replies, so whatever the connector prints goes to stderr.
+  const toStderr = new Console({ stdout: process.stderr, stderr: process.stderr })
+  const { log, info, debug, dir, dirxml, table } = toStderr
+  Object.assign(console, { log, info, debug, dir, dirxml, table })
   const server = createConnectorServer(connector, options)
   let inFlight = 0
   let ended = false

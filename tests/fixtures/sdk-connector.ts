@@ -51,3 +51,4 @@ void serveConnector(connector, { config: {} })
 // What a pack does: its generated entry serves, and so does the connector's own.
 if (process.argv[2] === 'twice') void serveConnector(connector, { config: {} })
 console.log('booting')
+console.dir({ booted: true })

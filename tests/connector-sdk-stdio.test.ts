@@ -80,6 +80,7 @@ describe('a connector served on stdio', () => {
       { jsonrpc: '2.0', id: 2, result: { text: 'hi', count: 3 } }
     ])
     expect(served.stderr()).toContain('booting')
+    expect(served.stderr()).toContain('booted: true')
     expect(served.stderr()).toContain('echoing hi')
   }, 30_000)
 
