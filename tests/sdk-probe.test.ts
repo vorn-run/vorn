@@ -817,3 +817,25 @@ describe('what a probed extension contributes', () => {
     expect(result.manifest.contributes).toBeUndefined()
   })
 })
+
+describe('which protocol a probed connector says it speaks', () => {
+  it('keeps a whole protocol number, including one newer than this build', async () => {
+    const { probeSdkConnector } = await importProbe()
+    for (const protocol of [1, 2]) {
+      respond(manifest({ protocol }))
+      const result = await probeSdkConnector({ command: 'npx', args: [] })
+      if (!result.ok) throw new Error(result.error)
+      expect(result.manifest.protocol).toBe(protocol)
+    }
+  })
+
+  it('leaves the protocol out when it is missing or not a whole number from one', async () => {
+    const { probeSdkConnector } = await importProbe()
+    for (const protocol of [undefined, '1', 0, 1.5, -1]) {
+      respond(manifest({ protocol }))
+      const result = await probeSdkConnector({ command: 'npx', args: [] })
+      if (!result.ok) throw new Error(result.error)
+      expect([protocol, 'protocol' in result.manifest]).toEqual([protocol, false])
+    }
+  })
+})
