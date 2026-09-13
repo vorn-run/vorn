@@ -64,11 +64,9 @@ const connector: Connector = defineConnector({
 type TextBlock = { type: string; text: string }
 type ToolCallResult = { content: TextBlock[]; isError?: boolean }
 
-async function connect(): Promise<Client> {
-  const server = createConnectorServer(connector, {
-    config: { apiToken: 'tok' },
-    now: () => NOW
-  })
+async function connect(
+  server = createConnectorServer(connector, { config: { apiToken: 'tok' }, now: () => NOW })
+): Promise<Client> {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   const client = new Client({ name: 'test', version: '1.0.0' })
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
@@ -173,9 +171,7 @@ describe('connector MCP server', () => {
       }),
       { config: {} }
     )
-    const [riskyClient, riskyServer] = InMemoryTransport.createLinkedPair()
-    const probe = new Client({ name: 'probe', version: '1.0.0' })
-    await Promise.all([risky.connect(riskyServer), probe.connect(riskyClient)])
+    const probe = await connect(risky)
     expect(
       (await probe.listTools()).tools.find((entry) => entry.name === 'createTicket')?.description
     ).toContain('Not idempotent')
@@ -188,6 +184,58 @@ describe('connector MCP server', () => {
     expect(payload(await client.callTool({ name: MANIFEST_TOOL, arguments: {} }))).toEqual(
       connectorManifest(connector)
     )
+    await client.close()
+  })
+
+  it('lets an action return lists, objects and null, and still checks declared types', async () => {
+    const shaped = createConnectorServer(
+      defineConnector({
+        id: 'shaped',
+        name: 'Shaped',
+        actions: [
+          {
+            type: 'listThings',
+            label: 'List things',
+            outputs: [
+              { key: 'items', description: 'An array of things' },
+              { key: 'owner', description: 'An object' },
+              { key: 'note', type: 'string', description: 'Text, or null when there is none' },
+              { key: 'count', type: 'number', description: 'How many' }
+            ],
+            run: () => ({
+              items: [{ id: 1 }, { id: 2 }],
+              owner: { name: 'Ada' },
+              note: null,
+              count: 2
+            })
+          },
+          {
+            type: 'miscount',
+            label: 'Miscount',
+            outputs: [{ key: 'count', type: 'number', description: 'How many' }],
+            run: () => ({ count: 'two' })
+          }
+        ]
+      }),
+      { config: {} }
+    )
+    const client = await connect(shaped)
+
+    const listed = (await client.callTool({ name: 'listThings', arguments: {} })) as ToolCallResult
+    expect(listed.isError).toBeFalsy()
+    expect(payload(listed)).toEqual({
+      items: [{ id: 1 }, { id: 2 }],
+      owner: { name: 'Ada' },
+      note: null,
+      count: 2
+    })
+
+    const miscounted = (await client.callTool({
+      name: 'miscount',
+      arguments: {}
+    })) as ToolCallResult
+    expect(miscounted.isError).toBe(true)
+    expect(miscounted.content[0].text).toContain('Output validation error')
     await client.close()
   })
 })
