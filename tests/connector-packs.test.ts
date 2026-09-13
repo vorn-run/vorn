@@ -45,15 +45,13 @@ function manifestFor(id: string, version: string, name = 'Acme'): unknown {
     id,
     name,
     version,
+    protocol: 1,
     description: 'Acme tickets',
     triggers: [
       {
         type: 'newTicket',
         label: 'New ticket',
-        setup: {
-          filters: { pollTool: 'poll_newTicket' },
-          env: [{ name: 'API_TOKEN', required: true, secret: true }]
-        }
+        setup: { env: [{ name: 'API_TOKEN', required: true, secret: true }] }
       }
     ],
     actions: [{ type: 'closeTicket', label: 'Close ticket' }]
@@ -88,6 +86,7 @@ function extensionFiles(panes: Array<Record<string, unknown>>): Record<string, s
       id: 'review',
       name: 'Review',
       version: '0.1.0',
+      protocol: 1,
       kind: 'extension',
       permissions: ['terminal.read'],
       contributes: { panes },
@@ -137,6 +136,17 @@ describe('verifyPackDir', () => {
 
   it('refuses a pack with no manifest', () => {
     expect(() => verifyPackDir(dirWith({ 'index.js': '' }))).toThrow(/no manifest.json/)
+  })
+
+  it('refuses a pack built for an older Vorn, saying how to get one that runs', () => {
+    const { protocol: _protocol, ...mcpEra } = manifestFor('acme', '1.2.0') as Record<
+      string,
+      unknown
+    >
+    const dir = dirWith({ 'manifest.json': JSON.stringify(mcpEra), 'index.js': '' })
+    expect(() => verifyPackDir(dir)).toThrow(
+      'Acme was built for an older Vorn. Update it in Settings → Connectors, or rebuild it with @vornrun/connector-sdk 0.7.1-beta.3 or later.'
+    )
   })
 
   it('refuses a manifest that is not readable as one', () => {
@@ -374,7 +384,8 @@ describe('installPack', () => {
     expect(result.pack.bytes).toBeGreaterThan(0)
     expect(installedLaunch('acme', { root })).toEqual({
       command: 'node',
-      args: [join(root, 'acme', '1.2.0', 'index.js')]
+      args: [join(root, 'acme', '1.2.0', 'index.js')],
+      protocol: 1
     })
     expect(listInstalledPacks({ root }).map((pack) => pack.id)).toEqual(['acme'])
     // Progress stays silent until the manifest names the connector.
@@ -724,15 +735,24 @@ describe('the protocol an installed pack speaks', () => {
     })
   })
 
-  it('names no protocol for a pack built before there was one', async () => {
+  it('refuses to install a pack built before there was one, and keeps nothing of it', async () => {
     const root = tempDir()
+    const { protocol: _protocol, ...mcpEra } = manifestFor('acme', '1.2.0') as Record<
+      string,
+      unknown
+    >
+    const files = {
+      'manifest.json': JSON.stringify(mcpEra),
+      'index.js': 'process.stdin.resume()\n'
+    }
 
-    await installPack({ kind: 'file', path: await buildArchive(goodFiles()) }, { root })
+    const result = await installPack({ kind: 'file', path: await buildArchive(files) }, { root })
 
-    expect(describePack('acme', { root })?.protocol).toBeUndefined()
-    expect(installedLaunch('acme', { root })).toEqual({
-      command: 'node',
-      args: [join(root, 'acme', '1.2.0', 'index.js')]
+    expect(result).toEqual({
+      ok: false,
+      error:
+        'Acme was built for an older Vorn. Update it in Settings → Connectors, or rebuild it with @vornrun/connector-sdk 0.7.1-beta.3 or later.'
     })
+    expect(describePack('acme', { root })).toBeUndefined()
   })
 })

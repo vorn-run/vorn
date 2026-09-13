@@ -28,6 +28,7 @@ const MANIFEST = {
   id: 'acme',
   name: 'Acme',
   version: '1.2.0',
+  protocol: 1,
   auth: {
     rung: 'cli',
     probe: { command: 'acme', args: ['auth', 'status'] },
@@ -37,7 +38,7 @@ const MANIFEST = {
     {
       type: 'newTicket',
       label: 'New ticket',
-      setup: { filters: { pollTool: 'poll_newTicket' }, env: [] }
+      setup: { env: [] }
     }
   ],
   actions: [

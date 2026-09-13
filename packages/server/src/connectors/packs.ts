@@ -22,6 +22,7 @@ import type {
   SdkConnectorManifest
 } from '@vornrun/shared/types'
 import { getDataDir } from '../database'
+import { outdatedConnectorMessage } from './sdk-client'
 import { toManifest } from './sdk-probe'
 import log from '../logger'
 
@@ -247,6 +248,8 @@ export function verifyPackDir(dir: string): SdkConnectorManifest {
   // Read before the allowlist rather than after it: what a pack may carry under
   // `web/` is exactly what its own manifest says it draws a pane from.
   const manifest = readManifest(dir)
+  // A pack with no protocol speaks MCP, which this build no longer runs.
+  if (manifest.protocol === undefined) throw new Error(outdatedConnectorMessage(manifest.name))
   const directories = webDirectories(manifest)
 
   // An allowlist rather than a script headcount: a `.cjs`, `.node` or `.wasm`
