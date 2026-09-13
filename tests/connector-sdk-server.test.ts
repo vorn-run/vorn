@@ -190,6 +190,60 @@ describe('connector MCP server', () => {
     )
     await client.close()
   })
+
+  it('lets an action return lists, objects and null, and still checks declared types', async () => {
+    const shaped = createConnectorServer(
+      defineConnector({
+        id: 'shaped',
+        name: 'Shaped',
+        actions: [
+          {
+            type: 'listThings',
+            label: 'List things',
+            outputs: [
+              { key: 'items', description: 'An array of things' },
+              { key: 'owner', description: 'An object' },
+              { key: 'note', type: 'string', description: 'Text, or null when there is none' },
+              { key: 'count', type: 'number', description: 'How many' }
+            ],
+            run: () => ({
+              items: [{ id: 1 }, { id: 2 }],
+              owner: { name: 'Ada' },
+              note: null,
+              count: 2
+            })
+          },
+          {
+            type: 'miscount',
+            label: 'Miscount',
+            outputs: [{ key: 'count', type: 'number', description: 'How many' }],
+            run: () => ({ count: 'two' })
+          }
+        ]
+      }),
+      { config: {} }
+    )
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test', version: '1.0.0' })
+    await Promise.all([shaped.connect(serverTransport), client.connect(clientTransport)])
+
+    const listed = (await client.callTool({ name: 'listThings', arguments: {} })) as ToolCallResult
+    expect(listed.isError).toBeFalsy()
+    expect(payload(listed)).toEqual({
+      items: [{ id: 1 }, { id: 2 }],
+      owner: { name: 'Ada' },
+      note: null,
+      count: 2
+    })
+
+    const miscounted = (await client.callTool({
+      name: 'miscount',
+      arguments: {}
+    })) as ToolCallResult
+    expect(miscounted.isError).toBe(true)
+    expect(miscounted.content[0].text).toContain('Output validation error')
+    await client.close()
+  })
 })
 
 describe('connectionSetup', () => {

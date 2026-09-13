@@ -88,21 +88,24 @@ function inputShape(inputs: ActionInputField[]): Record<string, ZodTypeAny> {
   return shape
 }
 
+// An output declared without a type may be any JSON value, a list or an object as much as text.
 function scalar(type: ActionOutputField['type']): ZodTypeAny {
   if (type === 'number') return z.number()
   if (type === 'boolean') return z.boolean()
-  return z.string()
+  if (type === 'string') return z.string()
+  return z.unknown()
 }
 
 /**
  * Output schemas are always loose. An action returns whatever the upstream API
  * gave it, and a strict schema would make the MCP client reject the call for
- * the crime of returning an extra field.
+ * the crime of returning an extra field, or a null where the API had nothing.
  */
 function outputSchema(outputs: ActionOutputField[]): ZodTypeAny {
   const shape: Record<string, ZodTypeAny> = {}
   for (const output of outputs) {
     shape[output.key] = scalar(output.type)
+      .nullable()
       .optional()
       .describe(output.description ?? output.key)
   }
