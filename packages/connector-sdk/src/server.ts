@@ -105,8 +105,7 @@ function outputSchema(outputs: ActionOutputField[]): ZodTypeAny {
   const shape: Record<string, ZodTypeAny> = {}
   for (const output of outputs) {
     shape[output.key] = scalar(output.type)
-      .nullable()
-      .optional()
+      .nullish()
       .describe(output.description ?? output.key)
   }
   return z.looseObject(shape)

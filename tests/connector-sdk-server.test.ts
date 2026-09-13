@@ -64,11 +64,9 @@ const connector: Connector = defineConnector({
 type TextBlock = { type: string; text: string }
 type ToolCallResult = { content: TextBlock[]; isError?: boolean }
 
-async function connect(): Promise<Client> {
-  const server = createConnectorServer(connector, {
-    config: { apiToken: 'tok' },
-    now: () => NOW
-  })
+async function connect(
+  server = createConnectorServer(connector, { config: { apiToken: 'tok' }, now: () => NOW })
+): Promise<Client> {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   const client = new Client({ name: 'test', version: '1.0.0' })
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
@@ -173,9 +171,7 @@ describe('connector MCP server', () => {
       }),
       { config: {} }
     )
-    const [riskyClient, riskyServer] = InMemoryTransport.createLinkedPair()
-    const probe = new Client({ name: 'probe', version: '1.0.0' })
-    await Promise.all([risky.connect(riskyServer), probe.connect(riskyClient)])
+    const probe = await connect(risky)
     expect(
       (await probe.listTools()).tools.find((entry) => entry.name === 'createTicket')?.description
     ).toContain('Not idempotent')
@@ -223,9 +219,7 @@ describe('connector MCP server', () => {
       }),
       { config: {} }
     )
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-    const client = new Client({ name: 'test', version: '1.0.0' })
-    await Promise.all([shaped.connect(serverTransport), client.connect(clientTransport)])
+    const client = await connect(shaped)
 
     const listed = (await client.callTool({ name: 'listThings', arguments: {} })) as ToolCallResult
     expect(listed.isError).toBeFalsy()
