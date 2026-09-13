@@ -16,11 +16,11 @@ const ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 /**
  * What a scaffolded connector depends on.
  *
- * Names a prerelease on purpose. Only `0.7.0-beta.x` is published, and a bare
- * `^0.7.0` matches no prerelease at all — a scaffold pinned to it installs
- * nothing. Bumped with the SDK's own version until a stable one exists.
+ * Names a prerelease on purpose. Only prereleases are published, and a bare
+ * `^0.7.1` matches no prerelease at all — a scaffold pinned to it installs
+ * nothing. `0.7.1-beta.3` is the first SDK that speaks Vorn's own protocol.
  */
-const SDK_DEPENDENCY_RANGE = '^0.7.0-beta.14'
+const SDK_DEPENDENCY_RANGE = '^0.7.1-beta.3'
 
 /** What a scaffold starts at, in the package and in the changelog section that must match it. */
 const SCAFFOLD_VERSION = '0.1.0'
