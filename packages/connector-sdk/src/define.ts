@@ -14,7 +14,8 @@ import type {
   ExtensionPlatform,
   PaneContribution
 } from './types'
-import { ORIGIN_PATTERN, allowedCheckHeader, withinOrigins } from './origins'
+import { ORIGIN_PATTERN, allowedSessionHeader, withinOrigins } from './origins'
+import { isRecord } from './post-receive'
 
 const KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 
@@ -228,12 +229,12 @@ function assertBrowserSignIn(id: string, browser: BrowserSignIn | undefined): vo
   }
   const headers: unknown = browser.check?.headers
   if (headers === undefined) return
-  const entries =
-    headers && typeof headers === 'object' && !Array.isArray(headers) ? Object.entries(headers) : []
-  const badHeader = entries.find(
-    ([name, value]) => typeof value !== 'string' || !allowedCheckHeader(name)
-  )
-  if (entries.length === 0 || badHeader) {
+  const badHeader = isRecord(headers)
+    ? Object.entries(headers).find(
+        ([name, value]) => typeof value !== 'string' || !allowedSessionHeader(name)
+      )
+    : undefined
+  if (!isRecord(headers) || badHeader) {
     throw new Error(
       `Connector ${id} may add only plain string headers to its signed-in check` +
         (badHeader ? `; ${JSON.stringify(badHeader[0])} is not one` : '')

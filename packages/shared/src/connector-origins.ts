@@ -1,4 +1,4 @@
-// Mirrors the connector SDK's origin rule, which the published SDK cannot import from here.
+// Mirrors the connector SDK's origin and header rules, which the published SDK cannot import from here.
 
 /** An origin a connector may act on: `https://host`, or `https://*.host` for every subdomain. */
 export const ORIGIN_PATTERN = /^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$/i
@@ -26,12 +26,11 @@ export function withinOrigins(origins: readonly string[], url: string): boolean 
   })
 }
 
-/** Header names a signed-in call may never carry: the browser sets them, or they carry who you are. */
-const FORBIDDEN_CHECK_HEADERS = new Set([
+/** Header names a connector may never send: the browser sets them, or they carry who you are. */
+const FORBIDDEN_SESSION_HEADERS = new Set([
   'cookie',
   'cookie2',
   'authorization',
-  'proxy-authorization',
   'host',
   'origin',
   'referer',
@@ -40,23 +39,24 @@ const FORBIDDEN_CHECK_HEADERS = new Set([
 
 const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/
 
-/** Whether a connector may add this header to a signed-in call or its check. */
+/** Whether `name` is a header a connector may send inside its signed-in window, on a call or its check. */
 export function allowedSessionHeader(name: string): boolean {
   const lower = name.toLowerCase()
   return (
     HEADER_NAME.test(name) &&
-    !FORBIDDEN_CHECK_HEADERS.has(lower) &&
+    !FORBIDDEN_SESSION_HEADERS.has(lower) &&
     !lower.startsWith('sec-') &&
     !lower.startsWith('proxy-')
   )
 }
 
-/** The headers a declared check may carry, or nothing when none are left. */
-export function checkHeaders(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const kept = Object.entries(value).filter(
-    (entry): entry is [string, string] =>
-      typeof entry[1] === 'string' && allowedSessionHeader(entry[0])
+/** The headers a connector may send inside its signed-in window, and none of the rest. */
+export function sessionHeaders(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] =>
+        typeof entry[1] === 'string' && allowedSessionHeader(entry[0])
+    )
   )
-  return kept.length > 0 ? Object.fromEntries(kept) : undefined
 }

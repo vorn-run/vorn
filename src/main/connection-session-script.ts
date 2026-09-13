@@ -4,13 +4,13 @@
 export const MAX_SESSION_BODY = 4 * 1024 * 1024
 
 import { CONNECTION_PROFILE_PREFIX, type SessionAnswer, type SessionRequest } from '../shared/types'
-import { allowedSessionHeader } from '@vornrun/shared/connector-origins'
+import { sessionHeaders } from '@vornrun/shared/connector-origins'
 
 export type { SessionAnswer, SessionRequest }
 
 /** The request headers a call may set; the page supplies the rest itself, cookies included. */
 export function allowedHeaders(headers: Record<string, string> = {}): Record<string, string> {
-  return Object.fromEntries(Object.entries(headers).filter(([name]) => allowedSessionHeader(name)))
+  return sessionHeaders(headers)
 }
 
 /** The script a runner page executes, built from JSON so nothing a connector sends runs as code. */

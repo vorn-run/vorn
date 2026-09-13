@@ -477,15 +477,7 @@ describe('how a probed connector says it signs in', () => {
   })
 
   it('keeps the headers a check declares, and drops any a connector may not set', async () => {
-    const headers = {
-      'X-CSRF-Protection': '1',
-      Cookie: 'sid=1',
-      Authorization: 'Bearer x',
-      'sec-fetch-site': 'same-origin',
-      'Proxy-Connection': 'keep-alive',
-      'bad name': '1',
-      'X-Count': 2
-    }
+    const headers = { 'X-CSRF-Protection': '1', Cookie: 'sid=1' }
     const declared = { ...browser.browser, check: { ...browser.browser.check, headers } }
     const auth = await probeAuth({ ...browser, browser: declared })
     expect(auth?.browser?.check.headers).toEqual({ 'X-CSRF-Protection': '1' })

@@ -14,7 +14,7 @@ import type { PostReceiveOp } from './types'
 /** Keys that would reach through an object into its prototype. */
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
