@@ -2224,7 +2224,7 @@ export const CONNECTOR_AUTH_RUNGS: readonly ConnectorAuthRung[] = [
 export interface SdkBrowserSignIn {
   signInUrl: string
   origins: string[]
-  check: { url: string; identity: string[] }
+  check: { url: string; identity: string[]; headers?: Record<string, string> }
 }
 
 export interface SdkConnectorAuth {

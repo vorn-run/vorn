@@ -141,10 +141,12 @@ export async function checkSession(
   connectionId: string,
   browser: SdkBrowserSignIn
 ): Promise<{ signedIn: boolean; identity: string | null }> {
+  const declared = browser.check.headers ?? {}
+  const hasAccept = Object.keys(declared).some((name) => name.toLowerCase() === 'accept')
   const answer = await fetchInSession(connectionId, browser.origins, {
     url: browser.check.url,
     method: 'GET',
-    headers: { accept: 'application/json' }
+    headers: { ...(!hasAccept && { accept: 'application/json' }), ...declared }
   })
   const signedIn = answer.status >= 200 && answer.status < 300
   return { signedIn, identity: signedIn ? identityFrom(answer.body, browser.check.identity) : null }

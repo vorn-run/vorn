@@ -6,7 +6,9 @@ import {
   SessionUnavailableError,
   withinOrigins
 } from '../packages/connector-sdk/src/index'
+import { allowedSessionHeader } from '../packages/connector-sdk/src/origins'
 import {
+  allowedSessionHeader as sharedAllowedSessionHeader,
   ORIGIN_PATTERN as SHARED_ORIGIN_PATTERN,
   withinOrigins as sharedWithinOrigins
 } from '../packages/shared/src/connector-origins'
@@ -119,6 +121,29 @@ describe('which pages a browser connector may reach', () => {
     expect(sharedWithinOrigins.toString()).toBe(withinOrigins.toString())
     for (const [url] of cases) {
       expect([url, sharedWithinOrigins(origins, url)]).toEqual([url, withinOrigins(origins, url)])
+    }
+    expect(sharedAllowedSessionHeader.toString()).toBe(allowedSessionHeader.toString())
+    const headers: Array<[string, boolean]> = [
+      ['x-csrf-protection', true],
+      ['accept', true],
+      ['content-type', true],
+      ['X-Custom', true],
+      ['Cookie', false],
+      ['cookie2', false],
+      ['Authorization', false],
+      ['Proxy-Authorization', false],
+      ['Host', false],
+      ['Origin', false],
+      ['Referer', false],
+      ['Content-Length', false],
+      ['Sec-Fetch-Mode', false],
+      ['proxy-connection', false],
+      ['bad name', false],
+      ['', false]
+    ]
+    for (const [name, allowed] of headers) {
+      expect([name, allowedSessionHeader(name)]).toEqual([name, allowed])
+      expect([name, sharedAllowedSessionHeader(name)]).toEqual([name, allowed])
     }
   })
 })

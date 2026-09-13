@@ -18,3 +18,27 @@ export function withinOrigins(origins: readonly string[], url: string): boolean 
     return wildcard ? target.endsWith(`.${host}`) : target === host
   })
 }
+
+/** Header names a connector may never send: the browser sets them, or they carry who you are. */
+const FORBIDDEN_SESSION_HEADERS = new Set([
+  'cookie',
+  'cookie2',
+  'authorization',
+  'host',
+  'origin',
+  'referer',
+  'content-length'
+])
+
+const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/
+
+/** Whether `name` is a header a connector may send inside its signed-in window, on a call or its check. */
+export function allowedSessionHeader(name: string): boolean {
+  const lower = name.toLowerCase()
+  return (
+    HEADER_NAME.test(name) &&
+    !FORBIDDEN_SESSION_HEADERS.has(lower) &&
+    !lower.startsWith('sec-') &&
+    !lower.startsWith('proxy-')
+  )
+}

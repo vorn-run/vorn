@@ -23,10 +23,8 @@ describe("the script a connection's hidden page runs", () => {
     expect(script).not.toContain('authorization')
   })
 
-  it('keeps only the headers a call may set', () => {
-    expect(allowedHeaders({ Accept: 'application/json', Cookie: 'a', 'X-Csrf': 'b' })).toEqual({
-      Accept: 'application/json'
-    })
+  it('keeps the headers a call may set, such as a CSRF flag, and drops the rest', () => {
+    expect(allowedHeaders({ 'X-Csrf': 'b', Cookie: 'a' })).toEqual({ 'X-Csrf': 'b' })
   })
 })
 

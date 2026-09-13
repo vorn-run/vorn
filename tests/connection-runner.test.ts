@@ -56,7 +56,8 @@ vi.mock('electron', () => {
 
 vi.mock('../src/main/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
 
-const { closeConnectionWindows, fetchInSession } = await import('../src/main/connection-sessions')
+const { checkSession, closeConnectionWindows, fetchInSession } =
+  await import('../src/main/connection-sessions')
 
 const origins = ['https://substack.com']
 const request = { url: 'https://substack.com/api/v1/user/profile/self', method: 'GET' }
@@ -103,5 +104,35 @@ describe('the hidden page a signed-in call runs in', () => {
     await slow
     await vi.advanceTimersByTimeAsync(60_000)
     expect(windows[0]!.destroyed).toBe(true)
+  })
+})
+
+describe('the check that says whether a connection is signed in', () => {
+  it('sends the headers the connector declared, beside accept', async () => {
+    const check = checkSession('c1', {
+      signInUrl: 'https://substack.com/sign-in',
+      origins,
+      check: { url: request.url, identity: ['name'], headers: { 'X-CSRF-Protection': '1' } }
+    })
+    await vi.waitFor(() => expect(windows).toHaveLength(1))
+    windows[0]!.load()
+    await expect(check).resolves.toEqual({ signedIn: true, identity: null })
+    const script = windows[0]!.webContents.executeJavaScript.mock.calls[0]![0] as string
+    expect(script).toContain('"X-CSRF-Protection":"1"')
+    expect(script).toContain('"accept":"application/json"')
+  })
+
+  it('sends the accept a connector declared instead of its own, in any letter case', async () => {
+    const check = checkSession('c1', {
+      signInUrl: 'https://substack.com/sign-in',
+      origins,
+      check: { url: request.url, identity: ['name'], headers: { Accept: 'text/plain' } }
+    })
+    await vi.waitFor(() => expect(windows).toHaveLength(1))
+    windows[0]!.load()
+    await check
+    const script = windows[0]!.webContents.executeJavaScript.mock.calls[0]![0] as string
+    expect(script).toContain('"Accept":"text/plain"')
+    expect(script).not.toContain('"accept":"application/json"')
   })
 })
