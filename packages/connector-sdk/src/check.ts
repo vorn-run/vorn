@@ -58,6 +58,7 @@ export type CheckCode =
   | 'mock-action-failed'
   | 'mock-network-escape'
   | 'mock-not-observed'
+  | 'mock-output-type'
   | 'preflight-failed'
   | 'live-action-failed'
   | 'pack-launch'
@@ -336,6 +337,33 @@ export function mockConfig(connector: Connector): ConnectorConfig {
   return config
 }
 
+/** A value's type in the words an output declares it with. */
+function outputTypeOf(value: unknown): string {
+  if (Array.isArray(value)) return 'array'
+  return value === null ? 'null' : typeof value
+}
+
+// Advisory: Vorn stores whatever came back, but a later step reads the declared type.
+function outputTypeFindings(
+  action: ActionDefinition,
+  output: Record<string, unknown>
+): CheckFinding[] {
+  return (action.outputs ?? []).flatMap((field) => {
+    const value = output[field.key]
+    if (field.type === undefined || value === undefined || value === null) return []
+    const actual = outputTypeOf(value)
+    if (actual === field.type) return []
+    return [
+      finding(
+        'warn',
+        'mock-output-type',
+        `action ${action.type}`,
+        `returned "${field.key}" as ${actual}, but declares it ${field.type}`
+      )
+    ]
+  })
+}
+
 async function mockFindings(connector: Connector, options: CheckOptions): Promise<CheckFinding[]> {
   if (!options.mock) return []
   const config = options.config ?? mockConfig(connector)
@@ -348,20 +376,21 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
       (action.inputs ?? []).map((input) => [input.key, sampleArg(input)])
     )
     // Caught inside, so the calls are readable even when the action threw.
-    const { result: thrown, calls } = await withMockHttp(routes, async () => {
+    const { result: ran, calls } = await withMockHttp(routes, async () => {
       try {
-        await runAction(connector, action.type, args, {
+        const output = await runAction(connector, action.type, args, {
           config,
           ...(options.now && { now: options.now }),
           sessionFetchImpl: globalThis.fetch
         })
-        return undefined
+        return { output }
       } catch (error) {
-        return error
+        return { thrown: error }
       }
     })
 
-    if (thrown !== undefined) {
+    if ('thrown' in ran) {
+      const { thrown } = ran
       const reason = thrown instanceof Error ? thrown.message : String(thrown)
       // Reaching for the network is a failure in either mode: a conformance
       // run that touches a real service is not a conformance run. Asked of the
@@ -392,6 +421,7 @@ async function mockFindings(connector: Connector, options: CheckOptions): Promis
         )
       )
     }
+    found.push(...outputTypeFindings(action, ran.output))
   }
 
   return found
@@ -910,6 +940,7 @@ export const CHECK_OWNERS: Record<CheckCode, string | null> = {
   'mock-action-failed': 'mock',
   'mock-network-escape': 'mock',
   'mock-not-observed': 'mock',
+  'mock-output-type': 'mock',
   'preflight-failed': 'live',
   'live-action-failed': 'live',
   'pack-launch': 'launch',

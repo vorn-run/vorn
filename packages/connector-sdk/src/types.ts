@@ -201,9 +201,10 @@ export type TriggerDefinition = TriggerBase &
 /**
  * What kind of value an action argument takes.
  *
- * Every argument still arrives as a string — Vorn renders them from templates —
- * so this says how to read one, and how to draw its field. `select` is a
- * string with known choices; `json` is a string holding a structured value.
+ * An argument arrives as a JSON value, often text Vorn rendered from a
+ * template, so this says how to read one and how to draw its field. `select`
+ * is a string with known choices; `json` is a structured value, or text
+ * holding one.
  */
 export type ActionInputType = 'string' | 'number' | 'boolean' | 'select' | 'json'
 
@@ -239,7 +240,7 @@ export interface ActionInputField {
  */
 export interface ActionOutputField {
   key: string
-  type?: 'string' | 'number' | 'boolean'
+  type?: 'string' | 'number' | 'boolean' | 'array' | 'object'
   description?: string
 }
 

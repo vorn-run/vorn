@@ -204,6 +204,17 @@ async function everyCodeAnyRunEmits(): Promise<Set<string>> {
           await fetch('https://acme.test/api')
           throw new Error('not what I wanted')
         }
+      },
+      {
+        type: 'miscount',
+        label: 'Miscount',
+        description: 'Counts in words',
+        idempotent: true,
+        outputs: [{ key: 'count', type: 'number' }],
+        run: async () => {
+          await fetch('https://acme.test/api')
+          return { count: 'two' }
+        }
       }
     ]
   })

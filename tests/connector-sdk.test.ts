@@ -383,7 +383,10 @@ describe('createConnectorHarness', () => {
     expect((await harness.poll('newTicket')).items[0].externalId).toBe('tok')
     expect((await harness.drain('newTicket')).map((item) => item.title)).toEqual(['Ticket tok'])
     expect(await harness.execute('ping')).toEqual({ at: NOW })
-    expect(harness.manifest().triggers[0].setup.filters.pollTool).toBe('poll_newTicket')
+    expect(harness.manifest()).toMatchObject({
+      protocol: 1,
+      triggers: [{ setup: { triggerType: 'newTicket' } }]
+    })
   })
 
   it('detects a trigger that ignores its lower bound and redelivers forever', async () => {

@@ -1,3 +1,4 @@
+import { UpstreamStatusError } from './errors'
 import { applyPostReceive, valueAt } from './post-receive'
 import type { ActionRequest, ConnectorConfig, PaginationStrategy, PostReceiveOp } from './types'
 
@@ -210,7 +211,7 @@ export async function sendRequest(
     ...(resolved.body !== undefined && { body: resolved.body })
   })
   const body = await readBody(response)
-  if (!response.ok) throw new Error(describeFailure(response, body))
+  if (!response.ok) throw new UpstreamStatusError(response.status, describeFailure(response, body))
   return { response, body }
 }
 

@@ -13,9 +13,9 @@ export {
   SessionRefusedError,
   BROWSER_HOST_ENV,
   BROWSER_TOKEN_ENV,
-  SESSION_CALL_HEADER,
-  SESSION_CALL_META
+  SESSION_CALL_HEADER
 } from './session'
+export { ActionArgumentError, UpstreamStatusError, protocolError } from './errors'
 export { ORIGIN_PATTERN, withinOrigins } from './origins'
 export {
   PROTOCOL_VERSION,
@@ -78,16 +78,7 @@ export {
 export type { RequestScope, ResolvedRequest, Substitution } from './request'
 export { resilientFetch, retryAfterMs, backoffMs } from './resilience'
 export type { RetryPolicy, ResilientFetchOptions } from './resilience'
-export {
-  connectionSetup,
-  connectorManifest,
-  footerToolName,
-  handlerToolName,
-  pollToolName,
-  MANIFEST_TOOL,
-  OPTIONS_TOOL,
-  PREFLIGHT_TOOL
-} from './setup'
+export { connectionSetup, connectorManifest } from './setup'
 export type { ConnectionSetup, ConnectorManifest, ManifestContributions } from './setup'
 export { packConnector, packFileName } from './pack'
 export type { PackOptions, PackResult } from './pack'
@@ -101,7 +92,7 @@ export {
 } from './packaging'
 export type { BundleRequest, BundleOutput } from './packaging'
 export { createConnectorServer, serveConnector } from './server'
-export type { ConnectorServerOptions } from './server'
+export type { ConnectorServer, ConnectorServerOptions } from './server'
 export { scaffoldFiles, titleCase } from './scaffold'
 export type { ScaffoldOptions, ScaffoldFile } from './scaffold'
 export {

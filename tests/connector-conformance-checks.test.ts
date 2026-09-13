@@ -219,7 +219,7 @@ describe('what a check says about the package a connector ships as', () => {
   })
 })
 
-/** A bundle that serves the MCP handshake Vorn opens with, then waits like a served connector. */
+/** A bundle that answers the hello Vorn opens with, then waits like a served connector. */
 const SERVES = [
   "let buffered = ''",
   "process.stdin.on('data', (chunk) => {",
@@ -231,11 +231,11 @@ const SERVES = [
   '    buffered = buffered.slice(end + 1)',
   '    if (!line.trim()) continue',
   '    const message = JSON.parse(line)',
-  "    if (message.method !== 'initialize') continue",
+  "    if (message.method !== 'vorn/hello') continue",
   '    const result = {',
-  '      protocolVersion: message.params.protocolVersion,',
-  '      capabilities: {},',
-  "      serverInfo: { name: 'stub', version: '1' }",
+  '      protocol: 1,',
+  "      sdk: { name: '@vornrun/connector-sdk', version: '0.0.0-stub' },",
+  "      connector: { id: 'acme', version: '1', kind: 'connector' }",
   '    }',
   "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }) + '\\n')",
   '  }',
@@ -305,6 +305,20 @@ describe('what a check says about starting the pack it would ship', () => {
   it('refuses a bundle that starts and then serves nothing', async () => {
     expect(await check('')).toContainEqual(
       expect.objectContaining({ code: 'pack-launch', level: 'error' })
+    )
+  })
+
+  it('refuses a bundle that answers the hello with an error', async () => {
+    const refuses = SERVES.replace(
+      'result })',
+      "error: { code: -32601, message: 'Method not found' } })"
+    )
+    expect(await check(refuses)).toContainEqual(
+      expect.objectContaining({
+        code: 'pack-launch',
+        level: 'error',
+        message: 'did not start as a pack: answered vorn/hello with Method not found'
+      })
     )
   })
 
@@ -393,5 +407,46 @@ describe('what a check says about starting the pack it would ship', () => {
     expect(bundledRequireFindings(afterRegex)[0]?.message).toContain('./late.js')
     // A property of that name is not the loader.
     expect(bundledRequireFindings('loader.require("./get")')).toEqual([])
+  })
+})
+
+describe('what a mock run says about what an action returned', () => {
+  const returning = (output: Record<string, unknown>) =>
+    connector({
+      actions: [
+        {
+          ...ping,
+          outputs: [
+            { key: 'ok', type: 'boolean' },
+            { key: 'items', type: 'array' },
+            { key: 'owner', type: 'object' },
+            { key: 'note' }
+          ],
+          run: async () => {
+            await fetch('https://acme.test/ping')
+            return output
+          }
+        }
+      ]
+    })
+  const typeFindings = async (output: Record<string, unknown>) =>
+    (await checkConnector(returning(output), { mock: true })).filter(
+      (item) => item.code === 'mock-output-type'
+    )
+
+  it('warns when an output comes back as another type than it declares', async () => {
+    expect(await typeFindings({ ok: 'yes', items: {}, owner: [] })).toEqual([
+      expect.objectContaining({
+        level: 'warn',
+        target: 'action ping',
+        message: 'returned "ok" as string, but declares it boolean'
+      }),
+      expect.objectContaining({ message: 'returned "items" as object, but declares it array' }),
+      expect.objectContaining({ message: 'returned "owner" as array, but declares it object' })
+    ])
+  })
+
+  it('says nothing of a match, a null, a missing output, or one declared without a type', async () => {
+    expect(await typeFindings({ ok: true, items: [], owner: null, note: 42 })).toEqual([])
   })
 })

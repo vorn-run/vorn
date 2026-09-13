@@ -46,13 +46,52 @@ describe('the kinds of value an argument arrives as', () => {
     expect(output).toEqual({ level: 'high' })
   })
 
-  it('still requires what is required, and drops what was left blank', async () => {
+  it('still requires what is required, and drops what was left blank or null', async () => {
     const inputs: ActionInputField[] = [
       { key: 'id', label: 'Id', required: true },
       { key: 'note', label: 'Note' }
     ]
     await expect(take(inputs, { id: '' })).rejects.toThrow(/requires "id"/)
+    await expect(take(inputs, { id: null })).rejects.toThrow(/requires "id"/)
     expect(await take(inputs, { id: '1', note: '' })).toEqual({ id: '1' })
+    expect(await take(inputs, { id: '1', note: null })).toEqual({ id: '1' })
+  })
+
+  it('takes a value that already has its type as it is', async () => {
+    const output = await take(
+      [
+        { key: 'count', label: 'Count', type: 'number' },
+        { key: 'draft', label: 'Draft', type: 'boolean' },
+        { key: 'body', label: 'Body', type: 'json' }
+      ],
+      { count: 7, draft: true, body: { a: [1, 2] } }
+    )
+    expect(output).toEqual({ count: 7, draft: true, body: { a: [1, 2] } })
+  })
+
+  it('reads a number or a flag handed to a text field as that text', async () => {
+    const inputs: ActionInputField[] = [
+      { key: 'id', label: 'Id' },
+      { key: 'level', label: 'Level', type: 'select', options: [{ value: '1' }] }
+    ]
+    expect(await take(inputs, { id: 42, level: true })).toEqual({ id: '42', level: 'true' })
+  })
+
+  it('names the field whose value is not the type it declares', async () => {
+    const inputs: ActionInputField[] = [
+      { key: 'count', label: 'Count', type: 'number' },
+      { key: 'draft', label: 'Draft', type: 'boolean' }
+    ]
+    await expect(take(inputs, { count: true })).rejects.toMatchObject({
+      name: 'ActionArgumentError',
+      field: 'count',
+      message: 'Action take argument "count": Expected a number, got true'
+    })
+    await expect(take(inputs, { draft: 1 })).rejects.toMatchObject({
+      field: 'draft',
+      message: 'Action take argument "draft": Expected a boolean, got 1'
+    })
+    await expect(take(inputs, { count: 'many' })).rejects.toThrow('Expected a number, got "many"')
   })
 })
 

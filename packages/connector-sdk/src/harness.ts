@@ -177,7 +177,7 @@ export async function withMockHttp<T>(
 }
 
 /**
- * Run a connector in-process, exactly as the MCP server would, without
+ * Run a connector in-process, exactly as the stdio server would, without
  * spawning anything. Authors get real assertions in a plain unit test.
  */
 export function createConnectorHarness(

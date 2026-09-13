@@ -18,7 +18,7 @@ const USAGE = `vorn-connector <command> <module | id> [options]
 Commands:
   new <id>                      Scaffold a new connector, ready to build
   manifest <module>             Print the connector manifest as JSON
-  setup <module> [trigger]      Print the Vorn connection settings to paste
+  setup <module> [trigger]      Print each trigger and the environment it reads
   check <module>                Verify the connector against Vorn's contract
   pack <module>                 Build an installable .vorn.tgz pack
   poll <module> <trigger>       Run one poll against the current environment
@@ -148,17 +148,15 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       const triggers = positional[0] ? [positional[0]] : connector.triggers.map((t) => t.type)
       for (const triggerType of triggers) {
         const setup = connectionSetup(connector, triggerType)
-        deps.write(`# ${connector.name} — ${triggerType}`)
-        deps.write(`Command: npx`)
-        deps.write(`Arguments: ["-y", "<your-package>"]`)
-        deps.write(`Filters: ${JSON.stringify(setup.filters, null, 2)}`)
-        if (setup.env.length > 0) {
-          deps.write(
-            `Environment: ${setup.env
+        const label = connector.triggers.find((trigger) => trigger.type === triggerType)?.label
+        deps.write(`# ${connector.name} — ${label} (${setup.triggerType})`)
+        deps.write(
+          `Environment: ${
+            setup.env
               .map((entry) => `${entry.name}${entry.required ? ' (required)' : ''}`)
-              .join(', ')}`
-          )
-        }
+              .join(', ') || 'none'
+          }`
+        )
       }
       return 0
     }

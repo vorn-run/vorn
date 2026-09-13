@@ -1,9 +1,9 @@
-// A connector built and served with the SDK as it ships today, which speaks only MCP.
+// A connector built and served with the SDK, exactly as a connector's bin runs it.
 import { defineConnector, serveConnector } from '../../packages/connector-sdk/src/index'
 
 const connector = defineConnector({
-  id: 'mcp-fixture',
-  name: 'MCP fixture',
+  id: 'sdk-fixture',
+  name: 'SDK fixture',
   version: '1.0.0',
   triggers: [
     {
@@ -29,10 +29,23 @@ const connector = defineConnector({
         { key: 'text', label: 'Text', required: true },
         { key: 'count', label: 'Count', type: 'number' }
       ],
-      run: (args) => ({ text: args.text, count: args.count })
+      run: (args) => {
+        console.log(`echoing ${String(args.text)}`)
+        return { text: args.text, count: args.count }
+      }
+    },
+    {
+      type: 'wait',
+      label: 'Wait',
+      inputs: [{ key: 'ms', label: 'Milliseconds', type: 'number', required: true }],
+      run: async (args) => {
+        await new Promise((resolve) => setTimeout(resolve, Number(args.ms)))
+        return { waited: args.ms }
+      }
     }
   ],
   preflight: () => ({ ok: true, message: 'ready' })
 })
 
 void serveConnector(connector, { config: {} })
+console.log('booting')

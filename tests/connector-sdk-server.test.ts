@@ -1,18 +1,20 @@
-import { describe, expect, it } from 'vitest'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  createConnectorServer,
-  defineConnector,
+  ActionArgumentError,
+  SessionUnavailableError,
+  UpstreamStatusError,
   connectionSetup,
   connectorManifest,
-  pollToolName,
-  MANIFEST_TOOL
+  createConnectorServer,
+  defineConnector,
+  protocolError
 } from '../packages/connector-sdk/src/index'
 import { isEntryPoint, runCli } from '../packages/connector-sdk/src/cli'
 import type { Connector } from '../packages/connector-sdk/src/types'
+import { greeted } from './helpers/connector-server'
 
 const NOW = '2026-08-05T00:00:00.000Z'
+const HELLO = { protocols: [1], host: { name: 'vorn', version: 'test' } }
 
 const connector: Connector = defineConnector({
   id: 'acme',
@@ -54,45 +56,85 @@ const connector: Connector = defineConnector({
       idempotent: true,
       inputs: [
         { key: 'id', label: 'Id', required: true },
-        { key: 'reason', label: 'Reason' }
+        { key: 'reason', label: 'Reason', description: 'Why it was closed' }
       ],
       run: (args, context) => ({ closed: args.id, token: context.config.apiToken })
     }
   ]
 })
 
-type TextBlock = { type: string; text: string }
-type ToolCallResult = { content: TextBlock[]; isError?: boolean }
+const serve = () => greeted(connector, { config: { apiToken: 'tok' }, now: () => NOW })
 
-async function connect(
-  server = createConnectorServer(connector, { config: { apiToken: 'tok' }, now: () => NOW })
-): Promise<Client> {
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-  const client = new Client({ name: 'test', version: '1.0.0' })
-  await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
-  return client
-}
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
-function payload(result: unknown): unknown {
-  return JSON.parse((result as ToolCallResult).content[0].text)
-}
-
-describe('connector MCP server', () => {
-  it('serves one poll tool per trigger, one tool per action, and a manifest', async () => {
-    const client = await connect()
-    const names = (await client.listTools()).tools.map((tool) => tool.name).sort()
-    expect(names).toEqual(['closeTicket', 'poll_brokenTrigger', 'poll_newTicket', MANIFEST_TOOL])
-    await client.close()
+describe('the hello a connector answers first', () => {
+  it('names the protocol it speaks, the SDK it was built with, and itself', async () => {
+    const server = createConnectorServer(connector, { config: {} })
+    expect(
+      await server.handle({ jsonrpc: '2.0', id: 1, method: 'vorn/hello', params: HELLO })
+    ).toEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        protocol: 1,
+        sdk: { name: '@vornrun/connector-sdk', version: expect.any(String) },
+        connector: { id: 'acme', version: '1.2.3', kind: 'connector' }
+      }
+    })
   })
 
-  it('returns a normalized page and forwards since/limit to the trigger', async () => {
-    const client = await connect()
-    const result = await client.callTool({
-      name: pollToolName('newTicket'),
-      arguments: { since: '2026-08-01T00:00:00.000Z', limit: '25' }
+  it('refuses a hello offering only protocols it does not speak, or none at all', async () => {
+    const server = createConnectorServer(connector, { config: {} })
+    const offered = (params: unknown) =>
+      server.handle({ jsonrpc: '2.0', id: 1, method: 'vorn/hello', params })
+    expect(await offered({ protocols: [2, 3], host: HELLO.host })).toMatchObject({
+      error: { code: -32001, message: 'Vorn offers connector protocol 2, 3; acme speaks 1' }
     })
+    expect(await offered({ host: HELLO.host })).toMatchObject({ error: { code: -32602 } })
+  })
 
-    expect(payload(result)).toEqual({
+  it('answers nothing else before it', async () => {
+    const server = createConnectorServer(connector, { config: {} })
+    expect(
+      await server.handle({ jsonrpc: '2.0', id: 1, method: 'connector/manifest', params: {} })
+    ).toEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      error: { code: -32002, message: 'Call vorn/hello before connector/manifest' }
+    })
+  })
+
+  it('answers no notification, and nothing that is not a request', async () => {
+    const server = createConnectorServer(connector, { config: {} })
+    expect(await server.handle({ jsonrpc: '2.0', method: 'vorn/hello', params: HELLO })).toBe(
+      undefined
+    )
+    expect(await server.handle('vorn/hello')).toBe(undefined)
+    expect(await server.handle([1, 2])).toBe(undefined)
+    expect(await server.handle({ jsonrpc: '2.0', id: 'one', method: 'vorn/hello' })).toBe(undefined)
+  })
+
+  it('says so for a method it does not know, or a request that is not one', async () => {
+    const server = await serve()
+    expect(await server.fail('tools/list')).toEqual({ code: -32601, message: 'Method not found' })
+    expect(await server.send('trigger/poll', 'newTicket')).toMatchObject({
+      error: { code: -32602, message: '"params" must be an object' }
+    })
+  })
+})
+
+describe('a poll over the protocol', () => {
+  it('returns a normalized page and hands since and a numeric limit to the trigger', async () => {
+    const server = await serve()
+    expect(
+      await server.call('trigger/poll', {
+        trigger: 'newTicket',
+        since: '2026-08-01T00:00:00.000Z',
+        limit: 25
+      })
+    ).toEqual({
       items: [
         {
           since: '2026-08-01T00:00:00.000Z',
@@ -108,87 +150,80 @@ describe('connector MCP server', () => {
       ],
       hasMore: false
     })
-    await client.close()
   })
 
-  it('reports a failing poll as a tool error instead of killing the server', async () => {
-    const client = await connect()
-    const result = (await client.callTool({
-      name: pollToolName('brokenTrigger'),
-      arguments: {}
-    })) as ToolCallResult
-    expect(result.isError).toBe(true)
-    expect(result.content[0].text).toContain('upstream exploded')
-
-    const badLimit = (await client.callTool({
-      name: pollToolName('newTicket'),
-      arguments: { limit: 'many' }
-    })) as ToolCallResult
-    expect(badLimit.isError).toBe(true)
-    expect(badLimit.content[0].text).toContain('Invalid limit')
-    await client.close()
+  it('refuses a poll it cannot run as asked', async () => {
+    const server = await serve()
+    expect(await server.fail('trigger/poll', { trigger: 'nope' })).toEqual({
+      code: -32602,
+      message: 'acme has no trigger "nope"'
+    })
+    expect(await server.fail('trigger/poll', { trigger: 'newTicket', limit: '25' })).toEqual({
+      code: -32602,
+      message: '"limit" must be a number'
+    })
+    expect(await server.fail('trigger/poll', { trigger: 'newTicket', cursor: 7 })).toMatchObject({
+      code: -32602
+    })
   })
 
-  it('runs actions with resolved config and reports argument errors', async () => {
-    const client = await connect()
-    expect(payload(await client.callTool({ name: 'closeTicket', arguments: { id: '7' } }))).toEqual(
-      {
-        closed: '7',
-        token: 'tok'
-      }
-    )
-
-    const missing = (await client.callTool({
-      name: 'closeTicket',
-      arguments: { reason: 'done' }
-    })) as ToolCallResult
-    expect(missing.isError).toBe(true)
-    await client.close()
+  it('reports a failing poll as a connector error instead of dying', async () => {
+    const server = await serve()
+    expect(await server.fail('trigger/poll', { trigger: 'brokenTrigger' })).toEqual({
+      code: -32000,
+      message: 'upstream exploded',
+      data: { kind: 'internal' }
+    })
+    expect(await server.call('trigger/poll', { trigger: 'newTicket' })).toMatchObject({
+      hasMore: false
+    })
   })
 
-  it('advertises action inputs so the workflow editor can render a form', async () => {
-    const client = await connect()
-    const tool = (await client.listTools()).tools.find((entry) => entry.name === 'closeTicket')
-    expect(Object.keys(tool?.inputSchema.properties ?? {})).toEqual(['id', 'reason'])
-    expect(tool?.inputSchema.required).toEqual(['id'])
-    await client.close()
+  it('reads its configuration only when a call needs it, and says what is missing', async () => {
+    vi.stubEnv('API_TOKEN', '')
+    const server = await greeted(connector, {})
+    expect(await server.call('connector/manifest')).toMatchObject({ id: 'acme' })
+    expect(await server.fail('trigger/poll', { trigger: 'newTicket' })).toMatchObject({
+      code: -32000,
+      message: expect.stringContaining('missing required configuration: apiToken (API_TOKEN)')
+    })
+  })
+})
+
+describe('an action over the protocol', () => {
+  it('runs with resolved config and hands back everything it returned', async () => {
+    const server = await serve()
+    expect(await server.call('action/run', { action: 'closeTicket', args: { id: '7' } })).toEqual({
+      closed: '7',
+      token: 'tok'
+    })
   })
 
-  it('tells an agent whether an action is safe to retry', async () => {
-    const client = await connect()
-    const tools = (await client.listTools()).tools
-    expect(tools.find((entry) => entry.name === 'closeTicket')?.description).toContain(
-      'Safe to retry'
-    )
-
-    const risky = createConnectorServer(
-      defineConnector({
-        id: 'risky',
-        name: 'Risky',
-        actions: [
-          { type: 'createTicket', label: 'Create ticket', idempotent: false, run: () => ({}) }
-        ]
-      }),
-      { config: {} }
-    )
-    const probe = await connect(risky)
+  it('reports a missing argument as a validation error naming the field', async () => {
+    const server = await serve()
     expect(
-      (await probe.listTools()).tools.find((entry) => entry.name === 'createTicket')?.description
-    ).toContain('Not idempotent')
-    await probe.close()
-    await client.close()
+      await server.fail('action/run', { action: 'closeTicket', args: { reason: 'done' } })
+    ).toEqual({
+      code: -32000,
+      message: 'Action closeTicket requires "id"',
+      data: { kind: 'validation', field: 'id' }
+    })
   })
 
-  it('serves the manifest a user needs to configure the connection', async () => {
-    const client = await connect()
-    expect(payload(await client.callTool({ name: MANIFEST_TOOL, arguments: {} }))).toEqual(
-      connectorManifest(connector)
-    )
-    await client.close()
+  it('refuses an action it does not have, and arguments that are not an object', async () => {
+    const server = await serve()
+    expect(await server.fail('action/run', { action: 'reopenTicket', args: {} })).toEqual({
+      code: -32602,
+      message: 'acme has no action "reopenTicket"'
+    })
+    expect(await server.fail('action/run', { action: 'closeTicket', args: ['7'] })).toEqual({
+      code: -32602,
+      message: '"args" must be an object'
+    })
   })
 
-  it('lets an action return lists, objects and null, and still checks declared types', async () => {
-    const shaped = createConnectorServer(
+  it('returns lists, objects, null and whatever it declared, since outputs only document', async () => {
+    const server = await greeted(
       defineConnector({
         id: 'shaped',
         name: 'Shaped',
@@ -197,8 +232,8 @@ describe('connector MCP server', () => {
             type: 'listThings',
             label: 'List things',
             outputs: [
-              { key: 'items', description: 'An array of things' },
-              { key: 'owner', description: 'An object' },
+              { key: 'items', type: 'array', description: 'An array of things' },
+              { key: 'owner', type: 'object', description: 'An object' },
               { key: 'note', type: 'string', description: 'Text, or null when there is none' },
               { key: 'count', type: 'number', description: 'How many' }
             ],
@@ -206,55 +241,79 @@ describe('connector MCP server', () => {
               items: [{ id: 1 }, { id: 2 }],
               owner: { name: 'Ada' },
               note: null,
-              count: 2
+              count: 'two'
             })
-          },
-          {
-            type: 'miscount',
-            label: 'Miscount',
-            outputs: [{ key: 'count', type: 'number', description: 'How many' }],
-            run: () => ({ count: 'two' })
           }
         ]
-      }),
-      { config: {} }
+      })
     )
-    const client = await connect(shaped)
-
-    const listed = (await client.callTool({ name: 'listThings', arguments: {} })) as ToolCallResult
-    expect(listed.isError).toBeFalsy()
-    expect(payload(listed)).toEqual({
+    expect(await server.call('action/run', { action: 'listThings', args: {} })).toEqual({
       items: [{ id: 1 }, { id: 2 }],
       owner: { name: 'Ada' },
       note: null,
-      count: 2
+      count: 'two'
     })
+  })
+})
 
-    const miscounted = (await client.callTool({
-      name: 'miscount',
-      arguments: {}
-    })) as ToolCallResult
-    expect(miscounted.isError).toBe(true)
-    expect(miscounted.content[0].text).toContain('Output validation error')
-    await client.close()
+describe('the manifest a connector serves', () => {
+  it('is the one it packs, naming the protocol it speaks', async () => {
+    const server = await serve()
+    const manifest = await server.call('connector/manifest')
+    expect(manifest).toEqual(connectorManifest(connector))
+    expect(manifest.protocol).toBe(1)
+  })
+
+  it('says whether an action is safe to retry and what each input is for', () => {
+    const [close] = connectorManifest(connector).actions
+    expect(close.idempotent).toBe(true)
+    expect(close.inputs[1]).toEqual({
+      key: 'reason',
+      label: 'Reason',
+      type: 'string',
+      required: false,
+      description: 'Why it was closed'
+    })
+    const risky = defineConnector({
+      id: 'risky',
+      name: 'Risky',
+      actions: [{ type: 'create', label: 'Create', run: () => ({}) }]
+    })
+    expect(connectorManifest(risky).actions[0]).not.toHaveProperty('idempotent')
+  })
+})
+
+describe('how a failure reads on the wire', () => {
+  it('names the kind of failure, following what an error was wrapped around', () => {
+    expect(protocolError(new ActionArgumentError('id', 'no id'))).toEqual({
+      code: -32000,
+      message: 'no id',
+      data: { kind: 'validation', field: 'id' }
+    })
+    expect(protocolError(new SessionUnavailableError('Vorn is closed')).data).toEqual({
+      kind: 'app-offline',
+      retryable: false
+    })
+    const unauthorized = new UpstreamStatusError(401, 'Request failed with 401')
+    expect(protocolError(unauthorized, true).data).toEqual({ kind: 'signed-out', retryable: false })
+    expect(protocolError(unauthorized, false).data).toEqual({ kind: 'upstream', retryable: false })
+    const wrapped = new Error('Action post: Request failed with 503', {
+      cause: new UpstreamStatusError(503, 'Request failed with 503')
+    })
+    expect(protocolError(wrapped)).toEqual({
+      code: -32000,
+      message: 'Action post: Request failed with 503',
+      data: { kind: 'upstream', retryable: true }
+    })
+    expect(protocolError('odd').data).toEqual({ kind: 'internal' })
   })
 })
 
 describe('connectionSetup', () => {
-  it('generates the exact filters a Vorn MCP connection needs', () => {
+  it('names the trigger and the environment the connector reads', () => {
     expect(connectionSetup(connector, 'newTicket')).toEqual({
       connectorId: 'acme',
       triggerType: 'newTicket',
-      filters: {
-        pollTool: 'poll_newTicket',
-        itemsPath: 'items',
-        idField: 'externalId',
-        timestampField: 'updatedAt',
-        titleField: 'title',
-        urlField: 'url',
-        cursorArg: 'cursor',
-        cursorPath: 'nextCursor'
-      },
       env: [
         { name: 'API_TOKEN', required: true, secret: true },
         { name: 'ORG_URL', required: false, secret: false, description: 'Base URL' }
@@ -277,18 +336,20 @@ describe('vorn-connector CLI', () => {
   it('prints the manifest as JSON', async () => {
     const out = capture()
     expect(await runCli(['manifest', 'pkg'], { load, write: out.write })).toBe(0)
-    expect(JSON.parse(out.lines.join('\n')).id).toBe('acme')
+    expect(JSON.parse(out.lines.join('\n'))).toMatchObject({ id: 'acme', protocol: 1 })
   })
 
-  it('prints setup for one trigger or for all of them', async () => {
+  it('prints each trigger and the environment it reads, for one trigger or all', async () => {
     const one = capture()
     await runCli(['setup', 'pkg', 'newTicket'], { load, write: one.write })
-    expect(one.lines.join('\n')).toContain('"pollTool": "poll_newTicket"')
-    expect(one.lines.join('\n')).toContain('API_TOKEN (required)')
+    expect(one.lines).toEqual([
+      '# Acme — New ticket (newTicket)',
+      'Environment: API_TOKEN (required), ORG_URL'
+    ])
 
     const all = capture()
     await runCli(['setup', 'pkg'], { load, write: all.write })
-    expect(all.lines.join('\n')).toContain('poll_brokenTrigger')
+    expect(all.lines.join('\n')).toContain('# Acme — Broken (brokenTrigger)')
   })
 
   it('checks a connector and fails only on errors', async () => {
