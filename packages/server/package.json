@@ -29,6 +29,7 @@
     "@vornrun/shared": "workspace:*",
     "@xterm/addon-serialize": "0.13.0",
     "@xterm/headless": "5.5.0",
+    "cross-spawn": "^7.0.6",
     "fastify": "^5.11.0",
     "libsql": "^0.5.29",
     "node-cron": "^4.2.1",
@@ -39,6 +40,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "@types/ws": "^8.18.1",
     "tsup": "^8.5.1",
     "tsx": "^4.23.1",

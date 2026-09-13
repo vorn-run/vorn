@@ -4125,6 +4125,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/cross-spawn@npm:^6.0.6":
+  version: 6.0.6
+  resolution: "@types/cross-spawn@npm:6.0.6"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10c0/e3d476bb6b3a54a8934a97fe6ee4bd13e2e5eb29073929a4be76a52466602ffaea420b20774ffe8503f9fa24f3ae34817e95e7f625689fb0d1c10404f5b2889c
+  languageName: node
+  linkType: hard
+
 "@types/d3-color@npm:*":
   version: 3.1.3
   resolution: "@types/d3-color@npm:3.1.3"
@@ -4841,10 +4850,12 @@ __metadata:
     "@fastify/static": "npm:^10.1.2"
     "@fastify/websocket": "npm:^11.3.0"
     "@modelcontextprotocol/sdk": "npm:^1.29.0"
+    "@types/cross-spawn": "npm:^6.0.6"
     "@types/ws": "npm:^8.18.1"
     "@vornrun/shared": "workspace:*"
     "@xterm/addon-serialize": "npm:0.13.0"
     "@xterm/headless": "npm:5.5.0"
+    cross-spawn: "npm:^7.0.6"
     fastify: "npm:^5.11.0"
     libsql: "npm:^0.5.29"
     node-cron: "npm:^4.2.1"
