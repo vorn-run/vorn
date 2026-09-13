@@ -1,4 +1,5 @@
 import {
+  SDK_CONNECTOR_ID,
   SDK_FILTER_KEYS,
   connectionConnectorId,
   isImplicitConnection,
@@ -25,8 +26,7 @@ export interface ImplicitConnectionDeps {
 export function syncImplicitConnection(
   connectorId: string,
   pack: InstalledConnectorPack | undefined,
-  deps: ImplicitConnectionDeps,
-  mcpConnectorId = 'mcp'
+  deps: ImplicitConnectionDeps
 ): SourceConnection | undefined {
   const existing = deps.list().filter((conn) => connectionConnectorId(conn) === connectorId)
 
@@ -41,7 +41,7 @@ export function syncImplicitConnection(
   if (existing.length > 0) return undefined
 
   return deps.create({
-    connectorId: mcpConnectorId,
+    connectorId: SDK_CONNECTOR_ID,
     name: pack.name,
     filters: {
       [SDK_FILTER_KEYS.connectorId]: pack.id,

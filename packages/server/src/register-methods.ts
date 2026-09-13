@@ -153,7 +153,6 @@ import {
   visibleMcpTools,
   stopMcpClient,
   stopClientsForConnector,
-  connectionIdsForConnector,
   connectionsForConnector,
   inspectPack,
   installPack,
@@ -161,13 +160,15 @@ import {
   rollbackPack,
   listInstalledPacks
 } from './connectors'
-import {
-  MCP_CONNECTOR_ID,
-  MCP_POLL_EVENT,
-  backfillMcpConnection,
-  preflightMcpConnection
-} from './connectors/mcp'
+import { MCP_CONNECTOR_ID, MCP_POLL_EVENT, backfillMcpConnection } from './connectors/mcp'
 import { sdkIdOf } from './connectors/mcp-clients'
+import {
+  SDK_CONNECTOR_ID,
+  backfillSdkConnection,
+  invokeSdkAction,
+  preflightSdkConnection,
+  sdkConnectionActions
+} from './connectors/sdk'
 import {
   httpConnector,
   httpProfileError,
@@ -284,8 +285,7 @@ function createConnectionRecord(
     'id' | 'createdAt' | 'lastSyncAt' | 'lastSyncError' | 'syncCursor'
   > & {
     seedWorkflow?: { name: string; defaultCronFromMinutes: number }
-  },
-  options: { discover?: boolean } = {}
+  }
 ): SourceConnection {
   const id = crypto.randomUUID()
   const conn: SourceConnection = {
@@ -305,8 +305,8 @@ function createConnectionRecord(
   const manifest = connector?.describe()
   const seeded: Array<NonNullable<ConnectorManifest['defaultWorkflows']>[number]> = [
     ...(manifest?.defaultWorkflows ?? []),
-    // Only for MCP: no other connector emits MCP_POLL_EVENT.
-    ...(params.seedWorkflow && params.connectorId === MCP_CONNECTOR_ID
+    // A package's suggested polling workflow, fired on the generic poll event.
+    ...(params.seedWorkflow && params.connectorId === SDK_CONNECTOR_ID
       ? [
           {
             name: params.seedWorkflow.name,
@@ -339,7 +339,7 @@ function createConnectionRecord(
   configManager.notifyChanged()
 
   // For MCP connections, kick off tool discovery in the background.
-  if (conn.connectorId === MCP_CONNECTOR_ID && options.discover !== false) {
+  if (conn.connectorId === MCP_CONNECTOR_ID) {
     setTimeout(() => {
       void runMcpDiscovery(conn.id).catch((err) =>
         log.warn(`[mcp] initial discovery failed for ${conn.id}: ${err}`)
@@ -365,7 +365,7 @@ function deleteConnectionRecord(id: string): void {
   clearDecryptedCreds(id)
   // Its signed-in profile goes too; the desktop that holds it may not be connected right now.
   void browserBridge.request('session:forget', id).catch(() => {})
-  // Terminate any live MCP stdio child for this connection.
+  // Terminate any live child for this connection.
   void stopMcpClient(id).catch((err) => log.warn(`[mcp] stopClient failed: ${err}`))
   dbSignalChange()
   configManager.notifyChanged()
@@ -374,8 +374,7 @@ function deleteConnectionRecord(id: string): void {
 /** The edges the implicit-connection rule acts through, wired to this server. */
 const implicitConnectionDeps: ImplicitConnectionDeps = {
   list: () => dbListSourceConnections(),
-  // The caller runs discovery once the connection exists.
-  create: (params) => createConnectionRecord({ ...params, statusMapping: {} }, { discover: false }),
+  create: (params) => createConnectionRecord({ ...params, statusMapping: {} }),
   remove: (connectionId) => {
     deleteConnectionRecord(connectionId)
     log.info(`[packs] withdrew the implicit connection ${connectionId}`)
@@ -390,39 +389,18 @@ const implicitConnectionDeps: ImplicitConnectionDeps = {
 export function reconcileImplicitConnections(): void {
   try {
     for (const pack of listInstalledPacks()) {
-      const made = syncImplicitConnection(pack.id, pack, implicitConnectionDeps, MCP_CONNECTOR_ID)
-      if (!made) continue
-      void runMcpDiscovery(made.id).catch((err) =>
-        log.warn(`[packs] discovery failed for ${made.id}: ${err}`)
-      )
+      syncImplicitConnection(pack.id, pack, implicitConnectionDeps)
     }
   } catch (err) {
     log.warn(`[packs] could not reconcile implicit connections: ${err}`)
   }
 }
 
-/**
- * Settle every connection of a connector whose files just changed.
- *
- * Stopping the child is only half of it: the tools a step can call were
- * discovered from the version that is now gone, so a rename or a removed
- * action would keep being offered until someone refreshed the row by hand.
- */
+/** Settle every connection of a connector whose files just changed; its next call starts on the new files. */
 async function onPackChanged(connectorId: string): Promise<void> {
   await syncExtensionsAfterPackChange(connectorId)
   await stopClientsForConnector(connectorId)
-  // Before the ids are read, so a connector that just connected itself is discovered too.
-  syncImplicitConnection(
-    connectorId,
-    installedPack(connectorId),
-    implicitConnectionDeps,
-    MCP_CONNECTOR_ID
-  )
-  await Promise.allSettled(
-    connectionIdsForConnector(connectorId).map((id) =>
-      runMcpDiscovery(id).catch((err) => log.warn(`[packs] rediscovery failed for ${id}: ${err}`))
-    )
-  )
+  syncImplicitConnection(connectorId, installedPack(connectorId), implicitConnectionDeps)
 }
 
 /** Discover tools on an MCP connection and persist them on the row. */
@@ -1849,11 +1827,13 @@ export function registerAllMethods(): void {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn) return { success: false, error: `Connection ${connectionId} not found` }
 
-    // MCP connections route through invokeMcpTool because the tool call needs
-    // the SourceConnection itself (to start / address the per-connection stdio
-    // client), not just the merged args the generic execute path provides.
+    // MCP and SDK connections run through their own child, which needs the
+    // SourceConnection itself, not just the merged args the generic path provides.
     if (conn.connectorId === MCP_CONNECTOR_ID) {
       return invokeMcpTool(conn, action, args ?? {})
+    }
+    if (conn.connectorId === SDK_CONNECTOR_ID) {
+      return invokeSdkAction(conn, action, args ?? {})
     }
 
     const connector = connectorRegistry.get(conn.connectorId)
@@ -1887,10 +1867,17 @@ export function registerAllMethods(): void {
    * to the same shape. The workflow editor drives its Action picker off this
    * endpoint so the form stays connector-agnostic.
    */
-  registerMethod('connection:listActions', (connectionId: string) => {
+  registerMethod('connection:listActions', async (connectionId: string) => {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn) return []
     if (conn.connectorId === MCP_CONNECTOR_ID) return mcpConnectionActions(conn)
+    if (conn.connectorId === SDK_CONNECTOR_ID) {
+      // A checkout or command is asked by starting it; one that will not start offers nothing yet.
+      return sdkConnectionActions(conn).catch((err) => {
+        log.warn(`[connectors] could not list actions for ${conn.id}: ${err}`)
+        return []
+      })
+    }
     const connector = connectorRegistry.get(conn.connectorId)
     return connector?.describe().actions ?? []
   })
@@ -1932,9 +1919,9 @@ export function registerAllMethods(): void {
     }
     // A built-in connector genuinely declares no preflight, so this really is
     // "nothing to check".
-    if (conn.connectorId !== MCP_CONNECTOR_ID) return { ok: null }
+    if (conn.connectorId !== SDK_CONNECTOR_ID) return { ok: null }
     try {
-      return await preflightMcpConnection(conn)
+      return await preflightSdkConnection(conn)
     } catch (err) {
       // Starting the connector at all is itself part of what preflight
       // answers: a package that will not launch is exactly the state the
@@ -2039,12 +2026,11 @@ export function registerAllMethods(): void {
     const conn = dbGetSourceConnection(connectionId)
     if (!conn) return { imported: 0, updated: 0, error: 'Connection not found' }
     const connector = connectorRegistry.get(conn.connectorId)
-    // MCP is polymorphic: draining it needs the full SourceConnection to
-    // address the per-connection stdio client, which the generic
-    // listItemsPage(filters) signature cannot carry — the same reason the
-    // scheduler routes MCP polling through pollMcpConnection.
+    // MCP and SDK connections drain through their own child, which the generic
+    // listItemsPage(filters) signature cannot address.
     const isMcp = conn.connectorId === MCP_CONNECTOR_ID
-    if (!isMcp && !connector?.listItems && !connector?.listItemsPage) {
+    const isSdk = conn.connectorId === SDK_CONNECTOR_ID
+    if (!isMcp && !isSdk && !connector?.listItems && !connector?.listItemsPage) {
       return {
         imported: 0,
         updated: 0,
@@ -2060,8 +2046,10 @@ export function registerAllMethods(): void {
     try {
       const drain = isMcp
         ? (visit: (item: ExternalItem) => void) => backfillMcpConnection(conn, visit)
-        : (visit: (item: ExternalItem) => void) =>
-            forEachConnectorItem(connector!, applyDecryptedCreds(conn), visit)
+        : isSdk
+          ? (visit: (item: ExternalItem) => void) => backfillSdkConnection(conn, visit)
+          : (visit: (item: ExternalItem) => void) =>
+              forEachConnectorItem(connector!, applyDecryptedCreds(conn), visit)
 
       await drain((item) => {
         const initialStatus = conn.statusMapping?.[item.status] || ('todo' as TaskStatus)

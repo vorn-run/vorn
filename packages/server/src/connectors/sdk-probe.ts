@@ -1,22 +1,6 @@
-/**
- * One-shot probe of a connector package built with `@vornrun/connector-sdk`.
- *
- * Such a connector is an ordinary MCP stdio server that also serves a
- * `vorn_connector_manifest` tool describing itself: its name, its triggers,
- * the environment variables it needs, and the exact filter values a Vorn
- * connection must carry to poll it correctly. Reading that manifest before the
- * connection exists is what lets Vorn fill the connection form in rather than
- * asking a person to transcribe a dozen field names from a README.
- *
- * Deliberately separate from `mcp-clients.ts`: that cache is keyed by
- * connection id and keeps children alive for the life of the process, which is
- * right for polling and wrong for a probe of something the user may not
- * install. This spawns, asks, and exits.
- */
+// A one-shot read of a connector package's manifest: start it, ask, stop it, before any connection exists.
 import { CONNECTOR_AUTH_RUNGS } from '@vornrun/shared/types'
 import { ORIGIN_PATTERN, sessionHeaders, withinOrigins } from '@vornrun/shared/connector-origins'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type {
   ConnectorAuthRung,
   ConnectorKind,
@@ -42,122 +26,38 @@ import type {
 // Re-exported because register-methods imports it from here rather than from
 // shared, and a type-only import is not itself an export.
 export type { SdkProbeRequest }
-import { getSafeEnv } from '../process-utils'
+import { connectSdkClient, type SdkClient, type SdkTimeouts } from './sdk-client'
 import log from '../logger'
 
-import { MANIFEST_TOOL } from './sdk-tools'
-
-export { MANIFEST_TOOL }
-
-/**
- * Give up rather than leave a child running. `npx -y <pkg>` downloads the
- * package on first use, so the budget has to cover a cold install, but an
- * unresponsive server must not wedge the settings UI.
- */
-const PROBE_TIMEOUT_MS = 90_000
+/** What a probe's messages call the package: its name, not the `npx` in front of it. */
+function probedName(command: string, args: readonly string[]): string {
+  return args.filter((arg) => !arg.startsWith('-')).at(-1) ?? command
+}
 
 export async function probeSdkConnector(
   request: SdkProbeRequest,
-  options: { timeoutMs?: number } = {}
+  options: { timeouts?: Partial<SdkTimeouts> } = {}
 ): Promise<SdkProbeResult> {
   const command = request.command?.trim()
   if (!command) return { ok: false, error: 'A command is required' }
+  const args = request.args ?? []
 
-  const transport = new StdioClientTransport({
-    command,
-    args: request.args ?? [],
-    // Same sanitized base as every other child process, so ambient tokens do
-    // not leak into a package the user is merely inspecting.
-    env: { ...getSafeEnv(), ...(request.env ?? {}) }
-  })
-  const client = new Client({ name: 'vorn', version: '0.1.0' }, { capabilities: {} })
-
+  let client: SdkClient | undefined
   try {
-    return await withTimeout(
-      probe(client, transport),
-      options.timeoutMs ?? PROBE_TIMEOUT_MS,
-      `Timed out after ${Math.round((options.timeoutMs ?? PROBE_TIMEOUT_MS) / 1000)}s waiting for ${command}`
+    client = await connectSdkClient(
+      { command, args, source: 'command', env: request.env ?? {} },
+      {
+        label: 'sdk-probe',
+        key: probedName(command, args),
+        ...(options.timeouts && { timeouts: options.timeouts })
+      }
     )
+    return { ok: true, manifest: toManifest(await client.manifest()) }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   } finally {
-    // Always reached, including on timeout: the probe promise keeps running
-    // after `withTimeout` rejects, and its child must not outlive this call.
-    try {
-      await client.close()
-    } catch {
-      /* the transport may already be gone */
-    }
-    try {
-      await transport.close()
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-async function probe(client: Client, transport: StdioClientTransport): Promise<SdkProbeResult> {
-  await client.connect(transport)
-
-  const tools = await client.listTools()
-  if (!(tools.tools ?? []).some((tool) => tool.name === MANIFEST_TOOL)) {
-    return {
-      ok: false,
-      error:
-        `This MCP server does not describe itself (no ${MANIFEST_TOOL} tool), so its ` +
-        `connection settings cannot be filled in automatically. Configure it as a plain ` +
-        `MCP connection instead.`
-    }
-  }
-
-  const result = await client.callTool({ name: MANIFEST_TOOL, arguments: {} })
-  if (result.isError) {
-    return { ok: false, error: textContent(result) ?? `${MANIFEST_TOOL} failed` }
-  }
-
-  const payload = manifestPayload(result)
-  if (!payload) return { ok: false, error: `${MANIFEST_TOOL} returned no manifest` }
-
-  try {
-    return { ok: true, manifest: toManifest(payload) }
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) }
-  }
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
-  let timer: NodeJS.Timeout
-  return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(message)), ms)
-    })
-  ])
-}
-
-export function textContent(result: unknown): string | undefined {
-  const content = (result as { content?: Array<{ type?: string; text?: string }> })?.content
-  if (!Array.isArray(content)) return undefined
-  for (const block of content) {
-    if (block?.type === 'text' && typeof block.text === 'string') return block.text
-  }
-  return undefined
-}
-
-/**
- * Prefer `structuredContent`, falling back to parsing the text block. The SDK
- * always sends both, but a hand-written server may only send text.
- */
-export function manifestPayload(result: unknown): Record<string, unknown> | undefined {
-  const structured = (result as { structuredContent?: unknown }).structuredContent
-  if (isRecord(structured)) return structured
-  const text = textContent(result)
-  if (!text) return undefined
-  try {
-    const parsed: unknown = JSON.parse(text)
-    return isRecord(parsed) ? parsed : undefined
-  } catch {
-    return undefined
+    // The child must not outlive a probe of something the user may never install.
+    await client?.close().catch(() => {})
   }
 }
 

@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { SESSION_CALL_META } from '../packages/shared/src/types'
-import type { SdkBrowserSignIn, SessionCall, SourceConnection } from '../src/shared/types'
+import type { SdkBrowserSignIn, SessionCall, SourceConnection } from '../packages/shared/src/types'
 import type { SessionGrant } from '../packages/server/src/connectors/session-bridge'
+import { SdkCallError } from '../packages/server/src/connectors/native-client'
 
-const callTool = vi.fn()
+const action = vi.fn()
 const grants = vi.hoisted(() => ({ current: undefined as SessionGrant | undefined }))
 vi.mock('../packages/server/src/connectors/mcp-clients', () => ({
-  getOrStartClient: vi.fn(async () => ({ callTool })),
+  getOrStartSdkClient: vi.fn(async () => ({ action })),
   sessionGrantFor: () => grants.current
 }))
 
@@ -20,13 +20,13 @@ vi.mock('../packages/server/src/database', async (importOriginal) => ({
   dbSignalChange: vi.fn()
 }))
 
-import { invokeMcpTool } from '../packages/server/src/connectors/mcp'
+import { invokeSdkAction } from '../packages/server/src/connectors/sdk'
 
 const conn = {
   id: 'c1',
-  connectorId: 'mcp',
+  connectorId: 'sdk',
   name: 'Substack',
-  filters: { command: 'node', args: '[]' },
+  filters: { sdkConnectorId: 'substack', sdkVersion: '0.2.1' },
   syncIntervalMinutes: 5,
   statusMapping: {},
   createdAt: '2026-09-10T20:00:00Z'
@@ -38,15 +38,18 @@ const browser: SdkBrowserSignIn = {
   check: { url: 'https://substack.com/api/v1/user/profile/self', identity: ['name'] }
 }
 
-const refused = { isError: true, content: [{ type: 'text', text: 'HTTP 401' }] }
+const refused = () =>
+  new SdkCallError('action/run', -32000, 'HTTP 401', { kind: 'upstream', retryable: false })
 
-/** The child answering each tool, after making these requests through its window under the call's key. */
-function child(tools: Record<string, { calls: SessionCall[]; answer: object }>): void {
-  callTool.mockImplementation(async (params: { name: string; _meta?: Record<string, unknown> }) => {
-    const { calls, answer } = tools[params.name]!
-    const key = params._meta?.[SESSION_CALL_META]
-    if (typeof key === 'string') grants.current?.calls.get(key)?.push(...calls)
-    return answer
+type Answer = { calls: SessionCall[]; fails?: () => Error; output?: Record<string, unknown> }
+
+/** The child answering each action, after making these requests through its window under the call's key. */
+function child(actions: Record<string, Answer>): void {
+  action.mockImplementation(async (params: { action: string; sessionCall?: string }) => {
+    const { calls, fails, output } = actions[params.action]!
+    if (params.sessionCall) grants.current?.calls.get(params.sessionCall)?.push(...calls)
+    if (fails) throw fails()
+    return output ?? {}
   })
 }
 
@@ -55,7 +58,7 @@ const signedInThroughWindow = () => {
 }
 
 beforeEach(() => {
-  callTool.mockReset()
+  action.mockReset()
   signIns.mockReset()
   bridge.request.mockReset()
   bridge.isConnected = true
@@ -64,12 +67,12 @@ beforeEach(() => {
 
 describe('what a failed call of a browser connection says', () => {
   it('leaves an ordinary connection exactly as it was', async () => {
-    child({ createDraft: { calls: [], answer: refused } })
-    const result = await invokeMcpTool(conn, 'createDraft', {})
+    child({ createDraft: { calls: [], fails: refused } })
+    const result = await invokeSdkAction(conn, 'createDraft', {})
     expect(result).toMatchObject({ success: false, error: 'HTTP 401' })
     expect(result.errorKind).toBeUndefined()
     expect(result.sessionCalls).toBeUndefined()
-    expect(callTool).toHaveBeenCalledWith({ name: 'createDraft', arguments: {} })
+    expect(action).toHaveBeenCalledWith({ action: 'createDraft', args: {} })
   })
 
   it('says to open Vorn when no desktop held the window', async () => {
@@ -77,10 +80,10 @@ describe('what a failed call of a browser connection says', () => {
     child({
       createDraft: {
         calls: [{ method: 'POST', path: '/api/v1/drafts', status: 'app-offline' }],
-        answer: refused
+        fails: refused
       }
     })
-    const result = await invokeMcpTool(conn, 'createDraft', {})
+    const result = await invokeSdkAction(conn, 'createDraft', {})
     expect(result.errorKind).toBe('app-offline')
     expect(result.error).toMatch(/Open Vorn on the desktop Substack signed in on/)
   })
@@ -88,9 +91,9 @@ describe('what a failed call of a browser connection says', () => {
   it('says it needs signing in when the site refused and the window is signed out', async () => {
     signedInThroughWindow()
     const calls: SessionCall[] = [{ method: 'POST', path: '/api/v1/drafts', status: 401 }]
-    child({ createDraft: { calls, answer: refused } })
+    child({ createDraft: { calls, fails: refused } })
     bridge.request.mockResolvedValue({ signedIn: false, identity: null })
-    const result = await invokeMcpTool(conn, 'createDraft', {})
+    const result = await invokeSdkAction(conn, 'createDraft', {})
     expect(result.errorKind).toBe('needs-sign-in')
     expect(result.sessionCalls).toEqual(calls)
     expect(signIns).toHaveBeenCalledWith('c1', null, null)
@@ -101,11 +104,11 @@ describe('what a failed call of a browser connection says', () => {
     child({
       deleteComment: {
         calls: [{ method: 'DELETE', path: '/api/v1/comment/9', status: 403 }],
-        answer: refused
+        fails: refused
       }
     })
     bridge.request.mockResolvedValue({ signedIn: true, identity: 'Javier' })
-    const result = await invokeMcpTool(conn, 'deleteComment', {})
+    const result = await invokeSdkAction(conn, 'deleteComment', {})
     expect(result.errorKind).toBeUndefined()
     expect(result.error).toBe('HTTP 401')
     expect(signIns).not.toHaveBeenCalled()
@@ -116,17 +119,17 @@ describe('what a failed call of a browser connection says', () => {
     child({
       createDraft: {
         calls: [{ method: 'POST', path: '/api/v1/drafts', status: 401 }],
-        answer: refused
+        fails: refused
       },
       searchPosts: {
         calls: [{ method: 'GET', path: '/api/v1/post/search', status: 200 }],
-        answer: { isError: true, content: [{ type: 'text', text: 'No query given' }] }
+        fails: () => new SdkCallError('action/run', -32000, 'No query given', { kind: 'internal' })
       }
     })
     bridge.request.mockResolvedValue({ signedIn: false, identity: null })
     const [draft, search] = await Promise.all([
-      invokeMcpTool(conn, 'createDraft', {}),
-      invokeMcpTool(conn, 'searchPosts', {})
+      invokeSdkAction(conn, 'createDraft', {}),
+      invokeSdkAction(conn, 'searchPosts', {})
     ])
     expect(draft.errorKind).toBe('needs-sign-in')
     expect(search.errorKind).toBeUndefined()
@@ -135,17 +138,61 @@ describe('what a failed call of a browser connection says', () => {
     ])
   })
 
-  it('gives a browser call longer to finish, keeps its calls for the log, then lets them go', async () => {
+  it('hands the child the call key, keeps its calls for the log, then lets them go', async () => {
     signedInThroughWindow()
     const calls: SessionCall[] = [{ method: 'GET', path: '/api/v1/post/search', status: 200 }]
-    child({ searchPosts: { calls, answer: { isError: false, structuredContent: { posts: [] } } } })
-    const result = await invokeMcpTool(conn, 'searchPosts', {})
-    expect(result).toMatchObject({ success: true, sessionCalls: calls })
-    expect(callTool).toHaveBeenCalledWith(
-      { name: 'searchPosts', arguments: {}, _meta: { [SESSION_CALL_META]: expect.any(String) } },
-      undefined,
-      { timeout: 120_000 }
-    )
+    child({ searchPosts: { calls, output: { posts: [] } } })
+    const result = await invokeSdkAction(conn, 'searchPosts', {})
+    expect(result).toEqual({ success: true, output: { posts: [] }, sessionCalls: calls })
+    expect(action).toHaveBeenCalledWith({
+      action: 'searchPosts',
+      args: {},
+      sessionCall: expect.any(String)
+    })
     expect(grants.current?.calls.size).toBe(0)
+  })
+})
+
+describe('what an SDK action carries both ways', () => {
+  it('sends typed arguments as they are, and returns lists and nulls whole', async () => {
+    child({ listPosts: { calls: [], output: { items: [{ id: 1 }], next: null } } })
+    const result = await invokeSdkAction(conn, 'listPosts', {
+      limit: 3,
+      tags: ['ai'],
+      draft: false
+    })
+    expect(action).toHaveBeenCalledWith({
+      action: 'listPosts',
+      args: { limit: 3, tags: ['ai'], draft: false }
+    })
+    expect(result).toEqual({ success: true, output: { items: [{ id: 1 }], next: null } })
+  })
+
+  it('reads the kind a connector gave its failure', async () => {
+    child({
+      offline: {
+        calls: [],
+        fails: () =>
+          new SdkCallError('action/run', -32000, 'Vorn is closed', { kind: 'app-offline' })
+      },
+      signedOut: {
+        calls: [],
+        fails: () => new SdkCallError('action/run', -32000, 'HTTP 401', { kind: 'signed-out' })
+      },
+      invalid: {
+        calls: [],
+        fails: () =>
+          new SdkCallError('action/run', -32000, 'requires "title"', {
+            kind: 'validation',
+            field: 'title'
+          })
+      }
+    })
+    expect((await invokeSdkAction(conn, 'offline', {})).errorKind).toBe('app-offline')
+    expect((await invokeSdkAction(conn, 'signedOut', {})).errorKind).toBe('needs-sign-in')
+    expect(await invokeSdkAction(conn, 'invalid', {})).toEqual({
+      success: false,
+      error: 'requires "title"'
+    })
   })
 })

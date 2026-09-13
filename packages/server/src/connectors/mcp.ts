@@ -14,7 +14,6 @@
  * token.
  * The decrypted values are merged in at spawn time via `getOrStartClient`.
  */
-import { openSessionCall, sessionOutcome, type OpenSessionCall } from './session-bridge'
 import type {
   VornConnector,
   ConnectorManifest,
@@ -26,13 +25,8 @@ import type {
   ExternalItem,
   SourceConnection
 } from '@vornrun/shared/types'
-import { SDK_FILTER_KEYS, SESSION_CALL_META } from '@vornrun/shared/types'
 import { schemaProperties, schemaTypeHint, schemaRequired } from '@vornrun/shared/json-schema-utils'
-import { getOrStartClient, sessionGrantFor } from './mcp-clients'
-import { PREFLIGHT_TOOL, isReservedSdkTool } from './sdk-tools'
-import { describePack } from './packs'
-
-export { PREFLIGHT_TOOL }
+import { getOrStartClient } from './mcp-clients'
 
 /** Stable id for the generic MCP connector. Used everywhere the server
  *  needs to distinguish MCP from static connectors. */
@@ -167,81 +161,15 @@ export async function discoverTools(conn: SourceConnection): Promise<McpDiscover
 }
 
 /** Return the actions a given MCP connection exposes, in the same shape as
- *  any other connector's static manifest. Empty until discovery completes.
- *
- *  A packaged connector also serves the manifest, preflight and poll tools the
- *  app drives itself; those are plumbing, not steps a workflow can call. A raw
- *  MCP server keeps every tool, because there nothing is reserved. */
+ *  any other connector's static manifest. Empty until discovery completes. */
 export function mcpConnectionActions(conn: SourceConnection): ConnectorActionDef[] {
   return visibleMcpTools(conn).map(mcpToolToConnectorAction)
 }
 
-/**
- * The tools on a connection that are the connector's own, not Vorn's.
- *
- * One answer for every surface that lists them — the step picker, the variable
- * picker, an agent, and the tools console — so they cannot disagree about what
- * a connector offers.
- */
+/** The tools discovered on an MCP connection, one answer for every surface that lists them. */
 export function visibleMcpTools(conn: SourceConnection): McpDiscoveredTool[] {
   const tools = conn.filters.discoveredTools
-  if (!Array.isArray(tools)) return []
-  const packaged = typeof conn.filters[SDK_FILTER_KEYS.connectorId] === 'string'
-  if (!packaged) return tools as McpDiscoveredTool[]
-  let triggerTypes: string[] | undefined
-  try {
-    triggerTypes = describePack(String(conn.filters[SDK_FILTER_KEYS.connectorId]))?.triggers.map(
-      (trigger) => trigger.type
-    )
-  } catch {
-    // No data directory yet, or nothing installed: the prefix rule still holds.
-    triggerTypes = undefined
-  }
-  return (tools as McpDiscoveredTool[]).filter(
-    (tool) => !isReservedSdkTool(tool.name, triggerTypes)
-  )
-}
-
-export interface PreflightReport {
-  /** `null` when the connector declares no preflight — nothing to check. */
-  ok: boolean | null
-  message?: string
-}
-
-/**
- * Ask a packaged connector whether it could run right now.
- *
- * Only meaningful per connection, never per catalog entry: answering needs the
- * connector's own process, and a catalog of twenty would mean twenty of them.
- * A connection already holds a client, so this costs nothing extra.
- *
- * A connector with no `preflight` reports `ok: null` rather than `true`. The
- * two are different answers — "nothing to check" must not be shown to a user
- * as "checked, fine" — and only the connectors borrowing an external login
- * have anything to say here.
- */
-export async function preflightMcpConnection(conn: SourceConnection): Promise<PreflightReport> {
-  const client = await getOrStartClient(conn)
-  const tools = await client.listTools()
-  if (!(tools.tools ?? []).some((tool) => tool.name === PREFLIGHT_TOOL)) {
-    return { ok: null }
-  }
-
-  const result = await client.callTool({ name: PREFLIGHT_TOOL, arguments: {} })
-  const structured = (result as { structuredContent?: Record<string, unknown> }).structuredContent
-  if (result.isError || !structured) {
-    return {
-      ok: false,
-      // Falls back to a sentence rather than the tool's name: this reaches a
-      // user, and `vorn_connector_preflight failed` tells them nothing they
-      // can act on while naming something they never chose.
-      message:
-        extractTextError(result.content) ?? 'The connector could not report whether it is ready.'
-    }
-  }
-
-  const message = typeof structured.message === 'string' ? structured.message : undefined
-  return { ok: structured.ok === true, ...(message && { message }) }
+  return Array.isArray(tools) ? (tools as McpDiscoveredTool[]) : []
 }
 
 /** Invoke a single MCP tool. Separate from `VornConnector.execute` because
@@ -252,24 +180,18 @@ export async function invokeMcpTool(
   toolName: string,
   args: Record<string, unknown>
 ): Promise<ActionResult> {
-  let call: OpenSessionCall | undefined
-  let outcome: ActionResult
   try {
     const client = await getOrStartClient(conn)
-    const grant = sessionGrantFor(conn.id)
-    if (grant) call = openSessionCall(grant)
     // Look up this tool's discovered inputSchema so we can coerce string form
     // values back to the types the tool actually expects.
     const tools = conn.filters.discoveredTools
     const tool = Array.isArray(tools)
       ? (tools as McpDiscoveredTool[]).find((t) => t.name === toolName)
       : undefined
-    const params = { name: toolName, arguments: coerceMcpArgs(tool?.inputSchema, args) }
-    const result = call
-      ? await client.callTool({ ...params, _meta: { [SESSION_CALL_META]: call.key } }, undefined, {
-          timeout: BROWSER_TOOL_TIMEOUT_MS
-        })
-      : await client.callTool(params)
+    const result = await client.callTool({
+      name: toolName,
+      arguments: coerceMcpArgs(tool?.inputSchema, args)
+    })
     // When the tool declared an outputSchema, MCP returns the typed payload
     // under `structuredContent`. Surface that as `output` so downstream
     // workflow steps can reference the declared fields directly
@@ -281,7 +203,7 @@ export async function invokeMcpTool(
       string,
       unknown
     >
-    outcome = result.isError
+    return result.isError
       ? {
           success: false,
           error: extractTextError(result.content) ?? `MCP tool ${toolName} reported an error`,
@@ -289,13 +211,9 @@ export async function invokeMcpTool(
         }
       : { success: true, output }
   } catch (err) {
-    outcome = { success: false, error: err instanceof Error ? err.message : String(err) }
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
   }
-  return call ? await sessionOutcome(conn, call, outcome) : outcome
 }
-
-/** A tool may make several calls through its window, each up to twenty seconds. */
-const BROWSER_TOOL_TIMEOUT_MS = 120_000
 
 // --- Poll / trigger support -------------------------------------------------
 
@@ -381,9 +299,7 @@ function fieldString(item: Record<string, unknown>, field: string | undefined): 
  * Cursor semantics come in two flavours. When `cursorArg` is configured the
  * tool owns dedup: the stored cursor is passed through as that argument, every
  * returned item is emitted, and the next cursor is read back from the result
- * (`cursorPath`, default `nextCursor`). Connectors built with
- * `@vornrun/connector-sdk` are wired this way, so their dedupe strategy — not
- * this function — decides what is new.
+ * (`cursorPath`, default `nextCursor`), so the tool decides what is new.
  *
  * Otherwise Vorn dedupes client-side: with a
  * `timestampField` configured, only items with `timestampField >= cursor` are

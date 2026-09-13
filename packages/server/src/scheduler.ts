@@ -26,6 +26,7 @@ import {
 } from './database'
 import { connectorRegistry, applyDecryptedCreds } from './connectors'
 import { MCP_CONNECTOR_ID, MCP_POLL_EVENT, pollMcpConnection } from './connectors/mcp'
+import { SDK_CONNECTOR_ID, pollSdkConnection, sdkTriggerOf } from './connectors/sdk'
 import log from './logger'
 import { runConnectorItem, runScheduled } from './workflows/dispatch'
 import { stopWorkflowRun } from './workflows/engine'
@@ -333,14 +334,10 @@ class Scheduler extends EventEmitter {
       return
     }
     const connector = connectorRegistry.get(conn.connectorId)
-    // MCP is polymorphic: its poll needs the full SourceConnection to spawn the
-    // per-connection stdio client, so it's routed through pollMcpConnection
-    // rather than the generic connector.poll (which only gets flattened
-    // filters) — mirroring how MCP execute is special-cased. Decrypted secrets
-    // don't need overlaying here: getOrStartClient pulls secretEnv from the
-    // decrypted-creds store keyed by conn.id.
+    // MCP and SDK connections poll through their own child, which needs the whole connection rather than flattened filters.
     const isMcp = conn.connectorId === MCP_CONNECTOR_ID
-    if (!isMcp && !connector?.poll) {
+    const isSdk = conn.connectorId === SDK_CONNECTOR_ID
+    if (!isMcp && !isSdk && !connector?.poll) {
       log.warn(`[scheduler] connectorPoll: connector ${conn.connectorId} has no poll() — skipping`)
       return
     }
@@ -352,6 +349,16 @@ class Scheduler extends EventEmitter {
       )
       return
     }
+    // A seeded workflow fires on the generic event and polls the connection's trigger; a template names the trigger itself.
+    const sdkTrigger = !isSdk
+      ? ''
+      : trigger.event === MCP_POLL_EVENT
+        ? sdkTriggerOf(conn)
+        : trigger.event
+    if (isSdk && !sdkTrigger) {
+      log.warn(`[scheduler] connectorPoll: connection ${conn.id} has no trigger to poll — skipping`)
+      return
+    }
 
     let cursor = dbGetConnectorPollCursor(workflowId, conn.id)
     const now = new Date().toISOString()
@@ -359,7 +366,9 @@ class Scheduler extends EventEmitter {
       for (let page = 0; page < MAX_POLL_PAGES_PER_TICK; page++) {
         const result = isMcp
           ? await pollMcpConnection(conn, cursor)
-          : await connector!.poll!(trigger.event, applyDecryptedCreds(conn), cursor)
+          : isSdk
+            ? await pollSdkConnection(conn, sdkTrigger, cursor)
+            : await connector!.poll!(trigger.event, applyDecryptedCreds(conn), cursor)
         const nextCursor = result.nextCursor ?? cursor
         if (result.hasMore && nextCursor === cursor) {
           throw new Error(
