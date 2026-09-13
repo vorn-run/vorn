@@ -704,3 +704,35 @@ describe('rollbackPack and removePack', () => {
     expect(listInstalledPacks({ root: join(tempDir(), 'absent') })).toEqual([])
   })
 })
+
+describe('the protocol an installed pack speaks', () => {
+  it('carries the protocol its manifest names, on the pack and on its launch', async () => {
+    const root = tempDir()
+    const files = {
+      'manifest.json': JSON.stringify({ ...(manifestFor('acme', '1.2.0') as object), protocol: 1 }),
+      'index.js': 'process.stdin.resume()\n'
+    }
+
+    const result = await installPack({ kind: 'file', path: await buildArchive(files) }, { root })
+
+    expect(result.ok).toBe(true)
+    expect(describePack('acme', { root })?.protocol).toBe(1)
+    expect(installedLaunch('acme', { root })).toEqual({
+      command: 'node',
+      args: [join(root, 'acme', '1.2.0', 'index.js')],
+      protocol: 1
+    })
+  })
+
+  it('names no protocol for a pack built before there was one', async () => {
+    const root = tempDir()
+
+    await installPack({ kind: 'file', path: await buildArchive(goodFiles()) }, { root })
+
+    expect(describePack('acme', { root })?.protocol).toBeUndefined()
+    expect(installedLaunch('acme', { root })).toEqual({
+      command: 'node',
+      args: [join(root, 'acme', '1.2.0', 'index.js')]
+    })
+  })
+})

@@ -2346,6 +2346,8 @@ export interface SdkConnectorManifest {
   icon?: SdkConnectorIcon
   /** Absent on a connector built before rungs existed, which reads as unknown. */
   auth?: SdkConnectorAuth
+  /** The native protocol it speaks; absent on a connector that speaks MCP. */
+  protocol?: number
   triggers: SdkTrigger[]
   actions: SdkAction[]
   /** Union of the environment variables the connector reads. */
@@ -2369,6 +2371,8 @@ export interface InstalledConnectorPack {
   icon?: SdkConnectorIcon
   /** How this connector signs in, read from the manifest that was installed. */
   auth?: SdkConnectorAuth
+  /** The native protocol the installed files speak; absent on a pack that speaks MCP. */
+  protocol?: number
   /** Directory holding the running version's files. */
   path: string
   /** The one version kept behind the current one, when a rollback is possible. */

@@ -135,7 +135,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   ])
 }
 
-function textContent(result: unknown): string | undefined {
+export function textContent(result: unknown): string | undefined {
   const content = (result as { content?: Array<{ type?: string; text?: string }> })?.content
   if (!Array.isArray(content)) return undefined
   for (const block of content) {
@@ -148,7 +148,7 @@ function textContent(result: unknown): string | undefined {
  * Prefer `structuredContent`, falling back to parsing the text block. The SDK
  * always sends both, but a hand-written server may only send text.
  */
-function manifestPayload(result: unknown): Record<string, unknown> | undefined {
+export function manifestPayload(result: unknown): Record<string, unknown> | undefined {
   const structured = (result as { structuredContent?: unknown }).structuredContent
   if (isRecord(structured)) return structured
   const text = textContent(result)
@@ -679,6 +679,13 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
   const auth = toAuth(payload.auth)
   const permissions = kind === 'extension' ? toPermissions(payload.permissions) : undefined
   const activates = kind === 'extension' ? toActivation(payload.activates) : undefined
+  // A newer protocol is kept, so the app can say the pack needs a newer Vorn instead of launching it as MCP.
+  const protocol =
+    typeof payload.protocol === 'number' &&
+    Number.isInteger(payload.protocol) &&
+    payload.protocol >= 1
+      ? payload.protocol
+      : undefined
 
   log.info(
     `[sdk-probe] ${id}@${str(payload.version, '0.0.0')}: ${kind === 'extension' ? `${(contributes?.panes?.length ?? 0) + (contributes?.footers?.length ?? 0) + (contributes?.linkHandlers?.length ?? 0)} contribution(s)` : `${triggers.length} trigger(s)`}`
@@ -692,6 +699,7 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
     ...(typeof payload.description === 'string' && { description: payload.description }),
     ...(icon && { icon }),
     ...(auth && { auth }),
+    ...(protocol !== undefined && { protocol }),
     triggers,
     actions,
     env: [...env.values()],

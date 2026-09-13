@@ -607,6 +607,7 @@ export function describePack(
     ...(manifest.description !== undefined && { description: manifest.description }),
     ...(manifest.icon !== undefined && { icon: manifest.icon }),
     ...(manifest.auth !== undefined && { auth: manifest.auth }),
+    ...(manifest.protocol !== undefined && { protocol: manifest.protocol }),
     ...extensionFacts(manifest),
     path,
     ...(current.previousVersion !== undefined && { previousVersion: current.previousVersion }),
@@ -634,9 +635,14 @@ export function listInstalledPacks(options: PackOptions = {}): InstalledConnecto
 export function installedLaunch(
   id: string,
   options: PackOptions = {}
-): { command: string; args: string[] } | undefined {
+): { command: string; args: string[]; protocol?: number } | undefined {
   const pack = describePack(id, options)
-  return pack ? { command: 'node', args: [join(pack.path, ENTRY_FILE)] } : undefined
+  if (!pack) return undefined
+  return {
+    command: 'node',
+    args: [join(pack.path, ENTRY_FILE)],
+    ...(pack.protocol !== undefined && { protocol: pack.protocol })
+  }
 }
 
 /** Swap back to the one version kept behind the current one. */

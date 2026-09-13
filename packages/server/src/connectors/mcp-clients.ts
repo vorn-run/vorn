@@ -57,7 +57,9 @@ function parseJsonArray(raw: unknown): string[] {
 }
 
 /** Before the database has resolved a data directory there is nowhere to look. */
-function installedPackLaunch(id: string): { command: string; args: string[] } | undefined {
+function installedPackLaunch(
+  id: string
+): { command: string; args: string[]; protocol?: number } | undefined {
   try {
     return installedLaunch(id)
   } catch {
@@ -70,16 +72,40 @@ export function sdkIdOf(conn: SourceConnection): string {
   return String(conn.filters[SDK_FILTER_KEYS.connectorId] ?? '').trim()
 }
 
+export type LaunchSource = 'checkout' | 'pack' | 'command'
+
+/** How a connection's child starts, where that came from, and the protocol an installed pack names. */
+export interface LaunchSpec {
+  command: string
+  args: string[]
+  source: LaunchSource
+  protocol?: number
+}
+
 /** Checkout, then installed pack, then stored command; a pack must beat stale args. */
-export function resolveLaunch(conn: SourceConnection): { command: string; args: string[] } {
+export function resolveLaunchSource(conn: SourceConnection): LaunchSpec {
   const sdkId = sdkIdOf(conn)
   if (sdkId) {
-    const resolved = localLaunchSpec(sdkId) ?? installedPackLaunch(sdkId)
-    if (resolved) return resolved
+    const local = localLaunchSpec(sdkId)
+    if (local) return { command: local.command, args: local.args, source: 'checkout' }
+    const pack = installedPackLaunch(sdkId)
+    if (pack) {
+      return {
+        command: pack.command,
+        args: pack.args,
+        source: 'pack',
+        ...(pack.protocol !== undefined && { protocol: pack.protocol })
+      }
+    }
   }
   const command = String(conn.filters.command ?? '').trim()
   if (!command) throw new Error('MCP connection is missing a command')
-  return { command, args: parseJsonArray(conn.filters.args) }
+  return { command, args: parseJsonArray(conn.filters.args), source: 'command' }
+}
+
+export function resolveLaunch(conn: SourceConnection): { command: string; args: string[] } {
+  const { command, args } = resolveLaunchSource(conn)
+  return { command, args }
 }
 
 interface SpawnConfig {

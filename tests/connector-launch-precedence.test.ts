@@ -186,3 +186,72 @@ describe('stopClientsForConnector', () => {
     expect(hasClient('conn-1')).toBe(false)
   })
 })
+
+describe('resolveLaunchSource', () => {
+  const pack: { installed: boolean; protocol?: number } = { installed: true }
+
+  beforeEach(() => {
+    pack.installed = true
+    delete pack.protocol
+    vi.doMock('../packages/server/src/connectors/packs', () => ({
+      installedLaunch: (id: string) =>
+        id === 'acme' && pack.installed
+          ? {
+              command: 'node',
+              args: ['/packs/acme/2.0.0/index.js'],
+              ...(pack.protocol !== undefined && { protocol: pack.protocol })
+            }
+          : undefined,
+      installedPack: () => undefined
+    }))
+  })
+
+  const load = async (): Promise<typeof import('../packages/server/src/connectors/mcp-clients')> =>
+    import('../packages/server/src/connectors/mcp-clients')
+
+  it('says a local checkout is where the launch comes from', async () => {
+    const root = checkoutWith('acme')
+    vi.stubEnv('VORN_CONNECTORS_ROOT', root)
+    const { resolveLaunchSource } = await load()
+    expect(resolveLaunchSource(connection({ sdkConnectorId: 'acme' }))).toEqual({
+      command: 'node',
+      args: [join(root, 'packages', 'acme', 'dist', 'index.js')],
+      source: 'checkout'
+    })
+  })
+
+  it('carries the protocol an installed pack names, and nothing for one that names none', async () => {
+    const { resolveLaunchSource } = await load()
+    const conn = connection({ sdkConnectorId: 'acme', command: 'npx' })
+    pack.protocol = 1
+    expect(resolveLaunchSource(conn)).toEqual({
+      command: 'node',
+      args: ['/packs/acme/2.0.0/index.js'],
+      source: 'pack',
+      protocol: 1
+    })
+    delete pack.protocol
+    expect(resolveLaunchSource(conn)).toEqual({
+      command: 'node',
+      args: ['/packs/acme/2.0.0/index.js'],
+      source: 'pack'
+    })
+  })
+
+  it('falls back to the stored command', async () => {
+    pack.installed = false
+    const { resolveLaunchSource } = await load()
+    expect(
+      resolveLaunchSource(connection({ sdkConnectorId: 'acme', command: 'uvx', args: '["x"]' }))
+    ).toEqual({ command: 'uvx', args: ['x'], source: 'command' })
+  })
+
+  it('keeps resolveLaunch to the command and its arguments', async () => {
+    pack.protocol = 1
+    const { resolveLaunch } = await load()
+    expect(resolveLaunch(connection({ sdkConnectorId: 'acme' }))).toEqual({
+      command: 'node',
+      args: ['/packs/acme/2.0.0/index.js']
+    })
+  })
+})
