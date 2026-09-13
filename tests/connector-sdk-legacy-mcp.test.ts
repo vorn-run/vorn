@@ -193,8 +193,9 @@ describe('a connector that only speaks MCP', () => {
     const bare = fake({})
     await bare.adapter.close()
     expect(bare.client.close).toHaveBeenCalled()
+    expect(bare.adapter.exited).toBe(false)
 
-    const lifecycle = { close: vi.fn(async () => {}), onExit: vi.fn() }
+    const lifecycle = { exited: true, close: vi.fn(async () => {}), onExit: vi.fn() }
     const client = { close: vi.fn(async () => {}) }
     const owned = legacyMcpSdkClient(client as unknown as Client, lifecycle)
     const listener = vi.fn()
@@ -202,6 +203,7 @@ describe('a connector that only speaks MCP', () => {
     await owned.close()
     expect(lifecycle.close).toHaveBeenCalled()
     expect(lifecycle.onExit).toHaveBeenCalledWith(listener)
+    expect(owned.exited).toBe(true)
     expect(client.close).not.toHaveBeenCalled()
   })
 })

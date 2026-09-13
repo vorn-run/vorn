@@ -8,15 +8,12 @@ import {
   type ProtocolMethod,
   type ProtocolMethods
 } from '@vornrun/shared/connector-protocol'
+import type { SpawnConfig } from './stdio-clients'
 import { getSafeEnv } from '../process-utils'
 import log from '../logger'
 
-export interface NativeSpawnConfig {
-  command: string
-  args: string[]
-  env: Record<string, string>
-  cwd?: string
-}
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value)
 
 export interface NativeClientOptions {
   label: string
@@ -187,7 +184,7 @@ interface Pending {
 }
 
 export async function startNativeClient(
-  config: NativeSpawnConfig,
+  config: SpawnConfig,
   options: NativeClientOptions
 ): Promise<NativeClient> {
   const maxBytes = options.maxFrameBytes ?? MAX_FRAME_BYTES

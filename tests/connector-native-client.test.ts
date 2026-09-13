@@ -231,7 +231,7 @@ describe('a native connector child', () => {
   })
 
   it('stops a child whose line outgrows the frame limit', async () => {
-    const client = await start('oversized')
+    const client = await start('oversized', { maxFrameBytes: 4096 })
     const exit = exitOf(client)
     await client.request('vorn/hello', HELLO_PARAMS, 5_000)
     await expect(client.request('connector/manifest', {}, 10_000)).rejects.toMatchObject({

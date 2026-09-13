@@ -48,7 +48,7 @@ function handle({ id, method, params = {} }) {
     return answer(id, HELLO)
   }
   if (mode === 'oversized') {
-    process.stdout.write(Buffer.alloc(16 * 1024 * 1024 + 1, 'x'))
+    process.stdout.write(Buffer.alloc(Number(process.argv[3] ?? 4097), 'x'))
     return
   }
   if (mode === 'exit-mid-call' && method === 'action/run') {

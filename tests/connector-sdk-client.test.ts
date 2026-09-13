@@ -109,8 +109,11 @@ describe('an installed pack', () => {
     const client = await connect(native('normal', 'pack', 1), { startLegacy: legacy.start })
     expect(client.protocol).toBe(1)
     expect(client.hello?.connector.id).toBe('native-fixture')
+    expect(client.exited).toBe(false)
     expect(await client.manifest()).toMatchObject({ id: 'native-fixture', protocol: 1 })
     expect(legacy.start).not.toHaveBeenCalled()
+    await client.close()
+    expect(client.exited).toBe(true)
   })
 
   it('that names no protocol is started as MCP without a hello', async () => {
@@ -207,6 +210,7 @@ describe('a checkout or a stored command', () => {
   it('that turns out to be an MCP connector is spoken to through the MCP adapter', async () => {
     const client = await connect(mcp('checkout'), { key: 'mcp-fixture' })
     expect(client.protocol).toBe('mcp')
+    expect(client.exited).toBe(false)
     expect(log.info).toHaveBeenCalledWith(
       '[connectors] mcp-fixture: legacy MCP protocol (checkout)'
     )
@@ -219,6 +223,8 @@ describe('a checkout or a stored command', () => {
     expect(
       await client.action({ action: 'echo', args: { text: 'hi', count: 3, gone: null } })
     ).toEqual({ text: 'hi', count: 3 })
+    await client.close()
+    await vi.waitFor(() => expect(client.exited).toBe(true))
   }, 30_000)
 
   it('that knows the hello but not this protocol needs a newer Vorn', async () => {

@@ -12,12 +12,20 @@ import {
   type ExtensionFooterResult,
   type ExtensionHandlerParams,
   type ExtensionHandlerResult,
+  type ProtocolMethod,
+  type ProtocolMethods,
   type TriggerPollParams,
   type TriggerPollResult,
   type VornHelloResult
 } from '@vornrun/shared/connector-protocol'
 import type { LaunchSpec } from './mcp-clients'
-import { SdkCallError, startNativeClient, type ChildExit, type NativeClient } from './native-client'
+import {
+  SdkCallError,
+  isRecord,
+  startNativeClient,
+  type ChildExit,
+  type NativeClient
+} from './native-client'
 import { startLegacyMcpSdkClient } from './sdk-legacy-mcp'
 import log from '../logger'
 
@@ -26,6 +34,7 @@ export interface SdkClient {
   /** The native protocol agreed in `vorn/hello`, or `mcp` for a child that only speaks MCP. */
   readonly protocol: number | 'mcp'
   readonly hello?: VornHelloResult
+  readonly exited: boolean
   manifest(): Promise<Record<string, unknown>>
   preflight(): Promise<ConnectorPreflightResult>
   options(params: ConnectorOptionsParams): Promise<ConnectorOptionsResult>
@@ -87,9 +96,6 @@ export interface ConnectSdkOptions {
   timeouts?: Partial<SdkTimeouts>
   startLegacy?: (launch: SdkLaunch) => Promise<SdkClient>
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === 'object' && !Array.isArray(value)
 
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
@@ -161,83 +167,102 @@ class NativeSdkClient implements SdkClient {
     this.key = key
   }
 
-  private malformed(method: string, what: string): SdkCallError {
-    return new SdkCallError(
-      method,
-      PROTOCOL_ERROR_CODES.connectorError,
-      `${this.key} answered ${method} without ${what}`
-    )
+  get exited(): boolean {
+    return this.client.exited
+  }
+
+  private async call<M extends ProtocolMethod>(
+    method: M,
+    params: ProtocolMethods[M]['params'],
+    timeoutMs: number,
+    valid: (result: Record<string, unknown>) => boolean,
+    what: string
+  ): Promise<ProtocolMethods[M]['result'] & Record<string, unknown>> {
+    const result: unknown = await this.client.request(method, params, timeoutMs)
+    if (!isRecord(result) || !valid(result)) {
+      throw new SdkCallError(
+        method,
+        PROTOCOL_ERROR_CODES.connectorError,
+        `${this.key} answered ${method} without ${what}`
+      )
+    }
+    return result as ProtocolMethods[M]['result'] & Record<string, unknown>
   }
 
   private callTimeout(sessionCall?: string): number {
     return sessionCall ? this.timeouts.sessionCall : this.timeouts.call
   }
 
-  async manifest(): Promise<Record<string, unknown>> {
-    const method = PROTOCOL_METHODS.manifest
-    const result: unknown = await this.client.request(method, {}, this.timeouts.manifest)
-    if (!isRecord(result) || typeof result.id !== 'string') {
-      throw this.malformed(method, 'a manifest')
-    }
-    return result
+  manifest(): Promise<Record<string, unknown>> {
+    return this.call(
+      PROTOCOL_METHODS.manifest,
+      {},
+      this.timeouts.manifest,
+      (r) => typeof r.id === 'string',
+      'a manifest'
+    )
   }
 
   async preflight(): Promise<ConnectorPreflightResult> {
-    const method = PROTOCOL_METHODS.preflight
-    const result: unknown = await this.client.request(method, {}, this.timeouts.call)
-    if (!isRecord(result) || (typeof result.ok !== 'boolean' && result.ok !== null)) {
-      throw this.malformed(method, 'an ok')
-    }
+    const result = await this.call(
+      PROTOCOL_METHODS.preflight,
+      {},
+      this.timeouts.call,
+      (r) => typeof r.ok === 'boolean' || r.ok === null,
+      'an ok'
+    )
     const message = typeof result.message === 'string' ? result.message : undefined
     return { ok: result.ok, ...(message && { message }) }
   }
 
-  async options(params: ConnectorOptionsParams): Promise<ConnectorOptionsResult> {
-    const method = PROTOCOL_METHODS.options
-    const result: unknown = await this.client.request(
-      method,
+  options(params: ConnectorOptionsParams): Promise<ConnectorOptionsResult> {
+    return this.call(
+      PROTOCOL_METHODS.options,
       params,
-      this.callTimeout(params.sessionCall)
+      this.callTimeout(params.sessionCall),
+      (r) => Array.isArray(r.options),
+      'options'
     )
-    if (!isRecord(result) || !Array.isArray(result.options)) throw this.malformed(method, 'options')
-    return result as unknown as ConnectorOptionsResult
   }
 
-  async poll(params: TriggerPollParams): Promise<TriggerPollResult> {
-    const method = PROTOCOL_METHODS.poll
-    const result: unknown = await this.client.request(
-      method,
+  poll(params: TriggerPollParams): Promise<TriggerPollResult> {
+    return this.call(
+      PROTOCOL_METHODS.poll,
       params,
-      this.callTimeout(params.sessionCall)
+      this.callTimeout(params.sessionCall),
+      (r) => Array.isArray(r.items) && typeof r.hasMore === 'boolean',
+      'a page of items'
     )
-    if (!isRecord(result) || !Array.isArray(result.items) || typeof result.hasMore !== 'boolean') {
-      throw this.malformed(method, 'a page of items')
-    }
-    return result as unknown as TriggerPollResult
   }
 
-  async action(params: ActionRunParams): Promise<ActionRunResult> {
-    const method = PROTOCOL_METHODS.action
-    const result: unknown = await this.client.request(
-      method,
+  action(params: ActionRunParams): Promise<ActionRunResult> {
+    return this.call(
+      PROTOCOL_METHODS.action,
       params,
-      this.callTimeout(params.sessionCall)
+      this.callTimeout(params.sessionCall),
+      () => true,
+      'an output object'
     )
-    if (!isRecord(result)) throw this.malformed(method, 'an output object')
-    return result
   }
 
-  async footer(params: ExtensionFooterParams): Promise<ExtensionFooterResult> {
-    const method = PROTOCOL_METHODS.footer
-    const result: unknown = await this.client.request(method, params, this.timeouts.call)
-    if (!isRecord(result) || !Array.isArray(result.items)) throw this.malformed(method, 'items')
-    return result as unknown as ExtensionFooterResult
+  footer(params: ExtensionFooterParams): Promise<ExtensionFooterResult> {
+    return this.call(
+      PROTOCOL_METHODS.footer,
+      params,
+      this.timeouts.call,
+      (r) => Array.isArray(r.items),
+      'items'
+    )
   }
 
   async handler(params: ExtensionHandlerParams): Promise<ExtensionHandlerResult> {
-    const method = PROTOCOL_METHODS.handler
-    const result: unknown = await this.client.request(method, params, this.timeouts.call)
-    if (!isRecord(result)) throw this.malformed(method, 'an object')
+    const result = await this.call(
+      PROTOCOL_METHODS.handler,
+      params,
+      this.timeouts.call,
+      () => true,
+      'an object'
+    )
     return typeof result.openPane === 'string' && result.openPane !== ''
       ? { openPane: result.openPane }
       : {}

@@ -9,8 +9,9 @@ import {
   type JsonValue,
   type TriggerPollItem
 } from '@vornrun/shared/connector-protocol'
-import { SdkCallError, type ChildExit, type NativeSpawnConfig } from './native-client'
+import { SdkCallError, isRecord, type ChildExit } from './native-client'
 import type { SdkClient } from './sdk-client'
+import type { SpawnConfig } from './stdio-clients'
 import { manifestPayload, textContent } from './sdk-probe'
 import {
   MANIFEST_TOOL,
@@ -25,6 +26,7 @@ import log from '../logger'
 
 /** How the adapter stops its child and hears it go; absent when someone else owns the client. */
 export interface LegacyLifecycle {
+  readonly exited: boolean
   close(): Promise<void>
   onExit(listener: (exit: ChildExit) => void): void
 }
@@ -33,9 +35,6 @@ export interface LegacyLifecycle {
 const SESSION_CALL_TIMEOUT_MS = 120_000
 
 type ToolResult = Awaited<ReturnType<Client['callTool']>>
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === 'object' && !Array.isArray(value)
 
 function structuredOf(result: ToolResult): Record<string, unknown> | undefined {
   const value = (result as { structuredContent?: unknown }).structuredContent
@@ -99,6 +98,11 @@ export function legacyMcpSdkClient(client: Client, lifecycle?: LegacyLifecycle):
 
   return {
     protocol: 'mcp',
+
+    // A client someone else owns is theirs to watch.
+    get exited() {
+      return lifecycle?.exited ?? false
+    },
 
     async manifest() {
       const result = await call(MANIFEST_TOOL, {})
@@ -191,7 +195,7 @@ export function legacyMcpSdkClient(client: Client, lifecycle?: LegacyLifecycle):
 }
 
 export async function startLegacyMcpSdkClient(
-  config: NativeSpawnConfig,
+  config: SpawnConfig,
   options: { label: string; key: string }
 ): Promise<SdkClient> {
   const name = `[${options.label}] ${options.key}`
@@ -226,6 +230,9 @@ export async function startLegacyMcpSdkClient(
   client.onerror = (err) => log.warn(`${name}: ${err.message}`)
 
   return legacyMcpSdkClient(client, {
+    get exited() {
+      return exited
+    },
     async close() {
       try {
         await client.close()
