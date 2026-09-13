@@ -325,14 +325,17 @@ describe('inspectPack', () => {
     if (!result.ok) expect(result.error).toMatch(/native\.node/)
   })
 
-  it('refuses a pack claiming the id of a connector Vorn ships', async () => {
-    const file = await buildArchive(goodFiles('1.0.0', 'http'))
+  it.each(['http', 'sdk'])(
+    'refuses a pack claiming %s, the id of a connector Vorn ships',
+    async (id) => {
+      const file = await buildArchive(goodFiles('1.0.0', id))
 
-    const result = await inspectPack({ kind: 'file', path: file }, { root: tempDir() })
+      const result = await inspectPack({ kind: 'file', path: file }, { root: tempDir() })
 
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error).toMatch(/already ships/)
-  })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error).toMatch(/already ships/)
+    }
+  )
 
   it('lets a pack take an id the app no longer answers to', async () => {
     // GitHub was a built-in and is not any more, so the id is a pack's to claim
