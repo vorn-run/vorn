@@ -390,7 +390,12 @@ export interface BrowserSignIn {
   /** `https://host` or `https://*.host`; the sign-in page and the check must sit inside them. */
   origins: string[]
   /** Answers 2xx only when signed in; `identity` names the fields of its JSON that say who. */
-  check: { url: string; identity: string[] }
+  check: {
+    url: string
+    identity: string[]
+    /** Sent with the check, for a site whose reads need a header such as a CSRF flag. */
+    headers?: Record<string, string>
+  }
 }
 
 /** The signed-in window, offered to a `browser` connector's code. */

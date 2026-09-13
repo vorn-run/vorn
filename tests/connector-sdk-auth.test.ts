@@ -113,6 +113,40 @@ describe('a connector that signs in through a Vorn window', () => {
     ).toThrow(/identity fields/)
   })
 
+  it('carries headers for its check, for a site whose reads need a CSRF header', () => {
+    const check = { ...browser.check, headers: { 'X-CSRF-Protection': '1' } }
+    expect(
+      connectorManifest(withAuth({ rung: 'browser', browser: { ...browser, check } })).auth
+    ).toEqual({
+      rung: 'browser',
+      browser: { ...browser, check }
+    })
+  })
+
+  it('refuses a check header the browser sets itself or that says who you are', () => {
+    for (const name of [
+      'Cookie',
+      'authorization',
+      'Origin',
+      'sec-fetch-site',
+      'proxy-connection',
+      'bad name'
+    ]) {
+      const check = { ...browser.check, headers: { [name]: '1' } }
+      expect(() => withAuth({ rung: 'browser', browser: { ...browser, check } })).toThrow(
+        /only plain string headers/
+      )
+    }
+    const notText = { ...browser.check, headers: { 'X-Count': 2 as unknown as string } }
+    expect(() => withAuth({ rung: 'browser', browser: { ...browser, check: notText } })).toThrow(
+      /"X-Count" is not one/
+    )
+    const empty = { ...browser.check, headers: {} }
+    expect(() => withAuth({ rung: 'browser', browser: { ...browser, check: empty } })).toThrow(
+      /only plain string headers/
+    )
+  })
+
   it('keeps no secret of its own, since the signed-in window is the secret', () => {
     const secret: ConnectorConfigField = { key: 'apiToken', label: 'API token', secret: true }
     expect(() => withAuth({ rung: 'browser', browser }, [secret])).toThrow(

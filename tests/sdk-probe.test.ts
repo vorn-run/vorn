@@ -476,6 +476,29 @@ describe('how a probed connector says it signs in', () => {
     expect(await probeAuth({ ...browser, browser: plainHttp })).toBeUndefined()
   })
 
+  it('keeps the headers a check declares, and drops any a connector may not set', async () => {
+    const headers = {
+      'X-CSRF-Protection': '1',
+      Cookie: 'sid=1',
+      Authorization: 'Bearer x',
+      'sec-fetch-site': 'same-origin',
+      'Proxy-Connection': 'keep-alive',
+      'bad name': '1',
+      'X-Count': 2
+    }
+    const declared = { ...browser.browser, check: { ...browser.browser.check, headers } }
+    const auth = await probeAuth({ ...browser, browser: declared })
+    expect(auth?.browser?.check.headers).toEqual({ 'X-CSRF-Protection': '1' })
+  })
+
+  it('leaves headers out when none of them may be sent', async () => {
+    const declared = {
+      ...browser.browser,
+      check: { ...browser.browser.check, headers: { Cookie: 'sid=1' } }
+    }
+    expect(await probeAuth({ ...browser, browser: declared })).toEqual(browser)
+  })
+
   it('carries what to borrow, since the token is fetched fresh at spawn', async () => {
     const auth = { ...cli, borrow: { env: ['GITLAB_HOST'], tokenArgs: ['auth', 'token'] } }
     expect(await probeAuth(auth)).toEqual(auth)

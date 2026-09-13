@@ -144,7 +144,7 @@ export async function checkSession(
   const answer = await fetchInSession(connectionId, browser.origins, {
     url: browser.check.url,
     method: 'GET',
-    headers: { accept: 'application/json' }
+    headers: { accept: 'application/json', ...browser.check.headers }
   })
   const signedIn = answer.status >= 200 && answer.status < 300
   return { signedIn, identity: signedIn ? identityFrom(answer.body, browser.check.identity) : null }

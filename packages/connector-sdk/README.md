@@ -217,6 +217,8 @@ auth: {
 }
 ```
 
+Add `headers` to `check` for a site whose reads need one, such as a CSRF flag. Headers the browser sets itself or that carry who you are, such as `cookie`, `authorization`, `origin` or any `sec-` header, are refused.
+
 Vorn opens a window on a browser profile that belongs to one connection, and the person signs in there. The connector's code then gets `ctx.session.fetch` beside `ctx.fetch`. A call through `ctx.session.fetch` runs inside that signed-in window as a same-origin request, so the service sees its own page asking and no cookie reaches the connector. Calls outside `origins` are refused. `ctx.fetch` stays a plain fetch for public reads, such as a feed, which work before anyone signs in. A `browser` connector's declared `request` actions go through the window.
 
 `--mock` serves signed-in calls from the same routes as every other call. A `--live` run from a terminal has no window, so it skips them.

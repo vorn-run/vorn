@@ -14,7 +14,7 @@
  * install. This spawns, asks, and exits.
  */
 import { CONNECTOR_AUTH_RUNGS } from '@vornrun/shared/types'
-import { ORIGIN_PATTERN, withinOrigins } from '@vornrun/shared/connector-origins'
+import { ORIGIN_PATTERN, checkHeaders, withinOrigins } from '@vornrun/shared/connector-origins'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type {
@@ -275,7 +275,12 @@ function toBrowserSignIn(value: unknown): SdkBrowserSignIn | undefined {
   const signInUrl = str(value.signInUrl).trim()
   const url = str(value.check.url).trim()
   if (!withinOrigins(origins, signInUrl) || !withinOrigins(origins, url)) return undefined
-  return { signInUrl, origins, check: { url, identity: strings(value.check.identity) } }
+  const headers = checkHeaders(value.check.headers)
+  return {
+    signInUrl,
+    origins,
+    check: { url, identity: strings(value.check.identity), ...(headers && { headers }) }
+  }
 }
 
 /**

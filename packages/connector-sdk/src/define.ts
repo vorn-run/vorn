@@ -14,7 +14,7 @@ import type {
   ExtensionPlatform,
   PaneContribution
 } from './types'
-import { ORIGIN_PATTERN, withinOrigins } from './origins'
+import { ORIGIN_PATTERN, allowedCheckHeader, withinOrigins } from './origins'
 
 const KEY_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 
@@ -225,6 +225,19 @@ function assertBrowserSignIn(id: string, browser: BrowserSignIn | undefined): vo
     identity.some((path) => typeof path !== 'string' || !path.trim())
   ) {
     throw new Error(`Connector ${id} must name its identity fields as non-empty strings`)
+  }
+  const headers: unknown = browser.check?.headers
+  if (headers === undefined) return
+  const entries =
+    headers && typeof headers === 'object' && !Array.isArray(headers) ? Object.entries(headers) : []
+  const badHeader = entries.find(
+    ([name, value]) => typeof value !== 'string' || !allowedCheckHeader(name)
+  )
+  if (entries.length === 0 || badHeader) {
+    throw new Error(
+      `Connector ${id} may add only plain string headers to its signed-in check` +
+        (badHeader ? `; ${JSON.stringify(badHeader[0])} is not one` : '')
+    )
   }
 }
 

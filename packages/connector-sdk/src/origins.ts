@@ -18,3 +18,28 @@ export function withinOrigins(origins: readonly string[], url: string): boolean 
     return wildcard ? target.endsWith(`.${host}`) : target === host
   })
 }
+
+/** Header names a signed-in check may never carry: the browser sets them, or they carry who you are. */
+const FORBIDDEN_CHECK_HEADERS = new Set([
+  'cookie',
+  'cookie2',
+  'authorization',
+  'proxy-authorization',
+  'host',
+  'origin',
+  'referer',
+  'content-length'
+])
+
+const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/
+
+/** Whether a connector may add this header to its signed-in check. */
+export function allowedCheckHeader(name: string): boolean {
+  const lower = name.toLowerCase()
+  return (
+    HEADER_NAME.test(name) &&
+    !FORBIDDEN_CHECK_HEADERS.has(lower) &&
+    !lower.startsWith('sec-') &&
+    !lower.startsWith('proxy-')
+  )
+}
