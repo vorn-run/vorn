@@ -23,6 +23,7 @@
     "./template-vars": "./src/template-vars.ts",
     "./workflow-graph": "./src/workflow-graph.ts",
     "./terminal-frame": "./src/terminal-frame.ts",
-    "./connector-origins": "./src/connector-origins.ts"
+    "./connector-origins": "./src/connector-origins.ts",
+    "./connector-protocol": "./src/connector-protocol.ts"
   }
 }

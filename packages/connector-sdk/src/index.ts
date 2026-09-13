@@ -17,6 +17,41 @@ export {
   SESSION_CALL_META
 } from './session'
 export { ORIGIN_PATTERN, withinOrigins } from './origins'
+export {
+  PROTOCOL_VERSION,
+  SUPPORTED_PROTOCOLS,
+  MAX_FRAME_BYTES,
+  PROTOCOL_METHODS,
+  PROTOCOL_ERROR_CODES,
+  PROTOCOL_ERROR_KINDS
+} from './protocol'
+export type {
+  ActionRunParams,
+  ActionRunResult,
+  ConnectorManifestParams,
+  ConnectorManifestResult,
+  ConnectorOptionsParams,
+  ConnectorOptionsResult,
+  ConnectorPreflightParams,
+  ConnectorPreflightResult,
+  ExtensionFooterParams,
+  ExtensionFooterResult,
+  ExtensionHandlerParams,
+  ExtensionHandlerResult,
+  JsonValue,
+  ProtocolError,
+  ProtocolErrorData,
+  ProtocolErrorKind,
+  ProtocolMethod,
+  ProtocolMethods,
+  ProtocolRequest,
+  ProtocolResponse,
+  TriggerPollItem,
+  TriggerPollParams,
+  TriggerPollResult,
+  VornHelloParams,
+  VornHelloResult
+} from './protocol'
 export type { SessionFetchOptions } from './session'
 export type { HostBridgeOptions } from './host'
 export { checkConnector, formatFindings, runConformance, CHECK_OWNERS } from './check'
