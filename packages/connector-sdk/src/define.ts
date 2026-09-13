@@ -286,13 +286,7 @@ export function envNameFor(key: string, explicit?: string): string {
     .toUpperCase()
 }
 
-/**
- * Validate a connector definition and fill in its defaults.
- *
- * Failing here — at import time — is the whole point: a typo in a trigger
- * type or a duplicate action key otherwise surfaces as a silently missing
- * MCP tool once the connector is already installed in someone's app.
- */
+/** Validate a definition and fill its defaults, failing at import time rather than as a missing action in someone's app. */
 export function defineConnector(definition: ConnectorDefinition): Connector {
   assertIdentity('Connector', definition)
 

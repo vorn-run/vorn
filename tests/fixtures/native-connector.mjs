@@ -37,6 +37,7 @@ const fail = (id, code, message, data) =>
 
 function handle({ id, method, params = {} }) {
   if (mode === 'silent') return
+  if (mode === 'mcp-only') return fail(id, -32601, 'Method not found')
   if (method === 'vorn/hello') {
     if (mode === 'hello-error') {
       return fail(id, -32000, 'the fixture refused to start', {

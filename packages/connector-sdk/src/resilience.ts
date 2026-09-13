@@ -9,7 +9,7 @@
  */
 
 /** Statuses worth trying again. Anything else is an answer, not a hiccup. */
-const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504])
+export const RETRYABLE_STATUS: ReadonlySet<number> = new Set([408, 425, 429, 500, 502, 503, 504])
 
 export interface RetryPolicy {
   /** Total tries, including the first. Defaults to 3. */

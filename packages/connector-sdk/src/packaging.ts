@@ -1,9 +1,17 @@
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { builtinModules } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
 import { cp, mkdtemp, readdir, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { CheckCode, CheckFinding } from './check'
+import { lineReader } from './lines'
+import {
+  MAX_FRAME_BYTES,
+  PROTOCOL_METHODS,
+  SUPPORTED_PROTOCOLS,
+  type VornHelloParams
+} from './protocol'
 import { connectorManifest } from './setup'
 import type { Connector } from './types'
 
@@ -392,26 +400,51 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   ])
 }
 
-// Start a staged pack the way the host does: only a completed `initialize` counts, so a bundle that logs and exits cannot pass.
-export async function packLaunchFindings(dir: string): Promise<CheckFinding[]> {
-  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
-  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: ['index.js'],
-    cwd: dir,
-    env: launchEnv(),
-    stderr: 'pipe'
+/** Resolves once the child answers `vorn/hello` with a protocol, and rejects on any other ending. */
+function helloAnswer(child: ChildProcessWithoutNullStreams): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onLine = (line: string): void => {
+      let reply: { id?: unknown; result?: { protocol?: unknown }; error?: { message?: unknown } }
+      try {
+        reply = JSON.parse(line)
+      } catch {
+        return
+      }
+      if (reply?.id !== 1) return
+      if (typeof reply.result?.protocol === 'number') return resolve()
+      reject(
+        new Error(
+          `answered ${PROTOCOL_METHODS.hello} with ${String(reply.error?.message ?? 'no protocol')}`
+        )
+      )
+    }
+    child.stdout.on(
+      'data',
+      lineReader(onLine, () => reject(new Error(`wrote a line over ${MAX_FRAME_BYTES} bytes`)))
+    )
+    child.once('error', reject)
+    child.once('exit', (code) => reject(new Error(`exited with code ${code} before answering`)))
+    child.stdin.on('error', () => {})
+    const params: VornHelloParams = {
+      protocols: [...SUPPORTED_PROTOCOLS],
+      host: { name: 'vorn-connector-check', version: '1' }
+    }
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: PROTOCOL_METHODS.hello, params })}\n`
+    )
   })
-  const client = new Client({ name: 'vorn-connector-check', version: '1' }, { capabilities: {} })
+}
+
+// Start a staged pack the way the host does: only an answered `vorn/hello` counts, so a bundle that logs and exits cannot pass.
+export async function packLaunchFindings(dir: string): Promise<CheckFinding[]> {
+  const child = spawn(process.execPath, ['index.js'], { cwd: dir, env: launchEnv() })
   let stderr = ''
-  // A PassThrough is handed over before the spawn, so nothing the child says on its way out is missed.
-  transport.stderr?.on('data', (chunk: Buffer) => {
+  child.stderr.on('data', (chunk: Buffer) => {
     stderr += chunk.toString()
   })
   try {
     await withTimeout(
-      client.connect(transport),
+      helloAnswer(child),
       LAUNCH_TIMEOUT_MS,
       `did not answer within ${LAUNCH_TIMEOUT_MS / 1000}s of starting`
     )
@@ -423,8 +456,7 @@ export async function packLaunchFindings(dir: string): Promise<CheckFinding[]> {
     ]
   } finally {
     // The child must not outlive the check, including when the timeout fired while it still ran.
-    await client.close().catch(() => {})
-    await transport.close().catch(() => {})
+    child.kill('SIGKILL')
   }
 }
 

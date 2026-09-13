@@ -1,40 +1,12 @@
-import { describe, expect, it, vi } from 'vitest'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import type { SourceConnection } from '../packages/shared/src/types'
+import { describe, expect, it } from 'vitest'
 import {
-  createConnectorServer,
   defineConnector,
-  defineExtension
+  defineExtension,
+  type TriggerPollResult
 } from '../packages/connector-sdk/src/index'
-
-vi.mock('../packages/server/src/logger', () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
-}))
-
-const getOrStartClient = vi.fn()
-vi.mock('../packages/server/src/connectors/mcp-clients', () => ({
-  sessionGrantFor: () => undefined,
-  getOrStartClient: (conn: SourceConnection) => getOrStartClient(conn)
-}))
+import { greeted, type Greeted } from './helpers/connector-server'
 
 const NOW = '2026-08-05T00:00:00.000Z'
-
-/**
- * The exact filters `connectionSetup()` tells a user to paste. Hard-coded here
- * rather than imported so a change to either side of the contract fails this
- * test instead of silently agreeing with itself.
- */
-const SETUP_FILTERS = {
-  pollTool: 'poll_newOrder',
-  itemsPath: 'items',
-  idField: 'externalId',
-  timestampField: 'updatedAt',
-  titleField: 'title',
-  urlField: 'url',
-  cursorArg: 'cursor',
-  cursorPath: 'nextCursor'
-}
 
 const orders = [
   { id: 'o-1', reference: 'A', updatedAt: '2026-08-04T10:00:00.000Z' },
@@ -73,42 +45,22 @@ const connector = defineConnector({
   ]
 })
 
-async function connectSdkServer(): Promise<Client> {
-  const server = createConnectorServer(connector, { config: {}, now: () => NOW })
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-  const client = new Client({ name: 'vorn', version: '1.0.0' })
-  await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
-  return client
-}
+const poll = (server: Greeted, cursor?: string) =>
+  server.call<TriggerPollResult>('trigger/poll', {
+    trigger: 'newOrder',
+    ...(cursor !== undefined && { cursor })
+  })
 
-async function connection(): Promise<SourceConnection> {
-  const client = await connectSdkServer()
-  getOrStartClient.mockResolvedValue(client)
-  const { discoverTools } = await import('../packages/server/src/connectors/mcp')
-  const base: SourceConnection = {
-    id: 'conn-sdk',
-    connectorId: 'mcp',
-    name: 'Orders database',
-    filters: { ...SETUP_FILTERS },
-    syncIntervalMinutes: 5,
-    statusMapping: {},
-    createdAt: NOW
-  }
-  return { ...base, filters: { ...base.filters, discoveredTools: await discoverTools(base) } }
-}
+describe('an SDK connector as Vorn polls it', () => {
+  it('delivers normalized items and a cursor of its own', async () => {
+    const server = await greeted(connector, { config: {}, now: () => NOW })
 
-describe('an SDK connector behind Vorn’s MCP connector', () => {
-  it('polls into trigger events using only the generated setup filters', async () => {
-    const conn = await connection()
-    const { pollMcpConnection } = await import('../packages/server/src/connectors/mcp')
+    const page = await poll(server)
 
-    const result = await pollMcpConnection(conn)
-
-    expect(result.events.map((event) => event.id)).toEqual(['o-1', 'o-2'])
-    // The cursor Vorn stores is the connector's own opaque one, handed straight
-    // back on the next poll rather than re-derived from timestamps here.
-    expect(JSON.parse(result.nextCursor!)).toMatchObject({ s: 'timestamp' })
-    expect(result.events[0].data).toMatchObject({
+    expect(page.items.map((item) => item.externalId)).toEqual(['o-1', 'o-2'])
+    // The cursor Vorn stores is the connector's own opaque one, handed straight back next time.
+    expect(JSON.parse(page.nextCursor!)).toMatchObject({ s: 'timestamp' })
+    expect(page.items[0]).toMatchObject({
       externalId: 'o-1',
       title: 'Order A',
       url: 'https://erp.test/o-1',
@@ -118,51 +70,30 @@ describe('an SDK connector behind Vorn’s MCP connector', () => {
   })
 
   it('delivers nothing once its cursor has caught up', async () => {
-    const conn = await connection()
-    const { pollMcpConnection } = await import('../packages/server/src/connectors/mcp')
+    const server = await greeted(connector, { config: {}, now: () => NOW })
 
-    const first = await pollMcpConnection(conn)
-    const second = await pollMcpConnection(conn, first.nextCursor)
+    const first = await poll(server)
+    const second = await poll(server, first.nextCursor)
 
-    // The connector recognizes its own cursor, so nothing is re-delivered —
-    // not even the items sharing the newest instant.
-    expect(second.events).toEqual([])
+    // Not even the items sharing the newest instant come back.
+    expect(second.items).toEqual([])
     expect(second.nextCursor).toBe(first.nextCursor)
   })
 
-  it('exposes SDK actions as invocable MCP tools with typed output', async () => {
-    const conn = await connection()
-    const { invokeMcpTool } = await import('../packages/server/src/connectors/mcp')
-
-    const result = await invokeMcpTool(conn, 'shipOrder', { id: 'o-1' })
-
-    expect(result.success).toBe(true)
-    expect(result.output).toMatchObject({ shipped: 'o-1', trackingNumber: 'TRACK-1' })
+  it('runs an action and hands back everything it returned', async () => {
+    const server = await greeted(connector, { config: {}, now: () => NOW })
+    expect(await server.call('action/run', { action: 'shipOrder', args: { id: 'o-1' } })).toEqual({
+      shipped: 'o-1',
+      trackingNumber: 'TRACK-1'
+    })
   })
 
-  it('reports a connector-side failure as a failed action rather than a crash', async () => {
-    const conn = await connection()
-    const { invokeMcpTool } = await import('../packages/server/src/connectors/mcp')
-
-    const result = await invokeMcpTool(conn, 'shipOrder', {})
-
-    expect(result.success).toBe(false)
-    expect(result.error).toContain('id')
-  })
-
-  it('renders SDK action inputs as connector action fields for the editor', async () => {
-    const conn = await connection()
-    const { mcpConnectionActions } = await import('../packages/server/src/connectors/mcp')
-
-    const ship = mcpConnectionActions(conn).find((action) => action.type === 'shipOrder')
-
-    expect(ship?.configFields.map((field) => field.key)).toEqual(['id'])
-    expect(ship?.configFields[0].required).toBe(true)
-    // Declared outputs reach the editor's variable autocomplete, while
-    // undeclared ones (trackingNumber) still pass through at runtime.
-    expect(Object.keys((ship?.outputSchema?.properties ?? {}) as Record<string, unknown>)).toEqual([
-      'shipped'
-    ])
+  it('reports a missing argument as a failed call naming it, rather than a crash', async () => {
+    const server = await greeted(connector, { config: {}, now: () => NOW })
+    expect(await server.fail('action/run', { action: 'shipOrder', args: {} })).toMatchObject({
+      message: expect.stringContaining('"id"'),
+      data: { kind: 'validation', field: 'id' }
+    })
   })
 
   it('drives a declarative dedupe trigger without the author writing cursor code', async () => {
@@ -186,39 +117,15 @@ describe('an SDK connector behind Vorn’s MCP connector', () => {
         }
       ]
     })
+    const server = await greeted(declarative, { config: {}, now: () => NOW })
 
-    const server = createConnectorServer(declarative, { config: {}, now: () => NOW })
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-    const client = new Client({ name: 'vorn', version: '1.0.0' })
-    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
-    getOrStartClient.mockResolvedValue(client)
+    const first = await poll(server)
+    expect(first.items.map((item) => item.externalId)).toEqual(['r-1'])
 
-    const { discoverTools, pollMcpConnection } =
-      await import('../packages/server/src/connectors/mcp')
-    const base: SourceConnection = {
-      id: 'conn-declarative',
-      connectorId: 'mcp',
-      name: 'Orders database',
-      filters: { ...SETUP_FILTERS },
-      syncIntervalMinutes: 5,
-      statusMapping: {},
-      createdAt: NOW
-    }
-    const conn = {
-      ...base,
-      filters: { ...base.filters, discoveredTools: await discoverTools(base) }
-    }
-
-    const first = await pollMcpConnection(conn)
-    expect(first.events.map((event) => event.id)).toEqual(['r-1'])
-
-    // A second row lands at the exact same instant — the case that silently
-    // loses items when a connector windows on `updatedAt > cursor`.
+    // A second row at the exact same instant: the case `updatedAt > cursor` silently loses.
     rows = [...rows, { id: 'r-2', updatedAt: shared }]
-    const second = await pollMcpConnection(conn, first.nextCursor)
-    expect(second.events.map((event) => event.id)).toEqual(['r-2'])
-
-    await client.close()
+    const second = await poll(server, first.nextCursor)
+    expect(second.items.map((item) => item.externalId)).toEqual(['r-2'])
   })
 })
 
@@ -238,21 +145,16 @@ describe('a served link handler', () => {
         }
       ]
     })
-    const server = createConnectorServer(extension, { config: {}, now: () => NOW })
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-    const client = new Client({ name: 'vorn', version: '1.0.0' })
-    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
+    const server = await greeted(extension, { config: {}, now: () => NOW })
 
-    const result = await client.callTool({
-      name: 'vorn_handler_pr',
-      arguments: {
+    expect(
+      await server.call('extension/handler', {
+        handler: 'pr',
         sessionId: 's1',
         worktreePath: '/tmp/w',
         agent: 'claude',
         url: 'https://github.com/vorn-run/vorn/pull/1'
-      }
-    })
-    expect(result.isError ?? false).toBe(false)
-    expect(result.structuredContent).toEqual({})
+      })
+    ).toEqual({})
   })
 })

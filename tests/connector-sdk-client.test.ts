@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -27,7 +26,7 @@ import type { LaunchSource } from '../packages/server/src/connectors/mcp-clients
 
 const REPO = path.join(__dirname, '..')
 const NATIVE = path.join(__dirname, 'fixtures', 'native-connector.mjs')
-const MCP = path.join(__dirname, 'fixtures', 'mcp-connector.ts')
+const SDK = path.join(__dirname, 'fixtures', 'sdk-connector.ts')
 
 const opened: SdkClient[] = []
 
@@ -41,14 +40,13 @@ function native(mode: string, source: LaunchSource = 'command', protocol?: numbe
   }
 }
 
-function mcp(source: LaunchSource = 'command', protocol?: number): SdkLaunch {
+function sdk(): SdkLaunch {
   return {
     command: process.execPath,
-    args: ['--import', 'tsx', MCP],
-    source,
+    args: ['--import', 'tsx', SDK],
+    source: 'checkout',
     env: {},
-    cwd: REPO,
-    ...(protocol !== undefined && { protocol })
+    cwd: REPO
   }
 }
 
@@ -148,7 +146,7 @@ describe('an installed pack', () => {
 
   it('that names protocol 1 but only speaks MCP fails rather than falling back', async () => {
     const legacy = fakeLegacy()
-    const failed = connectSdkClient(mcp('pack', 1), {
+    const failed = connectSdkClient(native('mcp-only', 'pack', 1), {
       label: 'connectors',
       key: 'fixture',
       startLegacy: legacy.start
@@ -158,7 +156,7 @@ describe('an installed pack', () => {
       message: 'fixture did not answer vorn/hello: Method not found'
     })
     expect(legacy.start).not.toHaveBeenCalled()
-  }, 30_000)
+  })
 })
 
 describe('a checkout or a stored command', () => {
@@ -208,24 +206,10 @@ describe('a checkout or a stored command', () => {
   })
 
   it('that turns out to be an MCP connector is spoken to through the MCP adapter', async () => {
-    const client = await connect(mcp('checkout'), { key: 'mcp-fixture' })
-    expect(client.protocol).toBe('mcp')
-    expect(client.exited).toBe(false)
-    expect(log.info).toHaveBeenCalledWith(
-      '[connectors] mcp-fixture: legacy MCP protocol (checkout)'
-    )
-    expect(await client.manifest()).toMatchObject({ id: 'mcp-fixture', name: 'MCP fixture' })
-    expect(await client.preflight()).toEqual({ ok: true, message: 'ready' })
-    expect(await client.poll({ trigger: 'tick', limit: 5 })).toMatchObject({
-      items: [{ externalId: 'tick-1', limit: 5 }],
-      hasMore: false
-    })
-    expect(
-      await client.action({ action: 'echo', args: { text: 'hi', count: 3, gone: null } })
-    ).toEqual({ text: 'hi', count: 3 })
-    await client.close()
-    await vi.waitFor(() => expect(client.exited).toBe(true))
-  }, 30_000)
+    const legacy = fakeLegacy()
+    expect(await connect(native('mcp-only'), { startLegacy: legacy.start })).toBe(legacy.client)
+    expect(log.info).toHaveBeenCalledWith('[connectors] fixture: legacy MCP protocol (command)')
+  })
 
   it('that knows the hello but not this protocol needs a newer Vorn', async () => {
     const legacy = fakeLegacy()
@@ -263,32 +247,35 @@ describe('a checkout or a stored command', () => {
   })
 })
 
-describe('an MCP connector built with the SDK', () => {
-  it('answers a first-message vorn/hello with exactly this line, and nothing before it', async () => {
-    const child = spawn(process.execPath, ['--import', 'tsx', MCP], {
-      cwd: REPO,
-      stdio: ['pipe', 'pipe', 'ignore']
+describe('a connector built with the SDK', () => {
+  it('is spoken to natively from a checkout, with typed values both ways', async () => {
+    const client = await connect(sdk(), { key: 'sdk-fixture' })
+    expect(client.protocol).toBe(1)
+    expect(client.hello).toMatchObject({
+      sdk: { name: '@vornrun/connector-sdk' },
+      connector: { id: 'sdk-fixture', version: '1.0.0', kind: 'connector' }
     })
-    try {
-      const first = await new Promise<string>((resolve, reject) => {
-        let out = ''
-        child.stdout.setEncoding('utf8')
-        child.stdout.on('data', (chunk: string) => {
-          out += chunk
-          const at = out.indexOf('\n')
-          if (at !== -1) resolve(out.slice(0, at))
-        })
-        child.once('error', reject)
-        child.once('exit', (code) => reject(new Error(`exited with ${code} before answering`)))
-        child.stdin.write(
-          `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'vorn/hello', params: { protocols: [1], host: { name: 'vorn', version: 'test' } } })}\n`
-        )
-      })
-      expect(first).toBe(
-        '{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}'
-      )
-    } finally {
-      child.kill('SIGKILL')
-    }
+    expect(await client.manifest()).toMatchObject({
+      protocol: 1,
+      id: 'sdk-fixture',
+      name: 'SDK fixture'
+    })
+    expect(await client.preflight()).toEqual({ ok: true, message: 'ready' })
+    expect(await client.poll({ trigger: 'tick', limit: 5 })).toMatchObject({
+      items: [{ externalId: 'tick-1', limit: 5 }],
+      hasMore: false
+    })
+    expect(await client.action({ action: 'echo', args: { text: 'hi', count: '3' } })).toEqual({
+      text: 'hi',
+      count: 3
+    })
+    await expect(client.action({ action: 'echo', args: { count: 3 } })).rejects.toMatchObject({
+      method: 'action/run',
+      kind: 'validation',
+      field: 'text'
+    })
+    expect(log.info).not.toHaveBeenCalledWith(expect.stringContaining('legacy MCP protocol'))
+    await client.close()
+    expect(client.exited).toBe(true)
   }, 30_000)
 })

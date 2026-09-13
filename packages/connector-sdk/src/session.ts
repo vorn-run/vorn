@@ -3,8 +3,7 @@ import { loopbackEndpoint } from './loopback'
 /** Where Vorn serves a browser-sign-in connector the window it signed in through. */
 export const BROWSER_HOST_ENV = 'VORN_BROWSER_HOST'
 export const BROWSER_TOKEN_ENV = 'VORN_BROWSER_TOKEN'
-/** The tool call a window request belongs to, so Vorn can tell a step's own requests from another's. */
-export const SESSION_CALL_META = 'vorn/sessionCall'
+/** The call a window request belongs to, so Vorn can tell a step's own requests from another's. */
 export const SESSION_CALL_HEADER = 'x-vorn-session-call'
 
 /** The signed-in window could not make the call: Vorn is closed, too old, or not the caller. */
@@ -30,7 +29,7 @@ export interface SessionFetchOptions {
   env?: NodeJS.ProcessEnv
   /** Replaced in tests so nothing opens a socket. */
   fetchImpl?: typeof fetch
-  /** The key of the tool call these requests belong to, from its MCP metadata. */
+  /** The key of the call these requests belong to, from its `sessionCall` param. */
   call?: string
 }
 

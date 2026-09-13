@@ -4,7 +4,12 @@ import {
   defineConnector,
   defineExtension
 } from '../packages/connector-sdk/src/index'
-import type { ExtensionDefinition, FooterItem } from '../packages/connector-sdk/src/types'
+import type {
+  ExtensionDefinition,
+  ExtensionHost,
+  FooterItem
+} from '../packages/connector-sdk/src/types'
+import { greeted } from './helpers/connector-server'
 
 /** The shape the scaffold generates, so a test says which one thing it changed. */
 function extension(over: Partial<ExtensionDefinition> = {}) {
@@ -219,6 +224,54 @@ describe('defineExtension', () => {
       /not inside the worktree/
     )
     expect(() => extension({ activates: { remoteHost: [' '] } })).toThrow(/empty "remoteHost"/)
+  })
+})
+
+describe('what a served extension answers', () => {
+  const session = { sessionId: 's1', worktreePath: '/tmp/w', agent: 'claude' }
+  const serve = () =>
+    greeted(
+      extension({
+        linkHandlers: [
+          {
+            id: 'pr',
+            title: 'Pull request',
+            pattern: 'github\\.com/.+/pull/',
+            example: 'https://github.com/vorn-run/vorn/pull/1',
+            run: (context) => ({ openPane: `report-${context.sessionId}` })
+          }
+        ]
+      }),
+      { config: {}, host: () => ({ output: async () => '' }) as unknown as ExtensionHost }
+    )
+
+  it('recomputes a footer and runs a link handler for one session', async () => {
+    const server = await serve()
+    expect(await server.call('extension/footer', { footer: 'checks', ...session })).toEqual({
+      items: [{ label: 'tests', value: 'passing', tone: 'ok' }]
+    })
+    expect(
+      await server.call('extension/handler', {
+        handler: 'pr',
+        ...session,
+        url: 'https://github.com/vorn-run/vorn/pull/1'
+      })
+    ).toEqual({ openPane: 'report-s1' })
+  })
+
+  it('refuses a contribution it does not have, or a session it cannot run for', async () => {
+    const server = await serve()
+    expect(await server.fail('extension/footer', { footer: 'nope', ...session })).toEqual({
+      code: -32602,
+      message: 'review contributes no footer "nope"'
+    })
+    expect(
+      await server.fail('extension/footer', { footer: 'checks', ...session, agent: 'emacs' })
+    ).toMatchObject({ code: -32602, message: expect.stringContaining('"agent" must be one of') })
+    expect(await server.fail('extension/handler', { handler: 'pr', ...session })).toEqual({
+      code: -32602,
+      message: '"url" must be a non-empty string'
+    })
   })
 })
 

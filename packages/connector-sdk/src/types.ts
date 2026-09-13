@@ -1,11 +1,4 @@
-/**
- * Author-facing types for Vorn connectors.
- *
- * A connector written with this SDK runs as an ordinary MCP stdio server, so
- * it is shared as a normal npm package and installed by pointing a Vorn
- * connection at `npx -y <package>`. Nothing about the host app has to change
- * to accept a new connector.
- */
+/** Author-facing types for Vorn connectors: npm packages Vorn starts and speaks its connector protocol to. */
 
 /** A raw item as the author's code returns it. Only id and title are required. */
 export interface ConnectorItem {
@@ -155,7 +148,7 @@ export interface DefaultWorkflow {
 }
 
 interface TriggerBase {
-  /** Event key, e.g. `workItemCreated`. Becomes the `poll_<type>` MCP tool. */
+  /** Event key, e.g. `workItemCreated`; the name Vorn polls the trigger by. */
   type: string
   label: string
   description?: string
@@ -198,13 +191,7 @@ export type TriggerDefinition = TriggerBase &
       }
   )
 
-/**
- * What kind of value an action argument takes.
- *
- * Every argument still arrives as a string — Vorn renders them from templates —
- * so this says how to read one, and how to draw its field. `select` is a
- * string with known choices; `json` is a string holding a structured value.
- */
+/** How to read an argument, often template text, and draw its field; `select` has choices, `json` holds structure. */
 export type ActionInputType = 'string' | 'number' | 'boolean' | 'select' | 'json'
 
 /** One choice a `select` argument offers. */
@@ -239,7 +226,7 @@ export interface ActionInputField {
  */
 export interface ActionOutputField {
   key: string
-  type?: 'string' | 'number' | 'boolean'
+  type?: 'string' | 'number' | 'boolean' | 'array' | 'object'
   description?: string
 }
 
@@ -305,16 +292,11 @@ export interface ActionRequest {
 }
 
 interface ActionBase {
-  /** Action key, e.g. `closeWorkItem`. Becomes an MCP tool of the same name. */
+  /** Action key, e.g. `closeWorkItem`; the name Vorn runs the action by. */
   type: string
   label: string
   description?: string
-  /**
-   * Whether repeating the call with the same arguments is safe. Surfaced in
-   * the MCP tool description, because an agent retrying a failed step has no
-   * other way to know whether it is about to create a second issue — and it is
-   * what decides whether the SDK may retry the call itself.
-   */
+  /** Whether repeating the call with the same arguments is safe; decides whether the SDK or an agent may retry it. */
   idempotent?: boolean
   inputs?: ActionInputField[]
   outputs?: ActionOutputField[]

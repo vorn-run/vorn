@@ -1,8 +1,9 @@
 # @vornrun/connector-sdk
 
 Build a Vorn pull connector in TypeScript and share it as an ordinary npm
-package. A connector built with this SDK runs as an MCP stdio server, and
-Vorn's generic MCP connector already knows how to talk to one.
+package. A connector built with this SDK runs as a child process that speaks
+Vorn's connector protocol — JSON-RPC, one message per line, over stdio — so
+Vorn needs no code of its own to run it.
 
 ```bash
 npm install @vornrun/connector-sdk
@@ -84,6 +85,10 @@ await serveConnector(connector)
 
 Publish it like any other package (`"bin": { "acme-connector": "dist/bin.js" }`).
 
+stdout carries only replies to Vorn. Once `serveConnector` has started,
+anything else written to stdout goes to stderr, so call it before printing
+anything.
+
 `vorn-connector new acme` writes all of the above — package, entry, definition,
 a test that needs no network — already building, checking and packing.
 
@@ -127,10 +132,10 @@ a live connection names a set the connector serves.
 
 Choices are **suggestions, not a closed set**. Vorn draws a picker while the
 value is one of them and its template-aware input whenever it is not, because a
-step is entitled to compute the value from an earlier one — so the served tool
-schema keeps the argument a plain string and lists the choices in its
-description. Your action still receives whatever was finally sent, and it is
-the connector's job to refuse a value it cannot use.
+step is entitled to compute the value from an earlier one — so the manifest
+carries the choices as suggestions and nothing refuses a value outside them.
+Your action still receives whatever was finally sent, and it is the
+connector's job to refuse a value it cannot use.
 
 ```ts
 options: { channels: async ({ config, fetch }) => ['general', 'random'] },
@@ -142,14 +147,17 @@ actions: [{
 }]
 ```
 
-`loadOptions` is served today but not yet consumed: the SDK registers a
-`vorn_connector_options` tool and answers it, and the manifest carries the set's
-name, but the app does not fetch the list yet — such a field is edited as text
-until it does. Declaring it now is what makes it work then; a field whose
-choices are already known should use `options` instead.
+`loadOptions` is served today but not yet consumed: the SDK answers
+`connector/options` for the set, and the manifest carries the set's name, but
+the app does not fetch the list yet — such a field is edited as text until it
+does. Declaring it now is what makes it work then; a field whose choices are
+already known should use `options` instead.
 
-A `json` argument arrives parsed. `builderHint` on a field is a note for whoever
-writes the next connector, not for whoever runs this one.
+Arguments arrive as JSON values. One that already has its declared type is
+taken as it is, text a template rendered is read as that type, and a `json`
+argument arrives parsed. A value that cannot be read fails the step with an
+error naming the field. `builderHint` on a field is a note for whoever writes
+the next connector, not for whoever runs this one.
 
 ## Poll a database instead of an API
 
@@ -326,7 +334,9 @@ call escaped instead of quietly reaching a real service.
 The stub replaces `fetch`, and only `fetch`. A connector that shells out to a
 CLI or opens its own socket is not intercepted by it, so `--mock` reports any
 action the stub never heard from as `mock-not-observed` and leaves `mock` out
-of the receipt rather than vouching for a run it did not see.
+of the receipt rather than vouching for a run it did not see. An action that
+returns a declared output as another type than it declares is reported as
+`mock-output-type`: Vorn keeps what came back, but a later step reads the type.
 
 ```ts
 {
@@ -365,23 +375,28 @@ test('does not redeliver the same backlog forever', async () => {
 
 ## Install it in Vorn
 
-**Settings → Connectors → MCP → From a package**, then type the package name.
+In **Settings → Connectors**, add a connection **From a package** and type the
+package name, or use **Install from file** for a pack.
 
-Vorn starts the connector once, asks it to describe itself, and fills in the
-connection settings from the answer. All that is left on screen is the
-connector's own name, its triggers, and the config it declared.
+Vorn starts the connector, says `vorn/hello`, asks for `connector/manifest`,
+and fills in the connection settings from the answer. All that is left on
+screen is the connector's own name, its triggers, and the config it declared.
+Polls are `trigger/poll` and actions are `action/run`, each carrying typed
+arguments; a failure comes back with a kind (`validation`, `app-offline`,
+`signed-out`, `upstream` or `internal`) that decides what Vorn tells you. A
+declared request sorts its own failures; a `run()` that reads a failing status
+can `throw new UpstreamStatusError(status, message, viaSession)`, where
+`viaSession` says the call went through `ctx.session.fetch`, so a 401 or 403
+reads as signed out.
 
-Nothing needs transcribing: `pollTool`, `itemsPath`, `idField`,
-`timestampField`, `titleField`, `urlField`, `cursorArg` and `cursorPath` all
-come from the manifest. `cursorArg` is what makes the dedupe strategy
-load-bearing — Vorn hands the connector back its own cursor on every poll and
-fires for whatever it returns, rather than re-filtering by timestamp itself.
+Vorn hands the connector back its own cursor on every poll and fires for
+whatever it returns, rather than re-filtering by timestamp itself — which is
+what makes the dedupe strategy load-bearing.
 
 Because the connector is a normal npm package, versions are pinned by the
 package spec and upgrades are a version bump — no separate registry.
 
-To see the same values on the command line, or to wire a connection up by
-hand:
+To see a connector's triggers and the environment each reads:
 
 ```bash
 npx vorn-connector setup ./dist/index.js
@@ -421,7 +436,7 @@ it on **Settings → Connectors** and Vorn launches it from disk.
 
 ### Ship an icon
 
-Without one, a connector shows the generic MCP glyph and is hard to pick out
+Without one, a connector shows a generic glyph and is hard to pick out
 of a list of connections.
 
 ```ts
@@ -565,7 +580,7 @@ linkHandlers: [
 ```
 vorn-connector new <id>                   Scaffold a new connector, ready to build
 vorn-connector manifest <module>          Print the manifest as JSON
-vorn-connector setup <module> [trigger]   Print the Vorn connection settings
+vorn-connector setup <module> [trigger]   Print each trigger and the environment it reads
 vorn-connector poll <module> <trigger>    Run one poll against the environment
 vorn-connector check <module>             Verify the connector against the contract
 vorn-connector pack <module>              Build an installable .vorn.tgz pack

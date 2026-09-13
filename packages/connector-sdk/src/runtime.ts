@@ -1,4 +1,5 @@
 import { pollWithDedupe } from './dedupe'
+import { ActionArgumentError, UnknownNameError } from './errors'
 import { normalizeItems } from './normalize'
 import { executeRequest } from './request'
 import { resilientFetch, type RetryPolicy } from './resilience'
@@ -28,7 +29,7 @@ export interface RunPollOptions {
   fetchImpl?: typeof fetch
   /** Replaced by the harness and by tests; defaults to the signed-in window Vorn serves. */
   sessionFetchImpl?: typeof fetch
-  /** The key Vorn gave this tool call, carried on each request through the window. */
+  /** The key Vorn gave this call, carried on each request through the window. */
   sessionCall?: string
   retry?: RetryPolicy
   /** Replaced in tests so backoff costs no real time. */
@@ -68,7 +69,7 @@ function sessionFor(
 export const MAX_POLL_PAGES = 1_000
 
 /**
- * Run one poll page and normalize it. Shared by the MCP server, the CLI and
+ * Run one poll page and normalize it. Shared by the stdio server, the CLI and
  * the test harness so all three observe exactly what Vorn will observe.
  */
 export async function runPoll(
@@ -78,7 +79,7 @@ export async function runPoll(
 ): Promise<PollPage> {
   const trigger = connector.triggers.find((entry) => entry.type === triggerType)
   if (!trigger) {
-    throw new Error(`Connector ${connector.id} has no trigger "${triggerType}"`)
+    throw new UnknownNameError(`${connector.id} has no trigger "${triggerType}"`)
   }
 
   const now = options.now ?? (() => new Date().toISOString())
@@ -147,7 +148,7 @@ export interface RunActionOptions {
   fetchImpl?: typeof fetch
   /** Replaced by the harness and by tests; defaults to the signed-in window Vorn serves. */
   sessionFetchImpl?: typeof fetch
-  /** The key Vorn gave this tool call, carried on each request through the window. */
+  /** The key Vorn gave this call, carried on each request through the window. */
   sessionCall?: string
   retry?: RetryPolicy
   /** Replaced in tests so backoff costs no real time. */
@@ -170,7 +171,7 @@ export async function runOptions(
 ): Promise<ActionInputOption[]> {
   const loader = connector.options?.[name]
   if (!loader) {
-    throw new Error(`Connector ${connector.id} serves no options set "${name}"`)
+    throw new UnknownNameError(`${connector.id} serves no options set "${name}"`)
   }
 
   const session = sessionFor(connector, options, true)
@@ -196,35 +197,37 @@ function quote(value: string): string {
   return value.length > MAX_QUOTED_VALUE ? `${value.slice(0, MAX_QUOTED_VALUE)}…` : value
 }
 
+const shown = (value: unknown): string =>
+  typeof value === 'string' ? `"${quote(value)}"` : quote(JSON.stringify(value) ?? String(value))
+
+// A typed value is taken as it is; text rendered from a template is read as the declared type.
 function coerceArg(value: unknown, type: string | undefined): unknown {
-  if (typeof value !== 'string') return value
   if (type === 'number') {
-    const parsed = Number(value)
-    if (Number.isNaN(parsed)) throw new Error(`Expected a number, got "${quote(value)}"`)
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    const parsed = typeof value === 'string' ? Number(value) : Number.NaN
+    if (Number.isNaN(parsed)) throw new Error(`Expected a number, got ${shown(value)}`)
     return parsed
   }
   if (type === 'boolean') {
+    if (typeof value === 'boolean') return value
     if (value === 'true') return true
     if (value === 'false') return false
-    throw new Error(`Expected a boolean, got "${quote(value)}"`)
+    throw new Error(`Expected a boolean, got ${shown(value)}`)
   }
   if (type === 'json') {
+    if (typeof value !== 'string') return value
     try {
       return JSON.parse(value)
     } catch {
-      throw new Error(`Expected JSON, got "${quote(value)}"`)
+      throw new Error(`Expected JSON, got ${shown(value)}`)
     }
   }
-  // `select` and `string` are both strings here: a select's value is one of
-  // its choices, which the served schema already states.
-  return value
+  // Whatever a text field is handed is still text: a number or flag as written, a list or object as JSON.
+  if (typeof value === 'string') return value
+  return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 
-/**
- * Run an action with its declared inputs validated and coerced. Vorn renders
- * every action argument as a template string, so numbers and booleans arrive
- * as text and have to be converted back here.
- */
+/** Run an action with its declared inputs validated and read as their declared types. */
 export async function runAction(
   connector: Connector,
   actionType: string,
@@ -233,25 +236,27 @@ export async function runAction(
 ): Promise<Record<string, unknown>> {
   const action = connector.actions.find((entry) => entry.type === actionType)
   if (!action) {
-    throw new Error(`Connector ${connector.id} has no action "${actionType}"`)
+    throw new UnknownNameError(`${connector.id} has no action "${actionType}"`)
   }
 
   const coerced: Record<string, unknown> = { ...args }
   for (const input of action.inputs ?? []) {
     const value = coerced[input.key]
-    if (value === undefined || value === '') {
-      if (input.required) throw new Error(`Action ${actionType} requires "${input.key}"`)
+    if (value === undefined || value === null || value === '') {
+      if (input.required) {
+        throw new ActionArgumentError(input.key, `Action ${actionType} requires "${input.key}"`)
+      }
       delete coerced[input.key]
       continue
     }
     try {
       coerced[input.key] = coerceArg(value, input.type)
     } catch (error) {
-      throw new Error(
+      throw new ActionArgumentError(
+        input.key,
         `Action ${actionType} argument "${input.key}": ${
           error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error }
+        }`
       )
     }
   }
@@ -272,7 +277,7 @@ export async function runAction(
         action.request,
         action.postReceive,
         { args: coerced, config },
-        { fetchImpl: session?.fetch ?? fetchImpl }
+        { fetchImpl: session?.fetch ?? fetchImpl, viaSession: session !== undefined }
       )
     } catch (error) {
       // Which action failed is the first thing a reader needs; the message

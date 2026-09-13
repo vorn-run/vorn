@@ -115,7 +115,9 @@ describe('packConnector', () => {
     const manifest = JSON.parse(readFileSync(join(unpacked, 'manifest.json'), 'utf8'))
     expect(manifest.id).toBe('acme')
     expect(manifest.version).toBe('1.2.3')
-    expect(manifest.triggers[0].setup.filters.pollTool).toBe('poll_newTicket')
+    // Vorn refuses a pack that does not name the protocol it speaks.
+    expect(manifest.protocol).toBe(1)
+    expect(manifest.triggers[0].setup.triggerType).toBe('newTicket')
     expect(readFileSync(join(unpacked, 'index.js'), 'utf8')).toContain('node:fs/promises')
   })
 
@@ -247,7 +249,7 @@ describe('packConnector', () => {
     expect(result.file).toBe(join(out, 'acme-1.2.3.vorn.tgz'))
     const unpacked = tempDir()
     await extract({ file: result.file as string, cwd: unpacked })
-    expect(readFileSync(join(unpacked, 'index.js'), 'utf8')).toContain('StdioServerTransport')
+    expect(readFileSync(join(unpacked, 'index.js'), 'utf8')).toContain('vorn/hello')
   }, 60_000)
 })
 

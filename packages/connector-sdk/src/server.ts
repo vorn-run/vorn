@@ -1,28 +1,20 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { z, type ZodTypeAny } from 'zod'
 import { EXTENSION_AGENTS, resolveConfig } from './define'
+import { UnknownNameError, messageOf, protocolError } from './errors'
 import { createExtensionHost } from './host'
-import { runAction, runOptions, runPoll } from './runtime'
-import { SESSION_CALL_META } from './session'
-
-/** The key Vorn gave a tool call, so its window requests are told apart from another step's. */
-function sessionCallOf(extra: { _meta?: Record<string, unknown> }): { sessionCall?: string } {
-  const key = extra._meta?.[SESSION_CALL_META]
-  return typeof key === 'string' ? { sessionCall: key } : {}
-}
+import { lineReader } from './lines'
+import { isRecord } from './post-receive'
 import {
-  MANIFEST_TOOL,
-  OPTIONS_TOOL,
-  PREFLIGHT_TOOL,
-  connectorManifest,
-  footerToolName,
-  handlerToolName,
-  pollToolName
-} from './setup'
+  MAX_FRAME_BYTES,
+  PROTOCOL_ERROR_CODES,
+  PROTOCOL_METHODS,
+  PROTOCOL_VERSION,
+  type ProtocolError,
+  type ProtocolResponse,
+  type VornHelloResult
+} from './protocol'
+import { runAction, runOptions, runPoll } from './runtime'
+import { connectorManifest } from './setup'
 import type {
-  ActionInputField,
-  ActionOutputField,
   Connector,
   ConnectorConfig,
   ExtensionAgent,
@@ -30,86 +22,10 @@ import type {
   ExtensionHost
 } from './types'
 
-function json(value: Record<string, unknown>): {
-  content: Array<{ type: 'text'; text: string }>
-  structuredContent: Record<string, unknown>
-} {
-  return {
-    // Vorn reads `structuredContent` to build step output and to find the
-    // `items` array a poll returned; the text block keeps the result readable
-    // in any generic MCP client.
-    content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
-    structuredContent: value
-  }
-}
+declare const __VORN_SDK_VERSION__: string | undefined
 
-function failure(error: unknown): {
-  content: Array<{ type: 'text'; text: string }>
-  isError: true
-} {
-  return {
-    content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }],
-    isError: true
-  }
-}
-
-/**
- * What the tool schema says a field is, in the words a caller reads.
- *
- * The manifest and the served schema describe the same `ActionInputField`, so
- * they are generated from it together rather than drifting into two accounts
- * of the same argument.
- */
-function describeInput(input: ActionInputField): string {
-  const base = input.description ?? input.label
-  if (input.loadOptions !== undefined) {
-    return `${base}. Choices come from this connector's "${input.loadOptions}" list.`
-  }
-  if (input.type === 'json') return `${base}. Takes JSON.`
-  const choices = (input.options ?? [])
-    .map((option) => option.value)
-    .filter((value) => typeof value === 'string' && value !== '')
-  if (choices.length > 0) return `${base}. Suggested values: ${choices.join(', ')}.`
-  return base
-}
-
-function inputShape(inputs: ActionInputField[]): Record<string, ZodTypeAny> {
-  const shape: Record<string, ZodTypeAny> = {}
-  for (const input of inputs) {
-    // Every value arrives as a string because Vorn renders action arguments
-    // from templates, and the declared type is applied by `runAction`. Choices
-    // stay in the description rather than becoming an enum: a step is entitled
-    // to compute this value, and a rendered template outside the list would
-    // otherwise be refused here — before the connector could say anything
-    // useful about it. The manifest carries `options` for the picker.
-    const base = z.string().describe(describeInput(input))
-    shape[input.key] = input.required ? base : base.optional()
-  }
-  return shape
-}
-
-// An output declared without a type may be any JSON value, a list or an object as much as text.
-function scalar(type: ActionOutputField['type']): ZodTypeAny {
-  if (type === 'number') return z.number()
-  if (type === 'boolean') return z.boolean()
-  if (type === 'string') return z.string()
-  return z.unknown()
-}
-
-/**
- * Output schemas are always loose. An action returns whatever the upstream API
- * gave it, and a strict schema would make the MCP client reject the call for
- * the crime of returning an extra field, or a null where the API had nothing.
- */
-function outputSchema(outputs: ActionOutputField[]): ZodTypeAny {
-  const shape: Record<string, ZodTypeAny> = {}
-  for (const output of outputs) {
-    shape[output.key] = scalar(output.type)
-      .nullish()
-      .describe(output.description ?? output.key)
-  }
-  return z.looseObject(shape)
-}
+// Stamped by the build; a run from source has none.
+const SDK_VERSION = typeof __VORN_SDK_VERSION__ === 'string' ? __VORN_SDK_VERSION__ : '0.0.0-source'
 
 export interface ConnectorServerOptions {
   /** Resolved connector configuration. Defaults to reading `process.env`. */
@@ -119,262 +35,249 @@ export interface ConnectorServerOptions {
   host?(sessionId: string): ExtensionHost
 }
 
-/**
- * Expose a connector as an MCP server.
- *
- * Each trigger becomes a `poll_<type>` tool returning the normalized page,
- * each action becomes a tool of the same name, and `vorn_connector_manifest`
- * reports everything needed to configure the connection. That is the entire
- * contract — Vorn's generic MCP connector consumes it with no host changes.
- */
+export interface ConnectorServer {
+  /** Answer one decoded message; a notification, or anything that is not a request, gets no answer. */
+  handle(message: unknown): Promise<ProtocolResponse | undefined>
+}
+
+type Params = Record<string, unknown>
+
+/** A request whose params do not fit the method. */
+class InvalidParams extends Error {}
+
+function text(params: Params, key: string): string {
+  const value = params[key]
+  if (typeof value !== 'string' || value === '') {
+    throw new InvalidParams(`"${key}" must be a non-empty string`)
+  }
+  return value
+}
+
+function optionalText(params: Params, key: string): string | undefined {
+  const value = params[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string') throw new InvalidParams(`"${key}" must be a string`)
+  return value
+}
+
+function optionalNumber(params: Params, key: string): number | undefined {
+  const value = params[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new InvalidParams(`"${key}" must be a number`)
+  }
+  return value
+}
+
+function failure(id: number, error: ProtocolError): ProtocolResponse {
+  return { jsonrpc: '2.0', id, error }
+}
+
+function refusal(id: number, code: number, message: string): ProtocolResponse {
+  return failure(id, { code, message })
+}
+
+/** Answer Vorn's connector protocol for one connector, one decoded message at a time. */
 export function createConnectorServer(
   connector: Connector,
   options: ConnectorServerOptions = {}
-): McpServer {
-  const server = new McpServer(
-    { name: connector.id, version: connector.version },
-    { capabilities: { tools: {} } }
-  )
-
-  // Resolved lazily so a missing environment variable surfaces as a tool error
-  // the user can read, rather than killing the process during MCP handshake.
+): ConnectorServer {
+  // Resolved on first use, so a missing variable is an answer the user can read, not a dead child.
   let cached: ConnectorConfig | undefined = options.config
   const config = (): ConnectorConfig => (cached ??= resolveConfig(connector))
+  const now = options.now
+  let greeted = false
 
-  server.registerTool(
-    MANIFEST_TOOL,
-    {
-      description: `Describe the ${connector.name} connector and how to configure it`,
-      inputSchema: {},
-      outputSchema: z.looseObject({})
-    },
-    () => json(connectorManifest(connector) as unknown as Record<string, unknown>)
-  )
-
-  // Registered only when declared, so a caller can tell "this connector has
-  // nothing to check" from "the check passed" by whether the tool exists.
-  if (connector.preflight) {
-    const preflight = connector.preflight.bind(connector)
-    server.registerTool(
-      PREFLIGHT_TOOL,
-      {
-        description: `Check whether ${connector.name} can run right now`,
-        inputSchema: {},
-        // Declared rather than left open like the manifest's: this shape is
-        // fixed, so a caller can validate against it. Still loose, because a
-        // connector adding a field of its own should not fail the call.
-        outputSchema: z.looseObject({
-          ok: z.boolean().describe('Whether the connector could run right now'),
-          message: z.string().optional().describe('What to do about it, when it could not')
-        })
-      },
-      async () => {
-        // A throw is the connector saying "broken", not "not set up yet", and
-        // it must not read to the user as a passing check. Reporting it as a
-        // failed preflight with the message keeps the distinction the caller
-        // can act on: ok:false is always something a person can fix.
-        try {
-          return json({ ...(await preflight()) })
-        } catch (error) {
-          return json({
-            ok: false,
-            message: error instanceof Error ? error.message : String(error)
-          })
-        }
-      }
-    )
-  }
-
-  // Registered only when the connector serves a set, so its absence means
-  // "nothing here loads its choices" rather than "the list came back empty".
-  const optionSets = Object.keys(connector.options ?? {})
-  if (optionSets.length > 0) {
-    server.registerTool(
-      OPTIONS_TOOL,
-      {
-        description: `List what one of ${connector.name}'s fields can be set to`,
-        inputSchema: {
-          name: z.enum(optionSets as [string, ...string[]]).describe('Which options set to list')
-        },
-        outputSchema: z.looseObject({
-          options: z
-            .array(z.looseObject({ value: z.string(), label: z.string().optional() }))
-            .describe('The choices, each a value to send and words to show')
-        })
-      },
-      async (args, extra) => {
-        try {
-          return json({
-            options: await runOptions(connector, args.name, {
-              config: config(),
-              ...(options.now && { now: options.now }),
-              ...sessionCallOf(extra)
-            })
-          })
-        } catch (error) {
-          return failure(error)
-        }
-      }
-    )
-  }
-
-  for (const trigger of connector.triggers) {
-    server.registerTool(
-      pollToolName(trigger.type),
-      {
-        description: trigger.description ?? `Poll ${connector.name} for ${trigger.label}`,
-        inputSchema: {
-          since: z
-            .string()
-            .optional()
-            .describe('Only return items changed after this ISO timestamp'),
-          cursor: z.string().optional().describe('Opaque cursor from a previous page'),
-          limit: z.string().optional().describe('Maximum number of items to return')
-        },
-        outputSchema: z.looseObject({
-          items: z.array(z.looseObject({})).describe('Normalized items'),
-          nextCursor: z.string().optional().describe('Cursor for the next page'),
-          hasMore: z.boolean().describe('Whether another page is immediately available')
-        })
-      },
-      async (args, extra) => {
-        try {
-          const limit = args.limit === undefined ? undefined : Number(args.limit)
-          if (limit !== undefined && !Number.isFinite(limit)) {
-            throw new Error(`Invalid limit "${args.limit}"`)
-          }
-          return json(
-            (await runPoll(connector, trigger.type, {
-              config: config(),
-              ...(args.since !== undefined && { since: args.since }),
-              ...(args.cursor !== undefined && { cursor: args.cursor }),
-              ...(limit !== undefined && { limit }),
-              ...(options.now && { now: options.now }),
-              ...sessionCallOf(extra)
-            })) as unknown as Record<string, unknown>
-          )
-        } catch (error) {
-          return failure(error)
-        }
-      }
-    )
-  }
-
-  // An extension's contributions are served the same way a trigger is: one tool
-  // each, called by the host on its own schedule or when someone clicks.
-  const sessionShape = {
-    sessionId: z.string().describe('The session this is being computed for'),
-    worktreePath: z.string().describe("Where the session's work is"),
-    agent: z.enum(EXTENSION_AGENTS).describe('Which agent runs in the session')
-  }
-  const sessionContext = (
-    args: { sessionId: string; worktreePath: string; agent: ExtensionAgent },
-    host: ExtensionHost
-  ): ExtensionContext => ({
-    sessionId: args.sessionId,
-    worktreePath: args.worktreePath,
-    agent: args.agent,
-    host,
-    now: options.now ?? (() => new Date().toISOString())
+  const runtime = (params: Params) => ({
+    config: config(),
+    now,
+    sessionCall: optionalText(params, 'sessionCall')
   })
+
   const hostFor = (sessionId: string): ExtensionHost =>
     options.host?.(sessionId) ?? createExtensionHost({ sessionId })
 
-  for (const footer of connector.contributes?.footers ?? []) {
-    server.registerTool(
-      footerToolName(footer.id),
-      {
-        title: footer.title,
-        description: footer.description ?? `Recompute ${footer.title} for one session`,
-        inputSchema: sessionShape,
-        outputSchema: z.looseObject({
-          items: z
-            .array(z.looseObject({ label: z.string(), value: z.string() }))
-            .describe('The readings to show in the band')
-        })
-      },
-      async (args) => {
-        try {
-          const items = await footer.run(sessionContext(args, hostFor(args.sessionId)))
-          return json({ items })
-        } catch (error) {
-          return failure(error)
-        }
-      }
-    )
+  const sessionContext = (params: Params): ExtensionContext => {
+    const agent = text(params, 'agent')
+    if (!(EXTENSION_AGENTS as string[]).includes(agent)) {
+      throw new InvalidParams(`"agent" must be one of ${EXTENSION_AGENTS.join(', ')}`)
+    }
+    const sessionId = text(params, 'sessionId')
+    return {
+      sessionId,
+      worktreePath: text(params, 'worktreePath'),
+      agent: agent as ExtensionAgent,
+      host: hostFor(sessionId),
+      now: now ?? (() => new Date().toISOString())
+    }
   }
 
-  for (const handler of connector.contributes?.linkHandlers ?? []) {
-    server.registerTool(
-      handlerToolName(handler.id),
-      {
-        title: handler.title,
-        description: handler.description ?? `Open ${handler.title} for a clicked link`,
-        inputSchema: {
-          ...sessionShape,
-          url: z.string().describe('The clicked text, which matched this handler')
-        },
-        outputSchema: z.looseObject({
-          openPane: z.string().optional().describe("Id of one of this extension's panes to open")
-        })
-      },
-      async (args) => {
-        try {
-          const handled = await handler.run({
-            ...sessionContext(args, hostFor(args.sessionId)),
-            url: args.url
-          })
-          return json({ ...(handled ?? {}) })
-        } catch (error) {
-          return failure(error)
-        }
+  const methods: Record<string, (params: Params) => unknown> = {
+    [PROTOCOL_METHODS.manifest]: () => connectorManifest(connector),
+
+    // A throw is the connector saying "broken", which must not read as a passing check.
+    [PROTOCOL_METHODS.preflight]: async () => {
+      if (!connector.preflight) return { ok: null }
+      try {
+        return { ...(await connector.preflight()) }
+      } catch (error) {
+        return { ok: false, message: messageOf(error) }
       }
-    )
+    },
+
+    [PROTOCOL_METHODS.options]: async (params) => ({
+      options: await runOptions(connector, text(params, 'name'), runtime(params))
+    }),
+
+    [PROTOCOL_METHODS.poll]: (params) =>
+      runPoll(connector, text(params, 'trigger'), {
+        ...runtime(params),
+        cursor: optionalText(params, 'cursor'),
+        since: optionalText(params, 'since'),
+        limit: optionalNumber(params, 'limit')
+      }),
+
+    [PROTOCOL_METHODS.action]: (params) => {
+      const action = text(params, 'action')
+      const args = params.args ?? {}
+      if (!isRecord(args)) throw new InvalidParams('"args" must be an object')
+      return runAction(connector, action, args, runtime(params))
+    },
+
+    [PROTOCOL_METHODS.footer]: async (params) => {
+      const id = text(params, 'footer')
+      const footer = connector.contributes?.footers?.find((entry) => entry.id === id)
+      if (!footer) throw new InvalidParams(`${connector.id} contributes no footer "${id}"`)
+      return { items: await footer.run(sessionContext(params)) }
+    },
+
+    [PROTOCOL_METHODS.handler]: async (params) => {
+      const id = text(params, 'handler')
+      const handler = connector.contributes?.linkHandlers?.find((entry) => entry.id === id)
+      if (!handler) throw new InvalidParams(`${connector.id} contributes no link handler "${id}"`)
+      const context = { ...sessionContext(params), url: text(params, 'url') }
+      return { ...((await handler.run(context)) ?? {}) }
+    }
   }
 
-  for (const action of connector.actions) {
-    const base = action.description ?? `${action.label} in ${connector.name}`
-    // An agent retrying a failed step has no other way to know whether it is
-    // about to create a second issue.
-    const retryHint =
-      action.idempotent === undefined
-        ? ''
-        : action.idempotent
-          ? ' Safe to retry: repeating this call with the same arguments has no additional effect.'
-          : ' Not idempotent: repeating this call performs the operation again.'
-    server.registerTool(
-      action.type,
-      {
-        // Carries the authored label, so a picker can name the action rather than its tool.
-        title: action.label,
-        description: `${base}${retryHint}`,
-        inputSchema: inputShape(action.inputs ?? []),
-        outputSchema: outputSchema(action.outputs ?? [])
-      },
-      async (args, extra) => {
-        try {
-          return json(
-            await runAction(connector, action.type, args as Record<string, unknown>, {
-              config: config(),
-              ...(options.now && { now: options.now }),
-              ...sessionCallOf(extra)
-            })
-          )
-        } catch (error) {
-          return failure(error)
-        }
-      }
-    )
+  const hello = (id: number, params: Params): ProtocolResponse => {
+    const offered = params.protocols
+    if (!Array.isArray(offered)) {
+      return refusal(id, PROTOCOL_ERROR_CODES.invalidParams, '"protocols" must be a list')
+    }
+    if (!offered.includes(PROTOCOL_VERSION)) {
+      return refusal(
+        id,
+        PROTOCOL_ERROR_CODES.unsupportedProtocol,
+        `Vorn offers connector protocol ${offered.join(', ') || 'none'}; ${connector.id} speaks ${PROTOCOL_VERSION}`
+      )
+    }
+    greeted = true
+    const result: VornHelloResult = {
+      protocol: PROTOCOL_VERSION,
+      sdk: { name: '@vornrun/connector-sdk', version: SDK_VERSION },
+      connector: { id: connector.id, version: connector.version, kind: connector.kind }
+    }
+    return { jsonrpc: '2.0', id, result }
   }
 
-  return server
+  return {
+    async handle(message) {
+      if (!isRecord(message) || typeof message.id !== 'number') return undefined
+      const { id, method } = message
+      if (typeof method !== 'string') {
+        return refusal(id, PROTOCOL_ERROR_CODES.invalidParams, 'A request names its method')
+      }
+      const params = message.params ?? {}
+      if (!isRecord(params)) {
+        return refusal(id, PROTOCOL_ERROR_CODES.invalidParams, '"params" must be an object')
+      }
+      if (method === PROTOCOL_METHODS.hello) return hello(id, params)
+      const run = Object.hasOwn(methods, method) ? methods[method] : undefined
+      if (!run) return refusal(id, PROTOCOL_ERROR_CODES.methodNotFound, 'Method not found')
+      if (!greeted) {
+        return refusal(
+          id,
+          PROTOCOL_ERROR_CODES.beforeHello,
+          `Call ${PROTOCOL_METHODS.hello} before ${method}`
+        )
+      }
+      try {
+        return { jsonrpc: '2.0', id, result: await run(params) } as ProtocolResponse
+      } catch (error) {
+        if (error instanceof InvalidParams || error instanceof UnknownNameError) {
+          return refusal(id, PROTOCOL_ERROR_CODES.invalidParams, error.message)
+        }
+        return failure(id, protocolError(error))
+      }
+    }
+  }
 }
+
+/** One reply as one line, or an error in its place when the result cannot travel. */
+function frame(response: ProtocolResponse): string {
+  try {
+    const line = JSON.stringify(response)
+    if (Buffer.byteLength(line) > MAX_FRAME_BYTES) {
+      throw new Error(`The answer is over ${MAX_FRAME_BYTES} bytes`)
+    }
+    return line
+  } catch (error) {
+    return JSON.stringify(failure(response.id, protocolError(error)))
+  }
+}
+
+// A pack's generated entry and a connector's own entry both call this in one process; only the first serves.
+const SERVING = Symbol.for('@vornrun/connector-sdk/serving')
 
 /** Serve a connector on stdio. This is the one line a connector's bin needs. */
 export async function serveConnector(
   connector: Connector,
   options: ConnectorServerOptions = {}
 ): Promise<void> {
+  const shared = globalThis as { [SERVING]?: boolean }
+  if (shared[SERVING]) return
+  shared[SERVING] = true
+  // stdout carries only replies, so anything else written there goes to stderr.
+  const reply = process.stdout.write.bind(process.stdout) as typeof process.stdout.write
+  process.stdout.write = process.stderr.write.bind(process.stderr) as typeof process.stdout.write
   const server = createConnectorServer(connector, options)
-  await server.connect(new StdioServerTransport())
+  let inFlight = 0
+  let ended = false
+  const finish = (): void => {
+    if (ended && inFlight === 0) reply('', () => process.exit(0))
+  }
+
+  const onLine = (line: string): void => {
+    if (line.trim() === '') return
+    let message: unknown
+    try {
+      message = JSON.parse(line)
+    } catch {
+      process.stderr.write(`${connector.id}: skipped a line that is not JSON\n`)
+      return
+    }
+    inFlight++
+    void server
+      .handle(message)
+      .then((response) => {
+        if (response) reply(`${frame(response)}\n`)
+      })
+      .finally(() => {
+        inFlight--
+        finish()
+      })
+  }
+
+  process.stdin.on(
+    'data',
+    lineReader(onLine, () => {
+      process.stderr.write(`${connector.id}: a message was over ${MAX_FRAME_BYTES} bytes\n`)
+      process.exit(1)
+    })
+  )
+  process.stdin.on('end', () => {
+    ended = true
+    finish()
+  })
 }

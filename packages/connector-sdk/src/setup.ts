@@ -1,4 +1,5 @@
 import { envNameFor } from './define'
+import { PROTOCOL_VERSION } from './protocol'
 import type {
   ActionInputOption,
   ActivationPredicate,
@@ -11,51 +12,9 @@ import type {
   StatusSuggestion
 } from './types'
 
-/** MCP tool name a trigger is served under. */
-export function pollToolName(triggerType: string): string {
-  return `poll_${triggerType}`
-}
-
-/** MCP tool name a footer is recomputed under. */
-export function footerToolName(footerId: string): string {
-  return `vorn_footer_${footerId}`
-}
-
-/** MCP tool name a link handler is run under. */
-export function handlerToolName(handlerId: string): string {
-  return `vorn_handler_${handlerId}`
-}
-
-/** Tool that reports the connector's manifest and setup hints. */
-export const MANIFEST_TOOL = 'vorn_connector_manifest'
-
-/**
- * Tool that reports whether the connector can run right now. Present only when
- * the connector declares a `preflight`, so its absence means "nothing to
- * check" rather than "check passed".
- */
-export const PREFLIGHT_TOOL = 'vorn_connector_preflight'
-
-/**
- * Tool that lists the choices for one dynamic field. Present only when the
- * connector serves an options set, for the same reason preflight is.
- */
-export const OPTIONS_TOOL = 'vorn_connector_options'
-
 export interface ConnectionSetup {
   connectorId: string
   triggerType: string
-  /** Values to paste into Vorn's MCP connection form. */
-  filters: {
-    pollTool: string
-    itemsPath: 'items'
-    idField: 'externalId'
-    timestampField: 'updatedAt'
-    titleField: 'title'
-    urlField: 'url'
-    cursorArg: 'cursor'
-    cursorPath: 'nextCursor'
-  }
   /** Environment variable names the connector reads. */
   env: Array<{
     name: string
@@ -67,15 +26,7 @@ export interface ConnectionSetup {
   }>
 }
 
-/**
- * Describe how to wire one trigger into a Vorn MCP connection.
- *
- * Every SDK connector normalizes to the same field names, so this mapping is
- * fixed; it is generated rather than documented so a rename in the SDK cannot
- * drift away from the setup instructions users copy. `cursorArg` hands the
- * connector back its own cursor each poll, which is what lets its dedupe
- * strategy — rather than Vorn's timestamp comparison — decide what is new.
- */
+/** What a Vorn connection needs for one trigger: which trigger, and the environment the connector reads. */
 export function connectionSetup(connector: Connector, triggerType: string): ConnectionSetup {
   const trigger = connector.triggers.find((entry) => entry.type === triggerType)
   if (!trigger) {
@@ -84,16 +35,6 @@ export function connectionSetup(connector: Connector, triggerType: string): Conn
   return {
     connectorId: connector.id,
     triggerType,
-    filters: {
-      pollTool: pollToolName(triggerType),
-      itemsPath: 'items',
-      idField: 'externalId',
-      timestampField: 'updatedAt',
-      titleField: 'title',
-      urlField: 'url',
-      cursorArg: 'cursor',
-      cursorPath: 'nextCursor'
-    },
     env: connector.config.map((field) => ({
       name: envNameFor(field.key, field.env),
       required: field.required === true,
@@ -119,6 +60,8 @@ export interface ManifestContributions {
 }
 
 export interface ConnectorManifest {
+  /** The connector protocol the pack speaks; Vorn refuses a pack without one. */
+  protocol: number
   id: string
   name: string
   version: string
@@ -148,11 +91,14 @@ export interface ConnectorManifest {
     type: string
     label: string
     description?: string
+    /** Whether repeating a call with the same arguments has no further effect; absent when unsaid. */
+    idempotent?: boolean
     inputs: Array<{
       key: string
       label: string
       type: string
       required: boolean
+      description?: string
       options?: ActionInputOption[]
       /** An options set the connector serves, resolved against a live connection. */
       loadOptions?: string
@@ -201,10 +147,11 @@ function manifestContributions(connector: Connector): ManifestContributions | un
   }
 }
 
-/** Full machine-readable description of a connector, served over MCP and printed by the CLI. */
+/** Full machine-readable description of a connector, served over stdio, written into a pack and printed by the CLI. */
 export function connectorManifest(connector: Connector): ConnectorManifest {
   const contributes = manifestContributions(connector)
   return {
+    protocol: PROTOCOL_VERSION,
     id: connector.id,
     name: connector.name,
     version: connector.version,
@@ -230,11 +177,13 @@ export function connectorManifest(connector: Connector): ConnectorManifest {
       type: action.type,
       label: action.label,
       ...(action.description !== undefined && { description: action.description }),
+      ...(action.idempotent !== undefined && { idempotent: action.idempotent }),
       inputs: (action.inputs ?? []).map((input) => ({
         key: input.key,
         label: input.label,
         type: input.type ?? 'string',
         required: input.required === true,
+        ...(input.description !== undefined && { description: input.description }),
         ...(input.options !== undefined && { options: input.options }),
         ...(input.loadOptions !== undefined && { loadOptions: input.loadOptions }),
         ...(input.builderHint !== undefined && { builderHint: input.builderHint })
