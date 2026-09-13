@@ -307,6 +307,8 @@ describe('a native connector child', () => {
       const client = await start('stubborn', {
         closeTimings: { termAfterMs: 50, killAfterMs: 200 }
       })
+      // Answering the hello proves the SIGTERM handler is in place, even on a loaded machine.
+      await client.request('vorn/hello', HELLO_PARAMS, 5_000)
       const exit = exitOf(client)
       await client.close()
       expect(client.exited).toBe(true)
