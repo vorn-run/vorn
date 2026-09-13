@@ -4810,7 +4810,7 @@ __metadata:
     electron-updater: "npm:^6.8.3"
     electron-vite: "npm:^5.0.0"
     typescript: "npm:^6.0.3"
-    ws: "npm:^8.21.1"
+    ws: "npm:^8.21.3"
   languageName: unknown
   linkType: soft
 
@@ -4826,7 +4826,7 @@ __metadata:
     tsup: "npm:^8.5.1"
     tsx: "npm:^4.23.1"
     typescript: "npm:^6.0.3"
-    ws: "npm:^8.21.1"
+    ws: "npm:^8.21.3"
     zod: "npm:^4.5.4"
   bin:
     mcp: dist/index.js
@@ -4854,7 +4854,7 @@ __metadata:
     tsup: "npm:^8.5.1"
     tsx: "npm:^4.23.1"
     typescript: "npm:^6.0.3"
-    ws: "npm:^8.21.1"
+    ws: "npm:^8.21.3"
     zod: "npm:^4.5.4"
   bin:
     vorn: ./dist/cli.cjs
@@ -12893,7 +12893,7 @@ __metadata:
     typescript-eslint: "npm:^8.59.2"
     vite: "npm:^8.2.2"
     vitest: "npm:4.1.11"
-    ws: "npm:^8.21.1"
+    ws: "npm:^8.21.3"
     zod: "npm:^4.5.4"
     zustand: "npm:^5.0.14"
   languageName: unknown
@@ -13321,7 +13321,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ws@npm:^8.16.0, ws@npm:^8.21.1":
+"ws@npm:^8.16.0":
   version: 8.21.1
   resolution: "ws@npm:8.21.1"
   peerDependencies:
@@ -13333,6 +13333,21 @@ __metadata:
     utf-8-validate:
       optional: true
   checksum: 10c0/c4c6f1d95f6d465262de2037c57c715725d67e078dd49420ede4e19115668aba159cb64d85c5e89c06eb2826be599e62e5095860ad6cc54ff42e8bd7684e1db8
+  languageName: node
+  linkType: hard
+
+"ws@npm:^8.21.3":
+  version: 8.21.3
+  resolution: "ws@npm:8.21.3"
+  peerDependencies:
+    bufferutil: ^4.0.1
+    utf-8-validate: ">=5.0.2"
+  peerDependenciesMeta:
+    bufferutil:
+      optional: true
+    utf-8-validate:
+      optional: true
+  checksum: 10c0/7b28dc2863ea0e2cece68d142a3eee90361021b73f750431e6d8076bb7dede5fdfdb75b3d29534b62f411261147b76b1bc80fb5cc63ab0aabd467280e85b22e0
   languageName: node
   linkType: hard
 
