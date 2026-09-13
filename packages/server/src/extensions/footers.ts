@@ -7,7 +7,6 @@ import type {
 import { IPC } from '@vornrun/shared/types'
 import { clientRegistry } from '../broadcast'
 import { activationFor, subjectOf } from './activation'
-import { footerToolName } from '../connectors/sdk-tools'
 import { getOrStartHost, installedExtensions } from './hosts'
 import log from '../logger'
 
@@ -95,21 +94,18 @@ async function runFooter(
   const poller = pollers.get(key)
   try {
     const client = await getOrStartHost(pack.id, session.projectPath)
-    const answered = await client.callTool({
-      name: footerToolName(footerId),
-      arguments: {
-        sessionId: session.id,
-        worktreePath: session.worktreePath ?? session.projectPath,
-        agent: session.agentType
-      }
+    const answered = await client.footer({
+      footer: footerId,
+      sessionId: session.id,
+      worktreePath: session.worktreePath ?? session.projectPath,
+      agent: session.agentType
     })
-    if (answered.isError) throw new Error(String(answered.content ?? 'the footer failed'))
     const reading: ExtensionFooterReading = {
       extensionId: pack.id,
       extensionName: pack.name,
       footerId,
       title,
-      items: readItems(answered.structuredContent),
+      items: readItems(answered),
       computedAt: new Date().toISOString()
     }
     if (poller?.failing) restart(pack, footerId, title, session, false)
