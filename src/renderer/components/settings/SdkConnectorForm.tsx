@@ -5,6 +5,7 @@ import { AlertCircle, Check, Loader2, Search } from 'lucide-react'
 import { BusyIcon } from './BusyIcon'
 import {
   borrowableFromManifest,
+  sdkConnectionFilters,
   type AuthProbeReport,
   type ConnectorCatalogItem,
   type InstalledConnectorPack,
@@ -15,7 +16,7 @@ import {
 import { useAppStore } from '../../stores'
 import { parseLaunchSpec } from './parse-launch-spec'
 import { ConnectorIcon } from '../ConnectorIcon'
-import { SDK_FILTER_KEYS } from '../../lib/connection-icon'
+import { SDK_CONNECTOR_ID } from '../../lib/connection-icon'
 import { packLaunch } from '../../lib/pack-status'
 
 const INPUT_CLASS =
@@ -165,13 +166,8 @@ export function SdkConnectorForm({
         command: launch.command,
         args: JSON.stringify(launch.args),
         env: JSON.stringify(plain),
-        // Recorded so the connection can be re-probed later without the user
-        // retyping what they installed.
-        [SDK_FILTER_KEYS.connectorId]: manifest.id,
-        [SDK_FILTER_KEYS.version]: manifest.version,
-        // Carried on the connection because a packaged connector is stored as
-        // an `mcp` connection, so there is no connector id to key a glyph by.
-        ...(manifest.icon && { [SDK_FILTER_KEYS.icon]: JSON.stringify(manifest.icon) })
+        // What it installed, the glyph it draws and the trigger it polls, so nobody retypes them.
+        ...sdkConnectionFilters(manifest, trigger?.type)
       }
 
       if (Object.keys(secret).length > 0) {
@@ -180,13 +176,8 @@ export function SdkConnectorForm({
         filters.secretEnv = await window.api.encryptString(JSON.stringify(secret))
       }
 
-      // The whole point of the probe: these are the values a person would
-      // otherwise have to copy by hand, and getting one wrong yields a
-      // connection that polls and never fires.
-      if (trigger) Object.assign(filters, trigger.filters)
-
       const created = await window.api.createConnection({
-        connectorId: 'mcp',
+        connectorId: SDK_CONNECTOR_ID,
         name: trigger ? `${manifest.name}: ${trigger.label}` : manifest.name,
         filters,
         syncIntervalMinutes: 5,
@@ -252,7 +243,7 @@ export function SdkConnectorForm({
             <div className="flex items-center gap-1.5 text-sm text-gray-200">
               {manifest.icon ? (
                 <ConnectorIcon
-                  connectorId="mcp"
+                  connectorId={SDK_CONNECTOR_ID}
                   icon={manifest.icon}
                   size={13}
                   className="text-gray-200 shrink-0"

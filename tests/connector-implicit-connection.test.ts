@@ -52,6 +52,7 @@ describe('the connection a connector that needs no sign-in comes with', () => {
     const made = syncImplicitConnection('echo-bench', NONE_PACK, d)
     expect(d.create).toHaveBeenCalledTimes(1)
     const params = d.create.mock.calls[0][0]
+    expect(params.connectorId).toBe('sdk')
     expect(params.filters.implicit).toBe(true)
     expect(params.filters.sdkConnectorId).toBe('echo-bench')
     expect(params.name).toBe('Echo Bench')

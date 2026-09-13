@@ -23,8 +23,7 @@ const {
   dbDeferConnectorInboxMock,
   dbRenewConnectorInboxLeaseMock,
   clientRegistryMock,
-  connectorGetMock,
-  pollMcpConnectionMock
+  connectorGetMock
 } = vi.hoisted(() => ({
   loadConfigMock: vi.fn(),
   dbGetSourceConnectionMock: vi.fn(),
@@ -39,8 +38,7 @@ const {
   dbDeferConnectorInboxMock: vi.fn(),
   dbRenewConnectorInboxLeaseMock: vi.fn(),
   clientRegistryMock: { size: 1 },
-  connectorGetMock: vi.fn(),
-  pollMcpConnectionMock: vi.fn()
+  connectorGetMock: vi.fn()
 }))
 
 const runScheduled = vi.hoisted(() => vi.fn(async (_workflowId: string, _inputs?: unknown) => {}))
@@ -88,12 +86,6 @@ vi.mock('../packages/server/src/connectors', async (importOriginal) => {
     applyDecryptedCreds: (conn: { filters: Record<string, unknown> }) => ({ ...conn.filters })
   }
 })
-// Keep the real MCP_CONNECTOR_ID / MCP_POLL_EVENT constants; stub only the poll.
-vi.mock('../packages/server/src/connectors/mcp', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>
-  return { ...actual, pollMcpConnection: pollMcpConnectionMock }
-})
-
 // Import after mocks are set up.
 import { scheduler } from '../packages/server/src/scheduler'
 
@@ -151,7 +143,6 @@ beforeEach(() => {
   runScheduled.mockClear()
   runConnectorItem.mockClear()
   connectorGetMock.mockReset()
-  pollMcpConnectionMock.mockReset()
 })
 
 describe('scheduler.triggerWorkflow for connectorPoll', () => {
@@ -465,9 +456,9 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     expect(dbRecordConnectorPollPageMock).not.toHaveBeenCalled()
   })
 
-  // --- MCP connections are routed through pollMcpConnection, not connector.poll ---
+  // --- A connector that runs a child per connection polls with the connection itself ---
 
-  function makeMcpPollWorkflow(id: string, event: string): WorkflowDefinition {
+  function makeGenericPollWorkflow(id: string, event: string): WorkflowDefinition {
     const trigger: ConnectorPollTriggerConfig = {
       triggerType: 'connectorPoll',
       connectionId: 'conn-1',
@@ -476,7 +467,7 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     }
     return {
       id,
-      name: 'MCP Poll',
+      name: 'Poll',
       icon: 'Plug',
       iconColor: '#64748b',
       enabled: true,
@@ -487,45 +478,82 @@ describe('scheduler.triggerWorkflow for connectorPoll', () => {
     }
   }
 
-  it('routes an mcpPoll event through pollMcpConnection and advances the cursor', async () => {
-    const wf = makeMcpPollWorkflow('wf-mcp', 'mcpPoll')
-    loadConfigMock.mockReturnValue({ workflows: [wf] })
-    dbGetSourceConnectionMock.mockReturnValue(
-      makeConn({ connectorId: 'mcp', filters: { pollTool: 'list' }, syncCursor: 'c0' })
-    )
-    connectorGetMock.mockReturnValue({}) // MCP has no generic poll()
-    pollMcpConnectionMock.mockResolvedValue({
-      events: [
-        { id: '1', type: 'mcpPoll', data: { externalId: '1', title: 'X' }, timestamp: 't1' }
-      ],
-      nextCursor: 't1'
-    })
+  /** The connector hands back this pager, or this reason it has nothing to poll. */
+  const pagerFor = (pager: ((cursor?: string) => Promise<PollResult>) | string) => {
+    const pollConnection = vi.fn(() => pager)
+    connectorGetMock.mockReturnValue({ pollConnection })
+    return pollConnection
+  }
 
-    scheduler.triggerWorkflow('wf-mcp')
+  const sdkConn = () => makeConn({ connectorId: 'sdk', name: 'Substack' })
+
+  const fire = async (workflowId: string): Promise<void> => {
+    scheduler.triggerWorkflow(workflowId)
     await new Promise((r) => setImmediate(r))
+  }
 
-    // pollMcpConnection called with the full connection + cursor.
-    expect(pollMcpConnectionMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'conn-1', connectorId: 'mcp' }),
-      undefined
+  it('hands the whole connection and the event to a connector that polls per connection', async () => {
+    loadConfigMock.mockReturnValue({ workflows: [makeGenericPollWorkflow('wf-conn', 'mcpPoll')] })
+    dbGetSourceConnectionMock.mockReturnValue(sdkConn())
+    const page = vi.fn().mockResolvedValue({
+      events: [
+        { id: 'p1', type: 'mcpPoll', data: { externalId: 'p1', title: 'P' }, timestamp: 't1' }
+      ],
+      nextCursor: 'c1',
+      hasMore: false
+    })
+    const pollConnection = pagerFor(page)
+
+    await fire('wf-conn')
+
+    expect(pollConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'conn-1', connectorId: 'sdk' }),
+      'mcpPoll'
     )
+    expect(page).toHaveBeenCalledWith(undefined)
     expect(dbRecordConnectorPollPageMock).toHaveBeenCalledWith(
-      expect.objectContaining({ workflowId: 'wf-mcp', connectionId: 'conn-1', cursor: 't1' })
+      expect.objectContaining({ workflowId: 'wf-conn', connectorId: 'sdk', cursor: 'c1' })
     )
   })
 
-  it('skips an MCP connection whose event is not mcpPoll', async () => {
-    const wf = makeMcpPollWorkflow('wf-mcp-bad', 'issueCreated')
-    loadConfigMock.mockReturnValue({ workflows: [wf] })
-    dbGetSourceConnectionMock.mockReturnValue(
-      makeConn({ connectorId: 'mcp', filters: { pollTool: 'list' } })
+  it('skips a connection whose connector says it has nothing to poll', async () => {
+    loadConfigMock.mockReturnValue({ workflows: [makeGenericPollWorkflow('wf-none', 'mcpPoll')] })
+    dbGetSourceConnectionMock.mockReturnValue(sdkConn())
+    pagerFor('has no trigger to poll')
+
+    await fire('wf-none')
+
+    expect(dbRecordConnectorPollPageMock).not.toHaveBeenCalled()
+    expect(dbRecordConnectorPollErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps polling a connection while it says there is more', async () => {
+    loadConfigMock.mockReturnValue({ workflows: [makeGenericPollWorkflow('wf-pages', 'mcpPoll')] })
+    dbGetSourceConnectionMock.mockReturnValue(sdkConn())
+    const page = vi
+      .fn()
+      .mockResolvedValueOnce({ events: [], nextCursor: 'p1', hasMore: true })
+      .mockResolvedValueOnce({ events: [], nextCursor: 'p2', hasMore: false })
+    pagerFor(page)
+
+    await fire('wf-pages')
+
+    expect(page.mock.calls.map((call) => call[0])).toEqual([undefined, 'p1'])
+    expect(dbRecordConnectorPollPageMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('records a pack built for an older Vorn as the sync error, saying how to fix it', async () => {
+    loadConfigMock.mockReturnValue({ workflows: [makeGenericPollWorkflow('wf-old', 'mcpPoll')] })
+    dbGetSourceConnectionMock.mockReturnValue(sdkConn())
+    const outdated =
+      'Substack was built for an older Vorn. Update it in Settings → Connectors, or rebuild it with @vornrun/connector-sdk 0.7.1-beta.3 or later.'
+    pagerFor(vi.fn().mockRejectedValue(new Error(outdated)))
+
+    await fire('wf-old')
+
+    expect(dbRecordConnectorPollErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({ workflowId: 'wf-old', connectionId: 'conn-1', error: outdated })
     )
-    connectorGetMock.mockReturnValue({})
-
-    scheduler.triggerWorkflow('wf-mcp-bad')
-    await new Promise((r) => setImmediate(r))
-
-    expect(pollMcpConnectionMock).not.toHaveBeenCalled()
     expect(dbRecordConnectorPollPageMock).not.toHaveBeenCalled()
   })
 

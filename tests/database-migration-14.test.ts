@@ -18,19 +18,13 @@ import {
   dbSignalChange
 } from '../packages/server/src/database'
 import { mintOwnerToken } from '../packages/server/src/token-manager'
+import { queryDb } from './helpers/database'
 
 let dataDir: string
 let dbFile: string
 
 /** Open the database file directly, outside the module under test. */
-function query<T>(fn: (d: Database.Database) => T): T {
-  const d = new Database(dbFile)
-  try {
-    return fn(d)
-  } finally {
-    d.close()
-  }
-}
+const query = <T>(fn: (d: Database.Database) => T): T => queryDb(dbFile, fn)
 
 /**
  * The version identity landed on, not a literal.

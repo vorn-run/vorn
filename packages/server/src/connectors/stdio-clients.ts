@@ -1,18 +1,6 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { getSafeEnv } from '../process-utils'
 import log from '../logger'
 
-/**
- * Children spawned once per key and kept until they exit or are stopped.
- *
- * A connector keys on the connection it polls and an extension on the project
- * it answers about, but the machinery either one needs is the same: share a
- * startup that two callers ask for at once, sanitize the environment, close the
- * transport when connecting fails, and forget a child that exits so the next
- * call spawns a fresh one. That is this, and the two differ only in the key and
- * in what they put in the environment.
- */
+// Children spawned once per key and kept until they exit or are stopped; a connection or an extension's project is the key.
 
 export interface SpawnConfig {
   command: string
@@ -21,17 +9,14 @@ export interface SpawnConfig {
   cwd?: string
 }
 
-interface LiveClient<Meta> {
-  client: Client
-  transport: StdioClientTransport
-  meta: Meta
+/** A running child: how to stop it, and how to hear that it ended on its own. */
+export interface ChildHandle {
+  close(): Promise<void>
+  onExit(listener: () => void): void
 }
 
-export interface StdioClientCache<Meta> {
-  getOrStart(
-    key: string,
-    spawn: () => Promise<{ config: SpawnConfig; meta: Meta }>
-  ): Promise<Client>
+export interface ChildCache<Handle, Meta, Config> {
+  getOrStart(key: string, spawn: () => Promise<{ config: Config; meta: Meta }>): Promise<Handle>
   stop(key: string): Promise<void>
   stopWhere(matches: (meta: Meta) => boolean): Promise<void>
   stopAll(): Promise<void>
@@ -41,47 +26,33 @@ export interface StdioClientCache<Meta> {
   entries(): Meta[]
 }
 
-export function createStdioClientCache<Meta>(label: string): StdioClientCache<Meta> {
-  const live = new Map<string, LiveClient<Meta>>()
+interface Live<Handle, Meta> {
+  handle: Handle
+  meta: Meta
+}
+
+export function createChildCache<Handle extends ChildHandle, Meta, Config = SpawnConfig>(
+  label: string,
+  open: (config: Config, key: string) => Promise<Handle>
+): ChildCache<Handle, Meta, Config> {
+  const live = new Map<string, Live<Handle, Meta>>()
   // In-flight startups, so two callers for one key share a child rather than racing two.
-  const pending = new Map<string, Promise<Client>>()
+  const pending = new Map<string, Promise<Handle>>()
 
   async function start(
     key: string,
-    spawn: () => Promise<{ config: SpawnConfig; meta: Meta }>
-  ): Promise<Client> {
+    spawn: () => Promise<{ config: Config; meta: Meta }>
+  ): Promise<Handle> {
     const { config, meta } = await spawn()
-    // The same sanitized base every child gets; what a caller names still wins.
-    const transport = new StdioClientTransport({
-      command: config.command,
-      args: config.args,
-      ...(config.cwd !== undefined && { cwd: config.cwd }),
-      env: { ...getSafeEnv(), ...config.env }
-    })
-    const client = new Client({ name: 'vorn', version: '0.1.0' }, { capabilities: {} })
-    try {
-      await client.connect(transport)
-    } catch (err) {
-      try {
-        await transport.close()
-      } catch {
-        /* the child is going away either way */
-      }
-      throw err
-    }
-
-    const entry: LiveClient<Meta> = { client, transport, meta }
+    const handle = await open(config, key)
+    const entry: Live<Handle, Meta> = { handle, meta }
     live.set(key, entry)
-    transport.onclose = () => {
-      if (live.get(key) === entry) {
-        live.delete(key)
-        log.info(`[${label}] ${key} exited, will start again when needed`)
-      }
-    }
-    transport.onerror = (err) => {
-      log.warn(`[${label}] ${key}: ${err}`)
-    }
-    return client
+    handle.onExit(() => {
+      if (live.get(key) !== entry) return
+      live.delete(key)
+      log.info(`[${label}] ${key} exited, will start again when needed`)
+    })
+    return handle
   }
 
   const stop = async (key: string): Promise<void> => {
@@ -89,7 +60,7 @@ export function createStdioClientCache<Meta>(label: string): StdioClientCache<Me
     if (!entry) return
     live.delete(key)
     try {
-      await entry.client.close()
+      await entry.handle.close()
     } catch (err) {
       log.warn(`[${label}] closing ${key} failed: ${err}`)
     }
@@ -101,7 +72,7 @@ export function createStdioClientCache<Meta>(label: string): StdioClientCache<Me
   return {
     getOrStart(key, spawn) {
       const existing = live.get(key)
-      if (existing) return Promise.resolve(existing.client)
+      if (existing) return Promise.resolve(existing.handle)
       const inFlight = pending.get(key)
       if (inFlight) return inFlight
       // Recorded before anything can suspend, so a second caller joins this startup.

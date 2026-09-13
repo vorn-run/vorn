@@ -29,17 +29,7 @@ const MANIFEST: SdkConnectorManifest = {
   triggers: [
     {
       type: 'queryResult',
-      label: 'Query result',
-      filters: {
-        pollTool: 'poll_queryResult',
-        itemsPath: 'items',
-        idField: 'externalId',
-        timestampField: 'updatedAt',
-        titleField: 'title',
-        urlField: 'url',
-        cursorArg: 'cursor',
-        cursorPath: 'nextCursor'
-      }
+      label: 'Query result'
     }
   ],
   actions: [],

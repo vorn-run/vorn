@@ -23,17 +23,7 @@ const MANIFEST: SdkConnectorManifest = {
     {
       type: 'queryResult',
       label: 'Query result',
-      description: 'Each new row',
-      filters: {
-        pollTool: 'poll_queryResult',
-        itemsPath: 'items',
-        idField: 'externalId',
-        timestampField: 'updatedAt',
-        titleField: 'title',
-        urlField: 'url',
-        cursorArg: 'cursor',
-        cursorPath: 'nextCursor'
-      }
+      description: 'Each new row'
     }
   ],
   actions: [{ type: 'runQuery', label: 'Run query' }],
@@ -148,7 +138,7 @@ describe('SdkConnectorForm', () => {
     expect(utils.getByText('Connect')).toBeDisabled()
   })
 
-  it('fills the polling fields from the manifest so nobody transcribes them', async () => {
+  it('records the connector and the trigger it polls, so nobody transcribes them', async () => {
     const utils = setup()
     await lookUp(utils)
 
@@ -159,7 +149,7 @@ describe('SdkConnectorForm', () => {
 
     await waitFor(() => expect(createConnection).toHaveBeenCalled())
     const arg = createConnection.mock.calls[0][0]
-    expect(arg.connectorId).toBe('mcp')
+    expect(arg.connectorId).toBe('sdk')
     expect(arg.name).toBe('Azure Data Explorer: Query result')
     expect(arg.filters).toMatchObject({
       command: 'npx',
@@ -167,12 +157,7 @@ describe('SdkConnectorForm', () => {
       env: JSON.stringify({ KUSTO_CLUSTER: 'https://help.kusto.windows.net' }),
       sdkConnectorId: 'kusto',
       sdkVersion: '0.5.2',
-      pollTool: 'poll_queryResult',
-      itemsPath: 'items',
-      idField: 'externalId',
-      timestampField: 'updatedAt',
-      cursorArg: 'cursor',
-      cursorPath: 'nextCursor'
+      sdkTrigger: 'queryResult'
     })
   })
 
@@ -210,7 +195,7 @@ describe('SdkConnectorForm', () => {
     expect(encryptString).not.toHaveBeenCalled()
   })
 
-  it('applies the filters of whichever trigger the user picks', async () => {
+  it('records whichever trigger the user picks', async () => {
     probeSdkConnector.mockResolvedValue({
       ok: true,
       manifest: {
@@ -220,8 +205,7 @@ describe('SdkConnectorForm', () => {
           MANIFEST.triggers[0],
           {
             type: 'alerts',
-            label: 'Alerts',
-            filters: { ...MANIFEST.triggers[0].filters, pollTool: 'poll_alerts' }
+            label: 'Alerts'
           }
         ]
       }
@@ -234,7 +218,7 @@ describe('SdkConnectorForm', () => {
 
     await waitFor(() => expect(createConnection).toHaveBeenCalled())
     const arg = createConnection.mock.calls[0][0]
-    expect(arg.filters.pollTool).toBe('poll_alerts')
+    expect(arg.filters.sdkTrigger).toBe('alerts')
     expect(arg.name).toBe('Azure Data Explorer: Alerts')
   })
 

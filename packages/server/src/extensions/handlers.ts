@@ -1,6 +1,5 @@
 import type { ExtensionLinkMatch, TerminalSession } from '@vornrun/shared/types'
 import { activationFor, subjectOf } from './activation'
-import { handlerToolName } from '../connectors/sdk-tools'
 import { getOrStartHost, installedExtensions } from './hosts'
 import { openPane, type OpenPane } from './panes'
 import log from '../logger'
@@ -54,20 +53,14 @@ export async function runHandler(
   url: string
 ): Promise<{ openedPane?: OpenPane }> {
   const client = await getOrStartHost(extensionId, session.projectPath)
-  const answered = await client.callTool({
-    name: handlerToolName(handlerId),
-    arguments: {
-      sessionId: session.id,
-      worktreePath: session.worktreePath ?? session.projectPath,
-      agent: session.agentType,
-      url: url.slice(0, MAX_CLICKED_TEXT)
-    }
+  const { openPane: asked } = await client.handler({
+    handler: handlerId,
+    sessionId: session.id,
+    worktreePath: session.worktreePath ?? session.projectPath,
+    agent: session.agentType,
+    url: url.slice(0, MAX_CLICKED_TEXT)
   })
-  if (answered.isError) {
-    throw new Error(String(answered.content ?? `${handlerId} failed`))
-  }
-  const asked = (answered.structuredContent as { openPane?: unknown })?.openPane
-  if (typeof asked !== 'string' || asked === '') return {}
+  if (!asked) return {}
   log.info(`[extensions] ${extensionId} ${handlerId} opened ${asked}`)
   return { openedPane: await openPane(extensionId, asked, session) }
 }

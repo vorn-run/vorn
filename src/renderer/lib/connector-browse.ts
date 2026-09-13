@@ -92,6 +92,8 @@ export interface BuiltInConnector {
   id: string
   name: string
   capabilities: string[]
+  /** False for a connector whose connections come from somewhere else. */
+  addable?: boolean
   manifest?: {
     triggers?: Array<{ type: string; label: string; description?: string }>
     actions?: Array<{ type: string; label: string; description?: string }>
@@ -235,18 +237,20 @@ export function buildConnectorListings(
   const packFor = (id: string) => packs.find((pack) => pack.id === id)
 
   const listings: ConnectorListing[] = [
-    ...builtIns.map((c) => ({
-      key: c.id,
-      id: c.id,
-      name: c.name,
-      capabilities: c.capabilities,
-      category: 'Built in',
-      kind: 'connector' as const,
-      source: 'builtin' as const,
-      keywords: [],
-      connectedCount: countFor(c.id),
-      implicitlyConnected: implicitFor(c.id)
-    })),
+    ...builtIns
+      .filter((c) => c.addable !== false)
+      .map((c) => ({
+        key: c.id,
+        id: c.id,
+        name: c.name,
+        capabilities: c.capabilities,
+        category: 'Built in',
+        kind: 'connector' as const,
+        source: 'builtin' as const,
+        keywords: [],
+        connectedCount: countFor(c.id),
+        implicitlyConnected: implicitFor(c.id)
+      })),
     ...catalog.map((entry) => {
       const pack = packFor(entry.id)
       return {

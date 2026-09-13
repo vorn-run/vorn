@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import type {
   CallConnectorActionConfig,
   ConnectorActionDef,
-  ConnectorCatalogActionInput,
   ConnectorConfigField,
   TriggerConfig
 } from '../../../../shared/types'
+import { actionInputField } from '../../../../shared/types'
 import { SelectPicker } from '../../SelectPicker'
 import { ConnectorIcon } from '../../ConnectorIcon'
 import { useConnections, iconForConnection } from '../../../lib/use-connections'
@@ -16,24 +16,6 @@ import {
   TemplateVariable
 } from '@vornrun/shared/template-vars'
 import { VariableAutocomplete } from './VariableAutocomplete'
-
-// A published argument, in the shape this form already draws.
-function asConfigField(input: ConnectorCatalogActionInput): ConnectorConfigField {
-  const type: ConnectorConfigField['type'] =
-    input.type === 'select' ? 'select' : input.type === 'json' ? 'textarea' : 'text'
-  return {
-    key: input.key,
-    label: input.label,
-    type,
-    required: input.required,
-    ...(input.options && {
-      options: input.options.map((option) => ({
-        value: option.value,
-        label: option.label ?? option.value
-      }))
-    })
-  }
-}
 
 interface Props {
   config: CallConnectorActionConfig
@@ -137,9 +119,13 @@ export function CallConnectorActionNodeForm({
         cancelled = true
       }
     }
-    window.api.listConnectionActions(config.connectionId).then((next) => {
-      if (!cancelled) setActions(next)
-    })
+    window.api
+      .listConnectionActions(config.connectionId)
+      .then((next) => {
+        if (!cancelled) setActions(next)
+      })
+      // A connection whose child will not start offers no actions yet.
+      .catch(() => {})
     return () => {
       cancelled = true
     }
@@ -179,7 +165,7 @@ export function CallConnectorActionNodeForm({
     const awaited = catalog.items
       .find((entry) => entry.id === config.connectorId)
       ?.actions?.find((action) => action.type === config.action)
-    return (awaited?.inputs ?? []).map(asConfigField)
+    return (awaited?.inputs ?? []).map(actionInputField)
   }, [selectedAction, unbound, catalog.items, config.connectorId, config.action])
 
   return (

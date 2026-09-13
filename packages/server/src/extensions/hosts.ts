@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { InstalledConnectorPack } from '@vornrun/shared/types'
-import { installedLaunch, installedPack, listInstalledPacks } from '../connectors/packs'
-import { createStdioClientCache } from '../connectors/stdio-clients'
+import { installedPack, listInstalledPacks } from '../connectors/packs'
+import { packLaunchSpec } from '../connectors/mcp-clients'
+import { createSdkChildCache, type SdkClient } from '../connectors/sdk-client'
 import { constantTimeEqual } from '../token-manager'
 
 /**
@@ -24,7 +24,7 @@ export interface ExtensionHost {
   projectPath: string
 }
 
-const hosts = createStdioClientCache<ExtensionHost>('extensions')
+const hosts = createSdkChildCache<ExtensionHost>('extensions')
 
 /** Where the bridge answers, learned once the server knows the port it won. */
 let bridgeOrigin = ''
@@ -75,21 +75,21 @@ export function installedExtensions(): InstalledConnectorPack[] {
   }
 }
 
-export async function getOrStartHost(extensionId: string, projectPath: string): Promise<Client> {
+export async function getOrStartHost(extensionId: string, projectPath: string): Promise<SdkClient> {
   return hosts.getOrStart(keyOf(extensionId, projectPath), async () => {
     const pack = installedPack(extensionId)
     if (!pack || pack.kind !== 'extension') {
       throw new Error(`No extension "${extensionId}" is installed`)
     }
-    const launch = installedLaunch(extensionId)
+    const launch = packLaunchSpec(extensionId)
     if (!launch) throw new Error(`The extension "${extensionId}" has no files to run`)
     if (!bridgeOrigin) throw new Error('The extension bridge has no address yet')
 
     const token = randomBytes(32).toString('base64url')
     return {
       config: {
-        command: launch.command,
-        args: launch.args,
+        ...launch,
+        name: pack.name,
         cwd: projectPath,
         // The two names the SDK's bridge client reads, and nothing else about this machine.
         env: {

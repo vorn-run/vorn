@@ -1108,6 +1108,39 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 20 (who a connection is signed in as)')
   }
+
+  if (version < 21) {
+    // A package's connections move to `sdk` under the same ids; a catalog MCP server never records `sdkVersion`, so it stays.
+    const packaged = `connector_id = 'mcp'
+       AND coalesce(json_extract(filters, '$.sdkConnectorId'), '') <> ''
+       AND coalesce(json_extract(filters, '$.sdkVersion'), '') <> ''`
+    d.transaction(() => {
+      d.prepare(
+        `UPDATE source_connections
+            SET filters = json_set(filters, '$.sdkTrigger', substr(json_extract(filters, '$.pollTool'), 6))
+          WHERE ${packaged}
+            AND json_extract(filters, '$.pollTool') LIKE 'poll\\_%' ESCAPE '\\'`
+      ).run()
+      d.prepare(
+        `UPDATE source_connections
+            SET connector_id = 'sdk',
+                filters = json_remove(filters, '$.discoveredTools', '$.pollTool', '$.pollArgs',
+                  '$.itemsPath', '$.idField', '$.timestampField', '$.titleField', '$.urlField',
+                  '$.cursorArg', '$.cursorPath')
+          WHERE ${packaged}`
+      ).run()
+      d.prepare(
+        `UPDATE connector_inbox SET connector_id = 'sdk'
+          WHERE connector_id = 'mcp'
+            AND connection_id IN (SELECT id FROM source_connections WHERE connector_id = 'sdk')`
+      ).run()
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '21')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 21 (package connections belong to sdk)')
+  }
 }
 
 /** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */

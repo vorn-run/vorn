@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import type { SourceConnection } from '../packages/shared/src/types'
-import { SDK_FILTER_KEYS } from '../packages/shared/src/types'
+import type { SdkAction, SourceConnection } from '../packages/shared/src/types'
 
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -8,23 +7,13 @@ vi.mock('../packages/server/src/logger', () => ({
 
 const { mcpConnectionActions, mcpToolToConnectorAction } =
   await import('../packages/server/src/connectors/mcp')
-const { isReservedSdkTool, MANIFEST_TOOL, OPTIONS_TOOL, PREFLIGHT_TOOL, pollToolName } =
-  await import('../packages/server/src/connectors/sdk-tools')
-
-/** The tools a packed SDK connector with one trigger and one action really serves. */
-const PACK_TOOLS = [
-  { name: MANIFEST_TOOL, description: 'Describe this connector' },
-  { name: PREFLIGHT_TOOL, description: 'Report readiness' },
-  { name: OPTIONS_TOOL, description: 'List what a field can be set to' },
-  { name: pollToolName('tick'), description: 'Poll Pack Demo for Tick' },
-  { name: 'echo', title: 'Echo', description: 'Return the given message.' }
-]
+const { sdkActionDef } = await import('../packages/server/src/connectors/sdk')
 
 function connection(filters: Record<string, unknown>): SourceConnection {
   return {
     id: 'conn-1',
     connectorId: 'mcp',
-    name: 'Pack Demo',
+    name: 'Filesystem',
     filters,
     syncIntervalMinutes: 5,
     statusMapping: {},
@@ -32,56 +21,12 @@ function connection(filters: Record<string, unknown>): SourceConnection {
   } as SourceConnection
 }
 
-describe('reserved SDK tool names', () => {
-  it('hides only the poll tools a connector declared, when its triggers are known', () => {
-    expect(isReservedSdkTool(pollToolName('tick'), ['tick'])).toBe(true)
-    // A connector may genuinely offer an action that starts this way.
-    expect(isReservedSdkTool('poll_status', ['tick'])).toBe(false)
-    expect(isReservedSdkTool('poll_status')).toBe(true)
-    expect(isReservedSdkTool(MANIFEST_TOOL, ['tick'])).toBe(true)
-  })
-
-  it('knows every kind of plumbing a connector serves', () => {
-    expect(isReservedSdkTool(MANIFEST_TOOL)).toBe(true)
-    expect(isReservedSdkTool(PREFLIGHT_TOOL)).toBe(true)
-    // Serves a field's choices, so it is Vorn's to call and never a step's.
-    expect(isReservedSdkTool(OPTIONS_TOOL)).toBe(true)
-    expect(isReservedSdkTool(OPTIONS_TOOL, ['tick'])).toBe(true)
-    expect(isReservedSdkTool(pollToolName('tick'))).toBe(true)
-    expect(isReservedSdkTool(pollToolName('issueCreated'))).toBe(true)
-  })
-
-  it('leaves an ordinary action alone', () => {
-    expect(isReservedSdkTool('echo')).toBe(false)
-    expect(isReservedSdkTool('createIssue')).toBe(false)
-  })
-})
-
-describe('actions offered for a connection', () => {
-  it('hides the plumbing a packaged connector serves', () => {
+describe('actions offered for an MCP connection', () => {
+  it('keeps every tool the server offers', () => {
     const actions = mcpConnectionActions(
-      connection({ discoveredTools: PACK_TOOLS, [SDK_FILTER_KEYS.connectorId]: 'packdemo' })
+      connection({ discoveredTools: [{ name: 'read_file' }, { name: 'write_file' }] })
     )
-    expect(actions.map((a) => a.type)).toEqual(['echo'])
-  })
-
-  it('names the action by its label, keeping the tool name as the type', () => {
-    const [echo] = mcpConnectionActions(
-      connection({ discoveredTools: PACK_TOOLS, [SDK_FILTER_KEYS.connectorId]: 'packdemo' })
-    )
-    expect(echo.label).toBe('Echo')
-    expect(echo.type).toBe('echo')
-  })
-
-  it('keeps every tool for a raw MCP server, where nothing is reserved', () => {
-    const actions = mcpConnectionActions(connection({ discoveredTools: PACK_TOOLS }))
-    expect(actions.map((a) => a.type)).toEqual([
-      MANIFEST_TOOL,
-      PREFLIGHT_TOOL,
-      OPTIONS_TOOL,
-      pollToolName('tick'),
-      'echo'
-    ])
+    expect(actions.map((a) => a.type)).toEqual(['read_file', 'write_file'])
   })
 
   it('falls back to the tool name when a server offers no title', () => {
@@ -91,5 +36,88 @@ describe('actions offered for a connection', () => {
 
   it('is empty until discovery has run', () => {
     expect(mcpConnectionActions(connection({}))).toEqual([])
+  })
+})
+
+describe('actions offered for an SDK connection', () => {
+  const action: SdkAction = {
+    type: 'imagine',
+    label: 'Imagine',
+    description: 'Submit a prompt',
+    inputs: [
+      {
+        key: 'prompt',
+        label: 'Prompt',
+        type: 'string',
+        required: true,
+        description: 'What to draw'
+      },
+      { key: 'count', label: 'Count', type: 'number', required: false },
+      {
+        key: 'aspect',
+        label: 'Aspect',
+        type: 'select',
+        required: false,
+        options: [{ value: '16:9', label: 'Wide' }, { value: '1:1' }]
+      },
+      { key: 'style', label: 'Style', type: 'json', required: false }
+    ],
+    outputs: [
+      { key: 'jobId', type: 'string', description: 'The job to wait on' },
+      { key: 'images', type: 'array' }
+    ]
+  }
+
+  it('draws each argument as the field its type needs', () => {
+    const def = sdkActionDef(action)
+    expect(def).toMatchObject({ type: 'imagine', label: 'Imagine', description: 'Submit a prompt' })
+    expect(def.configFields).toEqual([
+      {
+        key: 'prompt',
+        label: 'Prompt',
+        required: true,
+        supportsTemplates: true,
+        description: 'What to draw',
+        type: 'text'
+      },
+      { key: 'count', label: 'Count', required: false, supportsTemplates: true, type: 'text' },
+      {
+        key: 'aspect',
+        label: 'Aspect',
+        required: false,
+        supportsTemplates: true,
+        type: 'select',
+        options: [
+          { value: '16:9', label: 'Wide' },
+          { value: '1:1', label: '1:1' }
+        ]
+      },
+      {
+        key: 'style',
+        label: 'Style',
+        required: false,
+        supportsTemplates: true,
+        type: 'textarea',
+        placeholder: '{} or []'
+      }
+    ])
+  })
+
+  it('names its outputs, so a later step can refer to them', () => {
+    expect(sdkActionDef(action).outputSchema).toEqual({
+      type: 'object',
+      properties: {
+        jobId: { type: 'string', description: 'The job to wait on' },
+        images: { type: 'array' }
+      }
+    })
+  })
+
+  it('says nothing about outputs an action never declared', () => {
+    expect(sdkActionDef({ type: 'ping', label: 'Ping' })).toEqual({
+      type: 'ping',
+      label: 'Ping',
+      configFields: []
+    })
   })
 })

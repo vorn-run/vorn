@@ -6,12 +6,9 @@ vi.mock('../packages/server/src/logger', () => ({
 }))
 
 const getOrStartClientMock = vi.fn()
-vi.mock('../packages/server/src/connectors/mcp-clients', () => ({
-  sessionGrantFor: () => undefined,
-  getOrStartClient: (...args: unknown[]) => getOrStartClientMock(...args),
-  stopClient: vi.fn(),
-  stopAllClients: vi.fn(),
-  hasClient: vi.fn()
+vi.mock('../packages/server/src/connectors/mcp-clients', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getOrStartClient: (...args: unknown[]) => getOrStartClientMock(...args)
 }))
 
 const importMcp = async () => await import('../packages/server/src/connectors/mcp')
@@ -308,6 +305,15 @@ describe('mcpConnector.describe', () => {
     // The poll mapping lives on the connection (auth/config form), not the
     // trigger, so the trigger itself declares no config fields.
     expect(triggers[0].configFields).toEqual([])
+  })
+
+  it('polls only on its own event, and says why it will not poll another', async () => {
+    const { mcpConnector, MCP_POLL_EVENT } = await importMcp()
+    const conn = { id: 'c', connectorId: 'mcp', filters: {} } as unknown as SourceConnection
+    expect(mcpConnector.pollConnection!(conn, 'issueCreated')).toBe(
+      'got unexpected event "issueCreated"'
+    )
+    expect(typeof mcpConnector.pollConnection!(conn, MCP_POLL_EVENT)).toBe('function')
   })
 
   it('advertises the optional poll-config fields on the connection form', async () => {

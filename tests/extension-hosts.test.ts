@@ -1,37 +1,48 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { InstalledConnectorPack } from '@vornrun/shared/types'
+import type { SdkLaunch } from '../packages/server/src/connectors/sdk-client'
 
-const transports: Array<{ opts: Record<string, unknown>; onclose?: () => void }> = []
-const closed: string[] = []
+interface Started {
+  launch: SdkLaunch & { name: string }
+  key: string
+  closed: boolean
+  exit: () => void
+}
+
+const { started } = vi.hoisted(() => ({ started: [] as Started[] }))
 
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
 
-vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
-  Client: class {
-    private transport: { opts: Record<string, unknown> } | undefined
-    async connect(transport: { opts: Record<string, unknown> }): Promise<void> {
-      this.transport = transport
+vi.mock('../packages/server/src/connectors/sdk-client', async () => {
+  const { createChildCache } = await vi.importActual<
+    typeof import('../packages/server/src/connectors/stdio-clients')
+  >('../packages/server/src/connectors/stdio-clients')
+  const connectSdkClient = async (launch: Started['launch'], options: { key: string }) => {
+    const listeners: Array<() => void> = []
+    const child: Started = {
+      launch,
+      key: options.key,
+      closed: false,
+      exit: () => listeners.forEach((listener) => listener())
     }
-    async close(): Promise<void> {
-      closed.push(String(this.transport?.opts.args))
+    started.push(child)
+    return {
+      close: async () => {
+        child.closed = true
+      },
+      onExit: (listener: () => void) => listeners.push(listener)
     }
   }
-}))
-
-vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
-  StdioClientTransport: class {
-    readonly opts: Record<string, unknown>
-    onclose: (() => void) | undefined
-    onerror: ((err: unknown) => void) | undefined
-    constructor(opts: Record<string, unknown>) {
-      this.opts = opts
-      transports.push(this as never)
-    }
-    async close(): Promise<void> {}
+  return {
+    connectSdkClient,
+    createSdkChildCache: (label: string) =>
+      createChildCache(label, (spawn: Started['launch']) =>
+        connectSdkClient(spawn, { key: spawn.name })
+      )
   }
-}))
+})
 
 const packs: InstalledConnectorPack[] = []
 
@@ -39,13 +50,9 @@ vi.mock('../packages/server/src/connectors/packs', () => ({
   installedPack: (id: string) => packs.find((pack) => pack.id === id),
   installedLaunch: (id: string) =>
     packs.some((pack) => pack.id === id)
-      ? { command: 'node', args: [`/packs/${id}/index.js`] }
+      ? { command: 'node', args: [`/packs/${id}/index.js`], protocol: 1 }
       : undefined,
   listInstalledPacks: () => packs
-}))
-
-vi.mock('../packages/server/src/process-utils', () => ({
-  getSafeEnv: () => ({ PATH: '/usr/bin' })
 }))
 
 const hosts = await import('../packages/server/src/extensions/hosts')
@@ -53,9 +60,10 @@ const hosts = await import('../packages/server/src/extensions/hosts')
 function extension(id: string): InstalledConnectorPack {
   return {
     id,
-    name: id,
+    name: `${id} extension`,
     version: '0.1.0',
     kind: 'extension',
+    protocol: 1,
     path: `/packs/${id}`,
     installedAt: 0,
     bytes: 0,
@@ -68,8 +76,7 @@ function extension(id: string): InstalledConnectorPack {
 }
 
 beforeEach(() => {
-  transports.length = 0
-  closed.length = 0
+  started.length = 0
   packs.length = 0
   packs.push(extension('review'))
   hosts.setExtensionBridgeOrigin('http://127.0.0.1:8931')
@@ -80,14 +87,22 @@ afterEach(async () => {
 })
 
 describe('the child an extension runs as', () => {
-  it('starts one per project, and gives it the bridge to talk back on', async () => {
+  it('starts one per project as the installed pack, and gives it the bridge to talk back on', async () => {
     await hosts.getOrStartHost('review', '/work/vorn')
-    expect(transports).toHaveLength(1)
-    const env = transports[0].opts.env as Record<string, string>
-    expect(env.VORN_EXTENSION_HOST).toBe('http://127.0.0.1:8931/extensions/review/bridge')
-    expect(env.VORN_EXTENSION_TOKEN).toMatch(/^[\w-]{40,}$/)
-    expect(env.PATH).toBe('/usr/bin')
-    expect(transports[0].opts.cwd).toBe('/work/vorn')
+    expect(started).toHaveLength(1)
+    const { launch, key } = started[0]
+    expect(launch).toMatchObject({
+      command: 'node',
+      args: ['/packs/review/index.js'],
+      source: 'pack',
+      protocol: 1,
+      cwd: '/work/vorn'
+    })
+    expect(launch.env.VORN_EXTENSION_HOST).toBe('http://127.0.0.1:8931/extensions/review/bridge')
+    expect(launch.env.VORN_EXTENSION_TOKEN).toMatch(/^[\w-]{40,}$/)
+    expect(Object.keys(launch.env)).toEqual(['VORN_EXTENSION_HOST', 'VORN_EXTENSION_TOKEN'])
+    // What it says about itself names the extension, not the cache key.
+    expect(key).toBe('review extension')
   })
 
   it('gives every extension its own token', async () => {
@@ -100,7 +115,7 @@ describe('the child an extension runs as', () => {
   it('shares one child between the sessions of a project', async () => {
     await hosts.getOrStartHost('review', '/work/vorn')
     await hosts.getOrStartHost('review', '/work/vorn')
-    expect(transports).toHaveLength(1)
+    expect(started).toHaveLength(1)
   })
 
   // Recorded before anything suspends, so a second session joins the startup rather than racing it.
@@ -109,13 +124,13 @@ describe('the child an extension runs as', () => {
       hosts.getOrStartHost('review', '/work/vorn'),
       hosts.getOrStartHost('review', '/work/vorn')
     ])
-    expect(transports).toHaveLength(1)
+    expect(started).toHaveLength(1)
   })
 
   it('starts a second child for a second project', async () => {
     await hosts.getOrStartHost('review', '/work/vorn')
     await hosts.getOrStartHost('review', '/work/other')
-    expect(transports).toHaveLength(2)
+    expect(started).toHaveLength(2)
     expect(hosts.isRunning('review', '/work/other')).toBe(true)
   })
 
@@ -133,7 +148,7 @@ describe('the child an extension runs as', () => {
     await hosts.stopHostsForExtension('review')
     expect(hosts.isRunning('review', '/work/vorn')).toBe(false)
     expect(hosts.isRunning('review', '/work/other')).toBe(false)
-    expect(closed).toHaveLength(2)
+    expect(started.every((child) => child.closed)).toBe(true)
   })
 
   it('stops what a project was running when its last session goes', async () => {
@@ -144,10 +159,10 @@ describe('the child an extension runs as', () => {
 
   it('restarts after the child exits on its own', async () => {
     await hosts.getOrStartHost('review', '/work/vorn')
-    transports[0].onclose?.()
+    started[0].exit()
     expect(hosts.isRunning('review', '/work/vorn')).toBe(false)
     await hosts.getOrStartHost('review', '/work/vorn')
-    expect(transports).toHaveLength(2)
+    expect(started).toHaveLength(2)
   })
 
   it('runs nothing that is not an installed extension', async () => {

@@ -22,6 +22,7 @@ import type {
   SdkConnectorManifest
 } from '@vornrun/shared/types'
 import { getDataDir } from '../database'
+import { outdatedConnectorMessage } from './sdk-client'
 import { toManifest } from './sdk-probe'
 import log from '../logger'
 
@@ -171,8 +172,8 @@ function requireSafeId(id: string): void {
   if (!isSafeId(id)) throw new Error(`"${id}" is not a usable connector id`)
 }
 
-/** The two connector ids the app answers to itself; a pack claiming one would shadow it in every list. */
-const RESERVED_IDS = new Set(['mcp', 'http'])
+/** The connector ids the app answers to itself; a pack claiming one would shadow it in every list. */
+const RESERVED_IDS = new Set(['mcp', 'http', 'sdk'])
 
 function requireUnreservedId(id: string): void {
   if (RESERVED_IDS.has(id.toLowerCase())) {
@@ -247,6 +248,8 @@ export function verifyPackDir(dir: string): SdkConnectorManifest {
   // Read before the allowlist rather than after it: what a pack may carry under
   // `web/` is exactly what its own manifest says it draws a pane from.
   const manifest = readManifest(dir)
+  // A pack with no protocol speaks MCP, which this build no longer runs.
+  if (manifest.protocol === undefined) throw new Error(outdatedConnectorMessage(manifest.name))
   const directories = webDirectories(manifest)
 
   // An allowlist rather than a script headcount: a `.cjs`, `.node` or `.wasm`
@@ -635,12 +638,13 @@ export function listInstalledPacks(options: PackOptions = {}): InstalledConnecto
 export function installedLaunch(
   id: string,
   options: PackOptions = {}
-): { command: string; args: string[]; protocol?: number } | undefined {
+): { command: string; args: string[]; protocol?: number; name: string } | undefined {
   const pack = describePack(id, options)
   if (!pack) return undefined
   return {
     command: 'node',
     args: [join(pack.path, ENTRY_FILE)],
+    name: pack.name,
     ...(pack.protocol !== undefined && { protocol: pack.protocol })
   }
 }

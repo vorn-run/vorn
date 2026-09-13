@@ -1,18 +1,9 @@
 import type { SdkConnectorIcon, SourceConnection } from '../../shared/types'
 import { SDK_FILTER_KEYS } from '../../shared/types'
 
-export { SDK_FILTER_KEYS, connectionConnectorId } from '../../shared/types'
+export { SDK_CONNECTOR_ID, SDK_FILTER_KEYS, connectionConnectorId } from '../../shared/types'
 
-/**
- * The glyph a connection should show.
- *
- * A connector installed from a package is stored as an `mcp` connection, so
- * its own icon travels on the connection rather than being keyed by connector
- * id like the built-in ones.
- *
- * Re-validated on read: the value was written by a third-party manifest, and
- * a connection created by an older build could hold anything.
- */
+/** The glyph a package's connection carries, re-validated on read because a third-party manifest wrote it. */
 export function connectionIcon(
   connection: { filters: SourceConnection['filters'] } | null | undefined
 ): SdkConnectorIcon | undefined {

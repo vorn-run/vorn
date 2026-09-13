@@ -19,14 +19,14 @@ vi.mock('../packages/server/src/broadcast', () => ({
 }))
 
 const packs: InstalledConnectorPack[] = []
-const calls: Array<{ name: string; arguments: unknown }> = []
-let answer: () => unknown = () => ({ structuredContent: { items: [] } })
+const calls: Array<Record<string, unknown>> = []
+let answer: () => unknown = () => ({ items: [] })
 
 vi.mock('../packages/server/src/extensions/hosts', () => ({
   installedExtensions: () => packs,
   getOrStartHost: async () => ({
-    callTool: async (request: { name: string; arguments: unknown }) => {
-      calls.push(request)
+    footer: async (params: Record<string, unknown>) => {
+      calls.push(params)
       return answer()
     }
   })
@@ -80,7 +80,7 @@ beforeEach(() => {
   packs.push(extension())
   calls.length = 0
   broadcasts.length = 0
-  answer = () => ({ structuredContent: { items: [{ label: 'tests', value: '345 passed' }] } })
+  answer = () => ({ items: [{ label: 'tests', value: '345 passed' }] })
 })
 
 afterEach(() => {
@@ -93,8 +93,8 @@ describe('a footer band', () => {
     footers.syncFooters(session())
     await settle()
     expect(calls).toHaveLength(1)
-    expect(calls[0].name).toBe('vorn_footer_checks')
-    expect(calls[0].arguments).toMatchObject({
+    expect(calls[0]).toMatchObject({
+      footer: 'checks',
       sessionId: 's1',
       worktreePath,
       agent: 'claude'
@@ -148,27 +148,21 @@ describe('a footer band', () => {
   })
 
   it('refuses items a band cannot draw', async () => {
-    answer = () => ({ structuredContent: { items: [{ label: 'tests' }] } })
+    answer = () => ({ items: [{ label: 'tests' }] })
     footers.syncFooters(session())
     await settle()
     expect(footers.footerReadings('s1')[0].error).toContain('label and a value')
   })
 
   it('refuses an item linking somewhere a click should not go', async () => {
-    answer = () => ({
-      structuredContent: {
-        items: [{ label: 'ci', value: 'green', href: 'javascript:alert(1)' }]
-      }
-    })
+    answer = () => ({ items: [{ label: 'ci', value: 'green', href: 'javascript:alert(1)' }] })
     footers.syncFooters(session())
     await settle()
     expect(footers.footerReadings('s1')[0].error).toMatch(/http or https/)
   })
 
   it('names the rule when an item links to something that is not a URL', async () => {
-    answer = () => ({
-      structuredContent: { items: [{ label: 'ci', value: 'green', href: 'not a url' }] }
-    })
+    answer = () => ({ items: [{ label: 'ci', value: 'green', href: 'not a url' }] })
     footers.syncFooters(session())
     await settle()
     expect(footers.footerReadings('s1')[0].error).toMatch(/http or https/)
@@ -209,8 +203,7 @@ describe('a footer band', () => {
     let release: (() => void) | undefined
     answer = () =>
       new Promise((resolve) => {
-        release = () =>
-          resolve({ structuredContent: { items: [{ label: 'tests', value: 'passing' }] } })
+        release = () => resolve({ items: [{ label: 'tests', value: 'passing' }] })
       })
     footers.syncFooters(session())
     await settle()

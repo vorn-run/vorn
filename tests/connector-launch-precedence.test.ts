@@ -171,12 +171,13 @@ describe('stopClientsForConnector', () => {
   })
 
   it('picks the connections a pack change affects, by connector rather than by row', async () => {
-    const { connectionIdsForConnector } =
+    const { connectionsForConnector } =
       await import('../packages/server/src/connectors/mcp-clients')
-    expect(connectionIdsForConnector('acme')).toEqual(['conn-1', 'conn-2'])
-    expect(connectionIdsForConnector('other')).toEqual(['conn-3'])
-    expect(connectionIdsForConnector('github')).toEqual(['conn-4'])
-    expect(connectionIdsForConnector('mcp')).toEqual([])
+    const ids = (id: string) => connectionsForConnector(id).map((conn) => conn.id)
+    expect(ids('acme')).toEqual(['conn-1', 'conn-2'])
+    expect(ids('other')).toEqual(['conn-3'])
+    expect(ids('github')).toEqual(['conn-4'])
+    expect(ids('mcp')).toEqual([])
   })
 
   it('stopping a connector with no live children is a no-op', async () => {
