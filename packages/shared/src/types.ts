@@ -424,8 +424,7 @@ export interface ActionResult {
   sessionCalls?: SessionCall[]
 }
 
-/** Where a tool call's key travels: in the call's MCP metadata, then on each request the child makes through its window. */
-export const SESSION_CALL_META = 'vorn/sessionCall'
+/** The header a call's key travels on, on each request a child makes through its window. */
 export const SESSION_CALL_HEADER = 'x-vorn-session-call'
 
 /** A call a connector asks its signed-in window to make. */
@@ -1981,21 +1980,7 @@ export const IPC = {
   EXTENSION_SELECTION_RESULT: 'extension:selectionResult'
 } as const
 
-/**
- * Self-description read from a connector package built with
- * `@vornrun/connector-sdk`, used to fill in a connection form.
- */
-export interface SdkSetupFilters {
-  pollTool: string
-  itemsPath: string
-  idField: string
-  timestampField: string
-  titleField: string
-  urlField: string
-  cursorArg: string
-  cursorPath: string
-}
-
+/** An environment variable a connector package reads, from its manifest. */
 export interface SdkEnvVar {
   name: string
   required: boolean
@@ -2008,8 +1993,6 @@ export interface SdkTrigger {
   type: string
   label: string
   description?: string
-  /** Connection filter values that make this trigger poll correctly. */
-  filters: SdkSetupFilters
   /**
    * What an upstream status should become locally. Seeds the connection's own
    * mapping, which the person setting it up then owns. Absent means the

@@ -515,7 +515,6 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
     const type = str(raw.type).trim()
     if (!type) continue
     const setup = isRecord(raw.setup) ? raw.setup : {}
-    const filters = isRecord(setup.filters) ? setup.filters : {}
 
     const statusMapping = readStatusMapping(raw.statusMapping)
     const defaultWorkflow = readDefaultWorkflow(raw.defaultWorkflow)
@@ -525,17 +524,7 @@ export function toManifest(payload: Record<string, unknown>): SdkConnectorManife
       label: str(raw.label, type),
       ...(typeof raw.description === 'string' && { description: raw.description }),
       ...(statusMapping && { statusMapping }),
-      ...(defaultWorkflow && { defaultWorkflow }),
-      filters: {
-        pollTool: str(filters.pollTool, `poll_${type}`),
-        itemsPath: str(filters.itemsPath, 'items'),
-        idField: str(filters.idField, 'externalId'),
-        timestampField: str(filters.timestampField, 'updatedAt'),
-        titleField: str(filters.titleField, 'title'),
-        urlField: str(filters.urlField, 'url'),
-        cursorArg: str(filters.cursorArg, 'cursor'),
-        cursorPath: str(filters.cursorPath, 'nextCursor')
-      }
+      ...(defaultWorkflow && { defaultWorkflow })
     })
 
     // Every trigger reports the same connector-wide config, so the union is

@@ -131,7 +131,7 @@ describe('verifyPackDir', () => {
     const manifest = verifyPackDir(dirWith(goodFiles()))
     expect(manifest.id).toBe('acme')
     expect(manifest.version).toBe('1.2.0')
-    expect(manifest.triggers[0].filters.pollTool).toBe('poll_newTicket')
+    expect(manifest.triggers[0].type).toBe('newTicket')
     expect(manifest.env[0].name).toBe('API_TOKEN')
   })
 

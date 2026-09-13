@@ -14,17 +14,7 @@ const PREVIEW: ConnectorPackSummary = {
   triggers: [
     {
       type: 'tick',
-      label: 'Tick',
-      filters: {
-        pollTool: 'poll_tick',
-        itemsPath: 'items',
-        idField: 'externalId',
-        timestampField: 'updatedAt',
-        titleField: 'title',
-        urlField: 'url',
-        cursorArg: 'cursor',
-        cursorPath: 'nextCursor'
-      }
+      label: 'Tick'
     }
   ],
   actions: [{ type: 'echo', label: 'Echo' }],

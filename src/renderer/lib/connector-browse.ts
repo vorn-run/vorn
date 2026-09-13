@@ -15,7 +15,7 @@ import type {
   SourceConnection
 } from '../../shared/types'
 import { isImplicitConnection } from '../../shared/types'
-import { connectionConnectorId, connectionIcon } from './connection-icon'
+import { SDK_CONNECTOR_ID, connectionConnectorId, connectionIcon } from './connection-icon'
 import { EXTENSION_PERMISSION } from './extension-copy'
 
 /**
@@ -235,18 +235,21 @@ export function buildConnectorListings(
   const packFor = (id: string) => packs.find((pack) => pack.id === id)
 
   const listings: ConnectorListing[] = [
-    ...builtIns.map((c) => ({
-      key: c.id,
-      id: c.id,
-      name: c.name,
-      capabilities: c.capabilities,
-      category: 'Built in',
-      kind: 'connector' as const,
-      source: 'builtin' as const,
-      keywords: [],
-      connectedCount: countFor(c.id),
-      implicitlyConnected: implicitFor(c.id)
-    })),
+    // `sdk` is how installed packages run, never something to add by hand.
+    ...builtIns
+      .filter((c) => c.id !== SDK_CONNECTOR_ID)
+      .map((c) => ({
+        key: c.id,
+        id: c.id,
+        name: c.name,
+        capabilities: c.capabilities,
+        category: 'Built in',
+        kind: 'connector' as const,
+        source: 'builtin' as const,
+        keywords: [],
+        connectedCount: countFor(c.id),
+        implicitlyConnected: implicitFor(c.id)
+      })),
     ...catalog.map((entry) => {
       const pack = packFor(entry.id)
       return {

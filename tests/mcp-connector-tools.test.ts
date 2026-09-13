@@ -29,9 +29,7 @@ const MANIFEST = {
   id: 'kusto',
   name: 'Azure Data Explorer',
   version: '0.5.2',
-  triggers: [
-    { type: 'queryResult', label: 'Query result', filters: { pollTool: 'poll_queryResult' } }
-  ],
+  triggers: [{ type: 'queryResult', label: 'Query result' }],
   actions: [],
   env: [
     { name: 'KUSTO_CLUSTER', required: true, secret: false, description: 'Cluster URL' },
@@ -301,12 +299,14 @@ describe('install_connector', () => {
     await tools.get('install_connector')!({ connector_id: 'kusto', env: ENV })
 
     const [, params] = rpcCall.mock.calls.find((c) => c[0] === 'connection:create')!
+    expect(params.connectorId).toBe('sdk')
     expect(params.filters).toMatchObject({
       sdkConnectorId: 'kusto',
       sdkVersion: '0.5.2',
       env: JSON.stringify(ENV),
-      pollTool: 'poll_queryResult'
+      sdkTrigger: 'queryResult'
     })
+    expect(params.filters).not.toHaveProperty('pollTool')
   })
 
   it('names the catalog ids it knows when given one it does not', async () => {

@@ -153,10 +153,10 @@ function sourceOf(
  * survives the poll to tell them apart (`/pull/<n>` vs `/issues/<n>`).
  *
  * Keyed on that URL and not on the connector id, because a packaged connector
- * does not have its own id here: those connections are stored as `mcp` with
+ * does not have its own id here: those connections are stored as `sdk` with
  * the real id in `filters.sdkConnectorId`, so an `id === 'github'` test would
  * quietly stop matching the day GitHub ships as a package and every run would
- * read `mcp 123`.
+ * read `sdk 123`.
  */
 function connectorTitle(execution: WorkflowExecution, connectorId: string): string | undefined {
   const item = execution.connectorItem
@@ -170,7 +170,7 @@ function connectorTitle(execution: WorkflowExecution, connectorId: string): stri
 export function describeRun(
   execution: WorkflowExecution,
   workflow?: RunWorkflowRef,
-  /** Resolved from the run's connection, because the item only knows it as `mcp`. */
+  /** Resolved from the run's connection, because the item only knows it as `sdk`. */
   look?: ConnectorLook
 ): RunPresentation {
   const nodes = workflow?.nodes ?? []

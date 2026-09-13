@@ -1,12 +1,12 @@
 import type { SdkConnectorIcon, SourceConnection } from '../../shared/types'
 import { SDK_FILTER_KEYS } from '../../shared/types'
 
-export { SDK_FILTER_KEYS, connectionConnectorId } from '../../shared/types'
+export { SDK_CONNECTOR_ID, SDK_FILTER_KEYS, connectionConnectorId } from '../../shared/types'
 
 /**
  * The glyph a connection should show.
  *
- * A connector installed from a package is stored as an `mcp` connection, so
+ * A connector installed from a package is stored as an `sdk` connection, so
  * its own icon travels on the connection rather than being keyed by connector
  * id like the built-in ones.
  *

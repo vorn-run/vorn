@@ -27,7 +27,7 @@ import type {
   SourceConnection
 } from '@vornrun/shared/types'
 import { rpcCall } from '@vornrun/server/rpc-client'
-import { SDK_FILTER_KEYS, connectionConnectorId } from '@vornrun/shared/types'
+import { SDK_CONNECTOR_ID, SDK_FILTER_KEYS, connectionConnectorId } from '@vornrun/shared/types'
 
 /**
  * Starting a connector package downloads it first, so the probe is allowed
@@ -113,20 +113,23 @@ export function registerConnectorTools(server: McpServer): void {
       const packFor = (id: string) => packs.find((pack) => pack.id === id)
 
       const entries = [
-        ...builtIns.map((c) => ({
-          id: c.id,
-          name: c.name,
-          source: 'built-in' as const,
-          kind: 'connector' as const,
-          capabilities: c.capabilities,
-          connections: countFor(c.id),
-          // Only meaningful for connectors that authenticate up front; the
-          // rest report nothing rather than a misleading "not authed".
-          ...(statusFor(c.id) && {
-            authenticated: statusFor(c.id)!.authed,
-            ...(statusFor(c.id)!.message && { authMessage: statusFor(c.id)!.message })
-          })
-        })),
+        // `sdk` is how installed packages run, never something to add by hand.
+        ...builtIns
+          .filter((c) => c.id !== SDK_CONNECTOR_ID)
+          .map((c) => ({
+            id: c.id,
+            name: c.name,
+            source: 'built-in' as const,
+            kind: 'connector' as const,
+            capabilities: c.capabilities,
+            connections: countFor(c.id),
+            // Only meaningful for connectors that authenticate up front; the
+            // rest report nothing rather than a misleading "not authed".
+            ...(statusFor(c.id) && {
+              authenticated: statusFor(c.id)!.authed,
+              ...(statusFor(c.id)!.message && { authMessage: statusFor(c.id)!.message })
+            })
+          })),
         ...snapshot.items.map((entry) => {
           const pack = packFor(entry.id)
           // The files on disk answer for themselves; the catalog says what installing would bring.
@@ -400,7 +403,7 @@ export function registerConnectorTools(server: McpServer): void {
 
       const launch = typeof target === 'string' ? parseLaunch(target) : target
       const connection = await rpcCall<SourceConnection>('connection:create', {
-        connectorId: 'mcp',
+        connectorId: SDK_CONNECTOR_ID,
         name: args.name ?? (trigger ? `${manifest.name}: ${trigger.label}` : manifest.name),
         filters: {
           command: launch.command,
@@ -409,7 +412,7 @@ export function registerConnectorTools(server: McpServer): void {
           [SDK_FILTER_KEYS.connectorId]: manifest.id,
           [SDK_FILTER_KEYS.version]: manifest.version,
           ...(manifest.icon && { [SDK_FILTER_KEYS.icon]: JSON.stringify(manifest.icon) }),
-          ...(trigger?.filters ?? {})
+          ...(trigger && { [SDK_FILTER_KEYS.trigger]: trigger.type })
         },
         syncIntervalMinutes: args.sync_interval_minutes ?? 5,
         statusMapping: {},

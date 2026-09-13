@@ -40,17 +40,7 @@ const installedPack = (
     {
       type: 'newTicket',
       label: 'New ticket',
-      description: 'Tickets opened since the last poll',
-      filters: {
-        pollTool: 'poll_newTicket',
-        itemsPath: 'items',
-        idField: 'externalId',
-        timestampField: 'updatedAt',
-        titleField: 'title',
-        urlField: 'url',
-        cursorArg: 'cursor',
-        cursorPath: 'nextCursor'
-      }
+      description: 'Tickets opened since the last poll'
     }
   ],
   actions: [{ type: 'closeTicket', label: 'Close ticket' }],

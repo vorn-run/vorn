@@ -33,16 +33,6 @@ function manifest(overrides: Record<string, unknown> = {}): Record<string, unkno
         label: 'Query result',
         description: 'Each new row',
         setup: {
-          filters: {
-            pollTool: 'poll_queryResult',
-            itemsPath: 'items',
-            idField: 'externalId',
-            timestampField: 'updatedAt',
-            titleField: 'title',
-            urlField: 'url',
-            cursorArg: 'cursor',
-            cursorPath: 'nextCursor'
-          },
           env: [
             { name: 'KUSTO_CLUSTER', required: true, secret: false, description: 'Cluster URL' },
             { name: 'KUSTO_TOKEN', required: false, secret: true }
@@ -72,7 +62,7 @@ describe('probeSdkConnector', () => {
     expect(result.manifest.name).toBe('Azure Data Explorer')
     expect(result.manifest.version).toBe('0.1.0')
     expect(result.manifest.triggers).toHaveLength(1)
-    expect(result.manifest.triggers[0].filters.pollTool).toBe('poll_queryResult')
+    expect(result.manifest.triggers[0].type).toBe('queryResult')
     expect(result.manifest.actions[0].type).toBe('runQuery')
   })
 
@@ -169,26 +159,6 @@ describe('probeSdkConnector', () => {
       { name: 'SHARED', required: true, secret: false, description: 'first' },
       { name: 'ONLY_B', required: true, secret: true }
     ])
-  })
-
-  it('defaults filter fields a trigger leaves out so the connection still polls', async () => {
-    respond(manifest({ triggers: [{ type: 'items', label: 'Items', setup: { filters: {} } }] }))
-    const { probeSdkConnector } = await importProbe()
-
-    const result = await probeSdkConnector({ command: 'npx', args: [] })
-
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.manifest.triggers[0].filters).toEqual({
-      pollTool: 'poll_items',
-      itemsPath: 'items',
-      idField: 'externalId',
-      timestampField: 'updatedAt',
-      titleField: 'title',
-      urlField: 'url',
-      cursorArg: 'cursor',
-      cursorPath: 'nextCursor'
-    })
   })
 
   it('skips malformed trigger and env entries instead of failing the whole probe', async () => {

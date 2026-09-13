@@ -15,7 +15,7 @@ import {
 import { useAppStore } from '../../stores'
 import { parseLaunchSpec } from './parse-launch-spec'
 import { ConnectorIcon } from '../ConnectorIcon'
-import { SDK_FILTER_KEYS } from '../../lib/connection-icon'
+import { SDK_CONNECTOR_ID, SDK_FILTER_KEYS } from '../../lib/connection-icon'
 import { packLaunch } from '../../lib/pack-status'
 
 const INPUT_CLASS =
@@ -169,9 +169,10 @@ export function SdkConnectorForm({
         // retyping what they installed.
         [SDK_FILTER_KEYS.connectorId]: manifest.id,
         [SDK_FILTER_KEYS.version]: manifest.version,
-        // Carried on the connection because a packaged connector is stored as
-        // an `mcp` connection, so there is no connector id to key a glyph by.
-        ...(manifest.icon && { [SDK_FILTER_KEYS.icon]: JSON.stringify(manifest.icon) })
+        // Carried on the connection: every package's connection belongs to `sdk`, so no connector id keys its glyph.
+        ...(manifest.icon && { [SDK_FILTER_KEYS.icon]: JSON.stringify(manifest.icon) }),
+        // The trigger this connection polls when its workflow fires.
+        ...(trigger && { [SDK_FILTER_KEYS.trigger]: trigger.type })
       }
 
       if (Object.keys(secret).length > 0) {
@@ -180,13 +181,8 @@ export function SdkConnectorForm({
         filters.secretEnv = await window.api.encryptString(JSON.stringify(secret))
       }
 
-      // The whole point of the probe: these are the values a person would
-      // otherwise have to copy by hand, and getting one wrong yields a
-      // connection that polls and never fires.
-      if (trigger) Object.assign(filters, trigger.filters)
-
       const created = await window.api.createConnection({
-        connectorId: 'mcp',
+        connectorId: SDK_CONNECTOR_ID,
         name: trigger ? `${manifest.name}: ${trigger.label}` : manifest.name,
         filters,
         syncIntervalMinutes: 5,
