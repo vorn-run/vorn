@@ -267,12 +267,17 @@ function lineReader(onLine: (line: string) => void, overflow: () => void): (chun
   }
 }
 
+// A pack's generated entry and a connector's own entry both call this in one process; only the first serves.
+let serving = false
+
 /** Serve a connector on stdio. This is the one line a connector's bin needs. */
 export async function serveConnector(
   connector: Connector,
   options: ConnectorServerOptions = {}
 ): Promise<void> {
   // stdout carries only replies, so whatever the connector prints goes to stderr.
+  if (serving) return
+  serving = true
   console.log = console.info = console.debug = console.error
   const server = createConnectorServer(connector, options)
   let inFlight = 0

@@ -27,8 +27,8 @@ afterEach(() => {
 })
 
 /** The fixture connector run the way Vorn runs a checkout, with every stdout line kept. */
-function serve(): Served {
-  const child = spawn(process.execPath, ['--import', 'tsx', FIXTURE], { cwd: REPO })
+function serve(...args: string[]): Served {
+  const child = spawn(process.execPath, ['--import', 'tsx', FIXTURE, ...args], { cwd: REPO })
   started.push(child)
   const lines: string[] = []
   let out = ''
@@ -81,6 +81,24 @@ describe('a connector served on stdio', () => {
     ])
     expect(served.stderr()).toContain('booting')
     expect(served.stderr()).toContain('echoing hi')
+  }, 30_000)
+
+  it('answers once, and runs a call once, when a pack entry serves it a second time', async () => {
+    const served = serve('twice')
+    served.send(HELLO)
+    served.send({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'action/run',
+      params: { action: 'echo', args: { text: 'hi' } }
+    })
+    await vi.waitFor(() => expect(served.lines.length).toBeGreaterThanOrEqual(2), {
+      timeout: 20_000
+    })
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    expect(replies(served).map((reply) => reply.id)).toEqual([1, 2])
+    expect(served.stderr().match(/echoing hi/g)).toHaveLength(1)
   }, 30_000)
 
   it('skips a line that is not JSON and keeps serving', async () => {
