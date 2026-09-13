@@ -1,4 +1,4 @@
-// Opens a connector's child in the protocol it speaks: native after a `vorn/hello`, MCP when it has never heard of one.
+// Opens a connector's child in Vorn's connector protocol, after a `vorn/hello`.
 import {
   PROTOCOL_ERROR_CODES,
   PROTOCOL_METHODS,
@@ -26,14 +26,12 @@ import {
   type ChildExit,
   type NativeClient
 } from './native-client'
-import { startLegacyMcpSdkClient } from './sdk-legacy-mcp'
-import log from '../logger'
 
-/** One connector child, whichever protocol it speaks. */
+/** One connector child. */
 export interface SdkClient {
-  /** The native protocol agreed in `vorn/hello`, or `mcp` for a child that only speaks MCP. */
-  readonly protocol: number | 'mcp'
-  readonly hello?: VornHelloResult
+  /** The protocol agreed in `vorn/hello`. */
+  readonly protocol: number
+  readonly hello: VornHelloResult
   readonly exited: boolean
   manifest(): Promise<Record<string, unknown>>
   preflight(): Promise<ConnectorPreflightResult>
@@ -64,20 +62,27 @@ export function helloTimeoutFor(command: string, timeouts: SdkTimeouts = SDK_TIM
   return NPX_NAMES.includes(name) ? timeouts.npxHello : timeouts.hello
 }
 
-export type Detection = 'native' | 'mcp' | 'probe' | 'unsupported'
+export type Detection = 'native' | 'probe' | 'unsupported' | 'outdated'
 
 /** An installed pack names its protocol; a checkout or a stored command has to be asked. */
 export function detectionFor(launch: Pick<LaunchSpec, 'source' | 'protocol'>): Detection {
   if (launch.source !== 'pack') return 'probe'
-  if (launch.protocol === undefined) return 'mcp'
+  if (launch.protocol === undefined) return 'outdated'
   return SUPPORTED_PROTOCOLS.includes(launch.protocol) ? 'native' : 'unsupported'
 }
 
-/** A child that could not be opened in any protocol this build speaks. */
-export class SdkDetectionError extends Error {
-  readonly reason: 'unsupported' | 'failed'
+/** What a connector built on the MCP-era SDK is told, wherever it would have run. */
+export function outdatedConnectorMessage(name: string): string {
+  return `${name} was built for an older Vorn. Update it in Settings → Connectors, or rebuild it with @vornrun/connector-sdk 0.7.1-beta.3 or later.`
+}
 
-  constructor(reason: 'unsupported' | 'failed', message: string) {
+export type DetectionFailure = 'unsupported' | 'outdated' | 'failed'
+
+/** A child that could not be opened in the protocol this build speaks. */
+export class SdkDetectionError extends Error {
+  readonly reason: DetectionFailure
+
+  constructor(reason: DetectionFailure, message: string) {
     super(message)
     this.name = 'SdkDetectionError'
     this.reason = reason
@@ -94,7 +99,6 @@ export interface ConnectSdkOptions {
   key: string
   hostVersion?: string
   timeouts?: Partial<SdkTimeouts>
-  startLegacy?: (launch: SdkLaunch) => Promise<SdkClient>
 }
 
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err))
@@ -112,13 +116,9 @@ export async function connectSdkClient(
   const timeouts: SdkTimeouts = { ...SDK_TIMEOUTS_MS, ...options.timeouts }
   const detection = detectionFor(launch)
   if (detection === 'unsupported') throw needsNewerVorn(options.key, launch.protocol)
-  const legacy = (): Promise<SdkClient> => {
-    log.info(`[connectors] ${options.key}: legacy MCP protocol (${launch.source})`)
-    return options.startLegacy
-      ? options.startLegacy(launch)
-      : startLegacyMcpSdkClient(launch, { label: options.label, key: options.key })
+  if (detection === 'outdated') {
+    throw new SdkDetectionError('outdated', outdatedConnectorMessage(options.key))
   }
-  if (detection === 'mcp') return legacy()
 
   const native = await startNativeClient(launch, { label: options.label, key: options.key })
   let hello: unknown
@@ -134,8 +134,10 @@ export async function connectSdkClient(
   } catch (err) {
     await native.close()
     const code = err instanceof SdkCallError ? err.code : undefined
-    // Only a child nobody vouched for may turn out to be MCP; a pack that says native and is not is broken.
-    if (code === PROTOCOL_ERROR_CODES.methodNotFound && detection === 'probe') return legacy()
+    // A checkout or command that has never heard of the hello is MCP-era; a pack that says native and is not is broken.
+    if (code === PROTOCOL_ERROR_CODES.methodNotFound && detection === 'probe') {
+      throw new SdkDetectionError('outdated', outdatedConnectorMessage(options.key))
+    }
     if (code === PROTOCOL_ERROR_CODES.unsupportedProtocol) throw needsNewerVorn(options.key)
     throw new SdkDetectionError(
       'failed',

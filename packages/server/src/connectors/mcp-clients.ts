@@ -12,7 +12,7 @@
  * pushes via `credentials:setDecrypted`.
  */
 import { mintSessionGrant, type SessionGrant } from './session-bridge'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import {
   SDK_FILTER_KEYS,
   connectionConnectorId,
@@ -25,10 +25,12 @@ import { localLaunchSpec } from './catalog'
 import { installedLaunch } from './packs'
 import { borrowedSecrets } from './auth-rung'
 import { resolveConnectorAuth } from './connector-auth'
-import { createStdioClientCache } from './stdio-clients'
+import { openMcpChild, type McpChild } from './mcp-child'
+import { createChildCache } from './stdio-clients'
 
-const clients = createStdioClientCache<{ connectionId: string; grant?: SessionGrant }>(
-  'mcp-clients'
+const clients = createChildCache<McpChild, { connectionId: string; grant?: SessionGrant }>(
+  'mcp-clients',
+  (config, key) => openMcpChild(config, key, 'mcp-clients')
 )
 
 function tryParseJson<T>(raw: unknown, guard: (v: unknown) => v is T, fallback: T): T {
@@ -130,7 +132,7 @@ export async function buildSpawnConfig(conn: SourceConnection): Promise<SpawnCon
 }
 
 export async function getOrStartClient(conn: SourceConnection): Promise<Client> {
-  return clients.getOrStart(conn.id, async () => {
+  const child = await clients.getOrStart(conn.id, async () => {
     // The spawn config carries the connection's own environment, which wins over
     // the sanitized base every child starts from.
     const { command, args, env, browser } = await buildSpawnConfig(conn)
@@ -141,6 +143,7 @@ export async function getOrStartClient(conn: SourceConnection): Promise<Client> 
       meta: { connectionId: conn.id, ...(session && { grant: session.grant }) }
     }
   })
+  return child.client
 }
 
 /** The signed-in window grant of a connection's running child, if it has one. */

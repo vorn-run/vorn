@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { InstalledConnectorPack } from '@vornrun/shared/types'
+import { openMcpChild, type McpChild } from '../connectors/mcp-child'
 import { installedLaunch, installedPack, listInstalledPacks } from '../connectors/packs'
-import { createStdioClientCache } from '../connectors/stdio-clients'
+import { createChildCache } from '../connectors/stdio-clients'
 import { constantTimeEqual } from '../token-manager'
 
 /**
@@ -24,7 +25,9 @@ export interface ExtensionHost {
   projectPath: string
 }
 
-const hosts = createStdioClientCache<ExtensionHost>('extensions')
+const hosts = createChildCache<McpChild, ExtensionHost>('extensions', (config, key) =>
+  openMcpChild(config, key, 'extensions')
+)
 
 /** Where the bridge answers, learned once the server knows the port it won. */
 let bridgeOrigin = ''
@@ -76,7 +79,7 @@ export function installedExtensions(): InstalledConnectorPack[] {
 }
 
 export async function getOrStartHost(extensionId: string, projectPath: string): Promise<Client> {
-  return hosts.getOrStart(keyOf(extensionId, projectPath), async () => {
+  const child = await hosts.getOrStart(keyOf(extensionId, projectPath), async () => {
     const pack = installedPack(extensionId)
     if (!pack || pack.kind !== 'extension') {
       throw new Error(`No extension "${extensionId}" is installed`)
@@ -100,6 +103,7 @@ export async function getOrStartHost(extensionId: string, projectPath: string): 
       meta: { token, extensionId, projectPath }
     }
   })
+  return child.client
 }
 
 export async function stopHost(extensionId: string, projectPath: string): Promise<void> {
