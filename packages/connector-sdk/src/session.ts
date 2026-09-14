@@ -43,6 +43,7 @@ interface SessionReply {
   status: number
   headers?: Record<string, string>
   body?: string
+  bodyBase64?: string
 }
 
 function readReply(text: string): SessionReply {
@@ -77,7 +78,7 @@ export function createSessionFetch(options: SessionFetchOptions = {}): typeof fe
       (message) => new SessionUnavailableError(message)
     )
     const request = new Request(input, init)
-    // Carried as text both ways: signed-in calls are JSON and form posts, not uploads.
+    // Requests go out as text (JSON and form posts); answers come back as bytes, so files survive.
     const body = request.body ? await request.text() : undefined
     const answer = await call(`${url}/fetch`, {
       method: 'POST',
@@ -90,7 +91,8 @@ export function createSessionFetch(options: SessionFetchOptions = {}): typeof fe
         url: request.url,
         method: request.method,
         headers: Object.fromEntries(request.headers),
-        ...(body !== undefined && { body })
+        ...(body !== undefined && { body }),
+        binaryBody: true
       }),
       signal: AbortSignal.any([request.signal, AbortSignal.timeout(SESSION_TIMEOUT_MS)])
     })
@@ -106,7 +108,11 @@ export function createSessionFetch(options: SessionFetchOptions = {}): typeof fe
       )
     }
     const reply = readReply(text)
-    return new Response(NULL_BODY_STATUSES.has(reply.status) ? null : (reply.body ?? ''), {
+    const content =
+      reply.bodyBase64 !== undefined
+        ? Uint8Array.from(Buffer.from(reply.bodyBase64, 'base64'))
+        : (reply.body ?? '')
+    return new Response(NULL_BODY_STATUSES.has(reply.status) ? null : content, {
       status: reply.status,
       ...(reply.headers && { headers: reply.headers })
     })

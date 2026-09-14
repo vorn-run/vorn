@@ -433,6 +433,8 @@ export interface SessionRequest {
   method: string
   headers?: Record<string, string>
   body?: string
+  /** The caller can decode `bodyBase64`, so the window hands the answer back as bytes. */
+  binaryBody?: boolean
 }
 
 /** How the site answered a call made in the signed-in window. */
@@ -440,6 +442,8 @@ export interface SessionAnswer {
   status: number
   headers: Record<string, string>
   body: string
+  /** The answer's bytes, when the call asked for them; `body` is then empty. */
+  bodyBase64?: string
 }
 
 /** One call a browser connection made through its window: what, where, and how it was answered. */

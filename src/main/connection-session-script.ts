@@ -2,6 +2,10 @@
 
 /** The largest body a signed-in call hands back, so a runaway page cannot fill memory. */
 export const MAX_SESSION_BODY = 4 * 1024 * 1024
+/** The largest answer a signed-in call hands back as bytes; a bigger one is refused, never cut short. */
+export const MAX_SESSION_BYTES = 16 * 1024 * 1024
+/** How the byte limit reads in a refusal. */
+export const SESSION_BYTES_LIMIT = `${MAX_SESSION_BYTES / (1024 * 1024)} MiB`
 
 import { CONNECTION_PROFILE_PREFIX, type SessionAnswer, type SessionRequest } from '../shared/types'
 import { sessionHeaders } from '@vornrun/shared/connector-origins'
@@ -21,10 +25,18 @@ export function fetchScript(request: SessionRequest): string {
     credentials: 'include',
     ...(request.body !== undefined && { body: request.body })
   }
+  const over = JSON.stringify(` bytes, over the ${SESSION_BYTES_LIMIT} a signed-in call carries`)
+  const read = request.binaryBody
+    ? `const size = Number(res.headers.get('content-length'))
+  if (size > ${MAX_SESSION_BYTES}) throw new Error('The answer is ' + size + ${over})
+  const bytes = new Uint8Array(await res.arrayBuffer())
+  if (bytes.byteLength > ${MAX_SESSION_BYTES}) throw new Error('The answer is ' + bytes.byteLength + ${over})
+  return { status: res.status, headers: Object.fromEntries(res.headers), body: '', bodyBase64: bytes.toBase64() }`
+    : `const text = await res.text()
+  return { status: res.status, headers: Object.fromEntries(res.headers), body: text.slice(0, ${MAX_SESSION_BODY}) }`
   return `(async () => {
   const res = await fetch(${JSON.stringify(request.url)}, ${JSON.stringify(init)})
-  const text = await res.text()
-  return { status: res.status, headers: Object.fromEntries(res.headers), body: text.slice(0, ${MAX_SESSION_BODY}) }
+  ${read}
 })()`
 }
 

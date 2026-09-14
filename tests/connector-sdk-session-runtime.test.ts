@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   createConnectorHarness,
+  createSessionFetch,
   defineConnector,
   runAction,
   runOptions,
@@ -103,6 +104,24 @@ describe('the signed-in window a connector is handed', () => {
     await runPoll(connector, 'changed', { sessionFetchImpl: answer('window') })
     expect(seen).toHaveLength(2)
     expect(seen.every((session) => typeof session?.fetch === 'function')).toBe(true)
+  })
+
+  it('reads a declared call through the window as JSON when the answer comes back as bytes', async () => {
+    const reply = {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: '',
+      bodyBase64: Buffer.from(JSON.stringify({ name: 'Ada' })).toString('base64')
+    }
+    const window = createSessionFetch({
+      env: {
+        VORN_BROWSER_HOST: 'http://127.0.0.1:4100/connections/c1/browser',
+        VORN_BROWSER_TOKEN: 't'
+      },
+      fetchImpl: vi.fn<typeof fetch>(async () => new Response(JSON.stringify(reply)))
+    })
+    const output = await runAction(acme(signedIn).connector, 'me', {}, { sessionFetchImpl: window })
+    expect(output).toEqual({ name: 'Ada' })
   })
 
   it('lets one harness stub answer both kinds of call', async () => {

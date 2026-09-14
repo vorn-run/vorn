@@ -156,7 +156,8 @@ function readRequest(body: unknown): SessionRequest | undefined {
     url: value.url,
     method: value.method.toUpperCase(),
     ...(headers && { headers }),
-    ...(value.body !== undefined && { body: value.body as string })
+    ...(value.body !== undefined && { body: value.body as string }),
+    ...(value.binaryBody === true && { binaryBody: true })
   }
 }
 

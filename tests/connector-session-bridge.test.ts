@@ -101,6 +101,30 @@ describe('the endpoint a browser connector calls through', () => {
     expect(grant.calls.size).toBe(0)
   })
 
+  it('passes the ask for bytes to the window, and the bytes back to the child', async () => {
+    const answer = {
+      status: 200,
+      headers: { 'content-type': 'image/png' },
+      body: '',
+      bodyBase64: 'iVBORw0KGgo='
+    }
+    bridge.request.mockResolvedValue(answer)
+    const res = await call({ url: 'https://substack.com/a.png', method: 'GET', binaryBody: true })
+    expect(res.json()).toEqual(answer)
+    expect(bridge.request.mock.calls.at(-1)?.[1]).toEqual({
+      connectionId: 'c1',
+      origins: browser.origins,
+      request: { url: 'https://substack.com/a.png', method: 'GET', binaryBody: true }
+    })
+
+    await call({ url: 'https://substack.com/a.png', method: 'GET', binaryBody: 'yes' })
+    expect(bridge.request.mock.calls.at(-1)?.[1]).toEqual({
+      connectionId: 'c1',
+      origins: browser.origins,
+      request: { url: 'https://substack.com/a.png', method: 'GET' }
+    })
+  })
+
   it('keeps two tool calls on one connection apart, however their requests interleave', async () => {
     bridge.request
       .mockResolvedValueOnce({ status: 200, headers: {}, body: '[]' })

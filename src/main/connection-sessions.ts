@@ -14,6 +14,8 @@ import {
 import type { ServerBridge } from './server/server-bridge'
 import {
   MAX_SESSION_BODY,
+  MAX_SESSION_BYTES,
+  SESSION_BYTES_LIMIT,
   fetchScript,
   identityFrom,
   plainUserAgent,
@@ -102,6 +104,8 @@ function runnerFor(key: string, connectionId: string, origin: string): Runner {
   return runner
 }
 
+const base64Length = (bytes: number): number => Math.ceil(bytes / 3) * 4
+
 /** Make one call inside the connection's signed-in profile, from a page on the call's own origin. */
 export async function fetchInSession(
   connectionId: string,
@@ -126,6 +130,12 @@ export async function fetchInSession(
       fetchScript(request),
       true
     )) as SessionAnswer
+    if (
+      answer.bodyBase64 !== undefined &&
+      answer.bodyBase64.length > base64Length(MAX_SESSION_BYTES)
+    ) {
+      throw new Error(`The answer is over the ${SESSION_BYTES_LIMIT} a signed-in call carries`)
+    }
     return { ...answer, body: answer.body.slice(0, MAX_SESSION_BODY) }
   } finally {
     runner.busy--
