@@ -241,7 +241,7 @@ describe('what the restart will cost', () => {
     render(<UpdatesSettings />)
     expect(screen.queryByText(/restart on the new version/)).not.toBeInTheDocument()
     // The status detail is still there; it was replaced, not removed.
-    expect(screen.getByText(/restart to apply/)).toBeInTheDocument()
+    expect(screen.getByText(/closes for a few seconds and reopens itself/)).toBeInTheDocument()
   })
 
   it('stays quiet while a download is only downloading', () => {

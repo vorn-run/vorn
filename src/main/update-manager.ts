@@ -1,11 +1,43 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { autoUpdater, UpdateInfo, ProgressInfo } from 'electron-updater'
-import { BrowserWindow, app, autoUpdater as nativeAutoUpdater } from 'electron'
+import { BrowserWindow, app, dialog, autoUpdater as nativeAutoUpdater } from 'electron'
 import { IPC, UpdateStatus } from '../shared/types'
+import { isNewerVersion } from '../shared/version-order'
 import log from './logger'
 
 export type UpdateChannel = 'stable' | 'beta'
 
-class UpdateManager {
+/** On macOS Squirrel stages the download itself, after electron-updater reports it finished. */
+const stagedBySquirrel = (): boolean => process.platform === 'darwin'
+
+/** The update last handed to the installer, so the next launch can tell whether it landed. */
+interface UpdateAttempt {
+  from: string
+  target: string
+}
+
+const attemptFile = (): string => path.join(app.getPath('userData'), 'update-attempt.json')
+const shipItLog = (): string =>
+  path.join(os.homedir(), 'Library/Caches/com.vorn.app.ShipIt/ShipIt_stderr.log')
+/** How much of the installer's log a failed-update notice quotes. */
+const SHIPIT_LINES = 6
+
+/** The last lines the macOS installer wrote, or nothing when there is no log to read. */
+function shipItTail(): string {
+  try {
+    const lines = fs
+      .readFileSync(shipItLog(), 'utf-8')
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+    return lines.slice(-SHIPIT_LINES).join('\n')
+  } catch {
+    return ''
+  }
+}
+
+export class UpdateManager {
   private mainWindow: BrowserWindow | null = null
   private checkInterval: ReturnType<typeof setInterval> | null = null
   /**
@@ -18,6 +50,10 @@ class UpdateManager {
    */
   private status: UpdateStatus = { kind: 'unsupported' }
   private lastCheckedAt: number | null = null
+  /** The version whose download finished; on macOS it still waits for Squirrel to stage it. */
+  private downloaded: string | null = null
+  /** Whether the installer holds a complete update, so a restart installs it. */
+  private staged = false
 
   /**
    * Claim the quit before the windows are asked to close.
@@ -37,6 +73,7 @@ class UpdateManager {
     if (!app.isPackaged) return
 
     this.mainWindow = mainWindow
+    this.reportFailedAttempt()
     autoUpdater.autoDownload = autoDownload
     autoUpdater.autoInstallOnAppQuit = true
     this.setChannel(channel)
@@ -78,11 +115,24 @@ class UpdateManager {
 
     autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
       this.lastCheckedAt = Date.now()
-      this.setStatus({ kind: 'ready', version: info.version })
+      this.downloaded = info.version
+      if (!stagedBySquirrel()) {
+        this.markStaged()
+        return
+      }
+      // Squirrel still has to unpack it; a restart before then relaunches the old build.
+      this.staged = false
+      this.setStatus({ kind: 'downloading', version: info.version, percent: 100 })
+    })
+
+    nativeAutoUpdater.on('update-downloaded', () => {
+      if (stagedBySquirrel() && this.downloaded) this.markStaged()
     })
 
     autoUpdater.on('error', (err) => {
       log.error('[updater] Error:', err.message)
+      // A staged update still installs, so the button that installs it stays.
+      if (this.staged) return
       // Previously logged and dropped, which made a failed update completely
       // invisible: the app just never offered one.
       this.setStatus({ kind: 'error', message: err.message })
@@ -107,6 +157,8 @@ class UpdateManager {
   }
 
   checkForUpdates(): void {
+    // A check rebuilds Squirrel's feed and deletes what it staged, so none runs until it installs.
+    if (this.staged) return
     autoUpdater.checkForUpdates().catch((err) => {
       log.error('[updater] Check failed:', err.message)
       this.setStatus({ kind: 'error', message: err.message })
@@ -115,6 +167,7 @@ class UpdateManager {
 
   /** Start the transfer the user deferred by turning auto-download off. */
   downloadUpdate(): void {
+    if (this.staged) return
     autoUpdater.downloadUpdate().catch((err) => {
       log.error('[updater] Download failed:', err.message)
       this.setStatus({ kind: 'error', message: err.message })
@@ -125,8 +178,55 @@ class UpdateManager {
     return this.status
   }
 
-  installUpdate(): void {
+  /** Install the staged update, running `release` first; false, and nothing released, while nothing is staged. */
+  async installUpdate(release: () => Promise<void>): Promise<boolean> {
+    if (!this.staged || !this.downloaded) {
+      log.warn('[updater] asked to install before the update was staged; staying open')
+      return false
+    }
+    await release()
+    this.recordAttempt(this.downloaded)
     autoUpdater.quitAndInstall(false, true)
+    return true
+  }
+
+  private markStaged(): void {
+    this.staged = true
+    this.setStatus({ kind: 'ready', version: this.downloaded ?? '' })
+  }
+
+  private recordAttempt(target: string): void {
+    const attempt: UpdateAttempt = { from: app.getVersion(), target }
+    try {
+      fs.writeFileSync(attemptFile(), JSON.stringify(attempt))
+    } catch (err) {
+      log.warn(`[updater] could not note the update attempt: ${String(err)}`)
+    }
+  }
+
+  /** Say so once when the update last handed to the installer did not land. */
+  private reportFailedAttempt(): void {
+    let attempt: Partial<UpdateAttempt>
+    try {
+      attempt = JSON.parse(fs.readFileSync(attemptFile(), 'utf-8')) as Partial<UpdateAttempt>
+    } catch {
+      return
+    }
+    fs.rmSync(attemptFile(), { force: true })
+    const current = app.getVersion()
+    if (typeof attempt.target !== 'string' || !isNewerVersion(attempt.target, current)) return
+    log.warn(`[updater] the update to ${attempt.target} did not install; still on ${current}`)
+    const tail = process.platform === 'darwin' ? shipItTail() : ''
+    const options = {
+      type: 'warning' as const,
+      message: `The update to ${attempt.target} did not install`,
+      detail: `Vorn is still on ${current} and will offer the update again.${
+        tail ? `\n\nThe installer reported:\n${tail}` : ''
+      }`
+    }
+    void (this.mainWindow
+      ? dialog.showMessageBox(this.mainWindow, options)
+      : dialog.showMessageBox(options))
   }
 
   private setStatus(status: UpdateStatus): void {

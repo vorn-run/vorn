@@ -110,7 +110,7 @@ export function describeUpdateStatus(
       return {
         label: `Version ${status.version} is ready to install`,
         shortLabel: `v${status.version} ready`,
-        detail: 'restart to apply',
+        detail: 'Vorn closes for a few seconds and reopens itself',
         tone: 'blocked',
         percent: null,
         action: 'restart'
