@@ -141,6 +141,20 @@ describe('a Windows update', () => {
     await expect(manager.installUpdate(release())).resolves.toBe(true)
     expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true)
   })
+
+  it('keeps checking, downloading and reporting errors after a download, as before', () => {
+    manager.init(win, 'beta')
+    updater.emit('update-downloaded', { version: '0.7.1-beta.4' })
+    updater.checkForUpdates.mockClear()
+
+    manager.checkForUpdates()
+    manager.downloadUpdate()
+    expect(updater.checkForUpdates).toHaveBeenCalledTimes(1)
+    expect(updater.downloadUpdate).toHaveBeenCalledTimes(1)
+
+    updater.emit('error', new Error('feed unreachable'))
+    expect(manager.getStatus()).toEqual({ kind: 'error', message: 'feed unreachable' })
+  })
 })
 
 describe('the launch after an update', () => {

@@ -131,8 +131,8 @@ export class UpdateManager {
 
     autoUpdater.on('error', (err) => {
       log.error('[updater] Error:', err.message)
-      // A staged update still installs, so the button that installs it stays.
-      if (this.staged) return
+      // A Squirrel-staged update still installs, so the button that installs it stays.
+      if (this.holdsSquirrelStage()) return
       // Previously logged and dropped, which made a failed update completely
       // invisible: the app just never offered one.
       this.setStatus({ kind: 'error', message: err.message })
@@ -158,7 +158,7 @@ export class UpdateManager {
 
   checkForUpdates(): void {
     // A check rebuilds Squirrel's feed and deletes what it staged, so none runs until it installs.
-    if (this.staged) return
+    if (this.holdsSquirrelStage()) return
     autoUpdater.checkForUpdates().catch((err) => {
       log.error('[updater] Check failed:', err.message)
       this.setStatus({ kind: 'error', message: err.message })
@@ -167,7 +167,7 @@ export class UpdateManager {
 
   /** Start the transfer the user deferred by turning auto-download off. */
   downloadUpdate(): void {
-    if (this.staged) return
+    if (this.holdsSquirrelStage()) return
     autoUpdater.downloadUpdate().catch((err) => {
       log.error('[updater] Download failed:', err.message)
       this.setStatus({ kind: 'error', message: err.message })
@@ -188,6 +188,11 @@ export class UpdateManager {
     this.recordAttempt(this.downloaded)
     autoUpdater.quitAndInstall(false, true)
     return true
+  }
+
+  /** Only Squirrel throws a staged update away on a new check; Windows and Linux keep checking as before. */
+  private holdsSquirrelStage(): boolean {
+    return stagedBySquirrel() && this.staged
   }
 
   private markStaged(): void {
