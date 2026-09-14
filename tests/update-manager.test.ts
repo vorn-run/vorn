@@ -55,7 +55,14 @@ const realPlatform = process.platform
 const onPlatform = (platform: NodeJS.Platform): void => {
   Object.defineProperty(process, 'platform', { value: platform, configurable: true })
 }
-const attemptFile = (): string => path.join(dirs.userData, 'update-attempt.json')
+const attemptFile = (): string => path.join(dirs.userData, 'update-attempt.txt')
+const writeAttempt = (version: string): void => fs.writeFileSync(attemptFile(), version)
+const release = () => vi.fn(async () => {})
+/** A finished download, and on macOS Squirrel's staging of it. */
+const stage = (version: string): void => {
+  updater.emit('update-downloaded', { version })
+  if (process.platform === 'darwin') squirrel.emit('update-downloaded')
+}
 
 let manager: InstanceType<typeof UpdateManager>
 
@@ -74,8 +81,6 @@ afterEach(() => {
   fs.rmSync(dirs.userData, { recursive: true, force: true })
 })
 
-const release = () => vi.fn(async () => {})
-
 describe('a macOS update', () => {
   beforeEach(() => onPlatform('darwin'))
 
@@ -89,7 +94,7 @@ describe('a macOS update', () => {
     })
 
     const early = release()
-    await expect(manager.installUpdate(early)).resolves.toBe(false)
+    await manager.installUpdate(early)
     expect(early).not.toHaveBeenCalled()
     expect(updater.quitAndInstall).not.toHaveBeenCalled()
 
@@ -99,8 +104,7 @@ describe('a macOS update', () => {
 
   it('stops checking once staged, so nothing throws the staged update away', () => {
     manager.init(win, 'beta')
-    updater.emit('update-downloaded', { version: '0.7.1-beta.4' })
-    squirrel.emit('update-downloaded')
+    stage('0.7.1-beta.4')
     updater.checkForUpdates.mockClear()
 
     manager.checkForUpdates()
@@ -114,20 +118,17 @@ describe('a macOS update', () => {
 
   it('releases the server before installing, and notes the attempt', async () => {
     manager.init(win, 'beta')
-    updater.emit('update-downloaded', { version: '0.7.1-beta.4' })
-    squirrel.emit('update-downloaded')
+    stage('0.7.1-beta.4')
 
     const order: string[] = []
-    const releasing = vi.fn(async () => {
+    const releasing = release()
+    releasing.mockImplementation(async () => {
       order.push('release')
     })
     updater.quitAndInstall.mockImplementation(() => order.push('install'))
-    await expect(manager.installUpdate(releasing)).resolves.toBe(true)
+    await manager.installUpdate(releasing)
     expect(order).toEqual(['release', 'install'])
-    expect(JSON.parse(fs.readFileSync(attemptFile(), 'utf-8'))).toEqual({
-      from: '0.7.1-beta.3',
-      target: '0.7.1-beta.4'
-    })
+    expect(fs.readFileSync(attemptFile(), 'utf-8')).toBe('0.7.1-beta.4')
   })
 })
 
@@ -136,15 +137,17 @@ describe('a Windows update', () => {
 
   it('offers the restart as soon as the download is done, as before', async () => {
     manager.init(win, 'beta')
-    updater.emit('update-downloaded', { version: '0.7.1-beta.4' })
+    stage('0.7.1-beta.4')
     expect(manager.getStatus()).toEqual({ kind: 'ready', version: '0.7.1-beta.4' })
-    await expect(manager.installUpdate(release())).resolves.toBe(true)
+    const releasing = release()
+    await manager.installUpdate(releasing)
+    expect(releasing).toHaveBeenCalledOnce()
     expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true)
   })
 
   it('keeps checking, downloading and reporting errors after a download, as before', () => {
     manager.init(win, 'beta')
-    updater.emit('update-downloaded', { version: '0.7.1-beta.4' })
+    stage('0.7.1-beta.4')
     updater.checkForUpdates.mockClear()
 
     manager.checkForUpdates()
@@ -161,10 +164,7 @@ describe('the launch after an update', () => {
   beforeEach(() => onPlatform('darwin'))
 
   it('says once that the update did not install, and forgets the attempt', () => {
-    fs.writeFileSync(
-      attemptFile(),
-      JSON.stringify({ from: '0.7.1-beta.3', target: '0.7.1-beta.4' })
-    )
+    writeAttempt('0.7.1-beta.4')
     manager.init(win, 'beta')
     expect(showMessageBox).toHaveBeenCalledWith(
       win,
@@ -178,10 +178,7 @@ describe('the launch after an update', () => {
 
   it('stays quiet when the update landed', () => {
     getVersion.mockReturnValue('0.7.1-beta.4')
-    fs.writeFileSync(
-      attemptFile(),
-      JSON.stringify({ from: '0.7.1-beta.3', target: '0.7.1-beta.4' })
-    )
+    writeAttempt('0.7.1-beta.4')
     manager.init(win, 'beta')
     expect(showMessageBox).not.toHaveBeenCalled()
     expect(fs.existsSync(attemptFile())).toBe(false)

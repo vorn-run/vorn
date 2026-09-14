@@ -655,7 +655,6 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.on(IPC.UPDATE_INSTALL, async () => {
-    // Released only once the install is sure to go ahead, so a refused one keeps its server.
     await updateManager.installUpdate(async () => {
       serverStopped = true
       await releaseServerForUpdate()

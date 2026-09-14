@@ -9,31 +9,33 @@ import log from './logger'
 
 export type UpdateChannel = 'stable' | 'beta'
 
-/** On macOS Squirrel stages the download itself, after electron-updater reports it finished. */
-const stagedBySquirrel = (): boolean => process.platform === 'darwin'
-
-/** The update last handed to the installer, so the next launch can tell whether it landed. */
-interface UpdateAttempt {
-  from: string
-  target: string
-}
-
-const attemptFile = (): string => path.join(app.getPath('userData'), 'update-attempt.json')
+/** The version last handed to the installer, so the next launch can tell whether it landed. */
+const attemptFile = (): string => path.join(app.getPath('userData'), 'update-attempt.txt')
 const shipItLog = (): string =>
   path.join(os.homedir(), 'Library/Caches/com.vorn.app.ShipIt/ShipIt_stderr.log')
-/** How much of the installer's log a failed-update notice quotes. */
+/** How much of the installer's log a failed-update notice quotes, and how far back it reads. */
 const SHIPIT_LINES = 6
+const SHIPIT_TAIL_BYTES = 16 * 1024
 
-/** The last lines the macOS installer wrote, or nothing when there is no log to read. */
+/** The last lines the macOS installer wrote, or nothing elsewhere or when there is no log to read. */
 function shipItTail(): string {
+  if (process.platform !== 'darwin') return ''
+  let fd: number | undefined
   try {
-    const lines = fs
-      .readFileSync(shipItLog(), 'utf-8')
+    fd = fs.openSync(shipItLog(), 'r')
+    const { size } = fs.fstatSync(fd)
+    const length = Math.min(size, SHIPIT_TAIL_BYTES)
+    const buffer = Buffer.alloc(length)
+    fs.readSync(fd, buffer, 0, length, size - length)
+    const lines = buffer
+      .toString('utf-8')
       .split('\n')
       .filter((line) => line.trim() !== '')
     return lines.slice(-SHIPIT_LINES).join('\n')
   } catch {
     return ''
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd)
   }
 }
 
@@ -50,10 +52,10 @@ export class UpdateManager {
    */
   private status: UpdateStatus = { kind: 'unsupported' }
   private lastCheckedAt: number | null = null
-  /** The version whose download finished; on macOS it still waits for Squirrel to stage it. */
-  private downloaded: string | null = null
-  /** Whether the installer holds a complete update, so a restart installs it. */
-  private staged = false
+  /** On macOS Squirrel stages the download itself, after electron-updater reports it finished. */
+  private stagedBySquirrel = false
+  /** The downloaded update, and whether the installer holds it complete so a restart installs it. */
+  private update: { version: string; staged: boolean } | null = null
 
   /**
    * Claim the quit before the windows are asked to close.
@@ -73,7 +75,8 @@ export class UpdateManager {
     if (!app.isPackaged) return
 
     this.mainWindow = mainWindow
-    this.reportFailedAttempt()
+    this.stagedBySquirrel = process.platform === 'darwin'
+    this.reportFailedAttempt(mainWindow)
     autoUpdater.autoDownload = autoDownload
     autoUpdater.autoInstallOnAppQuit = true
     this.setChannel(channel)
@@ -115,19 +118,22 @@ export class UpdateManager {
 
     autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
       this.lastCheckedAt = Date.now()
-      this.downloaded = info.version
-      if (!stagedBySquirrel()) {
-        this.markStaged()
-        return
-      }
-      // Squirrel still has to unpack it; a restart before then relaunches the old build.
-      this.staged = false
-      this.setStatus({ kind: 'downloading', version: info.version, percent: 100 })
+      this.update = { version: info.version, staged: !this.stagedBySquirrel }
+      // On macOS Squirrel still has to unpack it; a restart before then relaunches the old build.
+      this.setStatus(
+        this.update.staged
+          ? { kind: 'ready', version: info.version }
+          : { kind: 'downloading', version: info.version, percent: 100 }
+      )
     })
 
-    nativeAutoUpdater.on('update-downloaded', () => {
-      if (stagedBySquirrel() && this.downloaded) this.markStaged()
-    })
+    if (this.stagedBySquirrel) {
+      nativeAutoUpdater.on('update-downloaded', () => {
+        if (!this.update) return
+        this.update = { ...this.update, staged: true }
+        this.setStatus({ kind: 'ready', version: this.update.version })
+      })
+    }
 
     autoUpdater.on('error', (err) => {
       log.error('[updater] Error:', err.message)
@@ -178,60 +184,50 @@ export class UpdateManager {
     return this.status
   }
 
-  /** Install the staged update, running `release` first; false, and nothing released, while nothing is staged. */
-  async installUpdate(release: () => Promise<void>): Promise<boolean> {
-    if (!this.staged || !this.downloaded) {
+  /** Install the staged update, running `release` just before; nothing happens, nothing released, until it is staged. */
+  async installUpdate(release: () => Promise<void>): Promise<void> {
+    if (!this.update?.staged) {
       log.warn('[updater] asked to install before the update was staged; staying open')
-      return false
+      return
     }
     await release()
-    this.recordAttempt(this.downloaded)
+    this.recordAttempt(this.update.version)
     autoUpdater.quitAndInstall(false, true)
-    return true
   }
 
   /** Only Squirrel throws a staged update away on a new check; Windows and Linux keep checking as before. */
   private holdsSquirrelStage(): boolean {
-    return stagedBySquirrel() && this.staged
-  }
-
-  private markStaged(): void {
-    this.staged = true
-    this.setStatus({ kind: 'ready', version: this.downloaded ?? '' })
+    return this.stagedBySquirrel && this.update?.staged === true
   }
 
   private recordAttempt(target: string): void {
-    const attempt: UpdateAttempt = { from: app.getVersion(), target }
     try {
-      fs.writeFileSync(attemptFile(), JSON.stringify(attempt))
+      fs.writeFileSync(attemptFile(), target)
     } catch (err) {
       log.warn(`[updater] could not note the update attempt: ${String(err)}`)
     }
   }
 
   /** Say so once when the update last handed to the installer did not land. */
-  private reportFailedAttempt(): void {
-    let attempt: Partial<UpdateAttempt>
+  private reportFailedAttempt(window: BrowserWindow): void {
+    let target: string
     try {
-      attempt = JSON.parse(fs.readFileSync(attemptFile(), 'utf-8')) as Partial<UpdateAttempt>
+      target = fs.readFileSync(attemptFile(), 'utf-8').trim()
     } catch {
       return
     }
     fs.rmSync(attemptFile(), { force: true })
     const current = app.getVersion()
-    if (typeof attempt.target !== 'string' || !isNewerVersion(attempt.target, current)) return
-    log.warn(`[updater] the update to ${attempt.target} did not install; still on ${current}`)
-    const tail = process.platform === 'darwin' ? shipItTail() : ''
-    const options = {
-      type: 'warning' as const,
-      message: `The update to ${attempt.target} did not install`,
+    if (!target || !isNewerVersion(target, current)) return
+    log.warn(`[updater] the update to ${target} did not install; still on ${current}`)
+    const tail = shipItTail()
+    void dialog.showMessageBox(window, {
+      type: 'warning',
+      message: `The update to ${target} did not install`,
       detail: `Vorn is still on ${current} and will offer the update again.${
         tail ? `\n\nThe installer reported:\n${tail}` : ''
       }`
-    }
-    void (this.mainWindow
-      ? dialog.showMessageBox(this.mainWindow, options)
-      : dialog.showMessageBox(options))
+    })
   }
 
   private setStatus(status: UpdateStatus): void {

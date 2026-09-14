@@ -25,6 +25,7 @@ beforeAll(() => {
 /** Run the page's script with a stand-in for the page's own fetch. */
 const runScript = (script: string, answer: Response): Promise<SessionAnswer> =>
   new Function('fetch', `return ${script}`)(async () => answer) as Promise<SessionAnswer>
+const bytesScript = (url: string): string => fetchScript({ url, method: 'GET', binaryBody: true })
 
 describe("the script a connection's hidden page runs", () => {
   it('carries the call as data, so nothing a connector sends is ever run as code', () => {
@@ -49,25 +50,16 @@ describe("the script a connection's hidden page runs", () => {
   it('reads bytes only when the call asks, and never passes the ask on to the site', () => {
     const plain = fetchScript({ url: 'https://cdn.example.com/0_0.png', method: 'GET' })
     expect(plain).toContain('await res.text()')
-    expect(plain).not.toContain('arrayBuffer')
-    const bytes = fetchScript({
-      url: 'https://cdn.example.com/0_0.png',
-      method: 'GET',
-      binaryBody: true
-    })
-    expect(bytes).toContain('await res.arrayBuffer()')
+    expect(plain).not.toContain('getReader')
+    const bytes = bytesScript('https://cdn.example.com/0_0.png')
+    expect(bytes).toContain('res.body?.getReader()')
     expect(bytes).not.toContain('binaryBody')
   })
 
   it('hands back the exact bytes the site sent', async () => {
     const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 255])
-    const script = fetchScript({
-      url: 'https://cdn.example.com/0_0.png',
-      method: 'GET',
-      binaryBody: true
-    })
     const answer = await runScript(
-      script,
+      bytesScript('https://cdn.example.com/0_0.png'),
       new Response(png, { status: 200, headers: { 'content-type': 'image/png' } })
     )
     expect(answer).toMatchObject({
@@ -79,11 +71,7 @@ describe("the script a connection's hidden page runs", () => {
   })
 
   it('refuses an answer over the byte limit rather than cutting it short', async () => {
-    const script = fetchScript({
-      url: 'https://cdn.example.com/big',
-      method: 'GET',
-      binaryBody: true
-    })
+    const script = bytesScript('https://cdn.example.com/big')
     const declared = new Response('x', {
       headers: { 'content-length': String(MAX_SESSION_BYTES + 1) }
     })

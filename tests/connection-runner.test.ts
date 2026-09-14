@@ -116,7 +116,7 @@ describe('the hidden page a signed-in call runs in', () => {
     windows[0]!.load()
     await expect(first).resolves.toEqual(answer)
 
-    const tooBig = 'A'.repeat(Math.ceil(MAX_SESSION_BYTES / 3) * 4 + 4)
+    const tooBig = Buffer.alloc(MAX_SESSION_BYTES + 1).toString('base64')
     windows[0]!.webContents.executeJavaScript.mockResolvedValueOnce({
       ...answer,
       bodyBase64: tooBig

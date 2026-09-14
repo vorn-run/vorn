@@ -40,8 +40,6 @@ export function packLaunch(pack: InstalledConnectorPack): { command: string; arg
   return { command: 'node', args: [`${pack.path}/index.js`] }
 }
 
-export { isNewerVersion }
-
 /** A live install outranks a rejection, which outranks what is on disk. */
 export function packStateFor(input: {
   installed?: InstalledConnectorPack | undefined

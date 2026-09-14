@@ -109,9 +109,7 @@ export function createSessionFetch(options: SessionFetchOptions = {}): typeof fe
     }
     const reply = readReply(text)
     const content =
-      reply.bodyBase64 !== undefined
-        ? Uint8Array.from(Buffer.from(reply.bodyBase64, 'base64'))
-        : (reply.body ?? '')
+      reply.bodyBase64 !== undefined ? Buffer.from(reply.bodyBase64, 'base64') : (reply.body ?? '')
     return new Response(NULL_BODY_STATUSES.has(reply.status) ? null : content, {
       status: reply.status,
       ...(reply.headers && { headers: reply.headers })
