@@ -655,9 +655,10 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.on(IPC.UPDATE_INSTALL, async () => {
-    serverStopped = true
-    await releaseServerForUpdate()
-    updateManager.installUpdate()
+    await updateManager.installUpdate(async () => {
+      serverStopped = true
+      await releaseServerForUpdate()
+    })
   })
 
   // Read synchronously so a freshly-opened panel renders without a flash.

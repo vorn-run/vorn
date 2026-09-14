@@ -46,7 +46,8 @@ describe('the signed-in fetch a browser connector gets', () => {
       url: 'https://novumai.substack.com/api/v1/drafts',
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: '{"draft_title":"t"}'
+      body: '{"draft_title":"t"}',
+      binaryBody: true
     })
   })
 
@@ -94,6 +95,39 @@ describe('the signed-in fetch a browser connector gets', () => {
     const res = await fetch('https://substack.com/api/v1/comment/1', { method: 'DELETE' })
     expect(res.status).toBe(204)
     expect(await res.text()).toBe('')
+  })
+
+  it('hands back the bytes the window sent, unchanged', async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 255, 128])
+    const fetch = createSessionFetch({
+      env,
+      fetchImpl: answering(200, {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+        body: '',
+        bodyBase64: Buffer.from(png).toString('base64')
+      })
+    })
+    const res = await fetch('https://cdn.example.com/0_0.png')
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(png)
+    expect(res.headers.get('content-type')).toBe('image/png')
+  })
+
+  it('reads text that came as bytes as before, and a text answer from an older Vorn', async () => {
+    const asBytes = createSessionFetch({
+      env,
+      fetchImpl: answering(200, {
+        status: 200,
+        body: '',
+        bodyBase64: Buffer.from('{"name":"Vörn ✓"}').toString('base64')
+      })
+    })
+    expect(await (await asBytes('https://substack.com/api')).json()).toEqual({ name: 'Vörn ✓' })
+    const asText = createSessionFetch({
+      env,
+      fetchImpl: answering(200, { status: 200, body: '{"name":"Vörn ✓"}' })
+    })
+    expect(await (await asText('https://substack.com/api')).json()).toEqual({ name: 'Vörn ✓' })
   })
 })
 

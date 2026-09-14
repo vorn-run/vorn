@@ -58,6 +58,7 @@ vi.mock('../src/main/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), 
 
 const { checkSession, closeConnectionWindows, fetchInSession } =
   await import('../src/main/connection-sessions')
+const { MAX_SESSION_BYTES } = await import('../src/main/connection-session-script')
 
 const origins = ['https://substack.com']
 const request = { url: 'https://substack.com/api/v1/user/profile/self', method: 'GET' }
@@ -104,6 +105,23 @@ describe('the hidden page a signed-in call runs in', () => {
     await slow
     await vi.advanceTimersByTimeAsync(60_000)
     expect(windows[0]!.destroyed).toBe(true)
+  })
+
+  it('hands back bytes as they came, and refuses bytes over the limit instead of cutting them', async () => {
+    const bytes = { ...request, binaryBody: true }
+    const answer = { status: 200, headers: {}, body: '', bodyBase64: 'iVBORw0KGgo=' }
+    const first = fetchInSession('c1', origins, bytes)
+    await vi.waitFor(() => expect(windows).toHaveLength(1))
+    windows[0]!.webContents.executeJavaScript.mockResolvedValueOnce(answer)
+    windows[0]!.load()
+    await expect(first).resolves.toEqual(answer)
+
+    const tooBig = Buffer.alloc(MAX_SESSION_BYTES + 1).toString('base64')
+    windows[0]!.webContents.executeJavaScript.mockResolvedValueOnce({
+      ...answer,
+      bodyBase64: tooBig
+    })
+    await expect(fetchInSession('c1', origins, bytes)).rejects.toThrow(/over the 16 MiB/)
   })
 })
 

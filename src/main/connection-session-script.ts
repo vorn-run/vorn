@@ -2,6 +2,10 @@
 
 /** The largest body a signed-in call hands back, so a runaway page cannot fill memory. */
 export const MAX_SESSION_BODY = 4 * 1024 * 1024
+/** The largest answer a signed-in call hands back as bytes; a bigger one is refused, never cut short. */
+export const MAX_SESSION_BYTES = 16 * 1024 * 1024
+/** What a call over that limit is refused with, in the page and in main alike. */
+export const SESSION_BYTES_REFUSAL = `The answer is over the ${MAX_SESSION_BYTES / (1024 * 1024)} MiB a signed-in call carries`
 
 import { CONNECTION_PROFILE_PREFIX, type SessionAnswer, type SessionRequest } from '../shared/types'
 import { sessionHeaders } from '@vornrun/shared/connector-origins'
@@ -21,10 +25,34 @@ export function fetchScript(request: SessionRequest): string {
     credentials: 'include',
     ...(request.body !== undefined && { body: request.body })
   }
+  // Counted as the bytes arrive, so a chunked or compressed answer is stopped at the limit too.
+  const read = request.binaryBody
+    ? `const refuse = (size) => { if (size > ${MAX_SESSION_BYTES}) throw new Error(${JSON.stringify(SESSION_BYTES_REFUSAL)}) }
+  refuse(Number(res.headers.get('content-length')))
+  const reader = res.body?.getReader()
+  const parts = []
+  let total = 0
+  while (reader) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > ${MAX_SESSION_BYTES}) await reader.cancel()
+    refuse(total)
+    parts.push(value)
+  }
+  const bytes = new Uint8Array(total)
+  let at = 0
+  for (const part of parts) {
+    bytes.set(part, at)
+    at += part.byteLength
+  }
+  const out = { body: '', bodyBase64: bytes.toBase64() }`
+    : `const text = await res.text()
+  const out = { body: text.slice(0, ${MAX_SESSION_BODY}) }`
   return `(async () => {
   const res = await fetch(${JSON.stringify(request.url)}, ${JSON.stringify(init)})
-  const text = await res.text()
-  return { status: res.status, headers: Object.fromEntries(res.headers), body: text.slice(0, ${MAX_SESSION_BODY}) }
+  ${read}
+  return { status: res.status, headers: Object.fromEntries(res.headers), ...out }
 })()`
 }
 

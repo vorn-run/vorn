@@ -14,6 +14,8 @@ import {
 import type { ServerBridge } from './server/server-bridge'
 import {
   MAX_SESSION_BODY,
+  MAX_SESSION_BYTES,
+  SESSION_BYTES_REFUSAL,
   fetchScript,
   identityFrom,
   plainUserAgent,
@@ -126,6 +128,12 @@ export async function fetchInSession(
       fetchScript(request),
       true
     )) as SessionAnswer
+    if (
+      answer.bodyBase64 !== undefined &&
+      Buffer.byteLength(answer.bodyBase64, 'base64') > MAX_SESSION_BYTES
+    ) {
+      throw new Error(SESSION_BYTES_REFUSAL)
+    }
     return { ...answer, body: answer.body.slice(0, MAX_SESSION_BODY) }
   } finally {
     runner.busy--

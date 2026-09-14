@@ -229,6 +229,8 @@ Add `headers` to `check` for a site whose reads need one, such as a CSRF flag. H
 
 Vorn opens a window on a browser profile that belongs to one connection, and the person signs in there. The connector's code then gets `ctx.session.fetch` beside `ctx.fetch`. A call through `ctx.session.fetch` runs inside that signed-in window as a same-origin request, so the service sees its own page asking and no cookie reaches the connector. Calls outside `origins` are refused. `ctx.fetch` stays a plain fetch for public reads, such as a feed, which work before anyone signs in. A `browser` connector's declared `request` actions go through the window.
 
+Answers come back as bytes, so `await res.arrayBuffer()` reads an image or any file the signed-in page can open, up to 16 MiB; a bigger answer is refused rather than cut short. This needs Vorn 0.7.1-beta.4 or later.
+
 `--mock` serves signed-in calls from the same routes as every other call. A `--live` run from a terminal has no window, so it skips them.
 
 ## Dedupe strategies
