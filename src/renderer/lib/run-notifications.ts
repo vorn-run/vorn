@@ -2,6 +2,7 @@ import type { WorkflowExecution } from '../../shared/types'
 import { isSignInWait } from '@vornrun/shared/workflow-graph'
 import { useAppStore } from '../stores'
 import { sendWorkflowGateNotification, sendWorkflowSignInNotification } from './notifications'
+import { isRejected } from './run-presentation'
 
 /**
  * The window's half of a run that is happening somewhere else.
@@ -63,7 +64,7 @@ export function announceRun(execution: WorkflowExecution): void {
     const steps = execution.nodeStates.filter((ns) => ns.status !== 'pending').length
     if (Notification.permission === 'granted') {
       new Notification('Vorn', {
-        body: `Workflow "${workflow.name}" ${execution.status === 'success' ? 'completed' : 'failed'} — ${steps} step${steps === 1 ? '' : 's'}`
+        body: `Workflow "${workflow.name}" ${execution.status === 'success' ? 'completed' : isRejected(execution) ? 'was rejected' : 'failed'} — ${steps} step${steps === 1 ? '' : 's'}`
       })
     }
   }

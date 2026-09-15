@@ -5,6 +5,7 @@ import { Check, X, Inbox, Play, RotateCcw, ExternalLink, Eye, MessageSquare } fr
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import {
   describeRun,
+  runDotStatus,
   runStatusLine,
   runVerdict,
   type RunWorkflowRef
@@ -164,7 +165,7 @@ export function RunDetailPane({
           <p className="text-[13px] text-ink-secondary">{presentation.subtitle}</p>
         )}
         <div className="flex items-center gap-2 text-[13px] text-ink">
-          <StatusDot status={waitingStep ? 'waiting' : run.status} />
+          <StatusDot status={waitingStep ? 'waiting' : runDotStatus(run)} />
           <span>{runStatusLine(run, nodes)}</span>
           {verdict && (
             <>

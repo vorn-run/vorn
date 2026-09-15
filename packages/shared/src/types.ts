@@ -1240,6 +1240,8 @@ export interface NodeExecutionState {
   worktreeOrigin?: 'created' | 'inherited'
   /** Timestamp when an approval gate was approved. */
   approvedAt?: string
+  /** When a person rejected an approval gate; a timeout leaves it unset. */
+  rejectedAt?: string
   /** An approval gate's message, with step outputs filled in when it opened. */
   message?: string
   /** Unlocks this round's review page; replaced every round, absent when there is none. */

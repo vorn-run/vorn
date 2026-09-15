@@ -15,7 +15,7 @@ import {
 
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
-import { nodeLabel } from '../../lib/run-presentation'
+import { nodeLabel, runDotStatus } from '../../lib/run-presentation'
 import { IconButton } from '../IconButton'
 import { failedStep, hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
@@ -242,7 +242,7 @@ export function RunStepsList({
               onClick={() => setExpandedNodeId(isExpanded ? null : ns.nodeId)}
               className="group w-full grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 px-4 py-2 text-left hover:bg-white/[0.02] transition-colors"
             >
-              <StatusDot status={ns.status} />
+              <StatusDot status={ns.rejectedAt ? 'cancelled' : ns.status} />
               <span
                 className={`flex items-center gap-1.5 min-w-0 text-[12.5px] ${faint ? 'text-ink-faint' : 'text-ink'}`}
               >
@@ -317,7 +317,13 @@ export function RunStepsList({
             {/* Engine lines are dimmed under the agent's own words, and the log is the trace's only box. */}
             {isExpanded && (
               <div className={`${UNDER_LABEL} flex flex-col gap-1.5`}>
-                {ns.error && <p className="text-[12px] text-danger">{ns.error}</p>}
+                {ns.error && (
+                  <p
+                    className={`text-[12px] ${ns.rejectedAt ? 'text-ink-secondary' : 'text-danger'}`}
+                  >
+                    {ns.error}
+                  </p>
+                )}
                 {timeline.length > 0 && (
                   <div className="bg-black/30 border border-white/[0.05] rounded overflow-auto max-h-[280px]">
                     {timeline.map((entry, ti) =>
@@ -434,7 +440,7 @@ export function RunEntry({
           ) : (
             <ChevronRight size={12} className="text-ink-faint" />
           )}
-          <StatusDot status={execution.status} />
+          <StatusDot status={runDotStatus(execution)} />
           <span className="text-[12px] text-ink flex-1 min-w-0 truncate">
             {workflowName && <span className="text-ink-faint mr-1.5">{workflowName}</span>}
             {formatRelativeTime(execution.startedAt)}

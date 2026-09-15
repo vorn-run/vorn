@@ -2103,6 +2103,7 @@ export async function rejectWorkflowGate(
     status: 'error',
     completedAt: now,
     error: timedOut ?? (note || 'Rejected by user'),
+    ...(!timedOut && { rejectedAt: now }),
     ...withFeedback(execution, nodeId, 'reject', note)
   })
 

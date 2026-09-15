@@ -3,6 +3,7 @@ import {
   bucketOf,
   describeRun,
   liveNodeStatus,
+  runDotStatus,
   runStatusLine,
   runVerdict,
   stepProgress
@@ -231,6 +232,39 @@ describe('runStatusLine', () => {
       nodeStates: [{ nodeId: 'abcdef123456', status: 'error' }] as NodeExecutionState[]
     })
     expect(runStatusLine(gone, [])).toBe('Failed at abcdef12')
+  })
+
+  it('says a person rejected the run at a gate, with the note when there is one', () => {
+    const rejected = (feedback?: NodeExecutionState['feedback']) =>
+      run({
+        status: 'error',
+        nodeStates: [
+          {
+            nodeId: 'gate',
+            status: 'error',
+            error: 'Too long',
+            rejectedAt: '2026-09-15T21:00:00Z',
+            feedback
+          }
+        ] as NodeExecutionState[]
+      })
+    const note = [
+      { round: 1, decision: 'reject' as const, comment: 'Too long', at: '2026-09-15T21:00:00Z' }
+    ]
+    expect(runStatusLine(rejected(note), nodes)).toBe('Rejected at Review · Too long')
+    expect(runStatusLine(rejected(), nodes)).toBe('Rejected at Review')
+    expect(runDotStatus(rejected())).toBe('cancelled')
+  })
+
+  it('keeps a gate that timed out a failure', () => {
+    const timedOut = run({
+      status: 'error',
+      nodeStates: [
+        { nodeId: 'gate', status: 'error', error: 'Approval timed out after 1000ms' }
+      ] as NodeExecutionState[]
+    })
+    expect(runStatusLine(timedOut, nodes)).toBe('Failed at Review')
+    expect(runDotStatus(timedOut)).toBe('error')
   })
 })
 

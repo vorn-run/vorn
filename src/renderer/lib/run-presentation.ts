@@ -24,7 +24,7 @@ export function runCompletionToast(
       message: `Run finished — ${steps} step${steps === 1 ? '' : 's'} in ${duration}`
     }
   }
-  if (execution.status === 'error') {
+  if (execution.status === 'error' && !isRejected(execution)) {
     const failed = failedStep(execution)
     const failedNode = failed ? nodes.find((n) => n.id === failed.nodeId) : undefined
     return {
@@ -53,7 +53,17 @@ export function nodeLabel(node: WorkflowNode | undefined, nodeId: string): strin
   return node?.label || nodeId.slice(0, 8)
 }
 
-/** A run's state in words, naming the step it broke at, waits at or is working on. */
+/** Whether a person ended the run by rejecting a gate, rather than a step breaking. */
+export function isRejected(execution: WorkflowExecution): boolean {
+  return execution.status === 'error' && !!failedStep(execution)?.rejectedAt
+}
+
+/** A settled run's dot: a rejection reads as a decision, like a stop, not as a break. */
+export function runDotStatus(execution: WorkflowExecution): WorkflowExecution['status'] {
+  return isRejected(execution) ? 'cancelled' : execution.status
+}
+
+/** A run's state in words, naming the step it broke at, was rejected at, waits at or is working on. */
 export function runStatusLine(execution: WorkflowExecution, nodes: WorkflowNode[]): string {
   const named = (nodeId: string): string =>
     nodeLabel(
@@ -70,7 +80,11 @@ export function runStatusLine(execution: WorkflowExecution, nodes: WorkflowNode[
   }
   if (execution.status === 'error') {
     const failed = failedStep(execution)
-    return failed ? `Failed at ${named(failed.nodeId)}` : 'Failed'
+    if (!failed) return 'Failed'
+    if (!failed.rejectedAt) return `Failed at ${named(failed.nodeId)}`
+    const last = failed.feedback?.[failed.feedback.length - 1]
+    const note = last?.decision === 'reject' ? ` · ${last.comment}` : ''
+    return `Rejected at ${named(failed.nodeId)}${note}`
   }
   return execution.status === 'cancelled' ? 'Stopped' : 'Completed'
 }

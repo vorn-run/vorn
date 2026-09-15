@@ -738,7 +738,11 @@ describe('sending the work back from a gate', () => {
 
     const rejected = await rejectWorkflowGate(waiting, 'approve', { note: 'Not today' })
     expect(rejected.status).toBe('error')
-    expect(gate()).toMatchObject({ status: 'error', error: 'Not today' })
+    expect(gate()).toMatchObject({
+      status: 'error',
+      error: 'Not today',
+      rejectedAt: expect.any(String)
+    })
   })
 })
 
