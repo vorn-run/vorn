@@ -78,6 +78,14 @@ describe('a gate that starts waiting', () => {
     )
   })
 
+  it('says what the gate asked as it was filled in when it opened', () => {
+    announceRun(
+      run({ nodeStates: [{ nodeId: 'gate', status: 'waiting', message: 'Post: hello' }] })
+    )
+
+    expect(sendWorkflowGateNotification.mock.calls[0][3]).toBe('Post: hello')
+  })
+
   it('opens the editor on the workflow when the notification is clicked', () => {
     announceRun(waiting())
 

@@ -75,6 +75,18 @@ describe('WaitingApprovalPill', () => {
     expect(container.textContent).toContain('please review')
   })
 
+  it('shows the message as it was filled in, not its template', () => {
+    const { container } = render(
+      <WaitingApprovalPill
+        execution={execution()}
+        nodeState={{ nodeId: 'n1', status: 'waiting', message: 'Post this: hello' }}
+        workflow={workflow('{{steps.check.output}}')}
+      />
+    )
+    expect(container.textContent).toContain('Post this: hello')
+    expect(container.textContent).not.toContain('{{steps')
+  })
+
   it('falls back to "Workflow" when workflow prop is missing', () => {
     const { container } = render(
       <WaitingApprovalPill execution={execution()} nodeState={nodeState()} />

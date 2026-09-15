@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
-import { ChevronDown, ChevronRight, Maximize2, Play, RotateCcw, Check, X } from 'lucide-react'
+import { GateActions, GateAsk } from '../workflow-runs/GateActions'
+import { roundLabel } from '../../lib/gate-round'
+import { GateReviewModal } from '../workflow-runs/GateReviewModal'
+import { ChevronDown, ChevronRight, Maximize2, Play, RotateCcw } from 'lucide-react'
 import {
   WorkflowExecution,
   WorkflowNode,
@@ -126,6 +128,7 @@ export function RunStepsList({
     activeNodeId ?? (execution.status === 'error' ? (failedStep(execution)?.nodeId ?? null) : null)
   const [expandedNodeId, setExpandedNodeId] = useState(focus)
   const [openedFor, setOpenedFor] = useState(focus)
+  const [reviewing, setReviewing] = useState<string | null>(null)
   if (openedFor !== focus) {
     setOpenedFor(focus)
     if (focus) setExpandedNodeId(focus)
@@ -223,8 +226,8 @@ export function RunStepsList({
 
         const isWaitingGate = ns.status === 'waiting' && node?.type === 'approval'
         const signInWait = isSignInWait(ns)
-        const approvalMessage =
-          node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
+        const approvalConfig =
+          node?.type === 'approval' ? (node.config as ApprovalConfig) : undefined
         const faint = ns.status === 'pending' || ns.status === 'skipped'
 
         return (
@@ -270,43 +273,35 @@ export function RunStepsList({
                 )}
               </span>
               <span className="font-mono text-[12px] text-ink-secondary tabular-nums">
-                {ns.startedAt && ns.completedAt
-                  ? formatRunDuration(ns.startedAt, ns.completedAt)
-                  : null}
+                {ns.startedAt && ns.completedAt ? (
+                  formatRunDuration(ns.startedAt, ns.completedAt)
+                ) : isWaitingGate ? (
+                  <span className="text-[11px] text-ink-faint">
+                    {roundLabel(approvalConfig, ns)}
+                  </span>
+                ) : null}
               </span>
             </button>
 
-            {isWaitingGate && (
-              <div className={`${UNDER_LABEL} flex items-start gap-2`}>
-                <div className="flex-1 min-w-0 text-[11.5px] text-bronzo">
-                  {approvalMessage || 'Waiting for approval.'}
-                </div>
-                <button
-                  onClick={() => {
-                    void window.api.resolveWorkflowGate({
-                      runId: execution.runId,
-                      nodeId: ns.nodeId,
-                      decision: 'approve'
-                    })
-                  }}
-                  className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_APPROVE}`}
-                >
-                  <Check size={11} strokeWidth={2.5} />
-                  Approve
-                </button>
-                <button
-                  onClick={() => {
-                    void window.api.resolveWorkflowGate({
-                      runId: execution.runId,
-                      nodeId: ns.nodeId,
-                      decision: 'reject'
-                    })
-                  }}
-                  className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_REJECT}`}
-                >
-                  <X size={11} strokeWidth={2.5} />
-                  Reject
-                </button>
+            {isWaitingGate && node && (
+              <div className={`${UNDER_LABEL} flex flex-col gap-2`}>
+                <GateAsk state={ns} config={approvalConfig} />
+                <GateActions
+                  runId={execution.runId}
+                  state={ns}
+                  config={approvalConfig}
+                  nodes={nodes}
+                  onOpenReview={() => setReviewing(ns.nodeId)}
+                />
+                {reviewing === ns.nodeId && (
+                  <GateReviewModal
+                    runId={execution.runId}
+                    state={ns}
+                    node={node}
+                    nodes={nodes}
+                    onClose={() => setReviewing(null)}
+                  />
+                )}
               </div>
             )}
 

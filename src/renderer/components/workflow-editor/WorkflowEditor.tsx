@@ -288,11 +288,14 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     return { outputs: buildStepOutputsMap(latestRun, nodeMap), states }
   }, [latestRun, nodes])
 
-  const stepGroups = useMemo(() => {
-    if (!selectedNodeId) return []
-    const ancestors = getAncestorNodes(nodes, edges, selectedNodeId)
-    return buildStepGroups(ancestors, lookupAction, lastRunData)
-  }, [nodes, edges, selectedNodeId, lookupAction, lastRunData])
+  const ancestors = useMemo(
+    () => (selectedNodeId ? getAncestorNodes(nodes, edges, selectedNodeId) : []),
+    [nodes, edges, selectedNodeId]
+  )
+  const stepGroups = useMemo(
+    () => buildStepGroups(ancestors, lookupAction, lastRunData),
+    [ancestors, lookupAction, lastRunData]
+  )
 
   // Load execution history from database
   useEffect(() => {
@@ -1635,6 +1638,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             isContextualTrigger={isContextualTrigger}
             inputVars={inputVars}
             stepGroups={stepGroups}
+            ancestorNodes={ancestors}
             onRunToStep={runToStepEligible(selectedNode.id) ? handleRunToStep : undefined}
           />
         )}

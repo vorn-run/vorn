@@ -29,7 +29,9 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
     () => workflow?.nodes.find((n) => n.id === nodeState.nodeId),
     [workflow, nodeState.nodeId]
   )
-  const message = node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
+  const message =
+    nodeState.message ??
+    (node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined)
 
   const WfIcon = workflow ? ICON_MAP[workflow.icon] || Workflow : Workflow
   const wfIconColor = workflow?.iconColor
@@ -83,7 +85,7 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
       {message && (
         <>
           <span className="text-[10px] text-gray-600 flex-shrink-0">&middot;</span>
-          <span className="text-[10px] text-gray-500 truncate max-w-[180px]">{message}</span>
+          <span className="text-[10px] text-gray-500 truncate max-w-[230px]">{message}</span>
         </>
       )}
 

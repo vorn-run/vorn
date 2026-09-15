@@ -20,5 +20,9 @@
 export const GATE_APPROVE =
   'rounded-md border border-bronzo/40 bg-bronzo/10 text-bronzo hover:bg-bronzo/20 transition-colors'
 
+/** Opening the review page or asking for changes: neutral, because neither settles the gate. */
+export const GATE_NEUTRAL =
+  'rounded-md border border-white/[0.06] text-ink-secondary hover:text-ink hover:bg-white/[0.04] transition-colors'
+
 export const GATE_REJECT =
   'rounded-md border border-white/[0.06] text-ink-secondary hover:bg-danger/10 hover:text-danger hover:border-danger/30 transition-colors'

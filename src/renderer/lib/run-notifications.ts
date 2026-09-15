@@ -51,7 +51,7 @@ export function announceRun(execution: WorkflowExecution): void {
         workflow,
         nodeId,
         node?.label ?? 'Approval',
-        (node?.config as { message?: string } | undefined)?.message,
+        state?.message ?? (node?.config as { message?: string } | undefined)?.message,
         store.config ?? null,
         openWorkflow
       )

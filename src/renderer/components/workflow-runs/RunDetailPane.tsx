@@ -1,7 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from '../../stores'
 import { toast } from '../Toast'
-import { Check, X, Inbox, Play, RotateCcw, ExternalLink } from 'lucide-react'
+import { Check, X, Inbox, Play, RotateCcw, ExternalLink, Eye, MessageSquare } from 'lucide-react'
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import {
   describeRun,
@@ -9,7 +9,7 @@ import {
   runVerdict,
   type RunWorkflowRef
 } from '../../lib/run-presentation'
-import { hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
+import { canRequestChanges, hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import { RunStepsList, StatusDot } from '../workflow-editor/RunEntry'
 import { useConnectorLook } from '../../lib/use-connections'
 import { nodeConnectionId } from '../workflow-editor/node-visuals'
@@ -17,9 +17,11 @@ import { SignInButton } from './SignInButton'
 import { StopRunButton } from './StopRunButton'
 import { IconButton } from '../IconButton'
 import { RunIcon } from './RunIcon'
-import { workflowRunId, type TaskConfig } from '../../../shared/types'
+import { workflowRunId, type ApprovalConfig, type TaskConfig } from '../../../shared/types'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
-import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
+import { GATE_APPROVE, GATE_NEUTRAL, GATE_REJECT } from '../../lib/gate-affordance'
+import { GateAsk, GateComposer } from './GateActions'
+import { GateReviewModal } from './GateReviewModal'
 
 export function RunDetailEmptyState() {
   return (
@@ -62,6 +64,19 @@ export function RunDetailPane({
   const presentation = describeRun(run, workflow, look)
   const waitingStep = run.nodeStates.find((ns) => ns.status === 'waiting')
   const signInWait = waitingStep !== undefined && isSignInWait(waitingStep)
+  const gate =
+    waitingStep && !signInWait
+      ? nodes.find((n) => n.id === waitingStep.nodeId && n.type === 'approval')
+      : undefined
+  const gateConfig = gate?.config as ApprovalConfig | undefined
+  // Keyed to the gate, so a comment or review left open does not follow the pane to another run.
+  const openGate = `${run.runId}:${waitingStep?.nodeId ?? ''}`
+  const [composingFor, setComposingFor] = useState<string | null>(null)
+  const [reviewingFor, setReviewingFor] = useState<string | null>(null)
+  const composing = composingFor === openGate
+  const reviewing = reviewingFor === openGate
+  const setComposing = (on: boolean): void => setComposingFor(on ? openGate : null)
+  const setReviewing = (on: boolean): void => setReviewingFor(on ? openGate : null)
   const verdict = run.status === 'success' ? runVerdict(run) : undefined
   const meta = [
     workflowName !== presentation.title && workflowName,
@@ -78,7 +93,7 @@ export function RunDetailPane({
   // `shortcutsEnabled` lets the view mute them behind a modal, and `repeat` is
   // ignored so holding a key can't reject the run that auto-selects next.
   useEffect(() => {
-    if (!waitingStep || signInWait || !shortcutsEnabled) return undefined
+    if (!waitingStep || signInWait || !shortcutsEnabled || composing || reviewing) return undefined
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.repeat) return
       const target = e.target as HTMLElement | null
@@ -103,7 +118,7 @@ export function RunDetailPane({
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [run, waitingStep, signInWait, shortcutsEnabled])
+  }, [run, waitingStep, signInWait, shortcutsEnabled, composing, reviewing])
 
   return (
     <div className="h-full flex flex-col min-h-0 overflow-y-auto">
@@ -162,6 +177,57 @@ export function RunDetailPane({
 
       {waitingStep && (
         <div className="px-5 pb-4 shrink-0 flex flex-col gap-1.5">
+          {gate && waitingStep && (
+            <>
+              <GateAsk state={waitingStep} config={gateConfig} />
+              {composing ? (
+                <GateComposer
+                  runId={run.runId}
+                  state={waitingStep}
+                  config={gateConfig}
+                  nodes={nodes}
+                  kind="changes"
+                  onDone={() => setComposing(false)}
+                  large
+                />
+              ) : (
+                (waitingStep.viewToken || canRequestChanges(gateConfig, waitingStep)) && (
+                  <div className="flex gap-1.5">
+                    {waitingStep.viewToken && (
+                      <button
+                        type="button"
+                        onClick={() => setReviewing(true)}
+                        className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-[12.5px] ${GATE_NEUTRAL}`}
+                      >
+                        <Eye size={13} strokeWidth={1.75} />
+                        Open review
+                      </button>
+                    )}
+                    {canRequestChanges(gateConfig, waitingStep) && (
+                      <button
+                        type="button"
+                        onClick={() => setComposing(true)}
+                        className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-[12.5px] ${GATE_NEUTRAL}`}
+                      >
+                        <MessageSquare size={13} strokeWidth={1.75} />
+                        Request changes
+                      </button>
+                    )}
+                  </div>
+                )
+              )}
+              {reviewing && (
+                <GateReviewModal
+                  runId={run.runId}
+                  workflowName={workflowName}
+                  state={waitingStep}
+                  node={gate}
+                  nodes={nodes}
+                  onClose={() => setReviewing(false)}
+                />
+              )}
+            </>
+          )}
           {signInWait ? (
             <SignInButton
               connectionId={nodeConnectionId(nodes.find((n) => n.id === waitingStep.nodeId))}

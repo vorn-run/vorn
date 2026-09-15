@@ -61,6 +61,7 @@ import {
   ServerRuntimeStatus,
   AuthProbeReport
 } from '../shared/types'
+import type { GateDecision } from '../shared/types'
 
 const api = {
   createTerminal: (payload: CreateTerminalPayload) =>
@@ -915,7 +916,8 @@ const api = {
   resolveWorkflowGate: (params: {
     runId: string
     nodeId: string
-    decision: 'approve' | 'reject'
+    decision: GateDecision
+    comment?: string
   }): Promise<{ accepted: boolean }> => ipcRenderer.invoke(IPC.WORKFLOW_RESOLVE_GATE, params),
   retryWorkflowRun: (runId: string): Promise<WorkflowExecution | null> =>
     ipcRenderer.invoke(IPC.WORKFLOW_RETRY_RUN, { runId }),

@@ -76,6 +76,48 @@ function renderPane(run: RunListEntry, nodes = NODES, extra = {}) {
   )
 }
 
+describe('RunDetailPane — a gate that takes changes', () => {
+  const nodes = [
+    makeNode('t', 'Manual Trigger', 'trigger', { triggerType: 'manual' }),
+    makeNode('draft', 'Make it sound like a person', 'script'),
+    makeNode('gate', 'Approve the Note', 'approval', {
+      message: 'ok?',
+      feedback: { from: 'draft', maxRounds: 3 }
+    })
+  ]
+  const parked = () =>
+    makeRun({
+      status: 'running',
+      completedAt: undefined,
+      nodeStates: [
+        { nodeId: 't', status: 'success' },
+        { nodeId: 'draft', status: 'success' },
+        { nodeId: 'gate', status: 'waiting', round: 1, message: 'Post this: hello' }
+      ]
+    })
+
+  it('shows the filled-in message and sends a comment back', () => {
+    renderPane(parked(), nodes)
+    expect(screen.getByText('Post this: hello')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Request changes/ }))
+    fireEvent.change(screen.getByLabelText('What should change'), { target: { value: 'Too neat' } })
+    fireEvent.click(screen.getByRole('button', { name: /Send back/ }))
+    expect(resolveWorkflowGate).toHaveBeenCalledWith({
+      runId: 'run-abcdef1234',
+      nodeId: 'gate',
+      decision: 'changes',
+      comment: 'Too neat'
+    })
+  })
+
+  it('keeps R from rejecting while a comment is being written', () => {
+    renderPane(parked(), nodes)
+    fireEvent.click(screen.getByRole('button', { name: /Request changes/ }))
+    fireEvent.keyDown(document, { key: 'r' })
+    expect(resolveWorkflowGate).not.toHaveBeenCalled()
+  })
+})
+
 describe('RunDetailEmptyState', () => {
   it('prompts the user to pick a run', () => {
     render(<RunDetailEmptyState />)

@@ -61,14 +61,42 @@ describe('RunEntry — approval gate controls', () => {
     })
   })
 
-  it('asks the server to reject when Reject is clicked', () => {
+  it('asks the server to reject once the rejection is confirmed', () => {
     const { getByText } = render(<RunEntry execution={makeExec()} nodes={[approvalNode]} />)
     fireEvent.click(getByText('Reject'))
+    expect(resolveWorkflowGate).not.toHaveBeenCalled()
+    fireEvent.click(getByText('Reject run'))
     expect(resolveWorkflowGate).toHaveBeenCalledWith({
       runId: 'run-1',
       nodeId: 'gate',
       decision: 'reject'
     })
+  })
+
+  it('keeps the note a rejection carries', () => {
+    const { getByText, getByLabelText } = render(
+      <RunEntry execution={makeExec()} nodes={[approvalNode]} />
+    )
+    fireEvent.click(getByText('Reject'))
+    fireEvent.change(getByLabelText('Why the run is rejected'), {
+      target: { value: 'Not this week' }
+    })
+    fireEvent.click(getByText('Reject run'))
+    expect(resolveWorkflowGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      nodeId: 'gate',
+      decision: 'reject',
+      comment: 'Not this week'
+    })
+  })
+
+  it('shows the message as it was filled in when the gate opened', () => {
+    const exec = makeExec({
+      nodeStates: [{ nodeId: 'gate', status: 'waiting', message: 'Post this: hello' }]
+    })
+    const { getByText, queryByText } = render(<RunEntry execution={exec} nodes={[approvalNode]} />)
+    expect(getByText('Post this: hello')).toBeTruthy()
+    expect(queryByText('Please confirm')).toBeNull()
   })
 
   it('offers a retry from the failed step when a step failed but the run went on', () => {
@@ -94,6 +122,86 @@ describe('RunEntry — approval gate controls', () => {
     }
     const { queryByText } = render(<RunEntry execution={makeExec()} nodes={[nonApproval]} />)
     expect(queryByText('Approve')).toBeNull()
+  })
+})
+
+describe('RunEntry — a gate that takes changes', () => {
+  const draft: WorkflowNode = {
+    id: 'draft',
+    type: 'script',
+    label: 'Make it sound like a person',
+    position: { x: 0, y: 0 },
+    config: { scriptType: 'bash', scriptContent: '' }
+  }
+  const gate: WorkflowNode = {
+    ...approvalNode,
+    config: { message: 'ok?', feedback: { from: 'draft', maxRounds: 3 } }
+  }
+  const parked = (round: number, extra: object = {}): WorkflowExecution =>
+    makeExec({
+      nodeStates: [
+        { nodeId: 'draft', status: 'success' },
+        { nodeId: 'gate', status: 'waiting', round, ...extra }
+      ]
+    })
+
+  it('sends a comment back, saying where the work restarts and which round comes next', () => {
+    const { getByText, getByLabelText, container } = render(
+      <RunEntry execution={parked(1)} nodes={[draft, gate]} />
+    )
+    expect(getByText('round 1 of 3')).toBeTruthy()
+    fireEvent.click(getByText('Request changes'))
+    expect(container.textContent).toContain(
+      'Runs again from Make it sound like a person with your comment, then asks you. Round 2 of 3.'
+    )
+    const send = getByText('Send back').closest('button')!
+    expect(send).toBeDisabled()
+    fireEvent.change(getByLabelText('What should change'), { target: { value: ' Too neat ' } })
+    fireEvent.click(send)
+    expect(resolveWorkflowGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      nodeId: 'gate',
+      decision: 'changes',
+      comment: 'Too neat'
+    })
+  })
+
+  it('shows the last request under the version that answers it', () => {
+    const { getByText } = render(
+      <RunEntry
+        execution={parked(2, {
+          feedback: [{ round: 1, decision: 'changes', comment: 'Too neat', at: '' }]
+        })}
+        nodes={[draft, gate]}
+      />
+    )
+    expect(getByText('You asked')).toBeTruthy()
+    expect(getByText('Too neat')).toBeTruthy()
+  })
+
+  it('stops offering changes on the last round', () => {
+    const { queryByText, getByText } = render(
+      <RunEntry execution={parked(3)} nodes={[draft, gate]} />
+    )
+    expect(getByText('round 3 of 3')).toBeTruthy()
+    expect(queryByText('Request changes')).toBeNull()
+  })
+
+  it('opens the review page from the local server in a sealed frame', async () => {
+    ;(window as unknown as { api: unknown }).api = {
+      resolveWorkflowGate,
+      stopWorkflowRun: vi.fn(),
+      getReachableUrls: vi.fn(async () => ({ urls: [], port: 5050, remote: false }))
+    }
+    const { getByText, findByTitle, queryByText } = render(
+      <RunEntry execution={parked(1)} nodes={[draft, gate]} />
+    )
+    expect(queryByText('Open review')).toBeNull()
+    render(<RunEntry execution={parked(1, { viewToken: 'abc' })} nodes={[draft, gate]} />)
+    fireEvent.click(getByText('Open review'))
+    const frame = (await findByTitle('Review page for Ship it?')) as HTMLIFrameElement
+    expect(frame.getAttribute('src')).toBe('http://127.0.0.1:5050/gate-view/run-1/gate?t=abc')
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
   })
 })
 

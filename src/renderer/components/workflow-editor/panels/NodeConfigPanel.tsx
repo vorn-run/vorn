@@ -45,6 +45,8 @@ interface Props {
   /** Autocomplete entries for the workflow's declared manual-run inputs. */
   inputVars?: TemplateVariable[]
   stepGroups?: StepVariableGroup[]
+  /** Steps above the selected one, for a gate choosing where to send work back to. */
+  ancestorNodes?: WorkflowNode[]
   /** Run only this step and its upstream slice; absent when the step is not a valid target. */
   onRunToStep?: (nodeId: string) => void
 }
@@ -63,7 +65,8 @@ export function NodeConfigPanel({
   triggerType,
   isContextualTrigger,
   inputVars,
-  stepGroups
+  stepGroups,
+  ancestorNodes
 }: Props) {
   const [showMenu, setShowMenu] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -219,6 +222,10 @@ export function NodeConfigPanel({
           <ApprovalConfigForm
             config={node.config as ApprovalConfig}
             onChange={(config) => onChange(node.id, config)}
+            stepGroups={stepGroups || []}
+            inputVars={inputVars}
+            redoFromSteps={ancestorNodes}
+            slug={node.slug}
           />
         )}
 
