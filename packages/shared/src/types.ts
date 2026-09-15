@@ -1293,6 +1293,8 @@ export interface WorkflowExecution {
   partial?: boolean
   /** The failed run this one resumed, reusing its completed step outputs. */
   retryOfRunId?: string
+  /** The workflow as this run started it; resuming follows this, not a later edit. */
+  definition?: WorkflowDefinition
 }
 
 /** Stable identity for a run row, tolerating history written before `runId`. */

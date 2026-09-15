@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { WorkflowExecution } from '../packages/shared/src/types'
+import type { WorkflowDefinition, WorkflowExecution } from '../packages/shared/src/types'
 
 /**
  * A gate answered from somewhere else.
@@ -12,10 +12,15 @@ import type { WorkflowExecution } from '../packages/shared/src/types'
 
 const executions = new Map<string, WorkflowExecution>()
 const published: WorkflowExecution[] = []
+const reimported: WorkflowDefinition[] = []
 
 vi.mock('../packages/server/src/workflows/host', () => ({
-  api: { saveWorkflowRun: vi.fn(async () => {}) },
-  config: () => ({ workflows: [{ id: 'wf-1', name: 'W', nodes: [], edges: [] }] }),
+  api: {
+    saveWorkflowRun: vi.fn(async () => {}),
+    releaseWorkflowRun: vi.fn(async () => {}),
+    reportWorkflowComplete: vi.fn(async () => {})
+  },
+  config: () => ({ workflows: [{ id: 'wf-1', name: 'W', nodes: [], edges: [] }, ...reimported] }),
   publishRun: (execution: WorkflowExecution) => published.push(execution),
   runById: (runId: string) => executions.get(runId),
   activeTerminals: () => [],
@@ -118,5 +123,67 @@ describe('acting on a gate decision from another client', () => {
     await applyGateDecision('run-1', 'gate-1', 'approve').catch(() => {})
     expect(published.length).toBeGreaterThan(0)
     expect(published[0]?.nodeStates.find((n) => n.nodeId === 'gate-1')?.status).toBe('success')
+  })
+})
+
+describe('a gate decided after its workflow was re-imported', () => {
+  const node = (id: string, type: string): WorkflowDefinition['nodes'][number] =>
+    ({ id, type, label: id, config: {}, position: { x: 0, y: 0 } }) as never
+
+  // The run started on trigger → gate; the re-import added a step after the gate.
+  const started = {
+    id: 'wf-2',
+    name: 'Notes',
+    nodes: [node('t', 'trigger'), node('gate', 'approval')],
+    edges: [{ id: 'e1', source: 't', target: 'gate' }]
+  } as WorkflowDefinition
+  const current = {
+    ...started,
+    nodes: [...started.nodes, node('late', 'script')],
+    edges: [...started.edges, { id: 'e2', source: 'gate', target: 'late' }]
+  } as WorkflowDefinition
+
+  function parkedOnGate(definition?: WorkflowDefinition): WorkflowExecution {
+    return {
+      runId: 'run-2',
+      workflowId: 'wf-2',
+      startedAt: new Date(0).toISOString(),
+      status: 'running',
+      nodeStates: [
+        { nodeId: 't', status: 'success' },
+        { nodeId: 'gate', status: 'waiting' }
+      ],
+      ...(definition && { definition })
+    }
+  }
+
+  beforeEach(() => {
+    reimported.length = 0
+    reimported.push(current)
+  })
+
+  it.each([
+    ['approve', 'success'],
+    ['reject', 'error']
+  ] as const)('finishes on its own definition when the gate is %s-ed', async (decision, status) => {
+    const run = parkedOnGate(started)
+    executions.set('run-2', run)
+
+    await applyGateDecision('run-2', 'gate', decision)
+
+    expect(run.status).toBe(status)
+    expect(run.nodeStates.map((ns) => ns.nodeId)).toEqual(['t', 'gate'])
+  })
+
+  // A run saved before snapshots resumes on the current definition, whose new step it holds
+  // no state for; that step used to be ready again on every wave, for ever.
+  it('ends a run holding no state for a step instead of re-running it', async () => {
+    const run = parkedOnGate()
+    executions.set('run-2', run)
+
+    await applyGateDecision('run-2', 'gate', 'approve')
+
+    expect(run.status).toBe('error')
+    expect(run.nodeStates.find((ns) => ns.nodeId === 'late')?.error).toMatch(/no state/)
   })
 })

@@ -122,15 +122,16 @@ describe('configManager', () => {
     expect(callback).toHaveBeenCalledWith(config)
   })
 
-  it('watchDb triggers notifyChanged for .db-wal files', async () => {
+  // The server writes run state on every step; reloading the config for each write re-synced
+  // every schedule and broadcast the whole config thousands of times an hour.
+  it('watchDb ignores writes to the WAL and the database file', async () => {
     let watchCallback: (event: string, filename: string) => void = () => {}
     vi.mocked(fs.watch).mockImplementation((_path: unknown, cb: unknown) => {
       watchCallback = cb as typeof watchCallback
       return { close: vi.fn() } as unknown as fs.FSWatcher
     })
 
-    const config = { version: 1, defaults: { shell: '/bin/zsh' }, projects: [] }
-    mockLoadConfig.mockReturnValue(config)
+    mockLoadConfig.mockReturnValue({ version: 1, defaults: { shell: '/bin/zsh' }, projects: [] })
 
     const cm = await getConfigManager()
     const callback = vi.fn()
@@ -138,30 +139,11 @@ describe('configManager', () => {
     cm.watchDb()
 
     watchCallback('change', 'vorn.db-wal')
-    await vi.advanceTimersByTimeAsync(300)
-
-    expect(callback).toHaveBeenCalledWith(config)
-  })
-
-  it('watchDb triggers notifyChanged for .db files', async () => {
-    let watchCallback: (event: string, filename: string) => void = () => {}
-    vi.mocked(fs.watch).mockImplementation((_path: unknown, cb: unknown) => {
-      watchCallback = cb as typeof watchCallback
-      return { close: vi.fn() } as unknown as fs.FSWatcher
-    })
-
-    const config = { version: 1, defaults: { shell: '/bin/zsh' }, projects: [] }
-    mockLoadConfig.mockReturnValue(config)
-
-    const cm = await getConfigManager()
-    const callback = vi.fn()
-    cm.onConfigChanged(callback)
-    cm.watchDb()
-
     watchCallback('change', 'vorn.db')
-    await vi.advanceTimersByTimeAsync(300)
+    watchCallback('change', 'vorn.db-shm')
+    await vi.advanceTimersByTimeAsync(500)
 
-    expect(callback).toHaveBeenCalledWith(config)
+    expect(callback).not.toHaveBeenCalled()
   })
 
   it('watchDb ignores unrelated files', async () => {
@@ -202,11 +184,7 @@ describe('configManager', () => {
     cm.watchDb()
 
     // Fire 5 rapid events — should coalesce into 1 notification
-    watchCallback('change', '.db-signal')
-    watchCallback('change', 'vorn.db-wal')
-    watchCallback('change', 'vorn.db')
-    watchCallback('change', '.db-signal')
-    watchCallback('change', '.db-signal')
+    for (let i = 0; i < 5; i++) watchCallback('change', '.db-signal')
     await vi.advanceTimersByTimeAsync(300)
 
     expect(callback).toHaveBeenCalledTimes(1)

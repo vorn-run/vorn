@@ -208,6 +208,61 @@ describe('firing a workflow', () => {
   })
 })
 
+describe('syncing schedules', () => {
+  function recurring(id: string, cron: string, timezone?: string): WorkflowDefinition {
+    return makeWorkflow({ id, triggerConfig: { triggerType: 'recurring', cron, timezone } })
+  }
+
+  function lastArmed(): { stop: ReturnType<typeof vi.fn> } {
+    return vi.mocked(cron.schedule).mock.results.at(-1)?.value
+  }
+
+  // A workflow moved from 07:00 to 10:00 kept firing at 07:00 until it was switched off and on.
+  it('re-arms a workflow whose cron changed', () => {
+    scheduler.syncSchedules([recurring('wf-moved', '0 7 * * 1')])
+    const before = lastArmed()
+    vi.mocked(cron.schedule).mockClear()
+
+    scheduler.syncSchedules([recurring('wf-moved', '0 10 * * 1')])
+
+    expect(before.stop).toHaveBeenCalled()
+    expect(vi.mocked(cron.schedule).mock.calls.map((call) => call[0])).toEqual(['0 10 * * 1'])
+  })
+
+  it('re-arms a workflow whose timezone changed', () => {
+    scheduler.syncSchedules([recurring('wf-zone', '0 9 * * *', 'Europe/Madrid')])
+    vi.mocked(cron.schedule).mockClear()
+
+    scheduler.syncSchedules([recurring('wf-zone', '0 9 * * *', 'America/Mexico_City')])
+
+    expect(vi.mocked(cron.schedule).mock.calls[0]?.[2]).toEqual({ timezone: 'America/Mexico_City' })
+  })
+
+  it('registers nothing when no schedule changed', () => {
+    scheduler.syncSchedules([recurring('wf-steady', '0 9 * * *')])
+    const armed = lastArmed()
+    vi.mocked(cron.schedule).mockClear()
+
+    scheduler.syncSchedules([{ ...recurring('wf-steady', '0 9 * * *'), name: 'Renamed' }])
+    scheduler.syncSchedules([
+      recurring('wf-steady', '0 9 * * *'),
+      makeWorkflow({ id: 'wf-other', triggerConfig: { triggerType: 'manual' } })
+    ])
+
+    expect(cron.schedule).not.toHaveBeenCalled()
+    expect(armed.stop).not.toHaveBeenCalled()
+  })
+
+  it('cancels a schedule whose workflow was disabled', () => {
+    scheduler.syncSchedules([recurring('wf-off', '0 9 * * *')])
+    const armed = lastArmed()
+
+    scheduler.syncSchedules([{ ...recurring('wf-off', '0 9 * * *'), enabled: false }])
+
+    expect(armed.stop).toHaveBeenCalled()
+  })
+})
+
 describe('scheduler.stopRun', () => {
   it('stops the run itself, because it is holding it', () => {
     stopWorkflowRun.mockClear()

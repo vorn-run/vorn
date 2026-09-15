@@ -97,6 +97,15 @@ function getTriggerConfig(wf: WorkflowDefinition): TriggerConfig | null {
   return triggerNode.config as TriggerConfig
 }
 
+/** What a job is armed with, or null for a trigger the scheduler does not arm. */
+function armedKey(trigger: TriggerConfig): string | null {
+  if (trigger.triggerType === 'recurring' || trigger.triggerType === 'connectorPoll') {
+    return `${trigger.triggerType} ${trigger.cron} ${trigger.timezone ?? ''}`
+  }
+  if (trigger.triggerType === 'once') return `once ${trigger.runAt}`
+  return null
+}
+
 class Scheduler extends EventEmitter {
   /**
    * Armed schedules that this server can act on with nobody attached.
@@ -113,8 +122,11 @@ class Scheduler extends EventEmitter {
     return this.cronJobs.size + this.timeouts.size
   }
 
-  private cronJobs = new Map<string, ScheduledTask>()
-  private timeouts = new Map<string, NodeJS.Timeout>()
+  /** Each armed job beside the trigger it was armed with, so a changed trigger is re-armed. */
+  private cronJobs = new Map<string, { task: ScheduledTask; armed: string }>()
+  private timeouts = new Map<string, { timer: NodeJS.Timeout; armed: string }>()
+  /** The schedule-relevant shape of the last sync; a config change that keeps it skips the sync. */
+  private lastSynced: string | null = null
   /** Polls run server-side, before any run claim, so they serialize here. */
   private pollsInFlight = new Set<string>()
   private inboxTimer: NodeJS.Timeout | null = null
@@ -199,42 +211,35 @@ class Scheduler extends EventEmitter {
   }
 
   syncSchedules(workflows: WorkflowDefinition[]): void {
-    log.info(
-      `[scheduler] syncing ${workflows.length} workflows (active crons: ${this.cronJobs.size}, timeouts: ${this.timeouts.size})`
-    )
+    const shape = JSON.stringify(workflows.map((wf) => [wf.id, wf.enabled, getTriggerConfig(wf)]))
+    if (shape === this.lastSynced) return
+    this.lastSynced = shape
 
-    // Cancel jobs for workflows that no longer exist or are disabled
-    for (const [id] of this.cronJobs) {
-      const wf = workflows.find((w) => w.id === id)
-      const trigger = wf ? getTriggerConfig(wf) : null
-      const kind = trigger?.triggerType
-      if (!wf || !wf.enabled || (kind !== 'recurring' && kind !== 'connectorPoll')) {
-        this.cronJobs.get(id)?.stop()
-        this.cronJobs.delete(id)
-      }
-    }
-    for (const [id] of this.timeouts) {
-      const wf = workflows.find((w) => w.id === id)
-      const trigger = wf ? getTriggerConfig(wf) : null
-      if (!wf || !wf.enabled || trigger?.triggerType !== 'once') {
-        clearTimeout(this.timeouts.get(id)!)
-        this.timeouts.delete(id)
-      }
-    }
-
-    // Register new/updated schedules
+    const wanted = new Map<
+      string,
+      { wf: WorkflowDefinition; trigger: TriggerConfig; armed: string }
+    >()
     for (const wf of workflows) {
-      if (!wf.enabled) {
-        log.info(`[scheduler] skipping disabled workflow "${wf.name}"`)
-        continue
-      }
-      const trigger = getTriggerConfig(wf)
-      if (!trigger) {
-        log.info(`[scheduler] no trigger node for workflow "${wf.name}"`)
-        continue
-      }
-      log.info(`[scheduler] workflow "${wf.name}" trigger=${trigger.triggerType}`)
+      const trigger = wf.enabled ? getTriggerConfig(wf) : null
+      const armed = trigger ? armedKey(trigger) : null
+      if (trigger && armed) wanted.set(wf.id, { wf, trigger, armed })
+    }
 
+    // Cancel jobs whose workflow is gone, disabled, or armed with a trigger it no longer has.
+    for (const [id, job] of this.cronJobs) {
+      if (wanted.get(id)?.armed === job.armed) continue
+      job.task.stop()
+      this.cronJobs.delete(id)
+      log.info(`[scheduler] cancelled schedule for workflow "${wanted.get(id)?.wf.name ?? id}"`)
+    }
+    for (const [id, job] of this.timeouts) {
+      if (wanted.get(id)?.armed === job.armed) continue
+      clearTimeout(job.timer)
+      this.timeouts.delete(id)
+      log.info(`[scheduler] cancelled schedule for workflow "${wanted.get(id)?.wf.name ?? id}"`)
+    }
+
+    for (const { wf, trigger, armed } of wanted.values()) {
       if (
         (trigger.triggerType === 'recurring' || trigger.triggerType === 'connectorPoll') &&
         !this.cronJobs.has(wf.id)
@@ -252,7 +257,7 @@ class Scheduler extends EventEmitter {
           const task = cron.schedule(trigger.cron, () => this.fireScheduled(wf.id), {
             timezone: trigger.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
           })
-          this.cronJobs.set(wf.id, task)
+          this.cronJobs.set(wf.id, { task, armed })
         } catch (err) {
           log.error({ err }, `[scheduler] failed to schedule workflow "${wf.name}":`)
         }
@@ -274,12 +279,14 @@ class Scheduler extends EventEmitter {
             if (safeDelay < delay) {
               // Re-schedule: not yet time to fire
               this.timeouts.delete(wf.id)
+              this.lastSynced = null
               this.syncSchedules(configManager.loadConfig().workflows ?? [])
             } else {
               this.fireScheduled(wf.id)
             }
           }, safeDelay)
-          this.timeouts.set(wf.id, timer)
+          log.info(`[scheduler] registering once workflow "${wf.name}" runAt="${trigger.runAt}"`)
+          this.timeouts.set(wf.id, { timer, armed })
         }
       }
     }
@@ -456,11 +463,12 @@ class Scheduler extends EventEmitter {
   }
 
   stopAll(): void {
-    for (const [, job] of this.cronJobs) job.stop()
-    for (const [, timer] of this.timeouts) clearTimeout(timer)
+    for (const [, job] of this.cronJobs) job.task.stop()
+    for (const [, job] of this.timeouts) clearTimeout(job.timer)
     this.cronJobs.clear()
     this.pollsInFlight.clear()
     this.timeouts.clear()
+    this.lastSynced = null
     if (this.inboxTimer) clearInterval(this.inboxTimer)
     this.inboxTimer = null
   }

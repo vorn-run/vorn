@@ -75,20 +75,16 @@ class ConfigManager {
     }
   }
 
-  /**
-   * Watch for external DB writes (e.g. MCP stdio process).
-   * Detects: .db-signal (explicit), .db-wal changes, and .db changes (post-checkpoint).
-   */
+  /** Reload when a writer touches `.db-signal` (`dbSignalChange`) after changing the configuration. */
   watchDb(): void {
     if (this.dbWatcher) return
-
-    const WATCH_SUFFIXES = ['.db-signal', '.db-wal', '.db']
 
     try {
       // Whatever directory the database actually landed in, not a second copy
       // of the default — a server on a custom --data-dir must watch its own.
-      this.dbWatcher = fs.watch(getDataDir(), (eventType, filename) => {
-        if (!filename || !WATCH_SUFFIXES.some((s) => filename.endsWith(s))) return
+      this.dbWatcher = fs.watch(getDataDir(), (_eventType, filename) => {
+        // Not the WAL or the database file: those change on every write, run state included.
+        if (filename !== '.db-signal') return
         // Debounce -- multiple writes can fire rapidly
         if (this.debounceTimer) clearTimeout(this.debounceTimer)
         this.debounceTimer = setTimeout(() => {

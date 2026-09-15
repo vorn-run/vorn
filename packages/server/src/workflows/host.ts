@@ -18,7 +18,7 @@ import { configManager } from '../config-manager'
 import { headlessManager } from '../headless-manager'
 import { ptyManager } from '../pty-manager'
 import { scriptRunnerEvents } from '../script-runner'
-import { getWorkflowRun } from '../database'
+import { getWorkflowRun, withoutDefinition } from '../database'
 import log from '../logger'
 
 /**
@@ -154,7 +154,7 @@ export function publishRun(execution: WorkflowExecution): void {
   if (execution.status === 'running') lastPublished.set(execution.runId, { at: now, shape })
   else lastPublished.delete(execution.runId)
 
-  clientRegistry.broadcast(IPC.WORKFLOW_RUN_UPDATED, execution)
+  clientRegistry.broadcast(IPC.WORKFLOW_RUN_UPDATED, withoutDefinition(execution))
 }
 
 /** The configuration the engine reads: projects, tasks, workflows, defaults. */
