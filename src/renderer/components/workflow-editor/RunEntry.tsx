@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { GATE_APPROVE, GATE_REJECT } from '../../lib/gate-affordance'
-import { ChevronDown, ChevronRight, Maximize2, Play, RotateCcw, Check, X } from 'lucide-react'
+import { GateActions, GateAsk } from '../workflow-runs/GateActions'
+import { roundLabel } from '../../lib/gate-round'
+import { GateReviewModal } from '../workflow-runs/GateReviewModal'
+import { ChevronDown, ChevronRight, Maximize2, Play, RotateCcw } from 'lucide-react'
 import {
   WorkflowExecution,
   WorkflowNode,
@@ -13,7 +15,7 @@ import {
 
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import { WORKFLOW_STATUS_DOT_PULSE, WORKFLOW_STATUS_DOT } from '../../lib/workflow-status'
-import { nodeLabel } from '../../lib/run-presentation'
+import { nodeLabel, runDotStatus } from '../../lib/run-presentation'
 import { IconButton } from '../IconButton'
 import { failedStep, hasFailedStep, isSignInWait } from '@vornrun/shared/workflow-graph'
 import { StopRunButton } from '../workflow-runs/StopRunButton'
@@ -126,6 +128,7 @@ export function RunStepsList({
     activeNodeId ?? (execution.status === 'error' ? (failedStep(execution)?.nodeId ?? null) : null)
   const [expandedNodeId, setExpandedNodeId] = useState(focus)
   const [openedFor, setOpenedFor] = useState(focus)
+  const [reviewing, setReviewing] = useState<string | null>(null)
   if (openedFor !== focus) {
     setOpenedFor(focus)
     if (focus) setExpandedNodeId(focus)
@@ -223,8 +226,8 @@ export function RunStepsList({
 
         const isWaitingGate = ns.status === 'waiting' && node?.type === 'approval'
         const signInWait = isSignInWait(ns)
-        const approvalMessage =
-          node?.type === 'approval' ? (node.config as ApprovalConfig).message : undefined
+        const approvalConfig =
+          node?.type === 'approval' ? (node.config as ApprovalConfig) : undefined
         const faint = ns.status === 'pending' || ns.status === 'skipped'
 
         return (
@@ -239,7 +242,7 @@ export function RunStepsList({
               onClick={() => setExpandedNodeId(isExpanded ? null : ns.nodeId)}
               className="group w-full grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 px-4 py-2 text-left hover:bg-white/[0.02] transition-colors"
             >
-              <StatusDot status={ns.status} />
+              <StatusDot status={ns.rejectedAt ? 'cancelled' : ns.status} />
               <span
                 className={`flex items-center gap-1.5 min-w-0 text-[12.5px] ${faint ? 'text-ink-faint' : 'text-ink'}`}
               >
@@ -270,43 +273,35 @@ export function RunStepsList({
                 )}
               </span>
               <span className="font-mono text-[12px] text-ink-secondary tabular-nums">
-                {ns.startedAt && ns.completedAt
-                  ? formatRunDuration(ns.startedAt, ns.completedAt)
-                  : null}
+                {ns.startedAt && ns.completedAt ? (
+                  formatRunDuration(ns.startedAt, ns.completedAt)
+                ) : isWaitingGate ? (
+                  <span className="text-[11px] text-ink-faint">
+                    {roundLabel(approvalConfig, ns)}
+                  </span>
+                ) : null}
               </span>
             </button>
 
-            {isWaitingGate && (
-              <div className={`${UNDER_LABEL} flex items-start gap-2`}>
-                <div className="flex-1 min-w-0 text-[11.5px] text-bronzo">
-                  {approvalMessage || 'Waiting for approval.'}
-                </div>
-                <button
-                  onClick={() => {
-                    void window.api.resolveWorkflowGate({
-                      runId: execution.runId,
-                      nodeId: ns.nodeId,
-                      decision: 'approve'
-                    })
-                  }}
-                  className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_APPROVE}`}
-                >
-                  <Check size={11} strokeWidth={2.5} />
-                  Approve
-                </button>
-                <button
-                  onClick={() => {
-                    void window.api.resolveWorkflowGate({
-                      runId: execution.runId,
-                      nodeId: ns.nodeId,
-                      decision: 'reject'
-                    })
-                  }}
-                  className={`flex items-center gap-1 px-2 py-1 text-[11px] shrink-0 ${GATE_REJECT}`}
-                >
-                  <X size={11} strokeWidth={2.5} />
-                  Reject
-                </button>
+            {isWaitingGate && node && (
+              <div className={`${UNDER_LABEL} flex flex-col gap-2`}>
+                <GateAsk state={ns} config={approvalConfig} />
+                <GateActions
+                  runId={execution.runId}
+                  state={ns}
+                  config={approvalConfig}
+                  nodes={nodes}
+                  onOpenReview={() => setReviewing(ns.nodeId)}
+                />
+                {reviewing === ns.nodeId && (
+                  <GateReviewModal
+                    runId={execution.runId}
+                    state={ns}
+                    node={node}
+                    nodes={nodes}
+                    onClose={() => setReviewing(null)}
+                  />
+                )}
               </div>
             )}
 
@@ -322,7 +317,13 @@ export function RunStepsList({
             {/* Engine lines are dimmed under the agent's own words, and the log is the trace's only box. */}
             {isExpanded && (
               <div className={`${UNDER_LABEL} flex flex-col gap-1.5`}>
-                {ns.error && <p className="text-[12px] text-danger">{ns.error}</p>}
+                {ns.error && (
+                  <p
+                    className={`text-[12px] ${ns.rejectedAt ? 'text-ink-secondary' : 'text-danger'}`}
+                  >
+                    {ns.error}
+                  </p>
+                )}
                 {timeline.length > 0 && (
                   <div className="bg-black/30 border border-white/[0.05] rounded overflow-auto max-h-[280px]">
                     {timeline.map((entry, ti) =>
@@ -439,7 +440,7 @@ export function RunEntry({
           ) : (
             <ChevronRight size={12} className="text-ink-faint" />
           )}
-          <StatusDot status={execution.status} />
+          <StatusDot status={runDotStatus(execution)} />
           <span className="text-[12px] text-ink flex-1 min-w-0 truncate">
             {workflowName && <span className="text-ink-faint mr-1.5">{workflowName}</span>}
             {formatRelativeTime(execution.startedAt)}

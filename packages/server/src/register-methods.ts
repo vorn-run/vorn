@@ -177,7 +177,8 @@ import {
   retryRunFromFailure,
   stopWorkflowRun,
   resumeSignInWaits,
-  runWaitsForSignIn
+  runWaitsForSignIn,
+  gateTakesChanges
 } from './workflows/engine'
 import { listKeys, passwordFields } from './connectors/keys'
 import { installedPack } from './connectors/packs'
@@ -785,14 +786,17 @@ export function registerAllMethods(): void {
     return tasks.map((task) => ({ ...task, description: '' }))
   })
 
-  registerMethod('workflow:resolveGate', ({ runId, nodeId, decision }) => {
+  registerMethod('workflow:resolveGate', ({ runId, nodeId, decision, comment }) => {
     // A sign-in wait ends when the connection signs in again, never by approval.
     if (decision === 'approve' && runWaitsForSignIn(runId, nodeId)) return { accepted: false }
+    if (decision === 'changes' && !gateTakesChanges(runId, nodeId, comment ?? '')) {
+      return { accepted: false }
+    }
     // Applied here, where the run is. It used to be broadcast for whichever
     // window held the run to apply, which is why answering from a phone with
     // nothing open did nothing at all.
     log.info({ runId, nodeId, decision }, '[workflow] a gate was answered')
-    void applyGateDecision(runId, nodeId, decision)
+    void applyGateDecision(runId, nodeId, decision, comment)
     // Still broadcast: a window showing the pill needs to stop showing it.
     clientRegistry.broadcast(IPC.WORKFLOW_GATE_RESOLVED, { runId, nodeId, decision })
     return { accepted: true }

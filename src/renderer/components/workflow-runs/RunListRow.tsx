@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import {
   describeRun,
+  runDotStatus,
   runStatusLine,
   stepProgress,
   type RunWorkflowRef
@@ -37,7 +38,9 @@ function RunListRowImpl({
 }: Props) {
   const look = useConnectorLook(run.connectorItem?.connectionId)
   const presentation = describeRun(run, workflow, look)
-  const dotStatus = run.nodeStates.some((n) => n.status === 'waiting') ? 'waiting' : run.status
+  const dotStatus = run.nodeStates.some((n) => n.status === 'waiting')
+    ? 'waiting'
+    : runDotStatus(run)
   // Everything past the dot and the workflow's own mark is one quiet line of words.
   const details = [
     runStatusLine(run, workflow?.nodes ?? []),

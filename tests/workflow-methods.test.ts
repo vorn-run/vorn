@@ -75,6 +75,7 @@ vi.mock(
       closeDatabase: vi.fn(),
       initDatabase: vi.fn(),
       getDataDir: vi.fn(() => '/tmp/vorn-workflow-methods-test'),
+      listWorkflowRunIds: vi.fn(() => []),
       dbGetOwnerUser: vi.fn(() => ({
         id: 'owner-1',
         name: 'test',

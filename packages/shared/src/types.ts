@@ -1042,6 +1042,26 @@ export interface ConditionConfig {
 export interface ApprovalConfig {
   message?: string
   timeoutMs?: number
+  /** A review page: HTML, or the path of a .html file, with step outputs filled in when the gate opens. */
+  view?: string
+  /** Lets the reviewer send the work back with a comment. */
+  feedback?: GateFeedbackConfig
+}
+
+export interface GateFeedbackConfig {
+  /** The step the work runs again from; every step from it to the gate runs again. */
+  from: string
+  /** How many times the gate may ask, the first included. */
+  maxRounds: number
+}
+
+export type GateDecision = 'approve' | 'reject' | 'changes'
+
+export interface GateFeedbackEntry {
+  round: number
+  decision: GateDecision
+  comment: string
+  at: string
 }
 
 /**
@@ -1220,6 +1240,16 @@ export interface NodeExecutionState {
   worktreeOrigin?: 'created' | 'inherited'
   /** Timestamp when an approval gate was approved. */
   approvedAt?: string
+  /** When a person rejected an approval gate; a timeout leaves it unset. */
+  rejectedAt?: string
+  /** An approval gate's message, with step outputs filled in when it opened. */
+  message?: string
+  /** Unlocks this round's review page; replaced every round, absent when there is none. */
+  viewToken?: string
+  /** Which time an approval gate is asking, from 1. */
+  round?: number
+  /** What the reviewer wrote at each answer that carried a comment. */
+  feedback?: GateFeedbackEntry[]
   /**
    * What the engine did on this step's behalf, and when — what it launched,
    * whether the agent ever produced anything, and how the step ended.

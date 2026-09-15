@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { isSignInWait } from '@vornrun/shared/workflow-graph'
+import { isSignInWait, MAX_GATE_ROUNDS, nodesBetween } from '@vornrun/shared/workflow-graph'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { V } from '../validation'
@@ -13,7 +13,7 @@ import type {
   LaunchAgentConfig,
   WorkflowInputDef
 } from '@vornrun/shared/types'
-import type { ScheduleLogEntry } from '@vornrun/shared/types'
+import type { GateDecision, ScheduleLogEntry } from '@vornrun/shared/types'
 import {
   dbListProjects,
   dbListWorkflows,
@@ -496,11 +496,42 @@ export function annotateWaitingGates<T extends WorkflowExecution>(
             asks: 'Sign in to its connection in the Vorn app, and this step runs again'
           }
         }
-        const asks = gateMessage(workflow, state.nodeId)
+        const asks = state.message ?? gateMessage(workflow, state.nodeId)
         return asks ? { ...state, asks } : state
       })
     }
   })
+}
+
+const ANSWERED: Record<GateDecision, string> = {
+  approve: 'Approved',
+  reject: 'Rejected',
+  changes: 'Sent back'
+}
+
+/** A gate that takes changes names a step above it to redo from, and a round count the engine allows. */
+export function validateGateFeedback(
+  nodes: { id: string; type: string; label?: string; config: Record<string, unknown> }[],
+  edges: { source: string; target: string }[]
+): string[] {
+  const errors: string[] = []
+  for (const node of nodes) {
+    if (node.type !== 'approval' || node.config?.feedback === undefined) continue
+    const feedback = node.config.feedback as { from?: unknown; maxRounds?: unknown } | null
+    const name = node.label || node.id
+    const from = typeof feedback?.from === 'string' ? feedback.from : ''
+    const source = nodes.find((n) => n.id === from)
+    if (!source) errors.push(`gate "${name}" redoes from unknown step "${from}"`)
+    else if (source.type === 'trigger') errors.push(`gate "${name}" cannot redo from its trigger`)
+    else if (nodesBetween(from, node.id, edges).size === 0) {
+      errors.push(`gate "${name}" redoes from "${source.label || from}", which does not lead to it`)
+    }
+    const rounds = Number(feedback?.maxRounds)
+    if (!Number.isInteger(rounds) || rounds < 2 || rounds > MAX_GATE_ROUNDS) {
+      errors.push(`gate "${name}" needs maxRounds between 2 and ${MAX_GATE_ROUNDS}`)
+    }
+  }
+  return errors
 }
 
 /** A run to answer a gate on: recent history first, then every parked run, since a gate can wait past the cap. */
@@ -516,7 +547,7 @@ async function runById(
 export function resolveGateTarget(
   run: Pick<WorkflowExecution, 'nodeStates'>,
   nodeId?: string,
-  decision: 'approve' | 'reject' = 'approve'
+  decision: GateDecision = 'approve'
 ): { nodeId: string } | { error: string } {
   const parked = run.nodeStates.filter((n) => n.status === 'waiting')
   // Rejecting a sign-in wait ends the run; approving one would skip the step it waits to run.
@@ -603,14 +634,13 @@ export function registerWorkflowTools(server: McpServer): void {
       if (args.nodes && args.edges) {
         nodes = args.nodes as unknown as WorkflowNode[]
         edges = args.edges as unknown as WorkflowEdge[]
-        const loopErrors = validateLoopBodies(
-          nodes as unknown as {
-            id: string
-            type: string
-            label?: string
-            config: Record<string, unknown>
-          }[]
-        )
+        const loose = nodes as unknown as {
+          id: string
+          type: string
+          label?: string
+          config: Record<string, unknown>
+        }[]
+        const loopErrors = [...validateLoopBodies(loose), ...validateGateFeedback(loose, edges)]
         if (loopErrors.length > 0) {
           return {
             content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],
@@ -674,14 +704,14 @@ export function registerWorkflowTools(server: McpServer): void {
       const updates: Partial<WorkflowDefinition> = {}
       if (args.name !== undefined) updates.name = args.name
       if (args.nodes !== undefined) {
-        const loopErrors = validateLoopBodies(
-          args.nodes as unknown as {
-            id: string
-            type: string
-            label?: string
-            config: Record<string, unknown>
-          }[]
-        )
+        const loose = args.nodes as unknown as {
+          id: string
+          type: string
+          label?: string
+          config: Record<string, unknown>
+        }[]
+        const edges = (args.edges ?? workflow.edges) as { source: string; target: string }[]
+        const loopErrors = [...validateLoopBodies(loose), ...validateGateFeedback(loose, edges)]
         if (loopErrors.length > 0) {
           return {
             content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],
@@ -827,12 +857,21 @@ export function registerWorkflowTools(server: McpServer): void {
 
   server.tool(
     'resolve_gate',
-    'Approve or reject the approval gate a workflow run is parked on, the way the Vorn app does. Requires the Vorn app to be running: the decision is broadcast, and the instance holding the run is what resumes it. Read what is being approved first — list_workflow_runs names the waiting node and what it asks.',
+    'Approve, reject, or send back the approval gate a workflow run is parked on, the way the Vorn app does. Requires the Vorn app to be running: the decision is broadcast, and the instance holding the run is what resumes it. Read what is being approved first — list_workflow_runs names the waiting node and what it asks.',
     {
       run_id: V.id.describe('Run ID (from list_workflow_runs)'),
       decision: z
-        .enum(['approve', 'reject'])
-        .describe('approve lets the run go on; reject ends it'),
+        .enum(['approve', 'reject', 'changes'])
+        .describe(
+          'approve lets the run go on; reject ends it; changes sends the work back to the step the gate redoes from, with your comment, and the gate asks again'
+        ),
+      comment: z
+        .string()
+        .max(20000)
+        .optional()
+        .describe(
+          'Required for changes: what to change. Optional on approve and reject; kept with the run.'
+        ),
       node_id: V.id.optional().describe('The waiting node, when a run has more than one gate open')
     },
     async (args) => {
@@ -868,16 +907,41 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
+      if (args.decision === 'changes' && !args.comment?.trim()) {
+        return {
+          content: [
+            { type: 'text', text: 'Error: changes needs a comment saying what to change.' }
+          ],
+          isError: true
+        }
+      }
+
       const workflow = (await dbListWorkflows()).find((w) => w.id === run.workflowId)
       const gateNode = approvalNode(workflow, target.nodeId)
-      const asked = askedBy(gateNode)
+      const asked =
+        run.nodeStates.find((n) => n.nodeId === target.nodeId)?.message ?? askedBy(gateNode)
 
       try {
-        await rpcCall('workflow:resolveGate', {
+        const answer = await rpcCall<{ accepted: boolean }>('workflow:resolveGate', {
           runId: args.run_id,
           nodeId: target.nodeId,
-          decision: args.decision
+          decision: args.decision,
+          ...(args.comment?.trim() && { comment: args.comment.trim() })
         })
+        if (answer?.accepted === false) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  args.decision === 'changes'
+                    ? 'Error: this gate takes no changes now: it has no step to redo from, or its rounds are used up. Approve or reject it instead.'
+                    : 'Error: the gate did not take that answer. Check list_workflow_runs.'
+              }
+            ],
+            isError: true
+          }
+        }
       } catch (err) {
         return {
           content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : err}` }],
@@ -890,7 +954,7 @@ export function registerWorkflowTools(server: McpServer): void {
         content: [
           {
             type: 'text',
-            text: `${args.decision === 'approve' ? 'Approved' : 'Rejected'} "${gate}" on run ${args.run_id}${run.workflowName ? ` of "${run.workflowName}"` : ''}.${asked ? `\n\nWhat it asked: ${asked}` : ''}\n\nThe decision went out; the instance holding the run acts on it, so a desktop has to be open. Confirm with list_workflow_runs.`
+            text: `${ANSWERED[args.decision]} "${gate}" on run ${args.run_id}${run.workflowName ? ` of "${run.workflowName}"` : ''}.${asked ? `\n\nWhat it asked: ${asked}` : ''}\n\nThe decision went out; the instance holding the run acts on it, so a desktop has to be open. Confirm with list_workflow_runs.`
           }
         ]
       }
@@ -1135,14 +1199,16 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
-      const loopErrors = validateLoopBodies(
-        parsed.nodes as unknown as {
-          id: string
-          type: string
-          label?: string
-          config: Record<string, unknown>
-        }[]
-      )
+      const loose = parsed.nodes as unknown as {
+        id: string
+        type: string
+        label?: string
+        config: Record<string, unknown>
+      }[]
+      const loopErrors = [
+        ...validateLoopBodies(loose),
+        ...validateGateFeedback(loose, parsed.edges)
+      ]
       if (loopErrors.length > 0) {
         return {
           content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],

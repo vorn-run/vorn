@@ -1,7 +1,8 @@
-import type { WorkflowExecution } from '../../shared/types'
+import { workflowRunId, type WorkflowExecution } from '../../shared/types'
 import { isSignInWait } from '@vornrun/shared/workflow-graph'
 import { useAppStore } from '../stores'
 import { sendWorkflowGateNotification, sendWorkflowSignInNotification } from './notifications'
+import { isRejected } from './run-presentation'
 
 /**
  * The window's half of a run that is happening somewhere else.
@@ -31,10 +32,7 @@ export function announceRun(execution: WorkflowExecution): void {
     for (const nodeId of waiting) {
       if (previous?.waiting.has(nodeId)) continue
       const node = workflow.nodes.find((n) => n.id === nodeId)
-      const openWorkflow = () => {
-        useAppStore.getState().setEditingWorkflowId(workflow.id)
-        useAppStore.getState().setWorkflowEditorOpen(true)
-      }
+      const openRun = () => useAppStore.getState().showRun(workflowRunId(execution))
       const state = execution.nodeStates.find((ns) => ns.nodeId === nodeId)
       if (state && isSignInWait(state)) {
         sendWorkflowSignInNotification(
@@ -43,7 +41,7 @@ export function announceRun(execution: WorkflowExecution): void {
           node?.label ?? 'A step',
           state.error,
           store.config ?? null,
-          openWorkflow
+          openRun
         )
         continue
       }
@@ -51,9 +49,9 @@ export function announceRun(execution: WorkflowExecution): void {
         workflow,
         nodeId,
         node?.label ?? 'Approval',
-        (node?.config as { message?: string } | undefined)?.message,
+        state?.message ?? (node?.config as { message?: string } | undefined)?.message,
         store.config ?? null,
-        openWorkflow
+        openRun
       )
     }
   }
@@ -63,7 +61,7 @@ export function announceRun(execution: WorkflowExecution): void {
     const steps = execution.nodeStates.filter((ns) => ns.status !== 'pending').length
     if (Notification.permission === 'granted') {
       new Notification('Vorn', {
-        body: `Workflow "${workflow.name}" ${execution.status === 'success' ? 'completed' : 'failed'} — ${steps} step${steps === 1 ? '' : 's'}`
+        body: `Workflow "${workflow.name}" ${execution.status === 'success' ? 'completed' : isRejected(execution) ? 'was rejected' : 'failed'} — ${steps} step${steps === 1 ? '' : 's'}`
       })
     }
   }

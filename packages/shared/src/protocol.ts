@@ -566,7 +566,12 @@ export interface RequestMethods {
    * is open there is nothing to act on it, and the gate stays open until one is.
    */
   'workflow:resolveGate': {
-    params: { runId: string; nodeId: string; decision: 'approve' | 'reject' }
+    params: {
+      runId: string
+      nodeId: string
+      decision: 'approve' | 'reject' | 'changes'
+      comment?: string
+    }
     result: { accepted: boolean }
   }
 

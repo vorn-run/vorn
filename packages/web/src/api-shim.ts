@@ -800,7 +800,8 @@ export function createApiShim(wsUrl: string) {
     resolveWorkflowGate: (params: {
       runId: string
       nodeId: string
-      decision: 'approve' | 'reject'
+      decision: 'approve' | 'reject' | 'changes'
+      comment?: string
     }) => rpc.invoke('workflow:resolveGate', params),
     retryWorkflowRun: (runId: string) => rpc.invoke('workflow:retryRun', { runId }),
     rerunWorkflowRun: (runId: string) => rpc.invoke('workflow:rerun', { runId }),

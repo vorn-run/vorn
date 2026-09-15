@@ -256,6 +256,12 @@ export function formatRunValue(val: unknown): string {
   }
 }
 
+const GATE_OUTPUT_KEYS = [
+  { key: 'feedback', label: 'feedback', description: "The reviewer's latest comment" },
+  { key: 'feedbackAll', label: 'feedbackAll', description: 'Every comment, one line per round' },
+  { key: 'round', label: 'round', description: 'Which time the gate asked, from 1' }
+]
+
 export function buildStepGroups(
   ancestorNodes: WorkflowNode[],
   lookupAction?: ConnectorActionLookup,
@@ -285,6 +291,8 @@ export function buildStepGroups(
           { key: 'headers', label: 'headers', description: 'Response headers' },
           ...defaultKeys
         ]
+      } else if (n.type === 'approval') {
+        keys = [...GATE_OUTPUT_KEYS, ...defaultKeys]
       } else if (n.type === 'launchAgent') {
         // A headless launchAgent with a declared outputSchema surfaces its typed
         // fields the same way — `{{steps.<slug>.<field>}}` — populated at run

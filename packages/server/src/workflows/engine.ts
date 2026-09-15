@@ -9,6 +9,9 @@ import {
   ConditionConfig,
   LoopConfig,
   ApprovalConfig,
+  GateDecision,
+  GateFeedbackEntry,
+  NodeExecutionState,
   CreateTaskFromItemConfig,
   CallConnectorActionConfig,
   HttpRequestConfig,
@@ -25,7 +28,9 @@ import {
 import {
   getWorktreeMode,
   webhookTriggerFromItem,
-  isSignInWait
+  isSignInWait,
+  canRequestChanges,
+  nodesBetween
 } from '@vornrun/shared/workflow-graph'
 import { buildTaskPrompt, buildWorkflowPrompt } from '@vornrun/shared/prompt-builder'
 import { extractStructuredOutput } from '@vornrun/shared/structured-output'
@@ -66,7 +71,8 @@ import {
   runById
 } from './host'
 import { reopenTask, startTask } from './tasks'
-import { listWorkflowRuns } from '../database'
+import { getDataDir, listWorkflowRuns } from '../database'
+import { gateViewFile, publishGateView, sameToken } from './gate-views'
 import log from '../logger'
 
 // Re-exported because the editor and the run views import them from here. They
@@ -207,7 +213,9 @@ function scheduleGateTimeout(
   const remaining = Math.max(0, timeoutMs - elapsedMs)
   const timer = setTimeout(() => {
     gateTimers.delete(key)
-    void rejectWorkflowGate(execution, nodeId, `Approval timed out after ${timeoutMs}ms`)
+    void rejectWorkflowGate(execution, nodeId, {
+      timedOut: `Approval timed out after ${timeoutMs}ms`
+    })
   }, remaining)
   gateTimers.set(key, timer)
 }
@@ -609,12 +617,31 @@ async function executeNode(
     if (existing?.status === 'waiting') return
 
     const config = node.config as ApprovalConfig
+    const round = existing?.round ?? 1
     const timeoutSuffix = config.timeoutMs ? ` (timeout ${config.timeoutMs}ms)` : ''
-    log.info(`[workflow] approval gate "${node.label}" waiting${timeoutSuffix}`)
+    log.info(`[workflow] approval gate "${node.label}" waiting, round ${round}${timeoutSuffix}`)
+
+    const message = config.message
+      ? resolveTemplateVars(config.message, context, stepOutputs).trim() || undefined
+      : undefined
+    const page = config.view?.trim()
+      ? publishGateView(
+          getDataDir(),
+          execution.runId,
+          node.id,
+          round,
+          resolveTemplateVars(config.view, context, stepOutputs)
+        )
+      : undefined
+    if (page && 'error' in page) log.warn(`[workflow] approval gate "${node.label}": ${page.error}`)
 
     updateNodeState(execution, node.id, {
       status: 'waiting',
-      startedAt: new Date().toISOString()
+      startedAt: new Date().toISOString(),
+      round,
+      message,
+      viewToken: page && 'token' in page ? page.token : undefined,
+      diagnostics: page && 'error' in page ? page.error : undefined
     })
     persistExecution(execution)
 
@@ -1473,7 +1500,8 @@ function latestRunForWorkflow(workflowId: string): WorkflowExecution | undefined
 export async function applyGateDecision(
   runId: string,
   nodeId: string,
-  decision: 'approve' | 'reject'
+  decision: GateDecision,
+  comment?: string
 ): Promise<void> {
   const execution = activeRuns.get(runId)?.execution ?? runById(runId)
   if (!execution) return
@@ -1487,8 +1515,19 @@ export async function applyGateDecision(
     publishRun(execution)
     return
   }
-  if (decision === 'approve') await approveWorkflowGate(execution, nodeId)
-  else await rejectWorkflowGate(execution, nodeId)
+  if (decision === 'approve') await approveWorkflowGate(execution, nodeId, comment)
+  else if (decision === 'reject') await rejectWorkflowGate(execution, nodeId, { note: comment })
+  else await requestGateChanges(execution, nodeId, comment ?? '')
+}
+
+/** The file of a gate's review page, when the token is this round's and the gate still asks. */
+export function gateViewPage(runId: string, nodeId: string, token: string): string | null {
+  const execution = activeRuns.get(runId)?.execution ?? runById(runId)
+  const state = execution?.nodeStates.find((ns) => ns.nodeId === nodeId)
+  if (state?.status !== 'waiting' || !state.viewToken || !sameToken(state.viewToken, token)) {
+    return null
+  }
+  return gateViewFile(getDataDir(), runId, nodeId, state.round ?? 1)
 }
 
 /**
@@ -1969,7 +2008,7 @@ export async function adoptConnectorInboxLease(
 function resolveWaitingGate(
   execution: WorkflowExecution,
   nodeId: string,
-  caller: 'approve' | 'reject'
+  caller: GateDecision
 ): { workflow: WorkflowDefinition } | null {
   const workflow = definitionOf(execution)
   if (!workflow) {
@@ -1998,10 +2037,30 @@ function resolveWaitingGate(
   return { workflow }
 }
 
+/** The gate's comments with this answer's added, when it carried one. */
+function withFeedback(
+  execution: WorkflowExecution,
+  nodeId: string,
+  decision: GateDecision,
+  comment: string | undefined
+): Pick<NodeExecutionState, 'feedback'> {
+  const state = execution.nodeStates.find((s) => s.nodeId === nodeId)
+  const text = comment?.trim()
+  if (!text) return { feedback: state?.feedback }
+  const entry: GateFeedbackEntry = {
+    round: state?.round ?? 1,
+    decision,
+    comment: text,
+    at: new Date().toISOString()
+  }
+  return { feedback: [...(state?.feedback ?? []), entry] }
+}
+
 /** Safe to call on an execution loaded from the database (cross-session resume). */
 export async function approveWorkflowGate(
   execution: WorkflowExecution,
-  nodeId: string
+  nodeId: string,
+  comment?: string
 ): Promise<WorkflowExecution> {
   const resolved = resolveWaitingGate(execution, nodeId, 'approve')
   if (!resolved) return execution
@@ -2011,7 +2070,8 @@ export async function approveWorkflowGate(
   updateNodeState(execution, nodeId, {
     status: 'success',
     completedAt: now,
-    approvedAt: now
+    approvedAt: now,
+    ...withFeedback(execution, nodeId, 'approve', comment)
   })
   persistExecution(execution)
 
@@ -2019,15 +2079,21 @@ export async function approveWorkflowGate(
   return runExecution(workflow, execution, context)
 }
 
+/** A person's answer, with an optional note, or the gate's own timeout. */
+type Rejection = { note?: string } | { timedOut: string }
+
 export async function rejectWorkflowGate(
   execution: WorkflowExecution,
   nodeId: string,
-  reason = 'Rejected by user'
+  rejection: Rejection = {}
 ): Promise<WorkflowExecution> {
   const resolved = resolveWaitingGate(execution, nodeId, 'reject')
   if (!resolved) return execution
   const { workflow } = resolved
-  if (reason === 'Rejected by user') {
+  const timedOut = 'timedOut' in rejection ? rejection.timedOut : undefined
+  const note = 'note' in rejection ? rejection.note?.trim() : undefined
+  // A person's answer settles the connector item; a timeout leaves it to be tried again.
+  if (!timedOut) {
     terminalConnectorDecisions.add(execution.runId)
     execution.connectorInboxDisposition = 'processed'
   }
@@ -2036,7 +2102,9 @@ export async function rejectWorkflowGate(
   updateNodeState(execution, nodeId, {
     status: 'error',
     completedAt: now,
-    error: reason
+    error: timedOut ?? (note || 'Rejected by user'),
+    ...(!timedOut && { rejectedAt: now }),
+    ...withFeedback(execution, nodeId, 'reject', note)
   })
 
   const { successors, predecessors } = buildGraph(workflow.edges)
@@ -2058,6 +2126,64 @@ export async function rejectWorkflowGate(
 
   const context = rebuildContextForResume(execution)
   return runExecution(workflow, execution, context)
+}
+
+/** Which steps a request for changes sends back, or why the gate cannot take it. */
+function changesPlan(
+  execution: WorkflowExecution,
+  nodeId: string,
+  comment: string
+): { from: string; reset: Set<string> } | { refused: string } {
+  const workflow = definitionOf(execution)
+  const node = workflow?.nodes.find((n) => n.id === nodeId)
+  if (!workflow || node?.type !== 'approval')
+    return { refused: `${nodeId} is not an approval gate` }
+  const state = execution.nodeStates.find((s) => s.nodeId === nodeId)
+  if (state?.status !== 'waiting' || isSignInWait(state))
+    return { refused: `${nodeId} is not asking` }
+  if (!comment.trim()) return { refused: 'a request for changes needs a comment' }
+  const config = node.config as ApprovalConfig
+  if (!canRequestChanges(config, state)) return { refused: `${nodeId} takes no more changes` }
+  const from = config.feedback!.from
+  const reset = nodesBetween(from, nodeId, workflow.edges)
+  if (reset.size === 0) return { refused: `${from} does not lead to ${nodeId}` }
+  return { from, reset }
+}
+
+/** Whether a request for changes with this comment would be taken, so the asker hears at once. */
+export function gateTakesChanges(runId: string, nodeId: string, comment: string): boolean {
+  const execution = activeRuns.get(runId)?.execution ?? runById(runId)
+  return !!execution && !('refused' in changesPlan(execution, nodeId, comment))
+}
+
+/** Send the work back: every step from the gate's `from` to the gate runs again, and the gate asks again. */
+export async function requestGateChanges(
+  execution: WorkflowExecution,
+  nodeId: string,
+  comment: string
+): Promise<WorkflowExecution> {
+  const plan = changesPlan(execution, nodeId, comment)
+  if ('refused' in plan) {
+    log.warn(`[workflow] requestGateChanges: ${plan.refused}`)
+    return execution
+  }
+  const resolved = resolveWaitingGate(execution, nodeId, 'changes')
+  if (!resolved) return execution
+  const { workflow } = resolved
+
+  const round = (execution.nodeStates.find((s) => s.nodeId === nodeId)?.round ?? 1) + 1
+  const { feedback } = withFeedback(execution, nodeId, 'changes', comment)
+  for (const state of execution.nodeStates) {
+    if (plan.reset.has(state.nodeId))
+      updateNodeState(execution, state.nodeId, blankPassState(state))
+  }
+  updateNodeState(execution, nodeId, { round, feedback })
+  persistExecution(execution)
+  log.info(
+    `[workflow] run ${execution.runId}: gate ${nodeId} sent back to ${plan.from}, round ${round}`
+  )
+
+  return runExecution(workflow, execution, rebuildContextForResume(execution))
 }
 
 /** Whether a waiting step waits for its connection to sign in again, not for an approval. */

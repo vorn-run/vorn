@@ -80,6 +80,7 @@ vi.mock(
       dbDeleteWorkflow: vi.fn(),
       saveWorkflowRun: vi.fn(),
       listWorkflowRuns: vi.fn(() => []),
+      listWorkflowRunIds: vi.fn(() => []),
       listWorkflowRunsByTask: vi.fn(() => []),
       updateWorkflowRunStatus: vi.fn(),
       dbReleaseConnectorInboxLeases: vi.fn(),

@@ -9,8 +9,7 @@ vi.mock('../src/renderer/lib/notifications', () => ({
   sendWorkflowSignInNotification
 }))
 
-const setEditingWorkflowId = vi.fn()
-const setWorkflowEditorOpen = vi.fn()
+const showRun = vi.fn()
 const mockState = {
   config: {
     workflows: [
@@ -24,8 +23,7 @@ const mockState = {
       }
     ]
   },
-  setEditingWorkflowId,
-  setWorkflowEditorOpen
+  showRun
 }
 vi.mock('../src/renderer/stores', () => ({
   useAppStore: { getState: () => mockState }
@@ -57,7 +55,7 @@ beforeEach(() => {
   resetAnnouncedRuns()
   sendWorkflowGateNotification.mockClear()
   sendWorkflowSignInNotification.mockClear()
-  setEditingWorkflowId.mockClear()
+  showRun.mockClear()
   ;(globalThis as unknown as { Notification: unknown }).Notification = { permission: 'denied' }
 })
 
@@ -78,14 +76,21 @@ describe('a gate that starts waiting', () => {
     )
   })
 
-  it('opens the editor on the workflow when the notification is clicked', () => {
+  it('says what the gate asked as it was filled in when it opened', () => {
+    announceRun(
+      run({ nodeStates: [{ nodeId: 'gate', status: 'waiting', message: 'Post: hello' }] })
+    )
+
+    expect(sendWorkflowGateNotification.mock.calls[0][3]).toBe('Post: hello')
+  })
+
+  it('opens the run in All runs when the notification is clicked', () => {
     announceRun(waiting())
 
     const onClick = sendWorkflowGateNotification.mock.calls[0][5] as () => void
     onClick()
 
-    expect(setEditingWorkflowId).toHaveBeenCalledWith('wf-1')
-    expect(setWorkflowEditorOpen).toHaveBeenCalledWith(true)
+    expect(showRun).toHaveBeenCalledWith('run-1')
   })
 
   it('says nothing about a workflow this window does not know', () => {
