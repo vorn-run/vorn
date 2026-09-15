@@ -163,6 +163,7 @@ vi.mock(
       dbSignalChange: vi.fn(),
       saveWorkflowRun: vi.fn(),
       listWorkflowRuns: vi.fn(() => []),
+      listWorkflowRunIds: vi.fn(() => []),
       listWorkflowRunsByTask: vi.fn(() => []),
       updateWorkflowRunStatus: vi.fn(),
       dbListSourceConnections: vi.fn(() => []),
