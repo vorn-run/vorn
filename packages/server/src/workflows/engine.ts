@@ -229,11 +229,7 @@ export async function reconcileRunningExecutions(
   workflows: WorkflowDefinition[]
 ): Promise<void> {
   const nodesOf = (execution: WorkflowExecution): Map<string, WorkflowNode> =>
-    new Map(
-      (
-        (execution.definition ?? workflows.find((w) => w.id === execution.workflowId))?.nodes ?? []
-      ).map((n) => [n.id, n])
-    )
+    new Map((definitionOf(execution, workflows)?.nodes ?? []).map((n) => [n.id, n]))
   for (const execution of executions) {
     if (execution.completedAt && execution.status !== 'running') {
       stopConnectorLeaseHeartbeat(execution.runId)
@@ -346,7 +342,7 @@ export function rescheduleWaitingGateTimers(
   const now = Date.now()
   for (const execution of executions) {
     if (execution.status === 'running') startConnectorLeaseHeartbeat(execution)
-    const workflow = execution.definition ?? workflows.find((w) => w.id === execution.workflowId)
+    const workflow = definitionOf(execution, workflows)
     if (!workflow) continue
     for (const ns of execution.nodeStates) {
       if (ns.status !== 'waiting') continue
@@ -1276,14 +1272,12 @@ async function executeNode(
   }
 }
 
-/** The definition a run came from, which the store holds once the config has loaded. */
-function workflowById(id: string): WorkflowDefinition | undefined {
-  return (loadConfig()?.workflows || []).find((w) => w.id === id)
-}
-
 /** The definition a run follows: its own snapshot, or the current one for runs saved before snapshots. */
-function definitionOf(execution: WorkflowExecution): WorkflowDefinition | undefined {
-  return execution.definition ?? workflowById(execution.workflowId)
+function definitionOf(
+  execution: WorkflowExecution,
+  workflows: WorkflowDefinition[] = loadConfig()?.workflows ?? []
+): WorkflowDefinition | undefined {
+  return execution.definition ?? workflows.find((w) => w.id === execution.workflowId)
 }
 
 export async function executeWorkflow(
