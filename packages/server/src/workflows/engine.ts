@@ -2037,7 +2037,6 @@ function resolveWaitingGate(
   return { workflow }
 }
 
-/** Safe to call on an execution loaded from the database (cross-session resume). */
 /** The gate's comments with this answer's added, when it carried one. */
 function withFeedback(
   execution: WorkflowExecution,
