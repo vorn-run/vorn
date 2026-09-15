@@ -1,11 +1,11 @@
 import { useCallback, useMemo } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { Check, X, Workflow } from 'lucide-react'
 import {
   WorkflowExecution,
   NodeExecutionState,
   WorkflowDefinition,
-  ApprovalConfig
+  ApprovalConfig,
+  workflowRunId
 } from '../../shared/types'
 import { useAppStore } from '../stores'
 import { ICON_MAP } from './project-sidebar/icon-map'
@@ -18,12 +18,7 @@ interface Props {
 }
 
 export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
-  const { setEditingWorkflowId, setWorkflowEditorOpen } = useAppStore(
-    useShallow((s) => ({
-      setEditingWorkflowId: s.setEditingWorkflowId,
-      setWorkflowEditorOpen: s.setWorkflowEditorOpen
-    }))
-  )
+  const showRun = useAppStore((s) => s.showRun)
 
   const node = useMemo(
     () => workflow?.nodes.find((n) => n.id === nodeState.nodeId),
@@ -36,10 +31,7 @@ export function WaitingApprovalPill({ execution, nodeState, workflow }: Props) {
   const WfIcon = workflow ? ICON_MAP[workflow.icon] || Workflow : Workflow
   const wfIconColor = workflow?.iconColor
 
-  const handleOpen = useCallback(() => {
-    setEditingWorkflowId(execution.workflowId)
-    setWorkflowEditorOpen(true)
-  }, [execution.workflowId, setEditingWorkflowId, setWorkflowEditorOpen])
+  const handleOpen = useCallback(() => showRun(workflowRunId(execution)), [execution, showRun])
 
   const handleApprove = useCallback(
     (e: React.MouseEvent) => {

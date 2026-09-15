@@ -719,6 +719,7 @@ export interface UISlice {
   setWorkflowsLandingTab: (tab: 'runs' | 'review') => void
   setWorkflowsRunFilter: (filter: RunBucket) => void
   setSelectedRunId: (id: string | null) => void
+  showRun: (runId: string) => void
   beginWorkflowsRunsLoad: () => void
   endWorkflowsRunsLoad: () => void
   bumpWorkflowsRunsReload: () => void

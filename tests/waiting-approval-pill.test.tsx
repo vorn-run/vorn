@@ -6,9 +6,8 @@ import '@testing-library/jest-dom/vitest'
 // Answering a gate is a request to the server; the pill only makes it.
 const resolveWorkflowGate = vi.fn()
 
-const setEditingWorkflowId = vi.fn()
-const setWorkflowEditorOpen = vi.fn()
-const mockState = { setEditingWorkflowId, setWorkflowEditorOpen }
+const showRun = vi.fn()
+const mockState = { showRun }
 vi.mock('../src/renderer/stores', () => ({
   useAppStore: (selector?: (state: unknown) => unknown) =>
     selector ? selector(mockState) : mockState
@@ -58,8 +57,7 @@ function workflow(msg?: string): WorkflowDefinition {
 beforeEach(() => {
   resolveWorkflowGate.mockReset()
   ;(window as unknown as { api: unknown }).api = { resolveWorkflowGate }
-  setEditingWorkflowId.mockReset()
-  setWorkflowEditorOpen.mockReset()
+  showRun.mockReset()
 })
 
 describe('WaitingApprovalPill', () => {
@@ -94,17 +92,16 @@ describe('WaitingApprovalPill', () => {
     expect(container.textContent).toContain('Workflow')
   })
 
-  it('opens the workflow editor when the pill is clicked', () => {
+  it('opens the run in All runs when the pill is clicked', () => {
     const { container } = render(
       <WaitingApprovalPill execution={execution()} nodeState={nodeState()} workflow={workflow()} />
     )
     const pill = container.firstElementChild as HTMLElement
     fireEvent.click(pill)
-    expect(setEditingWorkflowId).toHaveBeenCalledWith('wf-1')
-    expect(setWorkflowEditorOpen).toHaveBeenCalledWith(true)
+    expect(showRun).toHaveBeenCalledWith('wf-1:2026-04-20T10:00:00Z')
   })
 
-  it('asks the server to approve, and does not open the editor', () => {
+  it('asks the server to approve, and does not open the run', () => {
     const { getByLabelText } = render(
       <WaitingApprovalPill execution={execution()} nodeState={nodeState()} workflow={workflow()} />
     )
@@ -114,10 +111,10 @@ describe('WaitingApprovalPill', () => {
       nodeId: 'n1',
       decision: 'approve'
     })
-    expect(setEditingWorkflowId).not.toHaveBeenCalled()
+    expect(showRun).not.toHaveBeenCalled()
   })
 
-  it('asks the server to reject, and does not open the editor', () => {
+  it('asks the server to reject, and does not open the run', () => {
     const { getByLabelText } = render(
       <WaitingApprovalPill execution={execution()} nodeState={nodeState()} workflow={workflow()} />
     )
@@ -127,6 +124,6 @@ describe('WaitingApprovalPill', () => {
       nodeId: 'n1',
       decision: 'reject'
     })
-    expect(setEditingWorkflowId).not.toHaveBeenCalled()
+    expect(showRun).not.toHaveBeenCalled()
   })
 })

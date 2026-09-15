@@ -1746,6 +1746,14 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   setWorkflowsLandingTab: (tab) => set({ workflowsLandingTab: tab }),
   setWorkflowsRunFilter: (filter) => set({ workflowsRunFilter: filter }),
   setSelectedRunId: (id) => set({ selectedRunId: id }),
+  // All runs with this run open, so its whole execution shows rather than the designer.
+  showRun: (runId) => {
+    const state = get()
+    state.setMainViewMode('workflows')
+    state.setWorkflowEditorOpen(false)
+    state.setEditingWorkflowId(null)
+    set({ workflowsLandingTab: 'runs', workflowsRunFilter: 'all', selectedRunId: runId })
+  },
   beginWorkflowsRunsLoad: () =>
     set((s) => ({ workflowsRunsInflight: s.workflowsRunsInflight + 1 })),
   endWorkflowsRunsLoad: () =>
