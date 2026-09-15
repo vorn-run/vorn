@@ -59,6 +59,7 @@ function parkedRun(
 }
 
 let applyGateDecision: typeof import('../packages/server/src/workflows/engine').applyGateDecision
+let gateTakesChanges: typeof import('../packages/server/src/workflows/engine').gateTakesChanges
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -67,7 +68,8 @@ beforeEach(async () => {
   warned.mockClear()
   published.length = 0
   vi.resetModules()
-  ;({ applyGateDecision } = await import('../packages/server/src/workflows/engine'))
+  ;({ applyGateDecision, gateTakesChanges } =
+    await import('../packages/server/src/workflows/engine'))
 })
 
 describe('acting on a gate decision from another client', () => {
@@ -185,5 +187,109 @@ describe('a gate decided after its workflow was re-imported', () => {
 
     expect(run.status).toBe('error')
     expect(run.nodeStates.find((ns) => ns.nodeId === 'late')?.error).toMatch(/no state/)
+  })
+})
+
+describe('a gate that takes changes', () => {
+  const node = (
+    id: string,
+    type: string,
+    extra: object = {}
+  ): WorkflowDefinition['nodes'][number] =>
+    ({ id, type, label: id, config: {}, position: { x: 0, y: 0 }, ...extra }) as never
+
+  // The redone step is a condition on the gate's own feedback, so it shows the comment reached it.
+  const definition = {
+    id: 'wf-3',
+    name: 'Notes',
+    nodes: [
+      node('t', 'trigger'),
+      node('draft', 'condition', {
+        slug: 'draft',
+        config: { variable: '{{steps.approve.feedback}}', operator: 'isNotEmpty', value: '' }
+      }),
+      node('gate', 'approval', {
+        slug: 'approve',
+        config: {
+          message: 'Heard: {{steps.approve.feedback}}',
+          feedback: { from: 'draft', maxRounds: 2 }
+        }
+      })
+    ],
+    edges: [
+      { id: 'e1', source: 't', target: 'draft' },
+      { id: 'e2', source: 'draft', target: 'gate' }
+    ]
+  } as WorkflowDefinition
+
+  const parked = (def: WorkflowDefinition = definition): WorkflowExecution => ({
+    runId: 'run-3',
+    workflowId: 'wf-3',
+    startedAt: new Date(0).toISOString(),
+    status: 'running',
+    definition: def,
+    nodeStates: [
+      { nodeId: 't', status: 'success' },
+      { nodeId: 'draft', status: 'success', output: 'false' },
+      { nodeId: 'gate', status: 'waiting', round: 1, message: 'Heard:' }
+    ]
+  })
+
+  const state = (run: WorkflowExecution, id: string) =>
+    run.nodeStates.find((ns) => ns.nodeId === id)
+
+  it('redoes the steps from the chosen one with the comment, then asks again', async () => {
+    const run = parked()
+    executions.set('run-3', run)
+
+    await applyGateDecision('run-3', 'gate', 'changes', 'Too neat')
+
+    expect(state(run, 'draft')).toMatchObject({ status: 'success', output: 'true' })
+    expect(state(run, 'gate')).toMatchObject({
+      status: 'waiting',
+      round: 2,
+      message: 'Heard: Too neat',
+      feedback: [{ round: 1, decision: 'changes', comment: 'Too neat' }]
+    })
+    expect(run.status).toBe('running')
+  })
+
+  it('refuses a request with nothing in it, or past the last round', async () => {
+    const run = parked()
+    executions.set('run-3', run)
+
+    expect(gateTakesChanges('run-3', 'gate', '  ')).toBe(false)
+    await applyGateDecision('run-3', 'gate', 'changes', '  ')
+    expect(state(run, 'gate')).toMatchObject({ status: 'waiting', round: 1 })
+
+    state(run, 'gate')!.round = 2
+    expect(gateTakesChanges('run-3', 'gate', 'Again')).toBe(false)
+    await applyGateDecision('run-3', 'gate', 'changes', 'Again')
+    expect(state(run, 'gate')).toMatchObject({ status: 'waiting', round: 2 })
+    expect(state(run, 'gate')?.feedback).toBeUndefined()
+  })
+
+  it('refuses changes on a gate that does not take them', async () => {
+    const plain = {
+      ...definition,
+      nodes: definition.nodes.map((n) => (n.id === 'gate' ? { ...n, config: {} } : n))
+    }
+    executions.set('run-3', parked(plain))
+
+    expect(gateTakesChanges('run-3', 'gate', 'Too neat')).toBe(false)
+  })
+
+  it("ends the run with the reviewer's note as its reason", async () => {
+    const run = parked()
+    executions.set('run-3', run)
+
+    await applyGateDecision('run-3', 'gate', 'reject', 'Not this week')
+
+    expect(run.status).toBe('error')
+    expect(state(run, 'gate')).toMatchObject({
+      status: 'error',
+      error: 'Not this week',
+      feedback: [{ round: 1, decision: 'reject', comment: 'Not this week' }]
+    })
   })
 })

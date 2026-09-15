@@ -5,6 +5,8 @@ import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import log from './logger'
 import { getDefaultShell } from './process-utils'
+import { removeGateViews } from './workflows/gate-views'
+import type { GateFeedbackEntry } from '@vornrun/shared/types'
 import {
   AppConfig,
   ProjectConfig,
@@ -468,6 +470,10 @@ function createSchema(): void {
       worktree_name TEXT,
       worktree_origin TEXT,
       waiting_for TEXT,
+      message TEXT,
+      view_token TEXT,
+      round INTEGER,
+      feedback TEXT,
       FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
     );
 
@@ -1156,7 +1162,33 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 22 (the definition a run started with)')
   }
+
+  if (version < 23) {
+    d.transaction(() => {
+      const nodeCols = d.prepare('PRAGMA table_info(workflow_run_nodes)').all() as Array<{
+        name: string
+      }>
+      for (const [column, type] of GATE_COLUMNS) {
+        if (!nodeCols.some((c) => c.name === column)) {
+          d.exec(`ALTER TABLE workflow_run_nodes ADD COLUMN ${column} ${type}`)
+        }
+      }
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '23')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 23 (what an approval gate asked and heard)')
+  }
 }
+
+/** What a gate asked, its review page token, which round it is on, and what the reviewer wrote. */
+const GATE_COLUMNS = [
+  ['message', 'TEXT'],
+  ['view_token', 'TEXT'],
+  ['round', 'INTEGER'],
+  ['feedback', 'TEXT']
+] as const
 
 /** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */
 const REVISIONED_TABLES = [
@@ -1282,7 +1314,11 @@ function verifySchema(d: Database.Database): void {
         ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN structured_output TEXT'
       },
       // Which pass of a loop produced this row.
-      { column: 'iteration', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN iteration INTEGER' }
+      { column: 'iteration', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN iteration INTEGER' },
+      ...GATE_COLUMNS.map(([column, type]) => ({
+        column,
+        ddl: `ALTER TABLE workflow_run_nodes ADD COLUMN ${column} ${type}`
+      }))
     ],
     tasks: [
       {
@@ -3622,8 +3658,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
     d.prepare('DELETE FROM workflow_run_nodes WHERE run_id = ?').run(runId)
 
     const insertNode = d.prepare(
-      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration, worktree_path, worktree_name, worktree_origin, waiting_for)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration, worktree_path, worktree_name, worktree_origin, waiting_for, message, view_token, round, feedback)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const ns of execution.nodeStates) {
       insertNode.run(
@@ -3650,7 +3686,11 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
         ns.worktreePath ?? null,
         ns.worktreeName ?? null,
         ns.worktreeOrigin ?? null,
-        ns.waitingFor ?? null
+        ns.waitingFor ?? null,
+        ns.message ?? null,
+        ns.viewToken ?? null,
+        ns.round ?? null,
+        ns.feedback?.length ? JSON.stringify(ns.feedback) : null
       )
     }
 
@@ -3663,27 +3703,41 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
         .get(execution.workflowId) as { c: number }
     ).c
     if (count > MAX_WORKFLOW_RUNS) {
-      d.prepare(
-        `DELETE FROM workflow_runs WHERE id IN (
-          SELECT id FROM workflow_runs
-          WHERE workflow_id = ?
-            AND status != 'running'
-            AND (
-              connector_inbox_id IS NULL
-              OR NOT EXISTS (
-                SELECT 1 FROM connector_inbox
-                WHERE connector_inbox.id = workflow_runs.connector_inbox_id
-                  AND connector_inbox.status != 'processed'
+      const stale = d
+        .prepare(
+          `SELECT id FROM workflow_runs
+            WHERE workflow_id = ?
+              AND status != 'running'
+              AND (
+                connector_inbox_id IS NULL
+                OR NOT EXISTS (
+                  SELECT 1 FROM connector_inbox
+                  WHERE connector_inbox.id = workflow_runs.connector_inbox_id
+                    AND connector_inbox.status != 'processed'
+                )
               )
-            )
-          ORDER BY started_at ASC
-          LIMIT ?
-        )`
-      ).run(execution.workflowId, count - MAX_WORKFLOW_RUNS)
+            ORDER BY started_at ASC
+            LIMIT ?`
+        )
+        .all(execution.workflowId, count - MAX_WORKFLOW_RUNS) as Array<{ id: string }>
+      const remove = d.prepare('DELETE FROM workflow_runs WHERE id = ?')
+      for (const { id } of stale) {
+        remove.run(id)
+        trimmed.push(id)
+      }
     }
   })
 
+  const trimmed: string[] = []
   run()
+  for (const id of trimmed) removeGateViews(getDataDir(), id)
+}
+
+/** Every run id kept, so review pages of runs trimmed while the server was down can go too. */
+export function listWorkflowRunIds(): string[] {
+  return (getDb().prepare('SELECT id FROM workflow_runs').all() as Array<{ id: string }>).map(
+    (r) => r.id
+  )
 }
 
 type WorkflowRunNodeRow = {
@@ -3709,6 +3763,10 @@ type WorkflowRunNodeRow = {
   worktree_name: string | null
   worktree_origin: string | null
   waiting_for: string | null
+  message: string | null
+  view_token: string | null
+  round: number | null
+  feedback: string | null
 }
 
 function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
@@ -3717,6 +3775,7 @@ function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
   // structuredOutput on exactly the corrupt rows this is supposed to degrade.
   const structured =
     n.structured_output != null ? parseStructuredOutput(n.structured_output) : undefined
+  const feedback = parseGateFeedback(n.feedback)
 
   return {
     nodeId: n.node_id,
@@ -3741,7 +3800,22 @@ function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
     ...((n.worktree_origin === 'created' || n.worktree_origin === 'inherited') && {
       worktreeOrigin: n.worktree_origin
     }),
-    ...(n.waiting_for === 'signIn' && { waitingFor: 'signIn' as const })
+    ...(n.waiting_for === 'signIn' && { waitingFor: 'signIn' as const }),
+    ...(n.message != null && { message: n.message }),
+    ...(n.view_token != null && { viewToken: n.view_token }),
+    ...(n.round != null && { round: n.round }),
+    ...(feedback && { feedback })
+  }
+}
+
+/** A gate's comments, back out of storage; a corrupt row reads as none rather than breaking the run. */
+function parseGateFeedback(raw: string | null): GateFeedbackEntry[] | undefined {
+  if (raw == null) return undefined
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : undefined
+  } catch {
+    return undefined
   }
 }
 

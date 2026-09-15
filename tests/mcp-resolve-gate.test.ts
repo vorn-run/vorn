@@ -258,7 +258,7 @@ describe('answering a gate', () => {
     })
   })
 
-  it('takes only the two decisions it declares', () => {
+  it('takes only the decisions it declares', () => {
     const schema = registered().schema
     if (!schema) throw new Error('resolve_gate registered no schema')
     const shape = z.object(schema)
@@ -280,6 +280,65 @@ describe('answering a gate', () => {
       runId: 'run-1',
       nodeId: 'b',
       decision: 'approve'
+    })
+  })
+})
+
+describe('sending a gate back', () => {
+  const parked = run(node('develop', 'success'), {
+    ...node('approve', 'waiting'),
+    message: 'Post this: hello'
+  })
+
+  beforeEach(() => {
+    rpcCall.mockReset().mockResolvedValue({ accepted: true })
+    listAllWorkflowRuns.mockReset().mockResolvedValue([{ ...parked, workflowName: 'Build' }])
+    listRunsWithWaitingGates.mockReset().mockResolvedValue([])
+    dbListWorkflows.mockReset().mockResolvedValue([workflow('Read spec.md, then approve.')])
+  })
+
+  const resolve = async (args: Record<string, unknown>) => {
+    const tool = collect().get('resolve_gate')
+    if (!tool) throw new Error('resolve_gate was not registered')
+    return tool.handler(args)
+  }
+
+  it('passes the comment on with the request for changes', async () => {
+    const result = await resolve({ run_id: 'run-1', decision: 'changes', comment: '  Too neat  ' })
+
+    expect(rpcCall).toHaveBeenCalledWith('workflow:resolveGate', {
+      runId: 'run-1',
+      nodeId: 'approve',
+      decision: 'changes',
+      comment: 'Too neat'
+    })
+    expect(result.content[0].text).toContain('Sent back "Approval Gate"')
+  })
+
+  it('refuses a request for changes with nothing to say', async () => {
+    const result = await resolve({ run_id: 'run-1', decision: 'changes' })
+
+    expect(result.isError).toBe(true)
+    expect(rpcCall).not.toHaveBeenCalled()
+  })
+
+  it('says so when the gate takes no more changes', async () => {
+    rpcCall.mockResolvedValue({ accepted: false })
+
+    const result = await resolve({ run_id: 'run-1', decision: 'changes', comment: 'Again' })
+
+    expect(result.isError).toBe(true)
+    expect(result.content[0].text).toContain('takes no changes now')
+  })
+
+  it('quotes what the gate asked as it was filled in, not its template', async () => {
+    const result = await resolve({ run_id: 'run-1', decision: 'approve' })
+
+    expect(result.content[0].text).toContain('Post this: hello')
+    expect(result.content[0].text).not.toContain('Read spec.md')
+    const [listed] = annotateWaitingGates([parked], [workflow('Read spec.md, then approve.')])
+    expect(listed.nodeStates.find((n) => n.nodeId === 'approve')).toMatchObject({
+      asks: 'Post this: hello'
     })
   })
 })

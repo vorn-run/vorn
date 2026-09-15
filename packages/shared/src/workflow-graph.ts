@@ -1,4 +1,6 @@
 import {
+  ApprovalConfig,
+  GateFeedbackConfig,
   ConditionConfig,
   ConnectorItemContext,
   LaunchAgentConfig,
@@ -141,24 +143,89 @@ export function buildStepOutputsMap(
 ): StepOutputs {
   const outputs: StepOutputs = {}
   for (const ns of execution.nodeStates) {
-    if (ns.status !== 'success' && ns.status !== 'error') continue
     const node = nodeMap.get(ns.nodeId)
     if (!node?.slug) continue
+    const settled = ns.status === 'success' || ns.status === 'error'
+    // A gate that asked is readable before it settles: the steps it sent back read its comment.
+    const gate = node.type === 'approval' ? gateOutputs(ns) : undefined
+    if (!settled && !gate) continue
 
     // Schema-typed connector outputs come first so a declared key like
     // `html_url` wins over the generic fallback — but the defaults
     // (output/status/error) always overlay so control-flow references keep
     // working regardless of whether the connector returned a typed payload.
     outputs[node.slug] = {
-      ...(ns.structuredOutput ?? {}),
-      output: ns.output || ns.logs || '',
-      status: ns.status,
-      error: ns.error || '',
-      // The directory the step worked in, so a later step can run there.
-      worktreePath: ns.worktreePath ?? ''
+      ...(settled && {
+        ...(ns.structuredOutput ?? {}),
+        output: ns.output || ns.logs || '',
+        status: ns.status,
+        error: ns.error || '',
+        // The directory the step worked in, so a later step can run there.
+        worktreePath: ns.worktreePath ?? ''
+      }),
+      ...gate
     }
   }
   return outputs
+}
+
+/** A gate's latest comment, every comment, and which time it asked; undefined before it first asks. */
+function gateOutputs(state: NodeExecutionState): Record<string, unknown> | undefined {
+  if (state.round === undefined && !state.feedback?.length) return undefined
+  const entries = state.feedback ?? []
+  return {
+    feedback: entries.length > 0 ? entries[entries.length - 1].comment : '',
+    feedbackAll: entries.map((e) => `Round ${e.round}: ${e.comment}`).join('\n'),
+    round: state.round ?? 1
+  }
+}
+
+/** Ceiling on how many times a gate may ask, whatever a workflow says. */
+export const MAX_GATE_ROUNDS = 10
+
+export const DEFAULT_GATE_ROUNDS = 3
+
+export function gateMaxRounds(feedback: Pick<GateFeedbackConfig, 'maxRounds'> | undefined): number {
+  const rounds = Math.floor(Number(feedback?.maxRounds))
+  return Number.isFinite(rounds)
+    ? Math.min(Math.max(1, rounds), MAX_GATE_ROUNDS)
+    : DEFAULT_GATE_ROUNDS
+}
+
+/** Whether the reviewer may still send the work back at the round the gate is on. */
+export function canRequestChanges(
+  config: ApprovalConfig | undefined,
+  state: Pick<NodeExecutionState, 'round'> | undefined
+): boolean {
+  if (!config?.feedback?.from) return false
+  return (state?.round ?? 1) < gateMaxRounds(config.feedback)
+}
+
+/** Steps on some path from `from` to `to`, both included; empty when `to` is not below `from`. */
+export function nodesBetween(
+  from: string,
+  to: string,
+  edges: readonly { source: string; target: string }[]
+): Set<string> {
+  if (from === to) return new Set()
+  const { successors, predecessors } = buildGraph(edges)
+  const reach = (start: string, next: Map<string, string[]>): Set<string> => {
+    const seen = new Set([start])
+    const queue = [start]
+    while (queue.length > 0) {
+      for (const id of next.get(queue.shift()!) ?? []) {
+        if (!seen.has(id)) {
+          seen.add(id)
+          queue.push(id)
+        }
+      }
+    }
+    return seen
+  }
+  const below = reach(from, successors)
+  if (!below.has(to)) return new Set()
+  const above = reach(to, predecessors)
+  return new Set([...below].filter((id) => above.has(id)))
 }
 
 export function evaluateCondition(
@@ -232,7 +299,7 @@ const SURVIVES_A_PASS = new Set(['nodeId'])
 
 export function blankPassState(
   state: NodeExecutionState,
-  iteration: number
+  iteration?: number
 ): Partial<NodeExecutionState> {
   const cleared: Record<string, unknown> = {}
   for (const key of Object.keys(state)) {

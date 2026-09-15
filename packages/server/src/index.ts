@@ -48,7 +48,10 @@ import {
   clearLocalCredential,
   bearerFrom
 } from './ws-auth'
-import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
+import { getDataDir, dbCountActiveConnectorInboxLeases, listWorkflowRunIds } from './database'
+import { registerGateViewRoute } from './gate-view-route'
+import { gateViewPage } from './workflows/engine'
+import { sweepGateViews } from './workflows/gate-views'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
 import {
   DEFAULT_SERVER_PORT,
@@ -333,6 +336,8 @@ export async function startServer(
     return result
   })
 
+  registerGateViewRoute(app, gateViewPage)
+
   // Serve task images via HTTP (used by web app instead of file:// protocol)
   app.get('/api/task-images/:taskId/:filename', async (req, reply) => {
     const { taskId, filename } = req.params as { taskId: string; filename: string }
@@ -422,6 +427,7 @@ export async function startServer(
   scheduler.startInboxWorker()
   // After the methods, because picking a run back up uses them.
   void resumeRunsAfterStart()
+  sweepGateViews(getDataDir(), listWorkflowRunIds())
 
   // Server shutdown method (callable from clients)
   registerMethod('server:shutdown', async () => {

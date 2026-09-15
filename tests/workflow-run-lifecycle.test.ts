@@ -127,6 +127,7 @@ const {
   resumeSignInWaits,
   reconcileRunningExecutions,
   rejectWorkflowGate,
+  requestGateChanges,
   stopWorkflowRun
 } = await import('../packages/server/src/workflows/engine')
 
@@ -643,6 +644,101 @@ describe('rejecting an approval gate', () => {
       leaseToken: 'lease-92',
       disposition: 'processed'
     })
+  })
+})
+
+describe('sending the work back from a gate', () => {
+  const agent = (id: string, prompt: string) => ({
+    id,
+    slug: id,
+    type: 'launchAgent',
+    label: id,
+    position: { x: 0, y: 0 },
+    config: { agentType: 'claude', projectName: 'p', projectPath: '/p', headless: true, prompt }
+  })
+
+  function reviewedWorkflow(): WorkflowDefinition {
+    return {
+      ...makeWorkflow('wf-review'),
+      nodes: [
+        { id: 'trigger', type: 'trigger', label: 'Trigger', position: { x: 0, y: 0 }, config: {} },
+        agent('draft', 'Write it. Reviewer said: {{steps.approve.feedback}}'),
+        agent('polish', 'Polish it'),
+        {
+          id: 'approve',
+          slug: 'approve',
+          type: 'approval',
+          label: 'Approve',
+          position: { x: 0, y: 3 },
+          config: {
+            message: 'Post this: {{steps.polish.output}}',
+            feedback: { from: 'draft', maxRounds: 2 }
+          }
+        },
+        agent('post', 'Post it')
+      ],
+      edges: [
+        { id: 'e1', source: 'trigger', target: 'draft' },
+        { id: 'e2', source: 'draft', target: 'polish' },
+        { id: 'e3', source: 'polish', target: 'approve' },
+        { id: 'e4', source: 'approve', target: 'post' }
+      ]
+    } as unknown as WorkflowDefinition
+  }
+
+  // Ends a step with this output, already listening for the session it starts next.
+  async function finishStep(
+    session: Promise<string>,
+    output: string
+  ): Promise<{ next: Promise<string> }> {
+    const id = await session
+    const next = nextSession()
+    emitData(id, output)
+    emitExit(id, 0)
+    // Not runAllTimers: that would also fire the next step's hour-long timeout.
+    await vi.advanceTimersByTimeAsync(5_000)
+    return { next }
+  }
+
+  it('redoes the steps from the chosen one with the comment, asks again, and stops at the last round', async () => {
+    const workflow = reviewedWorkflow()
+    mockState.config.workflows = [workflow]
+
+    const first = nextSession()
+    const started = executeWorkflow(workflow)
+    const { next: polish } = await finishStep(first, 'first draft')
+    await finishStep(polish, 'polished one')
+    const waiting = await started
+    const gate = () => waiting.nodeStates.find((n) => n.nodeId === 'approve')!
+    expect(gate()).toMatchObject({ status: 'waiting', round: 1 })
+    expect(gate().message).toContain('Post this: polished one')
+
+    const redraft = nextSession()
+    const resumed = requestGateChanges(waiting, 'approve', 'Too neat')
+    await redraft
+    expect(createHeadlessSession.mock.calls.at(-1)?.[0].initialPrompt).toContain(
+      'Reviewer said: Too neat'
+    )
+    const { next: repolish } = await finishStep(redraft, 'second draft')
+    await finishStep(repolish, 'polished two')
+    await resumed
+
+    expect(gate()).toMatchObject({
+      status: 'waiting',
+      round: 2,
+      feedback: [expect.objectContaining({ round: 1, decision: 'changes', comment: 'Too neat' })]
+    })
+    expect(gate().message).toContain('Post this: polished two')
+    // Draft and polish twice; the step after the gate never ran.
+    expect(createHeadlessSession).toHaveBeenCalledTimes(4)
+
+    await requestGateChanges(waiting, 'approve', 'Once more')
+    expect(gate()).toMatchObject({ status: 'waiting', round: 2 })
+    expect(createHeadlessSession).toHaveBeenCalledTimes(4)
+
+    const rejected = await rejectWorkflowGate(waiting, 'approve', { note: 'Not today' })
+    expect(rejected.status).toBe('error')
+    expect(gate()).toMatchObject({ status: 'error', error: 'Not today' })
   })
 })
 
