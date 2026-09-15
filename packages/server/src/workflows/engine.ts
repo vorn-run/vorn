@@ -229,9 +229,7 @@ export async function reconcileRunningExecutions(
   workflows: WorkflowDefinition[]
 ): Promise<void> {
   const nodesOf = (execution: WorkflowExecution): Map<string, WorkflowNode> =>
-    new Map(
-      (workflows.find((w) => w.id === execution.workflowId)?.nodes ?? []).map((n) => [n.id, n])
-    )
+    new Map((definitionOf(execution, workflows)?.nodes ?? []).map((n) => [n.id, n]))
   for (const execution of executions) {
     if (execution.completedAt && execution.status !== 'running') {
       stopConnectorLeaseHeartbeat(execution.runId)
@@ -344,7 +342,7 @@ export function rescheduleWaitingGateTimers(
   const now = Date.now()
   for (const execution of executions) {
     if (execution.status === 'running') startConnectorLeaseHeartbeat(execution)
-    const workflow = workflows.find((w) => w.id === execution.workflowId)
+    const workflow = definitionOf(execution, workflows)
     if (!workflow) continue
     for (const ns of execution.nodeStates) {
       if (ns.status !== 'waiting') continue
@@ -1274,9 +1272,12 @@ async function executeNode(
   }
 }
 
-/** The definition a run came from, which the store holds once the config has loaded. */
-function workflowById(id: string): WorkflowDefinition | undefined {
-  return (loadConfig()?.workflows || []).find((w) => w.id === id)
+/** The definition a run follows: its own snapshot, or the current one for runs saved before snapshots. */
+function definitionOf(
+  execution: WorkflowExecution,
+  workflows: WorkflowDefinition[] = loadConfig()?.workflows ?? []
+): WorkflowDefinition | undefined {
+  return execution.definition ?? workflows.find((w) => w.id === execution.workflowId)
 }
 
 export async function executeWorkflow(
@@ -1369,7 +1370,8 @@ export async function executeWorkflow(
     connectorInboxId: context?.connectorItem?.inboxId,
     connectorInboxLeaseToken: context?.connectorItem?.inboxLeaseToken,
     dedupeParams,
-    inputs: context?.inputs
+    inputs: context?.inputs,
+    definition: workflow
   }
 
   const actionNodeCount = workflow.nodes.filter((n) => n.type !== 'trigger').length
@@ -1429,7 +1431,8 @@ export async function retryRunFromFailure(
     triggerTaskId: failedRun.triggerTaskId,
     connectorItem: context?.connectorItem,
     dedupeParams: params,
-    inputs: failedRun.inputs
+    inputs: failedRun.inputs,
+    definition: workflow
   }
 
   persistExecution(execution)
@@ -1554,7 +1557,7 @@ export async function stopWorkflowRun(runId: string): Promise<void> {
 
   // Release immediately rather than at the dedupe window's expiry, so stopping
   // a run and starting it again is not blocked by the run just stopped.
-  const workflow = workflowById(execution.workflowId)
+  const workflow = definitionOf(execution)
   await Promise.allSettled([
     api.releaseWorkflowRun({
       workflowId: execution.workflowId,
@@ -1654,6 +1657,8 @@ async function runExecution(
   }
 
   const actionNodeCount = workflow.nodes.filter((n) => n.type !== 'trigger').length
+  // Each step is ready once per pass, so this is generous; past it the run is spinning.
+  const maxWaves = 50 * Math.max(actionNodeCount, 1)
 
   // A run parked on a gate is still live, so its claim stays held; only a run
   // that reaches a terminal state gives the trigger back.
@@ -1668,6 +1673,9 @@ async function runExecution(
       if (ready.length === 0) break
 
       wave++
+      if (wave > maxWaves) {
+        throw new Error(`Stopped after ${maxWaves} waves: steps kept becoming ready again`)
+      }
       log.info(
         `[workflow] wave ${wave}: executing ${ready.length} node(s) in parallel: ${ready.map((n) => n.label).join(', ')}`
       )
@@ -1677,6 +1685,7 @@ async function runExecution(
       }
 
       const stepOutputs = buildStepOutputsMap(execution, nodeMap)
+      const stateless: string[] = []
 
       const promises = ready.map(async (node) => {
         running.add(node.id)
@@ -1694,7 +1703,19 @@ async function runExecution(
         running.delete(node.id)
 
         const postState = execution.nodeStates.find((s) => s.nodeId === node.id)
-        if (postState?.status === 'waiting') return
+        // A step the run holds no state for would be ready again on every wave.
+        if (!postState) {
+          const error = `Step "${node.label}" has no state in this run; its workflow changed under it`
+          execution.nodeStates.push({
+            nodeId: node.id,
+            status: 'error',
+            completedAt: new Date().toISOString(),
+            error
+          })
+          stateless.push(error)
+          return
+        }
+        if (postState.status === 'waiting') return
 
         completed.add(node.id)
 
@@ -1767,6 +1788,7 @@ async function runExecution(
       })
 
       await Promise.all(promises)
+      if (stateless.length > 0) throw new Error(stateless[0])
     }
 
     // Stopped mid-flight: stopWorkflowRun already wrote the terminal state, so
@@ -1949,7 +1971,7 @@ function resolveWaitingGate(
   nodeId: string,
   caller: 'approve' | 'reject'
 ): { workflow: WorkflowDefinition } | null {
-  const workflow = workflowById(execution.workflowId)
+  const workflow = definitionOf(execution)
   if (!workflow) {
     log.warn(`[workflow] ${caller}WorkflowGate: workflow ${execution.workflowId} not found`)
     return null
@@ -2053,7 +2075,7 @@ export async function resumeSignInWaits(
   const resumes: Array<Promise<WorkflowExecution>> = []
   for (const stored of parked) {
     const execution = activeRuns.get(stored.runId)?.execution ?? stored
-    const workflow = workflowById(execution.workflowId)
+    const workflow = definitionOf(execution)
     if (!workflow) continue
     const waiting = execution.nodeStates.filter((state) => {
       if (!isSignInWait(state)) return false

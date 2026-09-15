@@ -234,7 +234,7 @@ export function dbSignalChange(): void {
     const signalPath = path.join(getDataDir(), '.db-signal')
     fs.writeFileSync(signalPath, Date.now().toString())
   } catch {
-    // Best-effort — watcher fallback will catch it
+    // Best-effort — the next signal or local change reloads it
   }
 }
 
@@ -440,7 +440,8 @@ function createSchema(): void {
       connector_item TEXT,
       connector_inbox_id INTEGER,
       connector_inbox_lease_token TEXT,
-      connector_inbox_disposition TEXT
+      connector_inbox_disposition TEXT,
+      definition TEXT
     );
 
     CREATE TABLE IF NOT EXISTS workflow_run_nodes (
@@ -1141,6 +1142,20 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 21 (package connections belong to sdk)')
   }
+
+  if (version < 22) {
+    d.transaction(() => {
+      const runCols = d.prepare('PRAGMA table_info(workflow_runs)').all() as Array<{ name: string }>
+      if (!runCols.some((c) => c.name === 'definition')) {
+        d.exec('ALTER TABLE workflow_runs ADD COLUMN definition TEXT')
+      }
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '22')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 22 (the definition a run started with)')
+  }
 }
 
 /** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */
@@ -1231,7 +1246,8 @@ function verifySchema(d: Database.Database): void {
       {
         column: 'connector_inbox_disposition',
         ddl: 'ALTER TABLE workflow_runs ADD COLUMN connector_inbox_disposition TEXT'
-      }
+      },
+      { column: 'definition', ddl: 'ALTER TABLE workflow_runs ADD COLUMN definition TEXT' }
     ],
     connector_inbox: [
       {
@@ -3585,8 +3601,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
       `INSERT OR REPLACE INTO workflow_runs (
          id, workflow_id, started_at, completed_at, status, trigger_task_id,
          inputs, connector_item, connector_inbox_id, connector_inbox_lease_token,
-         connector_inbox_disposition
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         connector_inbox_disposition, definition
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       runId,
       execution.workflowId,
@@ -3598,7 +3614,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
       execution.connectorItem ? JSON.stringify(execution.connectorItem) : null,
       execution.connectorInboxId ?? null,
       execution.connectorInboxLeaseToken ?? null,
-      execution.connectorInboxDisposition ?? null
+      execution.connectorInboxDisposition ?? null,
+      execution.definition ? JSON.stringify(execution.definition) : null
     )
 
     // Delete existing nodes for this run (for upsert behavior)
@@ -3776,6 +3793,7 @@ type RunRow = {
   connector_inbox_id: number | null
   connector_inbox_lease_token: string | null
   connector_inbox_disposition: string | null
+  definition: string | null
   workflow_name?: string | null
 }
 
@@ -3803,6 +3821,7 @@ function mapRunRows(
   return rows.map((r) => {
     const inputs = parseRunInputs(r.inputs)
     const connectorItem = parseRunInputs(r.connector_item) as ConnectorItemContext | undefined
+    const definition = parseRunInputs(r.definition) as WorkflowDefinition | undefined
     return {
       runId: r.id,
       workflowId: r.workflow_id,
@@ -3820,9 +3839,16 @@ function mapRunRows(
         ? { connectorInboxDisposition: r.connector_inbox_disposition }
         : {}),
       ...(r.workflow_name != null && { workflowName: r.workflow_name }),
+      ...(definition && { definition }),
       nodeStates: nodesByRun.get(r.id) ?? []
     }
   })
+}
+
+/** A run as clients get it: the definition snapshot is the engine's, and heavy on every update. */
+export function withoutDefinition<T extends WorkflowExecution>(run: T): Omit<T, 'definition'> {
+  const { definition: _definition, ...rest } = run
+  return rest
 }
 
 export function dbGetWorkflowRunByConnectorInboxId(

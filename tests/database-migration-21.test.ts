@@ -263,7 +263,7 @@ describe('migration 21 — package connections belong to sdk', () => {
             }
           ).value
       )
-    expect(version()).toBe('21')
+    expect(Number(version())).toBeGreaterThanOrEqual(21)
     const before = ROWS.map((row) => stored(row.id))
     migrate()
     expect(ROWS.map((row) => stored(row.id))).toEqual(before)

@@ -103,6 +103,7 @@ import {
 } from './task-images'
 import {
   saveWorkflowRun,
+  withoutDefinition,
   listWorkflowRuns,
   listWorkflowRunsByTask,
   listAllWorkflowRuns,
@@ -686,7 +687,7 @@ function startedRun(
     const answer = (execution: WorkflowExecution | null): void => {
       if (answered) return
       answered = true
-      resolve(execution ? structuredClone(execution) : null)
+      resolve(execution ? structuredClone(withoutDefinition(execution)) : null)
     }
     begin(answer)
       .then(answer)
@@ -1464,14 +1465,16 @@ export function registerAllMethods(): void {
 
   // Workflow runs
   registerMethod('workflowRun:save', (execution) => saveWorkflowRun(execution))
-  registerMethod('workflowRun:list', ({ workflowId, limit }) => listWorkflowRuns(workflowId, limit))
-  registerMethod('workflowRun:listByTask', ({ taskId, limit }) =>
-    listWorkflowRunsByTask(taskId, limit)
+  registerMethod('workflowRun:list', ({ workflowId, limit }) =>
+    listWorkflowRuns(workflowId, limit).map(withoutDefinition)
   )
-  registerMethod('workflowRun:listWaiting', () => listRunsWithWaitingGates())
-  registerMethod('workflowRun:listRunning', () => listRunningRuns())
+  registerMethod('workflowRun:listByTask', ({ taskId, limit }) =>
+    listWorkflowRunsByTask(taskId, limit).map(withoutDefinition)
+  )
+  registerMethod('workflowRun:listWaiting', () => listRunsWithWaitingGates().map(withoutDefinition))
+  registerMethod('workflowRun:listRunning', () => listRunningRuns().map(withoutDefinition))
   registerMethod('workflowRun:listAll', ({ workspaceId, limit }) =>
-    listAllWorkflowRuns(workspaceId, limit)
+    listAllWorkflowRuns(workspaceId, limit).map(withoutDefinition)
   )
 
   // Session events
@@ -2372,6 +2375,7 @@ export function registerAllMethods(): void {
                 task.agentSessionId = event.session_id
                 task.updatedAt = new Date().toISOString()
                 configManager.saveConfig(config)
+                configManager.notifyChanged()
                 log.info(
                   `[hooks] stored agentSessionId ${event.session_id} on task "${task.title}"`
                 )

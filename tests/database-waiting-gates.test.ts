@@ -11,9 +11,10 @@ vi.mock('node:fs', async (importOriginal) => {
 import {
   initTestDatabase,
   saveWorkflowRun,
-  listRunsWithWaitingGates
+  listRunsWithWaitingGates,
+  withoutDefinition
 } from '../packages/server/src/database'
-import type { WorkflowExecution } from '@vornrun/shared/types'
+import type { WorkflowDefinition, WorkflowExecution } from '@vornrun/shared/types'
 
 let teardown: () => void
 
@@ -114,5 +115,25 @@ describe('a step waiting for a sign-in', () => {
       nodeStates: [{ nodeId: 'draft', status: 'waiting', waitingFor: 'signIn' }]
     })
     expect(listRunsWithWaitingGates()[0]?.nodeStates[0]?.waitingFor).toBe('signIn')
+  })
+})
+
+describe('the definition a run started with', () => {
+  const definition = {
+    id: 'wf-9',
+    name: 'Notes',
+    nodes: [{ id: 'gate', type: 'approval', label: 'Gate', config: {}, position: { x: 0, y: 0 } }],
+    edges: []
+  } as unknown as WorkflowDefinition
+
+  it('comes back from storage with the run, so a resume follows it', () => {
+    saveWorkflowRun({ ...run('wf-9', 'running', 'waiting'), definition })
+    expect(listRunsWithWaitingGates()[0]?.definition).toEqual(definition)
+  })
+
+  it('stays off what clients are sent', () => {
+    saveWorkflowRun({ ...run('wf-9', 'running', 'waiting'), definition })
+    const [stored] = listRunsWithWaitingGates()
+    expect(withoutDefinition(stored!)).not.toHaveProperty('definition')
   })
 })
