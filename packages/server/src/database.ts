@@ -1142,6 +1142,20 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 21 (package connections belong to sdk)')
   }
+
+  if (version < 22) {
+    d.transaction(() => {
+      const runCols = d.prepare('PRAGMA table_info(workflow_runs)').all() as Array<{ name: string }>
+      if (!runCols.some((c) => c.name === 'definition')) {
+        d.exec('ALTER TABLE workflow_runs ADD COLUMN definition TEXT')
+      }
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '22')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 22 (the definition a run started with)')
+  }
 }
 
 /** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */
