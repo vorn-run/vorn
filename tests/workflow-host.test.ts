@@ -51,7 +51,10 @@ vi.mock('../packages/server/src/config-manager', () => ({
     })
   }
 }))
-vi.mock('../packages/server/src/database', () => ({ getWorkflowRun: () => null }))
+vi.mock('../packages/server/src/database', () => ({
+  getWorkflowRun: () => null,
+  withoutDefinition: <T>(run: T) => run
+}))
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))

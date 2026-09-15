@@ -123,7 +123,7 @@ class Scheduler extends EventEmitter {
   }
 
   /** Each armed cron or timer beside the trigger it was armed with, so a changed trigger is re-armed. */
-  private jobs = new Map<string, { armed: string; cancel: () => void }>()
+  private jobs = new Map<string, { armed: string; name: string; cancel: () => void }>()
   /** The schedule-relevant shape of the last sync; a config change that keeps it skips the sync. */
   private lastSynced: string | null = null
   /** Polls run server-side, before any run claim, so they serialize here. */
@@ -229,7 +229,9 @@ class Scheduler extends EventEmitter {
       if (wanted.get(id)?.armed === job.armed) continue
       job.cancel()
       this.jobs.delete(id)
-      log.info(`[scheduler] cancelled schedule for workflow "${wanted.get(id)?.wf.name ?? id}"`)
+      log.info(
+        `[scheduler] cancelled schedule for workflow "${wanted.get(id)?.wf.name ?? job.name}"`
+      )
     }
 
     for (const { wf, trigger, armed } of wanted.values()) {
@@ -248,7 +250,7 @@ class Scheduler extends EventEmitter {
           const task = cron.schedule(trigger.cron, () => this.fireScheduled(wf.id), {
             timezone: trigger.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
           })
-          this.jobs.set(wf.id, { armed, cancel: () => task.stop() })
+          this.jobs.set(wf.id, { armed, name: wf.name, cancel: () => task.stop() })
         } catch (err) {
           log.error({ err }, `[scheduler] failed to schedule workflow "${wf.name}":`)
         }
@@ -277,7 +279,7 @@ class Scheduler extends EventEmitter {
             }
           }, safeDelay)
           log.info(`[scheduler] registering once workflow "${wf.name}" runAt="${trigger.runAt}"`)
-          this.jobs.set(wf.id, { armed, cancel: () => clearTimeout(timer) })
+          this.jobs.set(wf.id, { armed, name: wf.name, cancel: () => clearTimeout(timer) })
         }
       }
     }
