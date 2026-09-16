@@ -164,6 +164,76 @@ describe('RunEntry — approval gate controls', () => {
     })
   })
 
+  it('counts the words, and puts the text back with Revert', () => {
+    const exec = makeExec({
+      nodeStates: [{ nodeId: 'gate', status: 'waiting', editableText: 'A tidy draft.' }]
+    })
+    const { getByText, getByLabelText, container } = render(
+      <RunEntry execution={exec} nodes={[approvalNode]} />
+    )
+    fireEvent.click(getByText('Edit'))
+    expect(container.textContent).toContain('3 words')
+
+    fireEvent.change(getByLabelText('The text to approve'), { target: { value: 'My words.' } })
+    expect(container.textContent).toContain('2 words')
+    fireEvent.click(getByText('Revert'))
+    expect((getByLabelText('The text to approve') as HTMLTextAreaElement).value).toBe(
+      'A tidy draft.'
+    )
+  })
+
+  it('saves the rewrite on cmd+enter and abandons it on escape', () => {
+    const exec = makeExec({
+      nodeStates: [{ nodeId: 'gate', status: 'waiting', editableText: 'A tidy draft.' }]
+    })
+    const { getByText, getByLabelText } = render(
+      <RunEntry execution={exec} nodes={[approvalNode]} />
+    )
+    fireEvent.click(getByText('Edit'))
+    fireEvent.change(getByLabelText('The text to approve'), { target: { value: 'My words.' } })
+    fireEvent.keyDown(getByLabelText('The text to approve'), { key: 'Enter', metaKey: true })
+    fireEvent.click(getByText('Approve'))
+    expect(resolveWorkflowGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      nodeId: 'gate',
+      decision: 'approve',
+      edited: 'My words.'
+    })
+
+    resolveWorkflowGate.mockClear()
+    fireEvent.click(getByText('Edited'))
+    fireEvent.change(getByLabelText('The text to approve'), { target: { value: 'Discarded.' } })
+    fireEvent.keyDown(getByLabelText('The text to approve'), { key: 'Escape' })
+    fireEvent.click(getByText('Approve'))
+    expect(resolveWorkflowGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      nodeId: 'gate',
+      decision: 'approve',
+      edited: 'My words.'
+    })
+  })
+
+  it('warns that rejecting throws the rewrite away', () => {
+    const exec = makeExec({
+      nodeStates: [{ nodeId: 'gate', status: 'waiting', editableText: 'A tidy draft.' }]
+    })
+    const { getByText, getByLabelText, container } = render(
+      <RunEntry execution={exec} nodes={[approvalNode]} />
+    )
+    fireEvent.click(getByText('Edit'))
+    fireEvent.change(getByLabelText('The text to approve'), { target: { value: 'My words.' } })
+    fireEvent.click(getByText('Save'))
+    fireEvent.click(getByText('Reject'))
+    expect(container.textContent).toContain('Your edit is discarded.')
+
+    fireEvent.click(getByText('Reject run'))
+    expect(resolveWorkflowGate).toHaveBeenCalledWith({
+      runId: 'run-1',
+      nodeId: 'gate',
+      decision: 'reject'
+    })
+  })
+
   it('offers a retry from the failed step when a step failed but the run went on', () => {
     const onRetryRun = vi.fn()
     const execution = makeExec({
