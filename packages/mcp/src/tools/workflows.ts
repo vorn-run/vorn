@@ -872,6 +872,13 @@ export function registerWorkflowTools(server: McpServer): void {
         .describe(
           'Required for changes: what to change. Optional on approve and reject; kept with the run.'
         ),
+      edited: z
+        .string()
+        .max(200000)
+        .optional()
+        .describe(
+          "Your rewrite of the gate's editable text, when it has one. Kept beside the original, and read by later steps as {{steps.<gate>.text}}. Ignored on reject."
+        ),
       node_id: V.id.optional().describe('The waiting node, when a run has more than one gate open')
     },
     async (args) => {
@@ -926,7 +933,8 @@ export function registerWorkflowTools(server: McpServer): void {
           runId: args.run_id,
           nodeId: target.nodeId,
           decision: args.decision,
-          ...(args.comment?.trim() && { comment: args.comment.trim() })
+          ...(args.comment?.trim() && { comment: args.comment.trim() }),
+          ...(args.edited?.trim() && { edited: args.edited.trim() })
         })
         if (answer?.accepted === false) {
           return {

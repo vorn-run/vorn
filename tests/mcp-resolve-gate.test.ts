@@ -207,6 +207,24 @@ describe('answering a gate', () => {
     expect(result.content[0].text).toContain('Rejected "Approval Gate"')
   })
 
+  it("carries the reviewer's rewrite, trimmed, and leaves a blank one out", async () => {
+    await resolve({ run_id: 'run-1', decision: 'approve', edited: '  My words.  ' })
+    expect(rpcCall).toHaveBeenCalledWith('workflow:resolveGate', {
+      runId: 'run-1',
+      nodeId: 'approve',
+      decision: 'approve',
+      edited: 'My words.'
+    })
+
+    rpcCall.mockClear()
+    await resolve({ run_id: 'run-1', decision: 'approve', edited: '   ' })
+    expect(rpcCall).toHaveBeenCalledWith('workflow:resolveGate', {
+      runId: 'run-1',
+      nodeId: 'approve',
+      decision: 'approve'
+    })
+  })
+
   it('says a run already finished rather than broadcasting at nothing, the way stopping one does', async () => {
     listAllWorkflowRuns.mockResolvedValue([{ ...parked, status: 'success' }])
 

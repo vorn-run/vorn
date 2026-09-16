@@ -279,6 +279,50 @@ describe('a gate that takes changes', () => {
     expect(gateTakesChanges('run-3', 'gate', 'Too neat')).toBe(false)
   })
 
+  it('keeps the rewrite beside the text the steps produced when the gate is approved', async () => {
+    const run = parked()
+    state(run, 'gate')!.editableText = 'A tidy draft.'
+    executions.set('run-3', run)
+
+    await applyGateDecision('run-3', 'gate', 'approve', undefined, 'My words.')
+
+    expect(state(run, 'gate')).toMatchObject({
+      status: 'success',
+      editableText: 'A tidy draft.',
+      editedText: 'My words.',
+      feedback: [{ round: 1, decision: 'approve', comment: '', edited: 'My words.' }]
+    })
+  })
+
+  // The redone steps read {{steps.<gate>.text}}, so they start from the rewrite; by the time
+  // the gate asks again it has re-resolved its own text, and the stale rewrite is gone from
+  // the state while the round that carried it keeps it.
+  it('sends the rewrite back with the work, then asks again on the new text', async () => {
+    const run = parked()
+    state(run, 'gate')!.editableText = 'A tidy draft.'
+    executions.set('run-3', run)
+
+    await applyGateDecision('run-3', 'gate', 'changes', 'Too neat', 'My words.')
+
+    expect(state(run, 'gate')).toMatchObject({
+      status: 'waiting',
+      round: 2,
+      feedback: [{ round: 1, decision: 'changes', comment: 'Too neat', edited: 'My words.' }]
+    })
+    expect(state(run, 'gate')?.editedText).toBeUndefined()
+  })
+
+  it('discards a rewrite when the run is rejected', async () => {
+    const run = parked()
+    state(run, 'gate')!.editableText = 'A tidy draft.'
+    executions.set('run-3', run)
+
+    await applyGateDecision('run-3', 'gate', 'reject', 'Not this week', 'My words.')
+
+    expect(state(run, 'gate')?.editedText).toBeUndefined()
+    expect(state(run, 'gate')?.editableText).toBe('A tidy draft.')
+  })
+
   it("ends the run with the reviewer's note as its reason", async () => {
     const run = parked()
     executions.set('run-3', run)

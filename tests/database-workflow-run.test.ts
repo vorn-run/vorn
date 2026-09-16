@@ -87,6 +87,35 @@ describe('workflow run persistence', () => {
     expect(loaded.nodeStates[1]).not.toHaveProperty('worktreePath')
   })
 
+  it("round-trips the text a gate offered and the reviewer's rewrite of it", () => {
+    const exec: WorkflowExecution = {
+      workflowId: 'wf-1',
+      runId: 'wf-1:2026-09-16T10:00:00Z',
+      startedAt: '2026-09-16T10:00:00Z',
+      status: 'running',
+      nodeStates: [
+        {
+          nodeId: 'approve',
+          status: 'waiting',
+          editableText: 'A tidy draft.',
+          editedText: 'My words.',
+          feedback: [
+            { round: 1, decision: 'changes', comment: 'Too neat', at: '', edited: 'My words.' }
+          ]
+        },
+        { nodeId: 'draft', status: 'success' }
+      ]
+    }
+    saveWorkflowRun(exec)
+    const [loaded] = listWorkflowRuns('wf-1')
+    expect(loaded.nodeStates[0]).toMatchObject({
+      editableText: 'A tidy draft.',
+      editedText: 'My words.'
+    })
+    expect(loaded.nodeStates[0].feedback?.[0]).toMatchObject({ edited: 'My words.' })
+    expect(loaded.nodeStates[1]).not.toHaveProperty('editableText')
+  })
+
   it('round-trips step diagnostics, which outlive the window that made them', () => {
     // The timeline matters most for a run you come back to later, so it has to
     // survive the reload rather than living only in renderer memory.

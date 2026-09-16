@@ -786,7 +786,7 @@ export function registerAllMethods(): void {
     return tasks.map((task) => ({ ...task, description: '' }))
   })
 
-  registerMethod('workflow:resolveGate', ({ runId, nodeId, decision, comment }) => {
+  registerMethod('workflow:resolveGate', ({ runId, nodeId, decision, comment, edited }) => {
     // A sign-in wait ends when the connection signs in again, never by approval.
     if (decision === 'approve' && runWaitsForSignIn(runId, nodeId)) return { accepted: false }
     if (decision === 'changes' && !gateTakesChanges(runId, nodeId, comment ?? '')) {
@@ -796,7 +796,7 @@ export function registerAllMethods(): void {
     // window held the run to apply, which is why answering from a phone with
     // nothing open did nothing at all.
     log.info({ runId, nodeId, decision }, '[workflow] a gate was answered')
-    void applyGateDecision(runId, nodeId, decision, comment)
+    void applyGateDecision(runId, nodeId, decision, comment, edited)
     // Still broadcast: a window showing the pill needs to stop showing it.
     clientRegistry.broadcast(IPC.WORKFLOW_GATE_RESOLVED, { runId, nodeId, decision })
     return { accepted: true }

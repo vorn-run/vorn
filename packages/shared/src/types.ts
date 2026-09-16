@@ -1046,6 +1046,8 @@ export interface ApprovalConfig {
   view?: string
   /** Lets the reviewer send the work back with a comment. */
   feedback?: GateFeedbackConfig
+  /** The text the reviewer may rewrite, as a template; later steps read `{{steps.<gate>.text}}`. */
+  edit?: string
 }
 
 export interface GateFeedbackConfig {
@@ -1062,6 +1064,8 @@ export interface GateFeedbackEntry {
   decision: GateDecision
   comment: string
   at: string
+  /** The reviewer's rewrite at this answer, when they made one. */
+  edited?: string
 }
 
 /**
@@ -1250,6 +1254,10 @@ export interface NodeExecutionState {
   round?: number
   /** What the reviewer wrote at each answer that carried a comment. */
   feedback?: GateFeedbackEntry[]
+  /** An approval gate's editable text as the steps produced it, filled in when the gate opened. */
+  editableText?: string
+  /** The reviewer's rewrite of that text; absent until they save one. */
+  editedText?: string
   /**
    * What the engine did on this step's behalf, and when — what it launched,
    * whether the agent ever produced anything, and how the step ended.

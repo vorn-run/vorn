@@ -802,6 +802,7 @@ export function createApiShim(wsUrl: string) {
       nodeId: string
       decision: 'approve' | 'reject' | 'changes'
       comment?: string
+      edited?: string
     }) => rpc.invoke('workflow:resolveGate', params),
     retryWorkflowRun: (runId: string) => rpc.invoke('workflow:retryRun', { runId }),
     rerunWorkflowRun: (runId: string) => rpc.invoke('workflow:rerun', { runId }),
