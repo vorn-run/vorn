@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Eye, MessageSquare, RotateCcw, X } from 'lucide-react'
+import { Check, Eye, MessageSquare, Pencil, RotateCcw, X } from 'lucide-react'
 import { canRequestChanges, gateMaxRounds } from '@vornrun/shared/workflow-graph'
 import type {
   ApprovalConfig,
@@ -15,13 +15,15 @@ async function answerGate(
   runId: string,
   nodeId: string,
   decision: GateDecision,
-  comment?: string
+  comment?: string,
+  edited?: string
 ): Promise<boolean> {
   const result = await window.api.resolveWorkflowGate({
     runId,
     nodeId,
     decision,
-    ...(comment && { comment })
+    ...(comment && { comment }),
+    ...(edited && { edited })
   })
   if (result?.accepted !== false) return true
   toast.error(
@@ -61,12 +63,23 @@ interface ComposerProps {
   config?: ApprovalConfig
   nodes: WorkflowNode[]
   kind: 'changes' | 'reject'
+  /** A rewrite the reviewer made before answering; sent back with the work, discarded on a reject. */
+  edited?: string
   onDone: () => void
   large?: boolean
 }
 
 /** The comment a request for changes needs, or the note a rejection may carry. */
-export function GateComposer({ runId, state, config, nodes, kind, onDone, large }: ComposerProps) {
+export function GateComposer({
+  runId,
+  state,
+  config,
+  nodes,
+  kind,
+  edited,
+  onDone,
+  large
+}: ComposerProps) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const needsText = kind === 'changes'
@@ -78,7 +91,8 @@ export function GateComposer({ runId, state, config, nodes, kind, onDone, large 
     if (sending || (needsText && !text.trim())) return
     setSending(true)
     try {
-      if (await answerGate(runId, state.nodeId, kind, text.trim() || undefined)) onDone()
+      const carried = kind === 'changes' ? edited : undefined
+      if (await answerGate(runId, state.nodeId, kind, text.trim() || undefined, carried)) onDone()
     } finally {
       setSending(false)
     }
@@ -120,6 +134,7 @@ export function GateComposer({ runId, state, config, nodes, kind, onDone, large 
         ) : (
           'Ends the run. A note is kept as its reason.'
         )}
+        {edited && (needsText ? ' Your edit goes back with it.' : ' Your edit is discarded.')}
       </div>
       <div className="flex items-center justify-end gap-1.5">
         <button
@@ -147,6 +162,81 @@ export function GateComposer({ runId, state, config, nodes, kind, onDone, large 
   )
 }
 
+/** The gate's text, for the reviewer to rewrite before they answer. */
+export function GateEditor({
+  state,
+  onSave,
+  onCancel,
+  large
+}: {
+  state: NodeExecutionState
+  onSave: (edited: string) => void
+  onCancel: () => void
+  large?: boolean
+}) {
+  const original = state.editableText ?? ''
+  const [text, setText] = useState(state.editedText ?? original)
+  const size = large ? 'px-3.5 py-2 text-[12.5px]' : 'px-2 py-1 text-[11px]'
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0
+
+  return (
+    <div className="flex flex-col gap-2">
+      <textarea
+        id={`gate-edit-${state.nodeId}`}
+        aria-label="The text to approve"
+        autoFocus
+        rows={8}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.stopPropagation()
+            onCancel()
+          } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            onSave(text)
+          }
+        }}
+        className="w-full px-2.5 py-2 bg-white/[0.03] border border-white/[0.2] rounded-md
+                   text-[12.5px] leading-[1.5] text-gray-200 placeholder:text-gray-600
+                   focus:outline-none resize-none"
+      />
+      <div className="flex items-center gap-2 text-[11px] leading-[1.45] text-ink-faint">
+        <span>
+          {words} {words === 1 ? 'word' : 'words'}
+        </span>
+        {text !== original && <span className="text-ink-secondary">Edited</span>}
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setText(original)}
+          disabled={text === original}
+          className="hover:text-ink-secondary transition-colors disabled:opacity-40 disabled:pointer-events-none"
+        >
+          Revert
+        </button>
+      </div>
+      <div className="flex items-center justify-end gap-1.5">
+        <button
+          type="button"
+          onClick={onCancel}
+          className={`${size} text-ink-faint hover:text-ink-secondary transition-colors`}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => onSave(text)}
+          className={`flex items-center gap-1 ${size} ${GATE_NEUTRAL}`}
+        >
+          <Pencil size={large ? 13 : 11} strokeWidth={1.75} />
+          Save
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface Props {
   runId: string
   state: NodeExecutionState
@@ -157,7 +247,25 @@ interface Props {
 
 /** Open review, Request changes, Reject and Approve, in the order a reviewer reaches for them. */
 export function GateActions({ runId, state, config, nodes, onOpenReview }: Props) {
-  const [composing, setComposing] = useState<'changes' | 'reject' | null>(null)
+  const [composing, setComposing] = useState<'changes' | 'reject' | 'edit' | null>(null)
+  // Kept until the reviewer answers: approving sends it, sending the work back
+  // carries it, rejecting drops it with the run.
+  const [edited, setEdited] = useState<string | undefined>(undefined)
+
+  if (composing === 'edit') {
+    return (
+      <GateEditor
+        // The gate clears its own editedText when it opens, so reopening the editor
+        // has to be handed the rewrite that has not been sent yet.
+        state={{ ...state, ...(edited !== undefined && { editedText: edited }) }}
+        onSave={(text) => {
+          setEdited(text.trim() === (state.editableText ?? '').trim() ? undefined : text)
+          setComposing(null)
+        }}
+        onCancel={() => setComposing(null)}
+      />
+    )
+  }
 
   if (composing) {
     return (
@@ -167,6 +275,7 @@ export function GateActions({ runId, state, config, nodes, onOpenReview }: Props
         config={config}
         nodes={nodes}
         kind={composing}
+        edited={edited}
         onDone={() => setComposing(null)}
       />
     )
@@ -174,6 +283,16 @@ export function GateActions({ runId, state, config, nodes, onOpenReview }: Props
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
+      {state.editableText !== undefined && (
+        <button
+          type="button"
+          onClick={() => setComposing('edit')}
+          className={`flex items-center gap-1 px-2 py-1 text-[11px] ${GATE_NEUTRAL}`}
+        >
+          <Pencil size={11} strokeWidth={1.75} />
+          {edited ? 'Edited' : 'Edit'}
+        </button>
+      )}
       {state.viewToken && onOpenReview && (
         <button
           type="button"
@@ -205,7 +324,7 @@ export function GateActions({ runId, state, config, nodes, onOpenReview }: Props
       </button>
       <button
         type="button"
-        onClick={() => void answerGate(runId, state.nodeId, 'approve')}
+        onClick={() => void answerGate(runId, state.nodeId, 'approve', undefined, edited)}
         className={`flex items-center gap-1 px-2 py-1 text-[11px] ${GATE_APPROVE}`}
       >
         <Check size={11} strokeWidth={2.5} />

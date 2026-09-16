@@ -101,6 +101,30 @@ describe('ApprovalConfigForm', () => {
     })
   })
 
+  describe('the text a reviewer may rewrite', () => {
+    it('names the variable later steps read it through', () => {
+      const { container } = render(
+        <ApprovalConfigForm config={{}} onChange={vi.fn()} slug="approve" />
+      )
+      expect(container.textContent).toContain('Editable text')
+      expect(container.textContent).toContain('{{steps.approve.text}}')
+    })
+
+    it('keeps the template, and clears the setting when it is emptied', () => {
+      const onChange = vi.fn()
+      const { container, rerender } = render(<ApprovalConfigForm config={{}} onChange={onChange} />)
+      const field = container.querySelectorAll('textarea')[1]
+      fireEvent.change(field, { target: { value: '{{steps.draft.output}}' } })
+      expect(onChange).toHaveBeenCalledWith({ edit: '{{steps.draft.output}}' })
+
+      rerender(
+        <ApprovalConfigForm config={{ edit: '{{steps.draft.output}}' }} onChange={onChange} />
+      )
+      fireEvent.change(container.querySelectorAll('textarea')[1], { target: { value: '' } })
+      expect(onChange).toHaveBeenLastCalledWith({ edit: undefined })
+    })
+  })
+
   it('rejects zero/negative timeout input', () => {
     const onChange = vi.fn()
     const { container } = render(<ApprovalConfigForm config={{}} onChange={onChange} />)

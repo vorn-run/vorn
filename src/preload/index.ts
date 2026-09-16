@@ -918,6 +918,7 @@ const api = {
     nodeId: string
     decision: GateDecision
     comment?: string
+    edited?: string
   }): Promise<{ accepted: boolean }> => ipcRenderer.invoke(IPC.WORKFLOW_RESOLVE_GATE, params),
   retryWorkflowRun: (runId: string): Promise<WorkflowExecution | null> =>
     ipcRenderer.invoke(IPC.WORKFLOW_RETRY_RUN, { runId }),

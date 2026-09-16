@@ -624,6 +624,9 @@ async function executeNode(
     const message = config.message
       ? resolveTemplateVars(config.message, context, stepOutputs).trim() || undefined
       : undefined
+    const editableText = config.edit?.trim()
+      ? resolveTemplateVars(config.edit, context, stepOutputs)
+      : undefined
     const page = config.view?.trim()
       ? publishGateView(
           getDataDir(),
@@ -640,6 +643,10 @@ async function executeNode(
       startedAt: new Date().toISOString(),
       round,
       message,
+      editableText,
+      // A rewrite from an earlier round edited text the redone steps have since
+      // replaced, so it is dropped here; the rounds keep it in `feedback`.
+      editedText: undefined,
       viewToken: page && 'token' in page ? page.token : undefined,
       diagnostics: page && 'error' in page ? page.error : undefined
     })
@@ -1501,7 +1508,8 @@ export async function applyGateDecision(
   runId: string,
   nodeId: string,
   decision: GateDecision,
-  comment?: string
+  comment?: string,
+  edited?: string
 ): Promise<void> {
   const execution = activeRuns.get(runId)?.execution ?? runById(runId)
   if (!execution) return
@@ -1515,9 +1523,9 @@ export async function applyGateDecision(
     publishRun(execution)
     return
   }
-  if (decision === 'approve') await approveWorkflowGate(execution, nodeId, comment)
+  if (decision === 'approve') await approveWorkflowGate(execution, nodeId, comment, edited)
   else if (decision === 'reject') await rejectWorkflowGate(execution, nodeId, { note: comment })
-  else await requestGateChanges(execution, nodeId, comment ?? '')
+  else await requestGateChanges(execution, nodeId, comment ?? '', edited)
 }
 
 /** The file of a gate's review page, when the token is this round's and the gate still asks. */
@@ -2037,21 +2045,24 @@ function resolveWaitingGate(
   return { workflow }
 }
 
-/** The gate's comments with this answer's added, when it carried one. */
+/** The gate's comments with this answer's added, when it carried a comment or a rewrite. */
 function withFeedback(
   execution: WorkflowExecution,
   nodeId: string,
   decision: GateDecision,
-  comment: string | undefined
+  comment: string | undefined,
+  edited?: string
 ): Pick<NodeExecutionState, 'feedback'> {
   const state = execution.nodeStates.find((s) => s.nodeId === nodeId)
   const text = comment?.trim()
-  if (!text) return { feedback: state?.feedback }
+  const rewrite = edited?.trim()
+  if (!text && !rewrite) return { feedback: state?.feedback }
   const entry: GateFeedbackEntry = {
     round: state?.round ?? 1,
     decision,
-    comment: text,
-    at: new Date().toISOString()
+    comment: text ?? '',
+    at: new Date().toISOString(),
+    ...(rewrite && { edited: rewrite })
   }
   return { feedback: [...(state?.feedback ?? []), entry] }
 }
@@ -2060,18 +2071,21 @@ function withFeedback(
 export async function approveWorkflowGate(
   execution: WorkflowExecution,
   nodeId: string,
-  comment?: string
+  comment?: string,
+  edited?: string
 ): Promise<WorkflowExecution> {
   const resolved = resolveWaitingGate(execution, nodeId, 'approve')
   if (!resolved) return execution
   const { workflow } = resolved
 
   const now = new Date().toISOString()
+  const rewrite = edited?.trim()
   updateNodeState(execution, nodeId, {
     status: 'success',
     completedAt: now,
     approvedAt: now,
-    ...withFeedback(execution, nodeId, 'approve', comment)
+    ...(rewrite && { editedText: rewrite }),
+    ...withFeedback(execution, nodeId, 'approve', comment, edited)
   })
   persistExecution(execution)
 
@@ -2160,7 +2174,8 @@ export function gateTakesChanges(runId: string, nodeId: string, comment: string)
 export async function requestGateChanges(
   execution: WorkflowExecution,
   nodeId: string,
-  comment: string
+  comment: string,
+  edited?: string
 ): Promise<WorkflowExecution> {
   const plan = changesPlan(execution, nodeId, comment)
   if ('refused' in plan) {
@@ -2172,12 +2187,15 @@ export async function requestGateChanges(
   const { workflow } = resolved
 
   const round = (execution.nodeStates.find((s) => s.nodeId === nodeId)?.round ?? 1) + 1
-  const { feedback } = withFeedback(execution, nodeId, 'changes', comment)
+  const { feedback } = withFeedback(execution, nodeId, 'changes', comment, edited)
+  const rewrite = edited?.trim()
   for (const state of execution.nodeStates) {
     if (plan.reset.has(state.nodeId))
       updateNodeState(execution, state.nodeId, blankPassState(state))
   }
-  updateNodeState(execution, nodeId, { round, feedback })
+  // The rewrite is what the redone steps start from: they read {{steps.<gate>.text}},
+  // which prefers it, and the gate re-resolves the original when it asks again.
+  updateNodeState(execution, nodeId, { round, feedback, ...(rewrite && { editedText: rewrite }) })
   persistExecution(execution)
   log.info(
     `[workflow] run ${execution.runId}: gate ${nodeId} sent back to ${plan.from}, round ${round}`

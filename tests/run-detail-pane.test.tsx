@@ -307,6 +307,102 @@ describe('RunDetailPane', () => {
       fireEvent.keyDown(document, { key: 'Enter', metaKey: true })
       expect(resolveWorkflowGate).not.toHaveBeenCalled()
     })
+
+    it('offers no edit on a gate that names no editable text', () => {
+      renderPane(gateRun, gateNodes)
+      expect(screen.queryByRole('button', { name: /^Edit$/ })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('with a gate offering editable text', () => {
+    const editNodes = [
+      ...NODES,
+      makeNode('gate', 'Review', 'approval', {
+        message: 'Post this: hello',
+        edit: '{{steps.n1.output}}'
+      })
+    ]
+    const editRun = makeRun({
+      status: 'running',
+      completedAt: undefined,
+      nodeStates: [
+        { nodeId: 't', status: 'success' },
+        {
+          nodeId: 'gate',
+          status: 'waiting',
+          message: 'Post this: hello',
+          editableText: 'A tidy draft.'
+        }
+      ]
+    })
+
+    const rewrite = (text: string): void => {
+      fireEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+      fireEvent.change(screen.getByLabelText('The text to approve'), { target: { value: text } })
+      fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
+    }
+
+    it('opens the editor on the text the steps produced', () => {
+      renderPane(editRun, editNodes)
+      fireEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+      expect((screen.getByLabelText('The text to approve') as HTMLTextAreaElement).value).toBe(
+        'A tidy draft.'
+      )
+    })
+
+    it('approves with the rewrite once it is saved', () => {
+      renderPane(editRun, editNodes)
+      rewrite('My words.')
+      fireEvent.click(screen.getByRole('button', { name: /Approve & continue/ }))
+      expect(resolveWorkflowGate).toHaveBeenCalledWith({
+        runId: editRun.runId,
+        nodeId: 'gate',
+        decision: 'approve',
+        edited: 'My words.'
+      })
+    })
+
+    it('sends the rewrite with the keyboard approval too', () => {
+      renderPane(editRun, editNodes)
+      rewrite('My words.')
+      fireEvent.keyDown(document, { key: 'Enter', metaKey: true })
+      expect(resolveWorkflowGate).toHaveBeenCalledWith({
+        runId: editRun.runId,
+        nodeId: 'gate',
+        decision: 'approve',
+        edited: 'My words.'
+      })
+    })
+
+    it('keeps R from rejecting while the text is being edited', () => {
+      renderPane(editRun, editNodes)
+      fireEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+      fireEvent.keyDown(document, { key: 'r' })
+      expect(resolveWorkflowGate).not.toHaveBeenCalled()
+    })
+
+    it('answers as it stood when the editor is cancelled', () => {
+      renderPane(editRun, editNodes)
+      fireEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+      fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }))
+      fireEvent.click(screen.getByRole('button', { name: /Approve & continue/ }))
+      expect(resolveWorkflowGate).toHaveBeenCalledWith({
+        runId: editRun.runId,
+        nodeId: 'gate',
+        decision: 'approve'
+      })
+    })
+
+    it('treats text put back as it was as no rewrite at all', () => {
+      renderPane(editRun, editNodes)
+      rewrite('A tidy draft.')
+      fireEvent.click(screen.getByRole('button', { name: /Approve & continue/ }))
+      expect(resolveWorkflowGate).toHaveBeenCalledWith({
+        runId: editRun.runId,
+        nodeId: 'gate',
+        decision: 'approve'
+      })
+    })
   })
 
   it('disables "Open workflow" when the workflow is gone', () => {

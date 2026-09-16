@@ -64,6 +64,26 @@ export function ApprovalConfigForm({
 
       <div>
         <label className={LABEL}>
+          Editable text <span className="text-gray-600">(optional)</span>
+        </label>
+        <VariableAutocomplete
+          value={config.edit || ''}
+          onChange={(edit) => onChange({ ...config, edit: edit || undefined })}
+          placeholder="{{steps.draft.output}}"
+          rows={1}
+          stepGroups={stepGroups}
+          contextVars={inputVars}
+          mono
+        />
+        <div className={HELP}>
+          The reviewer may rewrite this before approving. Later steps read{' '}
+          <code className="font-mono text-gray-400">{`{{steps.${slug || 'this_gate'}.text}}`}</code>
+          , which is the rewrite when there is one and the original otherwise.
+        </div>
+      </div>
+
+      <div>
+        <label className={LABEL}>
           Review page <span className="text-gray-600">(optional)</span>
         </label>
         <VariableAutocomplete

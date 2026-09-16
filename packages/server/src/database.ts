@@ -475,6 +475,8 @@ function createSchema(): void {
       round INTEGER,
       feedback TEXT,
       rejected_at TEXT,
+      editable_text TEXT,
+      edited_text TEXT,
       FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
     );
 
@@ -1181,6 +1183,24 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 23 (what an approval gate asked and heard)')
   }
+
+  if (version < 24) {
+    d.transaction(() => {
+      const nodeCols = d.prepare('PRAGMA table_info(workflow_run_nodes)').all() as Array<{
+        name: string
+      }>
+      for (const [column, type] of GATE_EDIT_COLUMNS) {
+        if (!nodeCols.some((c) => c.name === column)) {
+          d.exec(`ALTER TABLE workflow_run_nodes ADD COLUMN ${column} ${type}`)
+        }
+      }
+
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '24')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 24 (the text a reviewer edited at a gate)')
+  }
 }
 
 /** What a gate asked, its review page token, which round it is on, what the reviewer wrote, and when a person rejected it. */
@@ -1190,6 +1210,12 @@ const GATE_COLUMNS = [
   ['round', 'INTEGER'],
   ['feedback', 'TEXT'],
   ['rejected_at', 'TEXT']
+] as const
+
+/** A gate's editable text as the steps produced it, and the reviewer's rewrite of it. */
+const GATE_EDIT_COLUMNS = [
+  ['editable_text', 'TEXT'],
+  ['edited_text', 'TEXT']
 ] as const
 
 /** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */
@@ -3660,8 +3686,8 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
     d.prepare('DELETE FROM workflow_run_nodes WHERE run_id = ?').run(runId)
 
     const insertNode = d.prepare(
-      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration, worktree_path, worktree_name, worktree_origin, waiting_for, message, view_token, round, feedback, rejected_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration, worktree_path, worktree_name, worktree_origin, waiting_for, message, view_token, round, feedback, rejected_at, editable_text, edited_text)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     for (const ns of execution.nodeStates) {
       insertNode.run(
@@ -3693,7 +3719,9 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
         ns.viewToken ?? null,
         ns.round ?? null,
         ns.feedback?.length ? JSON.stringify(ns.feedback) : null,
-        ns.rejectedAt ?? null
+        ns.rejectedAt ?? null,
+        ns.editableText ?? null,
+        ns.editedText ?? null
       )
     }
 
@@ -3771,6 +3799,8 @@ type WorkflowRunNodeRow = {
   round: number | null
   feedback: string | null
   rejected_at: string | null
+  editable_text: string | null
+  edited_text: string | null
 }
 
 function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
@@ -3809,7 +3839,9 @@ function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
     ...(n.view_token != null && { viewToken: n.view_token }),
     ...(n.round != null && { round: n.round }),
     ...(feedback && { feedback }),
-    ...(n.rejected_at != null && { rejectedAt: n.rejected_at })
+    ...(n.rejected_at != null && { rejectedAt: n.rejected_at }),
+    ...(n.editable_text != null && { editableText: n.editable_text }),
+    ...(n.edited_text != null && { editedText: n.edited_text })
   }
 }
 

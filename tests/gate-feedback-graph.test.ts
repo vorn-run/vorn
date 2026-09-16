@@ -76,6 +76,7 @@ describe('what a gate tells the steps it sends back', () => {
       nodes
     )
     expect(outputs.approve).toEqual({
+      text: '',
       feedback: 'Shorter',
       feedbackAll: 'Round 1: Too neat\nRound 2: Shorter',
       round: 3
@@ -84,5 +85,17 @@ describe('what a gate tells the steps it sends back', () => {
 
   it('leaves a gate that has not asked yet out of the outputs', () => {
     expect(buildStepOutputsMap(run({ nodeId: 'gate', status: 'pending' }), nodes)).toEqual({})
+  })
+
+  it("reads the reviewer's rewrite as the gate's text, and the original until there is one", () => {
+    const asked = { nodeId: 'gate', status: 'waiting' as const, round: 1 }
+    const original = buildStepOutputsMap(run({ ...asked, editableText: 'A tidy draft.' }), nodes)
+    expect(original.approve).toMatchObject({ text: 'A tidy draft.' })
+
+    const rewritten = buildStepOutputsMap(
+      run({ ...asked, editableText: 'A tidy draft.', editedText: 'My words.' }),
+      nodes
+    )
+    expect(rewritten.approve).toMatchObject({ text: 'My words.' })
   })
 })

@@ -571,6 +571,8 @@ export interface RequestMethods {
       nodeId: string
       decision: 'approve' | 'reject' | 'changes'
       comment?: string
+      /** The reviewer's rewrite of the gate's editable text, when they made one. */
+      edited?: string
     }
     result: { accepted: boolean }
   }

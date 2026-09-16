@@ -169,11 +169,12 @@ export function buildStepOutputsMap(
   return outputs
 }
 
-/** A gate's latest comment, every comment, and which time it asked; undefined before it first asks. */
+/** A gate's text, its latest comment, every comment, and which time it asked; undefined before it first asks. */
 function gateOutputs(state: NodeExecutionState): Record<string, unknown> | undefined {
   if (state.round === undefined && !state.feedback?.length) return undefined
   const entries = state.feedback ?? []
   return {
+    text: state.editedText ?? state.editableText ?? '',
     feedback: entries.length > 0 ? entries[entries.length - 1].comment : '',
     feedbackAll: entries.map((e) => `Round ${e.round}: ${e.comment}`).join('\n'),
     round: state.round ?? 1

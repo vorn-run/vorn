@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../../stores'
 import { toast } from '../Toast'
-import { Check, X, Inbox, Play, RotateCcw, ExternalLink, Eye, MessageSquare } from 'lucide-react'
+import {
+  Check,
+  X,
+  Inbox,
+  Play,
+  RotateCcw,
+  ExternalLink,
+  Eye,
+  MessageSquare,
+  Pencil
+} from 'lucide-react'
 import { formatRelativeTime, formatRunDuration } from '../../lib/format-time'
 import {
   describeRun,
@@ -21,7 +31,7 @@ import { RunIcon } from './RunIcon'
 import { workflowRunId, type ApprovalConfig, type TaskConfig } from '../../../shared/types'
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
 import { GATE_APPROVE, GATE_NEUTRAL, GATE_REJECT } from '../../lib/gate-affordance'
-import { GateAsk, GateComposer } from './GateActions'
+import { GateAsk, GateComposer, GateEditor } from './GateActions'
 import { GateReviewModal } from './GateReviewModal'
 
 export function RunDetailEmptyState() {
@@ -74,8 +84,12 @@ export function RunDetailPane({
   const openGate = `${run.runId}:${waitingStep?.nodeId ?? ''}`
   const [composingFor, setComposingFor] = useState<string | null>(null)
   const [reviewingFor, setReviewingFor] = useState<string | null>(null)
+  const [editingFor, setEditingFor] = useState<string | null>(null)
+  const [rewrite, setRewrite] = useState<{ gate: string; text: string } | null>(null)
   const composing = composingFor === openGate
   const reviewing = reviewingFor === openGate
+  const editing = editingFor === openGate
+  const edited = rewrite?.gate === openGate ? rewrite.text : undefined
   const setComposing = (on: boolean): void => setComposingFor(on ? openGate : null)
   const setReviewing = (on: boolean): void => setReviewingFor(on ? openGate : null)
   const verdict = run.status === 'success' ? runVerdict(run) : undefined
@@ -94,7 +108,9 @@ export function RunDetailPane({
   // `shortcutsEnabled` lets the view mute them behind a modal, and `repeat` is
   // ignored so holding a key can't reject the run that auto-selects next.
   useEffect(() => {
-    if (!waitingStep || signInWait || !shortcutsEnabled || composing || reviewing) return undefined
+    if (!waitingStep || signInWait || !shortcutsEnabled || composing || reviewing || editing) {
+      return undefined
+    }
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.repeat) return
       const target = e.target as HTMLElement | null
@@ -106,7 +122,8 @@ export function RunDetailPane({
         void window.api.resolveWorkflowGate({
           runId: run.runId,
           nodeId: waitingStep.nodeId,
-          decision: 'approve'
+          decision: 'approve',
+          ...(edited && { edited })
         })
       } else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'r') {
         e.preventDefault()
@@ -119,7 +136,7 @@ export function RunDetailPane({
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [run, waitingStep, signInWait, shortcutsEnabled, composing, reviewing])
+  }, [run, waitingStep, signInWait, shortcutsEnabled, composing, reviewing, editing, edited])
 
   return (
     <div className="h-full flex flex-col min-h-0 overflow-y-auto">
@@ -181,19 +198,43 @@ export function RunDetailPane({
           {gate && waitingStep && (
             <>
               <GateAsk state={waitingStep} config={gateConfig} />
-              {composing ? (
+              {editing ? (
+                <GateEditor
+                  state={{ ...waitingStep, ...(edited !== undefined && { editedText: edited }) }}
+                  onSave={(text) => {
+                    const original = waitingStep.editableText ?? ''
+                    setRewrite(text.trim() === original.trim() ? null : { gate: openGate, text })
+                    setEditingFor(null)
+                  }}
+                  onCancel={() => setEditingFor(null)}
+                  large
+                />
+              ) : composing ? (
                 <GateComposer
                   runId={run.runId}
                   state={waitingStep}
                   config={gateConfig}
                   nodes={nodes}
                   kind="changes"
+                  edited={edited}
                   onDone={() => setComposing(false)}
                   large
                 />
               ) : (
-                (waitingStep.viewToken || canRequestChanges(gateConfig, waitingStep)) && (
+                (waitingStep.viewToken ||
+                  waitingStep.editableText !== undefined ||
+                  canRequestChanges(gateConfig, waitingStep)) && (
                   <div className="flex gap-1.5">
+                    {waitingStep.editableText !== undefined && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingFor(openGate)}
+                        className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-[12.5px] ${GATE_NEUTRAL}`}
+                      >
+                        <Pencil size={13} strokeWidth={1.75} />
+                        {edited ? 'Edited' : 'Edit'}
+                      </button>
+                    )}
                     {waitingStep.viewToken && (
                       <button
                         type="button"
@@ -240,7 +281,8 @@ export function RunDetailPane({
                 void window.api.resolveWorkflowGate({
                   runId: run.runId,
                   nodeId: waitingStep.nodeId,
-                  decision: 'approve'
+                  decision: 'approve',
+                  ...(edited && { edited })
                 })
               }
               className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_APPROVE}`}
