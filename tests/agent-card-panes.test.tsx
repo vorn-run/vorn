@@ -74,7 +74,7 @@ function seed(ids: string[]): void {
       selectedTerminalId: null,
       renamingTerminalId: null,
       minimizedTerminals: new Set<string>(),
-      filesPanes: new Set(),
+      filesPanes: new Map(),
       editorPanes: new Map(),
       browserPanes: new Map(),
       devicePanes: new Map(),

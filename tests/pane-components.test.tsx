@@ -94,7 +94,7 @@ function seed(ids = ['t1']): void {
   act(() => {
     useAppStore.setState({
       terminals,
-      filesPanes: new Set(),
+      filesPanes: new Map(),
       editorPanes: new Map(),
       browserPanes: new Map(),
       terminalsPanes: new Map(),
@@ -119,8 +119,15 @@ beforeEach(() => {
   seed()
 })
 
+const open = (path: string, pin = false): void =>
+  act(() => useAppStore.getState().openFileTab('t1', path, { pin }))
+const filesPane = () => useAppStore.getState().filesPanes.get('t1')
+const textarea = (name: string): HTMLTextAreaElement =>
+  screen.getByLabelText(`Edit ${name}`) as HTMLTextAreaElement
+
 describe('FilesCard', () => {
-  it('lists the owner session’s worktree and opens a clicked file in its editor', async () => {
+  it('lists the owner session’s worktree and opens a clicked file as a tab', async () => {
+    act(() => useAppStore.getState().openFilesPane('t1'))
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
 
@@ -129,7 +136,11 @@ describe('FilesCard', () => {
     expect(mockListDir).toHaveBeenCalledWith('/repo', undefined)
 
     fireEvent.click(screen.getByText('a.ts'))
-    expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/a.ts')
+    expect(filesPane()).toMatchObject({ tabs: ['/repo/a.ts'], active: '/repo/a.ts' })
+    expect(await screen.findByRole('tab', { name: /a\.ts/ })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
   })
 
   it('prefers the worktree path when the session has one', async () => {
@@ -140,38 +151,135 @@ describe('FilesCard', () => {
       status: 'idle',
       lastOutputTimestamp: 1
     })
-    act(() => useAppStore.setState({ terminals }))
+    act(() => {
+      useAppStore.setState({ terminals })
+      useAppStore.getState().openFilesPane('t1')
+    })
 
     render(<FilesCard sessionId="t1" />)
     await waitFor(() => expect(mockListDir).toHaveBeenCalledWith('/repo-wt', undefined))
   })
 
-  it('confirms before replacing a dirty editor, and keeps the old file on cancel', async () => {
-    act(() => useAppStore.getState().openEditorPane('t1', '/repo/a.ts'))
-    dirtyRefFor('t1').current = true
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-
+  it('reuses one italic preview tab for single clicks, and keeps a double-clicked one', async () => {
+    act(() => useAppStore.getState().openFilesPane('t1'))
     render(<FilesCard sessionId="t1" />)
-    await screen.findByText('b.ts')
-    fireEvent.click(screen.getByText('b.ts'))
+    const rowA = (await screen.findByText('a.ts')).closest('[role="button"]') as HTMLElement
+    const rowB = screen.getByText('b.ts').closest('[role="button"]') as HTMLElement
 
-    expect(confirm).toHaveBeenCalled()
-    // Cancelling must not throw the unsaved buffer away.
-    expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/a.ts')
+    fireEvent.click(rowA)
+    fireEvent.click(rowB)
+    expect(filesPane()?.tabs).toEqual(['/repo/b.ts'])
+    expect(screen.getByRole('tab', { name: /b\.ts/ }).querySelector('.italic')).not.toBeNull()
+
+    fireEvent.doubleClick(rowB)
+    fireEvent.click(rowA)
+    expect(filesPane()?.tabs).toEqual(['/repo/b.ts', '/repo/a.ts'])
+    expect(screen.getByRole('tab', { name: /b\.ts/ }).querySelector('.italic')).toBeNull()
   })
 
-  it('closes its own pane without touching the editor', async () => {
+  it('keeps a tab that has been typed in, and marks it unsaved', async () => {
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    open('/repo/a.ts')
+    render(<FilesCard sessionId="t1" />)
+    await waitFor(() => expect(textarea('a.ts').value).toBe('hello'))
+
+    fireEvent.change(textarea('a.ts'), { target: { value: 'hello there' } })
+    await waitFor(() => expect(screen.getByTestId('tab-unsaved')).toBeInTheDocument())
+    expect(filesPane()?.preview).toBeNull()
+
+    fireEvent.click(screen.getByText('b.ts'))
+    expect(filesPane()?.tabs).toEqual(['/repo/a.ts', '/repo/b.ts'])
+  })
+
+  it('switches tabs without asking, and the buffer is still there on the way back', async () => {
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    open('/repo/a.ts', true)
+    open('/repo/b.ts', true)
+    const confirm = vi.spyOn(window, 'confirm')
+    render(<FilesCard sessionId="t1" />)
+    await waitFor(() => expect(textarea('b.ts').value).toBe('hello'))
+    fireEvent.change(textarea('b.ts'), { target: { value: 'half a thought' } })
+
+    fireEvent.click(screen.getByRole('tab', { name: /a\.ts/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /b\.ts/ }))
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(textarea('b.ts').value).toBe('half a thought')
+  })
+
+  it('asks before closing an edited tab, and keeps it on cancel', async () => {
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    open('/repo/a.ts', true)
+    render(<FilesCard sessionId="t1" />)
+    await waitFor(() => expect(textarea('a.ts').value).toBe('hello'))
+    fireEvent.change(textarea('a.ts'), { target: { value: 'edited' } })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close a.ts' }))
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(filesPane()?.tabs).toEqual(['/repo/a.ts'])
+
+    confirm.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Close a.ts' }))
+    expect(filesPane()?.tabs).toEqual([])
+  })
+
+  it('asks once before closing a pane that holds unsaved tabs', async () => {
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    open('/repo/a.ts', true)
+    open('/repo/b.ts', true)
+    render(<FilesCard sessionId="t1" />)
+    await waitFor(() => expect(textarea('a.ts').value).toBe('hello'))
+    fireEvent.change(textarea('a.ts'), { target: { value: 'one' } })
+    fireEvent.change(textarea('b.ts'), { target: { value: 'two' } })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    fireEvent.click(screen.getByRole('button', { name: /Close Files/ }))
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(useAppStore.getState().filesPanes.has('t1')).toBe(true)
+
+    confirm.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: /Close Files/ }))
+    expect(useAppStore.getState().filesPanes.has('t1')).toBe(false)
+  })
+
+  it('shows and hides the tree from the strip, and remembers it for the session', async () => {
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    open('/repo/a.ts')
+    render(<FilesCard sessionId="t1" />)
+    await screen.findByText('b.ts')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide file tree' }))
+    expect(screen.getByTestId('files-tree-column')).toHaveClass('hidden')
+    expect(filesPane()?.treeVisible).toBe(false)
+    expect(JSON.parse(localStorage.getItem('vorn:panes') as string).files.t1.treeVisible).toBe(
+      false
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show file tree' }))
+    expect(screen.getByTestId('files-tree-column')).not.toHaveClass('hidden')
+  })
+
+  it('shows the tree whatever the toggle says while no file is open', async () => {
     act(() => {
       useAppStore.getState().openFilesPane('t1')
-      useAppStore.getState().openEditorPane('t1', '/repo/a.ts')
+      useAppStore.getState().setFileTreeVisible('t1', false)
     })
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
 
-    fireEvent.click(screen.getByRole('button', { name: /Close Files/ }))
-    expect(useAppStore.getState().filesPanes.has('t1')).toBe(false)
-    // The panes are independent — the open file survives.
-    expect(useAppStore.getState().editorPanes.has('t1')).toBe(true)
+    expect(screen.getByTestId('files-tree-column')).not.toHaveClass('hidden')
+    expect(screen.getByTestId('files-pane-header')).toHaveTextContent('Files')
+  })
+
+  it('tells two open files with one name apart by their folder', async () => {
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    open('/repo/src/index.ts', true)
+    open('/repo/tests/index.ts', true)
+    render(<FilesCard sessionId="t1" />)
+
+    expect(await screen.findByRole('tab', { name: /index\.ts src/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /index\.ts tests/ })).toBeInTheDocument()
   })
 
   it('renders nothing when its owner session is gone', () => {
@@ -180,89 +288,95 @@ describe('FilesCard', () => {
   })
 })
 
-describe('EditorCard', () => {
-  beforeEach(() => {
-    act(() => useAppStore.getState().openEditorPane('t1', '/repo/a.ts'))
-  })
-
-  it('titles the pane with the filename and loads its content', async () => {
-    render(<EditorCard sessionId="t1" />)
-    await waitFor(() =>
-      expect(mockReadFileContent).toHaveBeenCalledWith('/repo/a.ts', undefined, undefined)
-    )
-    // The filename lives in the header; the path strip below shows the rest, so
-    // the two must not duplicate it.
-    expect(screen.getAllByText('a.ts').length).toBeGreaterThan(0)
-  })
-
-  it('confirms before closing a dirty buffer and stays open on cancel', async () => {
-    render(<EditorCard sessionId="t1" />)
-    await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
-    dirtyRefFor('t1').current = true
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
-
-    fireEvent.click(screen.getByRole('button', { name: /Close a\.ts/ }))
-    expect(useAppStore.getState().editorPanes.has('t1')).toBe(true)
-  })
-
-  it('closes when the discard is confirmed', async () => {
-    render(<EditorCard sessionId="t1" />)
-    await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
-    dirtyRefFor('t1').current = true
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-
-    fireEvent.click(screen.getByRole('button', { name: /Close a\.ts/ }))
-    expect(useAppStore.getState().editorPanes.has('t1')).toBe(false)
-  })
-
-  it('renders nothing when no file is open', () => {
-    act(() => useAppStore.getState().closeEditorPane('t1'))
-    const { container } = render(<EditorCard sessionId="t1" />)
-    expect(container).toBeEmptyDOMElement()
-  })
-})
-
-describe('EditorCard pop-out', () => {
-  it('moves the open file out to a card of its own', async () => {
-    act(() => useAppStore.getState().openEditorPane('t1', '/repo/a.ts'))
-    render(<EditorCard sessionId="t1" />)
+describe('FilesCard pop-out', () => {
+  it('moves the tab in front out to a card of its own', async () => {
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    open('/repo/a.ts', true)
+    render(<FilesCard sessionId="t1" />)
     await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
 
     fireEvent.click(screen.getByRole('button', { name: /Open this file as its own card/ }))
 
-    // Out of the session's editor and into a card — not copied into both.
-    expect(useAppStore.getState().editorPanes.has('t1')).toBe(false)
+    // Out of the strip and into a card — not copied into both.
+    expect(filesPane()?.tabs).toEqual([])
     const cards = [...useAppStore.getState().editorPanes]
     expect(cards).toHaveLength(1)
     expect(cards[0][1]).toEqual({ filePath: '/repo/a.ts', sessionId: 't1' })
   })
 
   it('asks first when the buffer it would move has unsaved edits', async () => {
-    const { dirtyRefFor } = await import('../src/renderer/lib/editor-dirty')
-    act(() => useAppStore.getState().openEditorPane('t1', '/repo/a.ts'))
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    open('/repo/a.ts', true)
+    render(<FilesCard sessionId="t1" />)
+    await waitFor(() => expect(textarea('a.ts').value).toBe('hello'))
+    fireEvent.change(textarea('a.ts'), { target: { value: 'edited' } })
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
 
-    render(<EditorCard sessionId="t1" />)
-    await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
-    // After mount: the editor clears the flag as it loads, so a value set
-    // before render would be wiped before the click ever happened.
-    dirtyRefFor('t1').current = true
     fireEvent.click(screen.getByRole('button', { name: /Open this file as its own card/ }))
 
-    // The card mounts a fresh editor under its own id, so the buffer does not
-    // travel — declining has to leave everything where it was.
+    // The card mounts a fresh editor, so the buffer does not travel.
     expect(confirm).toHaveBeenCalled()
-    expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/a.ts')
-    confirm.mockRestore()
+    expect(filesPane()?.tabs).toEqual(['/repo/a.ts'])
+    expect(useAppStore.getState().editorPanes.size).toBe(0)
   })
 
-  it('maximizes from its header, which a card cannot do', async () => {
-    act(() => useAppStore.getState().openEditorPane('t1', '/repo/a.ts'))
-    render(<EditorCard sessionId="t1" />)
-    await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
+  it('offers no pop-out in the strip while no file is open', async () => {
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    render(<FilesCard sessionId="t1" />)
+    await screen.findByText('a.ts')
+    expect(screen.queryByRole('button', { name: /Open this file as its own card/ })).toBeNull()
+  })
+})
 
-    fireEvent.doubleClick(screen.getByTestId('editor-pane-header'))
-    expect(useAppStore.getState().maximizedPaneId).toBe('editor:t1')
+describe('EditorCard', () => {
+  let cardId = ''
+  beforeEach(() => {
+    act(() => {
+      cardId = useAppStore.getState().promoteFile('t1', '/repo/a.ts')
+    })
+    clearDirty(cardId)
+  })
+
+  it('loads its file and names it once, in the path strip that carries its controls', async () => {
+    render(<EditorCard sessionId="t1" paneKey={cardId} />)
+    await waitFor(() =>
+      expect(mockReadFileContent).toHaveBeenCalledWith('/repo/a.ts', undefined, undefined)
+    )
+    const header = await screen.findByTestId('editor-pane-header')
+    expect(header).toContainElement(screen.getByLabelText('Close a.ts'))
+    expect(screen.getAllByText('a.ts')).toHaveLength(1)
+  })
+
+  it('confirms before closing a dirty buffer and stays open on cancel', async () => {
+    render(<EditorCard sessionId="t1" paneKey={cardId} />)
+    await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
+    dirtyRefFor(cardId).current = true
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    fireEvent.click(screen.getByRole('button', { name: /Close a\.ts/ }))
+    expect(useAppStore.getState().editorPanes.has(cardId)).toBe(true)
+  })
+
+  it('closes when the discard is confirmed', async () => {
+    render(<EditorCard sessionId="t1" paneKey={cardId} />)
+    await waitFor(() => expect(mockReadFileContent).toHaveBeenCalled())
+    dirtyRefFor(cardId).current = true
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    fireEvent.click(screen.getByRole('button', { name: /Close a\.ts/ }))
+    expect(useAppStore.getState().editorPanes.has(cardId)).toBe(false)
+  })
+
+  it('offers no maximize, which only a pane inside a card has', async () => {
+    render(<EditorCard sessionId="t1" paneKey={cardId} />)
+    fireEvent.doubleClick(await screen.findByTestId('editor-pane-header'))
+    expect(useAppStore.getState().maximizedPaneId).toBeNull()
+  })
+
+  it('renders nothing when the card is gone', () => {
+    act(() => useAppStore.getState().closeEditorPane(cardId))
+    const { container } = render(<EditorCard sessionId="t1" paneKey={cardId} />)
+    expect(container).toBeEmptyDOMElement()
   })
 })
 
@@ -282,9 +396,7 @@ describe('PaneCard chrome', () => {
   it('fills its frame on both axes', async () => {
     // A pane fills a block-layout cell whatever it declares, so a missing axis
     // stays invisible until some frame is a flex row or column — and then the
-    // card settles at its content size with the rest of the stage empty. The
-    // tab strip found both: one axis for the pane column, the other for a
-    // popped-out card's body.
+    // card settles at its content size with the rest of the stage empty.
     act(() => useAppStore.getState().openFilesPane('t1'))
     const { container } = render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
@@ -300,29 +412,27 @@ describe('PaneCard chrome', () => {
     await screen.findByText('a.ts')
 
     // Revealed on hover, deliberately: a tree is hundreds of rows, and a
-    // control drawn at rest on each of them buries the filenames. The always-
-    // there control lives on the editor pane, for the file you have open.
+    // control drawn at rest on each of them buries the filenames.
     const popOut = screen.getByRole('button', { name: /Open a\.ts as its own card/ })
     // Both halves of the rule. Asserting only the reveal leaves `opacity-0`
-    // free to be dropped, which draws the arrow permanently on every one of
-    // hundreds of rows — the exact noise the hover exists to prevent.
+    // free to be dropped, which draws the arrow permanently on every row.
     expect(popOut.className).toContain('opacity-0')
     expect(popOut.className).toContain('group-hover:opacity-100')
 
     fireEvent.click(popOut)
-    const cards = [...useAppStore.getState().editorPanes].filter(([id]) => id !== 't1')
+    const cards = [...useAppStore.getState().editorPanes]
     expect(cards).toHaveLength(1)
     expect(cards[0][1]).toEqual({ filePath: '/repo/a.ts', sessionId: 't1' })
   })
 
-  it('pops a file out without disturbing what the session editor holds', async () => {
-    act(() => useAppStore.getState().openEditorPane('t1', '/repo/b.ts'))
+  it('pops a file out of the tree without disturbing the open tabs', async () => {
+    act(() => useAppStore.getState().openFilesPane('t1'))
+    open('/repo/b.ts')
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
 
     fireEvent.click(screen.getByRole('button', { name: /Open a\.ts as its own card/ }))
-    // Popping out is additive; only selecting a file displaces the editor.
-    expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/b.ts')
+    expect(filesPane()?.tabs).toEqual(['/repo/b.ts'])
   })
 
   it('opens a file from the keyboard as well as the pointer', async () => {
@@ -333,15 +443,15 @@ describe('PaneCard chrome', () => {
     const row = (await screen.findByText('a.ts')).closest('[role="button"]') as HTMLElement
 
     fireEvent.keyDown(row, { key: 'Enter' })
-    expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/a.ts')
+    expect(filesPane()?.active).toBe('/repo/a.ts')
 
-    act(() => useAppStore.getState().closeEditorPane('t1'))
+    act(() => useAppStore.getState().closeFileTab('t1', '/repo/a.ts'))
     fireEvent.keyDown(row, { key: ' ' })
-    expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/a.ts')
+    expect(filesPane()?.active).toBe('/repo/a.ts')
 
-    act(() => useAppStore.getState().closeEditorPane('t1'))
+    act(() => useAppStore.getState().closeFileTab('t1', '/repo/a.ts'))
     fireEvent.keyDown(row, { key: 'x' })
-    expect(useAppStore.getState().editorPanes.has('t1')).toBe(false)
+    expect(filesPane()?.tabs).toEqual([])
   })
 
   it('gives a directory row no pop-out', async () => {
@@ -354,28 +464,18 @@ describe('PaneCard chrome', () => {
     expect(screen.queryByRole('button', { name: /Open src as its own card/ })).toBeNull()
   })
 
-  it('keeps the tree pane controls out of its filter row', async () => {
+  it('seats the pane controls in the tab strip, and keeps them out of the filter row', async () => {
     // Sharing the row made the search field the panel's title bar: it spanned
     // the full width and the buttons read as part of the input.
     act(() => useAppStore.getState().openFilesPane('t1'))
     render(<FilesCard sessionId="t1" />)
     await screen.findByText('a.ts')
 
-    const filterRow = screen.getByTestId('files-pane-header')
-    expect(filterRow).toContainElement(screen.getByPlaceholderText('Filter files…'))
-    expect(filterRow).not.toContainElement(screen.getByLabelText('Maximize Files'))
-    expect(filterRow).not.toContainElement(screen.getByLabelText('Close Files'))
-  })
-
-  it('names the open file once, in the path strip that carries its controls', async () => {
-    // The strip already shows the path, icon and dirty dot; a header above it
-    // repeated the filename directly over itself.
-    act(() => useAppStore.getState().openEditorPane('t1', '/repo/a.ts'))
-    render(<EditorCard sessionId="t1" />)
-
-    const header = await screen.findByTestId('editor-pane-header')
-    expect(header).toContainElement(screen.getByLabelText('Maximize a.ts'))
-    expect(screen.getAllByText('a.ts')).toHaveLength(1)
+    const strip = screen.getByTestId('files-pane-header')
+    expect(strip).toContainElement(screen.getByLabelText('Maximize Files'))
+    expect(strip).toContainElement(screen.getByLabelText('Close Files'))
+    expect(strip).not.toContainElement(screen.getByPlaceholderText('Filter files…'))
+    expect(screen.queryByTestId('pane-header-files:t1')).toBeNull()
   })
 
   it('offers no minimize, because a minimized pane had nowhere to go', async () => {
@@ -396,9 +496,7 @@ describe('PaneCard drag and double-click', () => {
     render(<FilesCard sessionId="t1" onDragStart={onDragStart} />)
     await screen.findByText('a.ts')
 
-    // The title row carries drag and maximize, not the filter row below it —
-    // wiring both meant two drag handles and two paths to the same action.
-    fireEvent.pointerDown(screen.getByTestId('pane-header-files:t1'))
+    fireEvent.pointerDown(screen.getByTestId('files-pane-header'))
     expect(onDragStart).toHaveBeenCalledWith('files:t1', expect.anything())
   })
 
@@ -413,16 +511,22 @@ describe('PaneCard drag and double-click', () => {
     expect(container.querySelector('.card-drop-target')).toBeInTheDocument()
   })
 
-  it('toggles maximize on header double-click', async () => {
+  it('toggles maximize on a double-click of the strip, but not of a tab', async () => {
     act(() => useAppStore.getState().openFilesPane('t1'))
+    open('/repo/a.ts')
     render(<FilesCard sessionId="t1" />)
-    await screen.findByText('a.ts')
+    await screen.findByText('b.ts')
 
-    fireEvent.doubleClick(screen.getByTestId('pane-header-files:t1'))
+    fireEvent.doubleClick(screen.getByTestId('files-pane-header'))
     expect(useAppStore.getState().maximizedPaneId).toBe('files:t1')
 
-    fireEvent.doubleClick(screen.getByTestId('pane-header-files:t1'))
+    fireEvent.doubleClick(screen.getByTestId('files-pane-header'))
     expect(useAppStore.getState().maximizedPaneId).toBeNull()
+
+    // On a tab the gesture keeps the tab instead.
+    fireEvent.doubleClick(screen.getByRole('tab', { name: /a\.ts/ }))
+    expect(useAppStore.getState().maximizedPaneId).toBeNull()
+    expect(filesPane()?.preview).toBeNull()
   })
 })
 
@@ -453,7 +557,7 @@ describe('panes travel with their session into focus mode', () => {
   it("renders the session's tree and file beside the expanded terminal", async () => {
     act(() => {
       useAppStore.getState().openFilesPane('t1')
-      useAppStore.getState().openEditorPane('t1', '/repo/a.ts')
+      useAppStore.getState().openFileTab('t1', '/repo/a.ts')
     })
 
     render(<FocusedTerminal />)
@@ -470,7 +574,7 @@ describe('panes travel with their session into focus mode', () => {
     // gets its own stage — it is not a passenger on its owner's, which is what
     // made asking for one file hand back the whole workspace.
     act(() => {
-      useAppStore.getState().openEditorPane('t1', '/repo/own.ts')
+      useAppStore.getState().openFileTab('t1', '/repo/own.ts')
       useAppStore.getState().promoteFile('t1', '/repo/popped.ts')
     })
     render(<FocusedTerminal />)

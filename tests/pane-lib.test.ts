@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
 import {
   filesPaneId,
-  editorPaneId,
+  fileTabKey,
   browserPaneId,
   devicePaneId,
   terminalsPaneId,
@@ -21,7 +22,8 @@ import {
   dirtyRefFor,
   isEditorDirty,
   clearDirty,
-  confirmDiscard
+  confirmDiscard,
+  useDirtyVersion
 } from '../src/renderer/lib/editor-dirty'
 
 /**
@@ -32,9 +34,7 @@ import {
 describe('pane-id', () => {
   it('builds and parses child pane ids', () => {
     expect(filesPaneId('abc')).toBe('files:abc')
-    expect(editorPaneId('abc')).toBe('editor:abc')
     expect(parsePaneId('files:abc')).toEqual({ kind: 'files', sessionId: 'abc' })
-    expect(parsePaneId('editor:abc')).toEqual({ kind: 'editor', sessionId: 'abc' })
     expect(browserPaneId('abc')).toBe('browser:abc')
     expect(parsePaneId('browser:abc')).toEqual({ kind: 'browser', sessionId: 'abc' })
   })
@@ -45,13 +45,11 @@ describe('pane-id', () => {
     expect(parsePaneId('abc')).toEqual({ kind: 'terminal', sessionId: 'abc' })
     expect(paneOwnerId('abc')).toBe('abc')
     expect(paneOwnerId('files:abc')).toBe('abc')
-    expect(paneOwnerId('editor:abc')).toBe('abc')
     expect(paneOwnerId('browser:abc')).toBe('abc')
   })
 
   it('reports kind without allocating the owner string', () => {
     expect(paneKind('files:abc')).toBe('files')
-    expect(paneKind('editor:abc')).toBe('editor')
     expect(paneKind('browser:abc')).toBe('browser')
     expect(paneKind('abc')).toBe('terminal')
   })
@@ -59,7 +57,6 @@ describe('pane-id', () => {
   it('distinguishes session panes from child panes', () => {
     expect(isTerminalPane('abc')).toBe(true)
     expect(isTerminalPane('files:abc')).toBe(false)
-    expect(isTerminalPane('editor:abc')).toBe(false)
     expect(isTerminalPane('browser:abc')).toBe(false)
   })
 
@@ -67,14 +64,7 @@ describe('pane-id', () => {
     // The pane column carries kinds, not ids, so it needs the inverse of
     // parsePaneId — and the two have to agree, or a promoted pane would be
     // skipped in the column under one id and drawn in the grid under another.
-    for (const kind of [
-      'files',
-      'editor',
-      'browser',
-      'device',
-      'extension',
-      'terminals'
-    ] as const) {
+    for (const kind of ['files', 'browser', 'device', 'extension', 'terminals'] as const) {
       const id = paneIdFor(kind, 'abc')
       expect(parsePaneId(id)).toEqual({ kind, sessionId: 'abc' })
     }
@@ -90,7 +80,6 @@ describe('pane-id', () => {
     expect(paneOwnerId(promotedCardId('abc', 3))).toBe('abc')
     expect(isPromotedCardId(promotedCardId('abc', 0))).toBe(true)
     expect(isPromotedCardId('abc')).toBe(false)
-    expect(isPromotedCardId('editor:abc')).toBe(false)
   })
 
   it('reads a card id from the right, so a colon in the session id survives', () => {
@@ -111,7 +100,6 @@ describe('pane-id', () => {
     expect(promotedCardSeq(promotedCardId('abc', 7))).toBe(7)
     expect(promotedCardSeq(promotedCardId('host:1234', 12))).toBe(12)
     expect(promotedCardSeq('abc')).toBeNull()
-    expect(promotedCardSeq('editor:abc')).toBeNull()
   })
 
   it('counts sessions and cards as grid cells, and child panes as not', () => {
@@ -122,7 +110,6 @@ describe('pane-id', () => {
     expect(isLayoutCellId('abc')).toBe(true)
     expect(isLayoutCellId(promotedCardId('abc', 2))).toBe(true)
     expect(isLayoutCellId('files:abc')).toBe(false)
-    expect(isLayoutCellId('editor:abc')).toBe(false)
     expect(isLayoutCellId('browser:abc')).toBe(false)
     expect(isLayoutCellId('device:abc')).toBe(false)
   })
@@ -144,7 +131,7 @@ describe('pane-id', () => {
     // carrying the extension and the contribution too would put three fields in
     // front of a session id that already has a colon in it.
     expect(parsePaneId(extensionPaneId(weird))).toEqual({ kind: 'extension', sessionId: weird })
-    expect(paneOwnerId(editorPaneId(weird))).toBe(weird)
+    expect(paneOwnerId(filesPaneId(weird))).toBe(weird)
     expect(paneOwnerId(browserPaneId(weird))).toBe(weird)
   })
 })
@@ -198,6 +185,22 @@ describe('editor-dirty', () => {
     // Confirming discards the buffer, so the flag must not linger and prompt
     // again on the next action.
     expect(isEditorDirty('s1')).toBe(false)
+  })
+
+  it('tells a subscriber when a flag turns, so a tab can draw its unsaved dot', () => {
+    const { result } = renderHook(() => (useDirtyVersion(), isEditorDirty('s1')))
+    expect(result.current).toBe(false)
+    act(() => {
+      dirtyRefFor('s1').current = true
+    })
+    expect(result.current).toBe(true)
+    act(() => clearDirty('s1'))
+    expect(result.current).toBe(false)
+  })
+
+  it('keys one open file apart from another in the same session', () => {
+    expect(fileTabKey('s1', '/p/a.ts')).not.toBe(fileTabKey('s1', '/p/b.ts'))
+    expect(fileTabKey('s1', '/p/a.ts')).not.toBe(fileTabKey('s2', '/p/a.ts'))
   })
 
   it('blocks and keeps the buffer when the user cancels', () => {

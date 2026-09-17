@@ -15,18 +15,16 @@
 export type PaneKind =
   | 'terminal'
   | 'files'
-  | 'editor'
   | 'browser'
   | 'device'
   | 'terminals'
   | 'extension'
   | 'card'
 
-/** Pane kinds a session stacks inside its own card, i.e. all but those two. */
+/** Pane kinds a session stacks inside its own card. */
 export type PaneChildKind = Exclude<PaneKind, 'terminal' | 'card'>
 
 const FILES_PREFIX = 'files:'
-const EDITOR_PREFIX = 'editor:'
 const BROWSER_PREFIX = 'browser:'
 const DEVICE_PREFIX = 'device:'
 const TERMINALS_PREFIX = 'terminals:'
@@ -38,9 +36,9 @@ export function filesPaneId(sessionId: string): string {
   return `${FILES_PREFIX}${sessionId}`
 }
 
-/** Id of the file-editor pane owned by `sessionId`. */
-export function editorPaneId(sessionId: string): string {
-  return `${EDITOR_PREFIX}${sessionId}`
+/** Key of one open file tab, for its unsaved flag and its draft. */
+export function fileTabKey(sessionId: string, filePath: string): string {
+  return `tab:${sessionId}\u0000${filePath}`
 }
 
 /** Id of the browser pane owned by `sessionId`. */
@@ -92,8 +90,6 @@ export function paneIdFor(kind: PaneChildKind, sessionId: string): string {
   switch (kind) {
     case 'files':
       return filesPaneId(sessionId)
-    case 'editor':
-      return editorPaneId(sessionId)
     case 'browser':
       return browserPaneId(sessionId)
     case 'device':
@@ -156,9 +152,6 @@ export function parsePaneId(paneId: string): { kind: PaneKind; sessionId: string
   if (paneId.startsWith(FILES_PREFIX)) {
     return { kind: 'files', sessionId: paneId.slice(FILES_PREFIX.length) }
   }
-  if (paneId.startsWith(EDITOR_PREFIX)) {
-    return { kind: 'editor', sessionId: paneId.slice(EDITOR_PREFIX.length) }
-  }
   if (paneId.startsWith(BROWSER_PREFIX)) {
     return { kind: 'browser', sessionId: paneId.slice(BROWSER_PREFIX.length) }
   }
@@ -178,7 +171,6 @@ export function parsePaneId(paneId: string): { kind: PaneKind; sessionId: string
 export function paneKind(paneId: string): PaneKind {
   if (paneId.startsWith(CARD_PREFIX)) return 'card'
   if (paneId.startsWith(FILES_PREFIX)) return 'files'
-  if (paneId.startsWith(EDITOR_PREFIX)) return 'editor'
   if (paneId.startsWith(BROWSER_PREFIX)) return 'browser'
   if (paneId.startsWith(DEVICE_PREFIX)) return 'device'
   if (paneId.startsWith(TERMINALS_PREFIX)) return 'terminals'

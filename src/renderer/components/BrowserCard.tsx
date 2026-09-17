@@ -1,6 +1,6 @@
 import { memo, forwardRef, useState, useRef, useEffect, useCallback } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { MousePointerClick, Pencil, Plus, Shapes, SquareArrowOutUpRight, X } from 'lucide-react'
+import { MousePointerClick, Pencil, Shapes, SquareArrowOutUpRight } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { tabUrl } from '../stores/types'
 import { browserPartition } from '../../shared/types'
@@ -8,6 +8,7 @@ import type { ArtifactManifest } from '../../shared/types'
 import { TweakBar } from './browser/TweakBar'
 import { AddressBar } from './browser/AddressBar'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
+import { PaneTabStrip } from './PaneTabStrip'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON } from '../lib/icon-button'
 import { browserPaneId, isPromotedCardId } from '../lib/pane-id'
@@ -79,7 +80,7 @@ function designUrlOf(url: string | null): string | null {
 /**
  * A session's browser, as its own grid pane.
  *
- * One per session, like its tree and its editor — so a session can keep its dev
+ * One per session, like its Files pane — so a session can keep its dev
  * server or a doc page beside the agent working on it. The page runs in a
  * separate process; `hardenWebviews` in the main process strips its privileges.
  *
@@ -567,119 +568,75 @@ export const BrowserCard = memo(
         // chrome stacked on chrome, and browsers don't have one.
         headerless
       >
-        {/* Tab strip — doubles as the pane's header, so it carries the drag
-            handle and the minimize / maximize / close cluster. */}
-        <div
-          className={`flex items-center gap-1 pl-1.5 pr-1 pt-1 shrink-0 ${
-            onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''
-          }`}
+        <PaneTabStrip
+          ariaLabel="Browser tabs"
+          draggable={Boolean(onDragStart || flexible)}
           onPointerDown={onDragStart ? (e) => onDragStart(paneId, e) : undefined}
-        >
-          <div
-            className="flex items-stretch gap-0.5 flex-1 min-w-0 overflow-x-auto"
-            role="tablist"
-            aria-label="Browser tabs"
-          >
-            {pane.tabs.map((tab, i) => {
-              const active = i === pane.activeTab
-              // The label names where the guest actually is, not where it was sent.
-              const shown = tabUrl(tab)
-              return (
-                <div
-                  key={i}
-                  role="tab"
-                  aria-selected={active}
-                  tabIndex={0}
-                  onClick={() => setActiveBrowserTab(key, i)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') setActiveBrowserTab(key, i)
-                  }}
-                  title={shown}
-                  className={`group/tab flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-md max-w-[170px]
-                              cursor-default select-none transition-colors ${
-                                active
-                                  ? 'bg-white/[0.06] text-gray-200'
-                                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.03]'
-                              }`}
-                >
-                  {/* A design is marked, because a tab that is a file in the
-                      repo behaves differently from a web page — it repaints when
-                      the file changes, and its header holds controls rather than
-                      an address. Only the active tab's manifest is known, so the
-                      mark appears where the claim has actually been read. */}
-                  {active && manifest && (
-                    <Shapes size={11} strokeWidth={2} className="shrink-0 text-bronzo" />
-                  )}
-                  <span className="text-[11px] truncate">
-                    {(active && manifest?.title) || displayHost(shown)}
-                  </span>
-                  {/* A card already holds exactly one page — popping its tab out
-                      again would swap one card for another. */}
-                  {!isCard && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        promoteBrowserTab(key, i)
-                      }}
-                      aria-label={`Open tab ${displayHost(shown)} as its own card`}
-                      title="Open as its own card"
-                      className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white
-                                 hover:bg-white/[0.08] transition-colors"
-                    >
-                      <SquareArrowOutUpRight size={10} strokeWidth={2.5} />
-                    </button>
-                  )}
+          // The label names where the guest actually is, not where it was sent.
+          tabs={pane.tabs.map((tab, i) => {
+            const shown = tabUrl(tab)
+            const isActive = i === pane.activeTab
+            return {
+              id: String(i),
+              name: displayHost(shown),
+              title: shown,
+              label: (isActive && manifest?.title) || displayHost(shown),
+              // Only the active tab's manifest is known, so a design is marked only there.
+              icon:
+                isActive && manifest ? (
+                  <Shapes size={11} strokeWidth={2} className="shrink-0 text-bronzo" />
+                ) : undefined,
+              closeLabel: `Close tab ${displayHost(shown)}`
+            }
+          })}
+          activeId={String(pane.activeTab)}
+          onSelect={(id) => setActiveBrowserTab(key, Number(id))}
+          onClose={(id) => closeBrowserTab(key, Number(id))}
+          // A card already holds exactly one page, so its tabs offer no pop-out.
+          tabActions={
+            isCard
+              ? undefined
+              : (tab) => (
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation()
-                      closeBrowserTab(key, i)
+                      promoteBrowserTab(key, Number(tab.id))
                     }}
-                    aria-label={`Close tab ${displayHost(shown)}`}
+                    aria-label={`Open tab ${tab.name} as its own card`}
+                    title="Open as its own card"
                     className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white
-                               opacity-0 group-hover/tab:opacity-100 focus:opacity-100 transition-opacity"
+                               hover:bg-white/[0.08] transition-colors"
                   >
-                    <X size={10} strokeWidth={2.5} />
+                    <SquareArrowOutUpRight size={10} strokeWidth={2.5} />
                   </button>
-                </div>
-              )
-            })}
-            <button
-              type="button"
-              onClick={() => addBrowserTab(key)}
-              aria-label="New tab"
-              className="shrink-0 self-center ml-0.5 p-1 rounded-md text-gray-600 hover:text-gray-200
-                         hover:bg-white/[0.06] transition-colors"
-            >
-              <Plus size={13} strokeWidth={2} />
-            </button>
-          </div>
-
-          {isCard ? (
-            <>
-              <PaneOwnerLabel sessionId={sessionId} />
-              <PromotedCardControls
-                cardId={key}
+                )
+          }
+          onAdd={() => addBrowserTab(key)}
+          trailing={
+            isCard ? (
+              <>
+                <PaneOwnerLabel sessionId={sessionId} />
+                <PromotedCardControls
+                  cardId={key}
+                  title={displayHost(url)}
+                  onClose={() => closeBrowserPane(key)}
+                  className="shrink-0"
+                />
+              </>
+            ) : (
+              <PaneControls
+                paneId={paneId}
                 title={displayHost(url)}
+                // "this page", not the host, so it never reads like a tab's own pop-out.
+                popOutLabel="this page"
+                onPopOut={() => promoteBrowserTab(key, pane.activeTab)}
                 onClose={() => closeBrowserPane(key)}
                 className="shrink-0"
               />
-            </>
-          ) : (
-            <PaneControls
-              paneId={paneId}
-              title={displayHost(url)}
-              // "this page", not the host: the tab strip already offers a
-              // control naming each tab, and two buttons reading identically is
-              // a coin flip for anyone not looking at where they sit.
-              popOutLabel="this page"
-              onPopOut={() => promoteBrowserTab(key, pane.activeTab)}
-              onClose={() => closeBrowserPane(key)}
-              className="shrink-0"
-            />
-          )}
-        </div>
+            )
+          }
+        />
 
         {/* The address bar — or the design's own controls, when the loaded page
             declares them. Pick and ink stay in both: they are how a person

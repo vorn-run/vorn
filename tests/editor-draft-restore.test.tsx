@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { FileStamp } from '../src/shared/types'
+import { truncationMarker } from '@vornrun/shared/string-utils'
 
 {
   const store = new Map<string, string>()
@@ -54,7 +55,7 @@ const STAMP: FileStamp = { size: 17, mtimeMs: 1_700_000_000_000 }
 const MOVED: FileStamp = { size: 22, mtimeMs: 1_700_000_009_000 }
 
 const DRAFTS = 'vorn:drafts'
-const PANE = 'editor:term-1'
+const PANE = 'tab:term-1\u0000/repo/a.ts'
 const PATH = '/repo/a.ts'
 
 beforeEach(() => {
@@ -105,8 +106,9 @@ describe('an edit that outlived the window', () => {
   it('lets go of a draft that says the same as the file', async () => {
     storeDraft(ON_DISK, STAMP)
     await open()
-    await waitFor(() => expect(screen.queryByRole('textbox')).not.toBeInTheDocument())
+    await waitFor(() => expect(editor().value).toBe(ON_DISK))
     expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeUndefined()
+    expect(screen.queryByLabelText(/^Save/)).not.toBeInTheDocument()
   })
 
   it('is not offered to a pane showing a different file', async () => {
@@ -114,7 +116,7 @@ describe('an edit that outlived the window', () => {
     await act(async () => {
       render(<FileEditorPane cwd="/repo" filePath="/repo/b.ts" draftKey={PANE} />)
     })
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    await waitFor(() => expect(editor().value).toBe(ON_DISK))
   })
 })
 
@@ -150,9 +152,21 @@ describe('saving over a file that moved', () => {
     await act(async () => {
       fireEvent.click(screen.getByText('Discard mine'))
     })
-    await waitFor(() => expect(screen.queryByRole('textbox')).not.toBeInTheDocument())
+    // The editor stays open, on what the disk holds, with nothing left to save.
+    await waitFor(() => expect(editor().value).toBe('what the agent wrote'))
+    expect(screen.queryByLabelText(/^Save/)).not.toBeInTheDocument()
     expect(writeFileContent).not.toHaveBeenCalled()
     expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeUndefined()
+  })
+
+  it('stops being editable when what the disk now holds came back capped', async () => {
+    await editAndSave()
+    readFileContent.mockResolvedValue(`grown past the cap${truncationMarker(900_000)}`)
+    await act(async () => {
+      fireEvent.click(screen.getByText('Discard mine'))
+    })
+    await waitFor(() => expect(screen.queryByRole('textbox')).not.toBeInTheDocument())
+    expect(writeFileContent).not.toHaveBeenCalled()
   })
 
   it('leaves the edit alone when the person wants to keep editing', async () => {
@@ -180,14 +194,34 @@ describe('an unchanged file', () => {
 })
 
 describe('an edit begun now', () => {
+  // A file opens ready to type in; there is no edit mode to enter first.
   async function startEditing(): Promise<void> {
     await open()
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText('Edit'))
-    })
+    await waitFor(() => expect(editor().value).toBe(ON_DISK))
   }
 
-  it('stamps the file as the edit starts, not as it is saved', async () => {
+  it('offers Save and Discard only once something has changed', async () => {
+    await startEditing()
+    expect(screen.queryByLabelText(/^Save/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Discard changes')).not.toBeInTheDocument()
+
+    fireEvent.change(editor(), { target: { value: 'changed' } })
+    expect(screen.getByLabelText(/^Save/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Discard changes')).toBeInTheDocument()
+  })
+
+  it('keeps the editor open after a save, with nothing left to save', async () => {
+    await startEditing()
+    fireEvent.change(editor(), { target: { value: 'changed' } })
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText(/^Save/))
+    })
+    await waitFor(() => expect(writeFileContent).toHaveBeenCalled())
+    expect(editor().value).toBe('changed')
+    expect(screen.queryByLabelText(/^Save/)).not.toBeInTheDocument()
+  })
+
+  it('stamps the file as it is opened, not as it is saved', async () => {
     // Stamping at save time would record whatever the file had become by then
     // as the version being edited, and the guard would never fire.
     await startEditing()
@@ -220,7 +254,7 @@ describe('an edit begun now', () => {
     await waitFor(() => expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeUndefined())
   })
 
-  it('lets go of the draft when the edit is cancelled', async () => {
+  it('lets go of the draft when the changes are discarded, and shows the file again', async () => {
     await startEditing()
     fireEvent.change(editor(), { target: { value: 'abandoned' } })
     await waitFor(() => expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeDefined(), {
@@ -228,9 +262,10 @@ describe('an edit begun now', () => {
     })
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('Cancel edit'))
+      fireEvent.click(screen.getByLabelText('Discard changes'))
     })
     expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeUndefined()
+    expect(editor().value).toBe(ON_DISK)
   })
 })
 
@@ -285,9 +320,7 @@ describe('a stamp slower than the first keystroke', () => {
       })
     )
     await open()
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText('Edit'))
-    })
+    await waitFor(() => expect(editor().value).toBe(ON_DISK))
     fireEvent.change(editor(), { target: { value: 'typed before the stamp landed' } })
 
     // The draft lands first, with nothing to compare against yet.

@@ -1,21 +1,30 @@
-import { useState, useEffect, useCallback, useMemo, useRef, type JSX, type ReactNode } from 'react'
+import {
+  memo,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  type JSX,
+  type ReactNode
+} from 'react'
 import type { FileStamp } from '../../shared/types'
 import { forgetDraft, hasMoved, readDraft, writeDraft } from '../lib/editor-drafts'
 
 /** How long typing has to stop before the draft is worth a synchronous write. */
 const DRAFT_SETTLE_MS = 400
 import type { FileEntry } from '../../shared/types'
-import { ChevronRight, Loader2, X, Search, Pencil, Save, SquareArrowOutUpRight } from 'lucide-react'
+import { ChevronRight, Loader2, X, Search, Save, SquareArrowOutUpRight, Undo2 } from 'lucide-react'
+import { isTruncatedRead } from '@vornrun/shared/string-utils'
 import { FileTypeIcon } from './file-icons'
 import { PANE_SURFACE } from '../lib/pane-surface'
-import { SplitDivider } from './SplitDivider'
-import { clampSplitRatio, DEFAULT_SPLIT_RATIO } from '../lib/split-ratio'
+import { ICON_BUTTON, ICON_BUTTON_SIZE } from '../lib/icon-button'
+import { Tooltip } from './Tooltip'
 
 const MAX_PREVIEW_LINES = 2000
-const ROW_HEIGHT = 22 // px — matches VS Code's tree item height
+const ROW_HEIGHT = 22 // px per tree row
 const INDENT_WIDTH = 16 // px per depth level
 const BASE_LEFT = 8 // px left gutter
-const SPLIT_RATIO_KEY = 'vorn:files-split-ratio'
 
 // ---------------------------------------------------------------------------
 // Filter helpers
@@ -66,6 +75,7 @@ function TreeNode({
   loadDir,
   selectedFile,
   onSelectFile,
+  onPinFile,
   onPopOutFile,
   filter,
   matched,
@@ -77,6 +87,7 @@ function TreeNode({
   loadDir: (path: string) => Promise<void>
   selectedFile: string | null
   onSelectFile: (path: string) => void
+  onPinFile?: (path: string) => void
   onPopOutFile?: (path: string) => void
   filter: string
   matched: Set<string>
@@ -151,6 +162,7 @@ function TreeNode({
                 loadDir={loadDir}
                 selectedFile={selectedFile}
                 onSelectFile={onSelectFile}
+                onPinFile={onPinFile}
                 onPopOutFile={onPopOutFile}
                 filter={filter}
                 matched={matched}
@@ -191,6 +203,7 @@ function TreeNode({
       role="button"
       tabIndex={0}
       onClick={() => onSelectFile(entry.path)}
+      onDoubleClick={onPinFile ? () => onPinFile(entry.path) : undefined}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
@@ -218,11 +231,7 @@ function TreeNode({
           }}
           aria-label={`Open ${entry.name} as its own card`}
           title="Open as its own card"
-          // Hover-revealed here, unlike the pane's own controls. A tree is
-          // hundreds of rows deep: a control drawn at rest on every one of them
-          // is a column of arrows down the whole panel, and the thing being
-          // read — the filenames — has to compete with it. The editor pane
-          // carries a control that is always there, for the file you have open.
+          // Hover-revealed, unlike the pane's controls: at rest it would be a column of arrows.
           className="shrink-0 p-0.5 rounded text-ink-ghost hover:text-white hover:bg-white/[0.08]
                      opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
         >
@@ -351,8 +360,13 @@ async function highlightCode(code: string, lang: string): Promise<TokenLine[]> {
   return result.tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color })))
 }
 
-function useHighlightedLines(text: string, fileName: string): TokenLine[] | null {
-  const [result, setResult] = useState<{ key: string; tokens: TokenLine[] } | null>(null)
+/** `loose` keeps the last tokens while newer ones are on their way; the caller must check each line still matches. */
+function useHighlightedLines(text: string, fileName: string, loose = false): TokenLine[] | null {
+  const [result, setResult] = useState<{
+    key: string
+    fileName: string
+    tokens: TokenLine[]
+  } | null>(null)
   const lang = getLang(fileName)
   const key = `${fileName}\0${text.length}`
 
@@ -363,7 +377,7 @@ function useHighlightedLines(text: string, fileName: string): TokenLine[] | null
     highlightCode(text, lang)
       .then((tokens) => {
         if (stale) return
-        setResult(tokens.length > 0 ? { key, tokens } : null)
+        setResult(tokens.length > 0 ? { key, fileName, tokens } : null)
       })
       .catch(() => {
         if (!stale) setResult(null)
@@ -372,9 +386,10 @@ function useHighlightedLines(text: string, fileName: string): TokenLine[] | null
     return () => {
       stale = true
     }
-  }, [text, lang, key])
+  }, [text, lang, key, fileName])
 
-  if (!lang || !result || result.key !== key) return null
+  if (!lang || !result) return null
+  if (loose ? result.fileName !== fileName : result.key !== key) return null
   return result.tokens
 }
 
@@ -570,42 +585,122 @@ function ReadView({
 // ---------------------------------------------------------------------------
 // Edit view
 // ---------------------------------------------------------------------------
+const HIGHLIGHT_SETTLE_MS = 150
+const EDIT_LINE_HEIGHT = 21 // px, shared by the gutter, the drawn text and the textarea
+
+/** A transparent textarea over the same text drawn in colour; a line uses its tokens only while they spell what was typed. */
 function EditView({
   draft,
+  fileName,
   onChange,
-  onSaveShortcut
+  onSaveShortcut,
+  findQuery,
+  activeMatchIdx,
+  onMatchesComputed
 }: {
   draft: string
+  fileName: string
   onChange: (next: string) => void
   onSaveShortcut: () => void
+  findQuery: string
+  activeMatchIdx: number
+  onMatchesComputed: (count: number) => void
 }) {
-  const lineCount = useMemo(() => draft.split('\n').length, [draft])
+  const lines = useMemo(() => draft.split('\n'), [draft])
+  const [settled, setSettled] = useState(draft)
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(draft), HIGHLIGHT_SETTLE_MS)
+    return () => clearTimeout(timer)
+  }, [draft])
+  const highlighted = useHighlightedLines(
+    lines.length > MAX_PREVIEW_LINES ? '' : settled,
+    fileName,
+    true
+  )
   const gutter = useMemo(
-    () => Array.from({ length: lineCount }, (_, i) => i + 1).join('\n'),
-    [lineCount]
+    () => Array.from({ length: lines.length }, (_, i) => i + 1).join('\n'),
+    [lines.length]
   )
 
+  const matches = useMemo(() => computeMatches(lines, findQuery), [lines, findQuery])
+  useEffect(() => {
+    onMatchesComputed(matches.length)
+  }, [matches.length, onMatchesComputed])
+
+  const activeMatch = matches.length > 0 ? matches[activeMatchIdx % matches.length] : null
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!activeMatch || !el) return
+    el.scrollTop = activeMatch.line * EDIT_LINE_HEIGHT - el.clientHeight / 2
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scroll when the match moves, not on every keystroke
+  }, [activeMatch?.line, activeMatch?.start, activeMatchIdx])
+
+  const rendered = useMemo<JSX.Element[]>(() => {
+    const byLine = new Map<number, FindMatch[]>()
+    for (const m of matches) byLine.set(m.line, [...(byLine.get(m.line) ?? []), m])
+    return lines.map((line, i) => {
+      const marks = byLine.get(i)
+      const tokens = highlighted?.[i]
+      const inStep = tokens !== undefined && tokens.map((t) => t.content).join('') === line
+      return (
+        <div key={i} style={{ height: EDIT_LINE_HEIGHT }}>
+          {marks
+            ? renderLineWithMarks(
+                line,
+                marks.map((m) => ({ start: m.start, end: m.end, active: m === activeMatch }))
+              )
+            : inStep && tokens.length > 0
+              ? tokens.map((t, j) => (
+                  <span key={j} style={t.color ? { color: t.color } : undefined}>
+                    {t.content}
+                  </span>
+                ))
+              : line || ' '}
+        </div>
+      )
+    })
+  }, [lines, highlighted, matches, activeMatch])
+
+  const text = 'text-[13px] font-mono whitespace-pre py-1 pr-3'
   return (
-    <div className="flex-1 overflow-auto flex">
-      <pre
-        className="select-none text-right pr-3 pl-2 py-1 text-[12px] leading-[1.65] font-mono text-gray-600 shrink-0"
-        aria-hidden="true"
-      >
-        {gutter}
-      </pre>
-      <textarea
-        value={draft}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-            e.preventDefault()
-            onSaveShortcut()
-          }
-        }}
-        spellCheck={false}
-        className="flex-1 bg-transparent text-gray-200 text-[13px] leading-[1.65] font-mono outline-none resize-none whitespace-pre py-1 pr-3"
-        style={{ minHeight: '100%' }}
-      />
+    <div ref={scrollerRef} className="flex-1 overflow-auto">
+      <div className="flex w-max min-w-full min-h-full">
+        <pre
+          className="sticky left-0 z-10 select-none text-right pr-3 pl-2 py-1 text-[12px] font-mono text-gray-600 shrink-0"
+          style={{ lineHeight: `${EDIT_LINE_HEIGHT}px`, background: PANE_SURFACE }}
+          aria-hidden="true"
+        >
+          {gutter}
+        </pre>
+        <div className="relative flex-1">
+          <pre
+            className={`${text} text-gray-300 pointer-events-none`}
+            style={{ lineHeight: `${EDIT_LINE_HEIGHT}px` }}
+            aria-hidden="true"
+            data-testid="editor-highlight"
+          >
+            {rendered}
+          </pre>
+          <textarea
+            value={draft}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+                e.preventDefault()
+                // The window also listens for this chord, and would change the view.
+                e.stopPropagation()
+                onSaveShortcut()
+              }
+            }}
+            spellCheck={false}
+            wrap="off"
+            aria-label={`Edit ${fileName}`}
+            className={`${text} absolute inset-0 w-full h-full bg-transparent text-transparent outline-none resize-none overflow-hidden`}
+            style={{ lineHeight: `${EDIT_LINE_HEIGHT}px`, caretColor: 'var(--color-ink)' }}
+          />
+        </div>
+      </div>
     </div>
   )
 }
@@ -613,21 +708,21 @@ function EditView({
 // ---------------------------------------------------------------------------
 // File panel
 // ---------------------------------------------------------------------------
+/** Why a file is shown but cannot be typed in, or null when it can. */
+type ReadOnlyReason = 'binary' | 'unreadable' | 'truncated' | null
+
 function FilePanel({
   cwd,
   filePath,
   content,
   loading,
-  isBinary,
-  onClose,
+  readOnly,
   onContentSaved,
   remoteHostId,
   dirtyRef,
   draftKey,
-  showHeader = true,
   controls,
   onHeaderPointerDown,
-  onHeaderDoubleClick,
   headerTestId,
   headerClassName = ''
 }: {
@@ -635,50 +730,24 @@ function FilePanel({
   filePath: string
   content: string | null
   loading: boolean
-  isBinary: boolean
-  onClose: () => void
+  readOnly: ReadOnlyReason
   onContentSaved: (next: string) => void
   remoteHostId?: string
   dirtyRef: React.MutableRefObject<boolean>
-  /**
-   * Where an unsaved edit is kept, so a quit does not throw it away.
-   *
-   * Keyed the way dirtiness already is — by pane, not by path — because two
-   * panes open on one file are two editors, and one draft between them would
-   * put a keystroke in either into both.
-   *
-   * Absent for a panel with no pane of its own to be keyed by, which keeps
-   * today's behaviour of losing the edit.
-   */
+  /** Where an unsaved edit is kept, so a quit does not throw it away. Keyed by tab or card, not by path. */
   draftKey?: string
-  /** False when hosted in a pane card that draws its own header. */
-  showHeader?: boolean
-  /**
-   * Pane chrome (maximize / close) seated in the path strip. A hosting card
-   * that passes this drops its own header row: the path strip already names
-   * the file, and two stacked bars read as chrome on chrome.
-   */
+  /** Pane chrome seated in the path strip, for a host with no title bar of its own. */
   controls?: ReactNode
   onHeaderPointerDown?: (e: React.PointerEvent) => void
-  onHeaderDoubleClick?: () => void
   headerTestId?: string
   headerClassName?: string
 }) {
-  const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
+  /** True once the buffer holds this file, or its restored draft. */
+  const [ready, setReady] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  /**
-   * What the file was when this edit started; the save compares against it.
-   *
-   * State rather than a ref, because it decides what gets written down. The
-   * stamp arrives over a round trip -- seconds of it, for a file on a remote
-   * host -- and a ref changing does not re-run the effect that persists the
-   * draft. So a draft saved before the stamp landed kept `base: null` for good,
-   * and a relaunch restored it with the guard unarmed: the next save would go
-   * over a file that had changed underneath, without asking. That is the one
-   * outcome all of this exists to prevent.
-   */
+  /** What the file was when this buffer was taken from it. State, so a late stamp reaches the stored draft. */
   const [base, setBase] = useState<FileStamp | null>(null)
   /** The file on screen right now, for answers that arrive after it changed. */
   const pathRef = useRef(filePath)
@@ -691,11 +760,24 @@ function FilePanel({
   const [findIdx, setFindIdx] = useState(0)
   const findInputRef = useRef<HTMLInputElement | null>(null)
 
+  const editable = readOnly === null && content !== null && !loading
+
+  // A failed stamp leaves the guard unarmed; one for another file is dropped.
+  const stampBase = useCallback((): void => {
+    const stamped = filePath
+    window.api
+      .fileStamp?.(filePath, remoteHostId)
+      .then((stamp) => {
+        if (pathRef.current === stamped) setBase(stamp ?? null)
+      })
+      .catch(() => {})
+  }, [filePath, remoteHostId])
+
   // Reset transient state when file changes
   useEffect(() => {
     pathRef.current = filePath
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: clear per-file edit/find state when the file changes
-    setEditing(false)
+    setReady(false)
     setDraft('')
     setSaveError(null)
     setConflict(false)
@@ -705,40 +787,28 @@ function FilePanel({
     setFindIdx(0)
   }, [filePath])
 
-  /**
-   * Pick an edit back up where it was left.
-   *
-   * After the file has loaded, so the draft is compared against something. The
-   * conflict is decided here rather than at save time for the restored case:
-   * the file can have moved while the app was closed, and finding that out only
-   * once somebody presses save means they have been editing against a screen
-   * that was already wrong.
-   */
+  // Take the file into the buffer once it has loaded, or the draft left over it.
   useEffect(() => {
-    if (!draftKey || loading || content === null) return
-    const draft = readDraft(draftKey, filePath)
-    if (!draft) return
-    // Saved elsewhere in the meantime, and the text now agrees with the file.
-    // Nothing to restore, and leaving the record would reopen the editor on
-    // every launch for an edit that has already landed.
-    if (draft.text === content) {
-      forgetDraft(draftKey)
+    if (ready || !editable || content === null) return
+    const kept = draftKey ? readDraft(draftKey, filePath) : null
+    /* eslint-disable react-hooks/set-state-in-effect -- intentional: the file and its draft are external state, read in once loaded */
+    setReady(true)
+    if (!kept || kept.text === content) {
+      // A draft that agrees with the file has already landed; drop the record.
+      if (kept && draftKey) forgetDraft(draftKey)
+      setDraft(content)
+      stampBase()
       return
     }
-    /* eslint-disable react-hooks/set-state-in-effect -- intentional: the draft is external state, read in once the file it belongs to has loaded */
-    setBase(draft.base)
-    setDraft(draft.text)
-    setEditing(true)
+    setBase(kept.base)
+    setDraft(kept.text)
     /* eslint-enable react-hooks/set-state-in-effect */
-    // Guarded on the way back: this resolves after a round trip to the server,
-    // by which time the pane can have been given another file or closed, and
-    // the answer would then be about neither. A stamp that cannot be taken
-    // leaves the guard unarmed rather than declaring a conflict.
+    // The file can have moved while the app was closed, so ask now rather than at save.
     let stale = false
     window.api
       .fileStamp?.(filePath, remoteHostId)
       .then((current) => {
-        if (!stale) setConflict(hasMoved(draft.base, current ?? null))
+        if (!stale) setConflict(hasMoved(kept.base, current ?? null))
       })
       .catch(() => {
         if (!stale) setConflict(false)
@@ -746,7 +816,8 @@ function FilePanel({
     return () => {
       stale = true
     }
-  }, [draftKey, filePath, remoteHostId, loading, content])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `ready` gates this to once per load
+  }, [draftKey, filePath, remoteHostId, editable, content])
 
   useEffect(() => {
     if (findOpen) findInputRef.current?.focus()
@@ -761,9 +832,8 @@ function FilePanel({
     return filePath
   }, [filePath, cwd, fileName])
 
-  const dirty = editing && content !== null && draft !== content
-  const canEdit = !isBinary && content !== null && !loading
-  const canFind = canEdit && !editing
+  const dirty = ready && editable && draft !== content
+  const canFind = content !== null && !loading
 
   useEffect(() => {
     dirtyRef.current = dirty
@@ -772,48 +842,18 @@ function FilePanel({
     }
   }, [dirty, dirtyRef])
 
-  const handleStartEdit = (): void => {
-    if (!canEdit || content === null) return
-    setDraft(content)
-    setEditing(true)
-    setSaveError(null)
-    setConflict(false)
-    // What this edit is based on, asked for now rather than at save time: by
-    // then the file may already have moved, and stamping it there would record
-    // somebody else's version as the one being edited.
-    setBase(null)
-    // Against the path this edit started on, because the answer can arrive after
-    // the pane has moved to another file -- and recording that file's stamp as
-    // this edit's base is worse than having none, since the guard would then be
-    // armed with the wrong version. A failure leaves it unarmed, which is the
-    // documented meaning of no base.
-    const editing = filePath
-    window.api
-      .fileStamp?.(filePath, remoteHostId)
-      .then((stamp) => {
-        if (pathRef.current === editing) setBase(stamp ?? null)
-      })
-      .catch(() => {})
-  }
-
-  const handleCancelEdit = (): void => {
+  const handleDiscard = (): void => {
+    if (content === null) return
     if (dirty && !window.confirm('Discard unsaved changes?')) return
     if (draftKey) forgetDraft(draftKey)
-    setEditing(false)
-    setDraft('')
+    setDraft(content)
     setSaveError(null)
     setConflict(false)
-    setBase(null)
   }
 
-  /**
-   * Keep the edit, so closing the window is not the same as discarding it.
-   *
-   * Written on a delay: this fires per keystroke, and `localStorage.setItem` is
-   * synchronous and on the same thread as the typing.
-   */
+  // Keep the edit past the window. Delayed: this fires per keystroke and the write is synchronous.
   useEffect(() => {
-    if (!draftKey || !editing || content === null) return
+    if (!draftKey || !ready || content === null) return
     if (draft === content) {
       forgetDraft(draftKey)
       return
@@ -823,22 +863,13 @@ function FilePanel({
       DRAFT_SETTLE_MS
     )
     return () => clearTimeout(timer)
-    // `base` included on purpose: a stamp that lands after the first write has
-    // to reach the record, or the draft outlives the window with no base.
-  }, [draftKey, editing, draft, content, filePath, base])
+    // `base` included on purpose: a stamp that lands after the first write has to reach the record.
+  }, [draftKey, ready, draft, content, filePath, base])
 
-  /**
-   * Write the draft to disk.
-   *
-   * `force` skips the check, and is only ever passed by the person answering the
-   * conflict. The write itself is last-writer-wins, so without asking first this
-   * silently discards whatever the file gained while the draft was open --
-   * which, now that a draft outlives the window, can be a day's work by an
-   * agent that was running the whole time.
-   */
+  /** Write the buffer to disk. `force` skips the moved-file check, and only the conflict banner passes it. */
   const handleSave = useCallback(
     async (force = false): Promise<void> => {
-      if (!editing) return
+      if (!dirty) return
       setSaving(true)
       setSaveError(null)
       try {
@@ -856,16 +887,16 @@ function FilePanel({
         }
         if (draftKey) forgetDraft(draftKey)
         onContentSaved(draft)
-        setEditing(false)
         setConflict(false)
         setBase(null)
+        stampBase()
       } catch (err) {
         setSaveError(err instanceof Error ? err.message : String(err))
       } finally {
         setSaving(false)
       }
     },
-    [filePath, editing, draft, remoteHostId, onContentSaved, draftKey, base]
+    [filePath, dirty, draft, remoteHostId, onContentSaved, draftKey, base, stampBase]
   )
 
   /** Throw the draft away and take what is on disk. */
@@ -879,9 +910,9 @@ function FilePanel({
     onContentSaved(next)
     setDraft(next)
     setConflict(false)
-    setEditing(false)
     setBase(null)
-  }, [filePath, remoteHostId, onContentSaved, draftKey])
+    stampBase()
+  }, [filePath, remoteHostId, onContentSaved, draftKey, stampBase])
 
   const handleToggleFind = (): void => {
     if (!canFind) return
@@ -900,24 +931,20 @@ function FilePanel({
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {showHeader && <PanelHeader title="File" onClose={onClose} />}
-
-      {/* Path strip + toolbar — doubles as the pane's title bar when the
-          hosting card goes headerless. */}
+      {/* Path strip + toolbar — the title bar too, for a host with none of its own. */}
       <div
-        className={`flex items-center gap-2 px-2 py-1 text-[11px] font-mono shrink-0 ${headerClassName}`}
+        className={`flex items-center gap-1 pl-2 pr-1 py-0.5 text-[11px] font-mono shrink-0 ${headerClassName}`}
         style={{ background: PANE_SURFACE }}
         onPointerDown={onHeaderPointerDown}
-        onDoubleClick={onHeaderDoubleClick}
         data-testid={headerTestId}
       >
         <FileTypeIcon name={fileName} size={12} />
-        <span className="text-gray-400 flex-1 min-w-0 truncate" title={filePath} dir="rtl">
+        <span className="text-gray-400 flex-1 min-w-0 truncate ml-1" title={filePath} dir="rtl">
           {relPath}
         </span>
         {dirty && (
           <span
-            className="w-[6px] h-[6px] rounded-full bg-amber-400 shrink-0"
+            className="w-[6px] h-[6px] rounded-full bg-amber-400 shrink-0 mx-1"
             title="Unsaved changes"
           />
         )}
@@ -928,18 +955,17 @@ function FilePanel({
           disabled={!canFind}
           onClick={handleToggleFind}
         />
-        {editing ? (
+        {dirty && (
           <>
             <ToolbarBtn
               icon={Save}
-              label={saving ? 'Saving…' : 'Save (⌘S)'}
-              disabled={!dirty || saving}
+              label={saving ? 'Saving…' : 'Save'}
+              shortcut="⌘S"
+              disabled={saving}
               onClick={() => void handleSave()}
             />
-            <ToolbarBtn icon={X} label="Cancel edit" onClick={handleCancelEdit} />
+            <ToolbarBtn icon={Undo2} label="Discard changes" onClick={handleDiscard} />
           </>
-        ) : (
-          <ToolbarBtn icon={Pencil} label="Edit" disabled={!canEdit} onClick={handleStartEdit} />
         )}
         {controls}
       </div>
@@ -1036,18 +1062,34 @@ function FilePanel({
         </div>
       )}
 
+      {readOnly === 'truncated' && (
+        <div className="px-3 py-1 text-[11px] text-ink-faint border-t border-white/[0.06] shrink-0">
+          Too large to edit here. Showing the first part, read-only.
+        </div>
+      )}
+
       {/* Body */}
       {loading ? (
         <div className="flex-1 flex items-center justify-center">
           <Loader2 size={16} className="text-gray-500 animate-spin" />
         </div>
-      ) : isBinary ? (
+      ) : readOnly === 'binary' || readOnly === 'unreadable' ? (
         <div className="flex-1 flex items-center justify-center text-gray-600 text-[13px]">
-          Binary file — preview unavailable
+          {readOnly === 'binary'
+            ? 'Binary file — preview unavailable'
+            : 'This file could not be read'}
         </div>
-      ) : editing ? (
-        <EditView draft={draft} onChange={setDraft} onSaveShortcut={() => void handleSave()} />
-      ) : content !== null ? (
+      ) : content === null ? null : editable && ready ? (
+        <EditView
+          draft={draft}
+          fileName={fileName}
+          onChange={setDraft}
+          onSaveShortcut={() => void handleSave()}
+          findQuery={findOpen ? findQuery : ''}
+          activeMatchIdx={findIdx}
+          onMatchesComputed={onMatchesComputed}
+        />
+      ) : editable ? null : (
         <ReadView
           filePath={filePath}
           content={content}
@@ -1055,7 +1097,7 @@ function FilePanel({
           activeMatchIdx={findIdx}
           onMatchesComputed={onMatchesComputed}
         />
-      ) : null}
+      )}
 
       {saveError && (
         <div className="px-3 py-1 text-[11px] text-danger bg-danger/10 border-t border-white/[0.06] shrink-0">
@@ -1069,57 +1111,36 @@ function FilePanel({
 function ToolbarBtn({
   icon: Icon,
   label,
+  shortcut,
   active,
   disabled,
   onClick
 }: {
   icon: typeof Search
   label: string
+  shortcut?: string
   active?: boolean
   disabled?: boolean
   onClick: () => void
 }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-      className={`p-1 rounded transition-colors shrink-0 ${
-        disabled
-          ? 'text-gray-700 cursor-not-allowed'
-          : active
-            ? 'text-gray-100 bg-white/[0.08]'
-            : 'text-gray-500 hover:text-gray-200 hover:bg-white/[0.05]'
-      }`}
-    >
-      <Icon size={12} strokeWidth={2} />
-    </button>
-  )
-}
-
-function PanelHeader({ title, onClose }: { title: string; onClose?: () => void }) {
-  return (
-    <div
-      className="flex items-center px-3 py-1.5 shrink-0 text-[12px]"
-      style={{ background: PANE_SURFACE }}
-    >
-      <span className="flex-1 text-gray-300 font-medium">{title}</span>
-      {onClose && (
-        <button
-          onClick={onClose}
-          className="text-gray-600 hover:text-white p-0.5 rounded transition-colors"
-          aria-label={`Close ${title}`}
-        >
-          <X size={12} strokeWidth={2} />
-        </button>
-      )}
-    </div>
+    <Tooltip label={label} shortcut={shortcut}>
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        className={`${ICON_BUTTON} shrink-0 ${active ? 'bg-white/[0.10]' : ''} ${
+          disabled ? 'opacity-40 cursor-not-allowed' : ''
+        }`}
+      >
+        <Icon size={ICON_BUTTON_SIZE} strokeWidth={2} />
+      </button>
+    </Tooltip>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Files panel (header + filter + tree)
+// Files panel (filter + tree)
 // ---------------------------------------------------------------------------
 function FilesPanel({
   rootEntries,
@@ -1127,8 +1148,8 @@ function FilesPanel({
   loadDir,
   selectedFile,
   onSelectFile,
+  onPinFile,
   onPopOutFile,
-  showHeader = true,
   headerTestId
 }: {
   rootEntries: FileEntry[]
@@ -1136,14 +1157,9 @@ function FilesPanel({
   loadDir: (path: string) => Promise<void>
   selectedFile: string | null
   onSelectFile: (path: string) => void
-  /**
-   * Open a file as a card of its own instead of in the session's editor.
-   * Absent where there is no grid to put a card in, which is what hides the
-   * per-row control rather than leaving it there doing nothing.
-   */
+  onPinFile?: (path: string) => void
+  /** Open a file as a card of its own. Absent where there is no grid to put a card in. */
   onPopOutFile?: (path: string) => void
-  /** False when hosted in a pane card that draws its own header. */
-  showHeader?: boolean
   headerTestId?: string
 }) {
   const [filter, setFilter] = useState('')
@@ -1154,11 +1170,10 @@ function FilesPanel({
 
   return (
     <div className="flex flex-col min-h-0 h-full">
-      {showHeader && <PanelHeader title="Files" />}
       <div className="flex items-center gap-1 px-1.5 py-1.5 shrink-0" data-testid={headerTestId}>
         {/* A search field has to read as somewhere you can type before anything
             is in it; at 4% over a near-black pane it was very nearly the pane. */}
-        <div className="flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1 rounded-md bg-white/[0.09] focus-within:bg-white/[0.13] transition-colors">
+        <div className="flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1 rounded bg-white/[0.09] focus-within:bg-white/[0.13] transition-colors">
           <Search size={13} className="text-gray-600 shrink-0" />
           <input
             value={filter}
@@ -1167,7 +1182,7 @@ function FilesPanel({
               if (e.key === 'Escape') setFilter('')
             }}
             placeholder="Filter files…"
-            className="flex-1 bg-transparent text-gray-200 outline-none text-[13px] placeholder:text-gray-600"
+            className="flex-1 min-w-0 bg-transparent text-gray-200 outline-none text-[13px] placeholder:text-gray-600"
           />
           {filter && (
             <button
@@ -1190,6 +1205,7 @@ function FilesPanel({
             loadDir={loadDir}
             selectedFile={selectedFile}
             onSelectFile={onSelectFile}
+            onPinFile={onPinFile}
             onPopOutFile={onPopOutFile}
             filter={filter}
             matched={matched}
@@ -1205,187 +1221,16 @@ function FilesPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Top-level orchestrator
-// ---------------------------------------------------------------------------
-export function FileTreeExplorer({ cwd, remoteHostId }: { cwd: string; remoteHostId?: string }) {
-  const [rootEntries, setRootEntries] = useState<FileEntry[] | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [dirCache, setDirCache] = useState(() => new Map<string, FileEntry[]>())
-  const [selectedFile, setSelectedFile] = useState<string | null>(null)
-  const [fileContent, setFileContent] = useState<string | null>(null)
-  const [fileLoading, setFileLoading] = useState(false)
-  const [isBinary, setIsBinary] = useState(false)
-  const activeRequestRef = useRef<string | null>(null)
-  const dirtyRef = useRef(false)
-
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const [splitRatio, setSplitRatio] = useState<number>(() => {
-    if (typeof localStorage === 'undefined') return DEFAULT_SPLIT_RATIO
-    const stored = localStorage.getItem(SPLIT_RATIO_KEY)
-    const n = stored ? Number(stored) : NaN
-    if (!Number.isFinite(n)) return DEFAULT_SPLIT_RATIO
-    return clampSplitRatio(n)
-  })
-
-  const persistRatio = useCallback((next: number): void => {
-    try {
-      localStorage.setItem(SPLIT_RATIO_KEY, String(next))
-    } catch {
-      /* ignore quota errors */
-    }
-  }, [])
-
-  useEffect(() => {
-    let stale = false
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset cache when cwd/host changes
-    setDirCache(new Map())
-    setLoading(true)
-    window.api
-      .listDir(cwd, remoteHostId)
-      .then((entries) => {
-        if (stale) return
-        setRootEntries(entries)
-        setLoading(false)
-      })
-      .catch(() => {
-        if (!stale) setLoading(false)
-      })
-    return () => {
-      stale = true
-    }
-  }, [cwd, remoteHostId])
-
-  const loadDir = useCallback(
-    async (dirPath: string) => {
-      const entries = await window.api.listDir(dirPath, remoteHostId)
-      setDirCache((prev) => {
-        if (prev.has(dirPath)) return prev
-        const next = new Map(prev)
-        next.set(dirPath, entries)
-        return next
-      })
-    },
-    [remoteHostId]
-  )
-
-  const handleSelectFile = useCallback(
-    async (filePath: string) => {
-      if (filePath === activeRequestRef.current) return
-      if (dirtyRef.current && !window.confirm('Discard unsaved changes?')) return
-      activeRequestRef.current = filePath
-      setSelectedFile(filePath)
-      setFileContent(null)
-      setIsBinary(false)
-      setFileLoading(true)
-      const content = await window.api.readFileContent(filePath, undefined, remoteHostId)
-      if (activeRequestRef.current !== filePath) return
-      if (content === null) {
-        setIsBinary(true)
-        setFileContent(null)
-      } else {
-        setIsBinary(false)
-        setFileContent(content)
-      }
-      setFileLoading(false)
-    },
-    [remoteHostId]
-  )
-
-  const handleClosePreview = useCallback(() => {
-    if (dirtyRef.current && !window.confirm('Discard unsaved changes?')) return
-    activeRequestRef.current = null
-    setSelectedFile(null)
-    setFileContent(null)
-    setIsBinary(false)
-  }, [])
-
-  const handleContentSaved = useCallback((next: string) => {
-    setFileContent(next)
-  }, [])
-
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <Loader2 size={20} className="text-gray-500 animate-spin" />
-      </div>
-    )
-  }
-
-  if (!rootEntries || rootEntries.length === 0) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">
-        Empty directory
-      </div>
-    )
-  }
-
-  const showFilePanel = selectedFile !== null
-
-  return (
-    <div ref={containerRef} className="flex-1 flex flex-col min-h-0">
-      <div
-        className="flex flex-col min-h-0"
-        style={
-          showFilePanel
-            ? { flex: `${splitRatio} 1 0`, minHeight: 0 }
-            : { flex: '1 1 0', minHeight: 0 }
-        }
-      >
-        <FilesPanel
-          rootEntries={rootEntries}
-          dirCache={dirCache}
-          loadDir={loadDir}
-          selectedFile={selectedFile}
-          onSelectFile={handleSelectFile}
-        />
-      </div>
-
-      {showFilePanel && (
-        <>
-          <SplitDivider
-            axis="y"
-            label="Resize files / file panels"
-            containerRef={containerRef}
-            onRatioChange={setSplitRatio}
-            onRatioCommit={persistRatio}
-          />
-          <div
-            className="flex flex-col min-h-0"
-            style={{ flex: `${1 - splitRatio} 1 0`, minHeight: 0 }}
-          >
-            <FilePanel
-              cwd={cwd}
-              filePath={selectedFile}
-              content={fileContent}
-              loading={fileLoading}
-              isBinary={isBinary}
-              onClose={handleClosePreview}
-              onContentSaved={handleContentSaved}
-              remoteHostId={remoteHostId}
-              dirtyRef={dirtyRef}
-            />
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Standalone panes
-//
-// `FileTreeExplorer` above stacks the tree and the editor in one component with
-// an internal divider. When each lives in its own grid pane, the grid provides
-// the split instead, so these two exports own their state independently — a
-// session can have either open, maximized, or closed without the other.
+// The two halves of the Files pane. Each owns its own loading.
 // ---------------------------------------------------------------------------
 
-/** The file tree on its own. Selecting a file is reported via `onSelectFile`. */
+/** The file tree. A click reports `onSelectFile`; a double click, `onPinFile`. */
 export function FileTreePane({
   cwd,
   remoteHostId,
   selectedFile,
   onSelectFile,
+  onPinFile,
   onPopOutFile,
   headerTestId
 }: {
@@ -1393,6 +1238,7 @@ export function FileTreePane({
   remoteHostId?: string
   selectedFile: string | null
   onSelectFile: (path: string) => void
+  onPinFile?: (path: string) => void
   onPopOutFile?: (path: string) => void
   headerTestId?: string
 }): JSX.Element {
@@ -1456,77 +1302,67 @@ export function FileTreePane({
       loadDir={loadDir}
       selectedFile={selectedFile}
       onSelectFile={onSelectFile}
+      onPinFile={onPinFile}
       onPopOutFile={onPopOutFile}
-      showHeader={false}
       headerTestId={headerTestId}
     />
   )
 }
 
-/**
- * The file editor on its own, owning the load of `filePath`. Independent of the
- * tree: it renders whatever path it is given, whether or not a tree is open.
- */
-export function FileEditorPane({
+/** One open file, owning the load of `filePath`. It opens ready to type in. */
+function FileEditorPaneImpl({
   cwd,
   filePath,
   remoteHostId,
-  onClose,
   dirtyRef: externalDirtyRef,
   draftKey,
   controls,
   onHeaderPointerDown,
-  onHeaderDoubleClick,
   headerTestId,
   headerClassName
 }: {
   cwd: string
   filePath: string
   remoteHostId?: string
-  onClose?: () => void
   /** Where an unsaved edit is kept; see `FilePanel`. */
   draftKey?: string
   /** Pane chrome seated in the path strip; see `FilePanel`. */
   controls?: ReactNode
   onHeaderPointerDown?: (e: React.PointerEvent) => void
-  onHeaderDoubleClick?: () => void
   headerTestId?: string
   headerClassName?: string
-  /**
-   * Set while the buffer has unsaved edits. The hosting pane reads it to
-   * confirm before swapping files or closing — in the split-pane layout those
-   * actions are driven from the tree and the card header, not from here.
-   */
+  /** Set while the buffer has unsaved edits, for whoever is about to close it. */
   dirtyRef?: React.MutableRefObject<boolean>
 }): JSX.Element {
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [isBinary, setIsBinary] = useState(false)
-  const activeRequestRef = useRef<string | null>(null)
+  const [readOnly, setReadOnly] = useState<ReadOnlyReason>(null)
   const localDirtyRef = useRef(false)
   const dirtyRef = externalDirtyRef ?? localDirtyRef
 
   useEffect(() => {
     let stale = false
-    activeRequestRef.current = filePath
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset to a loading state when the file changes
     setLoading(true)
     setContent(null)
-    setIsBinary(false)
-    window.api
-      .readFileContent(filePath, undefined, remoteHostId)
-      .then((next) => {
-        if (stale || activeRequestRef.current !== filePath) return
-        if (next === null) {
-          setIsBinary(true)
-          setContent(null)
-        } else {
-          setIsBinary(false)
-          setContent(next)
-        }
-        setLoading(false)
-      })
+    setReadOnly(null)
+    const load = async (): Promise<void> => {
+      const next = await window.api.readFileContent(filePath, undefined, remoteHostId)
+      if (stale) return
+      if (next !== null) {
+        setReadOnly(isTruncatedRead(next) ? 'truncated' : null)
+        setContent(next)
+        return
+      }
+      // A null read is a binary file or a failed one; only a stat can tell them apart.
+      const stamp = await window.api.fileStamp?.(filePath, remoteHostId)?.catch(() => null)
+      if (!stale) setReadOnly(stamp === null ? 'unreadable' : 'binary')
+    }
+    load()
       .catch(() => {
+        if (!stale) setReadOnly('unreadable')
+      })
+      .finally(() => {
         if (!stale) setLoading(false)
       })
     return () => {
@@ -1535,6 +1371,8 @@ export function FileEditorPane({
   }, [filePath, remoteHostId])
 
   const handleContentSaved = useCallback((next: string) => {
+    // A re-read from disk can come back capped even when the first read did not.
+    if (isTruncatedRead(next)) setReadOnly('truncated')
     setContent(next)
   }, [])
 
@@ -1544,18 +1382,18 @@ export function FileEditorPane({
       filePath={filePath}
       content={content}
       loading={loading}
-      isBinary={isBinary}
-      onClose={onClose ?? (() => {})}
+      readOnly={readOnly}
       onContentSaved={handleContentSaved}
       remoteHostId={remoteHostId}
       dirtyRef={dirtyRef}
       draftKey={draftKey}
-      showHeader={false}
       controls={controls}
       onHeaderPointerDown={onHeaderPointerDown}
-      onHeaderDoubleClick={onHeaderDoubleClick}
       headerTestId={headerTestId}
       headerClassName={headerClassName}
     />
   )
 }
+
+/** Memoised: a Files pane keeps every open tab mounted, and its own re-renders should not reach them. */
+export const FileEditorPane = memo(FileEditorPaneImpl)

@@ -90,6 +90,15 @@ export function forgetDraft(paneId: string): void {
   save(drafts)
 }
 
+/** Move a draft to a new key, for a file whose editor changed identity. */
+export function renameDraft(from: string, to: string): void {
+  const drafts = load()
+  if (!(from in drafts)) return
+  drafts[to] = drafts[from]
+  delete drafts[from]
+  save(drafts)
+}
+
 /** Drop drafts for panes that are gone, alongside the panes themselves. */
 export function pruneDrafts(livePaneIds: Set<string>): void {
   const drafts = load()

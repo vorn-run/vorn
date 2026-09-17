@@ -1,9 +1,10 @@
 import { memo, forwardRef, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Plus, SquareArrowOutUpRight, X } from 'lucide-react'
+import { SquareArrowOutUpRight } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { activePanelIndex } from '../stores/types'
 import { PaneCard, PaneControls } from './PaneCard'
+import { PaneTabStrip } from './PaneTabStrip'
 import { TerminalPane } from './TerminalPane'
 import { SessionComposer } from './card/SessionComposer'
 import { terminalsPaneId } from '../lib/pane-id'
@@ -90,97 +91,49 @@ export const TerminalsCard = memo(
         // The tab strip is this pane's title bar, as the browser's is.
         headerless
       >
-        <div
-          className={`flex items-center gap-1 pl-1.5 pr-1 pt-1 shrink-0 ${
-            onDragStart || flexible ? 'drag-handle cursor-grab active:cursor-grabbing' : ''
-          }`}
+        <PaneTabStrip
+          ariaLabel="Terminals"
+          testId={`terminals-pane-header-${sessionId}`}
+          draggable={Boolean(onDragStart || flexible)}
           onPointerDown={onDragStart ? (e) => onDragStart(paneId, e) : undefined}
-          data-testid={`terminals-pane-header-${sessionId}`}
-        >
-          <div
-            className="flex items-stretch gap-0.5 flex-1 min-w-0 overflow-x-auto"
-            role="tablist"
-            aria-label="Terminals"
-          >
-            {names.map((t, i) => {
-              // The clamped index, the same one the body below is drawn from.
-              // Reading the raw value here would leave a stale one showing a
-              // terminal with no tab marked as its own.
-              const isActive = i === activeIndex
-              return (
-                <div
-                  key={t.id}
-                  role="tab"
-                  aria-selected={isActive}
-                  tabIndex={0}
-                  onClick={() => {
-                    setActive(sessionId, i)
-                    setFocusTarget(t.id)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter' && e.key !== ' ') return
-                    setActive(sessionId, i)
-                    setFocusTarget(t.id)
-                  }}
-                  // The card underneath selects its session on pointerdown and
-                  // then focuses that session's agent a frame later, which would
-                  // take the keyboard straight back off the shell.
-                  onPointerDown={(e) => e.stopPropagation()}
-                  title={t.name}
-                  className={`group/tab flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-md max-w-[170px]
-                              cursor-default select-none transition-colors ${
-                                isActive
-                                  ? 'bg-white/[0.06] text-gray-200'
-                                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.03]'
-                              }`}
-                >
-                  <span className="text-[11px] truncate">{t.name}</span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      extract(sessionId, t.id)
-                    }}
-                    aria-label={`Open ${t.name} as its own terminal`}
-                    title="Open as its own terminal"
-                    className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white
-                               hover:bg-white/[0.08] transition-colors"
-                  >
-                    <SquareArrowOutUpRight size={10} strokeWidth={2.5} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      void closeTerminalSession(t.id)
-                    }}
-                    aria-label={`Close ${t.name}`}
-                    className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white
-                               opacity-0 group-hover/tab:opacity-100 focus:opacity-100 transition-opacity"
-                  >
-                    <X size={10} strokeWidth={2.5} />
-                  </button>
-                </div>
-              )
-            })}
+          // A press on a tab must not reach the card, which would hand the keyboard back to the agent.
+          isolateTabPointer
+          tabs={names.map((t) => ({ id: t.id, name: t.name }))}
+          // The clamped index, the same one the body below is drawn from.
+          activeId={active.id}
+          onSelect={(id) => {
+            setActive(
+              sessionId,
+              names.findIndex((t) => t.id === id)
+            )
+            setFocusTarget(id)
+          }}
+          onClose={(id) => void closeTerminalSession(id)}
+          tabActions={(tab) => (
             <button
               type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => {
-                void addTerminalToPanel(sessionId).then((id) => {
-                  if (id) setFocusTarget(id)
-                })
+              onClick={(e) => {
+                e.stopPropagation()
+                extract(sessionId, tab.id)
               }}
-              aria-label="New terminal in this session"
-              className="shrink-0 self-center ml-0.5 p-1 rounded-md text-gray-600 hover:text-gray-200
-                         hover:bg-white/[0.06] transition-colors"
+              aria-label={`Open ${tab.name} as its own terminal`}
+              title="Open as its own terminal"
+              className="shrink-0 p-0.5 rounded text-gray-600 hover:text-white
+                         hover:bg-white/[0.08] transition-colors"
             >
-              <Plus size={13} strokeWidth={2} />
+              <SquareArrowOutUpRight size={10} strokeWidth={2.5} />
             </button>
-          </div>
-
-          <PaneControls paneId={paneId} title="Terminals" onClose={close} className="shrink-0" />
-        </div>
+          )}
+          onAdd={() => {
+            void addTerminalToPanel(sessionId).then((id) => {
+              if (id) setFocusTarget(id)
+            })
+          }}
+          addLabel="New terminal in this session"
+          trailing={
+            <PaneControls paneId={paneId} title="Terminals" onClose={close} className="shrink-0" />
+          }
+        />
 
         {/* Only the tab in front is drawn. The rest keep running — the registry
             holds the xterm and its scrollback, and a slot is only where a

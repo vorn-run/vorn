@@ -78,22 +78,29 @@ export interface CardSplit {
   panes: number[]
 }
 
-/**
- * State of a file-editor pane. Independent of its session's tree pane — the
- * editor can be open, maximized, and closed on its own.
- */
+/** A session's Files pane: the files open in it as tabs, and whether its tree shows. */
+export interface FilesPaneState {
+  /** Absolute paths of the open files, in tab order. */
+  tabs: string[]
+  /** The tab in front, or null when none is open. */
+  active: string | null
+  /** The tab a single click may reuse, or null when every tab is kept. */
+  preview: string | null
+  treeVisible: boolean
+}
+
+export const EMPTY_FILES_PANE: FilesPaneState = {
+  tabs: [],
+  active: null,
+  preview: null,
+  treeVisible: true
+}
+
+/** A file popped out of its session's Files pane to a card of its own. */
 export interface EditorPaneState {
   /** Absolute path of the open file. */
   filePath: string
-  /**
-   * The session this editor belongs to, which is not always its key.
-   *
-   * A session's own editor is stored under the session id, so every existing
-   * `editorPanes.get(sessionId)` still reads it. A file popped out to a card of
-   * its own is stored under a `card:` id instead, and this is the only thing
-   * that still says whose file it is — which worktree to read it from, whose
-   * branch to label it with, and what to tear it down alongside.
-   */
+  /** The session the card came from; its key is a `card:` id. */
   sessionId: string
 }
 
@@ -422,17 +429,9 @@ export interface UISlice {
   knownSessionIds: Set<string> | null
   focusableTerminalIds: string[]
   minimizedTerminals: Set<string>
-  /** Session ids whose file-tree pane is open. Keyed by owner, one per session. */
-  filesPanes: Set<string>
-  /**
-   * Pane id → the file that editor is showing.
-   *
-   * Keyed by pane, not by session, so one session can have several: its own
-   * editor under the session id, plus a `card:` entry for every file popped out
-   * to a card of its own. An entry whose key is not its `sessionId` is exactly
-   * what a promoted card is — there is no second flag to fall out of step with
-   * it, and closing the pane is what removes the card.
-   */
+  /** Session id → its open Files pane. Presence is the pane being open. */
+  filesPanes: Map<string, FilesPaneState>
+  /** Card id → the file popped out to that card. */
   editorPanes: Map<string, EditorPaneState>
   /** Pane id → the pages that browser is showing. Keyed like `editorPanes`. */
   browserPanes: Map<string, BrowserPaneState>
@@ -555,11 +554,15 @@ export interface UISlice {
   openFilesPane: (sessionId: string) => void
   closeFilesPane: (sessionId: string) => void
   toggleFilesPane: (sessionId: string) => void
-  /**
-   * Show `filePath` in the session's editor pane, creating it if needed.
-   * Independent of the tree pane — the editor works with Files closed.
-   */
-  openEditorPane: (sessionId: string, filePath: string) => void
+  /** Open `filePath` as a tab; unpinned, it reuses the preview tab. */
+  openFileTab: (sessionId: string, filePath: string, options?: { pin?: boolean }) => void
+  pinFileTab: (sessionId: string, filePath: string) => void
+  setActiveFileTab: (sessionId: string, filePath: string) => void
+  closeFileTab: (sessionId: string, filePath: string) => void
+  /** Close every tab except those in `keep`. */
+  closeSavedFileTabs: (sessionId: string) => void
+  toggleFileTree: (sessionId: string) => void
+  setFileTreeVisible: (sessionId: string, visible: boolean) => void
   closeEditorPane: (paneId: string) => void
   /**
    * Show `url` in the session's browser pane, creating it if needed.
@@ -670,13 +673,7 @@ export interface UISlice {
   extractPanelTerminal: (sessionId: string, terminalId: string) => void
   /** Maximize a pane over its owner session's footprint, or null to restore. */
   setMaximizedPane: (paneId: string | null) => void
-  /**
-   * Open `filePath` as a card of its own rather than in the session's editor.
-   *
-   * Several files can be open this way at once, which is the point: the
-   * session's own editor holds exactly one, so reading two files side by side
-   * was not possible without this. Returns the new card's id.
-   */
+  /** Open `filePath` as a card of its own. Returns the card's id. */
   promoteFile: (sessionId: string, filePath: string) => string
   /**
    * Take one tab out of a browser pane and give it a card of its own.
@@ -689,7 +686,7 @@ export interface UISlice {
   promoteBrowserTab: (paneId: string, index: number) => string | null
   /**
    * Put a promoted card back where it came from: the file into its session's
-   * editor, the tab onto the end of its session's tab strip.
+   * Files pane as a tab, the tab onto the end of its session's tab strip.
    *
    * Where the session has no such pane open, this opens one — the card has to
    * land somewhere, and refusing to return it would strand it.

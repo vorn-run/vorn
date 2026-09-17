@@ -3,6 +3,7 @@ import path from 'node:path'
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { FileEntry, FileStamp, RemoteHost } from '@vornrun/shared/types'
+import { truncationMarker } from '@vornrun/shared/string-utils'
 import { sshExecSync, shellEscape, getSafeEnv, buildSshArgs } from './process-utils'
 import { resolveExecutable } from './resolve-executable'
 
@@ -168,7 +169,7 @@ export function readFileContent(
 
     let text = content.toString('utf-8')
     if (bytesRead < stat.size) {
-      text += `\n\n--- truncated (${stat.size} bytes total) ---`
+      text += truncationMarker(stat.size)
     }
     return text
   } catch {
@@ -198,7 +199,8 @@ function readFileContentRemote(
     for (let i = 0; i < Math.min(text.length, 8192); i++) {
       if (text.charCodeAt(i) === 0) return null
     }
-    return text
+    // `head -c` cuts silently, and a cut file saved back would lose its tail.
+    return Buffer.byteLength(text) >= maxBytes ? text + truncationMarker() : text
   } catch {
     return null
   }

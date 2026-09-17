@@ -23,15 +23,11 @@ const NO_ENTRIES: ColumnEntry[] = []
  * computation, so the frame and the contents cannot disagree.
  */
 export function usePaneColumnEntries(sessionId: string | null): ColumnEntry[] {
-  // A card id must answer "no panes". `editorPanes` is keyed by pane, so
-  // `has(cardId)` is true for an editor card — and this would then build an
-  // `editor:card:<id>` entry for a pane that does not exist. Harmless only
-  // because today's callers happen to branch before reading it.
+  // A card id must answer "no panes": a card owns none.
   const owner = sessionId !== null && !isPromotedCardId(sessionId) ? sessionId : null
-  const { hasFiles, hasEditor, hasBrowser, hasDevice, hasExtension, hasTerminals } = useAppStore(
+  const { hasFiles, hasBrowser, hasDevice, hasExtension, hasTerminals } = useAppStore(
     useShallow((s) => ({
       hasFiles: owner ? s.filesPanes.has(owner) : false,
-      hasEditor: owner ? s.editorPanes.has(owner) : false,
       hasBrowser: owner ? s.browserPanes.has(owner) : false,
       hasDevice: owner ? s.devicePanes.has(owner) : false,
       hasExtension: owner ? s.extensionPanes.has(owner) : false,
@@ -46,7 +42,6 @@ export function usePaneColumnEntries(sessionId: string | null): ColumnEntry[] {
     const kinds = (
       [
         hasFiles ? 'files' : null,
-        hasEditor ? 'editor' : null,
         hasBrowser ? 'browser' : null,
         hasDevice ? 'device' : null,
         hasExtension ? 'extension' : null,
@@ -54,5 +49,5 @@ export function usePaneColumnEntries(sessionId: string | null): ColumnEntry[] {
       ] satisfies (PaneChildKind | null)[]
     ).filter((k): k is PaneChildKind => k !== null)
     return kinds.map((kind) => ({ id: paneIdFor(kind, owner), kind }))
-  }, [owner, hasFiles, hasEditor, hasBrowser, hasDevice, hasExtension, hasTerminals])
+  }, [owner, hasFiles, hasBrowser, hasDevice, hasExtension, hasTerminals])
 }
