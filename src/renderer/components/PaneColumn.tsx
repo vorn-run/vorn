@@ -3,7 +3,6 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../stores'
 import { usePaneColumnEntries, type ColumnEntry } from '../hooks/usePaneColumnEntries'
 import { FilesCard } from './FilesCard'
-import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
 import { DeviceCard } from './DeviceCard'
 import { TerminalsCard } from './TerminalsCard'
@@ -14,7 +13,7 @@ import { splitPaneWeights, resizePaneWeights } from '../lib/split-ratio'
 /**
  * The stack of panes a session owns, rendered inside that session's frame.
  *
- * Panes are not grid cells: a session's tree, editor and browser live in a
+ * Panes are not grid cells: a session's files, browser and terminals live in a
  * column beside its terminal, so the space a card gets is divided between the
  * things that belong to it rather than spread across unrelated grid cells.
  *
@@ -62,8 +61,6 @@ export function PaneColumn({ sessionId }: { sessionId: string }): ReactNode {
     switch (entry.kind) {
       case 'files':
         return <FilesCard sessionId={sessionId} />
-      case 'editor':
-        return <EditorCard sessionId={sessionId} />
       case 'browser':
         return <BrowserCard sessionId={sessionId} />
       case 'device':

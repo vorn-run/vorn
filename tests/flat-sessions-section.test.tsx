@@ -7,7 +7,7 @@ const mockStore = {
   terminals: new Map(),
   terminalsPanes: new Map(),
   // A session row reads these; the rows are what this file renders.
-  filesPanes: new Set(),
+  filesPanes: new Map(),
   editorPanes: new Map(),
   browserPanes: new Map(),
   devicePanes: new Map(),

@@ -187,8 +187,9 @@ export function useKeyboardShortcuts() {
         return
       }
 
-      // Cmd+S — sessions view
-      if (modKey(e) && !e.shiftKey && e.key.toLowerCase() === 's') {
+      // Cmd+S — sessions view, unless a file editor holds the keyboard: there it saves.
+      const inFileEditor = (document.activeElement as HTMLElement | null)?.dataset?.fileEditor
+      if (modKey(e) && !e.shiftKey && e.key.toLowerCase() === 's' && !inFileEditor) {
         e.preventDefault()
         state.setMainViewMode('sessions')
         return

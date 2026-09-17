@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand'
 import { AppStore, TerminalsSlice, TerminalState } from './types'
 import {
   filesPaneId,
-  editorPaneId,
+  fileTabKey,
   browserPaneId,
   devicePaneId,
   extensionPaneId,
@@ -50,24 +50,18 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
       // lookup was running per element of the whole session order.
       const held = new Set(state.terminalsPanes.get(id)?.terminals ?? [])
       const order = state.terminalOrder.filter((tid) => tid !== id && !held.has(tid))
-      // A session owns its file-tree, editor, browser and device panes: they
+      // A session owns its files, browser and device panes: they
       // die with it, and so does any maximized state pointing at them.
-      const childIds = [
-        filesPaneId(id),
-        editorPaneId(id),
-        browserPaneId(id),
-        devicePaneId(id),
-        extensionPaneId(id)
-      ]
+      const childIds = [filesPaneId(id), browserPaneId(id), devicePaneId(id), extensionPaneId(id)]
       // The dirty registry lives outside the store, so it needs explicit
       // teardown — otherwise a session closed with unsaved edits leaves a flag
       // that a recycled id would inherit.
-      clearDirty(id)
+      for (const path of state.filesPanes.get(id)?.tabs ?? []) clearDirty(fileTabKey(id, path))
       forgetExtensionHydration(id)
       const minimized = new Set(state.minimizedTerminals)
       minimized.delete(id)
       for (const childId of childIds) minimized.delete(childId)
-      const filesPanes = new Set(state.filesPanes)
+      const filesPanes = new Map(state.filesPanes)
       filesPanes.delete(id)
       // Both collections are keyed by pane, so a session's own pane is one
       // entry and each file or tab popped out to a card of its own is another.
@@ -84,8 +78,7 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
         editorPanes.delete(paneId)
         minimized.delete(paneId)
         dying.add(paneId)
-        // A card's buffer reports dirtiness under its own id, not its owner's.
-        if (paneId !== id) clearDirty(paneId)
+        clearDirty(paneId)
       }
       const browserPanes = new Map(state.browserPanes)
       for (const [paneId, pane] of state.browserPanes) {

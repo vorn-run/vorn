@@ -30,7 +30,7 @@ function seed(ids: string[]): void {
       focusedTerminalId: null,
       previewTerminalId: null,
       selectedTerminalId: null,
-      filesPanes: new Set(),
+      filesPanes: new Map(),
       editorPanes: new Map(),
       browserPanes: new Map(),
       devicePanes: new Map()

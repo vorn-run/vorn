@@ -1,20 +1,50 @@
-/**
- * Unsaved-edit tracking for session-owned editor panes.
- *
- * The editor lives in one pane while the actions that would discard its buffer
- * live elsewhere — picking another file happens in the tree pane, closing
- * happens in the card header. Neither can reach the editor's internal state
- * through props, so each editor registers a dirty flag here under its session
- * id and the other panes consult it before throwing work away.
- */
+import { useSyncExternalStore } from 'react'
+
+/** Unsaved-edit flags, one per open file, for the close buttons and store actions that cannot see an editor's buffer. */
 
 const dirtyBySession = new Map<string, { current: boolean }>()
+const listeners = new Set<() => void>()
+let version = 0
 
-/** Ref the editor pane keeps in sync with its unsaved-changes state. */
+function changed(): void {
+  version++
+  for (const listener of listeners) listener()
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+function observableRef(): { current: boolean } {
+  let value = false
+  return {
+    get current() {
+      return value
+    },
+    set current(next: boolean) {
+      if (next === value) return
+      value = next
+      changed()
+    }
+  }
+}
+
+/** Re-renders when any editor's unsaved state changes; read flags with `isEditorDirty`. */
+export function useDirtyVersion(): number {
+  return useSyncExternalStore(subscribe, () => version)
+}
+
+/** Whether the editor under `key` holds unsaved changes, kept current. */
+export function useIsDirty(key: string): boolean {
+  return useSyncExternalStore(subscribe, () => isEditorDirty(key))
+}
+
+/** Ref an editor keeps in sync with its unsaved-changes state. */
 export function dirtyRefFor(sessionId: string): { current: boolean } {
   let ref = dirtyBySession.get(sessionId)
   if (!ref) {
-    ref = { current: false }
+    ref = observableRef()
     dirtyBySession.set(sessionId, ref)
   }
   return ref
@@ -25,7 +55,7 @@ export function isEditorDirty(sessionId: string): boolean {
 }
 
 export function clearDirty(sessionId: string): void {
-  dirtyBySession.delete(sessionId)
+  if (dirtyBySession.delete(sessionId)) changed()
 }
 
 /**

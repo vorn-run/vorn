@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
 import { activeBrowserUrl, isPromotedPane } from '../src/renderer/stores/types'
-import { parsePersistedBrowsers } from '../src/renderer/stores/ui-slice'
+import { parsePersistedBrowsers, loadViewForTest } from '../src/renderer/stores/ui-slice'
 import type { DeviceClaimFailure } from '../packages/shared/src/types'
 import { DEVICE_SPLIT_RATIO } from '../src/renderer/lib/split-ratio'
 
@@ -29,7 +29,7 @@ function seed(ids: string[] = ['t1']): void {
   act(() => {
     useAppStore.setState({
       terminals,
-      filesPanes: new Set(),
+      filesPanes: new Map(),
       editorPanes: new Map(),
       browserPanes: new Map(),
       browserMemory: new Map(),
@@ -77,25 +77,121 @@ describe('pane store actions', () => {
   it("keeps each session's panes separate", () => {
     const s = () => useAppStore.getState()
     act(() => {
-      s().openFilesPane('t1')
-      s().openEditorPane('t1', '/p/a.ts')
-      s().openEditorPane('t2', '/p/b.ts')
+      s().openFileTab('t1', '/p/a.ts')
+      s().openFileTab('t2', '/p/b.ts')
     })
 
     // Two sessions on the same worktree hold independent state — this is the
     // whole point of session ownership.
-    expect(s().editorPanes.get('t1')?.filePath).toBe('/p/a.ts')
-    expect(s().editorPanes.get('t2')?.filePath).toBe('/p/b.ts')
-    expect(s().filesPanes.has('t2')).toBe(false)
+    expect(s().filesPanes.get('t1')?.tabs).toEqual(['/p/a.ts'])
+    expect(s().filesPanes.get('t2')?.tabs).toEqual(['/p/b.ts'])
   })
 
-  it('swaps the file inside one editor rather than stacking editors', () => {
+  it('reuses the preview tab for the next single click', () => {
     const s = () => useAppStore.getState()
-    act(() => s().openEditorPane('t1', '/p/a.ts'))
-    act(() => s().openEditorPane('t1', '/p/b.ts'))
+    act(() => s().openFileTab('t1', '/p/a.ts'))
+    act(() => s().openFileTab('t1', '/p/b.ts'))
 
-    expect(s().editorPanes.size).toBe(1)
-    expect(s().editorPanes.get('t1')?.filePath).toBe('/p/b.ts')
+    expect(s().filesPanes.get('t1')).toEqual({
+      tabs: ['/p/b.ts'],
+      active: '/p/b.ts',
+      preview: '/p/b.ts',
+      treeVisible: true
+    })
+  })
+
+  it('keeps a pinned tab and opens the next file beside it', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openFileTab('t1', '/p/a.ts', { pin: true }))
+    act(() => s().openFileTab('t1', '/p/b.ts'))
+    act(() => s().pinFileTab('t1', '/p/b.ts'))
+    act(() => s().openFileTab('t1', '/p/c.ts'))
+
+    expect(s().filesPanes.get('t1')?.tabs).toEqual(['/p/a.ts', '/p/b.ts', '/p/c.ts'])
+    expect(s().filesPanes.get('t1')?.preview).toBe('/p/c.ts')
+  })
+
+  it('keeps an edited preview tab rather than replacing it under its buffer', async () => {
+    const { dirtyRefFor, clearDirty } = await import('../src/renderer/lib/editor-dirty')
+    const { fileTabKey } = await import('../src/renderer/lib/pane-id')
+    const s = () => useAppStore.getState()
+    act(() => s().openFileTab('t1', '/p/a.ts'))
+    dirtyRefFor(fileTabKey('t1', '/p/a.ts')).current = true
+
+    act(() => s().openFileTab('t1', '/p/b.ts'))
+    expect(s().filesPanes.get('t1')?.tabs).toEqual(['/p/a.ts', '/p/b.ts'])
+    clearDirty(fileTabKey('t1', '/p/a.ts'))
+  })
+
+  it('activates an open file instead of opening it twice', () => {
+    const s = () => useAppStore.getState()
+    act(() => s().openFileTab('t1', '/p/a.ts', { pin: true }))
+    act(() => s().openFileTab('t1', '/p/b.ts', { pin: true }))
+    act(() => s().openFileTab('t1', '/p/a.ts'))
+
+    expect(s().filesPanes.get('t1')?.tabs).toEqual(['/p/a.ts', '/p/b.ts'])
+    expect(s().filesPanes.get('t1')?.active).toBe('/p/a.ts')
+  })
+
+  it('hands the front to the right neighbour when the active tab closes, else the left', () => {
+    const s = () => useAppStore.getState()
+    act(() => {
+      for (const f of ['/p/a.ts', '/p/b.ts', '/p/c.ts']) s().openFileTab('t1', f, { pin: true })
+      s().setActiveFileTab('t1', '/p/b.ts')
+    })
+    act(() => s().closeFileTab('t1', '/p/b.ts'))
+    expect(s().filesPanes.get('t1')?.active).toBe('/p/c.ts')
+
+    act(() => s().closeFileTab('t1', '/p/c.ts'))
+    expect(s().filesPanes.get('t1')?.active).toBe('/p/a.ts')
+
+    // The last tab closing leaves the pane open on its tree.
+    act(() => s().closeFileTab('t1', '/p/a.ts'))
+    expect(s().filesPanes.get('t1')).toMatchObject({ tabs: [], active: null })
+  })
+
+  it('closes every tab but the ones it is told to keep', () => {
+    const s = () => useAppStore.getState()
+    act(() => {
+      for (const f of ['/p/a.ts', '/p/b.ts', '/p/c.ts']) s().openFileTab('t1', f, { pin: true })
+    })
+    act(() => s().closeSavedFileTabs('t1', ['/p/b.ts']))
+
+    expect(s().filesPanes.get('t1')).toMatchObject({ tabs: ['/p/b.ts'], active: '/p/b.ts' })
+  })
+
+  it('asks before a toggle closes a pane holding unsaved tabs', async () => {
+    const { dirtyRefFor, clearDirty } = await import('../src/renderer/lib/editor-dirty')
+    const { fileTabKey } = await import('../src/renderer/lib/pane-id')
+    const s = () => useAppStore.getState()
+    act(() => s().openFileTab('t1', '/p/a.ts'))
+    dirtyRefFor(fileTabKey('t1', '/p/a.ts')).current = true
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    act(() => s().toggleFilesPane('t1'))
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(s().filesPanes.has('t1')).toBe(true)
+
+    confirm.mockReturnValue(true)
+    act(() => s().toggleFilesPane('t1'))
+    expect(s().filesPanes.has('t1')).toBe(false)
+    confirm.mockRestore()
+    clearDirty(fileTabKey('t1', '/p/a.ts'))
+  })
+
+  it('remembers whether the tree is shown, per session', () => {
+    const s = () => useAppStore.getState()
+    act(() => {
+      s().openFilesPane('t1')
+      s().openFilesPane('t2')
+      s().toggleFileTree('t1')
+    })
+
+    expect(s().filesPanes.get('t1')?.treeVisible).toBe(false)
+    expect(s().filesPanes.get('t2')?.treeVisible).toBe(true)
+    expect(JSON.parse(localStorage.getItem('vorn:panes') as string).files.t1.treeVisible).toBe(
+      false
+    )
   })
 
   it('toggling the tree opens then closes it', () => {
@@ -107,17 +203,18 @@ describe('pane store actions', () => {
     expect(s().filesPanes.has('t1')).toBe(false)
   })
 
-  it('clears the editor dirty flag when its session closes', async () => {
+  it("clears a tab's dirty flag when its session closes", async () => {
     const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
+    const { fileTabKey } = await import('../src/renderer/lib/pane-id')
     const s = () => useAppStore.getState()
-    act(() => s().openEditorPane('t1', '/p/a.ts'))
-    dirtyRefFor('t1').current = true
+    act(() => s().openFileTab('t1', '/p/a.ts'))
+    dirtyRefFor(fileTabKey('t1', '/p/a.ts')).current = true
 
     act(() => s().removeTerminal('t1'))
 
     // The registry lives outside the store; a leaked flag would make a recycled
     // session id prompt about edits that no longer exist.
-    expect(isEditorDirty('t1')).toBe(false)
+    expect(isEditorDirty(fileTabKey('t1', '/p/a.ts'))).toBe(false)
   })
 
   it('opens a browser with a default page and normalizes typed urls', () => {
@@ -267,6 +364,38 @@ describe('pane store actions', () => {
     expect(panes.get('t1')).toEqual({ filePath: '/p/legacy.ts', sessionId: 't1' })
   })
 
+  it('reads a Files pane saved as a bare session id, and turns its one open file into a tab', async () => {
+    const { parsePersistedEditors, parsePersistedFiles } =
+      await import('../src/renderer/stores/ui-slice')
+    const { filesPanes, editorPanes } = parsePersistedFiles(
+      ['t1'],
+      parsePersistedEditors({
+        t1: { filePath: '/p/open.ts', sessionId: 't1' },
+        t2: '/p/legacy.ts',
+        'card:t1:0': { filePath: '/p/popped.ts', sessionId: 't1' }
+      })
+    )
+
+    expect(filesPanes.get('t1')).toMatchObject({ tabs: ['/p/open.ts'], active: '/p/open.ts' })
+    // A file open with its tree closed still comes back, in a pane opened for it.
+    expect(filesPanes.get('t2')).toMatchObject({ tabs: ['/p/legacy.ts'], treeVisible: true })
+    expect([...editorPanes.keys()]).toEqual(['card:t1:0'])
+  })
+
+  it('drops a saved tab state that no longer adds up', async () => {
+    const { parsePersistedFiles } = await import('../src/renderer/stores/ui-slice')
+    const { filesPanes } = parsePersistedFiles(
+      { t1: { tabs: ['/p/a.ts', '/p/a.ts'], active: '/p/gone.ts', preview: '/p/gone.ts' } },
+      new Map()
+    )
+    expect(filesPanes.get('t1')).toEqual({
+      tabs: ['/p/a.ts'],
+      active: '/p/a.ts',
+      preview: null,
+      treeVisible: true
+    })
+  })
+
   it('clamps a persisted active tab that points past the end', () => {
     const panes = parsePersistedBrowsers({ t1: { tabs: ['https://a/'], activeTab: 4 } })
     expect(panes.get('t1')?.activeTab).toBe(0)
@@ -353,43 +482,52 @@ describe('pane store actions', () => {
     expect(s().maximizedPaneId).toBeNull()
   })
 
-  it('closing an editor clears a maximize that pointed at it', () => {
+  it('closing the Files pane clears a maximize that pointed at it', () => {
     const s = () => useAppStore.getState()
     act(() => {
-      s().openEditorPane('t1', '/p/a.ts')
-      s().setMaximizedPane('editor:t1')
+      s().openFileTab('t1', '/p/a.ts')
+      s().setMaximizedPane('files:t1')
     })
-    act(() => s().closeEditorPane('t1'))
+    act(() => s().closeFilesPane('t1'))
 
     // A stale id here would leave the grid maximizing a pane that is gone.
     expect(s().maximizedPaneId).toBeNull()
-    expect(s().editorPanes.has('t1')).toBe(false)
+    expect(s().filesPanes.has('t1')).toBe(false)
+  })
+
+  it('drops a saved maximize that names the editor pane older builds had', () => {
+    localStorage.setItem('vorn:view', JSON.stringify({ maximizedPaneId: 'editor:t1' }))
+    expect(loadViewForTest().maximizedPaneId).toBeNull()
+    localStorage.setItem('vorn:view', JSON.stringify({ maximizedPaneId: 'files:t1' }))
+    expect(loadViewForTest().maximizedPaneId).toBe('files:t1')
   })
 
   it('persists open panes so a reload restores the workspace', () => {
     const s = () => useAppStore.getState()
     act(() => {
       s().openFilesPane('t1')
-      s().openEditorPane('t1', '/p/a.ts')
+      s().openFileTab('t1', '/p/a.ts')
     })
 
     const raw = localStorage.getItem('vorn:panes')
     expect(raw).toBeTruthy()
     expect(JSON.parse(raw as string)).toEqual({
-      files: ['t1'],
-      editors: { t1: { filePath: '/p/a.ts', sessionId: 't1' } },
+      files: {
+        t1: { tabs: ['/p/a.ts'], active: '/p/a.ts', preview: '/p/a.ts', treeVisible: true }
+      },
+      editors: {},
       browsers: {}
     })
 
     act(() => s().closeFilesPane('t1'))
-    expect(JSON.parse(localStorage.getItem('vorn:panes') as string).files).toEqual([])
+    expect(JSON.parse(localStorage.getItem('vorn:panes') as string).files).toEqual({})
   })
 
   it('drops persisted panes for sessions that never came back', () => {
     const s = () => useAppStore.getState()
     act(() => {
       s().openFilesPane('t1')
-      s().openEditorPane('t2', '/p/b.ts')
+      s().openFileTab('t2', '/p/b.ts')
     })
 
     // t2 does not return after a restart; its pane entry would otherwise sit in
@@ -401,8 +539,10 @@ describe('pane store actions', () => {
     act(() => s().setVisibleTerminalIds(['t1']))
 
     expect(s().filesPanes.has('t1')).toBe(true)
-    expect(s().editorPanes.has('t2')).toBe(false)
-    expect(JSON.parse(localStorage.getItem('vorn:panes') as string).editors).toEqual({})
+    expect(s().filesPanes.has('t2')).toBe(false)
+    expect(Object.keys(JSON.parse(localStorage.getItem('vorn:panes') as string).files)).toEqual([
+      't1'
+    ])
   })
 
   it('does not prune while the session list is still empty', () => {
@@ -670,16 +810,14 @@ describe('popping an item out to its own card', () => {
     seed(['t1', 't2'])
   })
 
-  it('opens a file as a card without disturbing the session editor', () => {
-    act(() => s().openEditorPane('t1', '/p/open.ts'))
+  it("opens a file as a card without disturbing the session's tabs", () => {
+    act(() => s().openFileTab('t1', '/p/open.ts'))
     let cardId = ''
     act(() => {
       cardId = s().promoteFile('t1', '/p/popped.ts')
     })
 
-    // The whole point: the session's editor holds one file, so a second file
-    // has to land somewhere else or it would displace the first.
-    expect(s().editorPanes.get('t1')?.filePath).toBe('/p/open.ts')
+    expect(s().filesPanes.get('t1')?.tabs).toEqual(['/p/open.ts'])
     expect(s().editorPanes.get(cardId)).toEqual({ filePath: '/p/popped.ts', sessionId: 't1' })
   })
 
@@ -732,7 +870,7 @@ describe('popping an item out to its own card', () => {
     expect(s().browserPanes.get('t1')?.tabs).toHaveLength(1)
   })
 
-  it('returns a file to the session editor', () => {
+  it("returns a file to the session's Files pane as a kept tab", () => {
     let cardId = ''
     act(() => {
       cardId = s().promoteFile('t1', '/p/popped.ts')
@@ -740,7 +878,12 @@ describe('popping an item out to its own card', () => {
     act(() => s().returnCardToSession(cardId))
 
     expect(s().editorPanes.has(cardId)).toBe(false)
-    expect(s().editorPanes.get('t1')?.filePath).toBe('/p/popped.ts')
+    // Opened for it where it was closed: the card has to land somewhere.
+    expect(s().filesPanes.get('t1')).toMatchObject({
+      tabs: ['/p/popped.ts'],
+      active: '/p/popped.ts',
+      preview: null
+    })
   })
 
   it('returns a tab to the end of the strip it came from', () => {
@@ -915,52 +1058,33 @@ describe('popping an item out to its own card', () => {
     confirm.mockRestore()
   })
 
-  it("asks before a return discards the session editor's buffer", async () => {
-    const { dirtyRefFor } = await import('../src/renderer/lib/editor-dirty')
-    act(() => s().openEditorPane('t1', '/p/open.ts'))
-    dirtyRefFor('t1').current = true
-    let cardId = ''
-    act(() => {
-      cardId = s().promoteFile('t1', '/p/popped.ts')
-    })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-
-    act(() => s().returnCardToSession(cardId))
-    // Returning displaces the session's editor exactly as picking a file in the
-    // tree does — and that path has always asked first.
-    expect(confirm).toHaveBeenCalled()
-    expect(s().editorPanes.get('t1')?.filePath).toBe('/p/open.ts')
-    expect(s().editorPanes.has(cardId)).toBe(true)
-    confirm.mockRestore()
-  })
-
-  it("does not clear one buffer's flag when the other answer is no", async () => {
+  it("asks before a return discards the card's own buffer, and leaves open tabs alone", async () => {
     const { dirtyRefFor, isEditorDirty } = await import('../src/renderer/lib/editor-dirty')
-    act(() => s().openEditorPane('t1', '/p/open.ts'))
-    dirtyRefFor('t1').current = true
+    const { fileTabKey } = await import('../src/renderer/lib/pane-id')
+    act(() => s().openFileTab('t1', '/p/open.ts'))
+    const openKey = fileTabKey('t1', '/p/open.ts')
+    dirtyRefFor(openKey).current = true
     let cardId = ''
     act(() => {
       cardId = s().promoteFile('t1', '/p/popped.ts')
     })
     dirtyRefFor(cardId).current = true
-    // Yes, then no. Asked as two questions the yes cleared the session editor's
-    // flag and the no then bailed, leaving those edits on screen with nothing
-    // left to prompt about them — so the next pane switch discarded them in
-    // silence. One question cannot produce that state at all.
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true).mockReturnValueOnce(false)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
 
     try {
       act(() => s().returnCardToSession(cardId))
-
       expect(confirm).toHaveBeenCalledOnce()
-      // The single yes covered both buffers, so the return actually happened —
-      // rather than half-applying and leaving the card where it was.
-      expect(s().editorPanes.has(cardId)).toBe(false)
-      expect(s().editorPanes.get('t1')?.filePath).toBe('/p/popped.ts')
-      expect(isEditorDirty('t1')).toBe(false)
+      expect(s().editorPanes.has(cardId)).toBe(true)
+
+      confirm.mockReturnValue(true)
+      act(() => s().returnCardToSession(cardId))
+      // The returned file lands beside the edited tab, which displaces nothing.
+      expect(s().filesPanes.get('t1')?.tabs).toEqual(['/p/open.ts', '/p/popped.ts'])
+      expect(isEditorDirty(openKey)).toBe(true)
       expect(isEditorDirty(cardId)).toBe(false)
     } finally {
       confirm.mockRestore()
+      dirtyRefFor(openKey).current = false
     }
   })
 
@@ -1078,7 +1202,7 @@ describe('popping an item out to its own card', () => {
     })
 
     expect(second).toBe(first)
-    expect([...s().editorPanes].filter(([id]) => id !== 't1')).toHaveLength(1)
+    expect(s().editorPanes.size).toBe(1)
   })
 
   it('still gives two sessions their own card for the same path', () => {

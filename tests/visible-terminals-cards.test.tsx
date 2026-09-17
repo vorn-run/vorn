@@ -30,7 +30,7 @@ function seed(ids: string[]): void {
       activeWorktreePath: null,
       minimizedTerminals: new Set(),
       terminalsPanes: new Map(),
-      filesPanes: new Set(),
+      filesPanes: new Map(),
       editorPanes: new Map(),
       browserPanes: new Map(),
       visibleTerminalIds: []
@@ -79,11 +79,11 @@ describe('useVisibleTerminals with popped-out cards', () => {
   })
 
   it("leaves a session's own panes out of the layout", () => {
-    // Opening a file in the session's editor must not add a cell. Only popping
+    // Opening a file as a tab must not add a cell. Only popping
     // one out does — otherwise every file anyone opened would rearrange the grid.
     act(() => {
       useAppStore.getState().openFilesPane('t1')
-      useAppStore.getState().openEditorPane('t1', '/p/a.ts')
+      useAppStore.getState().openFileTab('t1', '/p/a.ts')
     })
     const { result } = renderHook(() => useVisibleTerminals())
 

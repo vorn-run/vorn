@@ -67,7 +67,7 @@ function seed(open: ExtensionOpenPane | null, others: { device?: boolean } = {})
           }
         ]
       ]) as never,
-      filesPanes: new Set(),
+      filesPanes: new Map(),
       editorPanes: new Map(),
       browserPanes: new Map(),
       devicePanes: others.device

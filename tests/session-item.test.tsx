@@ -399,7 +399,7 @@ describe('SessionItem controls', () => {
       useAppStore.setState({
         editorPanes: new Map(),
         browserPanes: new Map(),
-        filesPanes: new Set(),
+        filesPanes: new Map(),
         focusedTerminalId: null,
         activeTabId: null,
         config: { defaults: { layoutMode: 'grid' } } as never

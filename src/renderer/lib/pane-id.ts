@@ -22,8 +22,8 @@ export type PaneKind =
   | 'extension'
   | 'card'
 
-/** Pane kinds a session stacks inside its own card, i.e. all but those two. */
-export type PaneChildKind = Exclude<PaneKind, 'terminal' | 'card'>
+/** Pane kinds a session stacks inside its own card. `editor` only names ids saved by older builds. */
+export type PaneChildKind = Exclude<PaneKind, 'terminal' | 'card' | 'editor'>
 
 const FILES_PREFIX = 'files:'
 const EDITOR_PREFIX = 'editor:'
@@ -38,9 +38,9 @@ export function filesPaneId(sessionId: string): string {
   return `${FILES_PREFIX}${sessionId}`
 }
 
-/** Id of the file-editor pane owned by `sessionId`. */
-export function editorPaneId(sessionId: string): string {
-  return `${EDITOR_PREFIX}${sessionId}`
+/** Key of one open file tab, for its unsaved flag and its draft. */
+export function fileTabKey(sessionId: string, filePath: string): string {
+  return `tab:${sessionId}\u0000${filePath}`
 }
 
 /** Id of the browser pane owned by `sessionId`. */
@@ -92,8 +92,6 @@ export function paneIdFor(kind: PaneChildKind, sessionId: string): string {
   switch (kind) {
     case 'files':
       return filesPaneId(sessionId)
-    case 'editor':
-      return editorPaneId(sessionId)
     case 'browser':
       return browserPaneId(sessionId)
     case 'device':

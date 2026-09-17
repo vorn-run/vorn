@@ -6,7 +6,7 @@ import '@testing-library/jest-dom/vitest'
 const mockStore = {
   terminals: new Map(),
   terminalsPanes: new Map(),
-  filesPanes: new Set(),
+  filesPanes: new Map(),
   editorPanes: new Map(),
   browserPanes: new Map(),
   devicePanes: new Map(),

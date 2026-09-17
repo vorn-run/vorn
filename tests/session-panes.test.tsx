@@ -39,7 +39,7 @@ describe('useVisibleTerminals — session-owned panes', () => {
         terminals,
         activeProject: null,
         activeWorktreePath: null,
-        filesPanes: new Set(),
+        filesPanes: new Map(),
         editorPanes: new Map(),
         minimizedTerminals: new Set(),
         terminalOrder: ['t1'],
@@ -55,7 +55,7 @@ describe('useVisibleTerminals — session-owned panes', () => {
     // A session's panes render inside its own card, so they are not layout
     // units in the grid — opening one must not add a cell.
     act(() => useAppStore.getState().openFilesPane('t1'))
-    act(() => useAppStore.getState().openEditorPane('t1', '/p/a.ts'))
+    act(() => useAppStore.getState().openFileTab('t1', '/p/a.ts'))
     act(() => useAppStore.getState().openBrowserPane('t1'))
     expect(result.current.orderedIds).toEqual(['t1'])
 
@@ -67,7 +67,7 @@ describe('useVisibleTerminals — session-owned panes', () => {
     renderHook(() => useVisibleTerminals())
     act(() => {
       useAppStore.getState().openFilesPane('t1')
-      useAppStore.getState().openEditorPane('t1', '/p/a.ts')
+      useAppStore.getState().openFileTab('t1', '/p/a.ts')
     })
 
     // Cmd+], Cmd+[ and Cmd+1-9 index into this list and hand the result to
@@ -80,13 +80,12 @@ describe('useVisibleTerminals — session-owned panes', () => {
     const { result } = renderHook(() => useVisibleTerminals())
     act(() => {
       useAppStore.getState().openFilesPane('t1')
-      useAppStore.getState().openEditorPane('t1', '/p/a.ts')
+      useAppStore.getState().openFileTab('t1', '/p/a.ts')
     })
     expect(result.current.orderedIds).toEqual(['t1'])
 
     act(() => useAppStore.getState().removeTerminal('t1'))
     expect(result.current.orderedIds).toEqual([])
     expect(useAppStore.getState().filesPanes.has('t1')).toBe(false)
-    expect(useAppStore.getState().editorPanes.has('t1')).toBe(false)
   })
 })

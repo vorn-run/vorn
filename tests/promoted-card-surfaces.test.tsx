@@ -47,7 +47,7 @@ beforeEach(() => {
         ['t1', { id: 't1', session: session('t1'), status: 'idle', lastOutputTimestamp: 1 }]
       ]) as never,
       terminalOrder: ['t1'],
-      filesPanes: new Set(),
+      filesPanes: new Map(),
       editorPanes: new Map(),
       browserPanes: new Map(),
       minimizedTerminals: new Set(),
@@ -122,7 +122,7 @@ describe('a promoted card wears its own controls', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /back in its session card/ }))
     expect(useAppStore.getState().editorPanes.has(cardId)).toBe(false)
-    expect(useAppStore.getState().editorPanes.get('t1')?.filePath).toBe('/repo/a.ts')
+    expect(useAppStore.getState().filesPanes.get('t1')?.active).toBe('/repo/a.ts')
   })
 
   it('selects itself when pressed, so keyboard jumps have something to land on', async () => {

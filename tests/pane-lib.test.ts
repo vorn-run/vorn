@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
 import {
   filesPaneId,
-  editorPaneId,
+  fileTabKey,
   browserPaneId,
   devicePaneId,
   terminalsPaneId,
@@ -21,7 +22,8 @@ import {
   dirtyRefFor,
   isEditorDirty,
   clearDirty,
-  confirmDiscard
+  confirmDiscard,
+  useIsDirty
 } from '../src/renderer/lib/editor-dirty'
 
 /**
@@ -32,7 +34,6 @@ import {
 describe('pane-id', () => {
   it('builds and parses child pane ids', () => {
     expect(filesPaneId('abc')).toBe('files:abc')
-    expect(editorPaneId('abc')).toBe('editor:abc')
     expect(parsePaneId('files:abc')).toEqual({ kind: 'files', sessionId: 'abc' })
     expect(parsePaneId('editor:abc')).toEqual({ kind: 'editor', sessionId: 'abc' })
     expect(browserPaneId('abc')).toBe('browser:abc')
@@ -67,14 +68,7 @@ describe('pane-id', () => {
     // The pane column carries kinds, not ids, so it needs the inverse of
     // parsePaneId — and the two have to agree, or a promoted pane would be
     // skipped in the column under one id and drawn in the grid under another.
-    for (const kind of [
-      'files',
-      'editor',
-      'browser',
-      'device',
-      'extension',
-      'terminals'
-    ] as const) {
+    for (const kind of ['files', 'browser', 'device', 'extension', 'terminals'] as const) {
       const id = paneIdFor(kind, 'abc')
       expect(parsePaneId(id)).toEqual({ kind, sessionId: 'abc' })
     }
@@ -144,7 +138,7 @@ describe('pane-id', () => {
     // carrying the extension and the contribution too would put three fields in
     // front of a session id that already has a colon in it.
     expect(parsePaneId(extensionPaneId(weird))).toEqual({ kind: 'extension', sessionId: weird })
-    expect(paneOwnerId(editorPaneId(weird))).toBe(weird)
+    expect(paneOwnerId(filesPaneId(weird))).toBe(weird)
     expect(paneOwnerId(browserPaneId(weird))).toBe(weird)
   })
 })
@@ -198,6 +192,22 @@ describe('editor-dirty', () => {
     // Confirming discards the buffer, so the flag must not linger and prompt
     // again on the next action.
     expect(isEditorDirty('s1')).toBe(false)
+  })
+
+  it('tells a subscriber when a flag turns, so a tab can draw its unsaved dot', () => {
+    const { result } = renderHook(() => useIsDirty('s1'))
+    expect(result.current).toBe(false)
+    act(() => {
+      dirtyRefFor('s1').current = true
+    })
+    expect(result.current).toBe(true)
+    act(() => clearDirty('s1'))
+    expect(result.current).toBe(false)
+  })
+
+  it('keys one open file apart from another in the same session', () => {
+    expect(fileTabKey('s1', '/p/a.ts')).not.toBe(fileTabKey('s1', '/p/b.ts'))
+    expect(fileTabKey('s1', '/p/a.ts')).not.toBe(fileTabKey('s2', '/p/a.ts'))
   })
 
   it('blocks and keeps the buffer when the user cancels', () => {

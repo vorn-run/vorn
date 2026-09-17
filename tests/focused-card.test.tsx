@@ -57,7 +57,7 @@ beforeEach(() => {
       terminals: new Map([
         ['t1', { id: 't1', session: session('t1'), status: 'idle', lastOutputTimestamp: 1 }]
       ]) as never,
-      filesPanes: new Set(),
+      filesPanes: new Map(),
       editorPanes: new Map(),
       browserPanes: new Map(),
       focusedTerminalId: null,

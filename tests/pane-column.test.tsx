@@ -54,7 +54,7 @@ beforeEach(() => {
         ['t1', { id: 't1', session: session('t1'), status: 'idle', lastOutputTimestamp: 1 }],
         ['t2', { id: 't2', session: session('t2'), status: 'idle', lastOutputTimestamp: 1 }]
       ]) as never,
-      filesPanes: new Set(),
+      filesPanes: new Map(),
       editorPanes: new Map(),
       browserPanes: new Map(),
       cardSplits: {},

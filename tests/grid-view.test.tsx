@@ -149,7 +149,7 @@ beforeEach(() => {
     focusedTerminalId: null,
     previewTerminalId: null,
     minimizedTerminals: new Set<string>(),
-    filesPanes: new Set<string>(),
+    filesPanes: new Map(),
     editorPanes: new Map(),
     browserPanes: new Map(),
     maximizedPaneId: null,
@@ -360,7 +360,7 @@ describe('GridView — session-owned panes', () => {
   it('gives a session one cell no matter how many panes it owns', () => {
     act(() => {
       useAppStore.getState().openFilesPane('term-a')
-      useAppStore.getState().openEditorPane('term-a', '/repo/a.ts')
+      useAppStore.getState().openFileTab('term-a', '/repo/a.ts')
     })
     render(<GridView />)
 

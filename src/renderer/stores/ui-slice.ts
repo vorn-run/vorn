@@ -11,6 +11,8 @@ import {
   FlexibleLayoutRect,
   TaskSourceFilter,
   EditorPaneState,
+  FilesPaneState,
+  EMPTY_FILES_PANE,
   BrowserPaneState,
   BrowserTabState,
   DevicePaneState,
@@ -23,7 +25,8 @@ import {
 } from './types'
 import {
   filesPaneId,
-  editorPaneId,
+  fileTabKey,
+  paneKind,
   browserPaneId,
   devicePaneId,
   terminalsPaneId,
@@ -35,9 +38,9 @@ import {
 } from '../lib/pane-id'
 import { normalizeUrl } from '../lib/browser-url'
 import { pruneScrollAnchors } from '../lib/scroll-anchor'
-import { pruneDrafts } from '../lib/editor-drafts'
+import { pruneDrafts, renameDraft } from '../lib/editor-drafts'
 import { pruneIntentDrafts } from '../lib/intent-drafts'
-import { confirmDiscard, confirmDiscardAll, clearDirty } from '../lib/editor-dirty'
+import { confirmDiscard, confirmDiscardAll, clearDirty, isEditorDirty } from '../lib/editor-dirty'
 import { clampSplitRatio, sanitizePaneWeights, DEVICE_SPLIT_RATIO } from '../lib/split-ratio'
 import { paneLabel } from '../lib/use-extensions'
 import { destroyTerminal } from '../lib/terminal-registry'
@@ -95,7 +98,7 @@ function loadView(): PersistedView {
     return {
       minimized: Array.isArray(parsed.minimized) ? parsed.minimized.filter(isNonEmpty) : [],
       activeTabId: orNull(parsed.activeTabId),
-      maximizedPaneId: orNull(parsed.maximizedPaneId),
+      maximizedPaneId: orLivePane(parsed.maximizedPaneId),
       activeProject: orNull(parsed.activeProject),
       activeGroupId: orNull(parsed.activeGroupId),
       activeWorktreePath: orNull(parsed.activeWorktreePath)
@@ -111,6 +114,12 @@ function isNonEmpty(value: unknown): value is string {
 
 function orNull(value: unknown): string | null {
   return isNonEmpty(value) ? value : null
+}
+
+// A session's own editor pane no longer exists, so a saved maximize naming one is dropped.
+function orLivePane(value: unknown): string | null {
+  const id = orNull(value)
+  return id && paneKind(id) !== 'editor' ? id : null
 }
 
 /** The reader, for tests: everything else reads it once at construction. */
@@ -311,32 +320,35 @@ function saveCardSplits(splits: Record<string, CardSplit>): void {
 /**
  * Open child panes, persisted so a reload restores the same workspace.
  *
- * Shape: `{ files: sessionId[], editors: { [id]: filePath }, browsers: { [id]: url } }`.
+ * Shape: `{ files: { [sessionId]: tabs }, editors: { [cardId]: file }, browsers: { [id]: tabs } }`.
  * Entries whose session no longer exists are pruned by `removeTerminal` when it
  * closes, and by `reconcilePanes` for sessions that never came back.
  */
 function loadPanes(): {
-  filesPanes: Set<string>
+  filesPanes: Map<string, FilesPaneState>
   editorPanes: Map<string, EditorPaneState>
   browserPanes: Map<string, BrowserPaneState>
 } {
   try {
     const raw = localStorage.getItem(PANES_STORAGE_KEY)
-    if (!raw) return { filesPanes: new Set(), editorPanes: new Map(), browserPanes: new Map() }
+    if (!raw) return { filesPanes: new Map(), editorPanes: new Map(), browserPanes: new Map() }
     const parsed = JSON.parse(raw) as {
-      files?: string[]
+      files?: string[] | Record<string, Partial<FilesPaneState>>
       editors?: Record<string, string | { filePath: string; sessionId?: string }>
       browsers?: Record<
         string,
         string | { tabs?: string[]; activeTab?: number; sessionId?: string }
       >
     }
-    const editorPanes = parsePersistedEditors(parsed.editors)
+    const { filesPanes, editorPanes } = parsePersistedFiles(
+      parsed.files,
+      parsePersistedEditors(parsed.editors)
+    )
     const browserPanes = parsePersistedBrowsers(parsed.browsers)
     seedCardSeq(editorPanes.keys(), browserPanes.keys())
-    return { filesPanes: new Set(parsed.files ?? []), editorPanes, browserPanes }
+    return { filesPanes, editorPanes, browserPanes }
   } catch {
-    return { filesPanes: new Set(), editorPanes: new Map(), browserPanes: new Map() }
+    return { filesPanes: new Map(), editorPanes: new Map(), browserPanes: new Map() }
   }
 }
 
@@ -358,6 +370,36 @@ export function parsePersistedEditors(
       out.set(id, { filePath: entry.filePath, sessionId: entry.sessionId ?? id })
   }
   return out
+}
+
+/** Read the persisted Files panes; an older build's session-keyed editor entry becomes that pane's tab. */
+export function parsePersistedFiles(
+  saved: string[] | Record<string, Partial<FilesPaneState>> | undefined,
+  editors: Map<string, EditorPaneState>
+): { filesPanes: Map<string, FilesPaneState>; editorPanes: Map<string, EditorPaneState> } {
+  const filesPanes = new Map<string, FilesPaneState>()
+  if (Array.isArray(saved)) {
+    for (const id of saved) if (isNonEmpty(id)) filesPanes.set(id, EMPTY_FILES_PANE)
+  } else {
+    for (const [id, entry] of Object.entries(saved ?? {})) {
+      const tabs = [...new Set((entry?.tabs ?? []).filter(isNonEmpty))]
+      const active = entry?.active && tabs.includes(entry.active) ? entry.active : (tabs[0] ?? null)
+      const preview = entry?.preview && tabs.includes(entry.preview) ? entry.preview : null
+      filesPanes.set(id, { tabs, active, preview, treeVisible: entry?.treeVisible !== false })
+    }
+  }
+  const editorPanes = new Map<string, EditorPaneState>()
+  for (const [id, editor] of editors) {
+    if (isPromotedPane(id, editor)) {
+      editorPanes.set(id, editor)
+      continue
+    }
+    const pane = filesPanes.get(id) ?? EMPTY_FILES_PANE
+    const tabs = pane.tabs.includes(editor.filePath) ? pane.tabs : [...pane.tabs, editor.filePath]
+    filesPanes.set(id, { ...pane, tabs, active: editor.filePath })
+    renameDraft(id, fileTabKey(id, editor.filePath))
+  }
+  return { filesPanes, editorPanes }
 }
 
 /**
@@ -404,8 +446,12 @@ export function parsePersistedBrowsers(
   )
 }
 
+function fileTabKeys(filesPanes: Map<string, FilesPaneState>): string[] {
+  return [...filesPanes].flatMap(([id, pane]) => pane.tabs.map((path) => fileTabKey(id, path)))
+}
+
 function savePanes(
-  filesPanes: Set<string>,
+  filesPanes: Map<string, FilesPaneState>,
   editorPanes: Map<string, EditorPaneState>,
   browserPanes: Map<string, BrowserPaneState>
 ): void {
@@ -413,7 +459,7 @@ function savePanes(
     localStorage.setItem(
       PANES_STORAGE_KEY,
       JSON.stringify({
-        files: [...filesPanes],
+        files: Object.fromEntries(filesPanes),
         editors: Object.fromEntries(
           [...editorPanes].map(([id, s]) => [id, { filePath: s.filePath, sessionId: s.sessionId }])
         ),
@@ -447,7 +493,7 @@ function savePanes(
  * position.
  */
 function reconcilePanes(
-  filesPanes: Set<string>,
+  filesPanes: Map<string, FilesPaneState>,
   editorPanes: Map<string, EditorPaneState>,
   browserPanes: Map<string, BrowserPaneState>,
   browserMemory: Map<string, BrowserPaneState>,
@@ -459,7 +505,7 @@ function reconcilePanes(
   cardSplits: Record<string, CardSplit>,
   liveSessionIds: Set<string>
 ): {
-  filesPanes: Set<string>
+  filesPanes: Map<string, FilesPaneState>
   editorPanes: Map<string, EditorPaneState>
   browserPanes: Map<string, BrowserPaneState>
   browserMemory: Map<string, BrowserPaneState>
@@ -470,15 +516,13 @@ function reconcilePanes(
   terminalsPanes: Map<string, TerminalsPaneState>
   cardSplits: Record<string, CardSplit>
 } | null {
-  const nextFiles = new Set([...filesPanes].filter((id) => liveSessionIds.has(id)))
+  const nextFiles = new Map([...filesPanes].filter(([id]) => liveSessionIds.has(id)))
   // On the record's owner, not on the key: a popped-out file or tab is keyed by
   // card id, and pruning by key would delete every one of them on the first
   // reconcile — silently discarding the pages and files someone put there.
   const nextEditors = new Map([...editorPanes].filter(([, e]) => liveSessionIds.has(e.sessionId)))
-  // Keyed by pane, so pruned against the panes that survived rather than against
-  // the sessions -- an editor popped out into a card outlives its owner's pane
-  // and its draft has to outlive it too.
-  pruneDrafts(new Set(nextEditors.keys()))
+  // Drafts are keyed by card or by tab, so they are pruned against what survived.
+  pruneDrafts(new Set([...nextEditors.keys(), ...fileTabKeys(nextFiles)]))
   pruneIntentDrafts(liveSessionIds)
   const nextBrowsers = new Map([...browserPanes].filter(([, b]) => liveSessionIds.has(b.sessionId)))
   // Tabs remembered for a closed pane die with their session as well. This is
@@ -767,6 +811,17 @@ function clearPlacement(
     cleared.minimizedTerminals = minimized
   }
   return cleared
+}
+
+function writeFilesPane(
+  state: Pick<AppStore, 'filesPanes' | 'editorPanes' | 'browserPanes'>,
+  sessionId: string,
+  pane: FilesPaneState
+): Partial<AppStore> {
+  const next = new Map(state.filesPanes)
+  next.set(sessionId, pane)
+  savePanes(next, state.editorPanes, state.browserPanes)
+  return { filesPanes: next }
 }
 
 /**
@@ -1108,16 +1163,18 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
   openFilesPane: (sessionId) =>
     set((state) => {
       if (state.filesPanes.has(sessionId)) return {}
-      const next = new Set(state.filesPanes)
-      next.add(sessionId)
+      const next = new Map(state.filesPanes)
+      next.set(sessionId, EMPTY_FILES_PANE)
       savePanes(next, state.editorPanes, state.browserPanes)
       return { filesPanes: next }
     }),
 
   closeFilesPane: (sessionId) =>
     set((state) => {
-      if (!state.filesPanes.has(sessionId)) return {}
-      const next = new Set(state.filesPanes)
+      const closing = state.filesPanes.get(sessionId)
+      if (!closing) return {}
+      for (const path of closing.tabs) clearDirty(fileTabKey(sessionId, path))
+      const next = new Map(state.filesPanes)
       next.delete(sessionId)
       savePanes(next, state.editorPanes, state.browserPanes)
       return {
@@ -1128,16 +1185,79 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
 
   toggleFilesPane: (sessionId) => {
     const { filesPanes, openFilesPane, closeFilesPane } = get()
-    if (filesPanes.has(sessionId)) closeFilesPane(sessionId)
-    else openFilesPane(sessionId)
+    const open = filesPanes.get(sessionId)
+    if (!open) return openFilesPane(sessionId)
+    // Closing the pane closes its tabs, so their unsaved edits are asked about first.
+    if (confirmDiscardAll(open.tabs.map((path) => fileTabKey(sessionId, path))))
+      closeFilesPane(sessionId)
   },
 
-  openEditorPane: (sessionId, filePath) =>
+  openFileTab: (sessionId, filePath, options) =>
     set((state) => {
-      const next = new Map(state.editorPanes)
-      next.set(sessionId, { filePath, sessionId })
-      savePanes(state.filesPanes, next, state.browserPanes)
-      return { editorPanes: next }
+      const pane = state.filesPanes.get(sessionId) ?? EMPTY_FILES_PANE
+      const pin = options?.pin === true
+      let { tabs, preview } = pane
+      if (tabs.includes(filePath)) {
+        if (pin && preview === filePath) preview = null
+      } else if (pin) {
+        tabs = [...tabs, filePath]
+      } else {
+        // An edited preview tab is kept rather than replaced under its buffer.
+        const reusable = preview !== null && !isEditorDirty(fileTabKey(sessionId, preview))
+        tabs = reusable ? tabs.map((t) => (t === preview ? filePath : t)) : [...tabs, filePath]
+        preview = filePath
+      }
+      return writeFilesPane(state, sessionId, { ...pane, tabs, preview, active: filePath })
+    }),
+
+  pinFileTab: (sessionId, filePath) =>
+    set((state) => {
+      const pane = state.filesPanes.get(sessionId)
+      if (!pane || pane.preview !== filePath) return {}
+      return writeFilesPane(state, sessionId, { ...pane, preview: null })
+    }),
+
+  setActiveFileTab: (sessionId, filePath) =>
+    set((state) => {
+      const pane = state.filesPanes.get(sessionId)
+      if (!pane || pane.active === filePath || !pane.tabs.includes(filePath)) return {}
+      return writeFilesPane(state, sessionId, { ...pane, active: filePath })
+    }),
+
+  closeFileTab: (sessionId, filePath) =>
+    set((state) => {
+      const pane = state.filesPanes.get(sessionId)
+      const index = pane ? pane.tabs.indexOf(filePath) : -1
+      if (!pane || index === -1) return {}
+      clearDirty(fileTabKey(sessionId, filePath))
+      const tabs = pane.tabs.filter((t) => t !== filePath)
+      const active =
+        pane.active === filePath ? (tabs[index] ?? tabs[index - 1] ?? null) : pane.active
+      const preview = pane.preview === filePath ? null : pane.preview
+      return writeFilesPane(state, sessionId, { ...pane, tabs, active, preview })
+    }),
+
+  closeSavedFileTabs: (sessionId, keep) =>
+    set((state) => {
+      const pane = state.filesPanes.get(sessionId)
+      if (!pane) return {}
+      const tabs = pane.tabs.filter((t) => keep.includes(t))
+      if (tabs.length === pane.tabs.length) return {}
+      const active = pane.active && tabs.includes(pane.active) ? pane.active : (tabs[0] ?? null)
+      const preview = pane.preview && tabs.includes(pane.preview) ? pane.preview : null
+      return writeFilesPane(state, sessionId, { ...pane, tabs, active, preview })
+    }),
+
+  toggleFileTree: (sessionId) => {
+    const pane = get().filesPanes.get(sessionId)
+    if (pane) get().setFileTreeVisible(sessionId, !pane.treeVisible)
+  },
+
+  setFileTreeVisible: (sessionId, visible) =>
+    set((state) => {
+      const pane = state.filesPanes.get(sessionId)
+      if (!pane || pane.treeVisible === visible) return {}
+      return writeFilesPane(state, sessionId, { ...pane, treeVisible: visible })
     }),
 
   closeEditorPane: (paneId) =>
@@ -1147,10 +1267,7 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       const next = new Map(state.editorPanes)
       next.delete(paneId)
       savePanes(state.filesPanes, next, state.browserPanes)
-      return {
-        editorPanes: next,
-        ...clearPlacement(state, isPromotedPane(paneId, closing) ? paneId : editorPaneId(paneId))
-      }
+      return { editorPanes: next, ...clearPlacement(state, paneId) }
     }),
 
   openBrowserPane: (sessionId, url, opts) =>
@@ -1622,15 +1739,10 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     const browser = state.browserPanes.get(cardId)
 
     if (editor && isPromotedPane(cardId, editor)) {
-      // Into the session's editor, which holds one file — so this displaces
-      // whatever was there, exactly as picking a file in the tree does, and has
-      // to ask the same question before throwing that buffer away. The card's
-      // own buffer goes too: it is a different editor under a different id.
-      // Both buffers in one question. Asked separately, answering yes then no
-      // cleared the session editor's dirty flag and then bailed — leaving those
-      // edits on screen with nothing left to prompt about them ever again.
-      if (!confirmDiscardAll([editor.sessionId, cardId])) return
-      state.openEditorPane(editor.sessionId, editor.filePath)
+      // The card's buffer does not travel; the tab it lands in displaces nothing.
+      if (!confirmDiscard(cardId)) return
+      clearDirty(cardId)
+      state.openFileTab(editor.sessionId, editor.filePath, { pin: true })
       state.closeEditorPane(cardId)
       return
     }
@@ -1961,17 +2073,11 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
 export function selectPaneFlags(
   s: Pick<
     AppStore,
-    | 'filesPanes'
-    | 'editorPanes'
-    | 'browserPanes'
-    | 'devicePanes'
-    | 'extensionPanes'
-    | 'terminalsPanes'
+    'filesPanes' | 'browserPanes' | 'devicePanes' | 'extensionPanes' | 'terminalsPanes'
   >,
   sessionId: string | null
 ): {
   files: boolean
-  editor: boolean
   browser: boolean
   device: boolean
   extension: boolean
@@ -1979,18 +2085,16 @@ export function selectPaneFlags(
   any: boolean
 } {
   const files = sessionId ? s.filesPanes.has(sessionId) : false
-  const editor = sessionId ? s.editorPanes.has(sessionId) : false
   const browser = sessionId ? s.browserPanes.has(sessionId) : false
   const device = sessionId ? s.devicePanes.has(sessionId) : false
   const extension = sessionId ? s.extensionPanes.has(sessionId) : false
   const terminals = sessionId ? s.terminalsPanes.has(sessionId) : false
   return {
     files,
-    editor,
     browser,
     device,
     extension,
     terminals,
-    any: files || editor || browser || device || extension || terminals
+    any: files || browser || device || extension || terminals
   }
 }

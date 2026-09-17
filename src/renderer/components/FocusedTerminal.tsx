@@ -16,7 +16,6 @@ import { useTerminalScrollButton } from '../hooks/useTerminalScrollButton'
 import { useTerminalPinchZoom } from '../hooks/useTerminalPinchZoom'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { FilesCard } from './FilesCard'
-import { EditorCard } from './EditorCard'
 import { BrowserCard } from './BrowserCard'
 import { DeviceCard } from './DeviceCard'
 import { ExtensionPaneCard } from './ExtensionPaneCard'
@@ -66,7 +65,6 @@ export function FocusedTerminal() {
   // The expanded session's own panes come with it, so maximizing a card doesn't
   // hide the tree or file you had open next to it.
   const hasFilesPane = useAppStore((s) => (effectiveId ? s.filesPanes.has(effectiveId) : false))
-  const hasEditorPane = useAppStore((s) => (effectiveId ? s.editorPanes.has(effectiveId) : false))
   const hasBrowserPane = useAppStore((s) => (effectiveId ? s.browserPanes.has(effectiveId) : false))
   const hasDevicePane = useAppStore((s) => (effectiveId ? s.devicePanes.has(effectiveId) : false))
   const hasExtensionPane = useAppStore((s) =>
@@ -95,7 +93,6 @@ export function FocusedTerminal() {
   const maximizedKind = maximized && maximized.sessionId === effectiveId ? maximized.kind : null
   const hasMaximizedPane =
     (maximizedKind === 'files' && hasFilesPane) ||
-    (maximizedKind === 'editor' && hasEditorPane) ||
     (maximizedKind === 'browser' && hasBrowserPane) ||
     (maximizedKind === 'device' && hasDevicePane) ||
     (maximizedKind === 'extension' && hasExtensionPane) ||
@@ -304,11 +301,6 @@ export function FocusedTerminal() {
               {hasFilesPane && (
                 <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'files'}>
                   <FilesCard sessionId={effectiveId} />
-                </PaneSlot>
-              )}
-              {hasEditorPane && (
-                <PaneSlot hidden={hasMaximizedPane && maximizedKind !== 'editor'}>
-                  <EditorCard sessionId={effectiveId} />
                 </PaneSlot>
               )}
               {hasBrowserPane && (

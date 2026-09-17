@@ -84,7 +84,7 @@ function seed(ids: string[] = ['t1']): void {
   act(() => {
     useAppStore.setState({
       terminals,
-      filesPanes: new Set(),
+      filesPanes: new Map(),
       editorPanes: new Map(),
       browserPanes: new Map(),
       browserMemory: new Map(),
