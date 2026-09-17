@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { FileStamp } from '../src/shared/types'
+import { truncationMarker } from '@vornrun/shared/string-utils'
 
 {
   const store = new Map<string, string>()
@@ -156,6 +157,16 @@ describe('saving over a file that moved', () => {
     expect(screen.queryByLabelText(/^Save/)).not.toBeInTheDocument()
     expect(writeFileContent).not.toHaveBeenCalled()
     expect(JSON.parse(localStorage.getItem(DRAFTS)!)[PANE]).toBeUndefined()
+  })
+
+  it('stops being editable when what the disk now holds came back capped', async () => {
+    await editAndSave()
+    readFileContent.mockResolvedValue(`grown past the cap${truncationMarker(900_000)}`)
+    await act(async () => {
+      fireEvent.click(screen.getByText('Discard mine'))
+    })
+    await waitFor(() => expect(screen.queryByRole('textbox')).not.toBeInTheDocument())
+    expect(writeFileContent).not.toHaveBeenCalled()
   })
 
   it('leaves the edit alone when the person wants to keep editing', async () => {

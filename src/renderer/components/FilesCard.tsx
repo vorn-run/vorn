@@ -150,6 +150,11 @@ export const FilesCard = memo(
       if (narrow) store.setFileTreeVisible(sessionId, false)
     }
 
+    const handleSelectTab = (path: string): void => {
+      store.setActiveFileTab(sessionId, path)
+      if (narrow) store.setFileTreeVisible(sessionId, false)
+    }
+
     const toggleMaximize = (): void => {
       const state = useAppStore.getState()
       state.setMaximizedPane(state.maximizedPaneId === paneId ? null : paneId)
@@ -176,7 +181,7 @@ export const FilesCard = memo(
           tabs={tabs}
           activeId={pane.active}
           emptyTitle="Files"
-          onSelect={(path) => store.setActiveFileTab(sessionId, path)}
+          onSelect={handleSelectTab}
           onDoubleClickTab={(path) => store.pinFileTab(sessionId, path)}
           onClose={handleCloseTab}
           leading={

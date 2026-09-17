@@ -1358,6 +1358,8 @@ export function FileEditorPane({
   }, [filePath, remoteHostId])
 
   const handleContentSaved = useCallback((next: string) => {
+    // A re-read from disk can come back capped even when the first read did not.
+    if (isTruncatedRead(next)) setReadOnly('truncated')
     setContent(next)
   }, [])
 
