@@ -35,11 +35,6 @@ export function useDirtyVersion(): number {
   return useSyncExternalStore(subscribe, () => version)
 }
 
-/** Whether the editor under `key` holds unsaved changes, kept current. */
-export function useIsDirty(key: string): boolean {
-  return useSyncExternalStore(subscribe, () => isEditorDirty(key))
-}
-
 /** Ref an editor keeps in sync with its unsaved-changes state. */
 export function dirtyRefFor(sessionId: string): { current: boolean } {
   let ref = dirtyBySession.get(sessionId)

@@ -560,7 +560,7 @@ export interface UISlice {
   setActiveFileTab: (sessionId: string, filePath: string) => void
   closeFileTab: (sessionId: string, filePath: string) => void
   /** Close every tab except those in `keep`. */
-  closeSavedFileTabs: (sessionId: string, keep: string[]) => void
+  closeSavedFileTabs: (sessionId: string) => void
   toggleFileTree: (sessionId: string) => void
   setFileTreeVisible: (sessionId: string, visible: boolean) => void
   closeEditorPane: (paneId: string) => void

@@ -26,7 +26,6 @@ import {
 import {
   filesPaneId,
   fileTabKey,
-  paneKind,
   browserPaneId,
   devicePaneId,
   terminalsPaneId,
@@ -98,7 +97,7 @@ function loadView(): PersistedView {
     return {
       minimized: Array.isArray(parsed.minimized) ? parsed.minimized.filter(isNonEmpty) : [],
       activeTabId: orNull(parsed.activeTabId),
-      maximizedPaneId: orLivePane(parsed.maximizedPaneId),
+      maximizedPaneId: orNull(parsed.maximizedPaneId),
       activeProject: orNull(parsed.activeProject),
       activeGroupId: orNull(parsed.activeGroupId),
       activeWorktreePath: orNull(parsed.activeWorktreePath)
@@ -114,12 +113,6 @@ function isNonEmpty(value: unknown): value is string {
 
 function orNull(value: unknown): string | null {
   return isNonEmpty(value) ? value : null
-}
-
-// A session's own editor pane no longer exists, so a saved maximize naming one is dropped.
-function orLivePane(value: unknown): string | null {
-  const id = orNull(value)
-  return id && paneKind(id) !== 'editor' ? id : null
 }
 
 /** The reader, for tests: everything else reads it once at construction. */
@@ -1237,11 +1230,11 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       return writeFilesPane(state, sessionId, { ...pane, tabs, active, preview })
     }),
 
-  closeSavedFileTabs: (sessionId, keep) =>
+  closeSavedFileTabs: (sessionId) =>
     set((state) => {
       const pane = state.filesPanes.get(sessionId)
       if (!pane) return {}
-      const tabs = pane.tabs.filter((t) => keep.includes(t))
+      const tabs = pane.tabs.filter((t) => isEditorDirty(fileTabKey(sessionId, t)))
       if (tabs.length === pane.tabs.length) return {}
       const active = pane.active && tabs.includes(pane.active) ? pane.active : (tabs[0] ?? null)
       const preview = pane.preview && tabs.includes(pane.preview) ? pane.preview : null

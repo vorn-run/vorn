@@ -19,7 +19,7 @@ import {
   useDirtyVersion
 } from '../lib/editor-dirty'
 
-const SPLIT_RATIO_KEY = 'vorn:files-split-ratio'
+const SPLIT_RATIO_KEY = 'vorn:files-tree-ratio'
 const DEFAULT_TREE_RATIO = 0.38
 /** Below this width the tree and the file take turns rather than sharing the pane. */
 const SIDE_BY_SIDE_MIN_PX = 480
@@ -204,10 +204,7 @@ export const FilesCard = memo(
               type="button"
               role="menuitem"
               onClick={() => {
-                store.closeSavedFileTabs(
-                  sessionId,
-                  pane.tabs.filter((path) => isEditorDirty(fileTabKey(sessionId, path)))
-                )
+                store.closeSavedFileTabs(sessionId)
                 close()
               }}
               className="w-full px-2 h-[26px] rounded text-left text-[12px] text-ink-secondary hover:bg-white/[0.05]"

@@ -79,12 +79,15 @@ export function PaneTabStrip({
   useEffect(() => {
     const el = scrollerRef.current
     if (!el) return
-    const measure = (): void => setOverflowing(el.scrollWidth > el.clientWidth + 1)
-    measure()
     if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(measure)
+    const observer = new ResizeObserver(() => setOverflowing(el.scrollWidth > el.clientWidth + 1))
     observer.observe(el)
     return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (el) setOverflowing(el.scrollWidth > el.clientWidth + 1)
   }, [tabs])
 
   useEffect(() => {

@@ -23,7 +23,7 @@ import {
   isEditorDirty,
   clearDirty,
   confirmDiscard,
-  useIsDirty
+  useDirtyVersion
 } from '../src/renderer/lib/editor-dirty'
 
 /**
@@ -35,7 +35,6 @@ describe('pane-id', () => {
   it('builds and parses child pane ids', () => {
     expect(filesPaneId('abc')).toBe('files:abc')
     expect(parsePaneId('files:abc')).toEqual({ kind: 'files', sessionId: 'abc' })
-    expect(parsePaneId('editor:abc')).toEqual({ kind: 'editor', sessionId: 'abc' })
     expect(browserPaneId('abc')).toBe('browser:abc')
     expect(parsePaneId('browser:abc')).toEqual({ kind: 'browser', sessionId: 'abc' })
   })
@@ -46,13 +45,11 @@ describe('pane-id', () => {
     expect(parsePaneId('abc')).toEqual({ kind: 'terminal', sessionId: 'abc' })
     expect(paneOwnerId('abc')).toBe('abc')
     expect(paneOwnerId('files:abc')).toBe('abc')
-    expect(paneOwnerId('editor:abc')).toBe('abc')
     expect(paneOwnerId('browser:abc')).toBe('abc')
   })
 
   it('reports kind without allocating the owner string', () => {
     expect(paneKind('files:abc')).toBe('files')
-    expect(paneKind('editor:abc')).toBe('editor')
     expect(paneKind('browser:abc')).toBe('browser')
     expect(paneKind('abc')).toBe('terminal')
   })
@@ -60,7 +57,6 @@ describe('pane-id', () => {
   it('distinguishes session panes from child panes', () => {
     expect(isTerminalPane('abc')).toBe(true)
     expect(isTerminalPane('files:abc')).toBe(false)
-    expect(isTerminalPane('editor:abc')).toBe(false)
     expect(isTerminalPane('browser:abc')).toBe(false)
   })
 
@@ -84,7 +80,6 @@ describe('pane-id', () => {
     expect(paneOwnerId(promotedCardId('abc', 3))).toBe('abc')
     expect(isPromotedCardId(promotedCardId('abc', 0))).toBe(true)
     expect(isPromotedCardId('abc')).toBe(false)
-    expect(isPromotedCardId('editor:abc')).toBe(false)
   })
 
   it('reads a card id from the right, so a colon in the session id survives', () => {
@@ -105,7 +100,6 @@ describe('pane-id', () => {
     expect(promotedCardSeq(promotedCardId('abc', 7))).toBe(7)
     expect(promotedCardSeq(promotedCardId('host:1234', 12))).toBe(12)
     expect(promotedCardSeq('abc')).toBeNull()
-    expect(promotedCardSeq('editor:abc')).toBeNull()
   })
 
   it('counts sessions and cards as grid cells, and child panes as not', () => {
@@ -116,7 +110,6 @@ describe('pane-id', () => {
     expect(isLayoutCellId('abc')).toBe(true)
     expect(isLayoutCellId(promotedCardId('abc', 2))).toBe(true)
     expect(isLayoutCellId('files:abc')).toBe(false)
-    expect(isLayoutCellId('editor:abc')).toBe(false)
     expect(isLayoutCellId('browser:abc')).toBe(false)
     expect(isLayoutCellId('device:abc')).toBe(false)
   })
@@ -195,7 +188,7 @@ describe('editor-dirty', () => {
   })
 
   it('tells a subscriber when a flag turns, so a tab can draw its unsaved dot', () => {
-    const { result } = renderHook(() => useIsDirty('s1'))
+    const { result } = renderHook(() => (useDirtyVersion(), isEditorDirty('s1')))
     expect(result.current).toBe(false)
     act(() => {
       dirtyRefFor('s1').current = true

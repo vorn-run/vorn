@@ -1,4 +1,13 @@
-import { useState, useEffect, useCallback, useMemo, useRef, type JSX, type ReactNode } from 'react'
+import {
+  memo,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  type JSX,
+  type ReactNode
+} from 'react'
 import type { FileStamp } from '../../shared/types'
 import { forgetDraft, hasMoved, readDraft, writeDraft } from '../lib/editor-drafts'
 
@@ -351,8 +360,13 @@ async function highlightCode(code: string, lang: string): Promise<TokenLine[]> {
   return result.tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color })))
 }
 
-function useHighlightedLines(text: string, fileName: string): TokenLine[] | null {
-  const [result, setResult] = useState<{ key: string; tokens: TokenLine[] } | null>(null)
+/** `loose` keeps the last tokens while newer ones are on their way; the caller must check each line still matches. */
+function useHighlightedLines(text: string, fileName: string, loose = false): TokenLine[] | null {
+  const [result, setResult] = useState<{
+    key: string
+    fileName: string
+    tokens: TokenLine[]
+  } | null>(null)
   const lang = getLang(fileName)
   const key = `${fileName}\0${text.length}`
 
@@ -363,7 +377,7 @@ function useHighlightedLines(text: string, fileName: string): TokenLine[] | null
     highlightCode(text, lang)
       .then((tokens) => {
         if (stale) return
-        setResult(tokens.length > 0 ? { key, tokens } : null)
+        setResult(tokens.length > 0 ? { key, fileName, tokens } : null)
       })
       .catch(() => {
         if (!stale) setResult(null)
@@ -372,9 +386,10 @@ function useHighlightedLines(text: string, fileName: string): TokenLine[] | null
     return () => {
       stale = true
     }
-  }, [text, lang, key])
+  }, [text, lang, key, fileName])
 
-  if (!lang || !result || result.key !== key) return null
+  if (!lang || !result) return null
+  if (loose ? result.fileName !== fileName : result.key !== key) return null
   return result.tokens
 }
 
@@ -570,6 +585,7 @@ function ReadView({
 // ---------------------------------------------------------------------------
 // Edit view
 // ---------------------------------------------------------------------------
+const HIGHLIGHT_SETTLE_MS = 150
 const EDIT_LINE_HEIGHT = 21 // px, shared by the gutter, the drawn text and the textarea
 
 /** A transparent textarea over the same text drawn in colour; a line uses its tokens only while they spell what was typed. */
@@ -591,7 +607,16 @@ function EditView({
   onMatchesComputed: (count: number) => void
 }) {
   const lines = useMemo(() => draft.split('\n'), [draft])
-  const highlighted = useHighlightedLines(lines.length > MAX_PREVIEW_LINES ? '' : draft, fileName)
+  const [settled, setSettled] = useState(draft)
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(draft), HIGHLIGHT_SETTLE_MS)
+    return () => clearTimeout(timer)
+  }, [draft])
+  const highlighted = useHighlightedLines(
+    lines.length > MAX_PREVIEW_LINES ? '' : settled,
+    fileName,
+    true
+  )
   const gutter = useMemo(
     () => Array.from({ length: lines.length }, (_, i) => i + 1).join('\n'),
     [lines.length]
@@ -603,10 +628,11 @@ function EditView({
   }, [matches.length, onMatchesComputed])
 
   const activeMatch = matches.length > 0 ? matches[activeMatchIdx % matches.length] : null
-  const rowRefs = useRef(new Map<number, HTMLDivElement>())
+  const scrollerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!activeMatch) return
-    rowRefs.current.get(activeMatch.line)?.scrollIntoView?.({ block: 'center' })
+    const el = scrollerRef.current
+    if (!activeMatch || !el) return
+    el.scrollTop = activeMatch.line * EDIT_LINE_HEIGHT - el.clientHeight / 2
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scroll when the match moves, not on every keystroke
   }, [activeMatch?.line, activeMatch?.start, activeMatchIdx])
 
@@ -618,14 +644,7 @@ function EditView({
       const tokens = highlighted?.[i]
       const inStep = tokens !== undefined && tokens.map((t) => t.content).join('') === line
       return (
-        <div
-          key={i}
-          ref={(el) => {
-            if (el) rowRefs.current.set(i, el)
-            else rowRefs.current.delete(i)
-          }}
-          style={{ height: EDIT_LINE_HEIGHT }}
-        >
+        <div key={i} style={{ height: EDIT_LINE_HEIGHT }}>
           {marks
             ? renderLineWithMarks(
                 line,
@@ -645,7 +664,7 @@ function EditView({
 
   const text = 'text-[13px] font-mono whitespace-pre py-1 pr-3'
   return (
-    <div className="flex-1 overflow-auto">
+    <div ref={scrollerRef} className="flex-1 overflow-auto">
       <div className="flex w-max min-w-full min-h-full">
         <pre
           className="sticky left-0 z-10 select-none text-right pr-3 pl-2 py-1 text-[12px] font-mono text-gray-600 shrink-0"
@@ -676,7 +695,6 @@ function EditView({
             }}
             spellCheck={false}
             wrap="off"
-            data-file-editor="true"
             aria-label={`Edit ${fileName}`}
             className={`${text} absolute inset-0 w-full h-full bg-transparent text-transparent outline-none resize-none overflow-hidden`}
             style={{ lineHeight: `${EDIT_LINE_HEIGHT}px`, caretColor: 'var(--color-ink)' }}
@@ -705,7 +723,6 @@ function FilePanel({
   draftKey,
   controls,
   onHeaderPointerDown,
-  onHeaderDoubleClick,
   headerTestId,
   headerClassName = ''
 }: {
@@ -722,7 +739,6 @@ function FilePanel({
   /** Pane chrome seated in the path strip, for a host with no title bar of its own. */
   controls?: ReactNode
   onHeaderPointerDown?: (e: React.PointerEvent) => void
-  onHeaderDoubleClick?: () => void
   headerTestId?: string
   headerClassName?: string
 }) {
@@ -817,7 +833,7 @@ function FilePanel({
   }, [filePath, cwd, fileName])
 
   const dirty = ready && editable && draft !== content
-  const canFind = content !== null && !loading && readOnly !== 'binary'
+  const canFind = content !== null && !loading
 
   useEffect(() => {
     dirtyRef.current = dirty
@@ -920,7 +936,6 @@ function FilePanel({
         className={`flex items-center gap-1 pl-2 pr-1 py-0.5 text-[11px] font-mono shrink-0 ${headerClassName}`}
         style={{ background: PANE_SURFACE }}
         onPointerDown={onHeaderPointerDown}
-        onDoubleClick={onHeaderDoubleClick}
         data-testid={headerTestId}
       >
         <FileTypeIcon name={fileName} size={12} />
@@ -1295,7 +1310,7 @@ export function FileTreePane({
 }
 
 /** One open file, owning the load of `filePath`. It opens ready to type in. */
-export function FileEditorPane({
+function FileEditorPaneImpl({
   cwd,
   filePath,
   remoteHostId,
@@ -1303,7 +1318,6 @@ export function FileEditorPane({
   draftKey,
   controls,
   onHeaderPointerDown,
-  onHeaderDoubleClick,
   headerTestId,
   headerClassName
 }: {
@@ -1315,7 +1329,6 @@ export function FileEditorPane({
   /** Pane chrome seated in the path strip; see `FilePanel`. */
   controls?: ReactNode
   onHeaderPointerDown?: (e: React.PointerEvent) => void
-  onHeaderDoubleClick?: () => void
   headerTestId?: string
   headerClassName?: string
   /** Set while the buffer has unsaved edits, for whoever is about to close it. */
@@ -1376,9 +1389,11 @@ export function FileEditorPane({
       draftKey={draftKey}
       controls={controls}
       onHeaderPointerDown={onHeaderPointerDown}
-      onHeaderDoubleClick={onHeaderDoubleClick}
       headerTestId={headerTestId}
       headerClassName={headerClassName}
     />
   )
 }
+
+/** Memoised: a Files pane keeps every open tab mounted, and its own re-renders should not reach them. */
+export const FileEditorPane = memo(FileEditorPaneImpl)

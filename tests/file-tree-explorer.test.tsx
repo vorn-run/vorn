@@ -323,12 +323,12 @@ describe('the Files pane', () => {
     await act(async () => {
       fireEvent(document, new PointerEvent('pointermove', { clientX: 300 }))
     })
-    expect(localStorage.getItem('vorn:files-split-ratio')).toBeNull()
+    expect(localStorage.getItem('vorn:files-tree-ratio')).toBeNull()
 
     await act(async () => {
       fireEvent(document, new PointerEvent('pointerup'))
     })
-    const stored = localStorage.getItem('vorn:files-split-ratio')
+    const stored = localStorage.getItem('vorn:files-tree-ratio')
     expect(stored).not.toBeNull()
     expect(Number(stored)).toBeCloseTo(0.3, 1)
   })

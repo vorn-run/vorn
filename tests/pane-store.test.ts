@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act } from '@testing-library/react'
 import { useAppStore } from '../src/renderer/stores'
 import { activeBrowserUrl, isPromotedPane } from '../src/renderer/stores/types'
-import { parsePersistedBrowsers, loadViewForTest } from '../src/renderer/stores/ui-slice'
+import { parsePersistedBrowsers } from '../src/renderer/stores/ui-slice'
 import type { DeviceClaimFailure } from '../packages/shared/src/types'
 import { DEVICE_SPLIT_RATIO } from '../src/renderer/lib/split-ratio'
 
@@ -150,12 +150,16 @@ describe('pane store actions', () => {
     expect(s().filesPanes.get('t1')).toMatchObject({ tabs: [], active: null })
   })
 
-  it('closes every tab but the ones it is told to keep', () => {
+  it('closes every tab but the unsaved ones', async () => {
+    const { dirtyRefFor, clearDirty } = await import('../src/renderer/lib/editor-dirty')
+    const { fileTabKey } = await import('../src/renderer/lib/pane-id')
     const s = () => useAppStore.getState()
     act(() => {
       for (const f of ['/p/a.ts', '/p/b.ts', '/p/c.ts']) s().openFileTab('t1', f, { pin: true })
     })
-    act(() => s().closeSavedFileTabs('t1', ['/p/b.ts']))
+    dirtyRefFor(fileTabKey('t1', '/p/b.ts')).current = true
+    act(() => s().closeSavedFileTabs('t1'))
+    clearDirty(fileTabKey('t1', '/p/b.ts'))
 
     expect(s().filesPanes.get('t1')).toMatchObject({ tabs: ['/p/b.ts'], active: '/p/b.ts' })
   })
@@ -493,13 +497,6 @@ describe('pane store actions', () => {
     // A stale id here would leave the grid maximizing a pane that is gone.
     expect(s().maximizedPaneId).toBeNull()
     expect(s().filesPanes.has('t1')).toBe(false)
-  })
-
-  it('drops a saved maximize that names the editor pane older builds had', () => {
-    localStorage.setItem('vorn:view', JSON.stringify({ maximizedPaneId: 'editor:t1' }))
-    expect(loadViewForTest().maximizedPaneId).toBeNull()
-    localStorage.setItem('vorn:view', JSON.stringify({ maximizedPaneId: 'files:t1' }))
-    expect(loadViewForTest().maximizedPaneId).toBe('files:t1')
   })
 
   it('persists open panes so a reload restores the workspace', () => {
