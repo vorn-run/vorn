@@ -13,3 +13,15 @@ export function displayNameFromPrompt(prompt: string, maxLen = 60): string | und
   const breakPoint = lastSpace > 0 ? lastSpace : maxLen
   return cleaned.slice(0, breakPoint) + '\u2026'
 }
+
+/** The line a capped file read ends with, so a reader can tell it is not the whole file. */
+export function truncationMarker(totalBytes?: number): string {
+  return totalBytes === undefined
+    ? '\n\n--- truncated ---'
+    : `\n\n--- truncated (${totalBytes} bytes total) ---`
+}
+
+/** True when `text` came from a capped read and must not be saved back over the file. */
+export function isTruncatedRead(text: string): boolean {
+  return /\n\n--- truncated(?: \(\d+ bytes total\))? ---$/.test(text)
+}

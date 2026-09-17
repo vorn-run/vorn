@@ -29,6 +29,7 @@ import {
   writeFileContent
 } from '../packages/server/src/file-utils'
 import type { RemoteHost } from '@vornrun/shared/types'
+import { isTruncatedRead, truncationMarker } from '@vornrun/shared/string-utils'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -181,6 +182,27 @@ describe('readFileContent', () => {
 
     const result = readFileContent('/test/big.txt', 50)
     expect(result).toContain('--- truncated (1000 bytes total) ---')
+  })
+
+  it('marks a capped read so a reader can refuse to save it back', () => {
+    expect(isTruncatedRead(`first part${truncationMarker(1000)}`)).toBe(true)
+    expect(isTruncatedRead(`first part${truncationMarker()}`)).toBe(true)
+    expect(isTruncatedRead('a file that merely mentions --- truncated --- in passing')).toBe(false)
+  })
+
+  it('marks a remote read that filled its cap, which `head -c` cuts without a word', () => {
+    const remote: RemoteHost = {
+      id: 'r1',
+      label: 'Remote',
+      hostname: 'example.com',
+      user: 'dev',
+      port: 22
+    }
+    mockExecFileSync.mockReturnValue('x'.repeat(50))
+    expect(isTruncatedRead(readFileContent('/remote/big.txt', 50, remote) ?? '')).toBe(true)
+
+    mockExecFileSync.mockReturnValue('short')
+    expect(readFileContent('/remote/small.txt', 50, remote)).toBe('short')
   })
 
   it('closes fd even when readSync throws', () => {
