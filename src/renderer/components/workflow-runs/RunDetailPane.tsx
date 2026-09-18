@@ -32,6 +32,7 @@ import { workflowRunId, type ApprovalConfig, type TaskConfig } from '../../../sh
 import type { RunListEntry } from '../../hooks/useAllWorkflowRuns'
 import { GATE_APPROVE, GATE_NEUTRAL, GATE_REJECT } from '../../lib/gate-affordance'
 import { GateAsk, GateComposer, GateEditor } from './GateActions'
+import type { GateDraft } from './GateJsonEditor'
 import { GateReviewModal } from './GateReviewModal'
 
 export function RunDetailEmptyState() {
@@ -86,10 +87,16 @@ export function RunDetailPane({
   const [reviewingFor, setReviewingFor] = useState<string | null>(null)
   const [editingFor, setEditingFor] = useState<string | null>(null)
   const [rewrite, setRewrite] = useState<{ gate: string; text: string } | null>(null)
+  const [draft, setDraft] = useState<(GateDraft & { gate: string }) | null>(null)
   const composing = composingFor === openGate
   const reviewing = reviewingFor === openGate
   const editing = editingFor === openGate
-  const edited = rewrite?.gate === openGate ? rewrite.text : undefined
+  const saved = rewrite?.gate === openGate ? rewrite.text : undefined
+  // Approve stays in view under the editor, so while it is open Approve answers
+  // with what the reviewer is looking at, and waits while that cannot be sent.
+  const live = editing && draft?.gate === openGate ? draft : undefined
+  const edited = live ? live.edited : saved
+  const blocked = live?.invalid ?? null
   const setComposing = (on: boolean): void => setComposingFor(on ? openGate : null)
   const setReviewing = (on: boolean): void => setReviewingFor(on ? openGate : null)
   const verdict = run.status === 'success' ? runVerdict(run) : undefined
@@ -200,13 +207,17 @@ export function RunDetailPane({
               <GateAsk state={waitingStep} config={gateConfig} />
               {editing ? (
                 <GateEditor
-                  state={{ ...waitingStep, ...(edited !== undefined && { editedText: edited }) }}
-                  onSave={(text) => {
-                    const original = waitingStep.editableText ?? ''
-                    setRewrite(text.trim() === original.trim() ? null : { gate: openGate, text })
+                  state={{ ...waitingStep, ...(saved !== undefined && { editedText: saved }) }}
+                  onSave={(next) => {
+                    setRewrite(next === undefined ? null : { gate: openGate, text: next })
                     setEditingFor(null)
+                    setDraft(null)
                   }}
-                  onCancel={() => setEditingFor(null)}
+                  onCancel={() => {
+                    setEditingFor(null)
+                    setDraft(null)
+                  }}
+                  onDraftChange={(next) => setDraft({ ...next, gate: openGate })}
                   large
                 />
               ) : composing ? (
@@ -232,7 +243,7 @@ export function RunDetailPane({
                         className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 text-[12.5px] ${GATE_NEUTRAL}`}
                       >
                         <Pencil size={13} strokeWidth={1.75} />
-                        {edited ? 'Edited' : 'Edit'}
+                        {saved ? 'Edited' : 'Edit'}
                       </button>
                     )}
                     {waitingStep.viewToken && (
@@ -277,6 +288,8 @@ export function RunDetailPane({
           ) : (
             <button
               type="button"
+              disabled={blocked !== null}
+              title={blocked ? `Cannot approve yet. ${blocked}` : undefined}
               onClick={() =>
                 void window.api.resolveWorkflowGate({
                   runId: run.runId,
@@ -285,7 +298,7 @@ export function RunDetailPane({
                   ...(edited && { edited })
                 })
               }
-              className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_APPROVE}`}
+              className={`flex items-center gap-2 px-4 py-2.5 text-[13px] ${GATE_APPROVE} disabled:opacity-40 disabled:cursor-not-allowed`}
             >
               <Check size={14} strokeWidth={2} />
               Approve &amp; continue

@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Eye, MessageSquare, Pencil, RotateCcw, X } from 'lucide-react'
 import { canRequestChanges, gateMaxRounds } from '@vornrun/shared/workflow-graph'
+import { isRecordList, toItemList } from '@vornrun/shared/item-list'
 import type {
   ApprovalConfig,
   GateDecision,
@@ -9,6 +10,7 @@ import type {
 } from '../../../shared/types'
 import { GATE_APPROVE, GATE_NEUTRAL, GATE_REJECT } from '../../lib/gate-affordance'
 import { toast } from '../Toast'
+import { GateJsonEditor, type GateDraft } from './GateJsonEditor'
 
 /** Ask the server to settle a gate; says so when the gate would not take the answer. */
 async function answerGate(
@@ -163,22 +165,87 @@ export function GateComposer({
   )
 }
 
-/** The gate's text, for the reviewer to rewrite before they answer. */
+/**
+ * The gate's text, for the reviewer to rewrite before they answer.
+ *
+ * A list of records opens as a table, because trimming and correcting rows is
+ * what a reviewer does with one, and hand-editing JSON is where they would
+ * break it. Anything else is prose, and gets a plain textarea.
+ *
+ * Save and Approve hand over undefined when the text says what the gate
+ * already had, so an editor opened and closed sends no rewrite.
+ */
 export function GateEditor({
   state,
   onSave,
   onCancel,
+  onApprove,
+  onDraftChange,
   large
 }: {
   state: NodeExecutionState
-  onSave: (edited: string) => void
+  onSave: (edited: string | undefined) => void
   onCancel: () => void
+  /** Offers Approve beside Save, for a host whose own Approve the editor replaces. */
+  onApprove?: (edited: string | undefined) => void
+  /** Told what the editor holds as it changes, for a host whose own Approve stays in view. */
+  onDraftChange?: (draft: GateDraft) => void
   large?: boolean
 }) {
+  const original = state.editableText ?? ''
+  const isTable = useMemo(() => {
+    const list = toItemList(original)
+    return !('error' in list) && isRecordList(list.items)
+  }, [original])
+
+  if (isTable) {
+    return (
+      <GateJsonEditor
+        original={original}
+        initial={state.editedText ?? original}
+        onSave={onSave}
+        onCancel={onCancel}
+        onApprove={onApprove}
+        onDraftChange={onDraftChange}
+        large={large}
+      />
+    )
+  }
+  return (
+    <GateTextEditor
+      state={state}
+      onSave={onSave}
+      onCancel={onCancel}
+      onApprove={onApprove}
+      onDraftChange={onDraftChange}
+      large={large}
+    />
+  )
+}
+
+function GateTextEditor({
+  state,
+  onSave,
+  onCancel,
+  onApprove,
+  onDraftChange,
+  large
+}: Parameters<typeof GateEditor>[0]) {
   const original = state.editableText ?? ''
   const [text, setText] = useState(state.editedText ?? original)
   const size = large ? 'px-3.5 py-2 text-[12.5px]' : 'px-2 py-1 text-[11px]'
   const words = text.trim() ? text.trim().split(/\s+/).length : 0
+  const edited = text.trim() === original.trim() ? undefined : text
+
+  // The host hands a fresh callback each render; telling it only when the draft
+  // changes keeps its state update from rendering the editor again, forever.
+  const draftRef = useRef(onDraftChange)
+  useEffect(() => {
+    draftRef.current = onDraftChange
+  })
+  useEffect(() => {
+    draftRef.current?.({ edited, invalid: null })
+  }, [edited])
 
   return (
     <div className="flex flex-col gap-2">
@@ -195,7 +262,7 @@ export function GateEditor({
             onCancel()
           } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault()
-            onSave(text)
+            onSave(edited)
           }
         }}
         className="w-full px-2.5 py-2 bg-white/[0.03] border border-white/[0.2] rounded-md
@@ -227,12 +294,22 @@ export function GateEditor({
         </button>
         <button
           type="button"
-          onClick={() => onSave(text)}
+          onClick={() => onSave(edited)}
           className={`flex items-center gap-1 ${size} ${GATE_NEUTRAL}`}
         >
           <Pencil size={large ? 13 : 11} strokeWidth={1.75} />
           Save
         </button>
+        {onApprove && (
+          <button
+            type="button"
+            onClick={() => onApprove(edited)}
+            className={`flex items-center gap-1 ${size} ${GATE_APPROVE}`}
+          >
+            <Check size={large ? 13 : 11} strokeWidth={2.5} />
+            Approve
+          </button>
+        )}
       </div>
     </div>
   )
@@ -259,11 +336,14 @@ export function GateActions({ runId, state, config, nodes, onOpenReview }: Props
         // The gate clears its own editedText when it opens, so reopening the editor
         // has to be handed the rewrite that has not been sent yet.
         state={{ ...state, ...(edited !== undefined && { editedText: edited }) }}
-        onSave={(text) => {
-          setEdited(text.trim() === (state.editableText ?? '').trim() ? undefined : text)
+        onSave={(next) => {
+          setEdited(next)
           setComposing(null)
         }}
         onCancel={() => setComposing(null)}
+        // The row with Approve on it gives way to the editor, so the editor carries
+        // one; it is shut while the draft cannot be sent, and says why.
+        onApprove={(next) => void answerGate(runId, state.nodeId, 'approve', undefined, next)}
       />
     )
   }
