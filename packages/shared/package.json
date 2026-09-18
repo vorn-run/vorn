@@ -22,6 +22,7 @@
     "./viewer-settings-store": "./src/viewer-settings-store.ts",
     "./template-vars": "./src/template-vars.ts",
     "./workflow-graph": "./src/workflow-graph.ts",
+    "./item-list": "./src/item-list.ts",
     "./terminal-frame": "./src/terminal-frame.ts",
     "./connector-origins": "./src/connector-origins.ts",
     "./connector-protocol": "./src/connector-protocol.ts"

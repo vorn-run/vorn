@@ -816,6 +816,12 @@ export interface WorkflowExecutionContext {
    * with `{{inputs.issue.number}}`.
    */
   inputs?: Record<string, unknown>
+  /**
+   * The pass a loop is on, for the steps inside it: `{{loop.item.*}}` in a
+   * for-each loop, and `{{loop.index}}` (from 0), `{{loop.number}}` (from 1)
+   * and `{{loop.count}}` in either kind.
+   */
+  loop?: { item?: unknown; index: number; number: number; count?: number }
 }
 
 export type WorkflowNodeType =
