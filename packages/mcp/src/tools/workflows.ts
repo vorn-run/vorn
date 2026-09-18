@@ -1,8 +1,24 @@
 import crypto from 'node:crypto'
-import { isSignInWait, MAX_GATE_ROUNDS, nodesBetween } from '@vornrun/shared/workflow-graph'
+import { isDeepStrictEqual } from 'node:util'
+import {
+  isSignInWait,
+  loopBodyOwners,
+  loopStructureError,
+  MAX_GATE_ROUNDS,
+  nodesBetween
+} from '@vornrun/shared/workflow-graph'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { V } from '../validation'
+import {
+  edgeSchema,
+  NODE_TYPES,
+  nodeConfigIssues,
+  triggerConfigSchema,
+  workflowInputDefSchema,
+  workflowInputsSchema,
+  type NodeType
+} from './node-config-schemas'
 import type {
   ApprovalConfig,
   WorkflowDefinition,
@@ -70,186 +86,84 @@ const launchAgentConfigSchema = z
     path: ['outputSchema']
   })
 
-// Parameters the run dialog prompts for, declared on the manual trigger so they
-// travel with the definition. Without this here, a workflow authored over MCP
-// could never declare the `{{inputs.*}}` it reads.
-export const workflowInputDefSchema = z
-  .object({
-    key: z
-      .string()
-      .regex(
-        /^[A-Za-z_][A-Za-z0-9_]*$/,
-        'key must be a valid identifier — it becomes {{inputs.<key>}}'
-      )
-      .max(100),
-    label: V.shortText,
-    type: z.enum(['text', 'textarea', 'number', 'select', 'boolean', 'project', 'branch']),
-    required: z.boolean().optional(),
-    defaultValue: V.shortText.optional(),
-    options: z.array(z.object({ value: V.shortText, label: V.shortText })).optional(),
-    placeholder: V.shortText.optional(),
-    description: V.shortText.optional()
-  })
-  // Reject a declaration that can never be satisfied at the moment it is
-  // authored, rather than letting it become a run-time error later. A workflow
-  // that cannot be run correctly should not be storable.
-  .superRefine((def, ctx) => {
-    const options = def.options ?? []
-
-    if (def.type === 'select' && options.length === 0) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['options'],
-        message: `select input "${def.key}" declares no options, so the run dialog could offer nothing`
-      })
-    }
-
-    if (def.defaultValue === undefined) return
-
-    // Finite, not merely numeric: "Infinity" and "1e999" parse but do not
-    // survive JSON, and resolveWorkflowInputs rejects them at run time. Letting
-    // one be authored would only defer the same failure to a worse moment.
-    if (def.type === 'number' && !Number.isFinite(Number(def.defaultValue))) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['defaultValue'],
-        message: `default "${def.defaultValue}" for number input "${def.key}" is not a finite number`
-      })
-    }
-
-    if (def.type === 'boolean' && !['true', 'false'].includes(def.defaultValue)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['defaultValue'],
-        message: `default "${def.defaultValue}" for boolean input "${def.key}" must be "true" or "false"`
-      })
-    }
-
-    if (
-      def.type === 'select' &&
-      options.length > 0 &&
-      !options.some((o) => o.value === def.defaultValue)
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['defaultValue'],
-        message: `default "${def.defaultValue}" for select input "${def.key}" is not one of its options`
-      })
-    }
-  })
-
-// Two inputs sharing a key cannot both survive under one `{{inputs.<key>}}`.
-// The editor already flags this as an error the author has to resolve, so MCP
-// authoring must not be the way an ambiguous workflow gets persisted.
-export const workflowInputsSchema = z.array(workflowInputDefSchema).superRefine((inputs, ctx) => {
-  const seen = new Set<string>()
-  inputs.forEach((def, index) => {
-    if (seen.has(def.key)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: [index, 'key'],
-        message: `duplicate input key "${def.key}" — only one value can survive under {{inputs.${def.key}}}`
-      })
-    }
-    seen.add(def.key)
-  })
-})
-
-export const triggerConfigSchema = z.union([
-  z.object({
-    triggerType: z.literal('manual'),
-    contextual: z.boolean().optional(),
-    inputs: workflowInputsSchema.optional()
-  }),
-  z.object({ triggerType: z.literal('once'), runAt: V.shortText }),
-  z.object({
-    triggerType: z.literal('recurring'),
-    cron: V.shortText,
-    timezone: V.shortText.optional()
-  }),
-  z.object({ triggerType: z.literal('taskCreated'), projectFilter: V.name.optional() }),
-  z.object({
-    triggerType: z.literal('taskStatusChanged'),
-    projectFilter: V.name.optional(),
-    fromStatus: z.enum(['todo', 'in_progress', 'in_review', 'done', 'cancelled']).optional(),
-    toStatus: z.enum(['todo', 'in_progress', 'in_review', 'done', 'cancelled']).optional()
-  }),
-  z.object({
-    triggerType: z.literal('connectorPoll'),
-    connectionId: V.id,
-    event: V.shortText,
-    cron: V.shortText,
-    timezone: V.shortText.optional()
-  }),
-  z.object({
-    triggerType: z.literal('webhook'),
-    method: z.enum(['POST', 'GET']),
-    token: V.shortText
-  })
-])
-
-export const nodeSchema = z
-  .object({
-    id: V.id,
-    // Full node palette — parity with the editor. `config` is a passthrough so
-    // each type carries its own shape (ConditionConfig, ApprovalConfig, etc.).
-    type: z.enum([
-      'trigger',
-      'launchAgent',
-      'script',
-      'condition',
-      'approval',
-      'createTaskFromItem',
-      'callConnectorAction',
-      'httpRequest',
-      'loop'
-    ]),
-    label: V.shortText,
-    // Referenced by typed step vars as `{{steps.<slug>.<field>}}`. Set one on any
-    // node whose output a later node consumes.
-    slug: V.shortText.optional(),
-    config: z.record(z.string(), z.unknown()),
-    position: z.object({ x: z.number(), y: z.number() }),
-    // Omitted means stop. Declared here because the object strips what it does
-    // not name: without it a workflow authored over MCP could never say a step
-    // is survivable, and the field would be dropped without complaint.
-    onError: z.enum(['stop', 'continue']).optional()
-  })
-  // `config` is a passthrough for every other node type, but a loop that
-  // declares no body or a nonsense budget cannot run at all — and the failure
-  // would surface on a run someone is waiting for rather than on the call that
-  // introduced it.
-  .superRefine((node, ctx) => {
-    if (node.type !== 'loop') return
-    const config = node.config as { bodyNodeIds?: unknown; maxIterations?: unknown }
-
-    if (!Array.isArray(config.bodyNodeIds) || config.bodyNodeIds.length === 0) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['config', 'bodyNodeIds'],
-        message: `loop "${node.id}" must list at least one body step in bodyNodeIds`
-      })
-    }
-
-    const max = config.maxIterations
-    if (typeof max !== 'number' || !Number.isInteger(max) || max < 1 || max > MAX_LOOP_ITERATIONS) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['config', 'maxIterations'],
-        message: `loop "${node.id}" needs maxIterations as a whole number from 1 to ${MAX_LOOP_ITERATIONS}`
-      })
-    }
-  })
+export { edgeSchema, triggerConfigSchema, workflowInputDefSchema, workflowInputsSchema }
 
 /**
- * Ceiling on loop passes, mirrored from the renderer that enforces it.
- *
- * Duplicated rather than imported because this package is the stdio MCP server
- * and does not pull in renderer code; the executor clamps regardless, so the
- * worst case of drift is a workflow rejected here that would have been clamped
- * there.
+ * A node's shape without its config checked: what update_workflow accepts, so a
+ * stored workflow whose config predates today's rules can still be edited. It
+ * checks configs itself, and tells an untouched old config from a new mistake.
  */
-const MAX_LOOP_ITERATIONS = 10
+export const nodeShapeSchema = z.object({
+  id: V.id.describe('Unique within the workflow; edges and bodyNodeIds refer to it'),
+  // Full node palette — parity with the editor.
+  type: z
+    .enum(NODE_TYPES)
+    .describe('Node type; describe_workflow_nodes gives the config each one takes'),
+  label: V.shortText.describe('Name shown on the canvas and in run history'),
+  // Referenced by typed step vars as `{{steps.<slug>.<field>}}`. Set one on any
+  // node whose output a later node consumes.
+  slug: V.shortText
+    .optional()
+    .describe('Name later steps read this one by, as {{steps.<slug>.<field>}}'),
+  config: z
+    .record(z.string(), z.unknown())
+    .describe("The type's own settings; describe_workflow_nodes has the schema for each type"),
+  position: z
+    .object({ x: z.number(), y: z.number() })
+    .describe('Where the node sits on the canvas'),
+  // Omitted means stop. Declared here because the object strips what it does
+  // not name: without it a workflow authored over MCP could never say a step
+  // is survivable, and the field would be dropped without complaint.
+  onError: z
+    .enum(['stop', 'continue'])
+    .optional()
+    .describe('stop (default) ends the run when this step fails; continue carries on past it')
+})
+
+/** Each config problem on a node, as "field: why", for a tool result. */
+export function describeConfigIssues(node: { type: NodeType; config: unknown }): string[] {
+  return nodeConfigIssues(node.type, node.config).map(
+    (issue) => `${['config', ...issue.path.map(String)].join('.')}: ${issue.message}`
+  )
+}
+
+/**
+ * Config problems on the nodes an update sends, split by whether the caller
+ * made them.
+ *
+ * A config identical to the one already stored under that node was accepted
+ * by an older build, or written by the editor, and refusing it would make the
+ * whole workflow uneditable over MCP until someone fixed a node they never
+ * touched. Those become warnings; a config the caller changed is held to the
+ * current rules.
+ */
+export function checkNodeConfigs(
+  nodes: { id: string; type: NodeType; label?: string; config: unknown }[],
+  stored: readonly WorkflowNode[]
+): { errors: string[]; warnings: string[] } {
+  const errors: string[] = []
+  const warnings: string[] = []
+  for (const node of nodes) {
+    const issues = describeConfigIssues(node)
+    if (issues.length === 0) continue
+    const before = stored.find((n) => n.id === node.id && n.type === node.type)
+    const untouched = before !== undefined && isDeepStrictEqual(before.config, node.config)
+    const line = `node "${node.label || node.id}" ${issues.join(', ')}`
+    if (untouched) warnings.push(line)
+    else errors.push(line)
+  }
+  return { errors, warnings }
+}
+
+// A node whose config does not match its type would be stored and then fail,
+// or worse run on a misread value, on a run someone is waiting for. Checking it
+// against its type's schema puts the error on the call that introduced it. The
+// config itself passes through unchanged, so nothing the caller wrote is lost.
+export const nodeSchema = nodeShapeSchema.superRefine((node, ctx) => {
+  for (const issue of nodeConfigIssues(node.type, node.config)) {
+    ctx.addIssue({ code: 'custom', path: ['config', ...issue.path], message: issue.message })
+  }
+})
 
 /**
  * Loop bodies must name steps that exist in the same workflow.
@@ -280,14 +194,38 @@ export function validateLoopBodies(
   return errors
 }
 
-const edgeSchema = z.object({
-  id: V.id,
-  source: V.id,
-  target: V.id,
-  // Which branch of a `condition` node this edge represents. Omit for normal
-  // edges; required to wire both outcomes of a condition.
-  conditionBranch: z.enum(['true', 'false']).optional()
-})
+type LooseNode = { id: string; type: string; label?: string; config: Record<string, unknown> }
+
+/**
+ * Whether each loop's body is a shape the engine will run, by the same check
+ * the engine makes before a first pass. The engine would fail such a loop on
+ * every run, so storing it only defers the error to someone waiting on one.
+ */
+export function validateLoopStructures(
+  nodes: LooseNode[],
+  edges: { id?: string; source: string; target: string; conditionBranch?: string }[]
+): string[] {
+  const graph = nodes as unknown as WorkflowNode[]
+  const wires = edges as unknown as WorkflowEdge[]
+  return graph
+    .filter((node) => node.type === 'loop')
+    .flatMap((loop) => {
+      const error = loopStructureError(graph, wires, loop)
+      return error ? [`loop "${loop.label || loop.id}": ${error}`] : []
+    })
+}
+
+/** Everything about a graph that no single node can check on its own. */
+export function validateGraph(
+  nodes: LooseNode[],
+  edges: { id?: string; source: string; target: string; conditionBranch?: string }[]
+): string[] {
+  return [
+    ...validateLoopBodies(nodes),
+    ...validateLoopStructures(nodes, edges),
+    ...validateGateFeedback(nodes, edges)
+  ]
+}
 
 /**
  * Build a workflow graph from a flat action list + trigger config (convenience format).
@@ -515,6 +453,7 @@ export function validateGateFeedback(
   edges: { source: string; target: string }[]
 ): string[] {
   const errors: string[] = []
+  const owners = loopBodyOwners(nodes as unknown as WorkflowNode[])
   for (const node of nodes) {
     if (node.type !== 'approval' || node.config?.feedback === undefined) continue
     const feedback = node.config.feedback as { from?: unknown; maxRounds?: unknown } | null
@@ -523,7 +462,14 @@ export function validateGateFeedback(
     const source = nodes.find((n) => n.id === from)
     if (!source) errors.push(`gate "${name}" redoes from unknown step "${from}"`)
     else if (source.type === 'trigger') errors.push(`gate "${name}" cannot redo from its trigger`)
-    else if (nodesBetween(from, node.id, edges).size === 0) {
+    // A loop drives its own body, so re-running one member on its own would run
+    // it outside any pass: no {{loop.*}}, and none of the steps around it.
+    else if (owners.has(from)) {
+      const loop = nodes.find((n) => n.id === owners.get(from))
+      errors.push(
+        `gate "${name}" redoes from "${source.label || from}", which is inside loop "${loop?.label || owners.get(from)}"; redo from the loop, or a step before it`
+      )
+    } else if (nodesBetween(from, node.id, edges).size === 0) {
       errors.push(`gate "${name}" redoes from "${source.label || from}", which does not lead to it`)
     }
     const rounds = Number(feedback?.maxRounds)
@@ -605,12 +551,26 @@ export function registerWorkflowTools(server: McpServer): void {
 
   server.tool(
     'create_workflow',
-    'Create a new workflow. Accepts either full nodes/edges (advanced mode — every node ' +
-      'type is supported: trigger, launchAgent, script, condition, approval, ' +
-      'createTaskFromItem, callConnectorAction; wire condition outcomes with edge ' +
-      'conditionBranch "true"/"false") or a convenience flat format (trigger + actions ' +
-      'array). Give a node a slug to reference its output downstream as {{steps.<slug>.<field>}}. ' +
-      'A headless launchAgent with an outputSchema returns typed fields for condition nodes.',
+    'Create a workflow: a graph of steps started by one trigger. Call describe_workflow_nodes ' +
+      'first — it gives the config schema, outputs and rules of every node type, the template ' +
+      'namespaces, and a complete example to copy. Pass nodes and edges (every node type is ' +
+      'supported), or the convenience format (trigger + actions, a straight line of agents).\n\n' +
+      'Node types: trigger (exactly one, what starts the run), launchAgent (an AI agent; headless ' +
+      'with an outputSchema gives typed fields), script (bash/python/node/powershell), condition ' +
+      '(branches: wire both outcomes with edge conditionBranch "true" and "false"), approval (a ' +
+      'human gate; can show a table to edit and send work back), createTaskFromItem, ' +
+      'callConnectorAction (an action of a connected service; list_connector_actions gives its ' +
+      'args), httpRequest, and loop.\n\n' +
+      'Give a node a slug and later steps read its output as {{steps.<slug>.<field>}}.\n\n' +
+      'Loops: config.bodyNodeIds lists the steps the loop runs each pass. Wire an edge from the ' +
+      'loop to each body entry step, edges between body steps, and from the last body steps to ' +
+      'the step after the loop; nothing outside the loop may point into its body, and a ' +
+      'condition inside it keeps both branches inside. mode "repeat" runs up to maxIterations ' +
+      '(1-10) passes, stopping early when until holds; mode "forEach" runs once per item of ' +
+      'items (e.g. {{steps.gate.items}}), and body steps read {{loop.item.<field>}}. A loop body ' +
+      'cannot hold an approval, a trigger or another loop.\n\n' +
+      'Each node config is checked against its type, and the graph for loop and gate wiring; ' +
+      'a refusal names the node and field.',
     {
       name: V.title.describe('Workflow name'),
       trigger: triggerConfigSchema
@@ -619,12 +579,23 @@ export function registerWorkflowTools(server: McpServer): void {
       actions: z
         .array(launchAgentConfigSchema)
         .optional()
-        .describe('Actions to execute (convenience mode). Auto-generates graph.'),
-      nodes: z.array(nodeSchema).optional().describe('Full graph nodes (advanced mode)'),
-      edges: z.array(edgeSchema).optional().describe('Full graph edges (advanced mode)'),
+        .describe('Agents to run one after another (convenience mode). Auto-generates the graph.'),
+      nodes: z
+        .array(nodeSchema)
+        .optional()
+        .describe('Graph nodes; pass with edges. describe_workflow_nodes has each config schema'),
+      edges: z
+        .array(edgeSchema)
+        .optional()
+        .describe('Graph edges; pass with nodes. A step runs once every edge into it has run'),
       icon: V.shortText.optional().describe('Lucide icon name (default: zap)'),
       icon_color: V.hexColor.optional().describe('Hex color (default: #6366f1)'),
-      enabled: z.boolean().optional().describe('Whether workflow is enabled (default: true)'),
+      enabled: z
+        .boolean()
+        .optional()
+        .describe(
+          'Whether its trigger fires on its own (default: true). Manual runs work either way'
+        ),
       stagger_delay_ms: z.number().optional().describe('Delay in ms between actions')
     },
     async (args) => {
@@ -634,16 +605,10 @@ export function registerWorkflowTools(server: McpServer): void {
       if (args.nodes && args.edges) {
         nodes = args.nodes as unknown as WorkflowNode[]
         edges = args.edges as unknown as WorkflowEdge[]
-        const loose = nodes as unknown as {
-          id: string
-          type: string
-          label?: string
-          config: Record<string, unknown>
-        }[]
-        const loopErrors = [...validateLoopBodies(loose), ...validateGateFeedback(loose, edges)]
-        if (loopErrors.length > 0) {
+        const graphErrors = validateGraph(nodes as unknown as LooseNode[], edges)
+        if (graphErrors.length > 0) {
           return {
-            content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],
+            content: [{ type: 'text', text: `Error: ${graphErrors.join('; ')}` }],
             isError: true
           }
         }
@@ -675,17 +640,33 @@ export function registerWorkflowTools(server: McpServer): void {
 
   server.tool(
     'update_workflow',
-    "Update a workflow's properties",
+    'Change a workflow. Only the fields you pass change; nodes and edges each replace the ' +
+      'whole list, so read the workflow first (list_workflows), edit it, and send the full list ' +
+      'back. Checked like create_workflow: each node config against its type ' +
+      '(describe_workflow_nodes), and the graph for loop and gate wiring. A node whose config you ' +
+      'left exactly as stored is let through with a warning even if it breaks a newer rule, so an ' +
+      'older workflow stays editable; fix what the warning names when you can.',
     {
       workflow_id: V.id.optional().describe('Workflow ID (from list_workflows)'),
       id: V.id.optional().describe('Deprecated alias for workflow_id'),
-      name: V.title.optional(),
-      nodes: z.array(nodeSchema).optional(),
-      edges: z.array(edgeSchema).optional(),
-      icon: V.shortText.optional(),
-      icon_color: V.hexColor.optional(),
-      enabled: z.boolean().optional(),
-      stagger_delay_ms: z.number().optional()
+      name: V.title.optional().describe('New name'),
+      // The shape only: configs are checked in the handler, where an untouched
+      // stored config can be told apart from a new mistake.
+      nodes: z
+        .array(nodeShapeSchema)
+        .optional()
+        .describe('Every node of the workflow, replacing the stored list'),
+      edges: z
+        .array(edgeSchema)
+        .optional()
+        .describe('Every edge of the workflow, replacing the stored list'),
+      icon: V.shortText.optional().describe('Lucide icon name'),
+      icon_color: V.hexColor.optional().describe('Hex color'),
+      enabled: z
+        .boolean()
+        .optional()
+        .describe('Whether its trigger fires on its own. Manual runs work either way'),
+      stagger_delay_ms: z.number().optional().describe('Delay in ms between actions')
     },
     async (args) => {
       const resolved = resolveWorkflowId(args)
@@ -701,25 +682,34 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
-      const updates: Partial<WorkflowDefinition> = {}
-      if (args.name !== undefined) updates.name = args.name
+      const warnings: string[] = []
       if (args.nodes !== undefined) {
-        const loose = args.nodes as unknown as {
-          id: string
-          type: string
-          label?: string
-          config: Record<string, unknown>
-        }[]
-        const edges = (args.edges ?? workflow.edges) as { source: string; target: string }[]
-        const loopErrors = [...validateLoopBodies(loose), ...validateGateFeedback(loose, edges)]
-        if (loopErrors.length > 0) {
+        const { errors, warnings: legacy } = checkNodeConfigs(args.nodes, workflow.nodes)
+        if (errors.length > 0) {
           return {
-            content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],
+            content: [{ type: 'text', text: `Error: ${errors.join('; ')}` }],
             isError: true
           }
         }
-        updates.nodes = args.nodes as unknown as WorkflowNode[]
+        warnings.push(...legacy)
       }
+      if (args.nodes !== undefined || args.edges !== undefined) {
+        // Either list changes the graph the other is read against, so both
+        // are checked together as they will be stored.
+        const nodes = (args.nodes ?? workflow.nodes) as unknown as LooseNode[]
+        const edges = args.edges ?? workflow.edges
+        const graphErrors = validateGraph(nodes, edges)
+        if (graphErrors.length > 0) {
+          return {
+            content: [{ type: 'text', text: `Error: ${graphErrors.join('; ')}` }],
+            isError: true
+          }
+        }
+      }
+
+      const updates: Partial<WorkflowDefinition> = {}
+      if (args.name !== undefined) updates.name = args.name
+      if (args.nodes !== undefined) updates.nodes = args.nodes as unknown as WorkflowNode[]
       if (args.edges !== undefined) updates.edges = args.edges as unknown as WorkflowEdge[]
       if (args.icon !== undefined) updates.icon = args.icon
       if (args.icon_color !== undefined) updates.iconColor = args.icon_color
@@ -729,8 +719,17 @@ export function registerWorkflowTools(server: McpServer): void {
       await dbUpdateWorkflow(resolved.id, updates)
       dbSignalChange()
 
+      const saved = JSON.stringify({ ...workflow, ...updates }, null, 2)
       return {
-        content: [{ type: 'text', text: JSON.stringify({ ...workflow, ...updates }, null, 2) }]
+        content: [
+          {
+            type: 'text',
+            text:
+              warnings.length > 0
+                ? `Warning: saved, but these configs were stored before and break a current rule, so they were kept as they are:\n  - ${warnings.join('\n  - ')}\n\n${saved}`
+                : saved
+          }
+        ]
       }
     }
   )
@@ -1211,16 +1210,7 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
-      const loose = parsed.nodes as unknown as {
-        id: string
-        type: string
-        label?: string
-        config: Record<string, unknown>
-      }[]
-      const loopErrors = [
-        ...validateLoopBodies(loose),
-        ...validateGateFeedback(loose, parsed.edges)
-      ]
+      const loopErrors = validateGraph(parsed.nodes as unknown as LooseNode[], parsed.edges)
       if (loopErrors.length > 0) {
         return {
           content: [{ type: 'text', text: `Error: ${loopErrors.join('; ')}` }],
