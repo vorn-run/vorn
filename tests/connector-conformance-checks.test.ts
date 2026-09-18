@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { execFile } from 'node:child_process'
 import {
   bundledRequireFindings,
@@ -353,6 +353,40 @@ describe('what a check says about starting the pack it would ship', () => {
     })
 
     expect(ran).toBe(0)
+  })
+
+  it("starts a bundle whose CommonJS dependency reads __dirname, and leaves a module's own alone", async () => {
+    // azure-devops-node-api reads its own package.json through __dirname at construction, which ESM does not define.
+    const source = mkdtempSync(join(tmpdir(), 'vorn-check-dirname-'))
+    writeFileSync(
+      join(source, 'legacy.cjs'),
+      'const path = require("path")\nmodule.exports = path.join(__dirname, "package.json") + "|" + __filename\n'
+    )
+    writeFileSync(join(source, 'own.cjs'), 'const __dirname = "mine"\nmodule.exports = __dirname\n')
+    const built = await esbuildBundle({
+      contents:
+        'import where from "./legacy.cjs"\nimport own from "./own.cjs"\n' +
+        'process.stdout.write(JSON.stringify({ where, own }))\n',
+      resolveDir: source
+    })
+    // Real path: on macOS the temp directory is a link, and import.meta.url names its target.
+    const out = join(
+      realpathSync(mkdtempSync(join(tmpdir(), 'vorn-check-dirname-out-'))),
+      'bundle.mjs'
+    )
+    writeFileSync(out, built.code)
+
+    const printed = await new Promise<string>((resolve, reject) => {
+      execFile(process.execPath, [out], (error, stdout) =>
+        error ? reject(error) : resolve(stdout)
+      )
+    })
+
+    // The bundle's own directory: where the pack puts index.js, not where the source was.
+    expect(JSON.parse(printed)).toEqual({
+      where: `${join(dirname(out), 'package.json')}|${out}`,
+      own: 'mine'
+    })
   })
 
   it('starts nothing without a mock run, which is where the packaging gates live', async () => {
