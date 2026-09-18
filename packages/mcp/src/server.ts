@@ -3,6 +3,7 @@ import { registerTaskTools } from './tools/tasks'
 import { registerProjectTools } from './tools/projects'
 import { registerSessionTools } from './tools/sessions'
 import { registerWorkflowTools } from './tools/workflows'
+import { registerDescribeNodesTool } from './tools/describe-nodes'
 import { registerConfigTools } from './tools/config'
 import { registerWorkspaceTools } from './tools/workspaces'
 import { registerConnectorTools } from './tools/connectors'
@@ -24,6 +25,7 @@ export function createMcpServer(version: string): McpServer {
   registerProjectTools(server)
   registerTaskTools(server)
   registerWorkflowTools(server)
+  registerDescribeNodesTool(server)
   registerWorkspaceTools(server)
 
   return server

@@ -215,6 +215,8 @@ export function NodeConfigPanel({
           <LoopConfigForm
             config={node.config as LoopConfig}
             onChange={(config) => onChange(node.id, config)}
+            stepGroups={stepGroups || []}
+            contextVars={inputVars}
           />
         )}
 

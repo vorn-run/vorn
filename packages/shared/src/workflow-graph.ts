@@ -10,10 +10,12 @@ import {
   ScriptConfig,
   WorkflowDefinition,
   WorkflowExecution,
+  WorkflowEdge,
   WorkflowExecutionContext,
   WorkflowNode
 } from './types'
 import { resolveTemplateVars, type StepOutputs } from './template-vars'
+import { isRecordList, jsonErrorLocation, toItemList } from './item-list'
 
 /**
  * The parts of workflow execution that decide rather than do.
@@ -169,16 +171,50 @@ export function buildStepOutputsMap(
   return outputs
 }
 
-/** A gate's text, its latest comment, every comment, and which time it asked; undefined before it first asks. */
+/**
+ * A gate's text, its latest comment, every comment, and which time it asked;
+ * undefined before it first asks. When the text is a list of records — what a
+ * review gate draws as a table — `items` is that list as data, the rows the
+ * reviewer kept, ready for a for-each loop.
+ */
 function gateOutputs(state: NodeExecutionState): Record<string, unknown> | undefined {
   if (state.round === undefined && !state.feedback?.length) return undefined
   const entries = state.feedback ?? []
+  const text = state.editedText ?? state.editableText ?? ''
+  const list = toItemList(text)
   return {
-    text: state.editedText ?? state.editableText ?? '',
+    ...('items' in list && isRecordList(list.items) && { items: list.items }),
+    text,
     feedback: entries.length > 0 ? entries[entries.length - 1].comment : '',
     feedbackAll: entries.map((e) => `Round ${e.round}: ${e.comment}`).join('\n'),
     round: state.round ?? 1
   }
+}
+
+/**
+ * Why a gate would refuse this rewrite, or undefined when it takes it.
+ *
+ * A gate that showed a list of records hands those records on as data, so a
+ * rewrite that is no longer valid JSON would reach the next step as text it
+ * cannot read. It is refused with where the JSON broke, instead.
+ */
+export function gateEditRefusal(
+  editableText: string | undefined,
+  edited: string | undefined
+): string | undefined {
+  if (!edited?.trim() || !editableText) return undefined
+  const original = toItemList(editableText)
+  if (!('items' in original) || !isRecordList(original.items)) return undefined
+  try {
+    JSON.parse(edited)
+  } catch (err) {
+    const where = jsonErrorLocation(edited, err)
+    return `The edited list is not valid JSON: line ${where.line}, column ${where.column}.`
+  }
+  const rewritten = toItemList(edited)
+  return 'error' in rewritten
+    ? `The edited text is no longer a list. ${rewritten.error}`
+    : undefined
 }
 
 /** Ceiling on how many times a gate may ask, whatever a workflow says. */
@@ -251,6 +287,9 @@ export function evaluateCondition(
       return false
   }
 }
+
+/** How much of each step's output a loop keeps per pass, in {{steps.<loop>.results}}. */
+export const LOOP_RESULT_OUTPUT_CHARS = 8000
 
 /** Ceiling on `maxIterations`, whatever a workflow asks for. */
 export const MAX_LOOP_ITERATIONS = 10
@@ -420,28 +459,168 @@ export function skipEntryPoints(
 /**
  * The node states a retry starts from: successes adopted, deliberate skips
  * (condition branches, a partial run's slice) preserved, everything else —
- * failures, gate rejections, loop bodies — reset to pending.
+ * failures, gate rejections — reset to pending.
+ *
+ * A loop and its body go together. A loop that finished keeps its steps'
+ * last pass, so what follows it still reads them; the main run never
+ * schedules a body step, so adopting them races nothing. A loop that did not
+ * finish runs again from its first pass, body and all — a body step left
+ * pending under a finished loop would never run, and later steps would read
+ * nothing from it.
  */
 export function seedRetryStates(
   workflow: WorkflowDefinition,
   failedRun: WorkflowExecution
 ): NodeExecutionState[] {
   const priorById = new Map(failedRun.nodeStates.map((ns) => [ns.nodeId, ns]))
-  // Body steps chain by real edges but are driven only by their loop; adopting
-  // one as completed would let the wave loop race its successor with the loop.
-  const bodyIds = new Set<string>()
-  for (const n of workflow.nodes) {
-    if (n.type !== 'loop') continue
-    for (const id of (n.config as LoopConfig).bodyNodeIds ?? []) bodyIds.add(id)
-  }
+  const owners = loopBodyOwners(workflow.nodes)
   return workflow.nodes.map((n) => {
     const prior = priorById.get(n.id)
     if (n.type === 'trigger') return { nodeId: n.id, status: 'success' }
-    if (bodyIds.has(n.id)) return { nodeId: n.id, status: 'pending' }
+    const owner = owners.get(n.id)
+    if (owner) {
+      return priorById.get(owner)?.status === 'success' && prior
+        ? { ...prior }
+        : { nodeId: n.id, status: 'pending' }
+    }
     if (prior?.status === 'success') return { ...prior }
     if (prior?.status === 'skipped' && prior.skipReason) return { ...prior }
     return { nodeId: n.id, status: 'pending' }
   })
+}
+
+/**
+ * Which loop owns each body step.
+ *
+ * Ids a loop lists that no longer exist are left out, so a stale
+ * `bodyNodeIds` entry (a step deleted in an older build) is not a member of
+ * anything. The first loop to claim a step keeps it.
+ */
+export function loopBodyOwners(nodes: readonly WorkflowNode[]): Map<string, string> {
+  const exists = new Set(nodes.map((n) => n.id))
+  const owners = new Map<string, string>()
+  for (const n of nodes) {
+    if (n.type !== 'loop') continue
+    for (const id of (n.config as LoopConfig).bodyNodeIds ?? []) {
+      if (exists.has(id) && id !== n.id && !owners.has(id)) owners.set(id, n.id)
+    }
+  }
+  return owners
+}
+
+/**
+ * The run graph as the main scheduler sees it: each loop stands in for its body.
+ *
+ * A loop drives its body itself, so the scheduler must never reach a body step
+ * on its own — otherwise a step left pending by a failed pass becomes ready the
+ * moment its predecessor settles, and runs outside the loop. Edges into and
+ * inside a body are dropped; an edge leaving a body is redrawn from the loop,
+ * which is also how the canvas draws it. A branch label on such an edge is
+ * dropped, since the loop, not the condition inside it, is what the run waits on.
+ */
+export function collapseLoopBodies(
+  nodes: readonly WorkflowNode[],
+  edges: readonly WorkflowEdge[]
+): WorkflowEdge[] {
+  const owners = loopBodyOwners(nodes)
+  const seen = new Set<string>()
+  const collapsed: WorkflowEdge[] = []
+  for (const edge of edges) {
+    if (owners.has(edge.target)) continue
+    const owner = owners.get(edge.source)
+    const next: WorkflowEdge = owner
+      ? { id: `${edge.id}:via-loop`, source: owner, target: edge.target }
+      : edge
+    if (next.source === next.target) continue
+    const key = `${next.source}->${next.target}:${next.conditionBranch ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    collapsed.push(next)
+  }
+  return collapsed
+}
+
+/**
+ * A loop's body as a graph of its own: members, the edges between them, and
+ * the members nothing inside the body feeds (where each pass starts).
+ *
+ * A body without edges between its members is chained in `bodyNodeIds` order,
+ * which is how loops ran before bodies could branch.
+ */
+export function loopBodyGraph(
+  nodes: readonly WorkflowNode[],
+  edges: readonly WorkflowEdge[],
+  loop: WorkflowNode
+): { members: WorkflowNode[]; edges: WorkflowEdge[]; entries: string[] } {
+  const owners = loopBodyOwners(nodes)
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const members = ((loop.config as LoopConfig).bodyNodeIds ?? [])
+    .filter((id) => owners.get(id) === loop.id)
+    .map((id) => byId.get(id)!)
+  const ids = new Set(members.map((m) => m.id))
+  let inner = edges.filter((e) => ids.has(e.source) && ids.has(e.target))
+  if (inner.length === 0 && members.length > 1) {
+    inner = members.slice(1).map((m, i) => ({
+      id: `${members[i].id}->${m.id}:chain`,
+      source: members[i].id,
+      target: m.id
+    }))
+  }
+  const fed = new Set(inner.map((e) => e.target))
+  return { members, edges: inner, entries: members.filter((m) => !fed.has(m.id)).map((m) => m.id) }
+}
+
+/**
+ * Why a loop's body cannot run, or undefined when it can.
+ *
+ * Checked by the engine before the first pass, and by the editor and the MCP
+ * tools before a workflow is saved, so a shape the engine refuses is never
+ * stored in the first place.
+ */
+export function loopStructureError(
+  nodes: readonly WorkflowNode[],
+  edges: readonly WorkflowEdge[],
+  loop: WorkflowNode
+): string | undefined {
+  const { members, edges: inner } = loopBodyGraph(nodes, edges, loop)
+  if (members.length === 0) return 'Loop has no body steps. Add at least one step for it to repeat.'
+  const ids = new Set(members.map((m) => m.id))
+  for (const m of members) {
+    // A gate inside a loop would park the run mid-pass, and resuming means
+    // re-entering the loop at the pass it stopped on: state a loop does not keep.
+    if (m.type === 'approval') {
+      return `Loop body contains an approval gate ("${m.label}"), which is not supported.`
+    }
+    if (m.type === 'loop')
+      return `Loop body contains another loop ("${m.label}"), which is not supported.`
+    if (m.type === 'trigger') return `Loop body contains a trigger ("${m.label}").`
+  }
+  for (const e of edges) {
+    if (ids.has(e.target) && !ids.has(e.source) && e.source !== loop.id) {
+      const from = nodes.find((n) => n.id === e.source)?.label ?? e.source
+      return `"${from}" feeds a step inside the loop from outside it. Only the loop starts its steps.`
+    }
+    if (ids.has(e.source) && !ids.has(e.target) && e.conditionBranch) {
+      return 'A condition inside the loop branches to a step outside it. Keep both branches inside the loop.'
+    }
+  }
+  // Kahn's algorithm: anything left over sits on a cycle.
+  const indegree = new Map(members.map((m) => [m.id, 0]))
+  for (const e of inner) indegree.set(e.target, (indegree.get(e.target) ?? 0) + 1)
+  const queue = [...indegree].filter(([, d]) => d === 0).map(([id]) => id)
+  let visited = 0
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    visited++
+    for (const e of inner) {
+      if (e.source !== id) continue
+      const d = (indegree.get(e.target) ?? 0) - 1
+      indegree.set(e.target, d)
+      if (d === 0) queue.push(e.target)
+    }
+  }
+  if (visited < members.length) return 'The steps inside the loop form a cycle.'
+  return undefined
 }
 
 /** Whether a run can still be stopped — drives the Stop control's visibility. */

@@ -36,6 +36,7 @@ import {
   AiAgentType,
   CallConnectorActionConfig,
   HttpRequestConfig,
+  LoopConfig,
   ConnectorActionDef,
   supportsExactSessionResume,
   getProjectRemoteHostId
@@ -69,6 +70,7 @@ import {
   insertBeforeFork,
   insertConditionBetween,
   createLoopNode,
+  adoptIntoLoopBody,
   appendToLoopBody,
   loopOwningInsertPoint,
   addParallelBranch,
@@ -113,7 +115,8 @@ import {
   ensureUniqueSlug,
   getAncestorNodes,
   buildStepGroups,
-  buildInputVars
+  buildInputVars,
+  buildLoopVars
 } from '@vornrun/shared/template-vars'
 
 const EMPTY_TASKS: import('../../../shared/types').TaskConfig[] = []
@@ -292,9 +295,22 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     () => (selectedNodeId ? getAncestorNodes(nodes, edges, selectedNodeId) : []),
     [nodes, edges, selectedNodeId]
   )
-  const stepGroups = useMemo(
-    () => buildStepGroups(ancestors, lookupAction, lastRunData),
-    [ancestors, lookupAction, lastRunData]
+  const stepGroups = useMemo(() => {
+    // A loop's stop condition is checked after a pass, so its own body steps
+    // are readable there too, not only what came before the loop.
+    const selected = nodes.find((n) => n.id === selectedNodeId)
+    const body =
+      selected?.type === 'loop'
+        ? ((selected.config as LoopConfig).bodyNodeIds ?? [])
+            .map((id) => nodes.find((n) => n.id === id))
+            .filter((n): n is WorkflowNode => !!n)
+        : []
+    return buildStepGroups([...ancestors, ...body], lookupAction, lastRunData)
+  }, [ancestors, nodes, selectedNodeId, lookupAction, lastRunData])
+  // Run inputs, and {{loop.*}} for a step inside a loop.
+  const selectedNodeVars = useMemo(
+    () => [...inputVars, ...buildLoopVars(nodes, selectedNodeId)],
+    [inputVars, nodes, selectedNodeId]
   )
 
   // Load execution history from database
@@ -810,7 +826,17 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
     ) => {
       // Condition nodes use a special insertion that creates true/false branches
       if (type === 'condition') {
-        const result = insertConditionBetween(nodes, edges, afterNodeId, beforeNodeId)
+        const result = adoptIntoLoopBody(
+          nodes,
+          insertConditionBetween(
+            nodes,
+            edges,
+            afterNodeId,
+            beforeNodeId === '__LOOP_BODY__' ? null : beforeNodeId
+          ),
+          afterNodeId,
+          beforeNodeId
+        )
         setNodes(result.nodes)
         setEdges(result.edges)
         // Select the condition node (last added)
@@ -831,11 +857,17 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
 
       let result: { nodes: WorkflowNode[]; edges: WorkflowEdge[] }
       if (beforeNodeId === '__LOOP_BODY__') {
-        // afterNodeId is the loop when its body is empty, otherwise the last
-        // body step; appendToLoopBody resolves the loop from either.
+        // afterNodeId is the loop itself (its + while empty, or the port inside
+        // its frame) or the body step to add after.
         const loop = loopOwningInsertPoint(nodes, afterNodeId)
         result = loop
-          ? appendToLoopBody(nodes, edges, loop.id, newNode)
+          ? appendToLoopBody(
+              nodes,
+              edges,
+              loop.id,
+              newNode,
+              afterNodeId === loop.id ? undefined : afterNodeId
+            )
           : appendNodeAfter(nodes, edges, afterNodeId, newNode)
       } else if (beforeNodeId === '__FORK__') {
         result = insertBeforeFork(nodes, edges, afterNodeId, newNode)
@@ -849,6 +881,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
       } else {
         result = appendNodeAfter(nodes, edges, afterNodeId, newNode)
       }
+      result = adoptIntoLoopBody(nodes, result, afterNodeId, beforeNodeId)
 
       setNodes(result.nodes)
       setEdges(result.edges)
@@ -1636,7 +1669,7 @@ export function WorkflowEditor({ inline = false }: { inline?: boolean } = {}) {
             onClose={() => setSelectedNodeId(null)}
             triggerType={triggerType}
             isContextualTrigger={isContextualTrigger}
-            inputVars={inputVars}
+            inputVars={selectedNodeVars}
             stepGroups={stepGroups}
             ancestorNodes={ancestors}
             onRunToStep={runToStepEligible(selectedNode.id) ? handleRunToStep : undefined}

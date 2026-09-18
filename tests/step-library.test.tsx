@@ -85,14 +85,16 @@ describe('the step library', () => {
     expect(screen.getByText('Condition')).toBeInTheDocument()
   })
 
-  it('offers only repeatable steps to a loop body', async () => {
+  it('offers a loop body every step but a gate, a loop and a parallel branch', async () => {
     renderLibrary({ bodyOnly: true, insideBranch: false })
     expect(screen.getByText('Agent')).toBeInTheDocument()
     expect(screen.getByText('Script')).toBeInTheDocument()
-    expect(screen.queryByText('Condition')).toBeNull()
+    expect(screen.getByText('Condition')).toBeInTheDocument()
+    expect(screen.queryByText('Approval gate')).toBeNull()
+    expect(screen.queryByText('Loop')).toBeNull()
     expect(screen.queryByText('Parallel branch')).toBeNull()
-    await Promise.resolve()
-    expect(screen.queryByText('GitHub')).toBeNull()
+    // Connector actions too: a loop is where "comment on each finding" lives.
+    expect(await group(/GitHub/)).toBeInTheDocument()
   })
 
   it('picks with click and with Enter on the highlighted row', async () => {

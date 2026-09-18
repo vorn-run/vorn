@@ -44,6 +44,7 @@ const VAR_CATEGORY_GROUPS: Record<
   trigger: { group: 'Trigger', description: '' },
   context: { group: 'Context', description: 'Resolved from the launching card or terminal' },
   inputs: { group: 'Run Inputs', description: 'Entered when the run is started' },
+  loop: { group: 'Loop', description: 'The pass this step is on' },
   connectorItem: {
     group: 'Connector Item',
     description: 'The upstream item that triggered this run'

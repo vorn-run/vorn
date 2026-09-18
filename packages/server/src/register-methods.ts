@@ -178,7 +178,8 @@ import {
   stopWorkflowRun,
   resumeSignInWaits,
   runWaitsForSignIn,
-  gateTakesChanges
+  gateTakesChanges,
+  gateEditIsRefused
 } from './workflows/engine'
 import { listKeys, passwordFields } from './connectors/keys'
 import { installedPack } from './connectors/packs'
@@ -792,6 +793,8 @@ export function registerAllMethods(): void {
     if (decision === 'changes' && !gateTakesChanges(runId, nodeId, comment ?? '')) {
       return { accepted: false }
     }
+    const editRefused = decision === 'reject' ? undefined : gateEditIsRefused(runId, nodeId, edited)
+    if (editRefused) return { accepted: false, reason: editRefused }
     // Applied here, where the run is. It used to be broadcast for whichever
     // window held the run to apply, which is why answering from a phone with
     // nothing open did nothing at all.

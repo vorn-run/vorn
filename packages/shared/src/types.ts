@@ -816,6 +816,12 @@ export interface WorkflowExecutionContext {
    * with `{{inputs.issue.number}}`.
    */
   inputs?: Record<string, unknown>
+  /**
+   * The pass a loop is on, for the steps inside it: `{{loop.item.*}}` in a
+   * for-each loop, and `{{loop.index}}` (from 0), `{{loop.number}}` (from 1)
+   * and `{{loop.count}}` in either kind.
+   */
+  loop?: { item?: unknown; index: number; number: number; count?: number }
 }
 
 export type WorkflowNodeType =
@@ -1128,7 +1134,7 @@ export type WorkflowNodeConfig =
 
 /**
  * Repeat a run of steps until they are good enough, or until the budget runs
- * out.
+ * out — or run them once for each item of a list.
  *
  * A loop node sits in the chain ahead of the steps it owns and drives them
  * itself, so the ordinary wave scheduler never runs a body node directly — it
@@ -1142,9 +1148,21 @@ export type WorkflowNodeConfig =
  */
 export interface LoopConfig {
   nodeType: 'loop'
-  /** Steps this loop owns, in execution order. */
+  /**
+   * `repeat` runs the body up to `maxIterations` times; `forEach` runs it once
+   * per item of `items`, with no cap. Absent means `repeat`, which is what
+   * every loop was before for-each existed.
+   */
+  mode?: 'repeat' | 'forEach'
+  /**
+   * For `forEach`: the list to walk, as a template naming it, e.g.
+   * `{{steps.review.items}}`. JSON text of a list works too, and so does an
+   * object holding exactly one list.
+   */
+  items?: string
+  /** Steps this loop owns. They run as a graph, by their own edges. */
   bodyNodeIds: string[]
-  /** Hard cap on passes. 1 means "run the body once", i.e. no repeat. */
+  /** For `repeat`: hard cap on passes. 1 means "run the body once", i.e. no repeat. */
   maxIterations: number
   /**
    * Checked after each pass; the loop stops when it holds. Omit to always run

@@ -122,6 +122,8 @@ vi.mock('../packages/server/src/logger', () => ({
 const {
   adoptConnectorInboxLease,
   applyGateDecision,
+  gateEditIsRefused,
+  retryRunFromFailure,
   approveWorkflowGate,
   executeWorkflow,
   resumeSignInWaits,
@@ -1156,5 +1158,433 @@ describe('a step whose connection signed out', () => {
     expect(stateOf(finished, 'draft')?.waitingFor).toBeUndefined()
     expect(stateOf(finished, 'tell')?.status).toBe('success')
     expect(execute).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('a loop whose steps form a graph', () => {
+  type Node = WorkflowDefinition['nodes'][number]
+  const action = (id: string, extra: Partial<Node> = {}): Node =>
+    ({
+      id,
+      type: 'callConnectorAction',
+      label: id,
+      slug: id,
+      position: { x: 0, y: 0 },
+      config: { nodeType: 'callConnectorAction', connectionId: 'conn', action: id, args: {} },
+      ...extra
+    }) as unknown as Node
+  const condition = (id: string, variable: string, value: string): Node =>
+    ({
+      id,
+      type: 'condition',
+      label: id,
+      slug: id,
+      position: { x: 0, y: 0 },
+      config: { variable, operator: 'equals', value }
+    }) as unknown as Node
+  const loopNode = (bodyNodeIds: string[], config: Record<string, unknown> = {}): Node =>
+    ({
+      id: 'loop',
+      type: 'loop',
+      label: 'Loop',
+      slug: 'loop',
+      position: { x: 0, y: 0 },
+      config: { nodeType: 'loop', bodyNodeIds, maxIterations: 1, ...config }
+    }) as unknown as Node
+  const workflow = (
+    nodes: Node[],
+    edges: [string, string, ('true' | 'false')?][]
+  ): WorkflowDefinition =>
+    ({
+      id: 'wf-loop-graph',
+      name: 'Loop graph',
+      icon: 'Rocket',
+      enabled: true,
+      nodes: [
+        { id: 'trigger', type: 'trigger', label: 'Trigger', position: { x: 0, y: 0 }, config: {} },
+        ...nodes
+      ],
+      edges: edges.map(([source, target, conditionBranch], i) => ({
+        id: `e${i}`,
+        source,
+        target,
+        ...(conditionBranch && { conditionBranch })
+      }))
+    }) as unknown as WorkflowDefinition
+  const stateOf = (run: WorkflowExecution, nodeId: string) =>
+    run.nodeStates.find((ns) => ns.nodeId === nodeId)
+
+  /** Answers each action from `outputs`, and records what ran, in order. */
+  function connectorAnswers(outputs: Record<string, unknown> = {}, failing: string[] = []) {
+    const calls: { action: string; args: Record<string, unknown> }[] = []
+    hostApi.executeConnectorAction = vi.fn(
+      async ({ action, args }: { action: string; args: Record<string, unknown> }) => {
+        calls.push({ action, args })
+        return failing.includes(action)
+          ? { success: false, error: `${action} broke` }
+          : { success: true, output: outputs[action] ?? {} }
+      }
+    )
+    return calls
+  }
+
+  it('takes one branch of a condition inside the body, and runs what follows the loop once', async () => {
+    const calls = connectorAnswers({ check: { verdict: 'yes' } })
+    const run = await executeWorkflow(
+      workflow(
+        [
+          loopNode(['check', 'decide', 'yes', 'no']),
+          action('check'),
+          condition('decide', '{{steps.check.verdict}}', 'yes'),
+          action('yes'),
+          action('no'),
+          action('after')
+        ],
+        [
+          ['trigger', 'loop'],
+          ['loop', 'check'],
+          ['check', 'decide'],
+          ['decide', 'yes', 'true'],
+          ['decide', 'no', 'false'],
+          ['yes', 'after'],
+          ['no', 'after']
+        ]
+      )
+    )
+
+    expect(run.status).toBe('success')
+    expect(calls.map((c) => c.action)).toEqual(['check', 'yes', 'after'])
+    expect(stateOf(run, 'no')).toMatchObject({ status: 'skipped', skipReason: 'branch' })
+    expect(stateOf(run, 'loop')?.status).toBe('success')
+  })
+
+  it('skips the rest of a failed pass instead of running it outside the loop later', async () => {
+    // A failed pass used to leave the rest of the body pending, and the main
+    // scheduler then ran it on its own once its predecessor had settled.
+    const calls = connectorAnswers({}, ['first'])
+    const run = await executeWorkflow(
+      workflow(
+        [loopNode(['first', 'second']), action('first'), action('second'), action('after')],
+        [
+          ['trigger', 'loop'],
+          ['loop', 'first'],
+          ['first', 'second'],
+          ['second', 'after']
+        ]
+      )
+    )
+
+    expect(calls.map((c) => c.action)).toEqual(['first'])
+    expect(stateOf(run, 'second')?.status).toBe('skipped')
+    expect(stateOf(run, 'loop')?.status).toBe('error')
+    expect(run.status).toBe('error')
+  })
+
+  it('runs the body once per item, each pass reading its own item', async () => {
+    const calls = connectorAnswers({
+      list: { findings: [{ path: 'a.ts' }, { path: 'b.ts' }, { path: 'c.ts' }] }
+    })
+    const comment = action('comment')
+    ;(comment.config as { args: Record<string, string> }).args = {
+      path: '{{loop.item.path}}',
+      position: '{{loop.number}} of {{loop.count}}'
+    }
+    const run = await executeWorkflow(
+      workflow(
+        [
+          action('list'),
+          loopNode(['comment'], { mode: 'forEach', items: '{{steps.list.findings}}' }),
+          comment,
+          action('after')
+        ],
+        [
+          ['trigger', 'list'],
+          ['list', 'loop'],
+          ['loop', 'comment'],
+          ['comment', 'after']
+        ]
+      )
+    )
+
+    expect(run.status).toBe('success')
+    expect(calls.filter((c) => c.action === 'comment').map((c) => c.args)).toEqual([
+      { path: 'a.ts', position: '1 of 3' },
+      { path: 'b.ts', position: '2 of 3' },
+      { path: 'c.ts', position: '3 of 3' }
+    ])
+    expect(calls.at(-1)?.action).toBe('after')
+    const loopState = stateOf(run, 'loop')
+    expect(loopState).toMatchObject({
+      output: '3',
+      structuredOutput: expect.objectContaining({ count: 3 })
+    })
+    const results = (
+      loopState?.structuredOutput as {
+        results: { item: unknown; steps: Record<string, { status: string }> }[]
+      }
+    ).results
+    expect(results.map((r) => r.item)).toEqual([
+      { path: 'a.ts' },
+      { path: 'b.ts' },
+      { path: 'c.ts' }
+    ])
+    expect(results[0].steps.comment.status).toBe('success')
+  })
+
+  it('branches differently for each item', async () => {
+    const calls = connectorAnswers({ list: { items: [{ keep: 'yes' }, { keep: 'no' }] } })
+    await executeWorkflow(
+      workflow(
+        [
+          action('list'),
+          loopNode(['decide', 'yes', 'no'], { mode: 'forEach', items: '{{steps.list.items}}' }),
+          condition('decide', '{{loop.item.keep}}', 'yes'),
+          action('yes'),
+          action('no')
+        ],
+        [
+          ['trigger', 'list'],
+          ['list', 'loop'],
+          ['loop', 'decide'],
+          ['decide', 'yes', 'true'],
+          ['decide', 'no', 'false']
+        ]
+      )
+    )
+    expect(calls.map((c) => c.action)).toEqual(['list', 'yes', 'no'])
+  })
+
+  it('walks a list with more items than a repeat loop may pass', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ n: i }))
+    const calls = connectorAnswers({ list: { items: many } })
+    const run = await executeWorkflow(
+      workflow(
+        [
+          action('list'),
+          loopNode(['each'], { mode: 'forEach', items: '{{steps.list.items}}' }),
+          action('each')
+        ],
+        [
+          ['trigger', 'list'],
+          ['list', 'loop'],
+          ['loop', 'each']
+        ]
+      )
+    )
+    expect(calls.filter((c) => c.action === 'each')).toHaveLength(25)
+    expect(stateOf(run, 'loop')?.output).toBe('25')
+  })
+
+  it('skips the steps inside for an empty list, and carries on', async () => {
+    const calls = connectorAnswers({ list: { items: [] } })
+    const run = await executeWorkflow(
+      workflow(
+        [
+          action('list'),
+          loopNode(['each'], { mode: 'forEach', items: '{{steps.list.items}}' }),
+          action('each'),
+          action('after')
+        ],
+        [
+          ['trigger', 'list'],
+          ['list', 'loop'],
+          ['loop', 'each'],
+          ['each', 'after']
+        ]
+      )
+    )
+    expect(calls.map((c) => c.action)).toEqual(['list', 'after'])
+    expect(stateOf(run, 'each')?.status).toBe('skipped')
+    expect(run.status).toBe('success')
+  })
+
+  it('fails with a reason when its items are not a list', async () => {
+    connectorAnswers({ list: { items: 'not a list' } })
+    const run = await executeWorkflow(
+      workflow(
+        [
+          action('list'),
+          loopNode(['each'], { mode: 'forEach', items: '{{steps.list.items}}' }),
+          action('each')
+        ],
+        [
+          ['trigger', 'list'],
+          ['list', 'loop'],
+          ['loop', 'each']
+        ]
+      )
+    )
+    expect(stateOf(run, 'loop')?.error).toMatch(/Not a list.*\{\{steps\.list\.items\}\}/)
+    expect(run.status).toBe('error')
+  })
+
+  it('stops at the item whose step fails, and reports which', async () => {
+    let n = 0
+    hostApi.executeConnectorAction = vi.fn(async ({ action: name }: { action: string }) => {
+      if (name === 'list') return { success: true, output: { items: [1, 2, 3] } }
+      n++
+      return n === 2 ? { success: false, error: 'broke' } : { success: true, output: {} }
+    })
+    const run = await executeWorkflow(
+      workflow(
+        [
+          action('list'),
+          loopNode(['each'], { mode: 'forEach', items: '{{steps.list.items}}' }),
+          action('each')
+        ],
+        [
+          ['trigger', 'list'],
+          ['list', 'loop'],
+          ['loop', 'each']
+        ]
+      )
+    )
+    expect(n).toBe(2)
+    expect(stateOf(run, 'loop')?.error).toBe('"each" failed on item 2')
+  })
+
+  it('still caps a repeat loop at ten passes', async () => {
+    const calls = connectorAnswers()
+    await executeWorkflow(
+      workflow(
+        [loopNode(['each'], { maxIterations: 50 }), action('each')],
+        [
+          ['trigger', 'loop'],
+          ['loop', 'each']
+        ]
+      )
+    )
+    expect(calls).toHaveLength(10)
+  })
+
+  it('hands the rows a reviewer kept at a gate to a for-each loop', async () => {
+    const findings = [
+      { path: 'a.ts', body: 'one' },
+      { path: 'b.ts', body: 'two' },
+      { path: 'c.ts', body: 'three' }
+    ]
+    const calls = connectorAnswers({ review: { findings } })
+    const gate = {
+      id: 'gate',
+      type: 'approval',
+      label: 'Check the review',
+      slug: 'gate',
+      position: { x: 0, y: 0 },
+      config: { edit: '{{steps.review.findings}}' }
+    } as unknown as Node
+    const comment = action('comment')
+    ;(comment.config as { args: Record<string, string> }).args = { path: '{{loop.item.path}}' }
+    const wf = workflow(
+      [
+        action('review'),
+        gate,
+        loopNode(['comment'], { mode: 'forEach', items: '{{steps.gate.items}}' }),
+        comment
+      ],
+      [
+        ['trigger', 'review'],
+        ['review', 'gate'],
+        ['gate', 'loop'],
+        ['loop', 'comment']
+      ]
+    )
+    mockState.config.workflows = [wf]
+    const run = await executeWorkflow(wf)
+
+    // The list reaches the reviewer whole, as readable JSON.
+    const asked = stateOf(run, 'gate')?.editableText ?? ''
+    expect(JSON.parse(asked)).toEqual(findings)
+    expect(asked).toContain('\n  {')
+
+    // A broken rewrite is refused with where it broke.
+    expect(gateEditIsRefused(run.runId, 'gate', '[{"path": "a.ts",}]')).toMatch(
+      /line 1, column \d+/
+    )
+
+    await applyGateDecision(
+      run.runId,
+      'gate',
+      'approve',
+      undefined,
+      JSON.stringify([findings[0], findings[2]])
+    )
+    expect(calls.filter((c) => c.action === 'comment').map((c) => c.args.path)).toEqual([
+      'a.ts',
+      'c.ts'
+    ])
+  })
+
+  it('retries past a finished loop with its steps still readable', async () => {
+    // A retry keeps the loop that finished; what follows it must still read
+    // the loop's steps rather than get nothing from them.
+    let afterFails = true
+    const calls: { action: string; args: Record<string, unknown> }[] = []
+    hostApi.executeConnectorAction = vi.fn(
+      async ({ action: name, args }: { action: string; args: Record<string, unknown> }) => {
+        calls.push({ action: name, args })
+        if (name === 'draft') return { success: true, output: { text: 'the draft' } }
+        if (name === 'after' && afterFails) return { success: false, error: 'broke' }
+        return { success: true, output: {} }
+      }
+    )
+    const after = action('after')
+    ;(after.config as { args: Record<string, string> }).args = { text: '{{steps.draft.text}}' }
+    const wf = workflow(
+      [loopNode(['draft']), action('draft'), after],
+      [
+        ['trigger', 'loop'],
+        ['loop', 'draft'],
+        ['draft', 'after']
+      ]
+    )
+    mockState.config.workflows = [wf]
+    const failed = await executeWorkflow(wf)
+    expect(failed.status).toBe('error')
+
+    afterFails = false
+    calls.length = 0
+    const retried = await retryRunFromFailure(wf, failed)
+    expect(retried.status).toBe('success')
+    expect(calls).toEqual([{ action: 'after', args: { text: 'the draft' } }])
+  })
+
+  it('refuses a loop whose body is fed from outside it', async () => {
+    connectorAnswers()
+    const run = await executeWorkflow(
+      workflow(
+        [loopNode(['inside']), action('outside'), action('inside')],
+        [
+          ['trigger', 'loop'],
+          ['trigger', 'outside'],
+          ['outside', 'inside']
+        ]
+      )
+    )
+    expect(stateOf(run, 'loop')?.error).toMatch(/from outside it/)
+    expect(stateOf(run, 'inside')?.status).toBe('skipped')
+  })
+
+  it('skips the body of a loop on a branch not taken, without failing the run', async () => {
+    const calls = connectorAnswers({ check: { verdict: 'no' } })
+    const run = await executeWorkflow(
+      workflow(
+        [
+          action('check'),
+          condition('decide', '{{steps.check.verdict}}', 'yes'),
+          loopNode(['inside']),
+          action('inside')
+        ],
+        [
+          ['trigger', 'check'],
+          ['check', 'decide'],
+          ['decide', 'loop', 'true'],
+          ['loop', 'inside']
+        ]
+      )
+    )
+    expect(calls.map((c) => c.action)).toEqual(['check'])
+    expect(stateOf(run, 'loop')).toMatchObject({ status: 'skipped', skipReason: 'branch' })
+    expect(stateOf(run, 'inside')).toMatchObject({ status: 'skipped', skipReason: 'branch' })
+    expect(run.status).toBe('success')
   })
 })

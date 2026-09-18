@@ -405,6 +405,52 @@ describe('RunDetailPane', () => {
     })
   })
 
+  describe('with a gate handing on a list of records', () => {
+    const rows = [
+      { id: 1, title: 'Leaky pool' },
+      { id: 2, title: 'Stale cache' }
+    ]
+    const listNodes = [
+      ...NODES,
+      makeNode('gate', 'Review', 'approval', { edit: '{{steps.n1.output}}' })
+    ]
+    const listRun = makeRun({
+      status: 'running',
+      completedAt: undefined,
+      nodeStates: [
+        { nodeId: 't', status: 'success' },
+        { nodeId: 'gate', status: 'waiting', editableText: JSON.stringify(rows, null, 2) }
+      ]
+    })
+
+    it('opens the rows as a table', () => {
+      renderPane(listRun, listNodes)
+      fireEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+      expect(screen.getByText('2 of 2 kept')).toBeInTheDocument()
+      expect(screen.getByLabelText('title, row 2')).toHaveValue('Stale cache')
+    })
+
+    it('approves with the rows in view, and waits while one cannot be sent', () => {
+      renderPane(listRun, listNodes)
+      fireEvent.click(screen.getByRole('button', { name: /^Edit$/ }))
+      const approve = screen.getByRole('button', { name: /Approve & continue/ })
+      fireEvent.change(screen.getByLabelText('id, row 1'), { target: { value: 'one' } })
+      expect(approve).toBeDisabled()
+      expect(approve.title).toContain('Row 1, id: not a number.')
+
+      fireEvent.change(screen.getByLabelText('id, row 1'), { target: { value: '1' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Remove row 1' }))
+      expect(approve).toBeEnabled()
+      fireEvent.click(approve)
+      expect(resolveWorkflowGate).toHaveBeenCalledWith({
+        runId: listRun.runId,
+        nodeId: 'gate',
+        decision: 'approve',
+        edited: JSON.stringify([rows[1]], null, 2)
+      })
+    })
+  })
+
   it('disables "Open workflow" when the workflow is gone', () => {
     render(<RunDetailPane run={makeRun()} workflowDeleted onOpenWorkflow={vi.fn()} />)
     const button = screen.getByRole('button', { name: 'Open workflow' })

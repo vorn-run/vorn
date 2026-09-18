@@ -40,6 +40,10 @@ import {
   canConnect,
   estimateNodeHeight,
   isPlaceholder,
+  layoutLoopBody,
+  LOOP_BODY_HANDLE,
+  LOOP_BODY_TOP,
+  loopBodyMembers,
   openingViewport,
   stepEdgePath,
   toCanvasElements,
@@ -109,6 +113,9 @@ interface Props {
 interface CanvasInteractions {
   nodesById: Map<string, WorkflowNode>
   allNodes: WorkflowNode[]
+  allEdges: WorkflowEdge[]
+  /** Steps that live inside a loop, which run only as part of it. */
+  bodyMembers: Set<string>
   selectedNodeId: string | null
   nodeStatus?: Record<string, NodeExecutionStatus>
   onNodeClick: (nodeId: string) => void
@@ -131,17 +138,19 @@ const TOOLBAR_BUTTON = `p-1.5 rounded-md bg-surface-overlay border border-white/
                         hover:text-white hover:border-white/[0.2] transition-colors`
 
 function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
-  const { nodesById, onDeleteNode, onRunToStep, onOpenLibrary } = useInteractions()
+  const { nodesById, bodyMembers, onDeleteNode, onRunToStep, onOpenLibrary } = useInteractions()
   const node = nodesById.get(nodeId)
   if (!onDeleteNode && !onRunToStep) return null
   const isTrigger = node?.type === 'trigger'
+  // A step inside a loop runs only as part of a pass, so it cannot be a run's target.
+  const inBody = bodyMembers.has(nodeId)
   const replaceable = !!node && REPLACEABLE_NODE_TYPES.has(node.type)
   return (
     <div
       className="absolute left-full top-1/2 -translate-y-1/2 ml-1.5 flex flex-col gap-1 opacity-0
                  group-hover:opacity-100 transition-opacity duration-100 z-10"
     >
-      {onRunToStep && !isTrigger && (
+      {onRunToStep && !isTrigger && !inBody && (
         <Tooltip label="Run to this step" position="right">
           <button
             aria-label="Run to this step"
@@ -169,7 +178,8 @@ function NodeHoverToolbar({ nodeId }: { nodeId: string }) {
                       afterNodeId: nodeId,
                       beforeNodeId: null,
                       insideBranch: false,
-                      bodyOnly: false,
+                      // Inside a loop, only what a loop body may hold can replace it.
+                      bodyOnly: inBody,
                       replaceNodeId: nodeId
                     }
               )
@@ -202,7 +212,8 @@ const HANDLE_CLASS = '!w-[7px] !h-[7px] !bg-surface-base !border !border-white/[
 
 /** A single step: the existing card, with ports above and below. */
 function StepNode({ data, id }: NodeProps) {
-  const { nodesById, allNodes, selectedNodeId, nodeStatus, onNodeClick } = useInteractions()
+  const { nodesById, allNodes, allEdges, selectedNodeId, nodeStatus, onNodeClick } =
+    useInteractions()
   const node = nodesById.get(data.nodeId as string)
   const updateNodeInternals = useUpdateNodeInternals()
   // A replace-in-place keeps the id, so React Flow would keep the old card's
@@ -210,7 +221,7 @@ function StepNode({ data, id }: NodeProps) {
   // Never on mount: that races the initial measure while the opening view settles.
   // Trigger kinds share a type and height, so the kind is part of the shape.
   const kind = (node?.config as { triggerType?: string } | undefined)?.triggerType ?? ''
-  const shape = node ? `${node.type}:${kind}:${estimateNodeHeight(node, allNodes)}` : ''
+  const shape = node ? `${node.type}:${kind}:${estimateNodeHeight(node, allNodes, allEdges)}` : ''
   const lastShape = useRef<string | null>(null)
   useEffect(() => {
     if (shape && lastShape.current !== null && lastShape.current !== shape) {
@@ -244,11 +255,16 @@ function StepNode({ data, id }: NodeProps) {
   )
 }
 
-/** A loop and its body as one enclosure; membership stays `bodyNodeIds`, not canvas geometry. */
+/**
+ * A loop's frame. Its body steps are canvas nodes of their own, drawn inside
+ * it by React Flow as children, so they have ports and edges like any step;
+ * membership stays `bodyNodeIds`, not canvas geometry.
+ */
 function LoopNode({ data, id }: NodeProps) {
   const {
     nodesById,
     allNodes,
+    allEdges,
     selectedNodeId,
     nodeStatus,
     onNodeClick,
@@ -257,7 +273,11 @@ function LoopNode({ data, id }: NodeProps) {
   } = useInteractions()
   const node = nodesById.get(data.nodeId as string)
   const updateNodeInternals = useUpdateNodeInternals()
-  const shape = node ? `${node.type}:${estimateNodeHeight(node, allNodes)}` : ''
+  const layout = useMemo(
+    () => (node?.type === 'loop' ? layoutLoopBody(node, allNodes, allEdges) : undefined),
+    [node, allNodes, allEdges]
+  )
+  const shape = node && layout ? `${node.type}:${layout.width}:${layout.height}` : ''
   const lastShape = useRef<string | null>(null)
   useEffect(() => {
     if (shape && lastShape.current !== null && lastShape.current !== shape) {
@@ -265,31 +285,36 @@ function LoopNode({ data, id }: NodeProps) {
     }
     lastShape.current = shape || lastShape.current
   }, [id, shape, updateNodeInternals])
-  if (!node || node.type !== 'loop') return null
+  if (!node || node.type !== 'loop' || !layout) return null
 
   const config = node.config as LoopConfig
+  const forEach = config.mode === 'forEach'
   const selected = node.id === selectedNodeId
   const until = config.until?.variable
-    ? `until ${config.until.variable} ${config.until.operator} ${config.until.value}`
-    : 'runs every pass'
-  const body = (config.bodyNodeIds ?? [])
-    .map((id) => allNodes.find((n) => n.id === id))
-    .filter((n): n is WorkflowNode => !!n)
-  const lastBodyId = body.length > 0 ? body[body.length - 1].id : null
+    ? ` · until ${config.until.variable} ${config.until.operator} ${config.until.value}`
+    : ''
+  const footer = forEach
+    ? `for each in ${config.items?.trim() || 'a list not chosen yet'}${until}`
+    : until
+      ? until.slice(3)
+      : 'runs every pass'
+  const body = (config.bodyNodeIds ?? []).filter((bodyId) => nodesById.has(bodyId))
+  const lastBodyId = body.length > 0 ? body[body.length - 1] : null
   const loopStatus = nodeStatus?.[node.id]
   const bodyAnchorAfter = lastBodyId ?? node.id
 
   return (
     // Stated for the same reason a step's is: the enclosure's own width, so a
     // sibling can never move the rail or the ports centred on it.
-    <div className="relative group w-[312px]">
+    <div className="relative group" style={{ width: layout.width }}>
       <Handle type="target" position={Position.Top} className={HANDLE_CLASS} />
       <NodeHoverToolbar nodeId={node.id} />
       <div
         data-loop-rail
-        className={`w-[312px] rounded-lg border transition-all relative
+        className={`rounded-lg border transition-all relative
                     ${selected ? NODE_SELECTED : loopStatus === 'error' ? 'border-danger/60' : NODE_UNSELECTED}
                     bg-surface-node`}
+        style={{ width: layout.width }}
       >
         {loopStatus === 'running' && (
           <span
@@ -310,7 +335,7 @@ function LoopNode({ data, id }: NodeProps) {
             {node.label}
           </span>
           <span className="shrink-0 text-[10px] font-mono text-gray-400 bg-white/[0.06] rounded px-1.5 py-0.5">
-            max {config.maxIterations ?? 1}
+            {forEach ? 'each' : `max ${config.maxIterations ?? 1}`}
           </span>
           {loopStatus && WORKFLOW_STATUS_DOT_PULSE[loopStatus] && (
             <span
@@ -319,6 +344,14 @@ function LoopNode({ data, id }: NodeProps) {
             />
           )}
         </div>
+        {/* Each pass starts here: the port its first steps are wired from. */}
+        <Handle
+          id={LOOP_BODY_HANDLE}
+          type="source"
+          position={Position.Bottom}
+          className={HANDLE_CLASS}
+          style={{ top: LOOP_BODY_TOP - 16 }}
+        />
 
         <div className="px-4 pt-4 flex flex-col items-center">
           {body.length === 0 ? (
@@ -329,20 +362,10 @@ function LoopNode({ data, id }: NodeProps) {
               No steps yet — add one below
             </div>
           ) : (
-            body.map((bodyNode, i) => (
-              <div key={bodyNode.id} className="flex flex-col items-center">
-                {i > 0 && <div className="w-px h-[18px] bg-white/[0.08]" />}
-                <NodeCard
-                  node={bodyNode}
-                  selected={bodyNode.id === selectedNodeId}
-                  onClick={() => onNodeClick(bodyNode.id)}
-                  executionStatus={nodeStatus?.[bodyNode.id]}
-                />
-              </div>
-            ))
+            // The body's steps are drawn over this space as child nodes.
+            <div data-loop-body aria-hidden style={{ height: layout.height }} />
           )}
 
-          {/* Inside the rail, so position is what decides membership. */}
           <div className="w-px h-[18px] bg-white/[0.08]" />
           <ConnectorButton
             active={isAnchor(libraryAnchor, bodyAnchorAfter, '__LOOP_BODY__')}
@@ -358,7 +381,7 @@ function LoopNode({ data, id }: NodeProps) {
         </div>
 
         <div className="px-4 pt-2.5 pb-3 text-[10px] font-mono text-gray-500 text-center truncate">
-          ↻ {until}
+          ↻ {footer}
         </div>
       </div>
       <Handle type="source" position={Position.Bottom} className={HANDLE_CLASS} />
@@ -489,7 +512,8 @@ function StepEdge({
                   afterNodeId: edgeData!.afterNodeId,
                   beforeNodeId: edgeData!.beforeNodeId,
                   insideBranch: edgeData!.insideBranch,
-                  bodyOnly: false
+                  // A step inserted inside a loop joins its body, so only what a body may hold is offered.
+                  bodyOnly: !!edgeData!.bodyOf
                 })
               }
             />
@@ -573,7 +597,8 @@ function WorkflowCanvasInner({
     // Committing every displayed position materializes the computed layout on first drag.
     const positions: Record<string, { x: number; y: number }> = {}
     for (const rfNode of rfNodes) {
-      if (isPlaceholder(rfNode)) continue
+      // A body step's position is its loop's layout, never stored.
+      if (isPlaceholder(rfNode) || rfNode.parentId) continue
       positions[rfNode.id] = { x: rfNode.position.x, y: rfNode.position.y }
     }
     onPositionsCommit(positions)
@@ -583,7 +608,7 @@ function WorkflowCanvasInner({
     (connection: Connection | Edge) =>
       !!connection.source &&
       !!connection.target &&
-      canConnect(nodes, edges, connection.source, connection.target),
+      canConnect(nodes, edges, connection.source, connection.target, connection.sourceHandle),
     [nodes, edges]
   )
 
@@ -596,8 +621,21 @@ function WorkflowCanvasInner({
     [onConnectEdge]
   )
 
+  const bodyMembers = useMemo(() => loopBodyMembers(nodes), [nodes])
+
   const openLibraryAppend = useCallback(
-    (afterNodeId: string, position?: { x: number; y: number }) => {
+    (afterNodeId: string, position?: { x: number; y: number }, fromLoopBody = false) => {
+      // Dropped from a step inside a loop, or from the port inside its frame:
+      // the new step joins that loop's body, after the step it came from.
+      if (fromLoopBody || bodyMembers.has(afterNodeId)) {
+        onOpenLibrary({
+          afterNodeId,
+          beforeNodeId: '__LOOP_BODY__',
+          insideBranch: false,
+          bodyOnly: true
+        })
+        return
+      }
       onOpenLibrary({
         afterNodeId,
         beforeNodeId: null,
@@ -606,14 +644,19 @@ function WorkflowCanvasInner({
         position
       })
     },
-    [onOpenLibrary, elements.branchMembers]
+    [onOpenLibrary, elements.branchMembers, bodyMembers]
   )
 
-  const pendingConnectSource = useRef<string | null>(null)
+  const pendingConnectSource = useRef<{ nodeId: string; handleId: string | null } | null>(null)
 
-  const handleConnectStart = useCallback((_: unknown, params: { nodeId: string | null }) => {
-    pendingConnectSource.current = params.nodeId
-  }, [])
+  const handleConnectStart = useCallback(
+    (_: unknown, params: { nodeId: string | null; handleId: string | null }) => {
+      pendingConnectSource.current = params.nodeId
+        ? { nodeId: params.nodeId, handleId: params.handleId }
+        : null
+    },
+    []
+  )
 
   const handleConnectEnd = useCallback(
     (event: MouseEvent | TouchEvent, connectionState: { isValid: boolean | null }) => {
@@ -621,7 +664,11 @@ function WorkflowCanvasInner({
       pendingConnectSource.current = null
       // A drop on empty canvas opens the library, remembering where the edge was released.
       if (connectionState.isValid === null && source && 'clientX' in event) {
-        openLibraryAppend(source, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
+        openLibraryAppend(
+          source.nodeId,
+          screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+          source.handleId === LOOP_BODY_HANDLE
+        )
       }
     },
     [openLibraryAppend, screenToFlowPosition]
@@ -629,9 +676,9 @@ function WorkflowCanvasInner({
 
   const leafForTabInsert = useCallback((): string | null => {
     const hasOutgoing = new Set(edges.map((e) => e.source))
-    const leaf = [...nodes].reverse().find((n) => !hasOutgoing.has(n.id))
+    const leaf = [...nodes].reverse().find((n) => !hasOutgoing.has(n.id) && !bodyMembers.has(n.id))
     return leaf?.id ?? null
-  }, [nodes, edges])
+  }, [nodes, edges, bodyMembers])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -675,6 +722,8 @@ function WorkflowCanvasInner({
     () => ({
       nodesById: new Map(nodes.map((n) => [n.id, n])),
       allNodes: nodes,
+      allEdges: edges,
+      bodyMembers,
       selectedNodeId,
       nodeStatus,
       onNodeClick,
@@ -685,6 +734,8 @@ function WorkflowCanvasInner({
     }),
     [
       nodes,
+      edges,
+      bodyMembers,
       selectedNodeId,
       nodeStatus,
       onNodeClick,

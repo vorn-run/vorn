@@ -2,90 +2,17 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, cleanup, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import { LoopNode } from '../src/renderer/components/workflow-editor/nodes/LoopNode'
 import { LoopConfigForm } from '../src/renderer/components/workflow-editor/panels/LoopConfigForm'
 import { ConnectorButton } from '../src/renderer/components/workflow-editor/nodes/AddStepNode'
-import type { LoopConfig, WorkflowNode } from '../packages/shared/src/types'
+import type { LoopConfig } from '../packages/shared/src/types'
 
 afterEach(cleanup)
-
-const step = (id: string, label: string): WorkflowNode => ({
-  id,
-  type: 'script',
-  label,
-  config: {} as WorkflowNode['config'],
-  position: { x: 0, y: 0 }
-})
 
 const config = (over: Partial<LoopConfig> = {}): LoopConfig => ({
   nodeType: 'loop',
   bodyNodeIds: ['write', 'review'],
   maxIterations: 2,
   ...over
-})
-
-describe('LoopNode (the fallback card for an unreachable loop)', () => {
-  const nodes = [step('write', 'Write the edition'), step('review', 'Review the draft')]
-
-  it('names the steps it repeats, in run order', () => {
-    render(<LoopNode label="Repeat" config={config()} nodes={nodes} onClick={() => {}} />)
-    expect(screen.getByText('Write the edition')).toBeInTheDocument()
-    expect(screen.getByText('Review the draft')).toBeInTheDocument()
-  })
-
-  it('says so when it has no body, rather than looking like a finished step', () => {
-    render(
-      <LoopNode
-        label="Repeat"
-        config={config({ bodyNodeIds: [] })}
-        nodes={nodes}
-        onClick={() => {}}
-      />
-    )
-    expect(screen.getByText('No steps selected yet')).toBeInTheDocument()
-  })
-
-  it('ignores a body id whose step no longer exists', () => {
-    // A step can be deleted while the loop still lists it; showing a blank row
-    // would be worse than showing one fewer.
-    render(
-      <LoopNode
-        label="Repeat"
-        config={config({ bodyNodeIds: ['write', 'deleted'] })}
-        nodes={nodes}
-        onClick={() => {}}
-      />
-    )
-    expect(screen.getByText(/Repeats 1 step /)).toBeInTheDocument()
-  })
-
-  it('shows the passes taken once a run has happened', () => {
-    render(
-      <LoopNode label="Repeat" config={config()} nodes={nodes} iteration={2} onClick={() => {}} />
-    )
-    expect(screen.getByText('2×')).toBeInTheDocument()
-  })
-
-  it('surfaces the exit condition', () => {
-    render(
-      <LoopNode
-        label="Repeat"
-        config={config({
-          until: { variable: '{{steps.review.approved}}', operator: 'equals', value: 'true' }
-        })}
-        nodes={nodes}
-        onClick={() => {}}
-      />
-    )
-    expect(screen.getByText(/until \{\{steps.review.approved\}\} equals true/)).toBeInTheDocument()
-  })
-
-  it('selects itself when clicked', () => {
-    const onClick = vi.fn()
-    render(<LoopNode label="Repeat" config={config()} nodes={nodes} onClick={onClick} />)
-    fireEvent.click(screen.getByText('Repeat'))
-    expect(onClick).toHaveBeenCalledOnce()
-  })
 })
 
 describe('LoopConfigForm', () => {
@@ -215,5 +142,36 @@ describe('the + on the canvas', () => {
     expect(screen.getByRole('button', { name: 'Add a step' }).className).toContain(
       'border-white/40'
     )
+  })
+})
+
+describe('LoopConfigForm choosing how the loop repeats', () => {
+  it('reads a loop saved before for-each existed as repeating', () => {
+    render(<LoopConfigForm config={config()} onChange={() => {}} />)
+    expect(screen.getByRole('radio', { name: 'A number of times' })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    )
+    expect(screen.getByText('Maximum passes')).toBeInTheDocument()
+    expect(screen.queryByText('Items')).toBeNull()
+  })
+
+  it('asks for the list to walk, and not for a pass limit, in for-each mode', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(<LoopConfigForm config={config()} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('radio', { name: 'For each item in a list' }))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'forEach', bodyNodeIds: ['write', 'review'] })
+    )
+
+    rerender(
+      <LoopConfigForm
+        config={config({ mode: 'forEach', items: '{{steps.gate.items}}' })}
+        onChange={onChange}
+      />
+    )
+    expect(screen.getByText('Items')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('{{steps.gate.items}}')).toBeInTheDocument()
+    expect(screen.queryByText('Maximum passes')).toBeNull()
   })
 })

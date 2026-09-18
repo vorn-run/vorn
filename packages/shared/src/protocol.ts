@@ -574,7 +574,7 @@ export interface RequestMethods {
       /** The reviewer's rewrite of the gate's editable text, when they made one. */
       edited?: string
     }
-    result: { accepted: boolean }
+    result: { accepted: boolean; reason?: string }
   }
 
   /**

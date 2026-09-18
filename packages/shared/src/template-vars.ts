@@ -6,6 +6,7 @@ import {
   WorkflowEdge,
   CallConnectorActionConfig,
   LaunchAgentConfig,
+  LoopConfig,
   ConnectorActionDef,
   WorkflowInputDef,
   NodeExecutionStatus
@@ -82,7 +83,7 @@ export interface LastRunData {
 export interface TemplateVariable {
   key: string
   label: string
-  category: 'task' | 'trigger' | 'connectorItem' | 'context' | 'inputs'
+  category: 'task' | 'trigger' | 'connectorItem' | 'context' | 'inputs' | 'loop'
 }
 
 export const TEMPLATE_VARIABLES: TemplateVariable[] = [
@@ -156,6 +157,31 @@ export function getAvailableContextVars(opts: {
     if (opts.isContextualTrigger && v.category === 'context') return true
     return false
   })
+}
+
+/**
+ * The `{{loop.*}}` entries a step can read: only a step inside a loop's body,
+ * or the loop itself (its stop condition is checked with a pass in hand).
+ */
+export function buildLoopVars(nodes: WorkflowNode[], nodeId: string | null): TemplateVariable[] {
+  if (!nodeId) return []
+  const loop = nodes.find(
+    (n) =>
+      n.type === 'loop' &&
+      (n.id === nodeId || ((n.config as LoopConfig).bodyNodeIds ?? []).includes(nodeId))
+  )
+  if (!loop) return []
+  const forEach = (loop.config as LoopConfig).mode === 'forEach'
+  return [
+    ...(forEach ? [{ key: '{{loop.item}}', label: 'This item', category: 'loop' as const }] : []),
+    {
+      key: '{{loop.number}}',
+      label: forEach ? 'Item number, from 1' : 'Pass number, from 1',
+      category: 'loop'
+    },
+    { key: '{{loop.index}}', label: 'Index, from 0', category: 'loop' },
+    { key: '{{loop.count}}', label: forEach ? 'How many items' : 'Most passes', category: 'loop' }
+  ]
 }
 
 /**
@@ -257,9 +283,21 @@ export function formatRunValue(val: unknown): string {
 }
 
 const GATE_OUTPUT_KEYS = [
+  {
+    key: 'items',
+    label: 'items',
+    description: 'The rows the reviewer kept, when the text is a JSON list'
+  },
   { key: 'feedback', label: 'feedback', description: "The reviewer's latest comment" },
   { key: 'feedbackAll', label: 'feedbackAll', description: 'Every comment, one line per round' },
   { key: 'round', label: 'round', description: 'Which time the gate asked, from 1' }
+]
+
+const LOOP_OUTPUT_KEYS = [
+  { key: 'results', label: 'results', description: 'Each pass: its item, status and step outputs' },
+  { key: 'outputs', label: 'outputs', description: "Each pass's final output, in order" },
+  { key: 'passes', label: 'passes', description: 'How many passes ran' },
+  { key: 'count', label: 'count', description: 'Items in the list, or the most passes allowed' }
 ]
 
 export function buildStepGroups(
@@ -293,6 +331,8 @@ export function buildStepGroups(
         ]
       } else if (n.type === 'approval') {
         keys = [...GATE_OUTPUT_KEYS, ...defaultKeys]
+      } else if (n.type === 'loop') {
+        keys = [...LOOP_OUTPUT_KEYS, ...defaultKeys]
       } else if (n.type === 'launchAgent') {
         // A headless launchAgent with a declared outputSchema surfaces its typed
         // fields the same way — `{{steps.<slug>.<field>}}` — populated at run
@@ -423,7 +463,8 @@ export function previewStepTokens(template: string, groups: StepVariableGroup[])
 
 // --- Template Variable Resolution ---
 
-const MAX_OUTPUT_LENGTH = 50_000
+/** The longest text a template expands to; longer text keeps its end. */
+export const MAX_OUTPUT_LENGTH = 50_000
 
 /** Walk a dotted path into a nested value. Stops at undefined/null. */
 function walkPath(root: unknown, path: string[]): unknown {
@@ -453,6 +494,63 @@ function stringifyResolved(val: unknown): string {
   }
 }
 
+const UNRESOLVED = Symbol('unresolved')
+
+/**
+ * The value a dotted template path names, before it becomes text.
+ *
+ * UNRESOLVED means the path belongs to no namespace this run has, and the
+ * token is left in place as written. An empty string means the namespace
+ * exists but holds nothing there, which renders as nothing.
+ */
+function lookupTemplatePath(
+  path: string,
+  context?: WorkflowExecutionContext,
+  stepOutputs?: StepOutputs
+): unknown {
+  const [ns, ...rest] = path.split('.')
+  if (rest.length === 0) return UNRESOLVED
+
+  if (ns === 'steps' && stepOutputs) {
+    const [stepName, ...keyPath] = rest
+    const stepData = stepOutputs[stepName]
+    if (!stepData) return ''
+    return keyPath.length === 0 ? stepData : walkPath(stepData, keyPath)
+  }
+  if (ns === 'task' && context?.task) {
+    if (rest.length === 1) {
+      const val = context.task[rest[0] as keyof TaskConfig]
+      return val != null ? String(val) : ''
+    }
+    return walkPath(context.task, rest)
+  }
+  if (ns === 'trigger' && context?.trigger) return walkPath(context.trigger, rest)
+  if (ns === 'connectorItem' && context?.connectorItem) return walkPath(context.connectorItem, rest)
+  if (ns === 'inputs' && context?.inputs) {
+    const [key, ...keyPath] = rest
+    const value = context.inputs[key]
+    if (value === undefined) return ''
+    return keyPath.length === 0 ? value : walkPath(value, keyPath)
+  }
+  if (ns === 'context' && rest.length === 1 && context) {
+    const resolved = resolveContextField(rest[0], context)
+    return resolved != null ? String(resolved) : ''
+  }
+  // Only a step inside a loop has a loop to read; anywhere else the token
+  // stays as written, so a misplaced one is visible rather than blank.
+  if (ns === 'loop' && context?.loop) {
+    const [key, ...keyPath] = rest
+    if (key === 'item')
+      return keyPath.length === 0 ? context.loop.item : walkPath(context.loop.item, keyPath)
+    if (keyPath.length === 0 && (key === 'index' || key === 'number' || key === 'count')) {
+      return context.loop[key] ?? ''
+    }
+  }
+  return UNRESOLVED
+}
+
+const TOKEN = /\{\{\s*([a-zA-Z_][\w.-]*)\s*\}\}/g
+
 export function resolveTemplateVars(
   template: string,
   context?: WorkflowExecutionContext,
@@ -463,48 +561,32 @@ export function resolveTemplateVars(
 
   // `{{ ns.k1.k2.k3... }}` — identifier-first, then any number of dotted
   // segments. The resolver walks those segments into whichever namespace
-  // matches (steps / task / trigger / connectorItem).
+  // matches (steps / task / trigger / connectorItem / inputs / context / loop).
   // Hyphens allowed so header names like content-type resolve as path segments.
-  return template.replace(/\{\{\s*([a-zA-Z_][\w.-]*)\s*\}\}/g, (match, path: string) => {
-    const segments = path.split('.')
-    const ns = segments[0]
-    const rest = segments.slice(1)
-    if (rest.length === 0) return match
-
-    if (ns === 'steps' && stepOutputs) {
-      const [stepName, ...keyPath] = rest
-      const stepData = stepOutputs[stepName]
-      if (!stepData) return ''
-      if (keyPath.length === 0) return stringifyResolved(stepData)
-      return stringifyResolved(walkPath(stepData, keyPath))
-    }
-    if (ns === 'task' && context?.task) {
-      if (rest.length === 1) {
-        const val = context.task[rest[0] as keyof TaskConfig]
-        return val != null ? String(val) : ''
-      }
-      return stringifyResolved(walkPath(context.task, rest))
-    }
-    if (ns === 'trigger' && context?.trigger) {
-      return stringifyResolved(walkPath(context.trigger, rest))
-    }
-    if (ns === 'connectorItem' && context?.connectorItem) {
-      return stringifyResolved(walkPath(context.connectorItem, rest))
-    }
-    if (ns === 'inputs' && context?.inputs) {
-      const [key, ...keyPath] = rest
-      const value = context.inputs[key]
-      if (value === undefined) return ''
-      if (keyPath.length === 0) return stringifyResolved(value)
-      return stringifyResolved(walkPath(value, keyPath))
-    }
-    if (ns === 'context' && rest.length === 1 && context) {
-      const resolved = resolveContextField(rest[0], context)
-      return resolved != null ? String(resolved) : ''
-    }
-
-    return match
+  return template.replace(TOKEN, (match, path: string) => {
+    const value = lookupTemplatePath(path, context, stepOutputs)
+    return value === UNRESOLVED ? match : stringifyResolved(value)
   })
+}
+
+/**
+ * A template's value as data rather than text.
+ *
+ * A template that is exactly one `{{path}}` yields what the path names —
+ * a list stays a list, and is never cut to the text limit, which would leave
+ * half a JSON document. Anything else is text, as resolveTemplateVars gives it.
+ */
+export function resolveTemplateValue(
+  template: string,
+  context?: WorkflowExecutionContext,
+  stepOutputs?: StepOutputs
+): unknown {
+  const whole = /^\s*\{\{\s*([a-zA-Z_][\w.-]*)\s*\}\}\s*$/.exec(template ?? '')
+  if (whole && (context || stepOutputs)) {
+    const value = lookupTemplatePath(whole[1], context, stepOutputs)
+    if (value !== UNRESOLVED) return value ?? ''
+  }
+  return resolveTemplateVars(template, context, stepOutputs)
 }
 
 /**
