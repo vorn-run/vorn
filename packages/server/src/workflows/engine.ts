@@ -22,9 +22,11 @@ import {
 import {
   getAncestorNodes,
   resolveContextField,
+  resolveTemplateValue,
   resolveTemplateVars,
   StepOutputs
 } from '@vornrun/shared/template-vars'
+import { toItemList } from '@vornrun/shared/item-list'
 import {
   getWorktreeMode,
   webhookTriggerFromItem,
@@ -472,35 +474,61 @@ async function executeLoop(
     entries
   } = loopBodyGraph(workflow.nodes, workflow.edges, node)
 
-  const invalid = loopStructureError(workflow.nodes, workflow.edges, node)
-  if (invalid) {
+  const nodeState = (id: string) => execution.nodeStates.find((s) => s.nodeId === id)
+  const fail = (message: string): void => {
     updateNodeState(execution, node.id, {
       status: 'error',
       completedAt: new Date().toISOString(),
-      error: invalid
+      error: message
     })
     persistExecution(execution)
+  }
+
+  const invalid = loopStructureError(workflow.nodes, workflow.edges, node)
+  if (invalid) {
+    fail(invalid)
     return
   }
 
+  // For-each walks a list an earlier step produced; repeat counts passes.
+  const forEach = config.mode === 'forEach'
+  let items: unknown[] = []
+  if (forEach) {
+    const list = toItemList(
+      resolveTemplateValue(config.items ?? '', context, buildStepOutputsMap(execution, nodeMap))
+    )
+    if ('error' in list) {
+      fail(`${list.error} The loop reads ${config.items?.trim() || 'nothing'} as its items.`)
+      return
+    }
+    items = list.items
+  }
   const requested = Number(config.maxIterations)
-  const max = Number.isFinite(requested)
-    ? Math.min(Math.max(1, Math.floor(requested)), MAX_LOOP_ITERATIONS)
-    : 1
+  const max = forEach
+    ? items.length
+    : Number.isFinite(requested)
+      ? Math.min(Math.max(1, Math.floor(requested)), MAX_LOOP_ITERATIONS)
+      : 1
   const summary: string[] = []
-  let stopReason = `reached the ${max}-pass limit`
+  let stopReason = forEach ? `went through all ${max} item(s)` : `reached the ${max}-pass limit`
   let passes = 0
+  const results: Record<string, unknown>[] = []
+  const outputs: string[] = []
   const signal = active?.abort.signal ?? new AbortController().signal
   // Each pass starts from the loop itself.
   const passEdges = [
     ...entries.map((id) => ({ id: `${node.id}->${id}:entry`, source: node.id, target: id })),
     ...bodyEdges
   ]
+  // A pass's answer is what its last steps said: the ones nothing inside the body follows.
+  const fedFrom = new Set(bodyEdges.map((e) => e.source))
+  const exits = body.filter((m) => !fedFrom.has(m.id))
 
   updateNodeState(execution, node.id, {
     status: 'running',
     startedAt: new Date().toISOString(),
-    iteration: 0
+    iteration: 0,
+    ...(forEach && { itemCount: items.length })
   })
   persistExecution(execution)
 
@@ -510,7 +538,20 @@ async function executeLoop(
       break
     }
     passes = iteration
-    summary.push(`── iteration ${iteration} of at most ${max} ──`)
+    summary.push(
+      forEach
+        ? `── item ${iteration} of ${max} ──`
+        : `── iteration ${iteration} of at most ${max} ──`
+    )
+    const passContext: WorkflowExecutionContext = {
+      ...context,
+      loop: {
+        ...(forEach && { item: items[iteration - 1] }),
+        index: iteration - 1,
+        number: iteration,
+        count: max
+      }
+    }
 
     // The whole body is cleared before the pass, not each step as its turn
     // comes. Resetting lazily leaves later steps holding last pass's results,
@@ -518,7 +559,7 @@ async function executeLoop(
     // has not run yet this time — the loop would then revise against a verdict
     // describing the draft it already replaced.
     for (const step of body) {
-      const state = execution.nodeStates.find((x) => x.nodeId === step.id)
+      const state = nodeState(step.id)
       if (state) updateNodeState(execution, step.id, blankPassState(state, iteration))
     }
     persistExecution(execution)
@@ -537,8 +578,8 @@ async function executeLoop(
           startedAt: new Date().toISOString()
         })
         persistExecution(execution)
-        await executeNode(step, workflow, execution, context, stepOutputs, active)
-        const state = execution.nodeStates.find((s) => s.nodeId === step.id)
+        await executeNode(step, workflow, execution, passContext, stepOutputs, active)
+        const state = nodeState(step.id)
         // A loop cannot wait mid-pass, so a step that would wait for a sign-in fails the pass instead.
         if (state && isSignInWait(state)) {
           updateNodeState(execution, step.id, {
@@ -558,7 +599,7 @@ async function executeLoop(
     // Whatever the pass never reached is skipped, never left pending: a pending
     // body step is one the run would otherwise report as stranded.
     for (const step of body) {
-      const state = execution.nodeStates.find((s) => s.nodeId === step.id)
+      const state = nodeState(step.id)
       if (state?.status === 'pending' || state?.status === 'running') {
         updateNodeState(execution, step.id, {
           status: 'skipped',
@@ -567,21 +608,32 @@ async function executeLoop(
           ...(signal.aborted ? { error: 'Skipped: the run was stopped' } : {})
         })
       }
-      summary.push(
-        `  ${step.label}: ${execution.nodeStates.find((s) => s.nodeId === step.id)?.status ?? 'unknown'}`
-      )
+      summary.push(`  ${step.label}: ${nodeState(step.id)?.status ?? 'unknown'}`)
     }
     persistExecution(execution)
 
     // Same policy as the main graph: a body step that fails ends the loop
     // unless it declared its failure survivable.
     const failedStep = body.find(
-      (step) =>
-        execution.nodeStates.find((s) => s.nodeId === step.id)?.status === 'error' &&
-        stopsRunOnError(step)
+      (step) => nodeState(step.id)?.status === 'error' && stopsRunOnError(step)
     )
+    results.push(
+      passResult(
+        iteration,
+        forEach ? items[iteration - 1] : undefined,
+        body,
+        nodeState,
+        !!failedStep
+      )
+    )
+    const exitState = exits
+      .map((m) => nodeState(m.id))
+      .find((s) => s?.status === 'success' || s?.status === 'error')
+    outputs.push(capOutput(exitState?.output || exitState?.logs || ''))
     if (failedStep) {
-      stopReason = `"${failedStep.label}" failed on pass ${iteration}`
+      stopReason = forEach
+        ? `"${failedStep.label}" failed on item ${iteration}`
+        : `"${failedStep.label}" failed on pass ${iteration}`
       break
     }
     if (signal.aborted) {
@@ -590,25 +642,39 @@ async function executeLoop(
     }
 
     if (config.until) {
-      const outputs = buildStepOutputsMap(execution, nodeMap)
-      const resolvedVariable = resolveTemplateVars(config.until.variable || '', context, outputs)
-      const resolvedValue = resolveTemplateVars(config.until.value || '', context, outputs)
+      const stepOutputs = buildStepOutputsMap(execution, nodeMap)
+      const resolvedVariable = resolveTemplateVars(
+        config.until.variable || '',
+        passContext,
+        stepOutputs
+      )
+      const resolvedValue = resolveTemplateVars(config.until.value || '', passContext, stepOutputs)
       if (loopShouldStop(config.until, resolvedVariable, resolvedValue)) {
-        stopReason = `the condition held after pass ${iteration}`
+        stopReason = `the condition held after ${forEach ? 'item' : 'pass'} ${iteration}`
         break
       }
       summary.push(`  condition not met (${config.until.variable} was "${resolvedVariable}")`)
     }
   }
 
+  // An empty list runs nothing: the steps inside are skipped, not failed.
+  if (forEach && max === 0) {
+    for (const step of body) {
+      updateNodeState(execution, step.id, {
+        status: 'skipped',
+        skipReason: 'branch',
+        completedAt: new Date().toISOString()
+      })
+    }
+    stopReason = 'the list was empty'
+  }
+
   // A step that declared its failure survivable does not fail the loop either,
   // otherwise `continue` would stop the run one level up and mean nothing.
   const failed = body.some(
-    (step) =>
-      execution.nodeStates.find((s) => s.nodeId === step.id)?.status === 'error' &&
-      stopsRunOnError(step)
+    (step) => nodeState(step.id)?.status === 'error' && stopsRunOnError(step)
   )
-  summary.push(`Stopped after ${passes} pass(es): ${stopReason}.`)
+  summary.push(`Stopped after ${passes} ${forEach ? 'item' : 'pass'}(s): ${stopReason}.`)
 
   updateNodeState(execution, node.id, {
     status: failed ? 'error' : 'success',
@@ -616,9 +682,45 @@ async function executeLoop(
     iteration: passes,
     output: String(passes),
     logs: summary.join('\n'),
+    structuredOutput: { passes, count: max, results, outputs },
     ...(failed && { error: stopReason })
   })
   persistExecution(execution)
+}
+
+/** Long enough for a paragraph, short enough that a hundred passes stay a readable run. */
+const LOOP_RESULT_OUTPUT_CHARS = 8000
+
+/** Keeps the start, where an answer is; the text limit elsewhere keeps the end. */
+function capOutput(text: string): string {
+  return text.length > LOOP_RESULT_OUTPUT_CHARS ? text.slice(0, LOOP_RESULT_OUTPUT_CHARS) : text
+}
+
+/** What one pass left behind, per step, for {{steps.<loop>.results}}. */
+function passResult(
+  iteration: number,
+  item: unknown,
+  body: WorkflowNode[],
+  nodeState: (id: string) => NodeExecutionState | undefined,
+  failed: boolean
+): Record<string, unknown> {
+  const steps: Record<string, unknown> = {}
+  for (const step of body) {
+    if (!step.slug) continue
+    const state = nodeState(step.id)
+    steps[step.slug] = {
+      ...(state?.structuredOutput ?? {}),
+      output: capOutput(state?.output || state?.logs || ''),
+      status: state?.status ?? 'unknown',
+      error: state?.error ?? ''
+    }
+  }
+  return {
+    index: iteration - 1,
+    ...(item !== undefined && { item }),
+    status: failed ? 'error' : 'success',
+    steps
+  }
 }
 
 async function executeNode(

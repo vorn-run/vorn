@@ -1134,7 +1134,7 @@ export type WorkflowNodeConfig =
 
 /**
  * Repeat a run of steps until they are good enough, or until the budget runs
- * out.
+ * out — or run them once for each item of a list.
  *
  * A loop node sits in the chain ahead of the steps it owns and drives them
  * itself, so the ordinary wave scheduler never runs a body node directly — it
@@ -1148,9 +1148,21 @@ export type WorkflowNodeConfig =
  */
 export interface LoopConfig {
   nodeType: 'loop'
-  /** Steps this loop owns, in execution order. */
+  /**
+   * `repeat` runs the body up to `maxIterations` times; `forEach` runs it once
+   * per item of `items`, with no cap. Absent means `repeat`, which is what
+   * every loop was before for-each existed.
+   */
+  mode?: 'repeat' | 'forEach'
+  /**
+   * For `forEach`: the list to walk, as a template naming it, e.g.
+   * `{{steps.review.items}}`. JSON text of a list works too, and so does an
+   * object holding exactly one list.
+   */
+  items?: string
+  /** Steps this loop owns. They run as a graph, by their own edges. */
   bodyNodeIds: string[]
-  /** Hard cap on passes. 1 means "run the body once", i.e. no repeat. */
+  /** For `repeat`: hard cap on passes. 1 means "run the body once", i.e. no repeat. */
   maxIterations: number
   /**
    * Checked after each pass; the loop stops when it holds. Omit to always run
@@ -1230,6 +1242,8 @@ export interface NodeExecutionState {
    * ran rather than indexing a history.
    */
   iteration?: number
+  /** A for-each loop's item count, so a run can say "item 3 of 12". */
+  itemCount?: number
   taskId?: string
   agentSessionId?: string
   /** Concrete agent type resolved at launch time. Distinct from the node's
