@@ -326,7 +326,7 @@ describe('what a retry adopts', () => {
     id: string
   ): string | undefined => states.find((n) => n.nodeId === id)?.status
 
-  it('never adopts a loop-body success; the loop re-drives its body', () => {
+  it('keeps a finished loop with its last pass, so what follows still reads it', () => {
     const wf = {
       ...makeChain(),
       nodes: [
@@ -363,7 +363,19 @@ describe('what a retry adopts', () => {
 
     const seeded = seedRetryStates(wf, failed)
     expect(seededStatus(seeded, 'loop')).toBe('success')
-    expect(seededStatus(seeded, 'x')).toBe('pending')
+    expect(seededStatus(seeded, 'x')).toBe('success')
+    expect(seededStatus(seeded, 'after')).toBe('pending')
+
+    // A loop that did not finish runs again, body and all.
+    const loopFailed = {
+      ...failed,
+      nodeStates: failed.nodeStates.map((ns) =>
+        ns.nodeId === 'loop' ? { ...ns, status: 'error' } : ns
+      )
+    } as WorkflowExecution
+    const again = seedRetryStates(wf, loopFailed)
+    expect(seededStatus(again, 'loop')).toBe('pending')
+    expect(seededStatus(again, 'x')).toBe('pending')
   })
 
   it('resets a gate rejection but preserves condition and target skips', () => {

@@ -456,24 +456,30 @@ export function skipEntryPoints(
 /**
  * The node states a retry starts from: successes adopted, deliberate skips
  * (condition branches, a partial run's slice) preserved, everything else —
- * failures, gate rejections, loop bodies — reset to pending.
+ * failures, gate rejections — reset to pending.
+ *
+ * A loop and its body go together. A loop that finished keeps its steps'
+ * last pass, so what follows it still reads them; the main run never
+ * schedules a body step, so adopting them races nothing. A loop that did not
+ * finish runs again from its first pass, body and all — a body step left
+ * pending under a finished loop would never run, and later steps would read
+ * nothing from it.
  */
 export function seedRetryStates(
   workflow: WorkflowDefinition,
   failedRun: WorkflowExecution
 ): NodeExecutionState[] {
   const priorById = new Map(failedRun.nodeStates.map((ns) => [ns.nodeId, ns]))
-  // Body steps chain by real edges but are driven only by their loop; adopting
-  // one as completed would let the wave loop race its successor with the loop.
-  const bodyIds = new Set<string>()
-  for (const n of workflow.nodes) {
-    if (n.type !== 'loop') continue
-    for (const id of (n.config as LoopConfig).bodyNodeIds ?? []) bodyIds.add(id)
-  }
+  const owners = loopBodyOwners(workflow.nodes)
   return workflow.nodes.map((n) => {
     const prior = priorById.get(n.id)
     if (n.type === 'trigger') return { nodeId: n.id, status: 'success' }
-    if (bodyIds.has(n.id)) return { nodeId: n.id, status: 'pending' }
+    const owner = owners.get(n.id)
+    if (owner) {
+      return priorById.get(owner)?.status === 'success' && prior
+        ? { ...prior }
+        : { nodeId: n.id, status: 'pending' }
+    }
     if (prior?.status === 'success') return { ...prior }
     if (prior?.status === 'skipped' && prior.skipReason) return { ...prior }
     return { nodeId: n.id, status: 'pending' }

@@ -123,6 +123,7 @@ const {
   adoptConnectorInboxLease,
   applyGateDecision,
   gateEditIsRefused,
+  retryRunFromFailure,
   approveWorkflowGate,
   executeWorkflow,
   resumeSignInWaits,
@@ -1508,6 +1509,40 @@ describe('a loop whose steps form a graph', () => {
       'a.ts',
       'c.ts'
     ])
+  })
+
+  it('retries past a finished loop with its steps still readable', async () => {
+    // A retry keeps the loop that finished; what follows it must still read
+    // the loop's steps rather than get nothing from them.
+    let afterFails = true
+    const calls: { action: string; args: Record<string, unknown> }[] = []
+    hostApi.executeConnectorAction = vi.fn(
+      async ({ action: name, args }: { action: string; args: Record<string, unknown> }) => {
+        calls.push({ action: name, args })
+        if (name === 'draft') return { success: true, output: { text: 'the draft' } }
+        if (name === 'after' && afterFails) return { success: false, error: 'broke' }
+        return { success: true, output: {} }
+      }
+    )
+    const after = action('after')
+    ;(after.config as { args: Record<string, string> }).args = { text: '{{steps.draft.text}}' }
+    const wf = workflow(
+      [loopNode(['draft']), action('draft'), after],
+      [
+        ['trigger', 'loop'],
+        ['loop', 'draft'],
+        ['draft', 'after']
+      ]
+    )
+    mockState.config.workflows = [wf]
+    const failed = await executeWorkflow(wf)
+    expect(failed.status).toBe('error')
+
+    afterFails = false
+    calls.length = 0
+    const retried = await retryRunFromFailure(wf, failed)
+    expect(retried.status).toBe('success')
+    expect(calls).toEqual([{ action: 'after', args: { text: 'the draft' } }])
   })
 
   it('refuses a loop whose body is fed from outside it', async () => {
