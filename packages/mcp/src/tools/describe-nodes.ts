@@ -1,4 +1,9 @@
-import { MAX_GATE_ROUNDS, MAX_LOOP_ITERATIONS } from '@vornrun/shared/workflow-graph'
+import {
+  LOOP_RESULT_OUTPUT_CHARS,
+  MAX_GATE_ROUNDS,
+  MAX_LOOP_ITERATIONS
+} from '@vornrun/shared/workflow-graph'
+import { MAX_OUTPUT_LENGTH } from '@vornrun/shared/template-vars'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { configSchemaByType, edgeSchema, NODE_TYPES, type NodeType } from './node-config-schemas'
@@ -326,8 +331,8 @@ export const WORKFLOW_NODES_REFERENCE = {
     repeatMaxIterations: MAX_LOOP_ITERATIONS,
     forEachMaxItems: 'uncapped',
     maxGateRounds: MAX_GATE_ROUNDS,
-    templateTextChars: 50_000,
-    loopResultOutputChars: 8000
+    templateTextChars: MAX_OUTPUT_LENGTH,
+    loopResultOutputChars: LOOP_RESULT_OUTPUT_CHARS
   },
   templates: {
     syntax:

@@ -4,6 +4,7 @@ export {
   webhookTriggerFromItem,
   type WorktreeMode
 } from '@vornrun/shared/workflow-graph'
+import { loopBodyOwners } from '@vornrun/shared/workflow-graph'
 
 import {
   WorkflowDefinition,
@@ -344,12 +345,11 @@ export function adoptIntoLoopBody(
   afterNodeId: string,
   beforeNodeId: string | null
 ): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
-  const ownerOf = (id: string | null): WorkflowNode | undefined =>
-    id
-      ? before.find(
-          (n) => n.type === 'loop' && ((n.config as LoopConfig).bodyNodeIds ?? []).includes(id)
-        )
-      : undefined
+  const owners = loopBodyOwners(before)
+  const ownerOf = (id: string | null): WorkflowNode | undefined => {
+    const owner = id ? owners.get(id) : undefined
+    return owner ? before.find((n) => n.id === owner) : undefined
+  }
   const afterOwner = ownerOf(afterNodeId)
   const beforeOwner = ownerOf(beforeNodeId)
   const loop =

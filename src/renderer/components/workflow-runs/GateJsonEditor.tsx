@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useMemo, useState, type KeyboardEvent } from 'react'
 import { Check, Pencil, X } from 'lucide-react'
 import { isRecordList, jsonErrorLocation, toItemList } from '@vornrun/shared/item-list'
 import { GATE_APPROVE, GATE_NEUTRAL } from '../../lib/gate-affordance'
 import { CodeEditor } from '../code-editor/CodeEditor'
+import { useReportDraft } from '../../hooks/useReportDraft'
 
 /** What the reviewer has in front of them: what it would send, and why it cannot be sent yet. */
 export type GateDraft = {
@@ -251,15 +252,7 @@ export function GateJsonEditor({
   }, [mode, source, sourceParse, parsed])
   const edited = text !== null && canonical(text) !== canonical(original) ? text : undefined
 
-  // The host hands a fresh callback each render; telling it only when the draft
-  // changes keeps its state update from rendering the editor again, forever.
-  const draftRef = useRef(onDraftChange)
-  useEffect(() => {
-    draftRef.current = onDraftChange
-  })
-  useEffect(() => {
-    draftRef.current?.({ edited, invalid })
-  }, [edited, invalid])
+  useReportDraft(onDraftChange, { edited, invalid }, [edited, invalid])
 
   const toSource = (): void => {
     if (mode === 'source') return

@@ -1242,8 +1242,6 @@ export interface NodeExecutionState {
    * ran rather than indexing a history.
    */
   iteration?: number
-  /** A for-each loop's item count, so a run can say "item 3 of 12". */
-  itemCount?: number
   taskId?: string
   agentSessionId?: string
   /** Concrete agent type resolved at launch time. Distinct from the node's

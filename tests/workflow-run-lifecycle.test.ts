@@ -1314,7 +1314,10 @@ describe('a loop whose steps form a graph', () => {
     ])
     expect(calls.at(-1)?.action).toBe('after')
     const loopState = stateOf(run, 'loop')
-    expect(loopState).toMatchObject({ output: '3', itemCount: 3 })
+    expect(loopState).toMatchObject({
+      output: '3',
+      structuredOutput: expect.objectContaining({ count: 3 })
+    })
     const results = (
       loopState?.structuredOutput as {
         results: { item: unknown; steps: Record<string, { status: string }> }[]

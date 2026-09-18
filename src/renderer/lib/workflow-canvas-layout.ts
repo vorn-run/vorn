@@ -95,6 +95,30 @@ export function layoutLoopBody(
   nodes: WorkflowNode[],
   edges: WorkflowEdge[]
 ): LoopBodyLayout {
+  // Asked for by the trunk's layout, each loop's height, the canvas elements
+  // and the loop's own card, all for the same definition; worked out once.
+  let byNodes = bodyLayouts.get(edges)
+  if (!byNodes) bodyLayouts.set(edges, (byNodes = new WeakMap()))
+  let byLoop = byNodes.get(nodes)
+  if (!byLoop) byNodes.set(nodes, (byLoop = new Map()))
+  const cached = byLoop.get(loop)
+  if (cached) return cached
+  const layout = computeLoopBody(loop, nodes, edges)
+  byLoop.set(loop, layout)
+  return layout
+}
+
+/** Body layouts per definition: a definition's arrays are replaced, never mutated, on every edit. */
+const bodyLayouts = new WeakMap<
+  WorkflowEdge[],
+  WeakMap<WorkflowNode[], Map<WorkflowNode, LoopBodyLayout>>
+>()
+
+function computeLoopBody(
+  loop: WorkflowNode,
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[]
+): LoopBodyLayout {
   const { members, edges: inner } = loopBodyGraph(nodes, edges, loop)
   if (members.length === 0) {
     return { positions: new Map(), branchMembers: new Set(), width: LOOP_WIDTH, height: EMPTY_BODY }

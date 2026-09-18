@@ -463,7 +463,8 @@ export function previewStepTokens(template: string, groups: StepVariableGroup[])
 
 // --- Template Variable Resolution ---
 
-const MAX_OUTPUT_LENGTH = 50_000
+/** The longest text a template expands to; longer text keeps its end. */
+export const MAX_OUTPUT_LENGTH = 50_000
 
 /** Walk a dotted path into a nested value. Stops at undefined/null. */
 function walkPath(root: unknown, path: string[]): unknown {

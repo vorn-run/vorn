@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Check, Eye, MessageSquare, Pencil, RotateCcw, X } from 'lucide-react'
 import { canRequestChanges, gateMaxRounds } from '@vornrun/shared/workflow-graph'
 import { isRecordList, toItemList } from '@vornrun/shared/item-list'
@@ -11,6 +11,7 @@ import type {
 import { GATE_APPROVE, GATE_NEUTRAL, GATE_REJECT } from '../../lib/gate-affordance'
 import { toast } from '../Toast'
 import { GateJsonEditor, type GateDraft } from './GateJsonEditor'
+import { useReportDraft } from '../../hooks/useReportDraft'
 
 /** Ask the server to settle a gate; says so when the gate would not take the answer. */
 async function answerGate(
@@ -237,15 +238,7 @@ function GateTextEditor({
   const words = text.trim() ? text.trim().split(/\s+/).length : 0
   const edited = text.trim() === original.trim() ? undefined : text
 
-  // The host hands a fresh callback each render; telling it only when the draft
-  // changes keeps its state update from rendering the editor again, forever.
-  const draftRef = useRef(onDraftChange)
-  useEffect(() => {
-    draftRef.current = onDraftChange
-  })
-  useEffect(() => {
-    draftRef.current?.({ edited, invalid: null })
-  }, [edited])
+  useReportDraft(onDraftChange, { edited, invalid: null }, [edited])
 
   return (
     <div className="flex flex-col gap-2">

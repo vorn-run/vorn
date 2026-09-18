@@ -288,6 +288,9 @@ export function evaluateCondition(
   }
 }
 
+/** How much of each step's output a loop keeps per pass, in {{steps.<loop>.results}}. */
+export const LOOP_RESULT_OUTPUT_CHARS = 8000
+
 /** Ceiling on `maxIterations`, whatever a workflow asks for. */
 export const MAX_LOOP_ITERATIONS = 10
 

@@ -36,6 +36,7 @@ import {
   gateEditRefusal,
   loopBodyGraph,
   loopBodyOwners,
+  LOOP_RESULT_OUTPUT_CHARS,
   loopStructureError,
   nodesBetween
 } from '@vornrun/shared/workflow-graph'
@@ -528,8 +529,7 @@ async function executeLoop(
   updateNodeState(execution, node.id, {
     status: 'running',
     startedAt: new Date().toISOString(),
-    iteration: 0,
-    ...(forEach && { itemCount: items.length })
+    iteration: 0
   })
   persistExecution(execution)
 
@@ -688,9 +688,6 @@ async function executeLoop(
   })
   persistExecution(execution)
 }
-
-/** Long enough for a paragraph, short enough that a hundred passes stay a readable run. */
-const LOOP_RESULT_OUTPUT_CHARS = 8000
 
 /** Keeps the start, where an answer is; the text limit elsewhere keeps the end. */
 function capOutput(text: string): string {
