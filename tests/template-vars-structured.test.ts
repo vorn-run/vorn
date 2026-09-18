@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { resolveTemplateValue, resolveTemplateVars } from '../packages/shared/src/template-vars'
-import type { WorkflowExecutionContext } from '../packages/shared/src/types'
+import {
+  buildLoopVars,
+  resolveTemplateValue,
+  resolveTemplateVars
+} from '../packages/shared/src/template-vars'
+import type { WorkflowExecutionContext, WorkflowNode } from '../packages/shared/src/types'
 
 const findings = [
   { path: 'a.ts', line: 3 },
@@ -58,5 +62,39 @@ describe('the loop namespace', () => {
   it('stays as written outside a loop, so a misplaced reference shows', () => {
     expect(resolveTemplateVars('{{loop.item.path}}', {})).toBe('{{loop.item.path}}')
     expect(resolveTemplateVars('{{loop.whatever}}', inside)).toBe('{{loop.whatever}}')
+  })
+})
+
+describe('buildLoopVars', () => {
+  const node = (id: string, type: string, config: Record<string, unknown> = {}) =>
+    ({ id, type, label: id, position: { x: 0, y: 0 }, config }) as unknown as WorkflowNode
+  const nodes = [
+    node('loop', 'loop', {
+      nodeType: 'loop',
+      mode: 'forEach',
+      items: '{{steps.gate.items}}',
+      bodyNodeIds: ['each']
+    }),
+    node('each', 'script'),
+    node('after', 'script')
+  ]
+
+  it('offers {{loop.*}} to a step inside the loop and to the loop itself', () => {
+    expect(buildLoopVars(nodes, 'each').map((v) => v.key)).toEqual([
+      '{{loop.item}}',
+      '{{loop.number}}',
+      '{{loop.index}}',
+      '{{loop.count}}'
+    ])
+    expect(buildLoopVars(nodes, 'loop')).toHaveLength(4)
+  })
+
+  it('offers nothing outside a loop, and no item to a repeating one', () => {
+    expect(buildLoopVars(nodes, 'after')).toEqual([])
+    const repeating = [
+      node('loop', 'loop', { nodeType: 'loop', bodyNodeIds: ['each'] }),
+      node('each', 'script')
+    ]
+    expect(buildLoopVars(repeating, 'each').map((v) => v.key)).not.toContain('{{loop.item}}')
   })
 })

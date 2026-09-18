@@ -6,6 +6,7 @@ import {
   WorkflowEdge,
   CallConnectorActionConfig,
   LaunchAgentConfig,
+  LoopConfig,
   ConnectorActionDef,
   WorkflowInputDef,
   NodeExecutionStatus
@@ -82,7 +83,7 @@ export interface LastRunData {
 export interface TemplateVariable {
   key: string
   label: string
-  category: 'task' | 'trigger' | 'connectorItem' | 'context' | 'inputs'
+  category: 'task' | 'trigger' | 'connectorItem' | 'context' | 'inputs' | 'loop'
 }
 
 export const TEMPLATE_VARIABLES: TemplateVariable[] = [
@@ -156,6 +157,31 @@ export function getAvailableContextVars(opts: {
     if (opts.isContextualTrigger && v.category === 'context') return true
     return false
   })
+}
+
+/**
+ * The `{{loop.*}}` entries a step can read: only a step inside a loop's body,
+ * or the loop itself (its stop condition is checked with a pass in hand).
+ */
+export function buildLoopVars(nodes: WorkflowNode[], nodeId: string | null): TemplateVariable[] {
+  if (!nodeId) return []
+  const loop = nodes.find(
+    (n) =>
+      n.type === 'loop' &&
+      (n.id === nodeId || ((n.config as LoopConfig).bodyNodeIds ?? []).includes(nodeId))
+  )
+  if (!loop) return []
+  const forEach = (loop.config as LoopConfig).mode === 'forEach'
+  return [
+    ...(forEach ? [{ key: '{{loop.item}}', label: 'This item', category: 'loop' as const }] : []),
+    {
+      key: '{{loop.number}}',
+      label: forEach ? 'Item number, from 1' : 'Pass number, from 1',
+      category: 'loop'
+    },
+    { key: '{{loop.index}}', label: 'Index, from 0', category: 'loop' },
+    { key: '{{loop.count}}', label: forEach ? 'How many items' : 'Most passes', category: 'loop' }
+  ]
 }
 
 /**
@@ -257,9 +283,21 @@ export function formatRunValue(val: unknown): string {
 }
 
 const GATE_OUTPUT_KEYS = [
+  {
+    key: 'items',
+    label: 'items',
+    description: 'The rows the reviewer kept, when the text is a JSON list'
+  },
   { key: 'feedback', label: 'feedback', description: "The reviewer's latest comment" },
   { key: 'feedbackAll', label: 'feedbackAll', description: 'Every comment, one line per round' },
   { key: 'round', label: 'round', description: 'Which time the gate asked, from 1' }
+]
+
+const LOOP_OUTPUT_KEYS = [
+  { key: 'results', label: 'results', description: 'Each pass: its item, status and step outputs' },
+  { key: 'outputs', label: 'outputs', description: "Each pass's final output, in order" },
+  { key: 'passes', label: 'passes', description: 'How many passes ran' },
+  { key: 'count', label: 'count', description: 'Items in the list, or the most passes allowed' }
 ]
 
 export function buildStepGroups(
@@ -293,6 +331,8 @@ export function buildStepGroups(
         ]
       } else if (n.type === 'approval') {
         keys = [...GATE_OUTPUT_KEYS, ...defaultKeys]
+      } else if (n.type === 'loop') {
+        keys = [...LOOP_OUTPUT_KEYS, ...defaultKeys]
       } else if (n.type === 'launchAgent') {
         // A headless launchAgent with a declared outputSchema surfaces its typed
         // fields the same way — `{{steps.<slug>.<field>}}` — populated at run

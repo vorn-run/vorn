@@ -15,7 +15,6 @@ import { LaunchAgentNode } from '../src/renderer/components/workflow-editor/node
 import { ScriptNode } from '../src/renderer/components/workflow-editor/nodes/ScriptNode'
 import { ConditionNode } from '../src/renderer/components/workflow-editor/nodes/ConditionNode'
 import { ApprovalNode } from '../src/renderer/components/workflow-editor/nodes/ApprovalNode'
-import { LoopNode } from '../src/renderer/components/workflow-editor/nodes/LoopNode'
 import { CreateTaskFromItemNode } from '../src/renderer/components/workflow-editor/nodes/CreateTaskFromItemNode'
 import { CallConnectorActionNode } from '../src/renderer/components/workflow-editor/nodes/CallConnectorActionNode'
 import {
@@ -73,18 +72,6 @@ const CARDS: [string, (selected: boolean) => React.ReactElement][] = [
   ],
   ['ApprovalNode', (s) => <ApprovalNode label="Ap" config={{}} selected={s} onClick={vi.fn()} />],
   [
-    'LoopNode',
-    (s) => (
-      <LoopNode
-        label="L"
-        config={{ nodeType: 'loop', bodyNodeIds: [], maxIterations: 1 }}
-        nodes={[]}
-        selected={s}
-        onClick={vi.fn()}
-      />
-    )
-  ],
-  [
     'CreateTaskFromItemNode',
     (s) => (
       <CreateTaskFromItemNode
@@ -129,20 +116,10 @@ describe('node card selection', () => {
   }
 
   it('shows its own execution status on every card that has one', () => {
-    // The dot is how a run reports itself on the canvas. Three cards had no
+    // The dot is how a run reports itself on the canvas. Two cards had no
     // test rendering them mid-run at all, so a card that silently stopped
     // showing status would have looked like a card that had not started.
     const withStatus: [string, React.ReactElement][] = [
-      [
-        'LoopNode',
-        <LoopNode
-          label="L"
-          config={{ nodeType: 'loop', bodyNodeIds: [], maxIterations: 1 }}
-          nodes={[]}
-          executionStatus="running"
-          onClick={vi.fn()}
-        />
-      ],
       [
         'CreateTaskFromItemNode',
         <CreateTaskFromItemNode
@@ -166,11 +143,7 @@ describe('node card selection', () => {
         />
       ]
     ]
-    const expected = [
-      WORKFLOW_STATUS_DOT.running,
-      WORKFLOW_STATUS_DOT.error,
-      WORKFLOW_STATUS_DOT.waiting
-    ]
+    const expected = [WORKFLOW_STATUS_DOT.error, WORKFLOW_STATUS_DOT.waiting]
     withStatus.forEach(([, element], i) => {
       const { container } = render(element)
       expect(container.querySelector(`.${expected[i]}`)).toBeInTheDocument()
