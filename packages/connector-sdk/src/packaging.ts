@@ -477,14 +477,22 @@ export async function esbuildBundle(request: BundleRequest): Promise<BundleOutpu
     write: false,
     metafile: true,
     legalComments: 'none',
-    // A bundled CommonJS dependency asks for its builtins through esbuild's shim, which throws unless a real require is in scope.
+    // A bundled CommonJS dependency asks for its builtins through esbuild's shim, which throws unless a real require is in scope,
+    // and may read __dirname or __filename, which ESM does not define. Uniquely named consts rather than __dirname itself, so
+    // nothing collides with a module that declares its own; `define` rewrites only the free references. They name the bundle's
+    // directory, so a dependency reading its own package.json there finds nothing — the ones we ship guard for that.
     banner: {
       js: [
         "import { createRequire as __vornCreateRequire } from 'node:module'",
+        "import { fileURLToPath as __vornFileURLToPath } from 'node:url'",
+        "import { dirname as __vornDirname } from 'node:path'",
         'const require = __vornCreateRequire(import.meta.url)',
+        'const __vorn_filename = __vornFileURLToPath(import.meta.url)',
+        'const __vorn_dirname = __vornDirname(__vorn_filename)',
         ''
       ].join('\n')
-    }
+    },
+    define: { __dirname: '__vorn_dirname', __filename: '__vorn_filename' }
   })
   const output = Object.values(result.metafile.outputs)[0]
   return {
