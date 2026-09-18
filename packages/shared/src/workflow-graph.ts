@@ -10,6 +10,7 @@ import {
   ScriptConfig,
   WorkflowDefinition,
   WorkflowExecution,
+  WorkflowEdge,
   WorkflowExecutionContext,
   WorkflowNode
 } from './types'
@@ -442,6 +443,140 @@ export function seedRetryStates(
     if (prior?.status === 'skipped' && prior.skipReason) return { ...prior }
     return { nodeId: n.id, status: 'pending' }
   })
+}
+
+/**
+ * Which loop owns each body step.
+ *
+ * Ids a loop lists that no longer exist are left out, so a stale
+ * `bodyNodeIds` entry (a step deleted in an older build) is not a member of
+ * anything. The first loop to claim a step keeps it.
+ */
+export function loopBodyOwners(nodes: readonly WorkflowNode[]): Map<string, string> {
+  const exists = new Set(nodes.map((n) => n.id))
+  const owners = new Map<string, string>()
+  for (const n of nodes) {
+    if (n.type !== 'loop') continue
+    for (const id of (n.config as LoopConfig).bodyNodeIds ?? []) {
+      if (exists.has(id) && id !== n.id && !owners.has(id)) owners.set(id, n.id)
+    }
+  }
+  return owners
+}
+
+/**
+ * The run graph as the main scheduler sees it: each loop stands in for its body.
+ *
+ * A loop drives its body itself, so the scheduler must never reach a body step
+ * on its own — otherwise a step left pending by a failed pass becomes ready the
+ * moment its predecessor settles, and runs outside the loop. Edges into and
+ * inside a body are dropped; an edge leaving a body is redrawn from the loop,
+ * which is also how the canvas draws it. A branch label on such an edge is
+ * dropped, since the loop, not the condition inside it, is what the run waits on.
+ */
+export function collapseLoopBodies(
+  nodes: readonly WorkflowNode[],
+  edges: readonly WorkflowEdge[]
+): WorkflowEdge[] {
+  const owners = loopBodyOwners(nodes)
+  const seen = new Set<string>()
+  const collapsed: WorkflowEdge[] = []
+  for (const edge of edges) {
+    if (owners.has(edge.target)) continue
+    const owner = owners.get(edge.source)
+    const next: WorkflowEdge = owner
+      ? { id: `${edge.id}:via-loop`, source: owner, target: edge.target }
+      : edge
+    if (next.source === next.target) continue
+    const key = `${next.source}->${next.target}:${next.conditionBranch ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    collapsed.push(next)
+  }
+  return collapsed
+}
+
+/**
+ * A loop's body as a graph of its own: members, the edges between them, and
+ * the members nothing inside the body feeds (where each pass starts).
+ *
+ * A body without edges between its members is chained in `bodyNodeIds` order,
+ * which is how loops ran before bodies could branch.
+ */
+export function loopBodyGraph(
+  nodes: readonly WorkflowNode[],
+  edges: readonly WorkflowEdge[],
+  loop: WorkflowNode
+): { members: WorkflowNode[]; edges: WorkflowEdge[]; entries: string[] } {
+  const owners = loopBodyOwners(nodes)
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const members = ((loop.config as LoopConfig).bodyNodeIds ?? [])
+    .filter((id) => owners.get(id) === loop.id)
+    .map((id) => byId.get(id)!)
+  const ids = new Set(members.map((m) => m.id))
+  let inner = edges.filter((e) => ids.has(e.source) && ids.has(e.target))
+  if (inner.length === 0 && members.length > 1) {
+    inner = members.slice(1).map((m, i) => ({
+      id: `${members[i].id}->${m.id}:chain`,
+      source: members[i].id,
+      target: m.id
+    }))
+  }
+  const fed = new Set(inner.map((e) => e.target))
+  return { members, edges: inner, entries: members.filter((m) => !fed.has(m.id)).map((m) => m.id) }
+}
+
+/**
+ * Why a loop's body cannot run, or undefined when it can.
+ *
+ * Checked by the engine before the first pass, and by the editor and the MCP
+ * tools before a workflow is saved, so a shape the engine refuses is never
+ * stored in the first place.
+ */
+export function loopStructureError(
+  nodes: readonly WorkflowNode[],
+  edges: readonly WorkflowEdge[],
+  loop: WorkflowNode
+): string | undefined {
+  const { members, edges: inner } = loopBodyGraph(nodes, edges, loop)
+  if (members.length === 0) return 'Loop has no body steps. Add at least one step for it to repeat.'
+  const ids = new Set(members.map((m) => m.id))
+  for (const m of members) {
+    // A gate inside a loop would park the run mid-pass, and resuming means
+    // re-entering the loop at the pass it stopped on: state a loop does not keep.
+    if (m.type === 'approval') {
+      return `Loop body contains an approval gate ("${m.label}"), which is not supported.`
+    }
+    if (m.type === 'loop')
+      return `Loop body contains another loop ("${m.label}"), which is not supported.`
+    if (m.type === 'trigger') return `Loop body contains a trigger ("${m.label}").`
+  }
+  for (const e of edges) {
+    if (ids.has(e.target) && !ids.has(e.source) && e.source !== loop.id) {
+      const from = nodes.find((n) => n.id === e.source)?.label ?? e.source
+      return `"${from}" feeds a step inside the loop from outside it. Only the loop starts its steps.`
+    }
+    if (ids.has(e.source) && !ids.has(e.target) && e.conditionBranch) {
+      return 'A condition inside the loop branches to a step outside it. Keep both branches inside the loop.'
+    }
+  }
+  // Kahn's algorithm: anything left over sits on a cycle.
+  const indegree = new Map(members.map((m) => [m.id, 0]))
+  for (const e of inner) indegree.set(e.target, (indegree.get(e.target) ?? 0) + 1)
+  const queue = [...indegree].filter(([, d]) => d === 0).map(([id]) => id)
+  let visited = 0
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    visited++
+    for (const e of inner) {
+      if (e.source !== id) continue
+      const d = (indegree.get(e.target) ?? 0) - 1
+      indegree.set(e.target, d)
+      if (d === 0) queue.push(e.target)
+    }
+  }
+  if (visited < members.length) return 'The steps inside the loop form a cycle.'
+  return undefined
 }
 
 /** Whether a run can still be stopped — drives the Stop control's visibility. */

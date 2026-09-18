@@ -1158,3 +1158,163 @@ describe('a step whose connection signed out', () => {
     expect(execute).toHaveBeenCalledTimes(3)
   })
 })
+
+describe('a loop whose steps form a graph', () => {
+  type Node = WorkflowDefinition['nodes'][number]
+  const action = (id: string, extra: Partial<Node> = {}): Node =>
+    ({
+      id,
+      type: 'callConnectorAction',
+      label: id,
+      slug: id,
+      position: { x: 0, y: 0 },
+      config: { nodeType: 'callConnectorAction', connectionId: 'conn', action: id, args: {} },
+      ...extra
+    }) as unknown as Node
+  const condition = (id: string, variable: string, value: string): Node =>
+    ({
+      id,
+      type: 'condition',
+      label: id,
+      slug: id,
+      position: { x: 0, y: 0 },
+      config: { variable, operator: 'equals', value }
+    }) as unknown as Node
+  const loopNode = (bodyNodeIds: string[], config: Record<string, unknown> = {}): Node =>
+    ({
+      id: 'loop',
+      type: 'loop',
+      label: 'Loop',
+      slug: 'loop',
+      position: { x: 0, y: 0 },
+      config: { nodeType: 'loop', bodyNodeIds, maxIterations: 1, ...config }
+    }) as unknown as Node
+  const workflow = (
+    nodes: Node[],
+    edges: [string, string, ('true' | 'false')?][]
+  ): WorkflowDefinition =>
+    ({
+      id: 'wf-loop-graph',
+      name: 'Loop graph',
+      icon: 'Rocket',
+      enabled: true,
+      nodes: [
+        { id: 'trigger', type: 'trigger', label: 'Trigger', position: { x: 0, y: 0 }, config: {} },
+        ...nodes
+      ],
+      edges: edges.map(([source, target, conditionBranch], i) => ({
+        id: `e${i}`,
+        source,
+        target,
+        ...(conditionBranch && { conditionBranch })
+      }))
+    }) as unknown as WorkflowDefinition
+  const stateOf = (run: WorkflowExecution, nodeId: string) =>
+    run.nodeStates.find((ns) => ns.nodeId === nodeId)
+
+  /** Answers each action from `outputs`, and records what ran, in order. */
+  function connectorAnswers(outputs: Record<string, unknown> = {}, failing: string[] = []) {
+    const calls: { action: string; args: Record<string, unknown> }[] = []
+    hostApi.executeConnectorAction = vi.fn(
+      async ({ action, args }: { action: string; args: Record<string, unknown> }) => {
+        calls.push({ action, args })
+        return failing.includes(action)
+          ? { success: false, error: `${action} broke` }
+          : { success: true, output: outputs[action] ?? {} }
+      }
+    )
+    return calls
+  }
+
+  it('takes one branch of a condition inside the body, and runs what follows the loop once', async () => {
+    const calls = connectorAnswers({ check: { verdict: 'yes' } })
+    const run = await executeWorkflow(
+      workflow(
+        [
+          loopNode(['check', 'decide', 'yes', 'no']),
+          action('check'),
+          condition('decide', '{{steps.check.verdict}}', 'yes'),
+          action('yes'),
+          action('no'),
+          action('after')
+        ],
+        [
+          ['trigger', 'loop'],
+          ['loop', 'check'],
+          ['check', 'decide'],
+          ['decide', 'yes', 'true'],
+          ['decide', 'no', 'false'],
+          ['yes', 'after'],
+          ['no', 'after']
+        ]
+      )
+    )
+
+    expect(run.status).toBe('success')
+    expect(calls.map((c) => c.action)).toEqual(['check', 'yes', 'after'])
+    expect(stateOf(run, 'no')).toMatchObject({ status: 'skipped', skipReason: 'branch' })
+    expect(stateOf(run, 'loop')?.status).toBe('success')
+  })
+
+  it('skips the rest of a failed pass instead of running it outside the loop later', async () => {
+    // A failed pass used to leave the rest of the body pending, and the main
+    // scheduler then ran it on its own once its predecessor had settled.
+    const calls = connectorAnswers({}, ['first'])
+    const run = await executeWorkflow(
+      workflow(
+        [loopNode(['first', 'second']), action('first'), action('second'), action('after')],
+        [
+          ['trigger', 'loop'],
+          ['loop', 'first'],
+          ['first', 'second'],
+          ['second', 'after']
+        ]
+      )
+    )
+
+    expect(calls.map((c) => c.action)).toEqual(['first'])
+    expect(stateOf(run, 'second')?.status).toBe('skipped')
+    expect(stateOf(run, 'loop')?.status).toBe('error')
+    expect(run.status).toBe('error')
+  })
+
+  it('refuses a loop whose body is fed from outside it', async () => {
+    connectorAnswers()
+    const run = await executeWorkflow(
+      workflow(
+        [loopNode(['inside']), action('outside'), action('inside')],
+        [
+          ['trigger', 'loop'],
+          ['trigger', 'outside'],
+          ['outside', 'inside']
+        ]
+      )
+    )
+    expect(stateOf(run, 'loop')?.error).toMatch(/from outside it/)
+    expect(stateOf(run, 'inside')?.status).toBe('skipped')
+  })
+
+  it('skips the body of a loop on a branch not taken, without failing the run', async () => {
+    const calls = connectorAnswers({ check: { verdict: 'no' } })
+    const run = await executeWorkflow(
+      workflow(
+        [
+          action('check'),
+          condition('decide', '{{steps.check.verdict}}', 'yes'),
+          loopNode(['inside']),
+          action('inside')
+        ],
+        [
+          ['trigger', 'check'],
+          ['check', 'decide'],
+          ['decide', 'loop', 'true'],
+          ['loop', 'inside']
+        ]
+      )
+    )
+    expect(calls.map((c) => c.action)).toEqual(['check'])
+    expect(stateOf(run, 'loop')).toMatchObject({ status: 'skipped', skipReason: 'branch' })
+    expect(stateOf(run, 'inside')).toMatchObject({ status: 'skipped', skipReason: 'branch' })
+    expect(run.status).toBe('success')
+  })
+})

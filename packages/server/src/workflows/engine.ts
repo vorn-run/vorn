@@ -30,8 +30,13 @@ import {
   webhookTriggerFromItem,
   isSignInWait,
   canRequestChanges,
+  collapseLoopBodies,
+  loopBodyGraph,
+  loopBodyOwners,
+  loopStructureError,
   nodesBetween
 } from '@vornrun/shared/workflow-graph'
+import { runWaves } from './graph-runner'
 import { buildTaskPrompt, buildWorkflowPrompt } from '@vornrun/shared/prompt-builder'
 import { extractStructuredOutput } from '@vornrun/shared/structured-output'
 import {
@@ -447,11 +452,10 @@ function resolveStepTimeoutMs(config: LaunchAgentConfig): number {
 /**
  * Run a loop node's body until its condition holds or its budget runs out.
  *
- * The body nodes are ordinary nodes sitting downstream in the same graph; this
- * drives them directly rather than letting the wave scheduler do it. By the
- * time the loop reports success they are already `completed`, so the scheduler
- * skips them and carries on with whatever follows — no cycle, and nothing to
- * teach `getReadyNodes` about repetition.
+ * The body steps are ordinary nodes of the same workflow, but the main
+ * scheduler never reaches them: it sees the loop in their place (see
+ * collapseLoopBodies). Each pass runs the body as a graph of its own, so a
+ * condition inside the loop branches exactly as one outside it does.
  */
 async function executeLoop(
   node: WorkflowNode,
@@ -462,30 +466,20 @@ async function executeLoop(
 ): Promise<void> {
   const config = node.config as LoopConfig
   const nodeMap = new Map(workflow.nodes.map((n) => [n.id, n]))
-  const body = (config.bodyNodeIds ?? [])
-    .map((id) => nodeMap.get(id))
-    .filter((n): n is WorkflowNode => Boolean(n))
+  const {
+    members: body,
+    edges: bodyEdges,
+    entries
+  } = loopBodyGraph(workflow.nodes, workflow.edges, node)
 
-  const fail = (message: string): void => {
+  const invalid = loopStructureError(workflow.nodes, workflow.edges, node)
+  if (invalid) {
     updateNodeState(execution, node.id, {
       status: 'error',
       completedAt: new Date().toISOString(),
-      error: message
+      error: invalid
     })
     persistExecution(execution)
-  }
-
-  if (body.length === 0) {
-    fail('Loop has no body steps. Add at least one step for it to repeat.')
-    return
-  }
-
-  // A gate inside a loop would park the run mid-iteration, and resuming it
-  // means re-entering the loop at the pass it stopped on — state this loop
-  // does not keep. Refusing is honest; half-supporting it would strand runs.
-  const gate = body.find((n) => n.type === 'approval')
-  if (gate) {
-    fail(`Loop body contains an approval gate ("${gate.label}"), which is not supported.`)
     return
   }
 
@@ -496,6 +490,12 @@ async function executeLoop(
   const summary: string[] = []
   let stopReason = `reached the ${max}-pass limit`
   let passes = 0
+  const signal = active?.abort.signal ?? new AbortController().signal
+  // Each pass starts from the loop itself.
+  const passEdges = [
+    ...entries.map((id) => ({ id: `${node.id}->${id}:entry`, source: node.id, target: id })),
+    ...bodyEdges
+  ]
 
   updateNodeState(execution, node.id, {
     status: 'running',
@@ -505,7 +505,7 @@ async function executeLoop(
   persistExecution(execution)
 
   for (let iteration = 1; iteration <= max; iteration++) {
-    if (active?.abort.signal.aborted) {
+    if (signal.aborted) {
       stopReason = 'the run was stopped'
       break
     }
@@ -523,46 +523,68 @@ async function executeLoop(
     }
     persistExecution(execution)
 
-    let failedStep: WorkflowNode | undefined
-    for (const step of body) {
-      if (active?.abort.signal.aborted) break
-
-      updateNodeState(execution, step.id, {
-        status: 'running',
-        startedAt: new Date().toISOString()
-      })
-      persistExecution(execution)
-
-      const stepOutputs = buildStepOutputsMap(execution, nodeMap)
-      await executeNode(step, workflow, execution, context, stepOutputs, active)
-
-      const state = execution.nodeStates.find((s) => s.nodeId === step.id)
-      // A loop cannot wait mid-pass, so a step that would wait for a sign-in fails the pass instead.
-      if (state && isSignInWait(state)) {
+    await runWaves({
+      nodes: body,
+      edges: passEdges,
+      roots: [node.id],
+      execution,
+      signal,
+      maxWaves: 50 * body.length,
+      stepOutputs: () => buildStepOutputsMap(execution, nodeMap),
+      runNode: async (step, stepOutputs) => {
         updateNodeState(execution, step.id, {
-          status: 'error',
-          waitingFor: undefined,
-          completedAt: new Date().toISOString(),
-          error:
-            'Its connection was signed out inside a loop, which cannot wait. Sign in, then run the workflow again.'
+          status: 'running',
+          startedAt: new Date().toISOString()
         })
         persistExecution(execution)
-      }
-      updateNodeState(execution, step.id, { iteration })
-      summary.push(`  ${step.label}: ${state?.status ?? 'unknown'}`)
-      // Same policy as the main graph: a body step that fails ends the pass
-      // unless it declared its failure survivable.
-      if (state?.status === 'error' && stopsRunOnError(step)) {
-        failedStep = step
-        break
-      }
-    }
+        await executeNode(step, workflow, execution, context, stepOutputs, active)
+        const state = execution.nodeStates.find((s) => s.nodeId === step.id)
+        // A loop cannot wait mid-pass, so a step that would wait for a sign-in fails the pass instead.
+        if (state && isSignInWait(state)) {
+          updateNodeState(execution, step.id, {
+            status: 'error',
+            waitingFor: undefined,
+            completedAt: new Date().toISOString(),
+            error:
+              'Its connection was signed out inside a loop, which cannot wait. Sign in, then run the workflow again.'
+          })
+        }
+        updateNodeState(execution, step.id, { iteration })
+        persistExecution(execution)
+      },
+      persist: () => persistExecution(execution)
+    })
 
+    // Whatever the pass never reached is skipped, never left pending: a pending
+    // body step is one the run would otherwise report as stranded.
+    for (const step of body) {
+      const state = execution.nodeStates.find((s) => s.nodeId === step.id)
+      if (state?.status === 'pending' || state?.status === 'running') {
+        updateNodeState(execution, step.id, {
+          status: 'skipped',
+          completedAt: new Date().toISOString(),
+          iteration,
+          ...(signal.aborted ? { error: 'Skipped: the run was stopped' } : {})
+        })
+      }
+      summary.push(
+        `  ${step.label}: ${execution.nodeStates.find((s) => s.nodeId === step.id)?.status ?? 'unknown'}`
+      )
+    }
+    persistExecution(execution)
+
+    // Same policy as the main graph: a body step that fails ends the loop
+    // unless it declared its failure survivable.
+    const failedStep = body.find(
+      (step) =>
+        execution.nodeStates.find((s) => s.nodeId === step.id)?.status === 'error' &&
+        stopsRunOnError(step)
+    )
     if (failedStep) {
       stopReason = `"${failedStep.label}" failed on pass ${iteration}`
       break
     }
-    if (active?.abort.signal.aborted) {
+    if (signal.aborted) {
       stopReason = 'the run was stopped'
       break
     }
@@ -1658,185 +1680,29 @@ async function runExecution(
   startConnectorLeaseHeartbeat(execution)
 
   const nodeMap = new Map(workflow.nodes.map((n) => [n.id, n]))
-  const { successors: successorsMap, predecessors: predecessorsMap } = buildGraph(workflow.edges)
-
-  // Rebuilt at the start of every wave so external mutations (e.g. a sibling
-  // gate approved mid-loop by another re-entry) are picked up.
-  const completed = new Set<string>()
-  const skippedByCondition = new Set<string>()
-  function rebuildCompletionSets(): void {
-    completed.clear()
-    skippedByCondition.clear()
-    for (const ns of execution.nodeStates) {
-      if (ns.status === 'success' || ns.status === 'error') completed.add(ns.nodeId)
-      else if (ns.status === 'skipped') skippedByCondition.add(ns.nodeId)
-    }
-  }
-
-  const running = new Set<string>()
-
-  function markSkippedBranch(startNodeId: string): void {
-    const branch = collectSkippedBranch(
-      startNodeId,
-      successorsMap,
-      predecessorsMap,
-      (id) => completed.has(id) || skippedByCondition.has(id)
-    )
-    for (const id of branch) skippedByCondition.add(id)
-  }
-
-  function getReadyNodes(): WorkflowNode[] {
-    const ready: WorkflowNode[] = []
-    for (const node of workflow.nodes) {
-      if (node.type === 'trigger') continue
-      if (completed.has(node.id) || running.has(node.id)) continue
-      if (skippedByCondition.has(node.id)) continue
-      const ns = execution.nodeStates.find((s) => s.nodeId === node.id)
-      if (ns?.status === 'waiting') continue
-
-      const preds = predecessorsMap.get(node.id) || []
-      const allPredsReady = preds.every((p) => completed.has(p) || skippedByCondition.has(p))
-      if (allPredsReady && preds.some((p) => completed.has(p))) {
-        ready.push(node)
-      }
-    }
-    return ready
-  }
-
+  // Loops run their own bodies; the main graph sees each loop in place of its body.
+  const bodyOwners = loopBodyOwners(workflow.nodes)
+  const mainNodes = workflow.nodes.filter((n) => !bodyOwners.has(n.id))
   const actionNodeCount = workflow.nodes.filter((n) => n.type !== 'trigger').length
-  // Each step is ready once per pass, so this is generous; past it the run is spinning.
-  const maxWaves = 50 * Math.max(actionNodeCount, 1)
 
   // A run parked on a gate is still live, so its claim stays held; only a run
   // that reaches a terminal state gives the trigger back.
   let parkedOnGate = false
 
   try {
-    let wave = 0
-    while (true) {
-      if (active.abort.signal.aborted) break
-      rebuildCompletionSets()
-      const ready = getReadyNodes()
-      if (ready.length === 0) break
-
-      wave++
-      if (wave > maxWaves) {
-        throw new Error(`Stopped after ${maxWaves} waves: steps kept becoming ready again`)
-      }
-      log.info(
-        `[workflow] wave ${wave}: executing ${ready.length} node(s) in parallel: ${ready.map((n) => n.label).join(', ')}`
-      )
-
-      if (wave > 1 && workflow.staggerDelayMs) {
-        await new Promise((r) => setTimeout(r, workflow.staggerDelayMs))
-      }
-
-      const stepOutputs = buildStepOutputsMap(execution, nodeMap)
-      const stateless: string[] = []
-
-      const promises = ready.map(async (node) => {
-        running.add(node.id)
-        try {
-          await executeNode(node, workflow, execution, context, stepOutputs, active)
-        } catch (err) {
-          log.error({ err, node: node.label }, '[workflow] a step failed')
-          updateNodeState(execution, node.id, {
-            status: 'error',
-            completedAt: new Date().toISOString(),
-            error: err instanceof Error ? err.message : String(err)
-          })
-          persistExecution(execution)
-        }
-        running.delete(node.id)
-
-        const postState = execution.nodeStates.find((s) => s.nodeId === node.id)
-        // A step the run holds no state for would be ready again on every wave.
-        if (!postState) {
-          const error = `Step "${node.label}" has no state in this run; its workflow changed under it`
-          execution.nodeStates.push({
-            nodeId: node.id,
-            status: 'error',
-            completedAt: new Date().toISOString(),
-            error
-          })
-          stateless.push(error)
-          return
-        }
-        if (postState.status === 'waiting') return
-
-        completed.add(node.id)
-
-        // A failed node stops the run unless it opted out. Marking the branch
-        // it feeds as skipped is what actually halts things: nothing downstream
-        // becomes ready, so the wave loop runs dry on its own. Nodes reachable
-        // by another live path are left alone — collectSkippedBranch only takes
-        // those whose remaining predecessors are already settled.
-        if (postState?.status === 'error' && stopsRunOnError(node)) {
-          // The first hop needs the same join guard collectSkippedBranch applies
-          // to every later hop: entering a join directly would skip it even when
-          // another predecessor is still live and about to feed it.
-          const entries = skipEntryPoints(
-            node.id,
-            workflow.edges,
-            predecessorsMap,
-            (id) => completed.has(id) || skippedByCondition.has(id)
-          )
-          for (const entry of entries) markSkippedBranch(entry)
-          for (const skippedId of skippedByCondition) {
-            const ns = execution.nodeStates.find((s) => s.nodeId === skippedId)
-            if (ns?.status !== 'pending') continue
-            updateNodeState(execution, skippedId, {
-              status: 'skipped',
-              completedAt: new Date().toISOString(),
-              error: `Skipped: "${node.label}" failed`
-            })
-          }
-          persistExecution(execution)
-          return
-        }
-
-        // A condition that failed answered nothing, so neither branch is the one it chose.
-        if (node.type === 'condition' && postState?.status === 'error') {
-          for (const edge of workflow.edges) {
-            if (edge.source === node.id && edge.conditionBranch) markSkippedBranch(edge.target)
-          }
-          for (const skippedId of skippedByCondition) {
-            updateNodeState(execution, skippedId, {
-              status: 'skipped',
-              skipReason: 'branch',
-              completedAt: new Date().toISOString()
-            })
-          }
-          persistExecution(execution)
-          return
-        }
-
-        // After a condition node completes, skip the non-matching branch
-        if (node.type === 'condition') {
-          const condState = execution.nodeStates.find((s) => s.nodeId === node.id)
-          const result = condState?.output // "true" or "false"
-          const skipBranch = result === 'true' ? 'false' : 'true'
-
-          for (const edge of workflow.edges) {
-            if (edge.source === node.id && edge.conditionBranch === skipBranch) {
-              markSkippedBranch(edge.target)
-              // Mark skipped nodes in execution state
-              for (const skippedId of skippedByCondition) {
-                updateNodeState(execution, skippedId, {
-                  status: 'skipped',
-                  skipReason: 'branch',
-                  completedAt: new Date().toISOString()
-                })
-              }
-              persistExecution(execution)
-            }
-          }
-        }
-      })
-
-      await Promise.all(promises)
-      if (stateless.length > 0) throw new Error(stateless[0])
-    }
+    const skippedByCondition = await runWaves({
+      nodes: mainNodes,
+      edges: collapseLoopBodies(workflow.nodes, workflow.edges),
+      execution,
+      signal: active.abort.signal,
+      // Each step is ready once per pass, so this is generous; past it the run is spinning.
+      maxWaves: 50 * Math.max(actionNodeCount, 1),
+      staggerMs: workflow.staggerDelayMs,
+      stepOutputs: () => buildStepOutputsMap(execution, nodeMap),
+      runNode: (node, stepOutputs) =>
+        executeNode(node, workflow, execution, context, stepOutputs, active),
+      persist: () => persistExecution(execution)
+    })
 
     // Stopped mid-flight: stopWorkflowRun already wrote the terminal state, so
     // leave it alone rather than recomputing it from the half-finished DAG.
@@ -1849,6 +1715,23 @@ async function runExecution(
       parkedOnGate = true
       persistExecution(execution)
       return execution
+    }
+
+    // A loop that was skipped, or failed before its first pass, never ran its
+    // body; those steps were not reachable on their own, so they are skipped
+    // with it rather than reported as failures of their own.
+    for (const ns of execution.nodeStates) {
+      const owner = ns.status === 'pending' ? bodyOwners.get(ns.nodeId) : undefined
+      if (!owner) continue
+      const loopState = execution.nodeStates.find((s) => s.nodeId === owner)
+      updateNodeState(execution, ns.nodeId, {
+        status: 'skipped',
+        completedAt: new Date().toISOString(),
+        ...(loopState?.skipReason
+          ? { skipReason: loopState.skipReason }
+          : { error: `Skipped: "${nodeMap.get(owner)?.label ?? 'the loop'}" did not run it` })
+      })
+      skippedByCondition.add(ns.nodeId)
     }
 
     // Mark any nodes still pending as skipped (unreachable due to missing edges or cycles)
