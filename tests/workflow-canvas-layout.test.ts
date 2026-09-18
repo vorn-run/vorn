@@ -82,12 +82,30 @@ describe('the definition projected onto the canvas', () => {
     expect(branchMembers.has('join')).toBe(false)
   })
 
-  it('draws no canvas nodes for loop body steps', () => {
+  it('draws loop body steps as children of the loop, laid out inside its frame', () => {
     const { nodes: rf } = toCanvasElements(loopNodes, loopEdges)
     const ids = rf.map((n) => n.id)
-    expect(ids).toContain('loop')
-    expect(ids).not.toContain('w')
-    expect(ids).not.toContain('r')
+    // A child is drawn only once its parent is known, so the loop comes first.
+    expect(ids.indexOf('loop')).toBeLessThan(ids.indexOf('w'))
+    const w = rf.find((n) => n.id === 'w')!
+    const r = rf.find((n) => n.id === 'r')!
+    expect(w).toMatchObject({ parentId: 'loop', draggable: false, type: 'step' })
+    expect(r.parentId).toBe('loop')
+    // Relative to the frame: below its header, one after the other.
+    expect(w.position.y).toBeGreaterThan(0)
+    expect(r.position.y).toBeGreaterThan(w.position.y)
+  })
+
+  it('draws the edges inside a loop body, and the one feeding it from the port in its frame', () => {
+    const { edges: rf } = toCanvasElements(loopNodes, loopEdges)
+    const entry = rf.find((e) => e.id === 'e2')!
+    expect(entry).toMatchObject({ source: 'loop', sourceHandle: 'body', target: 'w' })
+    expect(entry.data).toMatchObject({ bodyOf: 'loop' })
+    expect(rf.find((e) => e.id === 'e3')).toMatchObject({
+      source: 'w',
+      target: 'r',
+      data: { bodyOf: 'loop' }
+    })
   })
 
   it('redraws the edge that leaves a loop body from the composite', () => {
@@ -96,8 +114,40 @@ describe('the definition projected onto the canvas', () => {
     expect(exit.source).toBe('loop')
     // Real endpoints survive so inserts still splice correctly.
     expect(exit.data).toMatchObject({ afterNodeId: 'r', beforeNodeId: 'after' })
-    expect(rf.find((e) => e.id === 'e2')).toBeUndefined()
-    expect(rf.find((e) => e.id === 'e3')).toBeUndefined()
+  })
+
+  it('widens a loop whose body branches, and draws its branches inside', () => {
+    const nodes = [
+      node('t', 'trigger', 'Manual', { triggerType: 'manual' }),
+      node('loop', 'loop', 'Each', {
+        nodeType: 'loop',
+        mode: 'forEach',
+        bodyNodeIds: ['c', 'y', 'n']
+      }),
+      node('c', 'condition', 'Keep?', {
+        variable: '{{loop.item.keep}}',
+        operator: 'equals',
+        value: 'yes'
+      }),
+      node('y', 'script', 'Yes', { scriptType: 'bash', scriptContent: '' }),
+      node('n', 'script', 'No', { scriptType: 'bash', scriptContent: '' })
+    ]
+    const edges: WorkflowEdge[] = [
+      { id: 'e1', source: 't', target: 'loop' },
+      { id: 'e2', source: 'loop', target: 'c' },
+      { id: 'e3', source: 'c', target: 'y', conditionBranch: 'true' },
+      { id: 'e4', source: 'c', target: 'n', conditionBranch: 'false' }
+    ]
+    const { nodes: rf, edges: rfEdges } = toCanvasElements(nodes, edges)
+    const loop = rf.find((n) => n.id === 'loop')!
+    expect(loop.initialWidth).toBeGreaterThan(2 * 280)
+    const y = rf.find((n) => n.id === 'y')!
+    const n = rf.find((n2) => n2.id === 'n')!
+    expect(y.position.y).toBe(n.position.y)
+    expect(y.position.x).not.toBe(n.position.x)
+    expect(rfEdges.find((e) => e.id === 'e3')?.label).toBe('True')
+    // Its own body does not make the loop lead anywhere: it still trails a +.
+    expect(rf.some((node2) => node2.id === 'add:loop')).toBe(true)
   })
 
   it('labels condition branches and keeps the tag on the edge data', () => {
@@ -308,9 +358,18 @@ describe('what a hand-drawn connection may do', () => {
     expect(canConnect(forkNodes, forkEdges, 'c', 'join')).toBe(false)
   })
 
-  it('refuses edges touching a loop body', () => {
-    expect(canConnect(loopNodes, loopEdges, 'after', 'w')).toBe(false)
+  it('feeds a loop body only from its own loop or its own steps', () => {
     expect(loopBodyMembers(loopNodes)).toEqual(new Set(['w', 'r']))
+    // From outside the loop, into its body: refused.
+    expect(canConnect(loopNodes, loopEdges, 'after', 'w')).toBe(false)
+    // The loop's bottom port leads onward, never into its own body.
+    expect(canConnect(loopNodes, [], 'loop', 'w')).toBe(false)
+    // The port inside its frame does.
+    expect(canConnect(loopNodes, [], 'loop', 'w', 'body')).toBe(true)
+    expect(canConnect(loopNodes, [], 'loop', 'after', 'body')).toBe(false)
+    // Between its own steps, and out of it to what follows.
+    expect(canConnect(loopNodes, [], 'w', 'r')).toBe(true)
+    expect(canConnect(loopNodes, [], 'r', 'after')).toBe(true)
   })
 
   it('refuses a duplicate of an existing edge', () => {

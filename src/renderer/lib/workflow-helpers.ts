@@ -276,17 +276,19 @@ export function appendToLoopBody(
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
   loopNodeId: string,
-  newNode: WorkflowNode
+  newNode: WorkflowNode,
+  /** The body step to add after; the last one when absent. */
+  afterId?: string
 ): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
   const loop = nodes.find((n) => n.id === loopNodeId)
   if (!loop || loop.type !== 'loop') return { nodes, edges }
 
   const config = loop.config as LoopConfig
   const body = config.bodyNodeIds ?? []
-  const lastId = body[body.length - 1] ?? loopNodeId
+  const lastId = afterId && body.includes(afterId) ? afterId : (body[body.length - 1] ?? loopNodeId)
 
-  // The new step goes after the current last body step, taking over whatever
-  // that step pointed at so the rest of the workflow still follows the loop.
+  // The new step goes after that body step, taking over whatever it pointed
+  // at so the rest of the pass, and the workflow after the loop, still follows.
   const onward = edges.filter((e) => e.source === lastId)
   const nextEdges: WorkflowEdge[] = [
     ...edges.filter((e) => e.source !== lastId),
@@ -325,6 +327,68 @@ export function loopOwningInsertPoint(
   return nodes.find(
     (n) => n.type === 'loop' && ((n.config as LoopConfig).bodyNodeIds ?? []).includes(afterNodeId)
   )
+}
+
+/**
+ * Bring newly inserted steps into the loop body they were inserted in.
+ *
+ * An insert inside a body — on an edge between two of its steps, from the port
+ * inside its frame, or after a step with nothing below it — must add the new
+ * steps to `bodyNodeIds`, or the loop would not own them and the main run
+ * would find them outside every loop. One place decides that, for every kind
+ * of insert. A step added on the edge that leaves a body goes after the loop.
+ */
+export function adoptIntoLoopBody(
+  before: WorkflowNode[],
+  result: { nodes: WorkflowNode[]; edges: WorkflowEdge[] },
+  afterNodeId: string,
+  beforeNodeId: string | null
+): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
+  const ownerOf = (id: string | null): WorkflowNode | undefined =>
+    id
+      ? before.find(
+          (n) => n.type === 'loop' && ((n.config as LoopConfig).bodyNodeIds ?? []).includes(id)
+        )
+      : undefined
+  const afterOwner = ownerOf(afterNodeId)
+  const beforeOwner = ownerOf(beforeNodeId)
+  const loop =
+    beforeNodeId === '__LOOP_BODY__'
+      ? loopOwningInsertPoint(before, afterNodeId)
+      : beforeOwner && (beforeOwner === afterOwner || beforeOwner.id === afterNodeId)
+        ? beforeOwner
+        : beforeNodeId === null
+          ? afterOwner
+          : undefined
+  if (!loop) return result
+
+  const existing = new Set(before.map((n) => n.id))
+  const added = result.nodes.filter((n) => !existing.has(n.id)).map((n) => n.id)
+  if (added.length === 0) return result
+  return {
+    ...result,
+    nodes: result.nodes.map((n) => {
+      if (n.id !== loop.id) return n
+      const config = n.config as LoopConfig
+      const body = config.bodyNodeIds ?? []
+      return {
+        ...n,
+        config: { ...config, bodyNodeIds: [...body, ...added.filter((id) => !body.includes(id))] }
+      }
+    })
+  }
+}
+
+/** Loops without the removed steps in their bodies: a deleted step is no member of anything. */
+function withoutBodyMembers(nodes: WorkflowNode[], removed: Set<string>): WorkflowNode[] {
+  return nodes.map((n) => {
+    if (n.type !== 'loop') return n
+    const config = n.config as LoopConfig
+    const body = config.bodyNodeIds ?? []
+    return body.some((id) => removed.has(id))
+      ? { ...n, config: { ...config, bodyNodeIds: body.filter((id) => !removed.has(id)) } }
+      : n
+  })
 }
 
 export function createLoopNode(config: Partial<LoopConfig> = {}): WorkflowNode {
@@ -750,7 +814,10 @@ export function removeNode(
         remainingEdges.push({ id: crypto.randomUUID(), source: pred, target: joinId })
       }
     }
-    const remainingNodes = nodes.filter((n) => !toRemove.has(n.id))
+    const remainingNodes = withoutBodyMembers(
+      nodes.filter((n) => !toRemove.has(n.id)),
+      toRemove
+    )
     return { nodes: placeNewNodes(nodes, remainingNodes, remainingEdges), edges: remainingEdges }
   }
 
@@ -765,7 +832,10 @@ export function removeNode(
     }
   }
 
-  const newNodes = nodes.filter((n) => n.id !== nodeId)
+  const newNodes = withoutBodyMembers(
+    nodes.filter((n) => n.id !== nodeId),
+    new Set([nodeId])
+  )
   return { nodes: placeNewNodes(nodes, newNodes, newEdges), edges: newEdges }
 }
 

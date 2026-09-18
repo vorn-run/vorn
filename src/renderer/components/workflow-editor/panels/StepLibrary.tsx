@@ -244,7 +244,9 @@ export function StepLibrary({
     }
 
     for (const s of STEP_ITEMS) {
-      if (bodyOnly && s.type !== 'agent' && s.type !== 'script') continue
+      // A loop's body runs as a graph of its own, so any step fits there except
+      // a gate (a pass cannot park) and another loop (loops do not nest).
+      if (bodyOnly && (s.type === 'approval' || s.type === 'loop')) continue
       if (insideBranch && s.type === 'loop') continue
       if (replacing && (s.type === 'condition' || s.type === 'loop')) continue
       if (!matches(s.label)) continue
@@ -268,7 +270,7 @@ export function StepLibrary({
 
     // A saved profile is an HTTP request with the hard part already answered,
     // so it sits directly beneath the request rather than inside a form field.
-    if (!bodyOnly && !replacing) {
+    if (!replacing) {
       const profiles: Row[] = connections
         .filter((c) => connectionConnectorId(c) === HTTP_PROFILE_CONNECTOR)
         .filter((profile) => matches(`Call ${profile.name}`))
@@ -287,7 +289,7 @@ export function StepLibrary({
       flat.splice(afterHttp >= 0 ? afterHttp + 1 : flat.length, 0, ...profiles)
     }
 
-    if (!bodyOnly) {
+    {
       for (const conn of connections) {
         const connectorId = connectionConnectorId(conn)
         connectionGroup(
@@ -312,7 +314,7 @@ export function StepLibrary({
     }
 
     // Steps from connectors nobody has connected; not while replacing, which rebuilds the node from the pick.
-    if (!bodyOnly && !replacing) {
+    if (!replacing) {
       const connected = new Set(connections.map((conn) => connectionConnectorId(conn)))
       const unvouched: Group[] = []
       for (const entry of catalog.items) {

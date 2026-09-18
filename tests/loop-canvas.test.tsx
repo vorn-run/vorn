@@ -110,14 +110,15 @@ const withLoopConfig = (config: Record<string, unknown>): WorkflowNode[] =>
   nodes.map((n) => (n.id === 'loop' ? { ...n, config: config as WorkflowNode['config'] } : n))
 
 describe('the loop rail on the canvas', () => {
-  it('draws the repeated steps inside the loop, not beside it', () => {
-    // The whole point of the redesign: a repeated step must not look like a
-    // step that runs once.
+  it('reserves the room its repeated steps are drawn in, and draws each of them', () => {
+    // The steps are the loop's children on the canvas; the frame holds the
+    // space they sit in (their placement is covered by the layout tests).
     const { container } = renderWith(nodes)
     const rail = container.querySelector('[data-loop-rail]')
     expect(rail).not.toBeNull()
-    expect(within(rail as HTMLElement).getByText('Write the edition')).toBeInTheDocument()
-    expect(within(rail as HTMLElement).getByText('Review the draft')).toBeInTheDocument()
+    expect(rail!.querySelector('[data-loop-body]')).not.toBeNull()
+    expect(screen.getByText('Write the edition')).toBeInTheDocument()
+    expect(screen.getByText('Review the draft')).toBeInTheDocument()
   })
 
   it('leaves the steps that run once outside the rail', () => {
