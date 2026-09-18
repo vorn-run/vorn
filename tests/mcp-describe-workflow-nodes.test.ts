@@ -109,13 +109,15 @@ describe('describe_workflow_nodes', () => {
 
   it('embeds an example that create_workflow would accept', async () => {
     const { example } = await describeNodes()
-    const nodes = example.nodes.map((n) => nodeSchema.parse(n)) as unknown as WorkflowNode[]
+    const parsed = example.nodes.map((n) => nodeSchema.parse(n))
     const edges = example.edges.map((e) => edgeSchema.parse(e)) as WorkflowEdge[]
+    // The MCP checks take nodes as the tool parsed them; the shared one takes workflow nodes.
+    const nodes = parsed as unknown as WorkflowNode[]
 
-    expect(validateLoopBodies(nodes)).toEqual([])
+    expect(validateLoopBodies(parsed)).toEqual([])
     const loops = nodes.filter((n) => n.type === 'loop')
     expect(loops).toHaveLength(1)
     expect(loopStructureError(nodes, edges, loops[0])).toBeUndefined()
-    expect(validateGraph(nodes, edges)).toEqual([])
+    expect(validateGraph(parsed, edges)).toEqual([])
   })
 })
