@@ -20,6 +20,10 @@ import { FileTypeIcon } from './file-icons'
 import { PANE_SURFACE } from '../lib/pane-surface'
 import { ICON_BUTTON, ICON_BUTTON_SIZE } from '../lib/icon-button'
 import { Tooltip } from './Tooltip'
+import { CodeEditor } from './code-editor/CodeEditor'
+import { computeMatches, renderLineWithMarks, type FindMatch } from './code-editor/find'
+import { getLang } from './code-editor/shiki'
+import { useHighlightedLines } from './code-editor/useHighlightedLines'
 
 const MAX_PREVIEW_LINES = 2000
 const ROW_HEIGHT = 22 // px per tree row
@@ -243,179 +247,6 @@ function TreeNode({
 }
 
 // ---------------------------------------------------------------------------
-// Shiki syntax highlighting
-// ---------------------------------------------------------------------------
-const EXT_TO_LANG: Record<string, string> = {
-  ts: 'typescript',
-  tsx: 'tsx',
-  mts: 'typescript',
-  cts: 'typescript',
-  js: 'javascript',
-  jsx: 'jsx',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  json: 'json',
-  jsonc: 'jsonc',
-  json5: 'json5',
-  html: 'html',
-  htm: 'html',
-  vue: 'vue',
-  svelte: 'svelte',
-  css: 'css',
-  scss: 'scss',
-  sass: 'sass',
-  less: 'less',
-  md: 'markdown',
-  mdx: 'mdx',
-  py: 'python',
-  pyi: 'python',
-  rs: 'rust',
-  go: 'go',
-  java: 'java',
-  kt: 'kotlin',
-  swift: 'swift',
-  rb: 'ruby',
-  php: 'php',
-  lua: 'lua',
-  zig: 'zig',
-  c: 'c',
-  h: 'c',
-  cpp: 'cpp',
-  cc: 'cpp',
-  hpp: 'cpp',
-  cxx: 'cpp',
-  cs: 'csharp',
-  sh: 'bash',
-  bash: 'bash',
-  zsh: 'bash',
-  fish: 'fish',
-  sql: 'sql',
-  graphql: 'graphql',
-  gql: 'graphql',
-  yml: 'yaml',
-  yaml: 'yaml',
-  toml: 'toml',
-  ini: 'ini',
-  xml: 'xml',
-  svg: 'xml',
-  dockerfile: 'dockerfile',
-  makefile: 'makefile',
-  r: 'r',
-  dart: 'dart',
-  ex: 'elixir',
-  exs: 'elixir',
-  prisma: 'prisma',
-  tf: 'hcl',
-  ps1: 'powershell',
-  bat: 'batch'
-}
-
-const FILENAME_TO_LANG: Record<string, string> = {
-  dockerfile: 'dockerfile',
-  makefile: 'makefile',
-  '.gitignore': 'gitignore',
-  '.env': 'dotenv'
-}
-
-function getLang(name: string): string | undefined {
-  const lower = name.toLowerCase()
-  if (FILENAME_TO_LANG[lower]) return FILENAME_TO_LANG[lower]
-  const ext = lower.includes('.') ? lower.split('.').pop()! : undefined
-  return ext ? EXT_TO_LANG[ext] : undefined
-}
-
-type TokenLine = { content: string; color?: string }[]
-
-type Highlighter = Awaited<ReturnType<typeof import('shiki').createHighlighter>>
-let highlighterPromise: Promise<Highlighter> | null = null
-const loadedLangs = new Set<string>()
-
-function getHighlighter(): Promise<Highlighter> {
-  if (!highlighterPromise) {
-    highlighterPromise = import('shiki').then((m) =>
-      m.createHighlighter({
-        themes: ['vitesse-dark'],
-        langs: [],
-        engine: m.createJavaScriptRegexEngine()
-      })
-    )
-  }
-  return highlighterPromise
-}
-
-async function highlightCode(code: string, lang: string): Promise<TokenLine[]> {
-  const hl = await getHighlighter()
-  if (!loadedLangs.has(lang)) {
-    try {
-      await hl.loadLanguage(lang as Parameters<typeof hl.loadLanguage>[0])
-      loadedLangs.add(lang)
-    } catch {
-      return []
-    }
-  }
-  const result = hl.codeToTokens(code, {
-    lang: lang as Parameters<typeof hl.codeToTokens>[1]['lang'],
-    theme: 'vitesse-dark'
-  })
-  return result.tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color })))
-}
-
-/** `loose` keeps the last tokens while newer ones are on their way; the caller must check each line still matches. */
-function useHighlightedLines(text: string, fileName: string, loose = false): TokenLine[] | null {
-  const [result, setResult] = useState<{
-    key: string
-    fileName: string
-    tokens: TokenLine[]
-  } | null>(null)
-  const lang = getLang(fileName)
-  const key = `${fileName}\0${text.length}`
-
-  useEffect(() => {
-    if (!lang) return
-
-    let stale = false
-    highlightCode(text, lang)
-      .then((tokens) => {
-        if (stale) return
-        setResult(tokens.length > 0 ? { key, fileName, tokens } : null)
-      })
-      .catch(() => {
-        if (!stale) setResult(null)
-      })
-
-    return () => {
-      stale = true
-    }
-  }, [text, lang, key, fileName])
-
-  if (!lang || !result) return null
-  if (loose ? result.fileName !== fileName : result.key !== key) return null
-  return result.tokens
-}
-
-// ---------------------------------------------------------------------------
-// Find-in-file
-// ---------------------------------------------------------------------------
-type FindMatch = { line: number; start: number; end: number }
-
-function computeMatches(lines: string[], query: string): FindMatch[] {
-  if (!query) return []
-  const lc = query.toLowerCase()
-  const out: FindMatch[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const lower = lines[i].toLowerCase()
-    let from = 0
-    while (from <= lower.length - lc.length) {
-      const idx = lower.indexOf(lc, from)
-      if (idx < 0) break
-      out.push({ line: i, start: idx, end: idx + lc.length })
-      from = idx + lc.length
-    }
-  }
-  return out
-}
-
-// ---------------------------------------------------------------------------
 // Line row
 // ---------------------------------------------------------------------------
 function LineRow({
@@ -435,34 +266,6 @@ function LineRow({
       {children}
     </div>
   )
-}
-
-// Render a line of plain text with `<mark>` overlays at the given match ranges.
-function renderLineWithMarks(
-  line: string,
-  marks: { start: number; end: number; active: boolean }[]
-): JSX.Element[] {
-  if (marks.length === 0) return [<span key="t">{line || ' '}</span>]
-  const out: JSX.Element[] = []
-  let cursor = 0
-  marks.forEach((m, i) => {
-    if (m.start > cursor) out.push(<span key={`p${i}`}>{line.slice(cursor, m.start)}</span>)
-    out.push(
-      <span
-        key={`m${i}`}
-        className={
-          m.active
-            ? 'bg-amber-300/70 text-black rounded-[1px]'
-            : 'bg-amber-300/25 text-gray-100 rounded-[1px]'
-        }
-      >
-        {line.slice(m.start, m.end)}
-      </span>
-    )
-    cursor = m.end
-  })
-  if (cursor < line.length) out.push(<span key="tail">{line.slice(cursor)}</span>)
-  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +292,7 @@ function ReadView({
     [allLines, capped]
   )
   const visibleText = useMemo(() => visibleLines.join('\n'), [visibleLines])
-  const highlighted = useHighlightedLines(visibleText, fileName)
+  const highlighted = useHighlightedLines(visibleText, getLang(fileName))
 
   const matches = useMemo(() => computeMatches(visibleLines, findQuery), [visibleLines, findQuery])
   const matchesByLine = useMemo(() => {
@@ -585,10 +388,7 @@ function ReadView({
 // ---------------------------------------------------------------------------
 // Edit view
 // ---------------------------------------------------------------------------
-const HIGHLIGHT_SETTLE_MS = 150
-const EDIT_LINE_HEIGHT = 21 // px, shared by the gutter, the drawn text and the textarea
-
-/** A transparent textarea over the same text drawn in colour; a line uses its tokens only while they spell what was typed. */
+/** The file's text in the shared code editor, labelled and coloured by its name. */
 function EditView({
   draft,
   fileName,
@@ -606,102 +406,15 @@ function EditView({
   activeMatchIdx: number
   onMatchesComputed: (count: number) => void
 }) {
-  const lines = useMemo(() => draft.split('\n'), [draft])
-  const [settled, setSettled] = useState(draft)
-  useEffect(() => {
-    const timer = setTimeout(() => setSettled(draft), HIGHLIGHT_SETTLE_MS)
-    return () => clearTimeout(timer)
-  }, [draft])
-  const highlighted = useHighlightedLines(
-    lines.length > MAX_PREVIEW_LINES ? '' : settled,
-    fileName,
-    true
-  )
-  const gutter = useMemo(
-    () => Array.from({ length: lines.length }, (_, i) => i + 1).join('\n'),
-    [lines.length]
-  )
-
-  const matches = useMemo(() => computeMatches(lines, findQuery), [lines, findQuery])
-  useEffect(() => {
-    onMatchesComputed(matches.length)
-  }, [matches.length, onMatchesComputed])
-
-  const activeMatch = matches.length > 0 ? matches[activeMatchIdx % matches.length] : null
-  const scrollerRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = scrollerRef.current
-    if (!activeMatch || !el) return
-    el.scrollTop = activeMatch.line * EDIT_LINE_HEIGHT - el.clientHeight / 2
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- scroll when the match moves, not on every keystroke
-  }, [activeMatch?.line, activeMatch?.start, activeMatchIdx])
-
-  const rendered = useMemo<JSX.Element[]>(() => {
-    const byLine = new Map<number, FindMatch[]>()
-    for (const m of matches) byLine.set(m.line, [...(byLine.get(m.line) ?? []), m])
-    return lines.map((line, i) => {
-      const marks = byLine.get(i)
-      const tokens = highlighted?.[i]
-      const inStep = tokens !== undefined && tokens.map((t) => t.content).join('') === line
-      return (
-        <div key={i} style={{ height: EDIT_LINE_HEIGHT }}>
-          {marks
-            ? renderLineWithMarks(
-                line,
-                marks.map((m) => ({ start: m.start, end: m.end, active: m === activeMatch }))
-              )
-            : inStep && tokens.length > 0
-              ? tokens.map((t, j) => (
-                  <span key={j} style={t.color ? { color: t.color } : undefined}>
-                    {t.content}
-                  </span>
-                ))
-              : line || ' '}
-        </div>
-      )
-    })
-  }, [lines, highlighted, matches, activeMatch])
-
-  const text = 'text-[13px] font-mono whitespace-pre py-1 pr-3'
   return (
-    <div ref={scrollerRef} className="flex-1 overflow-auto">
-      <div className="flex w-max min-w-full min-h-full">
-        <pre
-          className="sticky left-0 z-10 select-none text-right pr-3 pl-2 py-1 text-[12px] font-mono text-gray-600 shrink-0"
-          style={{ lineHeight: `${EDIT_LINE_HEIGHT}px`, background: PANE_SURFACE }}
-          aria-hidden="true"
-        >
-          {gutter}
-        </pre>
-        <div className="relative flex-1">
-          <pre
-            className={`${text} text-gray-300 pointer-events-none`}
-            style={{ lineHeight: `${EDIT_LINE_HEIGHT}px` }}
-            aria-hidden="true"
-            data-testid="editor-highlight"
-          >
-            {rendered}
-          </pre>
-          <textarea
-            value={draft}
-            onChange={(e) => onChange(e.target.value)}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-                e.preventDefault()
-                // The window also listens for this chord, and would change the view.
-                e.stopPropagation()
-                onSaveShortcut()
-              }
-            }}
-            spellCheck={false}
-            wrap="off"
-            aria-label={`Edit ${fileName}`}
-            className={`${text} absolute inset-0 w-full h-full bg-transparent text-transparent outline-none resize-none overflow-hidden`}
-            style={{ lineHeight: `${EDIT_LINE_HEIGHT}px`, caretColor: 'var(--color-ink)' }}
-          />
-        </div>
-      </div>
-    </div>
+    <CodeEditor
+      value={draft}
+      onChange={onChange}
+      fileName={fileName}
+      ariaLabel={`Edit ${fileName}`}
+      onSaveShortcut={onSaveShortcut}
+      find={{ query: findQuery, activeIndex: activeMatchIdx, onMatchesComputed }}
+    />
   )
 }
 
