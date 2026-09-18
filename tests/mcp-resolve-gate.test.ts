@@ -349,6 +349,20 @@ describe('sending a gate back', () => {
     expect(result.content[0].text).toContain('takes no changes now')
   })
 
+  it('passes on why the gate refused a rewrite', async () => {
+    rpcCall.mockResolvedValue({
+      accepted: false,
+      reason: 'The edited list is not valid JSON: line 3, column 9.'
+    })
+
+    const result = await resolve({ run_id: 'run-1', decision: 'approve', edited: '[{"a": 1,}]' })
+
+    expect(result.isError).toBe(true)
+    expect(result.content[0].text).toBe(
+      'Error: The edited list is not valid JSON: line 3, column 9.'
+    )
+  })
+
   it('quotes what the gate asked as it was filled in, not its template', async () => {
     const result = await resolve({ run_id: 'run-1', decision: 'approve' })
 

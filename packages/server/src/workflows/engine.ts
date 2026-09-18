@@ -33,6 +33,7 @@ import {
   isSignInWait,
   canRequestChanges,
   collapseLoopBodies,
+  gateEditRefusal,
   loopBodyGraph,
   loopBodyOwners,
   loopStructureError,
@@ -748,9 +749,17 @@ async function executeNode(
     const message = config.message
       ? resolveTemplateVars(config.message, context, stepOutputs).trim() || undefined
       : undefined
-    const editableText = config.edit?.trim()
-      ? resolveTemplateVars(config.edit, context, stepOutputs)
+    // Read as data, so a list an agent returned arrives whole and pretty-printed
+    // for the reviewer's table, never cut to the text limit mid-document.
+    const editable = config.edit?.trim()
+      ? resolveTemplateValue(config.edit, context, stepOutputs)
       : undefined
+    const editableText =
+      editable === undefined
+        ? undefined
+        : typeof editable === 'string'
+          ? editable
+          : JSON.stringify(editable, null, 2)
     const page = config.view?.trim()
       ? publishGateView(
           getDataDir(),
@@ -2147,6 +2156,17 @@ function changesPlan(
   const reset = nodesBetween(from, nodeId, workflow.edges)
   if (reset.size === 0) return { refused: `${from} does not lead to ${nodeId}` }
   return { from, reset }
+}
+
+/** Why the gate would refuse this rewrite, so the asker hears at once rather than the run failing later. */
+export function gateEditIsRefused(
+  runId: string,
+  nodeId: string,
+  edited: string | undefined
+): string | undefined {
+  const execution = activeRuns.get(runId)?.execution ?? runById(runId)
+  const state = execution?.nodeStates.find((ns) => ns.nodeId === nodeId)
+  return gateEditRefusal(state?.editableText, edited)
 }
 
 /** Whether a request for changes with this comment would be taken, so the asker hears at once. */

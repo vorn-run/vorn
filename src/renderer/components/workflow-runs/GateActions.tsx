@@ -27,9 +27,10 @@ async function answerGate(
   })
   if (result?.accepted !== false) return true
   toast.error(
-    decision === 'changes'
-      ? 'This gate takes no more changes. Approve or reject it.'
-      : 'The gate did not take that answer.'
+    result.reason ??
+      (decision === 'changes'
+        ? 'This gate takes no more changes. Approve or reject it.'
+        : 'The gate did not take that answer.')
   )
   return false
 }

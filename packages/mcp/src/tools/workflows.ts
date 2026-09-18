@@ -929,20 +929,24 @@ export function registerWorkflowTools(server: McpServer): void {
         run.nodeStates.find((n) => n.nodeId === target.nodeId)?.message ?? askedBy(gateNode)
 
       try {
-        const answer = await rpcCall<{ accepted: boolean }>('workflow:resolveGate', {
-          runId: args.run_id,
-          nodeId: target.nodeId,
-          decision: args.decision,
-          ...(args.comment?.trim() && { comment: args.comment.trim() }),
-          ...(args.edited?.trim() && { edited: args.edited.trim() })
-        })
+        const answer = await rpcCall<{ accepted: boolean; reason?: string }>(
+          'workflow:resolveGate',
+          {
+            runId: args.run_id,
+            nodeId: target.nodeId,
+            decision: args.decision,
+            ...(args.comment?.trim() && { comment: args.comment.trim() }),
+            ...(args.edited?.trim() && { edited: args.edited.trim() })
+          }
+        )
         if (answer?.accepted === false) {
           return {
             content: [
               {
                 type: 'text',
-                text:
-                  args.decision === 'changes'
+                text: answer.reason
+                  ? `Error: ${answer.reason}`
+                  : args.decision === 'changes'
                     ? 'Error: this gate takes no changes now: it has no step to redo from, or its rounds are used up. Approve or reject it instead.'
                     : 'Error: the gate did not take that answer. Check list_workflow_runs.'
               }

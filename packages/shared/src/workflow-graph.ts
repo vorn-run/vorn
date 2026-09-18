@@ -15,6 +15,7 @@ import {
   WorkflowNode
 } from './types'
 import { resolveTemplateVars, type StepOutputs } from './template-vars'
+import { isRecordList, jsonErrorLocation, toItemList } from './item-list'
 
 /**
  * The parts of workflow execution that decide rather than do.
@@ -170,16 +171,50 @@ export function buildStepOutputsMap(
   return outputs
 }
 
-/** A gate's text, its latest comment, every comment, and which time it asked; undefined before it first asks. */
+/**
+ * A gate's text, its latest comment, every comment, and which time it asked;
+ * undefined before it first asks. When the text is a list of records — what a
+ * review gate draws as a table — `items` is that list as data, the rows the
+ * reviewer kept, ready for a for-each loop.
+ */
 function gateOutputs(state: NodeExecutionState): Record<string, unknown> | undefined {
   if (state.round === undefined && !state.feedback?.length) return undefined
   const entries = state.feedback ?? []
+  const text = state.editedText ?? state.editableText ?? ''
+  const list = toItemList(text)
   return {
-    text: state.editedText ?? state.editableText ?? '',
+    ...('items' in list && isRecordList(list.items) && { items: list.items }),
+    text,
     feedback: entries.length > 0 ? entries[entries.length - 1].comment : '',
     feedbackAll: entries.map((e) => `Round ${e.round}: ${e.comment}`).join('\n'),
     round: state.round ?? 1
   }
+}
+
+/**
+ * Why a gate would refuse this rewrite, or undefined when it takes it.
+ *
+ * A gate that showed a list of records hands those records on as data, so a
+ * rewrite that is no longer valid JSON would reach the next step as text it
+ * cannot read. It is refused with where the JSON broke, instead.
+ */
+export function gateEditRefusal(
+  editableText: string | undefined,
+  edited: string | undefined
+): string | undefined {
+  if (!edited?.trim() || !editableText) return undefined
+  const original = toItemList(editableText)
+  if (!('items' in original) || !isRecordList(original.items)) return undefined
+  try {
+    JSON.parse(edited)
+  } catch (err) {
+    const where = jsonErrorLocation(edited, err)
+    return `The edited list is not valid JSON: line ${where.line}, column ${where.column}.`
+  }
+  const rewritten = toItemList(edited)
+  return 'error' in rewritten
+    ? `The edited text is no longer a list. ${rewritten.error}`
+    : undefined
 }
 
 /** Ceiling on how many times a gate may ask, whatever a workflow says. */

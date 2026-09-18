@@ -122,6 +122,7 @@ vi.mock('../packages/server/src/logger', () => ({
 const {
   adoptConnectorInboxLease,
   applyGateDecision,
+  gateEditIsRefused,
   approveWorkflowGate,
   executeWorkflow,
   resumeSignInWaits,
@@ -1450,6 +1451,63 @@ describe('a loop whose steps form a graph', () => {
       )
     )
     expect(calls).toHaveLength(10)
+  })
+
+  it('hands the rows a reviewer kept at a gate to a for-each loop', async () => {
+    const findings = [
+      { path: 'a.ts', body: 'one' },
+      { path: 'b.ts', body: 'two' },
+      { path: 'c.ts', body: 'three' }
+    ]
+    const calls = connectorAnswers({ review: { findings } })
+    const gate = {
+      id: 'gate',
+      type: 'approval',
+      label: 'Check the review',
+      slug: 'gate',
+      position: { x: 0, y: 0 },
+      config: { edit: '{{steps.review.findings}}' }
+    } as unknown as Node
+    const comment = action('comment')
+    ;(comment.config as { args: Record<string, string> }).args = { path: '{{loop.item.path}}' }
+    const wf = workflow(
+      [
+        action('review'),
+        gate,
+        loopNode(['comment'], { mode: 'forEach', items: '{{steps.gate.items}}' }),
+        comment
+      ],
+      [
+        ['trigger', 'review'],
+        ['review', 'gate'],
+        ['gate', 'loop'],
+        ['loop', 'comment']
+      ]
+    )
+    mockState.config.workflows = [wf]
+    const run = await executeWorkflow(wf)
+
+    // The list reaches the reviewer whole, as readable JSON.
+    const asked = stateOf(run, 'gate')?.editableText ?? ''
+    expect(JSON.parse(asked)).toEqual(findings)
+    expect(asked).toContain('\n  {')
+
+    // A broken rewrite is refused with where it broke.
+    expect(gateEditIsRefused(run.runId, 'gate', '[{"path": "a.ts",}]')).toMatch(
+      /line 1, column \d+/
+    )
+
+    await applyGateDecision(
+      run.runId,
+      'gate',
+      'approve',
+      undefined,
+      JSON.stringify([findings[0], findings[2]])
+    )
+    expect(calls.filter((c) => c.action === 'comment').map((c) => c.args.path)).toEqual([
+      'a.ts',
+      'c.ts'
+    ])
   })
 
   it('refuses a loop whose body is fed from outside it', async () => {
