@@ -19,13 +19,14 @@ import log from './logger'
  * would otherwise fail is worth a short wait only once they have missed.
  *
  * `findOnPath` is deliberately a twin of the server's
- * (`packages/server/src/resolve-executable.ts`) rather than a shared import:
- * `packages/shared` is free of `node:*` because the renderer loads it, and
- * this is fifteen lines of `fs.accessSync`.
+ * (`packages/server/src/resolve-executable.ts`) rather than a shared import.
+ * Neither shared directory will take it: `packages/shared` is free of `node:*`
+ * because the renderer loads it, and `src/shared` is in the renderer's own
+ * build. Fifteen lines of `fs.accessSync` is the cheaper of the two prices.
  */
 
 /** Where `name` lives on `pathEnv`, or null. On Windows `.exe` and `.cmd` count too. */
-export function findOnPath(name: string, pathEnv: string | undefined): string | null {
+function findOnPath(name: string, pathEnv: string | undefined): string | null {
   if (!pathEnv) return null
   const sep = process.platform === 'win32' ? ';' : ':'
   const candidates = process.platform === 'win32' ? [`${name}.exe`, `${name}.cmd`, name] : [name]
@@ -50,11 +51,11 @@ export function findOnPath(name: string, pathEnv: string | undefined): string | 
  * nothing about them: Homebrew on Apple Silicon, then on Intel. Empty on
  * Windows, where an installer writes its own PATH entry instead.
  */
-export const EXTRA_BIN_DIRS: readonly string[] =
+const EXTRA_BIN_DIRS: readonly string[] =
   process.platform === 'win32' ? [] : ['/opt/homebrew/bin', '/usr/local/bin']
 
 /** Whether this exact path is a file that can be run, for a hand-written override. */
-export function isExecutableFile(candidate: string): boolean {
+function isExecutableFile(candidate: string): boolean {
   try {
     if (!fs.statSync(candidate).isFile()) return false
     fs.accessSync(candidate, fs.constants.X_OK)
@@ -73,6 +74,8 @@ let source: PathSource | null = null
 /** `final` once the server's login shell has answered; until then the PATH may still improve. */
 let host: { path: string | null; final: boolean } = { path: null, final: false }
 let asking: Promise<void> | null = null
+/** Binaries already located, cleared whenever the PATH they were found on changes. */
+const found = new Map<string, { path: string; searched: string[] }>()
 
 export function setPathSource(next: PathSource | null): void {
   source = next
@@ -82,6 +85,7 @@ export function setPathSource(next: PathSource | null): void {
 export function resetHostPath(): void {
   host = { path: null, final: false }
   asking = null
+  found.clear()
 }
 
 /** The server's PATH as last heard; never waits, so a caller can try it for free. */
@@ -106,6 +110,7 @@ export function primeHostPath(): Promise<void> {
         undefined,
         10_000
       )
+      if (answer?.path && answer.path !== host.path) found.clear()
       if (answer?.path) host = { path: answer.path, final: answer.resolved }
     } catch (err) {
       log.debug({ err }, '[binary-path] the server did not say what its PATH is')
@@ -118,7 +123,7 @@ export function primeHostPath(): Promise<void> {
 }
 
 /** Wait for the server's answer, but never longer than the caller can spare. */
-export async function hostPathSettled(maxMs: number): Promise<void> {
+async function hostPathSettled(maxMs: number): Promise<void> {
   if (host.final || !asking) return
   await Promise.race([asking, new Promise((resolve) => setTimeout(resolve, maxMs))])
 }
@@ -155,14 +160,24 @@ export function resolveBinary(name: string, overrideEnvVar?: string): BinaryReso
       : { path: null, searched: [], overrideMiss: override }
   }
 
+  // A hit is remembered, the way the server's resolver does: a device claim
+  // asks every time, and the answer cannot change while the PATH it was found
+  // on stays the same. A miss is never cached, so a binary installed
+  // mid-session is picked up without a restart.
+  const remembered = found.get(name)
+  if (remembered) return { path: remembered.path, searched: remembered.searched }
+
   const searched: string[] = []
   // The server's PATH first: it is the one the person actually has.
   for (const pathEnv of [hostPath(), process.env.PATH, EXTRA_BIN_DIRS.join(path.delimiter)]) {
     const dirs = dirsOf(pathEnv).filter((dir) => !searched.includes(dir))
     if (dirs.length === 0) continue
-    const found = findOnPath(name, dirs.join(path.delimiter))
+    const hit = findOnPath(name, dirs.join(path.delimiter))
     searched.push(...dirs)
-    if (found) return { path: found, searched }
+    if (hit) {
+      found.set(name, { path: hit, searched })
+      return { path: hit, searched }
+    }
   }
   return { path: null, searched }
 }

@@ -147,6 +147,36 @@ describe('asking the server for its PATH', () => {
   })
 })
 
+describe('remembering what it found', () => {
+  it('stops re-walking the PATH on every claim, but forgets when the PATH changes', async () => {
+    const mod = await importModule()
+    onDisk('/opt/homebrew/bin/idb_companion')
+    const probe = vi.mocked(fs.accessSync)
+
+    expect(mod.resolveBinary('idb_companion').path).toBe('/opt/homebrew/bin/idb_companion')
+    const afterFirst = probe.mock.calls.length
+    expect(mod.resolveBinary('idb_companion').path).toBe('/opt/homebrew/bin/idb_companion')
+    expect(probe.mock.calls.length).toBe(afterFirst)
+
+    // A different PATH may hold a different binary of the same name.
+    mod.setPathSource(sourceOf(async () => ({ path: '/elsewhere/bin', resolved: true })))
+    await mod.primeHostPath()
+    mod.resolveBinary('idb_companion')
+    expect(probe.mock.calls.length).toBeGreaterThan(afterFirst)
+  })
+
+  it('keeps asking for a binary it has not found yet', async () => {
+    const mod = await importModule()
+    onDisk()
+    expect(mod.resolveBinary('idb_companion').path).toBeNull()
+    const afterMiss = vi.mocked(fs.accessSync).mock.calls.length
+
+    onDisk('/opt/homebrew/bin/idb_companion')
+    expect(mod.resolveBinary('idb_companion').path).toBe('/opt/homebrew/bin/idb_companion')
+    expect(vi.mocked(fs.accessSync).mock.calls.length).toBeGreaterThan(afterMiss)
+  })
+})
+
 describe('the PATH handed to a child', () => {
   it('carries the server PATH, the one this process has, and where Homebrew installs', async () => {
     const mod = await importModule()
