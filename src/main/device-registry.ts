@@ -6,6 +6,7 @@ import type {
   DeviceElement,
   DeviceScreenRead,
   DevicePoint,
+  DeviceOrientation,
   DeviceTarget,
   DeviceSelection,
   DeviceAnnotation,
@@ -859,8 +860,68 @@ function resolveTarget(target: DeviceTarget | undefined, entry: Entry): DevicePo
   return { x: target.x, y: target.y }
 }
 
+/** Left shift, held around a keystroke that needs it. */
+const SHIFT_KEYCODE = 225
+
 /**
- * Keycodes for `type`, ASCII → HID usage.
+ * The unshifted characters, ASCII → HID usage.
+ *
+ * Every entry is the key as it is engraved, so the shifted table below can be
+ * expressed as "this character is that key, with shift held" rather than as a
+ * second copy of the same numbers.
+ */
+const PLAIN_KEYCODES: Record<string, number> = {
+  ' ': 44,
+  '\n': 40,
+  '\t': 43,
+  // Backspace, so a person typing into the pane can correct a slip.
+  '\b': 42,
+  '-': 45,
+  '=': 46,
+  '[': 47,
+  ']': 48,
+  '\\': 49,
+  ';': 51,
+  "'": 52,
+  '`': 53,
+  ',': 54,
+  '.': 55,
+  '/': 56
+}
+
+/** What each shifted key produces on a US layout, shifted character → key. */
+const SHIFTED_KEYCODES: Record<string, number> = {
+  '!': 30,
+  '@': 31,
+  '#': 32,
+  $: 33,
+  '%': 34,
+  '^': 35,
+  '&': 36,
+  '*': 37,
+  '(': 38,
+  ')': 39,
+  _: 45,
+  '+': 46,
+  '{': 47,
+  '}': 48,
+  '|': 49,
+  ':': 51,
+  '"': 52,
+  '~': 53,
+  '<': 54,
+  '>': 55,
+  '?': 56
+}
+
+/** One keystroke: the key, and whether shift is held while it is struck. */
+export interface Keystroke {
+  keycode: number
+  shift: boolean
+}
+
+/**
+ * Keystrokes for `type`, ASCII → HID usage.
  *
  * Unmapped characters throw rather than falling back to a space. A `type` that
  * reports success while entering different text than it was asked for is the
@@ -868,32 +929,49 @@ function resolveTarget(target: DeviceTarget | undefined, entry: Entry): DevicePo
  * action assumes the field holds what it typed. A password or a URL quietly
  * mistyped is far more costly than an error naming the character.
  *
- * No shift support yet, so upper case and shifted symbols are refused too —
- * lower-casing them would be the same silent corruption in a friendlier coat.
+ * Upper case and the shifted symbols are typed with shift held, never by
+ * lower-casing them — that was the same silent corruption in a friendlier coat,
+ * and it left the pane's keyboard unable to enter a capital letter at all. The
+ * layout assumed is US: on another layout the *engraving* differs, but the key
+ * codes are positional, so a shifted symbol can land as its US twin. Letters
+ * and digits, which is what nearly everything types, are unaffected.
  */
-export function keycodesFor(text: string): number[] {
-  const codes: number[] = []
+export function keycodesFor(text: string): Keystroke[] {
+  const strokes: Keystroke[] = []
   for (const ch of text) {
-    if (ch >= 'a' && ch <= 'z') codes.push(4 + (ch.charCodeAt(0) - 97))
-    else if (ch >= '1' && ch <= '9') codes.push(30 + (ch.charCodeAt(0) - 49))
-    else if (ch === '0') codes.push(39)
-    else if (ch === ' ') codes.push(44)
-    else if (ch === '\n') codes.push(40)
-    else if (ch === '.') codes.push(55)
-    else if (ch === '-') codes.push(45)
-    else if (ch === '/') codes.push(56)
-    else if (ch === ',') codes.push(54)
+    if (ch >= 'a' && ch <= 'z') strokes.push({ keycode: 4 + (ch.charCodeAt(0) - 97), shift: false })
+    else if (ch >= 'A' && ch <= 'Z')
+      strokes.push({ keycode: 4 + (ch.charCodeAt(0) - 65), shift: true })
+    else if (ch >= '1' && ch <= '9')
+      strokes.push({ keycode: 30 + (ch.charCodeAt(0) - 49), shift: false })
+    else if (ch === '0') strokes.push({ keycode: 39, shift: false })
+    else if (ch in PLAIN_KEYCODES) strokes.push({ keycode: PLAIN_KEYCODES[ch], shift: false })
+    else if (ch in SHIFTED_KEYCODES) strokes.push({ keycode: SHIFTED_KEYCODES[ch], shift: true })
     else
       throw new Error(
-        `Cannot type ${JSON.stringify(ch)}: only lower-case letters, digits, space, newline ` +
-          'and . - / , are supported (no shift/modifier support yet). Set the value another ' +
-          'way — typing it wrong silently would be worse.'
+        `Cannot type ${JSON.stringify(ch)}: letters, digits, space, newline, tab and ` +
+          "- = [ ] \\ ; ' ` , . / with their shifted forms are supported. Set the value " +
+          'another way — typing it wrong silently would be worse.'
       )
   }
-  return codes
+  return strokes
 }
 
 const BUTTONS = new Set(['APPLE_PAY', 'HOME', 'LOCK', 'SIDE_BUTTON', 'SIRI'])
+
+/**
+ * Our spelling of an orientation → the companion's.
+ *
+ * `HIDEvent.orientation` (`resources/idb.proto`) turns the simulator the way
+ * the Simulator app's rotate menu does; verified against companion 1.1.8, where
+ * the accessibility tree's root frame goes 402×874 → 874×402 and back.
+ */
+const PROTO_ORIENTATIONS: Record<DeviceOrientation, string> = {
+  portrait: 'PORTRAIT',
+  'portrait-upside-down': 'PORTRAIT_UPSIDE_DOWN',
+  'landscape-left': 'LANDSCAPE_LEFT',
+  'landscape-right': 'LANDSCAPE_RIGHT'
+}
 
 /**
  * Tap, swipe, type, or press a hardware button.
@@ -906,10 +984,11 @@ const BUTTONS = new Set(['APPLE_PAY', 'HOME', 'LOCK', 'SIDE_BUTTON', 'SIRI'])
  */
 export async function interact(params: {
   sessionId: string
-  action: 'tap' | 'swipe' | 'type' | 'button' | 'press'
+  action: 'tap' | 'swipe' | 'type' | 'button' | 'press' | 'rotate'
   target?: DeviceTarget
   to?: DevicePoint
   text?: string
+  orientation?: DeviceOrientation
   duration?: number
   systemGesture?: boolean
 }): Promise<{ ok: true; generation: number }> {
@@ -962,9 +1041,17 @@ export async function interact(params: {
     }
     case 'type': {
       if (!params.text) throw new Error('`type` needs `text`.')
-      for (const code of keycodesFor(params.text)) {
-        events.push({ press: { action: { key: { keycode: code } }, direction: 'DOWN' } })
-        events.push({ press: { action: { key: { keycode: code } }, direction: 'UP' } })
+      for (const stroke of keycodesFor(params.text)) {
+        const key = { key: { keycode: stroke.keycode } }
+        const shift = { key: { keycode: SHIFT_KEYCODE } }
+        // Shift goes down before the key and up after it, the way a keyboard
+        // sends it. Pressing them together, or releasing shift first, is how a
+        // capital arrives lower case on a device that samples the modifier at
+        // key-down.
+        if (stroke.shift) events.push({ press: { action: shift, direction: 'DOWN' } })
+        events.push({ press: { action: key, direction: 'DOWN' } })
+        events.push({ press: { action: key, direction: 'UP' } })
+        if (stroke.shift) events.push({ press: { action: shift, direction: 'UP' } })
       }
       break
     }
@@ -975,6 +1062,17 @@ export async function interact(params: {
       }
       events.push({ press: { action: { button: { button: name } }, direction: 'DOWN' } })
       events.push({ press: { action: { button: { button: name } }, direction: 'UP' } })
+      break
+    }
+    case 'rotate': {
+      const wanted = params.orientation
+      const proto = wanted ? PROTO_ORIENTATIONS[wanted] : undefined
+      if (!proto) {
+        throw new Error(
+          `Unknown orientation "${wanted}". One of: ${Object.keys(PROTO_ORIENTATIONS).join(', ')}.`
+        )
+      }
+      events.push({ orientation: { orientation: proto } })
       break
     }
   }

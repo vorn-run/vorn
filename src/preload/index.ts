@@ -57,6 +57,7 @@ import {
   DeviceAnnotation,
   DeviceTarget,
   DevicePoint,
+  DeviceOrientation,
   UpdateStatus,
   ServerRuntimeStatus,
   AuthProbeReport
@@ -210,6 +211,10 @@ const api = {
     defaultName: string
     contents: string
     title?: string
+    /** `base64` writes binary — a PNG from the device pane, for instance. */
+    encoding?: 'utf8' | 'base64'
+    /** What the save dialog offers; it rewrites the extension to match. */
+    filters?: { name: string; extensions: string[] }[]
   }): Promise<string | null> => ipcRenderer.invoke(IPC.DIALOG_SAVE_TEXT_FILE, params),
 
   detectIDEs: (): Promise<{ id: string; name: string; command: string }[]> =>
@@ -790,10 +795,11 @@ const api = {
     ipcRenderer.invoke(IPC.DEVICE_SCREENSHOT, { sessionId, maxEdge }),
   deviceInteract: (params: {
     sessionId: string
-    action: 'tap' | 'swipe' | 'type' | 'button' | 'press'
+    action: 'tap' | 'swipe' | 'type' | 'button' | 'press' | 'rotate'
     target?: DeviceTarget
     to?: DevicePoint
     text?: string
+    orientation?: DeviceOrientation
     duration?: number
     systemGesture?: boolean
   }): Promise<{ ok: true; generation: number }> => ipcRenderer.invoke(IPC.DEVICE_INTERACT, params),

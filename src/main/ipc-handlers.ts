@@ -500,17 +500,34 @@ export function registerIpcHandlers(): void {
 
   safeHandle(
     IPC.DIALOG_SAVE_TEXT_FILE,
-    async (event, params: { defaultName: string; contents: string; title?: string }) => {
+    async (
+      event,
+      params: {
+        defaultName: string
+        contents: string
+        title?: string
+        /** `base64` for a binary file — a device screenshot is the first. */
+        encoding?: 'utf8' | 'base64'
+        filters?: { name: string; extensions: string[] }[]
+      }
+    ) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       if (!win) return null
       if (typeof params?.contents !== 'string') throw new Error('Nothing to save')
       const result = await dialog.showSaveDialog(win, {
         defaultPath: params.defaultName,
         title: params.title ?? 'Save file',
-        filters: [{ name: 'JSON', extensions: ['json'] }]
+        // The caller's filters, because the dialog rewrites the extension to
+        // match them: a `.png` default name under a JSON filter is saved as
+        // `.json`, and the file the person gets back will not open.
+        filters: params.filters ?? [{ name: 'JSON', extensions: ['json'] }]
       })
       if (result.canceled || !result.filePath) return null
-      await writeFile(result.filePath, params.contents, 'utf8')
+      await writeFile(
+        result.filePath,
+        params.encoding === 'base64' ? Buffer.from(params.contents, 'base64') : params.contents,
+        params.encoding === 'base64' ? undefined : 'utf8'
+      )
       return result.filePath
     }
   )

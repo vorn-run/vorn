@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useLayoutEffect, RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Smartphone } from 'lucide-react'
 import { AnchorRect, calculatePopoverPosition } from '../lib/popover-position'
-import { isSelectable } from '../lib/device-affordance'
+import { orderDevices } from '../lib/device-picker-list'
 import type { DeviceInfo } from '../../shared/types'
 
 interface DevicePickerProps {
@@ -139,8 +139,8 @@ export function DevicePicker({
         ) : devices.length === 0 ? (
           <div className="text-gray-500 text-[12px] px-3 py-2">No simulators found</div>
         ) : (
-          devices.map((d) => {
-            const selectable = isSelectable(d, sessionId)
+          orderDevices(devices, sessionId).map((d) => {
+            const selectable = d.selectable
             return (
               <button
                 key={d.udid}
@@ -160,7 +160,14 @@ export function DevicePicker({
                   size={11}
                   className={d.booted ? 'text-green-400/70 shrink-0' : 'text-gray-600 shrink-0'}
                 />
-                <span className="truncate">{d.name}</span>
+                <span className="truncate min-w-0">
+                  <span className="block truncate">{d.name}</span>
+                  {/* Only where the name alone would be a coin toss — the same
+                      model on two runtimes, or a duplicated simulator. */}
+                  {d.subtitle && (
+                    <span className="block text-[9px] text-gray-500 truncate">{d.subtitle}</span>
+                  )}
+                </span>
                 {!selectable && (
                   <span className="text-[9px] text-amber-400/60 ml-auto shrink-0">in use</span>
                 )}

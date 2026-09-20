@@ -70,6 +70,8 @@ vi.mock('node:child_process', () => ({
   }
 }))
 
+/** The HID events of each `hid` call, so input can be checked on the wire. */
+const hidEvents: unknown[][] = []
 const stopped: string[] = []
 const treeJson = { value: JSON.stringify([{ role: 'AXWindow' }]) }
 /**
@@ -88,8 +90,9 @@ vi.mock('../src/main/device-companion', () => ({
   },
   stopCompanion: (udid: string) => stopped.push(udid),
   call: async () => ({ json: treeJson.value }),
-  callStreaming: async (_c: unknown, _m: string, _msgs: unknown, timeoutMs?: number) => {
+  callStreaming: async (_c: unknown, _m: string, msgs: unknown, timeoutMs?: number) => {
     hidTimeouts.push(timeoutMs)
+    hidEvents.push(msgs as unknown[])
     return {}
   },
   callBidiStreaming: async () => ({}),
@@ -446,6 +449,7 @@ describe('a press pays for its own hold', () => {
 
   beforeEach(() => {
     hidTimeouts.length = 0
+    hidEvents.length = 0
     treeJson.value = JSON.stringify([
       { role: 'AXWindow', frame: { x: 0, y: 0, width: 402, height: 874 } }
     ])
@@ -465,6 +469,40 @@ describe('a press pays for its own hold', () => {
     claimed()
     await interact({ sessionId: 's1', action: 'tap', target: { x: 200, y: 400 } })
     expect(hidTimeouts).toEqual([30_000])
+  })
+
+  it('holds shift around the key it belongs to, and nothing else', async () => {
+    // Pressing them together, or releasing shift first, is how a capital
+    // arrives lower case on a device that samples the modifier at key-down.
+    claimed()
+    await interact({ sessionId: 's1', action: 'type', text: 'Ab' })
+    expect(hidEvents[0]).toEqual([
+      { press: { action: { key: { keycode: 225 } }, direction: 'DOWN' } },
+      { press: { action: { key: { keycode: 4 } }, direction: 'DOWN' } },
+      { press: { action: { key: { keycode: 4 } }, direction: 'UP' } },
+      { press: { action: { key: { keycode: 225 } }, direction: 'UP' } },
+      { press: { action: { key: { keycode: 5 } }, direction: 'DOWN' } },
+      { press: { action: { key: { keycode: 5 } }, direction: 'UP' } }
+    ])
+  })
+
+  it('turns the device with the orientation event the companion understands', async () => {
+    claimed()
+    const before = entryForTests('s1')!.generation
+    await interact({ sessionId: 's1', action: 'rotate', orientation: 'landscape-left' })
+    expect(hidEvents[0]).toEqual([{ orientation: { orientation: 'LANDSCAPE_LEFT' } }])
+    // Rotating moves everything on screen, so every ref taken before it is
+    // describing a layout that no longer exists.
+    expect(entryForTests('s1')!.generation).toBe(before + 1)
+    expect(entryForTests('s1')!.refs.size).toBe(0)
+  })
+
+  it('refuses an orientation it does not know rather than guessing one', async () => {
+    claimed()
+    await expect(
+      interact({ sessionId: 's1', action: 'rotate', orientation: 'sideways' as never })
+    ).rejects.toThrow(/sideways/)
+    expect(hidEvents).toEqual([])
   })
 })
 
@@ -531,21 +569,38 @@ describe('a coordinate that cannot be trusted', () => {
 
 describe('typing keycodes', () => {
   it('maps the characters it claims to support', () => {
-    expect(keycodesFor('a')).toEqual([4])
-    expect(keycodesFor('0')).toEqual([39])
-    expect(keycodesFor('\n')).toEqual([40])
+    expect(keycodesFor('a')).toEqual([{ keycode: 4, shift: false }])
+    expect(keycodesFor('0')).toEqual([{ keycode: 39, shift: false }])
+    expect(keycodesFor('\n')).toEqual([{ keycode: 40, shift: false }])
   })
 
-  it('refuses a character it cannot type rather than typing another one', () => {
-    // The failure this guards is silent: '@' previously mapped to the keycode
-    // for '2', so typing an email address reported success and entered
-    // something else. An error naming the character costs a turn; a wrongly
-    // typed password costs far more.
-    expect(() => keycodesFor('user@example.com')).toThrow(/@/)
+  it('types upper case with shift held, never by lower-casing it', () => {
+    // Lower-casing was the silent corruption this file exists to avoid, and
+    // refusing outright left the device pane's keyboard unable to enter a
+    // capital letter at all. Shift is the answer to both.
+    expect(keycodesFor('A')).toEqual([{ keycode: 4, shift: true }])
+    expect(keycodesFor('Hi')).toEqual([
+      { keycode: 11, shift: true },
+      { keycode: 12, shift: false }
+    ])
   })
 
-  it('refuses upper case rather than silently lower-casing it', () => {
-    expect(() => keycodesFor('Hello')).toThrow(/H/)
+  it('maps a shifted symbol to its own key, not to the digit it shares', () => {
+    // '@' once mapped to the keycode for '2', so typing an email address
+    // reported success and entered something else. It is the same key — with
+    // shift, which is the whole difference.
+    expect(keycodesFor('@')).toEqual([{ keycode: 31, shift: true }])
+    expect(keycodesFor('2')).toEqual([{ keycode: 31, shift: false }])
+  })
+
+  it('can correct a typo', () => {
+    expect(keycodesFor('\b')).toEqual([{ keycode: 42, shift: false }])
+  })
+
+  it('still refuses a character it cannot type rather than typing another one', () => {
+    // An error naming the character costs a turn; a wrongly typed password
+    // costs far more.
+    expect(() => keycodesFor('café')).toThrow(/é/)
   })
 })
 

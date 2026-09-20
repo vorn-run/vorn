@@ -2938,6 +2938,18 @@ export interface DevicePoint {
 }
 
 /**
+ * Which way up the device is held.
+ *
+ * Spelled in lower case here and mapped to the companion's enum in main, so
+ * nothing outside `device-registry.ts` has to know idb's spelling.
+ */
+export type DeviceOrientation =
+  | 'portrait'
+  | 'portrait-upside-down'
+  | 'landscape-left'
+  | 'landscape-right'
+
+/**
  * One element of a screen as the agent sees it.
  *
  * The mobile counterpart of `BrowserNode`, with one structural difference worth

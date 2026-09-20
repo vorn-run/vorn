@@ -189,6 +189,40 @@ describe('DevicePicker', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('puts the simulators that are ready first, and the busy ones last', async () => {
+    // A booted simulator opens straight away; a shut-down one costs a boot; one
+    // another session holds cannot be picked at all. That is the order someone
+    // scanning the list wants them in.
+    deviceList.mockResolvedValue([
+      { udid: 'u3', name: 'iPhone 16', runtime: 'iOS 26.2', booted: true, claimedBy: 'other' },
+      { udid: 'u2', name: 'iPad Pro', runtime: 'iOS 26.2', booted: false },
+      { udid: 'u1', name: 'iPhone 17', runtime: 'iOS 26.2', booted: true }
+    ])
+    render(<Harness />)
+    await screen.findByText('iPhone 17')
+    expect(screen.getAllByRole('option').map((o) => o.textContent?.trim().split('\n')[0])).toEqual([
+      'iPhone 17booted',
+      'iPad Pro',
+      'iPhone 16in use'
+    ])
+  })
+
+  it('tells two simulators of the same name apart', async () => {
+    // This machine really has two "iPhone Duo" on one runtime; picking blind
+    // between two identical rows is a coin toss.
+    deviceList.mockResolvedValue([
+      { udid: 'aaaa1111-0000', name: 'iPhone Duo', runtime: 'iOS 27.1', booted: false },
+      { udid: 'bbbb2222-0000', name: 'iPhone Duo', runtime: 'iOS 27.1', booted: false },
+      { udid: 'u9', name: 'iPhone 17', runtime: 'iOS 26.2', booted: false }
+    ])
+    render(<Harness />)
+    await screen.findByText('iPhone 17')
+    expect(screen.getByText('iOS 27.1 · aaaa1111')).toBeInTheDocument()
+    expect(screen.getByText('iOS 27.1 · bbbb2222')).toBeInTheDocument()
+    // And a name that is already unique is left alone.
+    expect(screen.queryByText('iOS 26.2')).not.toBeInTheDocument()
+  })
+
   it('closes on a click outside, but not on one inside', async () => {
     const onClose = vi.fn()
     render(<Harness onClose={onClose} />)

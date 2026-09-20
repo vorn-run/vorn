@@ -199,15 +199,18 @@ export function registerDeviceTools(server: McpServer): void {
 
   server.tool(
     'device_interact',
-    'Act on your claimed simulator: tap, swipe, type, press a hardware button, or long-press. ' +
+    'Act on your claimed simulator: tap, swipe, type, press a hardware button, long-press, or ' +
+      'rotate it. ' +
       'Address the target by "ref" from read_screen where possible. Coordinates are in POINTS. ' +
       'A ref from before an earlier interaction is refused rather than guessed at — read the ' +
       'screen again. A swipe starting at the very edge of the screen is refused too: iOS claims ' +
       'those as system gestures and swallows them, which looks to you like nothing happened.',
     {
       action: z
-        .enum(['tap', 'swipe', 'type', 'button', 'press'])
-        .describe('"press" is a long press; "button" takes a name in `text`'),
+        .enum(['tap', 'swipe', 'type', 'button', 'press', 'rotate'])
+        .describe(
+          '"press" is a long press; "button" takes a name in `text`; "rotate" takes `orientation`'
+        ),
       ref: required('Element ref from read_screen or device_find').optional(),
       x: z.number().optional().describe('Screen x in points, when no ref is available'),
       y: z.number().optional().describe('Screen y in points, when no ref is available'),
@@ -218,6 +221,10 @@ export function registerDeviceTools(server: McpServer): void {
         .describe(
           'Text for "type", or the button name for "button" (HOME, LOCK, SIRI, SIDE_BUTTON)'
         ),
+      orientation: z
+        .enum(['portrait', 'portrait-upside-down', 'landscape-left', 'landscape-right'])
+        .optional()
+        .describe('Which way up to turn the device, for "rotate"'),
       duration: z.number().min(0).max(30).optional().describe('Seconds to hold, for "press"'),
       system_gesture: z
         .boolean()
@@ -235,6 +242,7 @@ export function registerDeviceTools(server: McpServer): void {
               ? { x: args.to_x, y: args.to_y }
               : undefined,
           text: args.text,
+          orientation: args.orientation,
           duration: args.duration,
           systemGesture: args.system_gesture
         })

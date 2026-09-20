@@ -52,6 +52,7 @@ import type {
   DeviceScreenRead,
   DeviceTarget,
   DevicePoint,
+  DeviceOrientation,
   MobileProject,
   ReachableUrls,
   PairingRequest,
@@ -1177,12 +1178,14 @@ export interface RequestMethods {
   'device:interact': {
     params: {
       sessionId: string
-      action: 'tap' | 'swipe' | 'type' | 'button' | 'press'
+      action: 'tap' | 'swipe' | 'type' | 'button' | 'press' | 'rotate'
       target?: DeviceTarget
       /** Swipe destination, in points. */
       to?: DevicePoint
       /** Text for `type`; button name for `button` (HOME, LOCK, SIRI…). */
       text?: string
+      /** Which way up to turn the device, for `rotate`. */
+      orientation?: DeviceOrientation
       /** Seconds to hold, for a long press. */
       duration?: number
       /**
