@@ -320,6 +320,13 @@ export interface RequestMethods {
   /** Present a credential. The only method accepted before authenticating. */
   'auth:authenticate': { params: { token: string }; result: { ok: boolean } }
   'server:reachableUrls': { params: void; result: ReachableUrls }
+  /**
+   * The PATH the server read from a login shell, for a process that has none
+   * of its own: an app started from Finder inherits four system directories,
+   * and everything a person installed is invisible to it. `resolved` is false
+   * while the shell has not answered yet, so the answer may still improve.
+   */
+  'env:path': { params: void; result: { path: string | null; resolved: boolean } }
   'webhook:info': { params: void; result: { baseUrl: string } }
   // Device tokens. Namespaced `token:` rather than `device:`, which belongs
   // entirely to the simulator registry — thirteen methods of it.

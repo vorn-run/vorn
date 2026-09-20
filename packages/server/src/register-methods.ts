@@ -208,7 +208,7 @@ import {
   startPairing
 } from './pairing'
 import { disconnectToken } from './ws-handler'
-import { testSshConnection } from './process-utils'
+import { resolvedShellPath, shellEnvSettled, testSshConnection } from './process-utils'
 import { captureAgentSessionId } from './agent-session-capture'
 import { listAgentModels } from './agent-model-catalog'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
@@ -1509,6 +1509,15 @@ export function registerAllMethods(): void {
       // Not installed or not answering; LAN addresses still stand.
     }
     return reachableUrls(serverPort, tailscaleIps)
+  })
+
+  // Asked for by the main process, which spawns the simulator's companion and
+  // has only the four system directories on its own PATH. Bounded well under
+  // the shell's own timeout: a caller waiting on this is a person waiting on a
+  // device pane, and a provisional answer beats a late one.
+  registerMethod('env:path', async () => {
+    await shellEnvSettled(5_000)
+    return resolvedShellPath()
   })
 
   registerMethod('webhook:info', () => ({ baseUrl: `http://127.0.0.1:${serverPort}` }))

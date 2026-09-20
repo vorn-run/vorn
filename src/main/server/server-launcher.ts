@@ -5,6 +5,7 @@ import path, { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { app } from 'electron'
 import log from '../logger'
+import { augmentedPath, resolveBinary } from '../binary-path'
 import {
   BOOTSTRAP_ENV_VAR,
   SERVER_PORT_ENV_VAR,
@@ -356,7 +357,12 @@ async function spawnServer(): Promise<number> {
     // same path the CLI already takes and is refused the same way if malformed.
     const devPort = readDevPort()
 
-    const child = spawn('npx', ['tsx', serverEntryPoint, ...(devPort ? ['--port', devPort] : [])], {
+    // Resolved for the same reason the simulator's companion is: a dev app
+    // started from Finder has no `npx` on its PATH. The name is kept as the
+    // fallback so a launch that works today cannot start failing here.
+    const npx = resolveBinary('npx').path ?? 'npx'
+
+    const child = spawn(npx, ['tsx', serverEntryPoint, ...(devPort ? ['--port', devPort] : [])], {
       stdio: ['ignore', 'pipe', 'pipe'],
       // Deliberately NOT detached, where production is.
       //
@@ -375,6 +381,9 @@ async function spawnServer(): Promise<number> {
         ...process.env,
         [BOOTSTRAP_ENV_VAR]: bootstrapToken,
         NODE_ENV: process.env.NODE_ENV ?? 'development',
+        // `npx` runs through `#!/usr/bin/env node`, so finding npx itself is
+        // not enough: the child needs a PATH that holds node as well.
+        PATH: augmentedPath(),
         ...identityEnv()
         // Connectors live in their own repository now, so a local build is
         // preferred by setting VORN_CONNECTORS_ROOT to that checkout. It

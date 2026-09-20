@@ -312,6 +312,23 @@ describe('the login-shell environment', () => {
     expect(mockExecFile).toHaveBeenCalledTimes(1)
   })
 
+  it('offers its PATH to the main process, saying whether the shell has spoken', async () => {
+    // The main process has no login shell of its own, so it asks for this one.
+    let finish: (() => void) | undefined
+    mockExecFile.mockImplementation((_bin, _args, _opts, cb) => {
+      finish = () => cb(null, 'PATH=/opt/homebrew/bin:/usr/bin\n')
+    })
+    const mod = await import('../packages/server/src/process-utils')
+    const priming = mod.primeShellEnv()
+    expect(mod.resolvedShellPath()).toEqual({ path: '/usr/bin', resolved: false })
+    finish?.()
+    await priming
+    expect(mod.resolvedShellPath()).toEqual({
+      path: '/opt/homebrew/bin:/usr/bin',
+      resolved: true
+    })
+  })
+
   it('does not hand the desktop credential to the login shell', async () => {
     process.env.SECRET_VORN_BOOTSTRAP_TOKEN = 'owner-token'
     mockExecFile.mockImplementation((_bin, _args, _opts, cb) => cb(null, 'PATH=/x\n'))
