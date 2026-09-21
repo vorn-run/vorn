@@ -43,6 +43,20 @@ vi.mock('node:child_process', () => ({
       cb(new Error(`${cmd} failed`), null)
       return
     }
+    if (cmd === 'xcrun') {
+      // `simctl` knows where each device type really lives. The identifier
+      // cannot be turned back into that path: it drops the punctuation, so
+      // `iPad Air 11-inch (M4)` comes back as `iPad-Air-11-inch-M4`.
+      cb(null, {
+        stdout: JSON.stringify({
+          devicetypes: [
+            { identifier: TYPE, bundlePath: BUNDLE_PATH },
+            { identifier: IPAD_TYPE, bundlePath: IPAD_BUNDLE_PATH }
+          ]
+        })
+      })
+      return
+    }
     if (cmd === 'plutil') {
       cb(null, { stdout: 'com.apple.dt.devicekit.chrome.phone11\n' })
       return
@@ -65,10 +79,16 @@ vi.mock('../src/main/logger', () => ({
 
 const { chromeFor, resetChromeCache } = await import('../src/main/device-chrome')
 
-const PROFILE =
-  '/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 18 Pro.simdevicetype/Contents/Resources/profile.plist'
+const BUNDLE_PATH =
+  '/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 18 Pro.simdevicetype'
+const PROFILE = `${BUNDLE_PATH}/Contents/Resources/profile.plist`
 const BUNDLE = '/Library/Developer/DeviceKit/Chrome/phone11.devicechrome/Contents/Resources'
 const TYPE = 'com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro'
+/** A name the identifier cannot be turned back into, which is the point. */
+const IPAD_BUNDLE_PATH =
+  '/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPad Air 11-inch (M4).simdevicetype'
+const IPAD_PROFILE = `${IPAD_BUNDLE_PATH}/Contents/Resources/profile.plist`
+const IPAD_TYPE = 'com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4'
 
 /** The real shape of a chrome manifest, trimmed to what is read. */
 const MANIFEST = JSON.stringify({
@@ -141,6 +161,16 @@ describe('finding the faceplate', () => {
       expect.objectContaining({ name: 'action', side: 'left', out: 8, top: 160 }),
       expect.objectContaining({ name: 'power', side: 'right', out: 8, top: 262 })
     ])
+  })
+
+  it('finds a device whose name the identifier cannot spell', async () => {
+    // `iPad-Air-11-inch-M4` rebuilt as a directory name gives
+    // "iPad Air 11 inch M4", which does not exist — so every iPad used to come
+    // back with no artwork at all, looking exactly like a device Apple ships
+    // no body for.
+    installBundle()
+    files.set(IPAD_PROFILE, 'binary plist')
+    expect((await chromeFor(IPAD_TYPE, '/data'))?.id).toBe('phone11')
   })
 
   it('renders each piece once, then remembers it', async () => {

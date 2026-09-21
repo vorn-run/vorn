@@ -1121,7 +1121,15 @@ export async function interact(params: {
     0
   )
   await callStreaming(entry.companion.client, 'hid', events, CALL_TIMEOUT_MS + heldSeconds * 1000)
-  if (params.action === 'rotate' && params.orientation) entry.orientation = params.orientation
+  if (params.action === 'rotate' && params.orientation) {
+    entry.orientation = params.orientation
+    // The screen has just changed shape for any app that follows the device,
+    // and the cached size is what every later screenshot divides by. Left
+    // stale it reports a 402x874 screen for an 874x402 one: the scale comes
+    // back more than twice too large, half the screen is refused as "outside
+    // the screen", and the pane turns a picture that had already turned.
+    entry.screenPoints = null
+  }
   // Refs describe a screen that this input may have just replaced.
   entry.generation++
   entry.refs.clear()

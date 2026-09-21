@@ -495,6 +495,10 @@ describe('a press pays for its own hold', () => {
     // keeps drawing portrait pixels while the device itself is sideways, so
     // the picture alone can never tell the pane which way up it is.
     expect(entryForTests('s1')!.orientation).toBe('landscape-left')
+    // And the cached screen size goes with it: an app that follows the device
+    // is now drawing 874x402, and every screenshot divides a coordinate by a
+    // scale measured against that size.
+    expect(entryForTests('s1')!.screenPoints).toBeNull()
     // Rotating moves everything on screen, so every ref taken before it is
     // describing a layout that no longer exists.
     expect(entryForTests('s1')!.generation).toBe(before + 1)

@@ -24,15 +24,6 @@ export interface ScreenSize {
   height: number
 }
 
-/** A switch or button moulded into the frame, as fractions of the long edge. */
-export interface BezelButton {
-  side: 'left' | 'right' | 'top' | 'bottom'
-  /** Distance from the device's top edge, as a fraction of the long edge. */
-  start: number
-  /** How long the button is, as a fraction of the long edge. */
-  length: number
-}
-
 export interface Bezel {
   /** CSS pixels per device point. The zoom, in the only unit that matters. */
   scale: number
@@ -41,6 +32,15 @@ export interface Bezel {
   height: number
   /** The device's own screen, in points, whichever way the picture is shown. */
   points: ScreenSize
+  /**
+   * How far the body is turned, which is how the device is being held.
+   *
+   * The artwork is drawn portrait, so everything about it — the thicker chin,
+   * the buttons moulded into the rails — turns with this, and the thicknesses
+   * in `inset` are mapped by the same rotation. The two have to agree, or the
+   * frame reserves space on one edge and paints the body on another.
+   */
+  bodyTurn: -90 | 0 | 90 | 180
   /**
    * How far the picture is turned to match a device held sideways.
    *
@@ -57,8 +57,6 @@ export interface Bezel {
   innerRadius: number
   landscape: boolean
   isPhone: boolean
-  /** Drawn only when Apple's artwork is not available. */
-  buttons: BezelButton[]
   /** The real device body, when the machine has it. */
   chrome: DeviceChrome | null
 }
@@ -87,28 +85,6 @@ const GUTTER = 8
 
 function clamp(value: number, low: number, high: number): number {
   return Math.min(Math.max(value, low), high)
-}
-
-/**
- * Where the buttons sit, as fractions of the device's long edge.
- *
- * Taken from where they are on the hardware rather than from a screenshot, and
- * only drawn on a phone: an iPad's volume keys are on a different edge per
- * model, and a frame that puts them in the wrong place is worse than a frame
- * with none.
- */
-function buttonsFor(isPhone: boolean, landscape: boolean): BezelButton[] {
-  // Turned a quarter, the device's left edge is the one at the top.
-  const left = landscape ? 'top' : 'left'
-  const right = landscape ? 'bottom' : 'right'
-  const power: BezelButton = { side: right, start: 0.24, length: 0.09 }
-  if (!isPhone) return [power]
-  return [
-    { side: left, start: 0.14, length: 0.04 },
-    { side: left, start: 0.21, length: 0.06 },
-    { side: left, start: 0.3, length: 0.06 },
-    power
-  ]
 }
 
 /**
@@ -186,6 +162,18 @@ export function bezelFor(
     sideways && points.height > points.width ? (orientation === 'landscape-left' ? -90 : 90) : 0
   const width = turn ? points.height : points.width
   const height = turn ? points.width : points.height
+  // Which way the body is turned. Taken from the shape it has to end up in —
+  // a landscape-only app leaves the device upright while its screen is wide,
+  // and the body still has to lie on its side to hold that screen — with the
+  // direction coming from how the device is actually held when it says.
+  const bodyTurn: -90 | 0 | 90 | 180 =
+    width > height
+      ? orientation === 'landscape-right'
+        ? 90
+        : -90
+      : orientation === 'portrait-upside-down'
+        ? 180
+        : 0
   const long = Math.max(width, height)
   const short = Math.min(width, height)
   // Long over short, so a phone held sideways is still a phone.
@@ -196,13 +184,13 @@ export function bezelFor(
       ? chrome
         ? // Apple's frame is measured in the device's own points, so it grows
           // and shrinks with the screen — the fit has to solve for both at once.
-          fitScaleWithFrame({ width, height }, container, sidesOf(chrome, landscape, 1))
+          fitScaleWithFrame({ width, height }, container, sidesOf(chrome, bodyTurn, 1))
         : fitScale({ width, height }, container, bezelThickness(container, isPhone))
       : clamp(zoom, ZOOM_MIN, ZOOM_MAX)
   const drawnWidth = Math.round(width * scale)
   const drawnHeight = Math.round(height * scale)
   const inset = chrome
-    ? sidesOf(chrome, landscape, scale)
+    ? sidesOf(chrome, bodyTurn, scale)
     : evenSides(bezelThickness(container, isPhone))
   const outerRadius = chrome
     ? Math.round(chrome.cornerRadius * scale)
@@ -213,14 +201,13 @@ export function bezelFor(
     height: drawnHeight,
     points,
     turn,
+    bodyTurn,
     inset,
     outerRadius,
     // Concentric with the outer one, never negative on a small drawing.
     innerRadius: Math.max(outerRadius - Math.max(inset.left, inset.top), 2),
     landscape,
     isPhone,
-    // Apple's frame already has the buttons moulded into it.
-    buttons: chrome ? [] : buttonsFor(isPhone, landscape),
     chrome
   }
 }
@@ -231,18 +218,28 @@ function evenSides(thickness: number): Bezel['inset'] {
 }
 
 /**
- * Apple's insets, turned with the device.
+ * Apple's insets, turned exactly as far as the artwork is.
  *
- * The artwork is drawn portrait; held sideways, the body's left edge is the
- * one along the top, and the frame has to follow or the thicker chin ends up
- * on the wrong side of the screen.
+ * The body is drawn portrait and rotated into place, so every thickness moves
+ * to another edge with it: a quarter-turn anticlockwise puts the portrait top
+ * along the left, and the chin — the thicker edge on most phones — along the
+ * right. Getting this one rotation out of step with the transform applied to
+ * the artwork leaves the frame reserving space on one edge while painting the
+ * body on another.
  */
-function sidesOf(chrome: DeviceChrome, landscape: boolean, scale: number): Bezel['inset'] {
+function sidesOf(chrome: DeviceChrome, bodyTurn: number, scale: number): Bezel['inset'] {
   const at = (value: number): number => Math.max(Math.round(value * scale), 1)
   const { left, right, top, bottom } = chrome.inset
-  return landscape
-    ? { left: at(bottom), right: at(top), top: at(left), bottom: at(right) }
-    : { left: at(left), right: at(right), top: at(top), bottom: at(bottom) }
+  if (bodyTurn === -90) {
+    return { left: at(top), top: at(right), right: at(bottom), bottom: at(left) }
+  }
+  if (bodyTurn === 90) {
+    return { left: at(bottom), top: at(left), right: at(top), bottom: at(right) }
+  }
+  if (bodyTurn === 180) {
+    return { left: at(right), top: at(bottom), right: at(left), bottom: at(top) }
+  }
+  return { left: at(left), right: at(right), top: at(top), bottom: at(bottom) }
 }
 
 /**

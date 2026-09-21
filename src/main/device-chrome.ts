@@ -30,7 +30,6 @@ const exec = promisify(execFile)
  * itself. A missing faceplate must never cost anyone their device pane.
  */
 
-const DEVICE_TYPES = '/Library/Developer/CoreSimulator/Profiles/DeviceTypes'
 const CHROME_BUNDLES = '/Library/Developer/DeviceKit/Chrome'
 
 /** The bits of `chrome.json` this uses. The file carries a good deal more. */
@@ -60,19 +59,40 @@ interface ChromeManifest {
 const cache = new Map<string, DeviceChrome | null>()
 
 /**
+ * Where CoreSimulator keeps this device type's profile.
+ *
+ * Asked for rather than rebuilt from the identifier. The identifier spells a
+ * name with hyphens and drops its punctuation — `iPad Air 11-inch (M4)`
+ * becomes `iPad-Air-11-inch-M4` — so reconstructing a directory name from it
+ * finds every iPhone and no iPad, which looks exactly like an iPad having no
+ * artwork. `simctl` knows the real path.
+ */
+async function profileFor(deviceTypeIdentifier: string): Promise<string | null> {
+  try {
+    const { stdout } = await exec('xcrun', ['simctl', 'list', 'devicetypes', '-j'])
+    const parsed = JSON.parse(stdout) as {
+      devicetypes?: Array<{ identifier?: string; bundlePath?: string }>
+    }
+    const bundle = parsed.devicetypes?.find(
+      (t) => t.identifier === deviceTypeIdentifier
+    )?.bundlePath
+    if (!bundle) return null
+    const profile = path.join(bundle, 'Contents/Resources/profile.plist')
+    return fs.existsSync(profile) ? profile : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * The chrome bundle a device type asks for.
  *
  * `profile.plist` is binary, so it is read through `plutil` rather than parsed
  * here — the same tool CoreSimulator ships with.
  */
 async function chromeIdFor(deviceTypeIdentifier: string): Promise<string | null> {
-  // `com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro` → `iPhone 18 Pro`,
-  // which is the directory name. Hyphens are how the identifier spells the
-  // spaces, and nothing else in the name is transformed.
-  const leaf = deviceTypeIdentifier.split('.').pop() ?? ''
-  const dir = path.join(DEVICE_TYPES, `${leaf.replace(/-/g, ' ')}.simdevicetype`)
-  const profile = path.join(dir, 'Contents/Resources/profile.plist')
-  if (!fs.existsSync(profile)) return null
+  const profile = await profileFor(deviceTypeIdentifier)
+  if (!profile) return null
   try {
     const { stdout } = await exec('plutil', ['-extract', 'chromeIdentifier', 'raw', profile])
     // `com.apple.dt.devicekit.chrome.phone11` → `phone11`.

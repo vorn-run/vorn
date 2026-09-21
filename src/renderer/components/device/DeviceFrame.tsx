@@ -52,11 +52,13 @@ function DeviceBody({ bezel }: { bezel: Bezel }): React.ReactElement | null {
   const chrome = bezel.chrome
   if (!chrome) return null
   const at = (points: number): number => points * bezel.scale
-  // The body is laid out portrait, then turned with the device.
+  // The body is laid out portrait, then turned with the device. A quarter-turn
+  // swaps the box it occupies; a half-turn does not.
   const outerWidth = bezel.width + bezel.inset.left + bezel.inset.right
   const outerHeight = bezel.height + bezel.inset.top + bezel.inset.bottom
-  const width = bezel.landscape ? outerHeight : outerWidth
-  const height = bezel.landscape ? outerWidth : outerHeight
+  const quarter = bezel.bodyTurn === 90 || bezel.bodyTurn === -90
+  const width = quarter ? outerHeight : outerWidth
+  const height = quarter ? outerWidth : outerHeight
   const i = chrome.images
   const corner = { width: at(i.topLeft.width), height: at(i.topLeft.height) }
   const piece = (url: string, style: React.CSSProperties): React.ReactElement => (
@@ -80,7 +82,7 @@ function DeviceBody({ bezel }: { bezel: Bezel }): React.ReactElement | null {
         height,
         left: (outerWidth - width) / 2,
         top: (outerHeight - height) / 2,
-        transform: bezel.landscape ? 'rotate(-90deg)' : undefined
+        transform: bezel.bodyTurn ? `rotate(${bezel.bodyTurn}deg)` : undefined
       }}
     >
       {chrome.buttons.map((b, n) => (
@@ -202,25 +204,6 @@ export function DeviceFrame({
             }}
           >
             <DeviceBody bezel={bezel} />
-            {bezel.buttons.map((b, i) => {
-              const along = bezel.landscape ? bezel.width : bezel.height
-              const size = Math.max(Math.round(along * b.length), 6)
-              const offset = Math.round(along * b.start) + bezel.inset.top
-              const vertical = b.side === 'left' || b.side === 'right'
-              return (
-                <span
-                  key={i}
-                  aria-hidden
-                  className="absolute bg-white/[0.12] rounded-sm"
-                  style={{
-                    [b.side]: -2,
-                    [vertical ? 'top' : 'left']: offset,
-                    [vertical ? 'width' : 'height']: 2,
-                    [vertical ? 'height' : 'width']: size
-                  }}
-                />
-              )
-            })}
             <div
               className={`relative overflow-hidden ${typing ? 'ring-1 ring-sky-400/40' : ''}`}
               style={{

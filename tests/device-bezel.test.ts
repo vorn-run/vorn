@@ -75,20 +75,6 @@ describe('the frame', () => {
     expect(bezelFor(IPAD, { width: 900, height: 900 }, 'fit').isPhone).toBe(false)
   })
 
-  it('draws only the buttons it can honestly place', () => {
-    // An iPad's volume keys move from model to model, so the frame claims only
-    // the one button every tablet has.
-    expect(bezelFor(IPAD, { width: 900, height: 900 }, 'fit').buttons).toHaveLength(1)
-    expect(bezelFor(IPHONE, { width: 500, height: 900 }, 'fit').buttons.length).toBeGreaterThan(1)
-  })
-
-  it('puts the buttons on the edges that are long, whichever way up it is', () => {
-    const portrait = bezelFor(IPHONE, { width: 500, height: 900 }, 'fit')
-    expect(portrait.buttons.every((b) => b.side === 'left' || b.side === 'right')).toBe(true)
-    const landscape = bezelFor({ width: 874, height: 402 }, { width: 900, height: 500 }, 'fit')
-    expect(landscape.buttons.every((b) => b.side === 'top' || b.side === 'bottom')).toBe(true)
-  })
-
   it('stays drawable in a pane barely bigger than nothing', () => {
     const bezel = bezelFor(IPHONE, { width: 40, height: 40 }, 'fit')
     expect(bezel.inset.left).toBeGreaterThanOrEqual(6)
@@ -156,9 +142,6 @@ describe("Apple's own faceplate, when the machine has it", () => {
     const bezel = bezelFor(IPHONE, { width: 900, height: 1600 }, 1, CHROME)
     expect(bezel.inset).toEqual({ left: 18, right: 18, top: 18, bottom: 22 })
     expect(bezel.outerRadius).toBe(80)
-    // Apple's frame has the buttons moulded into the artwork, so drawing our
-    // own on top of it would double them.
-    expect(bezel.buttons).toEqual([])
   })
 
   it('grows the body with the device, the way Simulator does', () => {
@@ -176,12 +159,29 @@ describe("Apple's own faceplate, when the machine has it", () => {
     )
   })
 
-  it('turns the body with the device, so the chin stays at the chin', () => {
-    const landscape = bezelFor({ width: 874, height: 402 }, { width: 1200, height: 700 }, 1, CHROME)
-    // Held a quarter-turn left, the bottom edge of the device is the one on the
-    // left of the pane.
-    expect(landscape.inset.left).toBe(22)
-    expect(landscape.inset.bottom).toBe(18)
+  it('turns the thicknesses exactly as far as the artwork turns', () => {
+    // The body is drawn portrait and rotated into place, so each thickness
+    // moves with it. A quarter-turn anticlockwise puts the portrait top along
+    // the left and the chin — the thicker edge — along the right. If this and
+    // the transform on the artwork disagree, the frame reserves space on one
+    // edge and paints the body on another.
+    const left = bezelFor({ width: 874, height: 402 }, { width: 1200, height: 700 }, 1, CHROME)
+    expect(left.bodyTurn).toBe(-90)
+    expect(left.inset).toEqual({ left: 18, top: 18, right: 22, bottom: 18 })
+
+    const right = bezelFor(
+      { width: 874, height: 402 },
+      { width: 1200, height: 700 },
+      1,
+      CHROME,
+      'landscape-right'
+    )
+    expect(right.bodyTurn).toBe(90)
+    expect(right.inset).toEqual({ left: 22, top: 18, right: 18, bottom: 18 })
+  })
+
+  it('leaves the body upright for a device that is', () => {
+    expect(bezelFor(IPHONE, { width: 900, height: 1600 }, 1, CHROME).bodyTurn).toBe(0)
   })
 })
 
