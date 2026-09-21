@@ -950,6 +950,10 @@ export function createApiShim(wsUrl: string) {
     deviceClaim: unsupportedInWeb('Claiming a device'),
     deviceRelease: async () => ({ released: false }),
     deviceScreenshot: unsupportedInWeb('Taking a device screenshot'),
+    // Null rather than a refusal: the faceplate is Apple artwork read from a
+    // local Xcode, which a browser has no way to reach, and a pane without one
+    // simply draws its own frame.
+    deviceChrome: async () => null,
     deviceInteract: unsupportedInWeb('Interacting with a device'),
     pickDeviceElement: unsupportedInWeb('Picking a device element'),
     annotateDevice: unsupportedInWeb('Annotating the device pane')

@@ -1948,6 +1948,7 @@ export const IPC = {
   DEVICE_SCREENSHOT: 'device:screenshot',
   DEVICE_INTERACT: 'device:interact',
   DEVICE_LIST: 'device:list',
+  DEVICE_CHROME: 'device:chrome',
   DEVICE_CLAIM: 'device:claim',
   DEVICE_RELEASE: 'device:release',
   /**
@@ -2936,6 +2937,78 @@ export interface DevicePoint {
   x: number
   y: number
 }
+
+/**
+ * The body Apple draws around this kind of device.
+ *
+ * Read at runtime from the machine's own Xcode (`DeviceKit`'s chrome bundles,
+ * the artwork Simulator and Device Hub use), never shipped with Vorn. Null
+ * wherever that is not available, and the pane draws a plain frame instead.
+ */
+export interface DeviceChromePiece {
+  /** PNG data URL. */
+  url: string
+  /** The artwork's own size, in device points. Corners are drawn at it; edges
+   *  keep this thickness and stretch along the side they run down. */
+  width: number
+  height: number
+}
+
+/** A hardware button moulded into the body, drawn where Apple places it. */
+export interface DeviceChromeButton {
+  name: string
+  url: string
+  width: number
+  height: number
+  /** Which edge of the body it sits on. */
+  side: 'left' | 'right' | 'top' | 'bottom'
+  /** How far it stands out from that edge, in points. */
+  out: number
+  /** How far along that edge it sits, from the body's top or left, in points. */
+  along: number
+}
+
+export interface DeviceChrome {
+  /** The chrome bundle's short name, e.g. `phone11`. */
+  id: string
+  /** How far the screen sits inside the body, in device points. */
+  inset: { left: number; right: number; top: number; bottom: number }
+  /** The body's outer corner radius, in device points. */
+  cornerRadius: number
+  /**
+   * The whole body in one picture, when the bundle has one.
+   *
+   * Preferred over the pieces wherever it exists, because some bundles ship
+   * the composite as the real artwork and fill the nine slices with a red
+   * "unused" placeholder — drawing those puts a red slab around the device.
+   * A composite is drawn for one device, so it fits its own body exactly.
+   */
+  composite: DeviceChromePiece | null
+  /** The nine-slice pieces, for a bundle with no composite. */
+  images: {
+    topLeft: DeviceChromePiece
+    top: DeviceChromePiece
+    topRight: DeviceChromePiece
+    right: DeviceChromePiece
+    bottomRight: DeviceChromePiece
+    bottom: DeviceChromePiece
+    bottomLeft: DeviceChromePiece
+    left: DeviceChromePiece
+  } | null
+  buttons: DeviceChromeButton[]
+}
+
+/**
+ * Which way up the device is held.
+ *
+ * Spelled in lower case here and mapped to the companion's enum in main, so
+ * nothing outside `device-registry.ts` has to know idb's spelling.
+ */
+export type DeviceOrientation =
+  | 'portrait'
+  | 'portrait-upside-down'
+  | 'landscape-left'
+  | 'landscape-right'
 
 /**
  * One element of a screen as the agent sees it.

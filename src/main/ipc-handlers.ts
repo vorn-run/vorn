@@ -17,6 +17,7 @@ import { cliShimStatus, installCliShim } from './cli-shim'
 import { setFileRoot, allowsFileUrl } from './browser-file-scope'
 import { watchArtifact, stopWatching } from './artifact-watcher'
 import * as deviceRegistry from './device-registry'
+import * as deviceChrome from './device-chrome'
 import { registerCredentialHandlers, enrichPayloadWithCredentials } from './credential-handlers'
 import log from './logger'
 
@@ -64,6 +65,11 @@ function registerInboundHandlers(b: ServerBridge): void {
   b.handle('device:readScreen', (p) => deviceRegistry.readScreen(p as P<'device:readScreen'>))
   b.handle('device:find', (p) => deviceRegistry.findElements(p as P<'device:find'>))
   b.handle('device:interact', (p) => deviceRegistry.interact(p as P<'device:interact'>))
+  b.handle('device:chrome', async (p) => {
+    const { udid } = p as P<'device:chrome'>
+    const type = await deviceRegistry.deviceTypeFor(udid)
+    return type ? deviceChrome.chromeFor(type, app.getPath('userData')) : null
+  })
   b.handle('device:screenshot', (p) => deviceRegistry.screenshot(p as P<'device:screenshot'>))
   b.handle('device:launch', (p) => deviceRegistry.launch(p as P<'device:launch'>))
   b.handle('device:terminate', (p) => deviceRegistry.terminate(p as P<'device:terminate'>))
@@ -500,17 +506,34 @@ export function registerIpcHandlers(): void {
 
   safeHandle(
     IPC.DIALOG_SAVE_TEXT_FILE,
-    async (event, params: { defaultName: string; contents: string; title?: string }) => {
+    async (
+      event,
+      params: {
+        defaultName: string
+        contents: string
+        title?: string
+        /** `base64` for a binary file — a device screenshot is the first. */
+        encoding?: 'utf8' | 'base64'
+        filters?: { name: string; extensions: string[] }[]
+      }
+    ) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       if (!win) return null
       if (typeof params?.contents !== 'string') throw new Error('Nothing to save')
       const result = await dialog.showSaveDialog(win, {
         defaultPath: params.defaultName,
         title: params.title ?? 'Save file',
-        filters: [{ name: 'JSON', extensions: ['json'] }]
+        // The caller's filters, because the dialog rewrites the extension to
+        // match them: a `.png` default name under a JSON filter is saved as
+        // `.json`, and the file the person gets back will not open.
+        filters: params.filters ?? [{ name: 'JSON', extensions: ['json'] }]
       })
       if (result.canceled || !result.filePath) return null
-      await writeFile(result.filePath, params.contents, 'utf8')
+      await writeFile(
+        result.filePath,
+        params.encoding === 'base64' ? Buffer.from(params.contents, 'base64') : params.contents,
+        params.encoding === 'base64' ? undefined : 'utf8'
+      )
       return result.filePath
     }
   )
@@ -613,6 +636,13 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.DEVICE_SCREENSHOT, (_, params) => deviceRegistry.screenshot(params))
   safeHandle(IPC.DEVICE_INTERACT, (_, params) => deviceRegistry.interact(params))
   safeHandle(IPC.DEVICE_LIST, () => deviceRegistry.listDevices())
+  // The pane's faceplate. Answers null rather than throwing wherever the
+  // machine has no artwork for this device, because a frame is cosmetic and a
+  // device pane that fails over one would not be.
+  safeHandle(IPC.DEVICE_CHROME, async (_, params: { udid: string }) => {
+    const type = await deviceRegistry.deviceTypeFor(params.udid)
+    return type ? deviceChrome.chromeFor(type, app.getPath('userData')) : null
+  })
   safeHandle(IPC.DEVICE_CLAIM, (_, params) => deviceRegistry.claim(params))
   safeHandle(IPC.DEVICE_RELEASE, (_, params) => deviceRegistry.release(params))
   // Both are read-only by design: pointing at or drawing on the screen must

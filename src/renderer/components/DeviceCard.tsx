@@ -1,12 +1,26 @@
-import { memo, forwardRef, useState, useRef, useEffect, useCallback } from 'react'
+import { memo, forwardRef, useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { MousePointerClick, Pencil, Smartphone, X } from 'lucide-react'
+import { ChevronDown, Loader2, MousePointerClick, Pencil, Smartphone, X } from 'lucide-react'
 import { useAppStore } from '../stores'
 import { PaneCard, PaneControls } from './PaneCard'
-import { PANE_SURFACE } from '../lib/pane-surface'
+import { DeviceFrame } from './device/DeviceFrame'
+import { DeviceControlBar } from './device/DeviceControlBar'
+import { DevicePicker } from './DevicePicker'
+import { Tooltip } from './Tooltip'
+import { toast } from './Toast'
 import { ICON_BUTTON } from '../lib/icon-button'
 import { devicePaneId } from '../lib/pane-id'
 import { flattenPageText } from '../lib/browser-url'
+import { useDeviceFrame } from '../hooks/useDeviceFrame'
+import {
+  bezelFor,
+  screenPointFor,
+  steppedZoom,
+  PANE_MAX_EDGE,
+  ZOOM_MAX,
+  ZOOM_MIN
+} from '../lib/device-bezel'
+import type { DeviceChrome, DeviceOrientation } from '../../shared/types'
 
 interface Props {
   /** Session that owns this device pane. */
@@ -16,24 +30,24 @@ interface Props {
   flexible?: boolean
 }
 
-/** How often a visible pane asks main for a fresh still. */
-const POLL_MS = 500
-
 /**
- * True when `visibility: hidden` is in force on `el` or anything above it.
+ * How long typed characters are collected before they are sent.
  *
- * The one hidden-ness an IntersectionObserver structurally cannot report: the
- * element keeps its box and keeps intersecting, so the observer calls it on
- * screen. Walking ancestors because `visibility` inherits — the hide is applied
- * to the pane wrapper, not to the element being polled. Deliberately not
- * `checkVisibility()`/`offsetParent`, both of which need layout that jsdom
- * never performs, and would report every pane hidden under test.
+ * Every `type` ends by bumping the device's generation and clearing every ref
+ * the session's agent holds, so a call per keystroke invalidates the agent's
+ * view of the screen five times a second while somebody types a sentence.
+ * Below the 500ms poll, so the character still appears on the next frame: the
+ * wait is invisible, the saving is not.
  */
-function isCssHidden(el: HTMLElement): boolean {
-  for (let node: HTMLElement | null = el; node; node = node.parentElement) {
-    if (getComputedStyle(node).visibility === 'hidden') return true
-  }
-  return false
+const TYPE_FLUSH_MS = 80
+/** Never hold more than this before sending, however fast the typing is. */
+const TYPE_FLUSH_CHARS = 16
+
+/** A filename that sorts, and that says which device it came from. */
+function screenshotName(name: string): string {
+  const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '-')
+  const slug = name.replace(/[^\w.-]+/g, '-').replace(/^-|-$/g, '')
+  return `${slug || 'device'} ${stamp}.png`
 }
 
 /**
@@ -46,129 +60,77 @@ function isCssHidden(el: HTMLElement): boolean {
  * agent's refs are stamped against, instead of moving the screen invisibly
  * underneath them.
  *
- * Polling is expensive (a full-device PNG per frame before downscaling), so it
- * runs only while the pane is actually on screen: an observer covers unmount,
- * scroll and background-tab, and a per-tick visibility check covers the case an
- * observer structurally cannot see — a sibling maximized over a pane that is
- * still full-size and intersecting, just `visibility: hidden`.
+ * This file keeps everything that talks to main, plus the arithmetic that turns
+ * a click into a point. The picture and its frame (`DeviceFrame`), the buttons
+ * (`DeviceControlBar`) and the polling (`useDeviceFrame`) are separate because
+ * they are separable; the click-to-point conversion is not, and splitting it
+ * from the refs it reads would scatter the most safety-critical arithmetic in
+ * the pane across two files.
  */
 export const DeviceCard = memo(
   forwardRef<HTMLDivElement, Props>(function DeviceCard(
     { sessionId, isDragTarget, onDragStart, flexible },
     ref
   ) {
-    const { pane, closeDevicePane } = useAppStore(
+    const { pane, closeDevicePane, claimAndOpenDevicePane } = useAppStore(
       useShallow((s) => ({
         pane: s.devicePanes.get(sessionId) ?? null,
-        closeDevicePane: s.closeDevicePane
+        closeDevicePane: s.closeDevicePane,
+        claimAndOpenDevicePane: s.claimAndOpenDevicePane
       }))
     )
 
-    const containerRef = useRef<HTMLDivElement | null>(null)
     const imgRef = useRef<HTMLImageElement | null>(null)
-    const [frame, setFrame] = useState<string | null>(null)
-    const [screen, setScreen] = useState<{ width: number; height: number } | null>(null)
-    const [error, setError] = useState<string | null>(null)
-    // The error message the person has already waved away. Compared by text so
-    // a new, different failure still surfaces.
-    const [dismissed, setDismissed] = useState<string | null>(null)
-    const [visible, setVisible] = useState(false)
-    // Remembered separately from `visible` because the two answers can differ:
-    // backgrounding the window must stop polling without making the observer
-    // forget that the pane is still on screen, or nothing would ever restart it.
-    const onScreenRef = useRef(false)
+    const [zoom, setZoom] = useState<number | 'fit'>('fit')
+    // Read by the poll, which must not restart every time the zoom changes.
+    const scaleRef = useRef(1)
 
-    // `PaneColumn` hides a non-maximized sibling with `invisible` rather than
-    // unmounting it, so React never tells us the pane went away. An observer on
-    // the real element is the only signal that survives that — and it also
-    // covers a pane scrolled out of a tall column.
-    useEffect(() => {
-      const el = containerRef.current
-      if (!el || typeof IntersectionObserver === 'undefined') {
-        onScreenRef.current = true
-        setVisible(true)
-        return
-      }
-      const io = new IntersectionObserver((entries) => {
-        const onScreen = entries.some((e) => e.isIntersecting)
-        onScreenRef.current = onScreen
-        setVisible(onScreen && document.visibilityState !== 'hidden')
-      })
-      io.observe(el)
-      return () => io.disconnect()
-    }, [])
+    const {
+      containerRef,
+      frame,
+      screen,
+      orientation,
+      box,
+      error,
+      dismissed,
+      dismiss,
+      reportError
+    } = useDeviceFrame({ sessionId, udid: pane?.udid ?? null, scaleRef })
 
+    // The device's own body, borrowed from the machine's Xcode. Null on a
+    // machine without it, and then the pane draws a plain frame — asked for
+    // once per device, and never waited on: the pane is useful without it.
+    const [chrome, setChrome] = useState<DeviceChrome | null>(null)
     useEffect(() => {
-      const onVis = (): void => {
-        // Only ever forcing this false leaves polling dead after the app is
-        // backgrounded once: the IntersectionObserver has nothing new to
-        // report, so nothing else would ever set it back.
-        if (document.visibilityState === 'hidden') setVisible(false)
-        else setVisible(onScreenRef.current)
-      }
-      document.addEventListener('visibilitychange', onVis)
-      return () => document.removeEventListener('visibilitychange', onVis)
-    }, [])
-
-    useEffect(() => {
-      if (!pane || !visible) return
+      const udid = pane?.udid
+      if (!udid) return
       let cancelled = false
-      let timer: ReturnType<typeof setTimeout> | undefined
-
-      // Chained timeouts, not an interval: a slow device must not queue frames
-      // it will never render, which is how a laggy simulator turns into an
-      // unbounded backlog of screenshot RPCs.
-      const tick = async (): Promise<void> => {
-        try {
-          const el = containerRef.current
-          // An IntersectionObserver cannot see this. Both hide paths render the
-          // pane `invisible` — CSS `visibility: hidden` — which keeps the
-          // element full-size and intersecting, so the observer happily reports
-          // it on screen while a maximized sibling covers it completely. Left to
-          // that signal alone, a hidden pane keeps pulling a full-device PNG
-          // twice a second: fan spin and battery drain with no visible cause.
-          // Rescheduling rather than returning matters — bailing outright would
-          // kill the loop for good, since un-hiding fires no event either.
-          if (el && isCssHidden(el)) {
-            if (!cancelled) timer = setTimeout(() => void tick(), POLL_MS)
-            return
-          }
-          const box = el?.getBoundingClientRect()
-          // The real ratio, not a hard-coded 2: on a non-retina display that
-          // constant fetches four times the pixels the pane can show, and on a
-          // 3× display it under-fetches and shows a soft image. Main clamps
-          // whatever this asks for, so a dragged-large window cannot turn the
-          // 2fps poll into a multi-megabyte one.
-          const dpr = window.devicePixelRatio || 1
-          const maxEdge = box ? Math.ceil(Math.max(box.width, box.height) * dpr) : undefined
-          const shot = await window.api.deviceScreenshot(sessionId, maxEdge)
-          if (cancelled) return
-          setFrame(shot.data)
-          setScreen(shot.screen)
-          setError(null)
-          // Forget what was waved away, too. Dismissal silences one message
-          // while it keeps recurring; a frame that arrives means the condition
-          // behind it cleared, so the next occurrence is new news. Left set,
-          // the dismissal outlived its cause and the pane would go silent
-          // forever about the one failure the person had already seen once —
-          // which is exactly the failure most likely to come back.
-          setDismissed(null)
-        } catch (err) {
-          if (cancelled) return
-          setError(err instanceof Error ? err.message : String(err))
-        }
-        if (!cancelled) timer = setTimeout(() => void tick(), POLL_MS)
-      }
-      void tick()
-
+      setChrome(null)
+      void window.api
+        .deviceChrome?.(udid)
+        .then((found) => !cancelled && setChrome(found))
+        .catch(() => {})
       return () => {
         cancelled = true
-        if (timer) clearTimeout(timer)
       }
-    }, [sessionId, pane, visible])
+    }, [pane?.udid])
+
+    const bezel = useMemo(
+      () => (screen ? bezelFor(screen, box, zoom, chrome, orientation) : null),
+      [screen, box, zoom, chrome, orientation]
+    )
+    useEffect(() => {
+      if (bezel) scaleRef.current = bezel.scale
+    }, [bezel])
 
     const [picking, setPicking] = useState(false)
     const [annotating, setAnnotating] = useState(false)
+    const [typing, setTyping] = useState(false)
+    const [saving, setSaving] = useState(false)
+    const [rotating, setRotating] = useState(false)
+    const [switching, setSwitching] = useState(false)
+    const [pickerOpen, setPickerOpen] = useState(false)
+    const nameRef = useRef<HTMLButtonElement | null>(null)
     const strokesRef = useRef<Array<{ points: Array<{ x: number; y: number }> }>>([])
     const inkRef = useRef<HTMLCanvasElement | null>(null)
     const drawingRef = useRef(false)
@@ -176,25 +138,21 @@ export const DeviceCard = memo(
     /**
      * Client coordinates → device **points**.
      *
-     * The still is letterboxed (`object-contain`), so the mapping goes through
-     * the drawn box, not the element box, and lands in points rather than image
-     * pixels. Handing main a pixel coordinate would put the touch at a third of
-     * the intended position on a 3× screen — the silent mis-tap this whole
-     * surface is shaped to avoid. Null means outside the screen.
+     * The arithmetic itself lives in `device-bezel.ts`, where it is tested at
+     * every zoom and both orientations: it is the one thing in this pane that
+     * fails silently, since a mis-mapped tap looks exactly like a tap that
+     * worked. The rect read here is the drawn screen — for a quarter-turn the
+     * element's bounding box is the turned box, which is what the mapping
+     * expects. Null means outside the screen.
      */
     const toPoints = useCallback(
       (clientX: number, clientY: number): { x: number; y: number } | null => {
         const img = imgRef.current
-        if (!img || !screen || screen.width <= 0 || screen.height <= 0) return null
+        if (!img || !bezel) return null
         const box = img.getBoundingClientRect()
-        const drawn = Math.min(box.width / screen.width, box.height / screen.height)
-        if (!(drawn > 0)) return null
-        const x = (clientX - box.left - (box.width - screen.width * drawn) / 2) / drawn
-        const y = (clientY - box.top - (box.height - screen.height * drawn) / 2) / drawn
-        if (x < 0 || y < 0 || x > screen.width || y > screen.height) return null
-        return { x, y }
+        return screenPointFor(clientX - box.left, clientY - box.top, bezel, box)
       },
-      [screen]
+      [bezel]
     )
 
     /**
@@ -235,10 +193,10 @@ export const DeviceCard = memo(
           ].filter(Boolean)
           window.api.writeTerminal(sessionId, lines.join('\n') + '\n')
         } catch (err) {
-          setError(err instanceof Error ? err.message : String(err))
+          reportError(err)
         }
       },
-      [picking, sessionId, toPoints]
+      [picking, sessionId, toPoints, reportError]
     )
 
     /**
@@ -272,9 +230,9 @@ export const DeviceCard = memo(
           ].join('\n') + '\n'
         )
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        reportError(err)
       }
-    }, [sessionId])
+    }, [sessionId, reportError])
 
     /** Draw locally, and record the stroke in device points so main can resolve
      *  it against the tree rather than against this pane's pixel size. */
@@ -305,9 +263,201 @@ export const DeviceCard = memo(
       [toPoints]
     )
 
+    // ---------------------------------------------------------------------
+    // The control bar
+    // ---------------------------------------------------------------------
+
+    /**
+     * One-shot failures go to a toast, not to the pane's error bar.
+     *
+     * The bar is cleared by every frame that arrives, so a failed Home press
+     * would show for at most half a second and then vanish — which is how a
+     * control comes to look like it did nothing at all.
+     */
+    const say = useCallback((err: unknown) => {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }, [])
+
+    const pressButton = useCallback(
+      async (name: 'HOME' | 'LOCK') => {
+        try {
+          await window.api.deviceInteract({ sessionId, action: 'button', text: name })
+        } catch (err) {
+          say(err)
+        }
+      },
+      [sessionId, say]
+    )
+
+    const rotate = useCallback(async () => {
+      // Turning it back is the other half of the button: a device left sideways
+      // with no way back would be a trap. Which way to turn comes from the
+      // orientation the device reports, never from the shape of the picture —
+      // an app that does not rotate keeps sending portrait pixels however the
+      // device is held, so a button reading those would send "landscape" for
+      // ever and appear to work exactly once.
+      const next: DeviceOrientation = orientation === 'portrait' ? 'landscape-left' : 'portrait'
+      setRotating(true)
+      try {
+        await window.api.deviceInteract({ sessionId, action: 'rotate', orientation: next })
+      } catch (err) {
+        say(err)
+      } finally {
+        setRotating(false)
+      }
+    }, [orientation, sessionId, say])
+
+    const saveScreenshot = useCallback(async () => {
+      if (!pane) return
+      setSaving(true)
+      try {
+        // A fresh capture, not the frame on screen: that one is downscaled to
+        // whatever the pane happens to be showing, which at a zoomed-out pane
+        // is a fraction of the device's real resolution.
+        const shot = await window.api.deviceScreenshot(sessionId, PANE_MAX_EDGE)
+        const saved = await window.api.saveTextFile?.({
+          defaultName: screenshotName(pane.name),
+          contents: shot.data,
+          encoding: 'base64',
+          filters: [{ name: 'PNG image', extensions: ['png'] }],
+          title: 'Save device screenshot'
+        })
+        if (saved) toast.success('Screenshot saved')
+      } catch (err) {
+        say(err)
+      } finally {
+        setSaving(false)
+      }
+    }, [pane, sessionId, say])
+
+    // ---------------------------------------------------------------------
+    // Typing
+    // ---------------------------------------------------------------------
+
+    const bufferRef = useRef('')
+    const flushTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+    // Typed text is only text if it arrives in order, so the calls are chained
+    // rather than raced.
+    const chainRef = useRef<Promise<void>>(Promise.resolve())
+
+    const flushTyping = useCallback(() => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = undefined
+      const text = bufferRef.current
+      bufferRef.current = ''
+      if (!text) return
+      chainRef.current = chainRef.current.then(
+        () => window.api.deviceInteract({ sessionId, action: 'type', text }).then(() => {}),
+        () => {}
+      )
+      chainRef.current = chainRef.current.catch((err: unknown) => {
+        // Drop whatever is still queued. Retrying after a partly applied type
+        // is how "hello" becomes "helhello".
+        bufferRef.current = ''
+        say(err)
+      })
+    }, [sessionId, say])
+
+    const stopTyping = useCallback(() => {
+      flushTyping()
+      setTyping(false)
+    }, [flushTyping])
+
+    const enqueue = useCallback(
+      (text: string) => {
+        bufferRef.current += text
+        if (bufferRef.current.length >= TYPE_FLUSH_CHARS || text === '\n') {
+          flushTyping()
+          return
+        }
+        if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
+        flushTimerRef.current = setTimeout(flushTyping, TYPE_FLUSH_MS)
+      },
+      [flushTyping]
+    )
+
+    /**
+     * Keys go to the device only while this pane holds focus.
+     *
+     * A listener on the window would be simpler and much worse: it would keep
+     * capturing after the person clicked into the terminal, and the app's own
+     * shortcuts would be fighting it. Anything held with a modifier is passed
+     * through untouched for the same reason.
+     */
+    const onStageKeyDown = useCallback(
+      (e: React.KeyboardEvent<HTMLDivElement>) => {
+        if (!typing) return
+        if (e.metaKey || e.ctrlKey || e.altKey) return
+        if (e.key === 'Tab') return
+        if (e.key === 'Escape') {
+          // Stopped here, or the app's Escape chain un-maximizes the pane the
+          // person was typing into.
+          e.preventDefault()
+          e.stopPropagation()
+          stopTyping()
+          return
+        }
+        const text =
+          e.key === 'Enter'
+            ? '\n'
+            : e.key === 'Backspace'
+              ? '\b'
+              : e.key.length === 1
+                ? e.key
+                : null
+        if (text === null) return
+        e.preventDefault()
+        enqueue(text)
+      },
+      [typing, enqueue, stopTyping]
+    )
+
+    // Tapping the device must not end typing mode — it is usually how a text
+    // field gets focused in the first place — so focus is taken back whenever
+    // the stage is clicked, and only a move out of the pane ends the mode.
+    const onStagePointerDown = useCallback(() => {
+      if (typing) containerRef.current?.focus()
+    }, [typing, containerRef])
+
+    const onStageBlur = useCallback(
+      (e: React.FocusEvent<HTMLDivElement>) => {
+        if (!typing) return
+        if (containerRef.current?.contains(e.relatedTarget as Node | null)) return
+        stopTyping()
+      },
+      [typing, containerRef, stopTyping]
+    )
+
+    const toggleTyping = useCallback(() => {
+      if (typing) {
+        stopTyping()
+        return
+      }
+      setTyping(true)
+      containerRef.current?.focus()
+    }, [typing, stopTyping, containerRef])
+
+    // A device that is no longer the one on screen must not receive the tail of
+    // what was typed at the last one, and none of the armed modes carry over to
+    // a device the person has not looked at yet. Adjusted during render for the
+    // same reason as the frame itself: after the commit is a frame too late.
+    const [shownUdid, setShownUdid] = useState(pane?.udid)
+    if (pane?.udid !== shownUdid) {
+      setShownUdid(pane?.udid)
+      bufferRef.current = ''
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
+      setTyping(false)
+      setPicking(false)
+      setAnnotating(false)
+      setZoom('fit')
+    }
+
+    useEffect(() => () => void (flushTimerRef.current && clearTimeout(flushTimerRef.current)), [])
+
     if (!pane) return null
 
     const btn = ICON_BUTTON
+    const scale = bezel?.scale ?? 1
 
     return (
       <PaneCard
@@ -326,7 +476,30 @@ export const DeviceCard = memo(
           onPointerDown={onDragStart ? (e) => onDragStart(devicePaneId(sessionId), e) : undefined}
         >
           <Smartphone size={12} strokeWidth={2} className="text-gray-500 shrink-0" />
-          <span className="text-[11px] text-gray-300 font-medium truncate">{pane.name}</span>
+          {/* The name is the switcher. Changing simulator used to mean closing
+              the pane and claiming again from the session card, which also lost
+              whatever the pane was showing. */}
+          <Tooltip label="Switch simulator">
+            <button
+              ref={nameRef}
+              type="button"
+              onClick={() => !switching && setPickerOpen((v) => !v)}
+              // Without this the click starts a pane drag: this row is the
+              // drag handle.
+              onPointerDown={(e) => e.stopPropagation()}
+              aria-haspopup="listbox"
+              aria-expanded={pickerOpen}
+              aria-label={`Switch simulator, currently ${pane.name}`}
+              className="flex items-center gap-1 min-w-0 px-1 py-0.5 rounded text-[11px] text-gray-300 font-medium hover:bg-white/[0.06] transition-colors"
+            >
+              <span className="truncate">{pane.name}</span>
+              {switching ? (
+                <Loader2 size={10} strokeWidth={2.5} className="shrink-0 animate-spin" />
+              ) : (
+                <ChevronDown size={10} strokeWidth={2.5} className="shrink-0 text-gray-500" />
+              )}
+            </button>
+          </Tooltip>
           <span className="flex-1" />
           {/* The two agent-facing tools. Both are read-only against the device:
               pointing or drawing must never move the screen, or the person
@@ -359,17 +532,32 @@ export const DeviceCard = memo(
           />
         </div>
 
+        {pickerOpen && (
+          <DevicePicker
+            sessionId={sessionId}
+            anchorRef={nameRef}
+            onClose={() => setPickerOpen(false)}
+            onSelect={(device) => {
+              setPickerOpen(false)
+              if (device.udid === pane.udid) return
+              setSwitching(true)
+              // Claiming releases whatever this session held and boots the new
+              // simulator if it is not running, so the pane simply changes what
+              // it is showing.
+              void claimAndOpenDevicePane(sessionId, device).then((failure) => {
+                setSwitching(false)
+                if (failure) toast.error(failure.message)
+              })
+            }}
+          />
+        )}
+
         {error && error !== dismissed && (
           <div className="flex items-start gap-1 px-2 py-1 text-[10px] text-amber-400/90 shrink-0">
             <span className="flex-1 min-w-0 break-words">{error}</span>
             <button
               type="button"
-              // Dismiss the message, not the state. These errors are sticky —
-              // no claim, a dropped companion — and the poll re-sets the same
-              // string every 500ms, so clearing `error` would put the identical
-              // bar back within half a second and make the control look broken.
-              // A *different* failure still gets through.
-              onClick={() => setDismissed(error)}
+              onClick={dismiss}
               aria-label="Dismiss error"
               className="shrink-0 p-0.5 rounded text-gray-500 hover:text-gray-200"
             >
@@ -378,50 +566,56 @@ export const DeviceCard = memo(
           </div>
         )}
 
-        <div
-          ref={containerRef}
-          data-testid={`device-pane-${sessionId}`}
-          className="flex-1 min-h-0 relative flex items-center justify-center"
-          style={{ background: PANE_SURFACE }}
-        >
-          {frame ? (
-            <img
-              ref={imgRef}
-              src={`data:image/png;base64,${frame}`}
-              alt={`Screen of ${pane.name}`}
-              data-testid={`device-frame-${sessionId}`}
-              onClick={(e) => void onClickFrame(e)}
-              // Dimmed once a poll fails: the frame is the last one that
-              // arrived, and rendering a dead screen at full strength makes a
-              // frozen device look live. The person taps it, every tap throws,
-              // and nothing on screen ever said the picture had stopped.
-              className={`max-w-full max-h-full object-contain select-none transition-opacity ${
-                error ? 'opacity-40' : ''
-              } ${picking ? 'cursor-crosshair' : 'cursor-pointer'}`}
-              draggable={false}
-            />
-          ) : (
-            <span className="text-[11px] text-gray-500">
-              {error ? 'No frame' : 'Waiting for the device…'}
-            </span>
-          )}
-          {/* Mounted only while armed: a permanent overlay would swallow every
-              tap meant for the device. */}
-          {annotating && (
-            <canvas
-              ref={inkRef}
-              data-testid={`device-ink-${sessionId}`}
-              onPointerDown={(e) => {
-                drawingRef.current = true
-                e.currentTarget.setPointerCapture(e.pointerId)
-                draw(e, true)
-              }}
-              onPointerMove={(e) => drawingRef.current && draw(e, false)}
-              onPointerUp={() => (drawingRef.current = false)}
-              className="absolute inset-0 w-full h-full cursor-crosshair z-10"
-            />
-          )}
-        </div>
+        <DeviceFrame
+          sessionId={sessionId}
+          name={pane.name}
+          frame={frame}
+          bezel={bezel}
+          stale={Boolean(error)}
+          picking={picking}
+          typing={typing}
+          annotating={annotating}
+          containerRef={containerRef}
+          imgRef={imgRef}
+          inkRef={inkRef}
+          emptyLabel={error ? 'No frame' : 'Waiting for the device…'}
+          onClickScreen={(e) => void onClickFrame(e)}
+          onInkDown={(e) => {
+            drawingRef.current = true
+            e.currentTarget.setPointerCapture(e.pointerId)
+            draw(e, true)
+          }}
+          onInkMove={(e) => drawingRef.current && draw(e, false)}
+          onInkUp={() => (drawingRef.current = false)}
+          onStageKeyDown={onStageKeyDown}
+          onStagePointerDown={onStagePointerDown}
+          onStageBlur={onStageBlur}
+        />
+
+        {typing && (
+          <div className="px-2 py-0.5 text-[10px] text-sky-400/90 shrink-0">
+            Typing goes to {pane.name} — Esc gives the keyboard back
+          </div>
+        )}
+
+        <DeviceControlBar
+          onHome={() => void pressButton('HOME')}
+          onLock={() => void pressButton('LOCK')}
+          onSave={() => void saveScreenshot()}
+          onRotate={() => void rotate()}
+          onToggleKeyboard={toggleTyping}
+          onZoomIn={() => setZoom(steppedZoom(scale, 1))}
+          onZoomOut={() => setZoom(steppedZoom(scale, -1))}
+          onZoomFit={() => setZoom('fit')}
+          onZoomActual={() => setZoom(1)}
+          typing={typing}
+          saving={saving}
+          rotating={rotating}
+          zoomPercent={Math.round(scale * 100)}
+          fitting={zoom === 'fit'}
+          canZoomIn={scale < ZOOM_MAX}
+          canZoomOut={scale > ZOOM_MIN}
+        />
       </PaneCard>
     )
   })

@@ -130,6 +130,17 @@ describe('untrusted app content', () => {
   })
 })
 
+describe('rotation', () => {
+  it('passes the orientation through, so an agent can turn the device too', async () => {
+    rpc.mockResolvedValue({ ok: true, generation: 4 })
+    await tools.get('device_interact')!({ action: 'rotate', orientation: 'landscape-left' })
+    expect(rpc).toHaveBeenCalledWith(
+      'device:interact',
+      expect.objectContaining({ action: 'rotate', orientation: 'landscape-left' })
+    )
+  })
+})
+
 describe('failures reach the model', () => {
   it('returns a stale-ref refusal rather than throwing', async () => {
     rpc.mockRejectedValue(

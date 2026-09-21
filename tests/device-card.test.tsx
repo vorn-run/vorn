@@ -28,6 +28,31 @@ const deviceInteract = vi.fn()
 const pickDeviceElement = vi.fn()
 const annotateDevice = vi.fn()
 const writeTerminal = vi.fn()
+const deviceList = vi.fn()
+const deviceClaim = vi.fn()
+const deviceRelease = vi.fn()
+const saveTextFile = vi.fn()
+
+/** The picker the switcher opens observes its own size to place itself. */
+const resizeCallbacks: Array<() => void> = []
+class RO {
+  constructor(cb: () => void) {
+    resizeCallbacks.push(cb)
+  }
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+vi.stubGlobal('ResizeObserver', RO)
+
+const toastError = vi.fn()
+const toastSuccess = vi.fn()
+vi.mock('../src/renderer/components/Toast', () => ({
+  toast: Object.assign(vi.fn(), {
+    error: (m: string) => toastError(m),
+    success: (m: string) => toastSuccess(m)
+  })
+}))
 
 Object.defineProperty(window, 'matchMedia', {
   value: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
@@ -41,6 +66,10 @@ Object.defineProperty(window, 'api', {
     pickDeviceElement,
     annotateDevice,
     writeTerminal,
+    deviceList,
+    deviceClaim,
+    deviceRelease,
+    saveTextFile,
     notifyWidgetStatus: vi.fn()
   },
   writable: true,
@@ -64,12 +93,25 @@ beforeEach(() => {
   deviceScreenshot.mockReset().mockResolvedValue({
     data: 'AAAA',
     scale: 1,
-    screen: { width: 402, height: 874 }
+    screen: { width: 402, height: 874 },
+    orientation: 'portrait'
   })
   deviceInteract.mockReset().mockResolvedValue({ ok: true })
   pickDeviceElement.mockReset()
   annotateDevice.mockReset()
   writeTerminal.mockReset()
+  deviceList.mockReset().mockResolvedValue([
+    { udid: 'udid-1', name: 'iPhone 17', runtime: 'iOS 26.2', booted: true },
+    { udid: 'udid-2', name: 'iPad Pro', runtime: 'iOS 26.2', booted: false }
+  ])
+  deviceClaim
+    .mockReset()
+    .mockResolvedValue({ ok: true, udid: 'udid-2', name: 'iPad Pro', booted: true })
+  deviceRelease.mockReset().mockResolvedValue({ released: true })
+  saveTextFile.mockReset().mockResolvedValue('/tmp/shot.png')
+  toastError.mockReset()
+  toastSuccess.mockReset()
+  resizeCallbacks.length = 0
   observed = null
   fixLayout()
   act(() => {
@@ -403,5 +445,257 @@ describe('lifecycle', () => {
     const { container } = render(<DeviceCard sessionId="t1" />)
     expect(container).toBeEmptyDOMElement()
     expect(deviceScreenshot).not.toHaveBeenCalled()
+  })
+})
+
+describe('the control bar', () => {
+  /** A rendered, visible pane with one frame already in. */
+  async function shown(): Promise<void> {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+  }
+
+  it('presses the hardware buttons the person cannot otherwise reach', async () => {
+    await shown()
+    fireEvent.click(screen.getByLabelText('Press Home'))
+    expect(deviceInteract).toHaveBeenCalledWith({
+      sessionId: 't1',
+      action: 'button',
+      text: 'HOME'
+    })
+    fireEvent.click(screen.getByLabelText('Press Lock'))
+    expect(deviceInteract).toHaveBeenCalledWith({
+      sessionId: 't1',
+      action: 'button',
+      text: 'LOCK'
+    })
+  })
+
+  it('reports a failed press where it will still be read', async () => {
+    // Not in the pane's error bar: every frame that arrives clears it, so a
+    // one-shot failure would show for half a second and the button would look
+    // like it did nothing at all.
+    deviceInteract.mockRejectedValueOnce(new Error('the companion is gone'))
+    await shown()
+    fireEvent.click(screen.getByLabelText('Press Home'))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('the companion is gone'))
+  })
+
+  it('turns the device, and turns it back', async () => {
+    await shown()
+    fireEvent.click(screen.getByLabelText('Rotate the device'))
+    expect(deviceInteract).toHaveBeenCalledWith({
+      sessionId: 't1',
+      action: 'rotate',
+      orientation: 'landscape-left'
+    })
+
+    // Once it is sideways the same button is the way home again, or a rotated
+    // device would be a trap. The picture stays portrait throughout, because
+    // the Home Screen does not rotate — a button that read the picture instead
+    // of the reported orientation would send "landscape" a second time and
+    // look as though it had stopped working.
+    deviceScreenshot.mockResolvedValue({
+      data: 'BBBB',
+      scale: 1,
+      screen: { width: 402, height: 874 },
+      orientation: 'landscape-left'
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600)
+    })
+    fireEvent.click(screen.getByLabelText('Rotate the device'))
+    expect(deviceInteract).toHaveBeenLastCalledWith({
+      sessionId: 't1',
+      action: 'rotate',
+      orientation: 'portrait'
+    })
+  })
+
+  it('saves a fresh capture, not the picture the pane happens to be showing', async () => {
+    await shown()
+    fireEvent.click(screen.getByLabelText('Save a screenshot'))
+    await waitFor(() => expect(saveTextFile).toHaveBeenCalled())
+    // The on-screen frame is downscaled to the pane; saving that would hand
+    // the person a fraction of the device's real resolution.
+    expect(deviceScreenshot).toHaveBeenLastCalledWith('t1', 2000)
+    const params = saveTextFile.mock.calls[0][0]
+    expect(params.encoding).toBe('base64')
+    expect(params.defaultName).toMatch(/\.png$/)
+    // The dialog rewrites the extension to match its filters, so a PNG saved
+    // under the default JSON filter would not open.
+    expect(params.filters).toEqual([{ name: 'PNG image', extensions: ['png'] }])
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+  })
+
+  it('says nothing when the save is cancelled', async () => {
+    saveTextFile.mockResolvedValue(null)
+    await shown()
+    fireEvent.click(screen.getByLabelText('Save a screenshot'))
+    await waitFor(() => expect(saveTextFile).toHaveBeenCalled())
+    expect(toastSuccess).not.toHaveBeenCalled()
+  })
+})
+
+describe('zoom', () => {
+  it('asks for more pixels as the device is drawn larger, and never more than main sends', async () => {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+    const first = deviceScreenshot.mock.calls.at(-1)?.[1]
+
+    for (let i = 0; i < 12; i++) fireEvent.click(screen.getByLabelText('Zoom in'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600)
+    })
+    const zoomed = deviceScreenshot.mock.calls.at(-1)?.[1]
+    expect(zoomed).toBeGreaterThan(first)
+    expect(zoomed).toBeLessThanOrEqual(2000)
+  })
+
+  it('does not restart the poll on every click', async () => {
+    // The zoom is read from a ref for exactly this reason: in the dependency
+    // array it would cancel the in-flight request and fire an extra
+    // full-device screenshot per press.
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+    const before = deviceScreenshot.mock.calls.length
+    for (let i = 0; i < 4; i++) fireEvent.click(screen.getByLabelText('Zoom in'))
+    expect(deviceScreenshot.mock.calls.length).toBe(before)
+  })
+
+  it('keeps a tap landing where it was aimed while the device is drawn large', async () => {
+    // The one regression here that is completely silent: the picture looks
+    // right and the tap goes somewhere else. The drawn box is 804×1748 for a
+    // 402×874 screen, so every coordinate is halved — and no letterbox offset
+    // is subtracted, because a screen drawn at an exact size has none.
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    const img = await screen.findByTestId('device-frame-t1')
+    fireEvent.click(screen.getByLabelText('Show the device at actual size'))
+    fireEvent.click(img, { clientX: 100, clientY: 300 })
+    await waitFor(() => expect(deviceInteract).toHaveBeenCalled())
+    expect(deviceInteract).toHaveBeenCalledWith({
+      sessionId: 't1',
+      action: 'tap',
+      target: { x: 50, y: 150 }
+    })
+  })
+})
+
+describe('typing on the device', () => {
+  async function typing(): Promise<HTMLElement> {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+    fireEvent.click(screen.getByLabelText('Type on the device'))
+    return screen.getByTestId('device-pane-t1')
+  }
+
+  it('collects a burst of keys into one call', async () => {
+    // Every `type` bumps the device's generation and clears every ref the
+    // session's agent holds. A call per keystroke invalidates the agent's view
+    // of the screen five times a second while somebody types a word.
+    const stage = await typing()
+    fireEvent.keyDown(stage, { key: 'h' })
+    fireEvent.keyDown(stage, { key: 'e' })
+    fireEvent.keyDown(stage, { key: 'y' })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200)
+    })
+    const typed = deviceInteract.mock.calls.filter((c) => c[0].action === 'type')
+    expect(typed).toHaveLength(1)
+    expect(typed[0][0].text).toBe('hey')
+  })
+
+  it('types a capital letter, which the device bridge can now reach', async () => {
+    const stage = await typing()
+    fireEvent.keyDown(stage, { key: 'A' })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200)
+    })
+    expect(deviceInteract).toHaveBeenLastCalledWith({
+      sessionId: 't1',
+      action: 'type',
+      text: 'A'
+    })
+  })
+
+  it('leaves the app its own shortcuts', async () => {
+    const stage = await typing()
+    fireEvent.keyDown(stage, { key: 'k', metaKey: true })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200)
+    })
+    expect(deviceInteract.mock.calls.filter((c) => c[0].action === 'type')).toHaveLength(0)
+  })
+
+  it('hands the keyboard back on Escape without disturbing the pane', async () => {
+    // Escape walks the app's own chain, which un-maximizes a pane — so the
+    // keystroke that leaves typing mode must stop there.
+    act(() => {
+      useAppStore.setState({ maximizedPaneId: 'device-t1' })
+    })
+    const stage = await typing()
+    fireEvent.keyDown(stage, { key: 'Escape' })
+    expect(screen.getByLabelText('Type on the device')).toHaveAttribute('aria-pressed', 'false')
+    expect(useAppStore.getState().maximizedPaneId).toBe('device-t1')
+  })
+})
+
+describe('switching simulator', () => {
+  it('claims the chosen device without closing the pane', async () => {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+    fireEvent.click(screen.getByLabelText(/Switch simulator/))
+    fireEvent.click(await screen.findByText('iPad Pro'))
+    await waitFor(() => expect(deviceClaim).toHaveBeenCalledWith('t1', 'udid-2'))
+    expect(useAppStore.getState().devicePanes.get('t1')?.udid).toBe('udid-2')
+  })
+
+  it('drops the previous device’s picture the moment it is no longer that device', async () => {
+    // Left up, the old screen stays on and stays clickable while the first new
+    // frame arrives — and a tap on it is computed from the old device's size,
+    // so on a device of another shape it lands somewhere arbitrary.
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+    deviceScreenshot.mockImplementation(() => new Promise(() => {}))
+    act(() => {
+      useAppStore.setState({
+        devicePanes: new Map([['t1', { udid: 'udid-2', name: 'iPad Pro' }]]) as never
+      })
+    })
+    await waitFor(() => expect(screen.queryByTestId('device-frame-t1')).not.toBeInTheDocument())
+  })
+
+  it('does not start a pane drag when the name is clicked', async () => {
+    // The header row is the drag handle, so the switcher sits inside it.
+    const onDragStart = vi.fn()
+    render(<DeviceCard sessionId="t1" onDragStart={onDragStart} />)
+    show()
+    fireEvent.pointerDown(screen.getByLabelText(/Switch simulator/))
+    expect(onDragStart).not.toHaveBeenCalled()
+  })
+})
+
+describe('a device the pane has turned', () => {
+  it('turns the picture when the app inside it stayed portrait', async () => {
+    // The Home Screen does not rotate, so the framebuffer comes back portrait
+    // while the device is sideways. Left alone the pane looks as though the
+    // rotate button did nothing at all.
+    deviceScreenshot.mockResolvedValue({
+      data: 'AAAA',
+      scale: 1,
+      screen: { width: 402, height: 874 },
+      orientation: 'landscape-left'
+    })
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    const img = await screen.findByTestId('device-frame-t1')
+    await waitFor(() => expect(img.style.transform).toContain('rotate(-90deg)'))
   })
 })
