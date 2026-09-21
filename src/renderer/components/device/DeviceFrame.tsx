@@ -31,14 +31,16 @@ interface Props {
 }
 
 /**
- * The device's body, in the pieces Apple draws it in.
+ * The device's body, as Apple draws it.
  *
- * Composited the way Apple's own renderer does it, which is not the way a CSS
- * border works: the corners are drawn at the artwork's natural size — 110
- * points on a phone, the whole curve and its rim — and the edges keep that
- * thickness while stretching along their side. Scaling a corner down to the
- * 18-point inset the screen sits behind loses the curve entirely and leaves a
- * plain black border, which is what this looked like before.
+ * Two shapes of artwork. Most bundles ship one composite picture of the whole
+ * body, which is drawn for that device and fits it exactly; the rest ship it
+ * in nine pieces, and those are composited the way Apple's own renderer does
+ * it rather than the way a CSS border works — the corners at the artwork's
+ * natural size, 110 points on a phone, the whole curve and its rim, and the
+ * edges keeping that thickness while stretching along their side. Scaling a
+ * corner down to the inset the screen sits behind loses the curve entirely and
+ * leaves a plain black border, which is what this looked like before.
  *
  * The body sits *behind* the screen, with the buttons behind the body so the
  * rail overlaps them the way a real one does. The screen is then laid on top,
@@ -59,8 +61,6 @@ function DeviceBody({ bezel }: { bezel: Bezel }): React.ReactElement | null {
   const quarter = bezel.bodyTurn === 90 || bezel.bodyTurn === -90
   const width = quarter ? outerHeight : outerWidth
   const height = quarter ? outerWidth : outerHeight
-  const i = chrome.images
-  const corner = { width: at(i.topLeft.width), height: at(i.topLeft.height) }
   const piece = (url: string, style: React.CSSProperties): React.ReactElement => (
     <span
       aria-hidden
@@ -73,6 +73,8 @@ function DeviceBody({ bezel }: { bezel: Bezel }): React.ReactElement | null {
       }}
     />
   )
+  const i = chrome.images
+  const corner = i && { width: at(i.topLeft.width), height: at(i.topLeft.height) }
   return (
     <div
       aria-hidden
@@ -85,49 +87,59 @@ function DeviceBody({ bezel }: { bezel: Bezel }): React.ReactElement | null {
         transform: bezel.bodyTurn ? `rotate(${bezel.bodyTurn}deg)` : undefined
       }}
     >
-      {chrome.buttons.map((b, n) => (
-        <span
-          key={`${b.name}-${n}`}
-          className="absolute"
-          style={{
-            [b.side]: -at(b.out),
-            top: at(b.top),
-            width: at(b.width),
-            height: at(b.height),
-            backgroundImage: `url(${b.url})`,
-            backgroundSize: '100% 100%',
-            backgroundRepeat: 'no-repeat'
-          }}
-        />
-      ))}
-      {piece(i.topLeft.url, { left: 0, top: 0, ...corner })}
-      {piece(i.topRight.url, { right: 0, top: 0, ...corner })}
-      {piece(i.bottomLeft.url, { left: 0, bottom: 0, ...corner })}
-      {piece(i.bottomRight.url, { right: 0, bottom: 0, ...corner })}
-      {piece(i.top.url, {
-        left: corner.width,
-        right: corner.width,
-        top: 0,
-        height: at(i.top.height)
+      {chrome.buttons.map((b, n) => {
+        const vertical = b.side === 'left' || b.side === 'right'
+        return (
+          <span
+            key={`${b.name}-${n}`}
+            className="absolute"
+            style={{
+              [b.side]: -at(b.out),
+              [vertical ? 'top' : 'left']: at(b.along),
+              width: at(b.width),
+              height: at(b.height),
+              backgroundImage: `url(${b.url})`,
+              backgroundSize: '100% 100%',
+              backgroundRepeat: 'no-repeat'
+            }}
+          />
+        )
       })}
-      {piece(i.bottom.url, {
-        left: corner.width,
-        right: corner.width,
-        bottom: 0,
-        height: at(i.bottom.height)
-      })}
-      {piece(i.left.url, {
-        top: corner.height,
-        bottom: corner.height,
-        left: 0,
-        width: at(i.left.width)
-      })}
-      {piece(i.right.url, {
-        top: corner.height,
-        bottom: corner.height,
-        right: 0,
-        width: at(i.right.width)
-      })}
+      {/* One picture of the body where the bundle has one — see
+          `device-chrome.ts` for why that is the artwork to trust. */}
+      {chrome.composite && piece(chrome.composite.url, { inset: 0 })}
+      {i && corner && (
+        <>
+          {piece(i.topLeft.url, { left: 0, top: 0, ...corner })}
+          {piece(i.topRight.url, { right: 0, top: 0, ...corner })}
+          {piece(i.bottomLeft.url, { left: 0, bottom: 0, ...corner })}
+          {piece(i.bottomRight.url, { right: 0, bottom: 0, ...corner })}
+          {piece(i.top.url, {
+            left: corner.width,
+            right: corner.width,
+            top: 0,
+            height: at(i.top.height)
+          })}
+          {piece(i.bottom.url, {
+            left: corner.width,
+            right: corner.width,
+            bottom: 0,
+            height: at(i.bottom.height)
+          })}
+          {piece(i.left.url, {
+            top: corner.height,
+            bottom: corner.height,
+            left: 0,
+            width: at(i.left.width)
+          })}
+          {piece(i.right.url, {
+            top: corner.height,
+            bottom: corner.height,
+            right: 0,
+            width: at(i.right.width)
+          })}
+        </>
+      )}
     </div>
   )
 }

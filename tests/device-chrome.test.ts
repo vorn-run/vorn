@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 
 /**
  * Borrowing Apple's faceplate, and never depending on it.
@@ -79,6 +79,14 @@ vi.mock('../src/main/logger', () => ({
 
 const { chromeFor, resetChromeCache } = await import('../src/main/device-chrome')
 
+// All of this is macOS-only, and CI is not a Mac: without saying so every case
+// would pass for the wrong reason, by taking the platform guard's early exit.
+const realPlatform = process.platform
+function pretendPlatform(value: string): void {
+  Object.defineProperty(process, 'platform', { value, configurable: true })
+}
+afterAll(() => pretendPlatform(realPlatform))
+
 const BUNDLE_PATH =
   '/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 18 Pro.simdevicetype'
 const PROFILE = `${BUNDLE_PATH}/Contents/Resources/profile.plist`
@@ -107,8 +115,21 @@ const MANIFEST = JSON.stringify({
   paths: { simpleOutsideBorder: { cornerRadiusX: 80, cornerRadiusY: 80 } },
   inputs: [
     { name: 'action', image: 'Mute BTN', anchor: 'left', offsets: { normal: { x: 8, y: 160 } } },
-    { name: 'power', image: 'X_Power BTN', anchor: 'right', offsets: { normal: { x: -8, y: 262 } } }
+    {
+      name: 'power',
+      image: 'X_Power BTN',
+      anchor: 'right',
+      offsets: { normal: { x: -8, y: 262 } }
+    },
+    // A rail across the top, which some devices have: the two offsets swap.
+    { name: 'volume-up', image: 'Vol BTN', anchor: 'top', offsets: { normal: { x: 316, y: 7 } } }
   ]
+})
+
+/** The same bundle, as the ones with placeholder slices actually ship. */
+const MANIFEST_WITH_COMPOSITE = JSON.stringify({
+  ...JSON.parse(MANIFEST),
+  images: { ...JSON.parse(MANIFEST).images, composite: 'PhoneComposite' }
 })
 
 function installBundle(): void {
@@ -124,13 +145,15 @@ function installBundle(): void {
     'Phone BL',
     'Phone Left',
     'Mute BTN',
-    'X_Power BTN'
+    'X_Power BTN',
+    'Vol BTN'
   ]) {
     files.set(`${BUNDLE}/${art}.pdf`, '%PDF')
   }
 }
 
 beforeEach(() => {
+  pretendPlatform('darwin')
   files.clear()
   execCalls.length = 0
   execFails.on = false
@@ -145,7 +168,7 @@ describe('finding the faceplate', () => {
     // The thicknesses and the radius are the device's own, not a guess.
     expect(chrome?.inset).toEqual({ left: 18, right: 18, top: 18, bottom: 22 })
     expect(chrome?.cornerRadius).toBe(80)
-    const pieces = Object.values(chrome!.images)
+    const pieces = Object.values(chrome!.images ?? {})
     expect(pieces.every((p) => p.url.startsWith('data:image/png;base64,'))).toBe(true)
     // The artwork's own size travels with it: a corner is 110 points of body,
     // and drawing it at the 18-point inset instead loses the whole curve.
@@ -158,8 +181,9 @@ describe('finding the faceplate', () => {
     // Apple writes the right-hand offset as a negative number; the pane only
     // needs to know how far the button stands out from that edge.
     expect(chrome?.buttons).toEqual([
-      expect.objectContaining({ name: 'action', side: 'left', out: 8, top: 160 }),
-      expect.objectContaining({ name: 'power', side: 'right', out: 8, top: 262 })
+      expect.objectContaining({ name: 'action', side: 'left', out: 8, along: 160 }),
+      expect.objectContaining({ name: 'power', side: 'right', out: 8, along: 262 }),
+      expect.objectContaining({ name: 'volume-up', side: 'top', out: 7, along: 316 })
     ])
   })
 
@@ -173,12 +197,24 @@ describe('finding the faceplate', () => {
     expect((await chromeFor(IPAD_TYPE, '/data'))?.id).toBe('phone11')
   })
 
+  it('prefers one picture of the body over nine pieces of it', async () => {
+    // Some bundles fill all nine slices with a red placeholder reading
+    // "unused" and ship the real artwork as the composite — drawing the pieces
+    // there wraps the device in a red slab.
+    installBundle()
+    files.set(`${BUNDLE}/chrome.json`, MANIFEST_WITH_COMPOSITE)
+    files.set(`${BUNDLE}/PhoneComposite.pdf`, '%PDF')
+    const chrome = await chromeFor(TYPE, '/data')
+    expect(chrome?.composite?.url).toMatch(/^data:image\/png;base64,/)
+    expect(chrome?.images).toBeNull()
+  })
+
   it('renders each piece once, then remembers it', async () => {
     installBundle()
     await chromeFor(TYPE, '/data')
     const rasterized = execCalls.filter((c) => c[0] === 'sips' && c.includes('--out')).length
-    // Eight pieces of body, plus the two buttons this device has.
-    expect(rasterized).toBe(10)
+    // Eight pieces of body, plus the three buttons this device has.
+    expect(rasterized).toBe(11)
     await chromeFor(TYPE, '/data')
     // Same device type, so nothing is rasterized or read a second time.
     expect(execCalls.filter((c) => c[0] === 'sips' && c.includes('--out'))).toHaveLength(rasterized)
@@ -188,6 +224,12 @@ describe('finding the faceplate', () => {
     installBundle()
     files.delete(`${BUNDLE}/Phone Left.pdf`)
     // A body missing one edge reads as a bug in Vorn; a plain frame does not.
+    expect(await chromeFor(TYPE, '/data')).toBeNull()
+  })
+
+  it('leaves every other platform alone', async () => {
+    installBundle()
+    pretendPlatform('linux')
     expect(await chromeFor(TYPE, '/data')).toBeNull()
   })
 

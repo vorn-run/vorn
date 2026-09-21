@@ -44,6 +44,7 @@ interface ChromeManifest {
     bottom?: string
     bottomLeft?: string
     left?: string
+    composite?: string
     sizing?: { leftWidth?: number; rightWidth?: number; topHeight?: number; bottomHeight?: number }
   }
   paths?: { simpleOutsideBorder?: { cornerRadiusX?: number; cornerRadiusY?: number } }
@@ -207,6 +208,38 @@ async function load(
 
   const images = manifest.images
   const sizing = images?.sizing
+  const cacheDir = cacheDirFor(userDataDir, chromeId)
+
+  const inset = {
+    left: sizing?.leftWidth ?? 18,
+    right: sizing?.rightWidth ?? 18,
+    top: sizing?.topHeight ?? 18,
+    bottom: sizing?.bottomHeight ?? 18
+  }
+  const radius = manifest.paths?.simpleOutsideBorder?.cornerRadiusX ?? 0
+  const common = { id: chromeId, inset, cornerRadius: radius }
+
+  /**
+   * One picture of the whole body, where the bundle has one.
+   *
+   * Preferred over the nine pieces, and not only for being simpler: some
+   * bundles — the ones for devices whose slices were never drawn — fill all
+   * nine with a red placeholder reading "unused", and the composite is the
+   * real artwork. Drawing the pieces there wraps the device in a red slab.
+   * A composite belongs to one device, so it fits that body exactly.
+   */
+  if (images?.composite) {
+    const composite = await pieceOf(resources, cacheDir, images.composite)
+    if (composite) {
+      return {
+        ...common,
+        composite,
+        images: null,
+        buttons: await buttonsOf(manifest, resources, cacheDir)
+      }
+    }
+  }
+
   // Every side of the body has to be there. A frame missing one edge is worse
   // than a plain one: it reads as a rendering bug in Vorn, not a missing asset.
   const pieces = {
@@ -221,7 +254,6 @@ async function load(
   }
   if (Object.values(pieces).some((name) => !name)) return null
 
-  const cacheDir = cacheDirFor(userDataDir, chromeId)
   // One at a time. This runs once per device type in the life of an install,
   // and conversions that overlap are how the whole body came back empty.
   const entries: Array<[string, DeviceChromePiece | null]> = []
@@ -230,19 +262,10 @@ async function load(
   }
   if (entries.some(([, piece]) => !piece)) return null
 
-  const radius = manifest.paths?.simpleOutsideBorder?.cornerRadiusX ?? 0
   return {
-    id: chromeId,
-    // The art's own units, which are the device's points: the pane multiplies
-    // them by whatever scale it is drawing the screen at.
-    inset: {
-      left: sizing?.leftWidth ?? 18,
-      right: sizing?.rightWidth ?? 18,
-      top: sizing?.topHeight ?? 18,
-      bottom: sizing?.bottomHeight ?? 18
-    },
-    cornerRadius: radius,
-    images: Object.fromEntries(entries) as DeviceChrome['images'],
+    ...common,
+    composite: null,
+    images: Object.fromEntries(entries) as NonNullable<DeviceChrome['images']>,
     buttons: await buttonsOf(manifest, resources, cacheDir)
   }
 }
@@ -259,22 +282,26 @@ async function buttonsOf(
   resources: string,
   cacheDir: string
 ): Promise<DeviceChromeButton[]> {
+  const sides = ['left', 'right', 'top', 'bottom'] as const
   const found: DeviceChromeButton[] = []
   for (const input of manifest.inputs ?? []) {
-    const side = input.anchor === 'left' ? 'left' : input.anchor === 'right' ? 'right' : null
+    const side = sides.find((s) => s === input.anchor)
     const offset = input.offsets?.normal
-    if (!side || !input.image || typeof offset?.y !== 'number') continue
+    if (!side || !input.image || !offset) continue
     const piece = await pieceOf(resources, cacheDir, input.image)
     if (!piece) continue
+    // On a side rail the offset runs x-out, y-along; on the top or bottom edge
+    // the two swap. Apple writes the outward number as negative on the right
+    // and at the bottom, which is the same distance either way.
+    const vertical = side === 'left' || side === 'right'
     found.push({
       name: input.name ?? 'button',
       url: piece.url,
       width: piece.width,
       height: piece.height,
       side,
-      // Apple writes the outward offset as a negative number on the right.
-      out: Math.abs(offset.x ?? 0),
-      top: offset.y
+      out: Math.abs((vertical ? offset.x : offset.y) ?? 0),
+      along: (vertical ? offset.y : offset.x) ?? 0
     })
   }
   return found

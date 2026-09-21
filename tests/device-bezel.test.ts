@@ -115,6 +115,7 @@ describe("Apple's own faceplate, when the machine has it", () => {
     id: 'phone11',
     inset: { left: 18, right: 18, top: 18, bottom: 22 },
     cornerRadius: 80,
+    composite: null,
     images: {
       topLeft: corner('data:,tl'),
       top: { url: 'data:,t', width: 1, height: 110 },
@@ -133,7 +134,7 @@ describe("Apple's own faceplate, when the machine has it", () => {
         height: 101,
         side: 'right' as const,
         out: 8,
-        top: 262
+        along: 262
       }
     ]
   }

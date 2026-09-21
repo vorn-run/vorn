@@ -2961,11 +2961,11 @@ export interface DeviceChromeButton {
   width: number
   height: number
   /** Which edge of the body it sits on. */
-  side: 'left' | 'right'
+  side: 'left' | 'right' | 'top' | 'bottom'
   /** How far it stands out from that edge, in points. */
   out: number
-  /** Distance from the top of the body, in points. */
-  top: number
+  /** How far along that edge it sits, from the body's top or left, in points. */
+  along: number
 }
 
 export interface DeviceChrome {
@@ -2975,7 +2975,16 @@ export interface DeviceChrome {
   inset: { left: number; right: number; top: number; bottom: number }
   /** The body's outer corner radius, in device points. */
   cornerRadius: number
-  /** The nine-slice pieces of the body. */
+  /**
+   * The whole body in one picture, when the bundle has one.
+   *
+   * Preferred over the pieces wherever it exists, because some bundles ship
+   * the composite as the real artwork and fill the nine slices with a red
+   * "unused" placeholder — drawing those puts a red slab around the device.
+   * A composite is drawn for one device, so it fits its own body exactly.
+   */
+  composite: DeviceChromePiece | null
+  /** The nine-slice pieces, for a bundle with no composite. */
   images: {
     topLeft: DeviceChromePiece
     top: DeviceChromePiece
@@ -2985,7 +2994,7 @@ export interface DeviceChrome {
     bottom: DeviceChromePiece
     bottomLeft: DeviceChromePiece
     left: DeviceChromePiece
-  }
+  } | null
   buttons: DeviceChromeButton[]
 }
 
