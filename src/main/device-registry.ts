@@ -77,6 +77,18 @@ export interface Entry {
   screenPoints: { width: number; height: number } | null
   /** pixels ÷ points — 3 on every modern iPhone, but read, never assumed. */
   scale: number
+  /**
+   * Which way up the device is being held.
+   *
+   * Remembered because nothing can be asked. The companion reports no
+   * orientation, and the framebuffer does not give it away: an app that does
+   * not rotate — the Home Screen on an iPhone, most of all — keeps drawing
+   * portrait pixels while the device itself is sideways, which is exactly the
+   * state Simulator and Device Hub show as a turned device with an upright
+   * picture inside it. Without this the pane cannot tell that case from one
+   * where nothing happened.
+   */
+  orientation: DeviceOrientation
   logs: string[]
 }
 
@@ -117,6 +129,7 @@ export function newEntry(sessionId = 's', udid = 'udid-0'): Entry {
     refs: new Map(),
     screenPoints: null,
     scale: 3,
+    orientation: 'portrait',
     logs: []
   }
 }
@@ -440,6 +453,9 @@ interface SimctlDevice {
   name: string
   state: string
   isAvailable: boolean
+  /** `com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro`, which names the
+   *  faceplate Apple draws for it. */
+  deviceTypeIdentifier?: string
 }
 
 /**
@@ -472,6 +488,23 @@ export async function listDevices(): Promise<DeviceInfo[]> {
     }
   }
   return out
+}
+
+/**
+ * The kind of device this udid is, for whoever needs its faceplate.
+ *
+ * Kept out of `DeviceInfo`: it is an implementation detail of drawing the
+ * pane, not something an agent choosing a simulator should have to read past.
+ */
+export async function deviceTypeFor(udid: string): Promise<string | null> {
+  const { stdout } = await exec('xcrun', ['simctl', 'list', 'devices', 'available', '-j'])
+  const parsed = JSON.parse(stdout) as { devices: Record<string, SimctlDevice[]> }
+  for (const devices of Object.values(parsed.devices)) {
+    for (const d of devices) {
+      if (d.udid === udid) return d.deviceTypeIdentifier ?? null
+    }
+  }
+  return null
 }
 
 /** Turns simctl's failure modes into instructions rather than diagnostics. */
@@ -1073,6 +1106,8 @@ export async function interact(params: {
         )
       }
       events.push({ orientation: { orientation: proto } })
+      // Recorded after the call succeeds, below, so a refused rotation does
+      // not leave the pane drawing a device that never turned.
       break
     }
   }
@@ -1086,6 +1121,7 @@ export async function interact(params: {
     0
   )
   await callStreaming(entry.companion.client, 'hid', events, CALL_TIMEOUT_MS + heldSeconds * 1000)
+  if (params.action === 'rotate' && params.orientation) entry.orientation = params.orientation
   // Refs describe a screen that this input may have just replaced.
   entry.generation++
   entry.refs.clear()
@@ -1130,10 +1166,12 @@ export function clampMaxEdge(requested: number | undefined): number {
  * pixels, and every tap is in points. Returning one without the other is what
  * makes a mis-tap at 3× look like a targeting mistake instead of a unit error.
  */
-export async function screenshot(params: {
-  sessionId: string
-  maxEdge?: number
-}): Promise<{ data: string; scale: number; screen: { width: number; height: number } }> {
+export async function screenshot(params: { sessionId: string; maxEdge?: number }): Promise<{
+  data: string
+  scale: number
+  screen: { width: number; height: number }
+  orientation: DeviceOrientation
+}> {
   const entry = deviceFor(params.sessionId)
   if (!entry.screenPoints) await fetchTree(entry)
   // Fail closed, exactly as the swipe guard does on the same condition. The
@@ -1177,7 +1215,10 @@ export async function screenshot(params: {
     // The scale of the image *as returned*, not of the raw capture — this is
     // the number that converts a coordinate on the delivered image to points.
     scale: shown.width / screen.width,
-    screen
+    screen,
+    // What the picture cannot say: the device may be sideways while the app
+    // inside it goes on drawing portrait pixels.
+    orientation: entry.orientation
   }
 }
 

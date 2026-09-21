@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   bezelFor,
   fitScale,
+  screenPointFor,
   maxEdgeFor,
   steppedZoom,
   PANE_MAX_EDGE,
@@ -47,8 +48,10 @@ describe('drawing the screen', () => {
   it('leaves room for the frame it is going to draw around it', () => {
     const container = { width: 500, height: 900 }
     const bezel = bezelFor(IPHONE, container, 'fit')
-    expect(bezel.width + 2 * bezel.thickness).toBeLessThanOrEqual(container.width)
-    expect(bezel.height + 2 * bezel.thickness).toBeLessThanOrEqual(container.height)
+    expect(bezel.width + bezel.inset.left + bezel.inset.right).toBeLessThanOrEqual(container.width)
+    expect(bezel.height + bezel.inset.top + bezel.inset.bottom).toBeLessThanOrEqual(
+      container.height
+    )
   })
 
   it('falls back to actual size before anything has been laid out', () => {
@@ -88,7 +91,7 @@ describe('the frame', () => {
 
   it('stays drawable in a pane barely bigger than nothing', () => {
     const bezel = bezelFor(IPHONE, { width: 40, height: 40 }, 'fit')
-    expect(bezel.thickness).toBeGreaterThanOrEqual(6)
+    expect(bezel.inset.left).toBeGreaterThanOrEqual(6)
     expect(bezel.innerRadius).toBeGreaterThan(0)
     expect(bezel.width).toBeGreaterThan(0)
   })
@@ -116,5 +119,128 @@ describe('stepping the zoom', () => {
     expect(steppedZoom(1, -1)).toBeLessThan(1)
     expect(steppedZoom(ZOOM_MAX, 1)).toBe(ZOOM_MAX)
     expect(steppedZoom(ZOOM_MIN, -1)).toBe(ZOOM_MIN)
+  })
+})
+
+describe("Apple's own faceplate, when the machine has it", () => {
+  /** The shape of a real chrome bundle: phone11, which is the iPhone 18 Pro. */
+  const corner = (url: string) => ({ url, width: 110, height: 110 })
+  const CHROME = {
+    id: 'phone11',
+    inset: { left: 18, right: 18, top: 18, bottom: 22 },
+    cornerRadius: 80,
+    images: {
+      topLeft: corner('data:,tl'),
+      top: { url: 'data:,t', width: 1, height: 110 },
+      topRight: corner('data:,tr'),
+      right: { url: 'data:,r', width: 110, height: 1 },
+      bottomRight: corner('data:,br'),
+      bottom: { url: 'data:,b', width: 1, height: 110 },
+      bottomLeft: corner('data:,bl'),
+      left: { url: 'data:,l', width: 110, height: 1 }
+    },
+    buttons: [
+      {
+        name: 'power',
+        url: 'data:,p',
+        width: 16,
+        height: 101,
+        side: 'right' as const,
+        out: 8,
+        top: 262
+      }
+    ]
+  }
+
+  it('takes the body and the corner radius from the device itself', () => {
+    const bezel = bezelFor(IPHONE, { width: 900, height: 1600 }, 1, CHROME)
+    expect(bezel.inset).toEqual({ left: 18, right: 18, top: 18, bottom: 22 })
+    expect(bezel.outerRadius).toBe(80)
+    // Apple's frame has the buttons moulded into the artwork, so drawing our
+    // own on top of it would double them.
+    expect(bezel.buttons).toEqual([])
+  })
+
+  it('grows the body with the device, the way Simulator does', () => {
+    const half = bezelFor(IPHONE, { width: 900, height: 1600 }, 0.5, CHROME)
+    expect(half.inset.left).toBe(9)
+    expect(half.outerRadius).toBe(40)
+  })
+
+  it('fits the whole body, not just the screen', () => {
+    const container = { width: 300, height: 700 }
+    const bezel = bezelFor(IPHONE, container, 'fit', CHROME)
+    expect(bezel.width + bezel.inset.left + bezel.inset.right).toBeLessThanOrEqual(container.width)
+    expect(bezel.height + bezel.inset.top + bezel.inset.bottom).toBeLessThanOrEqual(
+      container.height
+    )
+  })
+
+  it('turns the body with the device, so the chin stays at the chin', () => {
+    const landscape = bezelFor({ width: 874, height: 402 }, { width: 1200, height: 700 }, 1, CHROME)
+    // Held a quarter-turn left, the bottom edge of the device is the one on the
+    // left of the pane.
+    expect(landscape.inset.left).toBe(22)
+    expect(landscape.inset.bottom).toBe(18)
+  })
+})
+
+describe('a device held sideways', () => {
+  const PANE = { width: 1200, height: 800 }
+
+  it('turns the picture when the app inside it did not', () => {
+    // The Home Screen does not rotate on an iPhone: the device goes sideways
+    // and the framebuffer stays portrait. Simulator shows that as a turned
+    // device with an upright picture, and so must the pane — nothing in the
+    // screenshot says the device moved at all.
+    const bezel = bezelFor(IPHONE, PANE, 1, null, 'landscape-left')
+    expect(bezel.turn).toBe(-90)
+    expect([bezel.width, bezel.height]).toEqual([874, 402])
+    expect(bezel.landscape).toBe(true)
+    expect(bezel.points).toEqual(IPHONE)
+  })
+
+  it('turns it the other way round', () => {
+    expect(bezelFor(IPHONE, PANE, 1, null, 'landscape-right').turn).toBe(90)
+  })
+
+  it('leaves a picture that already rotated alone', () => {
+    // An app that rotates hands back landscape pixels; turning those again
+    // would stand the screen on its head.
+    const bezel = bezelFor({ width: 874, height: 402 }, PANE, 1, null, 'landscape-left')
+    expect(bezel.turn).toBe(0)
+    expect([bezel.width, bezel.height]).toEqual([874, 402])
+  })
+
+  it('stays put in portrait', () => {
+    expect(bezelFor(IPHONE, PANE, 1, null, 'portrait').turn).toBe(0)
+  })
+})
+
+describe('a click on the screen', () => {
+  it('divides by the scale, with no letterbox to correct for', () => {
+    const bezel = bezelFor(IPHONE, { width: 1200, height: 2000 }, 2)
+    expect(screenPointFor(100, 300, bezel)).toEqual({ x: 50, y: 150 })
+  })
+
+  it('turns back with the picture', () => {
+    // Turned a quarter anticlockwise, the device's top-right corner is what
+    // sits at the top-left of the pane. A tap that does not turn back lands
+    // somewhere else entirely, and nothing on screen says so.
+    const bezel = bezelFor(IPHONE, { width: 1200, height: 800 }, 1, null, 'landscape-left')
+    expect(screenPointFor(0, 0, bezel)).toEqual({ x: 402, y: 0 })
+    expect(screenPointFor(bezel.width / 2, bezel.height / 2, bezel)).toEqual({ x: 201, y: 437 })
+    expect(screenPointFor(bezel.width, bezel.height, bezel)).toEqual({ x: 0, y: 874 })
+  })
+
+  it('turns back the other way too', () => {
+    const bezel = bezelFor(IPHONE, { width: 1200, height: 800 }, 1, null, 'landscape-right')
+    expect(screenPointFor(0, 0, bezel)).toEqual({ x: 0, y: 874 })
+  })
+
+  it('refuses a click outside the screen', () => {
+    const bezel = bezelFor(IPHONE, { width: 1200, height: 2000 }, 1)
+    expect(screenPointFor(-4, 10, bezel)).toBeNull()
+    expect(screenPointFor(10, 900, bezel)).toBeNull()
   })
 })

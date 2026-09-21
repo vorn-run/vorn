@@ -58,6 +58,7 @@ import {
   DeviceTarget,
   DevicePoint,
   DeviceOrientation,
+  DeviceChrome,
   UpdateStatus,
   ServerRuntimeStatus,
   AuthProbeReport
@@ -791,8 +792,12 @@ const api = {
   deviceScreenshot: (
     sessionId: string,
     maxEdge?: number
-  ): Promise<{ data: string; scale: number; screen: { width: number; height: number } }> =>
-    ipcRenderer.invoke(IPC.DEVICE_SCREENSHOT, { sessionId, maxEdge }),
+  ): Promise<{
+    data: string
+    scale: number
+    screen: { width: number; height: number }
+    orientation: DeviceOrientation
+  }> => ipcRenderer.invoke(IPC.DEVICE_SCREENSHOT, { sessionId, maxEdge }),
   deviceInteract: (params: {
     sessionId: string
     action: 'tap' | 'swipe' | 'type' | 'button' | 'press' | 'rotate'
@@ -804,6 +809,9 @@ const api = {
     systemGesture?: boolean
   }): Promise<{ ok: true; generation: number }> => ipcRenderer.invoke(IPC.DEVICE_INTERACT, params),
   deviceList: (): Promise<DeviceInfo[]> => ipcRenderer.invoke(IPC.DEVICE_LIST),
+  /** The body Apple draws for this device, read from the machine's own Xcode. */
+  deviceChrome: (udid: string): Promise<DeviceChrome | null> =>
+    ipcRenderer.invoke(IPC.DEVICE_CHROME, { udid }),
   deviceClaim: (sessionId: string, udid: string): Promise<DeviceClaimResult> =>
     ipcRenderer.invoke(IPC.DEVICE_CLAIM, { sessionId, udid }),
   deviceRelease: (sessionId: string): Promise<{ released: boolean }> =>

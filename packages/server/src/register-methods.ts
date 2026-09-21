@@ -2172,6 +2172,7 @@ export function registerAllMethods(): void {
   registerMethod('device:readScreen', (p) => browserBridge.request('device:readScreen', p))
   registerMethod('device:find', (p) => browserBridge.request('device:find', p))
   registerMethod('device:interact', (p) => browserBridge.request('device:interact', p))
+  registerMethod('device:chrome', (p) => browserBridge.request('device:chrome', p))
   registerMethod('device:screenshot', (p) => browserBridge.request('device:screenshot', p))
   registerMethod('device:launch', (p) => browserBridge.request('device:launch', p))
   registerMethod('device:terminate', (p) => browserBridge.request('device:terminate', p))

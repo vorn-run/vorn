@@ -53,6 +53,7 @@ import type {
   DeviceTarget,
   DevicePoint,
   DeviceOrientation,
+  DeviceChrome,
   MobileProject,
   ReachableUrls,
   PairingRequest,
@@ -1197,11 +1198,22 @@ export interface RequestMethods {
     }
     result: { ok: true; generation: number }
   }
+  'device:chrome': {
+    params: { udid: string }
+    /** Null when the machine has no faceplate for it; the pane draws its own. */
+    result: DeviceChrome | null
+  }
   'device:screenshot': {
     params: { sessionId: string; maxEdge?: number }
     /** Base64 PNG, downscaled in main. `scale` converts image pixels back to
      *  the points every ref and tap is expressed in. */
-    result: { data: string; scale: number; screen: { width: number; height: number } }
+    result: {
+      data: string
+      scale: number
+      screen: { width: number; height: number }
+      /** Which way up the device is being held, which the picture cannot say. */
+      orientation: DeviceOrientation
+    }
   }
   'device:launch': {
     params: { sessionId: string; bundleId: string }

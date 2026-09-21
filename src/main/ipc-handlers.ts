@@ -17,6 +17,7 @@ import { cliShimStatus, installCliShim } from './cli-shim'
 import { setFileRoot, allowsFileUrl } from './browser-file-scope'
 import { watchArtifact, stopWatching } from './artifact-watcher'
 import * as deviceRegistry from './device-registry'
+import * as deviceChrome from './device-chrome'
 import { registerCredentialHandlers, enrichPayloadWithCredentials } from './credential-handlers'
 import log from './logger'
 
@@ -64,6 +65,11 @@ function registerInboundHandlers(b: ServerBridge): void {
   b.handle('device:readScreen', (p) => deviceRegistry.readScreen(p as P<'device:readScreen'>))
   b.handle('device:find', (p) => deviceRegistry.findElements(p as P<'device:find'>))
   b.handle('device:interact', (p) => deviceRegistry.interact(p as P<'device:interact'>))
+  b.handle('device:chrome', async (p) => {
+    const { udid } = p as P<'device:chrome'>
+    const type = await deviceRegistry.deviceTypeFor(udid)
+    return type ? deviceChrome.chromeFor(type, app.getPath('userData')) : null
+  })
   b.handle('device:screenshot', (p) => deviceRegistry.screenshot(p as P<'device:screenshot'>))
   b.handle('device:launch', (p) => deviceRegistry.launch(p as P<'device:launch'>))
   b.handle('device:terminate', (p) => deviceRegistry.terminate(p as P<'device:terminate'>))
@@ -630,6 +636,13 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.DEVICE_SCREENSHOT, (_, params) => deviceRegistry.screenshot(params))
   safeHandle(IPC.DEVICE_INTERACT, (_, params) => deviceRegistry.interact(params))
   safeHandle(IPC.DEVICE_LIST, () => deviceRegistry.listDevices())
+  // The pane's faceplate. Answers null rather than throwing wherever the
+  // machine has no artwork for this device, because a frame is cosmetic and a
+  // device pane that fails over one would not be.
+  safeHandle(IPC.DEVICE_CHROME, async (_, params: { udid: string }) => {
+    const type = await deviceRegistry.deviceTypeFor(params.udid)
+    return type ? deviceChrome.chromeFor(type, app.getPath('userData')) : null
+  })
   safeHandle(IPC.DEVICE_CLAIM, (_, params) => deviceRegistry.claim(params))
   safeHandle(IPC.DEVICE_RELEASE, (_, params) => deviceRegistry.release(params))
   // Both are read-only by design: pointing at or drawing on the screen must

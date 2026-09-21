@@ -93,7 +93,8 @@ beforeEach(() => {
   deviceScreenshot.mockReset().mockResolvedValue({
     data: 'AAAA',
     scale: 1,
-    screen: { width: 402, height: 874 }
+    screen: { width: 402, height: 874 },
+    orientation: 'portrait'
   })
   deviceInteract.mockReset().mockResolvedValue({ ok: true })
   pickDeviceElement.mockReset()
@@ -491,11 +492,15 @@ describe('the control bar', () => {
     })
 
     // Once it is sideways the same button is the way home again, or a rotated
-    // device would be a trap.
+    // device would be a trap. The picture stays portrait throughout, because
+    // the Home Screen does not rotate — a button that read the picture instead
+    // of the reported orientation would send "landscape" a second time and
+    // look as though it had stopped working.
     deviceScreenshot.mockResolvedValue({
       data: 'BBBB',
       scale: 1,
-      screen: { width: 874, height: 402 }
+      screen: { width: 402, height: 874 },
+      orientation: 'landscape-left'
     })
     await act(async () => {
       await vi.advanceTimersByTimeAsync(600)
@@ -674,5 +679,23 @@ describe('switching simulator', () => {
     show()
     fireEvent.pointerDown(screen.getByLabelText(/Switch simulator/))
     expect(onDragStart).not.toHaveBeenCalled()
+  })
+})
+
+describe('a device the pane has turned', () => {
+  it('turns the picture when the app inside it stayed portrait', async () => {
+    // The Home Screen does not rotate, so the framebuffer comes back portrait
+    // while the device is sideways. Left alone the pane looks as though the
+    // rotate button did nothing at all.
+    deviceScreenshot.mockResolvedValue({
+      data: 'AAAA',
+      scale: 1,
+      screen: { width: 402, height: 874 },
+      orientation: 'landscape-left'
+    })
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    const img = await screen.findByTestId('device-frame-t1')
+    await waitFor(() => expect(img.style.transform).toContain('rotate(-90deg)'))
   })
 })

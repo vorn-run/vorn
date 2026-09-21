@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { maxEdgeFor } from '../lib/device-bezel'
+import type { DeviceOrientation } from '../../shared/types'
 
 /** How often a visible pane asks main for a fresh still. */
 const POLL_MS = 500
@@ -26,8 +27,10 @@ export interface DeviceFrameState {
   containerRef: React.MutableRefObject<HTMLDivElement | null>
   /** The latest still, base64 PNG, or null before the first arrives. */
   frame: string | null
-  /** The device's screen in points, which is also its orientation. */
+  /** The device's screen in points. */
   screen: { width: number; height: number } | null
+  /** Which way up the device is held, which the picture alone cannot say. */
+  orientation: DeviceOrientation
   /** The stage, in CSS pixels, for working out what fits. */
   box: { width: number; height: number }
   error: string | null
@@ -61,6 +64,7 @@ export function useDeviceFrame(args: {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [frame, setFrame] = useState<string | null>(null)
   const [screen, setScreen] = useState<{ width: number; height: number } | null>(null)
+  const [orientation, setOrientation] = useState<DeviceOrientation>('portrait')
   const [box, setBox] = useState<{ width: number; height: number }>({ width: 0, height: 0 })
   const [error, setError] = useState<string | null>(null)
   // The error message the person has already waved away. Compared by text so
@@ -92,6 +96,7 @@ export function useDeviceFrame(args: {
     setShown(udid)
     setFrame(null)
     setScreen(null)
+    setOrientation('portrait')
     setError(null)
     setDismissed(null)
   }
@@ -186,6 +191,7 @@ export function useDeviceFrame(args: {
         if (cancelled) return
         setFrame(shot.data)
         setScreen(shot.screen)
+        setOrientation(shot.orientation ?? 'portrait')
         setError(null)
         // Forget what was waved away, too. Dismissal silences one message
         // while it keeps recurring; a frame that arrives means the condition
@@ -222,6 +228,7 @@ export function useDeviceFrame(args: {
     containerRef,
     frame,
     screen,
+    orientation,
     box,
     error,
     dismissed,

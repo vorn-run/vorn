@@ -491,6 +491,10 @@ describe('a press pays for its own hold', () => {
     const before = entryForTests('s1')!.generation
     await interact({ sessionId: 's1', action: 'rotate', orientation: 'landscape-left' })
     expect(hidEvents[0]).toEqual([{ orientation: { orientation: 'LANDSCAPE_LEFT' } }])
+    // Remembered, because nothing can be asked: an app that does not rotate
+    // keeps drawing portrait pixels while the device itself is sideways, so
+    // the picture alone can never tell the pane which way up it is.
+    expect(entryForTests('s1')!.orientation).toBe('landscape-left')
     // Rotating moves everything on screen, so every ref taken before it is
     // describing a layout that no longer exists.
     expect(entryForTests('s1')!.generation).toBe(before + 1)
@@ -503,6 +507,8 @@ describe('a press pays for its own hold', () => {
       interact({ sessionId: 's1', action: 'rotate', orientation: 'sideways' as never })
     ).rejects.toThrow(/sideways/)
     expect(hidEvents).toEqual([])
+    // And nothing is remembered about a rotation that never happened.
+    expect(entryForTests('s1')!.orientation).toBe('portrait')
   })
 })
 

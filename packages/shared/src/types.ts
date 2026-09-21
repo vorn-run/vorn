@@ -1948,6 +1948,7 @@ export const IPC = {
   DEVICE_SCREENSHOT: 'device:screenshot',
   DEVICE_INTERACT: 'device:interact',
   DEVICE_LIST: 'device:list',
+  DEVICE_CHROME: 'device:chrome',
   DEVICE_CLAIM: 'device:claim',
   DEVICE_RELEASE: 'device:release',
   /**
@@ -2935,6 +2936,57 @@ export type DeviceClaimResult =
 export interface DevicePoint {
   x: number
   y: number
+}
+
+/**
+ * The body Apple draws around this kind of device.
+ *
+ * Read at runtime from the machine's own Xcode (`DeviceKit`'s chrome bundles,
+ * the artwork Simulator and Device Hub use), never shipped with Vorn. Null
+ * wherever that is not available, and the pane draws a plain frame instead.
+ */
+export interface DeviceChromePiece {
+  /** PNG data URL. */
+  url: string
+  /** The artwork's own size, in device points. Corners are drawn at it; edges
+   *  keep this thickness and stretch along the side they run down. */
+  width: number
+  height: number
+}
+
+/** A hardware button moulded into the body, drawn where Apple places it. */
+export interface DeviceChromeButton {
+  name: string
+  url: string
+  width: number
+  height: number
+  /** Which edge of the body it sits on. */
+  side: 'left' | 'right'
+  /** How far it stands out from that edge, in points. */
+  out: number
+  /** Distance from the top of the body, in points. */
+  top: number
+}
+
+export interface DeviceChrome {
+  /** The chrome bundle's short name, e.g. `phone11`. */
+  id: string
+  /** How far the screen sits inside the body, in device points. */
+  inset: { left: number; right: number; top: number; bottom: number }
+  /** The body's outer corner radius, in device points. */
+  cornerRadius: number
+  /** The nine-slice pieces of the body. */
+  images: {
+    topLeft: DeviceChromePiece
+    top: DeviceChromePiece
+    topRight: DeviceChromePiece
+    right: DeviceChromePiece
+    bottomRight: DeviceChromePiece
+    bottom: DeviceChromePiece
+    bottomLeft: DeviceChromePiece
+    left: DeviceChromePiece
+  }
+  buttons: DeviceChromeButton[]
 }
 
 /**

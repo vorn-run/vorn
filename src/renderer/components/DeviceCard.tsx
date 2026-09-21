@@ -12,8 +12,15 @@ import { ICON_BUTTON } from '../lib/icon-button'
 import { devicePaneId } from '../lib/pane-id'
 import { flattenPageText } from '../lib/browser-url'
 import { useDeviceFrame } from '../hooks/useDeviceFrame'
-import { bezelFor, steppedZoom, PANE_MAX_EDGE, ZOOM_MAX, ZOOM_MIN } from '../lib/device-bezel'
-import type { DeviceOrientation } from '../../shared/types'
+import {
+  bezelFor,
+  screenPointFor,
+  steppedZoom,
+  PANE_MAX_EDGE,
+  ZOOM_MAX,
+  ZOOM_MIN
+} from '../lib/device-bezel'
+import type { DeviceChrome, DeviceOrientation } from '../../shared/types'
 
 interface Props {
   /** Session that owns this device pane. */
@@ -78,10 +85,40 @@ export const DeviceCard = memo(
     // Read by the poll, which must not restart every time the zoom changes.
     const scaleRef = useRef(1)
 
-    const { containerRef, frame, screen, box, error, dismissed, dismiss, reportError } =
-      useDeviceFrame({ sessionId, udid: pane?.udid ?? null, scaleRef })
+    const {
+      containerRef,
+      frame,
+      screen,
+      orientation,
+      box,
+      error,
+      dismissed,
+      dismiss,
+      reportError
+    } = useDeviceFrame({ sessionId, udid: pane?.udid ?? null, scaleRef })
 
-    const bezel = useMemo(() => (screen ? bezelFor(screen, box, zoom) : null), [screen, box, zoom])
+    // The device's own body, borrowed from the machine's Xcode. Null on a
+    // machine without it, and then the pane draws a plain frame — asked for
+    // once per device, and never waited on: the pane is useful without it.
+    const [chrome, setChrome] = useState<DeviceChrome | null>(null)
+    useEffect(() => {
+      const udid = pane?.udid
+      if (!udid) return
+      let cancelled = false
+      setChrome(null)
+      void window.api
+        .deviceChrome?.(udid)
+        .then((found) => !cancelled && setChrome(found))
+        .catch(() => {})
+      return () => {
+        cancelled = true
+      }
+    }, [pane?.udid])
+
+    const bezel = useMemo(
+      () => (screen ? bezelFor(screen, box, zoom, chrome, orientation) : null),
+      [screen, box, zoom, chrome, orientation]
+    )
     useEffect(() => {
       if (bezel) scaleRef.current = bezel.scale
     }, [bezel])
@@ -101,26 +138,21 @@ export const DeviceCard = memo(
     /**
      * Client coordinates → device **points**.
      *
-     * The image is drawn at exactly `screen × scale` (see `device-bezel.ts`), so
-     * this reduces to dividing by that scale — but it is still written against
-     * the drawn box rather than the zoom value, so a rounding difference of half
-     * a pixel cannot turn into a mis-tap, and so the one place that converts
-     * coordinates keeps working if the sizing ever changes again. Null means
-     * outside the screen.
+     * The arithmetic itself lives in `device-bezel.ts`, where it is tested at
+     * every zoom and both orientations: it is the one thing in this pane that
+     * fails silently, since a mis-mapped tap looks exactly like a tap that
+     * worked. The rect read here is the drawn screen — for a quarter-turn the
+     * element's bounding box is the turned box, which is what the mapping
+     * expects. Null means outside the screen.
      */
     const toPoints = useCallback(
       (clientX: number, clientY: number): { x: number; y: number } | null => {
         const img = imgRef.current
-        if (!img || !screen || screen.width <= 0 || screen.height <= 0) return null
+        if (!img || !bezel) return null
         const box = img.getBoundingClientRect()
-        const drawn = Math.min(box.width / screen.width, box.height / screen.height)
-        if (!(drawn > 0)) return null
-        const x = (clientX - box.left - (box.width - screen.width * drawn) / 2) / drawn
-        const y = (clientY - box.top - (box.height - screen.height * drawn) / 2) / drawn
-        if (x < 0 || y < 0 || x > screen.width || y > screen.height) return null
-        return { x, y }
+        return screenPointFor(clientX - box.left, clientY - box.top, bezel, box)
       },
-      [screen]
+      [bezel]
     )
 
     /**
@@ -258,10 +290,13 @@ export const DeviceCard = memo(
     )
 
     const rotate = useCallback(async () => {
-      if (!screen) return
       // Turning it back is the other half of the button: a device left sideways
-      // with no way back would be a trap.
-      const next: DeviceOrientation = screen.width > screen.height ? 'portrait' : 'landscape-left'
+      // with no way back would be a trap. Which way to turn comes from the
+      // orientation the device reports, never from the shape of the picture —
+      // an app that does not rotate keeps sending portrait pixels however the
+      // device is held, so a button reading those would send "landscape" for
+      // ever and appear to work exactly once.
+      const next: DeviceOrientation = orientation === 'portrait' ? 'landscape-left' : 'portrait'
       setRotating(true)
       try {
         await window.api.deviceInteract({ sessionId, action: 'rotate', orientation: next })
@@ -270,7 +305,7 @@ export const DeviceCard = memo(
       } finally {
         setRotating(false)
       }
-    }, [screen, sessionId, say])
+    }, [orientation, sessionId, say])
 
     const saveScreenshot = useCallback(async () => {
       if (!pane) return
