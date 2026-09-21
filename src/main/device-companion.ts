@@ -7,6 +7,7 @@ import * as grpc from '@grpc/grpc-js'
 import * as protoLoader from '@grpc/proto-loader'
 import { app } from 'electron'
 import log from './logger'
+import { augmentedPath, resolveBinaryWaiting } from './binary-path'
 
 /**
  * One `idb_companion` child process per claimed simulator, and the gRPC client
@@ -70,6 +71,42 @@ export function socketPathFor(udid: string, dir: string = os.tmpdir()): string {
 /** The one companion binary we shell out to, resolved for the error taxonomy. */
 const COMPANION_BIN = 'idb_companion'
 
+/** An absolute path to the companion, for an install the search cannot guess. */
+const COMPANION_ENV_VAR = 'VORN_IDB_COMPANION'
+
+/**
+ * Why no companion could be started, in a sentence a person can act on.
+ *
+ * The install line is kept exactly as it was: it is what the picker shows and
+ * what a test pins. What is new is the rest — where we looked — because this
+ * message used to claim the binary was missing whenever the app could not
+ * find it, which for an app launched from Finder was most of the time.
+ */
+export function companionMissingMessage(resolution?: {
+  searched?: string[]
+  overrideMiss?: string
+}): string {
+  const lines = resolution?.overrideMiss
+    ? [
+        `${COMPANION_ENV_VAR} points at ${resolution.overrideMiss}, which is not a file this app can run.`,
+        `Point it at ${COMPANION_BIN}, or unset it and install with:`,
+        `  brew install facebook/fb/idb-companion`
+      ]
+    : [
+        `${COMPANION_BIN} is not installed. Install it with:`,
+        `  brew install facebook/fb/idb-companion`
+      ]
+  const searched = resolution?.searched ?? []
+  if (searched.length > 0) {
+    const shown = searched.slice(0, 6).join(', ')
+    const more = searched.length > 6 ? ` and ${searched.length - 6} more` : ''
+    lines.push(
+      `Looked in ${shown}${more}. Set ${COMPANION_ENV_VAR} to its absolute path if it lives elsewhere.`
+    )
+  }
+  return lines.join('\n')
+}
+
 /**
  * Reads the readiness line the companion writes on startup, so we know it is
  * actually listening before the first call.
@@ -122,9 +159,7 @@ export function readCompanionReady(child: ChildProcess, timeoutMs = 30_000): Pro
     child.on('error', (err) => {
       done(
         (err as NodeJS.ErrnoException).code === 'ENOENT'
-          ? new Error(
-              `${COMPANION_BIN} is not installed. Install it with:\n  brew install facebook/fb/idb-companion`
-            )
+          ? new Error(companionMissingMessage())
           : err
       )
     })
@@ -173,8 +208,13 @@ export async function startCompanion(
     // Nothing there, which is the normal case.
   }
 
+  // Resolved rather than trusted to PATH: an app started from Finder has only
+  // the system directories, and the companion is installed by Homebrew.
+  const resolved = await resolveBinaryWaiting(COMPANION_BIN, COMPANION_ENV_VAR)
+  if (!resolved.path) throw new Error(companionMissingMessage(resolved))
+
   const child = spawn(
-    COMPANION_BIN,
+    resolved.path,
     [
       '--udid',
       udid,
@@ -185,7 +225,9 @@ export async function startCompanion(
       '--terminate-offline',
       '1'
     ],
-    { stdio: ['ignore', 'pipe', 'pipe'] }
+    // The companion shells out to Xcode's own tooling, so it needs a PATH
+    // worth having even when this process was handed one that is not.
+    { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: augmentedPath() } }
   )
 
   if (child.stderr) {

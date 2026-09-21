@@ -39,6 +39,7 @@ import { readHostSettings } from './server/host-store'
 import { registerConnectHandlers, showConnectWindow } from './server/connect-window'
 import { readPortFile } from './server/server-adoption'
 import type { ServerBridge } from './server/server-bridge'
+import { primeHostPath, resetHostPath, setPathSource } from './binary-path'
 import log from './logger'
 import { loginItemFor } from './login-item'
 
@@ -533,6 +534,20 @@ app.whenReady().then(async () => {
   })
 
   setBridge(bridge)
+  // A local server knows the PATH a login shell reports; this process, started
+  // from Finder, does not. Asked for now so the answer is in hand before anyone
+  // opens a device pane, and asked again whenever a server takes over.
+  //
+  // Never asked of a host: that server runs on another machine, and the
+  // binaries it would name are not the ones this process is about to spawn.
+  if (readHostSettings().mode !== 'host') {
+    setPathSource(bridge)
+    void primeHostPath()
+    bridge.on('connected', () => {
+      resetHostPath()
+      void primeHostPath()
+    })
+  }
   // Lets the browser and device registries ask the renderer for a pane, so an
   // agent can open one itself instead of waiting on a human click. Both are
   // wired from the same helper: a registry left unwired keeps its default

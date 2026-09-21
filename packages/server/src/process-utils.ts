@@ -69,6 +69,12 @@ export function primeShellEnv(): Promise<void> {
 }
 
 /** True once the login shell has answered; on Windows there is nothing to wait for. */
+/** The PATH a process without one should use, and whether the shell has spoken for it. */
+export function resolvedShellPath(): { path: string | null; resolved: boolean } {
+  const env = getSafeEnv()
+  return { path: env.PATH || env.Path || null, resolved: shellEnvResolved() }
+}
+
 export function shellEnvResolved(): boolean {
   return process.platform === 'win32' || resolvedEnvCache !== undefined
 }
