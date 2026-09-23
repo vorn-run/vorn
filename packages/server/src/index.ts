@@ -49,6 +49,7 @@ import {
   bearerFrom
 } from './ws-auth'
 import { getDataDir, dbCountActiveConnectorInboxLeases, listWorkflowRunIds } from './database'
+import { sweepArtifacts } from './artifacts/service'
 import { registerGateViewRoute } from './gate-view-route'
 import { gateViewPage } from './workflows/engine'
 import { sweepGateViews } from './workflows/gate-views'
@@ -428,6 +429,7 @@ export async function startServer(
   // After the methods, because picking a run back up uses them.
   void resumeRunsAfterStart()
   sweepGateViews(getDataDir(), listWorkflowRunIds())
+  sweepArtifacts(getDataDir())
 
   // Server shutdown method (callable from clients)
   registerMethod('server:shutdown', async () => {

@@ -2803,6 +2803,61 @@ export interface ArtifactManifest {
   tweaks?: Record<string, ArtifactTweak>
 }
 
+/** What an agent can publish: any HTML page, a Markdown doc, or a design with tweaks. */
+export type ArtifactKind = 'page' | 'doc' | 'design'
+
+export const ARTIFACT_KINDS: readonly ArtifactKind[] = ['page', 'doc', 'design']
+
+/** Who wrote a version: the agent that published it, or the person who edited a doc. */
+export type ArtifactAuthor = 'agent' | 'user'
+
+/** A published deliverable, kept with every version it has had. */
+export interface Artifact {
+  id: string
+  kind: ArtifactKind
+  title: string
+  /** The session that published it; null when a workflow gate did. */
+  sessionId: string | null
+  projectName: string | null
+  latestVersion: number
+  gateRunId?: string
+  gateNodeId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ArtifactVersion {
+  artifactId: string
+  version: number
+  author: ArtifactAuthor
+  /** The batch of comments this version was published in answer to. */
+  answersBatchId?: string
+  createdAt: string
+}
+
+/** Where a comment points: a quote with its surroundings, a point on an artboard, or a person's own edit of a doc. */
+export type ArtifactAnchor =
+  | { kind: 'quote'; quote: string; prefix: string; suffix: string }
+  | { kind: 'point'; artboard: string; x: number; y: number; element: string }
+  | { kind: 'edit'; before: string; after: string }
+
+export type ArtifactCommentState = 'draft' | 'sent'
+
+export interface ArtifactComment {
+  id: string
+  artifactId: string
+  /** The version the comment was written on. */
+  version: number
+  /** Null for a general note about the whole version. */
+  anchor: ArtifactAnchor | null
+  body: string
+  state: ArtifactCommentState
+  batchId?: string
+  createdAt: string
+  updatedAt: string
+  sentAt?: string
+}
+
 /** Where an interaction lands: a ref from `read_page`, or raw viewport coords. */
 export type BrowserTarget = { ref: string } | { x: number; y: number }
 

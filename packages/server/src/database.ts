@@ -6,7 +6,15 @@ import { randomUUID } from 'node:crypto'
 import log from './logger'
 import { getDefaultShell } from './process-utils'
 import { removeGateViews } from './workflows/gate-views'
-import type { GateFeedbackEntry } from '@vornrun/shared/types'
+import type {
+  Artifact,
+  ArtifactAnchor,
+  ArtifactAuthor,
+  ArtifactComment,
+  ArtifactKind,
+  ArtifactVersion,
+  GateFeedbackEntry
+} from '@vornrun/shared/types'
 import {
   AppConfig,
   ProjectConfig,
@@ -529,6 +537,7 @@ function createSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_connector_inbox_connection
       ON connector_inbox(connection_id, created_at);
   `)
+  d.exec(ARTIFACT_DDL)
 
   migrateSchema(d)
   verifySchema(d)
@@ -1201,7 +1210,62 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 24 (the text a reviewer edited at a gate)')
   }
+
+  if (version < 25) {
+    d.transaction(() => {
+      d.exec(ARTIFACT_DDL)
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '25')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 25 (published artifacts and their comments)')
+  }
 }
+
+/** Published artifacts, every version they have had, and the comments written on them. */
+const ARTIFACT_DDL = `
+  CREATE TABLE IF NOT EXISTS artifacts (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    session_id TEXT,
+    project_name TEXT,
+    token TEXT NOT NULL,
+    latest_version INTEGER NOT NULL DEFAULT 0,
+    gate_run_id TEXT,
+    gate_node_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_artifacts_session ON artifacts(session_id, updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_name, updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS artifact_versions (
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    author TEXT NOT NULL,
+    answers_batch_id TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (artifact_id, version)
+  );
+
+  CREATE TABLE IF NOT EXISTS artifact_comments (
+    id TEXT PRIMARY KEY,
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    anchor TEXT,
+    body TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'draft',
+    batch_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    sent_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_artifact_comments_artifact
+    ON artifact_comments(artifact_id, created_at);
+`
 
 /** What a gate asked, its review page token, which round it is on, what the reviewer wrote, and when a person rejected it. */
 const GATE_COLUMNS = [
@@ -1343,7 +1407,7 @@ function verifySchema(d: Database.Database): void {
       },
       // Which pass of a loop produced this row.
       { column: 'iteration', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN iteration INTEGER' },
-      ...GATE_COLUMNS.map(([column, type]) => ({
+      ...[...GATE_COLUMNS, ...GATE_EDIT_COLUMNS].map(([column, type]) => ({
         column,
         ddl: `ALTER TABLE workflow_run_nodes ADD COLUMN ${column} ${type}`
       }))
@@ -4166,5 +4230,286 @@ function mapSessionEventRow(r: Record<string, unknown>): SessionEvent {
     eventType: r.event_type as SessionEvent['eventType'],
     timestamp: r.timestamp as string,
     ...(meta != null && { metadata: JSON.parse(meta) })
+  }
+}
+
+// ─── Artifacts ────────────────────────────────────────────────────
+
+export interface NewArtifact {
+  kind: ArtifactKind
+  title: string
+  sessionId: string | null
+  projectName: string | null
+  gateRunId?: string
+  gateNodeId?: string
+}
+
+/** Create an artifact with no versions yet, and the token that unlocks its pages. */
+export function insertArtifact(fields: NewArtifact): { artifact: Artifact; token: string } {
+  const now = new Date().toISOString()
+  const id = randomUUID()
+  const token = randomUUID().replace(/-/g, '')
+  getDb()
+    .prepare(
+      `INSERT INTO artifacts (id, kind, title, session_id, project_name, token, latest_version,
+         gate_run_id, gate_node_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
+    )
+    .run(
+      id,
+      fields.kind,
+      fields.title,
+      fields.sessionId,
+      fields.projectName,
+      token,
+      fields.gateRunId ?? null,
+      fields.gateNodeId ?? null,
+      now,
+      now
+    )
+  return { artifact: getArtifact(id)!, token }
+}
+
+export function getArtifact(id: string): Artifact | null {
+  const row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined
+  return row ? mapArtifactRow(row) : null
+}
+
+export function getArtifactToken(id: string): string | null {
+  const row = getDb().prepare('SELECT token FROM artifacts WHERE id = ?').get(id) as
+    | { token: string }
+    | undefined
+  return row?.token ?? null
+}
+
+/** The newest first, narrowed to one session or one project when asked. */
+export function listArtifacts(
+  filter: { sessionId?: string; projectName?: string } = {},
+  limit = 50
+): Artifact[] {
+  const where: string[] = []
+  const params: unknown[] = []
+  if (filter.sessionId) {
+    where.push('session_id = ?')
+    params.push(filter.sessionId)
+  }
+  if (filter.projectName) {
+    where.push('project_name = ?')
+    params.push(filter.projectName)
+  }
+  const sql = `SELECT * FROM artifacts ${where.length ? `WHERE ${where.join(' OR ')}` : ''}
+               ORDER BY updated_at DESC LIMIT ?`
+  const rows = getDb()
+    .prepare(sql)
+    .all(...params, limit) as Array<Record<string, unknown>>
+  return rows.map(mapArtifactRow)
+}
+
+export function renameArtifact(id: string, title: string): void {
+  getDb().prepare('UPDATE artifacts SET title = ? WHERE id = ?').run(title, id)
+}
+
+/** Number the next version and make it the latest, in one step so two publishes cannot share a number. */
+export function addArtifactVersion(
+  artifactId: string,
+  author: ArtifactAuthor,
+  answersBatchId?: string
+): ArtifactVersion {
+  const d = getDb()
+  return d.transaction(() => {
+    const row = d.prepare('SELECT latest_version FROM artifacts WHERE id = ?').get(artifactId) as
+      | { latest_version: number }
+      | undefined
+    if (!row) throw new Error(`Artifact not found: ${artifactId}`)
+    const version = row.latest_version + 1
+    const now = new Date().toISOString()
+    d.prepare(
+      `INSERT INTO artifact_versions (artifact_id, version, author, answers_batch_id, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(artifactId, version, author, answersBatchId ?? null, now)
+    d.prepare('UPDATE artifacts SET latest_version = ?, updated_at = ? WHERE id = ?').run(
+      version,
+      now,
+      artifactId
+    )
+    return { artifactId, version, author, answersBatchId, createdAt: now }
+  })()
+}
+
+export function listArtifactVersions(artifactId: string): ArtifactVersion[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM artifact_versions WHERE artifact_id = ? ORDER BY version')
+    .all(artifactId) as Array<Record<string, unknown>>
+  return rows.map((r) => ({
+    artifactId: r.artifact_id as string,
+    version: r.version as number,
+    author: r.author as ArtifactAuthor,
+    ...(r.answers_batch_id != null && { answersBatchId: r.answers_batch_id as string }),
+    createdAt: r.created_at as string
+  }))
+}
+
+/** The latest batch sent on this artifact that no version has answered yet. */
+export function unansweredBatchId(artifactId: string): string | undefined {
+  const row = getDb()
+    .prepare(
+      `SELECT batch_id FROM artifact_comments
+       WHERE artifact_id = ? AND state = 'sent' AND batch_id IS NOT NULL
+         AND batch_id NOT IN (
+           SELECT answers_batch_id FROM artifact_versions
+           WHERE artifact_id = ? AND answers_batch_id IS NOT NULL
+         )
+       ORDER BY sent_at DESC LIMIT 1`
+    )
+    .get(artifactId, artifactId) as { batch_id: string } | undefined
+  return row?.batch_id
+}
+
+export function listArtifactComments(
+  artifactId: string,
+  filter: { version?: number; state?: ArtifactComment['state']; batchId?: string } = {}
+): ArtifactComment[] {
+  const where = ['artifact_id = ?']
+  const params: unknown[] = [artifactId]
+  if (filter.version !== undefined) {
+    where.push('version = ?')
+    params.push(filter.version)
+  }
+  if (filter.state) {
+    where.push('state = ?')
+    params.push(filter.state)
+  }
+  if (filter.batchId) {
+    where.push('batch_id = ?')
+    params.push(filter.batchId)
+  }
+  const rows = getDb()
+    .prepare(`SELECT * FROM artifact_comments WHERE ${where.join(' AND ')} ORDER BY created_at`)
+    .all(...params) as Array<Record<string, unknown>>
+  return rows.map(mapArtifactCommentRow)
+}
+
+export function getArtifactComment(id: string): ArtifactComment | null {
+  const row = getDb().prepare('SELECT * FROM artifact_comments WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined
+  return row ? mapArtifactCommentRow(row) : null
+}
+
+export function insertArtifactComment(fields: {
+  artifactId: string
+  version: number
+  anchor: ArtifactAnchor | null
+  body: string
+}): ArtifactComment {
+  const now = new Date().toISOString()
+  const id = randomUUID()
+  getDb()
+    .prepare(
+      `INSERT INTO artifact_comments (id, artifact_id, version, anchor, body, state, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)`
+    )
+    .run(
+      id,
+      fields.artifactId,
+      fields.version,
+      fields.anchor ? JSON.stringify(fields.anchor) : null,
+      fields.body,
+      now,
+      now
+    )
+  return getArtifactComment(id)!
+}
+
+/** Change a draft's words or anchor; a sent comment is part of the record and stays as it was. */
+export function updateArtifactComment(
+  id: string,
+  change: { body?: string; anchor?: ArtifactAnchor | null }
+): ArtifactComment | null {
+  const current = getArtifactComment(id)
+  if (!current || current.state !== 'draft') return null
+  const anchor = change.anchor === undefined ? current.anchor : change.anchor
+  getDb()
+    .prepare('UPDATE artifact_comments SET body = ?, anchor = ?, updated_at = ? WHERE id = ?')
+    .run(
+      change.body ?? current.body,
+      anchor ? JSON.stringify(anchor) : null,
+      new Date().toISOString(),
+      id
+    )
+  return getArtifactComment(id)
+}
+
+/** Drop a draft. Returns false when there was no draft by that id. */
+export function deleteArtifactComment(id: string): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM artifact_comments WHERE id = ? AND state = 'draft'")
+    .run(id)
+  return result.changes > 0
+}
+
+/** Seal every draft on the artifact into one batch. Null when there were none. */
+export function sendArtifactDrafts(
+  artifactId: string
+): { batchId: string; comments: ArtifactComment[] } | null {
+  const d = getDb()
+  return d.transaction(() => {
+    const batchId = randomUUID()
+    const result = d
+      .prepare(
+        `UPDATE artifact_comments SET state = 'sent', batch_id = ?, sent_at = ?
+         WHERE artifact_id = ? AND state = 'draft'`
+      )
+      .run(batchId, new Date().toISOString(), artifactId)
+    if (result.changes === 0) return null
+    return { batchId, comments: listArtifactComments(artifactId, { batchId }) }
+  })()
+}
+
+/** Remove artifacts untouched since `cutoff`, returning their ids so their pages can go too. */
+export function deleteArtifactsUpdatedBefore(cutoff: string): string[] {
+  const d = getDb()
+  const rows = d.prepare('SELECT id FROM artifacts WHERE updated_at < ?').all(cutoff) as Array<{
+    id: string
+  }>
+  d.prepare('DELETE FROM artifacts WHERE updated_at < ?').run(cutoff)
+  return rows.map((r) => r.id)
+}
+
+export function listArtifactIds(): string[] {
+  const rows = getDb().prepare('SELECT id FROM artifacts').all() as Array<{ id: string }>
+  return rows.map((r) => r.id)
+}
+
+function mapArtifactRow(r: Record<string, unknown>): Artifact {
+  return {
+    id: r.id as string,
+    kind: r.kind as ArtifactKind,
+    title: r.title as string,
+    sessionId: (r.session_id as string | null) ?? null,
+    projectName: (r.project_name as string | null) ?? null,
+    latestVersion: r.latest_version as number,
+    ...(r.gate_run_id != null && { gateRunId: r.gate_run_id as string }),
+    ...(r.gate_node_id != null && { gateNodeId: r.gate_node_id as string }),
+    createdAt: r.created_at as string,
+    updatedAt: r.updated_at as string
+  }
+}
+
+function mapArtifactCommentRow(r: Record<string, unknown>): ArtifactComment {
+  const anchor = r.anchor as string | null
+  return {
+    id: r.id as string,
+    artifactId: r.artifact_id as string,
+    version: r.version as number,
+    anchor: anchor ? (JSON.parse(anchor) as ArtifactAnchor) : null,
+    body: r.body as string,
+    state: r.state as ArtifactComment['state'],
+    ...(r.batch_id != null && { batchId: r.batch_id as string }),
+    createdAt: r.created_at as string,
+    updatedAt: r.updated_at as string,
+    ...(r.sent_at != null && { sentAt: r.sent_at as string })
   }
 }
