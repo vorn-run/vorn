@@ -1,6 +1,9 @@
-import { useMemo } from 'react'
-import { RichMarkdownEditor } from '../rich-editor/RichMarkdownEditor'
+import { Suspense, lazy, useMemo } from 'react'
 import { mergeDocEdit } from '../../lib/doc-edits'
+
+const RichMarkdownEditor = lazy(() =>
+  import('../rich-editor/RichMarkdownEditor').then((m) => ({ default: m.RichMarkdownEditor }))
+)
 
 /** The bar while a doc is being edited: which version it starts from, and the way out. */
 export function DocEditBar({
@@ -61,7 +64,9 @@ export function DocEditor({
   return (
     <div className="absolute inset-0 z-10 flex min-h-0 bg-surface-base">
       <div className="flex-1 min-w-0 overflow-y-auto p-4">
-        <RichMarkdownEditor value={edited} onChange={onChange} placeholder="" />
+        <Suspense fallback={null}>
+          <RichMarkdownEditor value={edited} onChange={onChange} placeholder="" />
+        </Suspense>
       </div>
       <aside
         aria-label="Your edits"
