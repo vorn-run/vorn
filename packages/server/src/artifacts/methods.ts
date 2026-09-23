@@ -14,9 +14,11 @@ import {
   listArtifactComments,
   listArtifacts,
   listArtifactVersions,
+  sendArtifactDrafts,
   updateArtifactComment
 } from '../database'
 import { artifactPath, canSeeArtifact, publishArtifact, type PublishingSession } from './service'
+import { createArtifactDelivery } from './delivery'
 import log from '../logger'
 
 function callingSession(sessionId: string): PublishingSession {
@@ -40,8 +42,22 @@ function visibleTo(sessionId: string, artifactId: string): Artifact {
 const commentsChanged = (artifactId: string): void =>
   clientRegistry.broadcast(IPC.ARTIFACT_COMMENTS_CHANGED, { artifactId })
 
+const delivery = createArtifactDelivery({
+  session: (id) => ptyManager.getActiveSessions().find((s) => s.id === id) ?? null,
+  write: (id, data) => ptyManager.writeToPty(id, data),
+  sendDrafts: (id) => sendArtifactDrafts(id),
+  hasDrafts: (id) => listArtifactComments(id, { state: 'draft' }).length > 0,
+  artifact: (id) => getArtifact(id),
+  changed: commentsChanged
+})
+
 /** Publishing, reading and commenting on artifacts; `port` is the server's, known once it listens. */
 export function registerArtifactMethods(port: () => number): void {
+  ptyManager.on('client-message', (channel: string, payload: unknown) => {
+    if (channel === IPC.SESSION_UPDATED) delivery.statusChanged((payload as { id: string }).id)
+  })
+  ptyManager.on('session-exit', (session: { id: string }) => delivery.sessionEnded(session.id))
+
   const loopback = (path: string): string => `http://127.0.0.1:${port()}${path}`
 
   registerMethod('artifact:publish', async ({ sessionId, open, ...request }) => {
@@ -94,7 +110,7 @@ export function registerArtifactMethods(port: () => number): void {
       artifact,
       versions: listArtifactVersions(artifactId),
       comments: listArtifactComments(artifactId),
-      queued: false
+      queued: delivery.isQueued(artifactId)
     }
   })
 
@@ -128,6 +144,8 @@ export function registerArtifactMethods(port: () => number): void {
     if (comment) commentsChanged(comment.artifactId)
     return comment
   })
+
+  registerMethod('artifact:send', ({ artifactId }) => delivery.send(artifactId))
 
   registerMethod('artifact:deleteComment', ({ commentId }) => {
     const artifactId = getArtifactComment(commentId)?.artifactId
