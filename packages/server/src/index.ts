@@ -49,7 +49,8 @@ import {
   bearerFrom
 } from './ws-auth'
 import { getDataDir, dbCountActiveConnectorInboxLeases, listWorkflowRunIds } from './database'
-import { sweepArtifacts } from './artifacts/service'
+import { artifactPage, sweepArtifacts } from './artifacts/service'
+import { registerArtifactRoute } from './artifact-route'
 import { registerGateViewRoute } from './gate-view-route'
 import { gateViewPage } from './workflows/engine'
 import { sweepGateViews } from './workflows/gate-views'
@@ -338,6 +339,7 @@ export async function startServer(
   })
 
   registerGateViewRoute(app, gateViewPage)
+  registerArtifactRoute(app, (id, version, token) => artifactPage(getDataDir(), id, version, token))
 
   // Serve task images via HTTP (used by web app instead of file:// protocol)
   app.get('/api/task-images/:taskId/:filename', async (req, reply) => {
