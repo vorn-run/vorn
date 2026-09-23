@@ -803,6 +803,7 @@ export function createApiShim(wsUrl: string) {
       decision: 'approve' | 'reject' | 'changes'
       comment?: string
       edited?: string
+      comments?: import('../../shared/src/types').GateComment[]
     }) => rpc.invoke('workflow:resolveGate', params),
     retryWorkflowRun: (runId: string) => rpc.invoke('workflow:retryRun', { runId }),
     rerunWorkflowRun: (runId: string) => rpc.invoke('workflow:rerun', { runId }),
@@ -817,6 +818,8 @@ export function createApiShim(wsUrl: string) {
     getArtifact: (artifactId: string) => rpc.invoke('artifact:get', { artifactId }),
     artifactVersionUrl: (artifactId: string, version?: number) =>
       rpc.invoke('artifact:versionUrl', { artifactId, version }),
+    artifactForGate: (runId: string, nodeId: string) =>
+      rpc.invoke('artifact:forGate', { runId, nodeId }),
     saveArtifactComment: (params: {
       artifactId: string
       version: number

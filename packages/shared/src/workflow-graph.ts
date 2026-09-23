@@ -172,7 +172,8 @@ export function buildStepOutputsMap(
 }
 
 /**
- * A gate's text, its latest comment, every comment, and which time it asked;
+ * A gate's text, its latest comment, every comment, the comments pinned to
+ * its review page in the latest round, and which time it asked;
  * undefined before it first asks. When the text is a list of records — what a
  * review gate draws as a table — `items` is that list as data, the rows the
  * reviewer kept, ready for a for-each loop.
@@ -187,6 +188,11 @@ function gateOutputs(state: NodeExecutionState): Record<string, unknown> | undef
     text,
     feedback: entries.length > 0 ? entries[entries.length - 1].comment : '',
     feedbackAll: entries.map((e) => `Round ${e.round}: ${e.comment}`).join('\n'),
+    comments: (entries.at(-1)?.comments ?? []).map((c) => ({
+      quote: c.quote ?? '',
+      comment: c.comment,
+      anchored: Boolean(c.quote)
+    })),
     round: state.round ?? 1
   }
 }

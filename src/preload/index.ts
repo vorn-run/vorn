@@ -73,7 +73,7 @@ import {
   ServerRuntimeStatus,
   AuthProbeReport
 } from '../shared/types'
-import type { GateDecision } from '../shared/types'
+import type { GateComment, GateDecision } from '../shared/types'
 
 const api = {
   createTerminal: (payload: CreateTerminalPayload) =>
@@ -965,6 +965,7 @@ const api = {
     decision: GateDecision
     comment?: string
     edited?: string
+    comments?: GateComment[]
   }): Promise<{ accepted: boolean; reason?: string }> =>
     ipcRenderer.invoke(IPC.WORKFLOW_RESOLVE_GATE, params),
   retryWorkflowRun: (runId: string): Promise<WorkflowExecution | null> =>
@@ -994,6 +995,12 @@ const api = {
     version?: number
   ): Promise<{ path: string; url: string } | null> =>
     ipcRenderer.invoke(IPC.ARTIFACT_VERSION_URL, { artifactId, version }),
+  /** The artifact a gate's review page is kept as, and the address of the round it asks. */
+  artifactForGate: (
+    runId: string,
+    nodeId: string
+  ): Promise<{ artifact: Artifact; version: number; url: string } | null> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_FOR_GATE, { runId, nodeId }),
   saveArtifactComment: (params: {
     artifactId: string
     version: number

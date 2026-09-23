@@ -288,8 +288,14 @@ const GATE_OUTPUT_KEYS = [
     label: 'items',
     description: 'The rows the reviewer kept, when the text is a JSON list'
   },
-  { key: 'feedback', label: 'feedback', description: "The reviewer's latest comment" },
-  { key: 'feedbackAll', label: 'feedbackAll', description: 'Every comment, one line per round' },
+  { key: 'text', label: 'text', description: 'The text the gate showed, as the reviewer left it' },
+  {
+    key: 'comments',
+    label: 'comments',
+    description: 'Anchored comments from the latest round, as JSON: quote, comment, anchored'
+  },
+  { key: 'feedback', label: 'feedback', description: 'The general note from the latest round' },
+  { key: 'feedbackAll', label: 'feedbackAll', description: 'Every note, one line per round' },
   { key: 'round', label: 'round', description: 'Which time the gate asked, from 1' }
 ]
 

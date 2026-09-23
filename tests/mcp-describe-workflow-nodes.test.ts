@@ -86,7 +86,7 @@ describe('describe_workflow_nodes', () => {
       expect.arrayContaining(['output', 'passes', 'count', 'results', 'outputs'])
     )
     expect(fields('approval')).toEqual(
-      expect.arrayContaining(['text', 'items', 'feedback', 'feedbackAll', 'round'])
+      expect.arrayContaining(['text', 'items', 'comments', 'feedback', 'feedbackAll', 'round'])
     )
   })
 

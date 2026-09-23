@@ -11,13 +11,15 @@ interface Props {
   agent: string
   queued: boolean
   sending: boolean
-  onSend: () => void
+  /** Absent where the comments go with another action, as at a gate. */
+  onSend?: () => void
   onEdit: (id: string, body: string) => void
   onDelete: (id: string) => void
   onReveal: (comment: ArtifactComment) => void
   onAddNote: (body: string) => void
   /** What to do to start a comment, which differs on a canvas. */
   hint?: string
+  heading?: string
 }
 
 /** Where a comment points, as the rail quotes it. */
@@ -132,7 +134,8 @@ export function ArtifactRail({
   onDelete,
   onReveal,
   onAddNote,
-  hint = 'Select words on the page to comment on them.'
+  hint = 'Select words on the page to comment on them.',
+  heading = 'To send'
 }: Props): React.JSX.Element {
   const [note, setNote] = useState('')
   const sentOn = sent.length ? Math.max(...sent.map((c) => c.version)) : 0
@@ -151,7 +154,7 @@ export function ArtifactRail({
           className="flex justify-between px-3 py-2 border-b border-white/[0.04] font-mono
                      text-[11px] font-semibold tracking-wider uppercase text-ink-faint"
         >
-          <span>To send</span>
+          <span>{heading}</span>
           <span>{drafts.length}</span>
         </h4>
         {drafts.length === 0 ? (
@@ -210,46 +213,48 @@ export function ArtifactRail({
           </>
         )}
       </div>
-      <div className="flex flex-col gap-2 p-3 border-t border-white/[0.06]">
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) addNote()
-          }}
-          aria-label="Note about the whole version"
-          placeholder="A note about the whole version"
-          rows={2}
-          className="w-full resize-none rounded border border-white/[0.12] bg-surface-sunken
+      {onSend && (
+        <div className="flex flex-col gap-2 p-3 border-t border-white/[0.06]">
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) addNote()
+            }}
+            aria-label="Note about the whole version"
+            placeholder="A note about the whole version"
+            rows={2}
+            className="w-full resize-none rounded border border-white/[0.12] bg-surface-sunken
                      px-2 py-1.5 text-[12px] text-ink outline-none focus:border-white/[0.24]
                      placeholder:text-ink-faint"
-        />
-        {note.trim() && (
+          />
+          {note.trim() && (
+            <button
+              type="button"
+              onClick={addNote}
+              className="h-6 rounded border border-white/[0.12] text-[12px] text-ink hover:bg-white/[0.06]"
+            >
+              Add note
+            </button>
+          )}
           <button
             type="button"
-            onClick={addNote}
-            className="h-6 rounded border border-white/[0.12] text-[12px] text-ink hover:bg-white/[0.06]"
+            onClick={onSend}
+            disabled={drafts.length === 0 || sending}
+            className="h-7 rounded bg-ink text-surface-base text-[12px] font-semibold disabled:opacity-40"
           >
-            Add note
+            {drafts.length
+              ? `Send ${drafts.length} comment${drafts.length === 1 ? '' : 's'} to ${agent}`
+              : 'Nothing to send yet'}
           </button>
-        )}
-        <button
-          type="button"
-          onClick={onSend}
-          disabled={drafts.length === 0 || sending}
-          className="h-7 rounded bg-ink text-surface-base text-[12px] font-semibold disabled:opacity-40"
-        >
-          {drafts.length
-            ? `Send ${drafts.length} comment${drafts.length === 1 ? '' : 's'} to ${agent}`
-            : 'Nothing to send yet'}
-        </button>
-        {queued && (
-          <p className="text-[11.5px] text-ink-faint">
-            Queued. It goes once {agent} is back at its prompt.
-          </p>
-        )}
-      </div>
+          {queued && (
+            <p className="text-[11.5px] text-ink-faint">
+              Queued. It goes once {agent} is back at its prompt.
+            </p>
+          )}
+        </div>
+      )}
     </aside>
   )
 }

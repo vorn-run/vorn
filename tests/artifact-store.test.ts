@@ -28,6 +28,8 @@ import {
   writeVersionBody
 } from '../packages/server/src/artifacts/bodies'
 import {
+  gateDraftComments,
+  publishGateArtifact,
   readArtifactSource,
   saveUserVersion,
   sweepArtifacts
@@ -153,5 +155,42 @@ describe("the person's own version of a doc", () => {
     const a = figures()
     addArtifactVersion(a.id, 'agent')
     expect(() => saveUserVersion(dataDir, a.id, '<p>x</p>', [])).toThrow(/Only a doc/)
+  })
+})
+
+describe("a gate's review page", () => {
+  const gate = { runId: 'run-1', nodeId: 'review', title: 'Review the draft' }
+
+  it('keeps each round as the next version of one artifact no session can see', () => {
+    const first = publishGateArtifact(dataDir, gate, '<p>Round one</p>')
+    const second = publishGateArtifact(dataDir, gate, '<p>Round two</p>')
+
+    expect(second.artifact.id).toBe(first.artifact.id)
+    expect(second.artifact).toMatchObject({
+      kind: 'page',
+      sessionId: null,
+      projectName: null,
+      gateRunId: 'run-1',
+      gateNodeId: 'review',
+      latestVersion: 2
+    })
+    expect(readArtifactSource(dataDir, first.artifact.id, 2)?.body).toBe('<p>Round two</p>')
+  })
+
+  it('offers its drafts as the comments a request for changes carries', () => {
+    const { artifact } = publishGateArtifact(dataDir, gate, '<p>The week in review</p>')
+    insertArtifactComment({
+      artifactId: artifact.id,
+      version: 1,
+      anchor: { kind: 'quote', quote: 'week in review', prefix: 'The ', suffix: '' },
+      body: 'Too generic.'
+    })
+    insertArtifactComment({ artifactId: artifact.id, version: 1, anchor: null, body: 'Shorter.' })
+
+    expect(gateDraftComments('run-1', 'review')).toEqual([
+      { quote: 'week in review', comment: 'Too generic.' },
+      { comment: 'Shorter.' }
+    ])
+    expect(gateDraftComments('run-1', 'other')).toEqual([])
   })
 })

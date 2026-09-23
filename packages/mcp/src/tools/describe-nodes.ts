@@ -95,8 +95,13 @@ const DOCS: Record<NodeType, NodeTypeDoc> = {
         description:
           'When the editable text is a JSON list of records: the rows the reviewer kept, as a list, ready for a forEach loop'
       },
-      { field: 'feedback', description: "The reviewer's latest comment" },
-      { field: 'feedbackAll', description: 'Every comment, one line per round' },
+      {
+        field: 'comments',
+        description:
+          'Comments pinned to the review page in the latest round, as a JSON list of {quote, comment, anchored}'
+      },
+      { field: 'feedback', description: 'The general note from the latest round' },
+      { field: 'feedbackAll', description: 'Every note, one line per round' },
       { field: 'round', description: 'Which time the gate asked, from 1' },
       ...COMMON_OUTPUTS
     ],

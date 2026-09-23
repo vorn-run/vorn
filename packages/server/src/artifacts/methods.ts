@@ -6,6 +6,7 @@ import { clientRegistry } from '../broadcast'
 import { browserBridge } from '../browser-bridge'
 import {
   deleteArtifactComment,
+  findGateArtifact,
   getArtifact,
   getArtifactComment,
   getArtifactToken,
@@ -58,6 +59,12 @@ const delivery = createArtifactDelivery({
   changed: commentsChanged,
   latestAuthor: (id) => listArtifactVersions(id).at(-1)?.author
 })
+
+/** A request for changes carried the gate page's drafts back to the run; they are sent now. */
+export function sealGateDrafts(runId: string, nodeId: string): void {
+  const artifact = findGateArtifact(runId, nodeId)
+  if (artifact && sendArtifactDrafts(artifact.id)) commentsChanged(artifact.id)
+}
 
 /** Publishing, reading and commenting on artifacts; `port` is the server's, known once it listens. */
 export function registerArtifactMethods(port: () => number): void {
@@ -129,6 +136,14 @@ export function registerArtifactMethods(port: () => number): void {
     if (!artifact || !token || n < 1 || n > artifact.latestVersion) return null
     const path = artifactPath(artifactId, n, token)
     return { path, url: loopback(path) }
+  })
+
+  registerMethod('artifact:forGate', ({ runId, nodeId }) => {
+    const artifact = findGateArtifact(runId, nodeId)
+    const token = artifact && getArtifactToken(artifact.id)
+    if (!artifact || !token || artifact.latestVersion < 1) return null
+    const n = artifact.latestVersion
+    return { artifact, version: n, url: loopback(artifactPath(artifact.id, n, token)) }
   })
 
   registerMethod('artifact:readComments', ({ sessionId, artifactId, version }) => {

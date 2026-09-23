@@ -4,13 +4,15 @@ import type {
   Artifact,
   ArtifactComment,
   ArtifactKind,
-  ArtifactVersion
+  ArtifactVersion,
+  GateComment
 } from '@vornrun/shared/types'
 import {
   addArtifactVersion,
   insertArtifactComment,
   listArtifactVersions,
   deleteArtifactsUpdatedBefore,
+  findGateArtifact,
   getArtifact,
   getArtifactToken,
   insertArtifact,
@@ -177,6 +179,38 @@ export function publishArtifact(
     path: artifactPath(artifact.id, version.version, token),
     answered: answers ? listArtifactComments(artifact.id, { batchId: answers }).length : 0
   }
+}
+
+/** Keep a gate's review page as the next version of the gate's own artifact, so it can be commented on. */
+export function publishGateArtifact(
+  dataDir: string,
+  gate: { runId: string; nodeId: string; title: string },
+  html: string
+): { artifact: Artifact; version: ArtifactVersion } {
+  const existing = findGateArtifact(gate.runId, gate.nodeId)
+  const artifact =
+    existing ??
+    insertArtifact({
+      kind: 'page',
+      title: gate.title,
+      sessionId: null,
+      projectName: null,
+      gateRunId: gate.runId,
+      gateNodeId: gate.nodeId
+    }).artifact
+  const version = addArtifactVersion(artifact.id, 'agent')
+  writeVersionBody(dataDir, artifact.id, version.version, 'page', html)
+  return { artifact: getArtifact(artifact.id)!, version }
+}
+
+/** The drafts on a gate's review page, as the comments a request for changes carries. */
+export function gateDraftComments(runId: string, nodeId: string): GateComment[] {
+  const artifact = findGateArtifact(runId, nodeId)
+  if (!artifact) return []
+  return listArtifactComments(artifact.id, { state: 'draft' }).map((c) => ({
+    ...(c.anchor?.kind === 'quote' && { quote: c.anchor.quote }),
+    comment: c.body
+  }))
 }
 
 /** A version's source as it was written: Markdown for a doc, HTML otherwise. */

@@ -1065,6 +1065,12 @@ export interface GateFeedbackConfig {
 
 export type GateDecision = 'approve' | 'reject' | 'changes'
 
+/** A reviewer's comment on the review page: the words it is about, when it points at some. */
+export interface GateComment {
+  quote?: string
+  comment: string
+}
+
 export interface GateFeedbackEntry {
   round: number
   decision: GateDecision
@@ -1072,6 +1078,8 @@ export interface GateFeedbackEntry {
   at: string
   /** The reviewer's rewrite at this answer, when they made one. */
   edited?: string
+  /** Comments left on the review page with this answer. */
+  comments?: GateComment[]
 }
 
 /**
@@ -1898,6 +1906,7 @@ export const IPC = {
   ARTIFACT_LIST: 'artifact:list',
   ARTIFACT_GET: 'artifact:get',
   ARTIFACT_VERSION_URL: 'artifact:versionUrl',
+  ARTIFACT_FOR_GATE: 'artifact:forGate',
   ARTIFACT_SAVE_COMMENT: 'artifact:saveComment',
   ARTIFACT_UPDATE_COMMENT: 'artifact:updateComment',
   ARTIFACT_DELETE_COMMENT: 'artifact:deleteComment',

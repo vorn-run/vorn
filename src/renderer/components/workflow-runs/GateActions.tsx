@@ -4,6 +4,7 @@ import { canRequestChanges, gateMaxRounds } from '@vornrun/shared/workflow-graph
 import { isRecordList, toItemList } from '@vornrun/shared/item-list'
 import type {
   ApprovalConfig,
+  GateComment,
   GateDecision,
   NodeExecutionState,
   WorkflowNode
@@ -19,14 +20,16 @@ async function answerGate(
   nodeId: string,
   decision: GateDecision,
   comment?: string,
-  edited?: string
+  edited?: string,
+  comments?: GateComment[]
 ): Promise<boolean> {
   const result = await window.api.resolveWorkflowGate({
     runId,
     nodeId,
     decision,
     ...(comment && { comment }),
-    ...(edited && { edited })
+    ...(edited && { edited }),
+    ...(comments?.length && { comments })
   })
   if (result?.accepted !== false) return true
   toast.error(
@@ -69,6 +72,8 @@ interface ComposerProps {
   kind: 'changes' | 'reject'
   /** A rewrite the reviewer made before answering; sent back with the work, discarded on a reject. */
   edited?: string
+  /** Comments left on the review page; a request for changes carries them and then needs no note. */
+  comments?: GateComment[]
   onDone: () => void
   large?: boolean
 }
@@ -81,12 +86,14 @@ export function GateComposer({
   nodes,
   kind,
   edited,
+  comments,
   onDone,
   large
 }: ComposerProps) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
-  const needsText = kind === 'changes'
+  const pinned = kind === 'changes' ? (comments?.length ?? 0) : 0
+  const needsText = kind === 'changes' && pinned === 0
   const from = nodes.find((n) => n.id === config?.feedback?.from)
   const size = large ? 'px-3.5 py-2 text-[12.5px]' : 'px-2 py-1 text-[11px]'
   const icon = large ? 13 : 11
@@ -96,7 +103,9 @@ export function GateComposer({
     setSending(true)
     try {
       const carried = kind === 'changes' ? edited : undefined
-      if (await answerGate(runId, state.nodeId, kind, text.trim() || undefined, carried)) onDone()
+      const carriedComments = kind === 'changes' ? comments : undefined
+      const note = text.trim() || undefined
+      if (await answerGate(runId, state.nodeId, kind, note, carried, carriedComments)) onDone()
     } finally {
       setSending(false)
     }
@@ -106,7 +115,7 @@ export function GateComposer({
     <div className="flex flex-col gap-2">
       <textarea
         id={`gate-${kind}-${state.nodeId}`}
-        aria-label={needsText ? 'What should change' : 'Why the run is rejected'}
+        aria-label={kind === 'changes' ? 'What should change' : 'Why the run is rejected'}
         autoFocus
         rows={3}
         value={text}
@@ -121,24 +130,31 @@ export function GateComposer({
           }
         }}
         placeholder={
-          needsText ? 'What should change?' : 'Why, if it should be kept with the run (optional)'
+          needsText
+            ? 'What should change?'
+            : pinned
+              ? 'Anything else to change (optional)'
+              : 'Why, if it should be kept with the run (optional)'
         }
         className="w-full px-2.5 py-2 bg-white/[0.03] border border-white/[0.2] rounded-md
                    text-[12.5px] leading-[1.5] text-gray-200 placeholder:text-gray-600
                    focus:outline-none resize-none"
       />
       <div className="text-[11px] leading-[1.45] text-ink-faint">
-        {needsText ? (
+        {kind === 'changes' ? (
           <>
             Runs again from{' '}
-            <span className="text-ink-secondary">{from?.label || 'the chosen step'}</span> with your
-            comment, then asks you. Round {(state.round ?? 1) + 1} of{' '}
-            {gateMaxRounds(config?.feedback)}.
+            <span className="text-ink-secondary">{from?.label || 'the chosen step'}</span> with{' '}
+            {pinned
+              ? `your ${pinned} comment${pinned === 1 ? '' : 's'} on the page`
+              : 'your comment'}
+            , then asks you. Round {(state.round ?? 1) + 1} of {gateMaxRounds(config?.feedback)}.
           </>
         ) : (
           'Ends the run. A note is kept as its reason.'
         )}
-        {edited && (needsText ? ' Your edit goes back with it.' : ' Your edit is discarded.')}
+        {edited &&
+          (kind === 'changes' ? ' Your edit goes back with it.' : ' Your edit is discarded.')}
       </div>
       <div className="flex items-center justify-end gap-1.5">
         <button
@@ -152,14 +168,14 @@ export function GateComposer({
           type="button"
           disabled={sending || (needsText && !text.trim())}
           onClick={() => void submit()}
-          className={`flex items-center gap-1 ${size} ${needsText ? GATE_APPROVE : GATE_REJECT} disabled:opacity-40 disabled:pointer-events-none`}
+          className={`flex items-center gap-1 ${size} ${kind === 'changes' ? GATE_APPROVE : GATE_REJECT} disabled:opacity-40 disabled:pointer-events-none`}
         >
-          {needsText ? (
+          {kind === 'changes' ? (
             <RotateCcw size={icon} strokeWidth={2} />
           ) : (
             <X size={icon} strokeWidth={2.5} />
           )}
-          {needsText ? 'Send back' : 'Reject run'}
+          {kind === 'changes' ? 'Send back' : 'Reject run'}
         </button>
       </div>
     </div>
@@ -314,10 +330,12 @@ interface Props {
   config?: ApprovalConfig
   nodes: WorkflowNode[]
   onOpenReview?: () => void
+  /** Comments left on the review page, which Request changes carries back. */
+  comments?: GateComment[]
 }
 
 /** Open review, Request changes, Reject and Approve, in the order a reviewer reaches for them. */
-export function GateActions({ runId, state, config, nodes, onOpenReview }: Props) {
+export function GateActions({ runId, state, config, nodes, onOpenReview, comments }: Props) {
   const [composing, setComposing] = useState<'changes' | 'reject' | 'edit' | null>(null)
   // Kept until the reviewer answers: approving sends it, sending the work back
   // carries it, rejecting drops it with the run.
@@ -350,6 +368,7 @@ export function GateActions({ runId, state, config, nodes, onOpenReview }: Props
         nodes={nodes}
         kind={composing}
         edited={edited}
+        comments={comments}
         onDone={() => setComposing(null)}
       />
     )
@@ -385,7 +404,7 @@ export function GateActions({ runId, state, config, nodes, onOpenReview }: Props
           className={`flex items-center gap-1 px-2 py-1 text-[11px] ${GATE_NEUTRAL}`}
         >
           <MessageSquare size={11} strokeWidth={1.75} />
-          Request changes
+          {comments?.length ? `Request changes · ${comments.length}` : 'Request changes'}
         </button>
       )}
       <button

@@ -341,10 +341,11 @@ describe('RunEntry — a gate that takes changes', () => {
     expect(queryByText('Request changes')).toBeNull()
   })
 
-  it('opens the review page from the local server in a sealed frame', async () => {
+  it('opens a review page kept with no comments in a sealed frame on the local server', async () => {
     ;(window as unknown as { api: unknown }).api = {
       resolveWorkflowGate,
       stopWorkflowRun: vi.fn(),
+      artifactForGate: vi.fn(async () => null),
       getReachableUrls: vi.fn(async () => ({ urls: [], port: 5050, remote: false }))
     }
     const { getByText, findByTitle, queryByText } = render(

@@ -1,6 +1,7 @@
 import type { AgentModelRequest, AgentModelCatalog } from './agent-models'
 import type {
   Artifact,
+  GateComment,
   ArtifactAnchor,
   ArtifactComment,
   ArtifactKind,
@@ -589,6 +590,8 @@ export interface RequestMethods {
       comment?: string
       /** The reviewer's rewrite of the gate's editable text, when they made one. */
       edited?: string
+      /** Comments left on the review page; a request for changes carries them back. */
+      comments?: GateComment[]
     }
     result: { accepted: boolean; reason?: string }
   }
@@ -1198,6 +1201,11 @@ export interface RequestMethods {
     params: { artifactId: string; version?: number }
     /** `path` is relative to the server's origin; `url` is the loopback address of it. */
     result: { path: string; url: string } | null
+  }
+  /** The artifact a gate's review page is kept as, with the address of the round it is asking. */
+  'artifact:forGate': {
+    params: { runId: string; nodeId: string }
+    result: { artifact: Artifact; version: number; url: string } | null
   }
   'artifact:readComments': {
     params: { sessionId: string; artifactId: string; version?: number }

@@ -27,8 +27,9 @@ import { CommentPopover } from './browser/CommentPopover'
 import { DocEditBar, DocEditor } from './browser/DocEditor'
 import { DesignCanvas, type CanvasPin } from './browser/DesignCanvas'
 import { mergeDocEdit } from '../lib/doc-edits'
-import { latestSentBatch, marksFor, placePopover } from '../lib/artifact-comments'
+import { placePopover } from '../lib/artifact-comments'
 import { useArtifact } from '../hooks/useArtifact'
+import { useQuoteComments } from '../hooks/useQuoteComments'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { PaneTabStrip } from './PaneTabStrip'
 import { PANE_SURFACE } from '../lib/pane-surface'
@@ -166,14 +167,6 @@ export const BrowserCard = memo(
     const art = activeTabState?.artifact
     const { state: artState, refresh: refreshArtifact } = useArtifact(art?.id)
     const [commenting, setCommenting] = useState(false)
-    // A comment being written: what it is anchored to, how the popover names that, and where it opens.
-    const [pending, setPending] = useState<{
-      anchor: ArtifactAnchor
-      label: string
-      at: { x: number; y: number }
-    } | null>(null)
-    const [found, setFound] = useState<Record<string, boolean>>({})
-    const [focusId, setFocusId] = useState<string | null>(null)
     const [sending, setSending] = useState(false)
     const [loadTick, setLoadTick] = useState(0)
     const areaRef = useRef<HTMLDivElement | null>(null)
@@ -548,86 +541,38 @@ export const BrowserCard = memo(
     }, [comparing, art, answeredOn])
 
     const canComment = Boolean(art) && !isCard
-    const drafts = (artState?.comments ?? []).filter((c) => c.state === 'draft')
-    const sentBatch = latestSentBatch(artState?.comments ?? [])
-    const marks = commenting && canComment ? marksFor(drafts, sentBatch, focusId) : []
-    const marksKey = JSON.stringify(marks)
-
-    // While commenting, watch the page for a selection; the page itself is never given a way to call in.
-    useEffect(() => {
-      if (!commenting || !canComment || pending || boards) return
-      let stale = false
-      let last = ''
-      const timer = window.setInterval(() => {
-        void window.api
-          .artifactSelection(sessionId)
-          .then((sel) => {
-            const area = areaRef.current?.getBoundingClientRect()
-            // Open only once the same words are read twice, so a drag still in progress is left alone.
-            const seen = last
-            last = sel ? JSON.stringify(sel.anchor) : ''
-            if (stale || !sel || !area || last !== seen) return
-            setPending({
-              anchor: sel.anchor,
-              label: sel.anchor.quote,
-              at: placePopover(sel.rect, area)
-            })
-          })
-          .catch(() => {})
-      }, 400)
-      return () => {
-        stale = true
-        window.clearInterval(timer)
-      }
-    }, [commenting, canComment, pending, sessionId, boards])
-
-    useEffect(() => {
-      if (!canComment) return
-      let stale = false
-      void window.api
-        .paintArtifactMarks(sessionId, JSON.parse(marksKey))
-        .then((r) => {
-          if (!stale) setFound(r.found)
-        })
-        .catch(() => {})
-      return () => {
-        stale = true
-      }
-    }, [marksKey, loadTick, canComment, sessionId])
-
-    const dropSelection = useCallback(() => {
-      setPending(null)
-      void window.api.clearArtifactSelection(sessionId).catch(() => {})
-    }, [sessionId])
-
-    const addComment = useCallback(
-      (body: string) => {
-        if (!art || !pending) return
-        void window.api
-          .saveArtifactComment({
-            artifactId: art.id,
-            version: art.version,
-            anchor: pending.anchor,
-            body
-          })
-          .then(refreshArtifact)
-          .catch(() => setFailed('Could not save the comment'))
-        dropSelection()
-      },
-      [art, pending, refreshArtifact, dropSelection]
-    )
+    const {
+      pending,
+      setPending,
+      found,
+      focusId,
+      drafts,
+      sentBatch,
+      dropSelection,
+      addComment,
+      addNote,
+      editComment,
+      deleteComment,
+      revealComment: revealQuote
+    } = useQuoteComments({
+      guestKey: sessionId,
+      artifact: art,
+      comments: artState?.comments ?? [],
+      attached: canComment,
+      enabled: commenting && canComment,
+      watching: !boards,
+      loadTick,
+      area: areaRef,
+      onSaved: refreshArtifact,
+      onError: setFailed
+    })
 
     const revealComment = useCallback(
       (c: ArtifactComment) => {
-        setFocusId(c.id)
         if (c.anchor?.kind === 'point') setBoard(c.anchor.artboard)
-        if (c.anchor?.kind !== 'quote') return
-        const { quote, prefix, suffix } = c.anchor
-        void window.api
-          .revealArtifactMark(sessionId, { id: c.id, quote, prefix, suffix, state: 'focus' })
-          .catch(() => {})
+        revealQuote(c)
       },
-      [sessionId]
+      [revealQuote]
     )
 
     const sendComments = useCallback(() => {
@@ -661,7 +606,7 @@ export const BrowserCard = memo(
             })
           })
       },
-      [boards, sessionId]
+      [boards, sessionId, setPending]
     )
     const pins: CanvasPin[] = [...drafts, ...sentBatch]
       .filter((c) => c.anchor?.kind === 'point')
@@ -689,7 +634,7 @@ export const BrowserCard = memo(
           setEditing({ original: found.body, edited: found.body })
         })
         .catch(() => setFailed('Could not read the doc'))
-    }, [art])
+    }, [art, setPending])
 
     // A tab switch or another version ends the edit; the words were never saved.
     useEffect(() => setEditing(null), [bannerKey])
@@ -1170,31 +1115,11 @@ export const BrowserCard = memo(
               queued={artState?.queued ?? false}
               sending={sending}
               onSend={sendComments}
-              onEdit={(id, body) =>
-                void window.api
-                  .updateArtifactComment({ commentId: id, body })
-                  .then(refreshArtifact)
-                  .catch(() => {})
-              }
-              onDelete={(id) =>
-                void window.api
-                  .deleteArtifactComment(id)
-                  .then(refreshArtifact)
-                  .catch(() => {})
-              }
+              onEdit={editComment}
+              onDelete={deleteComment}
               onReveal={revealComment}
               hint={boards ? 'Click an artboard to pin a comment there.' : undefined}
-              onAddNote={(body) =>
-                void window.api
-                  .saveArtifactComment({
-                    artifactId: art.id,
-                    version: art.version,
-                    anchor: null,
-                    body
-                  })
-                  .then(refreshArtifact)
-                  .catch(() => {})
-              }
+              onAddNote={addNote}
             />
           )}
         </div>

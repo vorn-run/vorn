@@ -4307,6 +4307,14 @@ export function listArtifacts(
   return rows.map(mapArtifactRow)
 }
 
+/** The artifact a gate's review pages are kept as, one version per round. */
+export function findGateArtifact(runId: string, nodeId: string): Artifact | null {
+  const row = getDb()
+    .prepare('SELECT * FROM artifacts WHERE gate_run_id = ? AND gate_node_id = ?')
+    .get(runId, nodeId) as Record<string, unknown> | undefined
+  return row ? mapArtifactRow(row) : null
+}
+
 export function renameArtifact(id: string, title: string): void {
   getDb().prepare('UPDATE artifacts SET title = ? WHERE id = ?').run(title, id)
 }
