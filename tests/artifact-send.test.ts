@@ -57,6 +57,7 @@ describe('formatArtifactFeedback', () => {
         '- Edited `it always bothered me` → `a few things kept me`',
         '- The whole version: Fig 5 still mentions\n  the old split.',
         '',
+        'The latest version is v3.',
         'When it is revised, publish the next version with publish_artifact and artifactId "a1".'
       ].join('\n')
     )
@@ -71,6 +72,17 @@ describe('formatArtifactFeedback', () => {
     ])
     expect(text).toContain("- `a 'b'[201~ c`: ok[201~")
     expect(text).not.toContain('\x1b')
+  })
+})
+
+describe('the version the agent builds on', () => {
+  it('names the latest version, and says when the person wrote it', () => {
+    expect(formatArtifactFeedback(ART, [comment('c1')], 'agent')).toContain(
+      'The latest version is v3.'
+    )
+    const text = formatArtifactFeedback(ART, [comment('c1')], 'user')
+    expect(text).toContain('v3, which the person saved with their own edits')
+    expect(text).toContain('read_artifact')
   })
 })
 

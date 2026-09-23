@@ -1902,6 +1902,8 @@ export const IPC = {
   ARTIFACT_UPDATE_COMMENT: 'artifact:updateComment',
   ARTIFACT_DELETE_COMMENT: 'artifact:deleteComment',
   ARTIFACT_SEND: 'artifact:send',
+  ARTIFACT_READ_SOURCE: 'artifact:readSource',
+  ARTIFACT_SAVE_USER_VERSION: 'artifact:saveUserVersion',
   /** Renderer asks main for the quote selected in the pane's artifact, if any. */
   BROWSER_ARTIFACT_SELECTION: 'browser:artifactSelection',
   /** Renderer asks main to highlight comment anchors in the pane's artifact. */

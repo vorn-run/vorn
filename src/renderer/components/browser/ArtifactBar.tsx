@@ -18,6 +18,8 @@ interface Props {
   onToggleComments?: () => void
   onSelectVersion: (version: number) => void
   onSend?: () => void
+  /** Offered on a doc; null when it can be edited only from its latest version. */
+  onEdit?: (() => void) | null
   sending: boolean
   queued: boolean
   btn: string
@@ -39,6 +41,7 @@ export function ArtifactBar({
   onToggleComments,
   onSelectVersion,
   onSend,
+  onEdit,
   sending,
   queued,
   btn
@@ -71,6 +74,22 @@ export function ArtifactBar({
       </span>
       <span className="flex-1" />
 
+      {onEdit !== undefined && (
+        <Tooltip
+          label={onEdit ? 'Edit the words yourself' : 'Open the latest version to edit it'}
+          position="bottom"
+        >
+          <button
+            type="button"
+            onClick={onEdit ?? undefined}
+            disabled={!onEdit}
+            className="mr-1 h-6 px-2.5 rounded border border-white/[0.12] text-[12px] text-ink
+                       hover:bg-white/[0.06] disabled:opacity-40 disabled:hover:bg-transparent shrink-0"
+          >
+            Edit
+          </button>
+        </Tooltip>
+      )}
       {onToggleComments && (
         <Tooltip label={commenting ? 'Stop commenting' : 'Comment on the page'} position="bottom">
           <button

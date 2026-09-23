@@ -17,7 +17,14 @@ import {
   sendArtifactDrafts,
   updateArtifactComment
 } from '../database'
-import { artifactPath, canSeeArtifact, publishArtifact, type PublishingSession } from './service'
+import {
+  artifactPath,
+  canSeeArtifact,
+  publishArtifact,
+  readArtifactSource,
+  saveUserVersion,
+  type PublishingSession
+} from './service'
 import { createArtifactDelivery } from './delivery'
 import log from '../logger'
 
@@ -48,7 +55,8 @@ const delivery = createArtifactDelivery({
   sendDrafts: (id) => sendArtifactDrafts(id),
   hasDrafts: (id) => listArtifactComments(id, { state: 'draft' }).length > 0,
   artifact: (id) => getArtifact(id),
-  changed: commentsChanged
+  changed: commentsChanged,
+  latestAuthor: (id) => listArtifactVersions(id).at(-1)?.author
 })
 
 /** Publishing, reading and commenting on artifacts; `port` is the server's, known once it listens. */
@@ -146,6 +154,19 @@ export function registerArtifactMethods(port: () => number): void {
   })
 
   registerMethod('artifact:send', ({ artifactId }) => delivery.send(artifactId))
+
+  registerMethod('artifact:readSource', ({ sessionId, artifactId, version }) => {
+    if (sessionId) visibleTo(sessionId, artifactId)
+    return readArtifactSource(getDataDir(), artifactId, version)
+  })
+
+  registerMethod('artifact:saveUserVersion', ({ artifactId, body, edits, send }) => {
+    const { version } = saveUserVersion(getDataDir(), artifactId, body, edits)
+    const artifact = getArtifact(artifactId)!
+    clientRegistry.broadcast(IPC.ARTIFACT_PUBLISHED, { artifact, version })
+    commentsChanged(artifactId)
+    return { version, sent: send ? delivery.send(artifactId) : null }
+  })
 
   registerMethod('artifact:deleteComment', ({ commentId }) => {
     const artifactId = getArtifactComment(commentId)?.artifactId

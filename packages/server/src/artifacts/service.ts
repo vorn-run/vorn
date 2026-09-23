@@ -1,8 +1,15 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Artifact, ArtifactKind, ArtifactVersion } from '@vornrun/shared/types'
+import type {
+  Artifact,
+  ArtifactComment,
+  ArtifactKind,
+  ArtifactVersion
+} from '@vornrun/shared/types'
 import {
   addArtifactVersion,
+  insertArtifactComment,
+  listArtifactVersions,
   deleteArtifactsUpdatedBefore,
   getArtifact,
   getArtifactToken,
@@ -170,4 +177,45 @@ export function publishArtifact(
     path: artifactPath(artifact.id, version.version, token),
     answered: answers ? listArtifactComments(artifact.id, { batchId: answers }).length : 0
   }
+}
+
+/** A version's source as it was written: Markdown for a doc, HTML otherwise. */
+export function readArtifactSource(
+  dataDir: string,
+  artifactId: string,
+  version?: number
+): { version: ArtifactVersion; body: string } | null {
+  const artifact = getArtifact(artifactId)
+  if (!artifact) return null
+  const n = version ?? artifact.latestVersion
+  const found = listArtifactVersions(artifactId).find((v) => v.version === n)
+  if (!found) return null
+  const body = readVersionBody(dataDir, artifactId, n, artifact.kind)
+  return body === null ? null : { version: found, body }
+}
+
+/** Keep the person's own edit of a doc as its next version, each changed paragraph a draft to send. */
+export function saveUserVersion(
+  dataDir: string,
+  artifactId: string,
+  body: string,
+  edits: Array<{ before: string; after: string }>
+): { version: ArtifactVersion; drafts: ArtifactComment[] } {
+  const artifact = getArtifact(artifactId)
+  if (!artifact) throw new Error(`Artifact not found: ${artifactId}`)
+  if (artifact.kind !== 'doc') throw new Error('Only a doc can be edited in place.')
+  if (!body.trim()) throw new Error('The artifact is empty.')
+  const bytes = Buffer.byteLength(body)
+  if (bytes > ARTIFACT_MAX_BYTES) throw new Error(tooBigMessage(bytes))
+  const version = addArtifactVersion(artifactId, 'user')
+  writeVersionBody(dataDir, artifactId, version.version, 'doc', body)
+  const drafts = edits.map((e) =>
+    insertArtifactComment({
+      artifactId,
+      version: version.version,
+      anchor: { kind: 'edit', before: e.before, after: e.after },
+      body: ''
+    })
+  )
+  return { version, drafts }
 }

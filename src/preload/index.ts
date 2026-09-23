@@ -994,6 +994,22 @@ const api = {
     artifactId: string
   ): Promise<{ state: ArtifactSendState; count: number }> =>
     ipcRenderer.invoke(IPC.ARTIFACT_SEND, { artifactId }),
+  /** A version's source: Markdown for a doc, HTML otherwise. */
+  readArtifactSource: (
+    artifactId: string,
+    version?: number
+  ): Promise<{ version: ArtifactVersion; body: string } | null> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_READ_SOURCE, { artifactId, version }),
+  /** Keep the person's edit of a doc as its next version, and send it with the drafts when asked. */
+  saveArtifactUserVersion: (params: {
+    artifactId: string
+    body: string
+    edits: Array<{ before: string; after: string }>
+    send: boolean
+  }): Promise<{
+    version: ArtifactVersion
+    sent: { state: ArtifactSendState; count: number } | null
+  }> => ipcRenderer.invoke(IPC.ARTIFACT_SAVE_USER_VERSION, params),
   /** The quote selected on the artifact in the session's pane, if any. */
   artifactSelection: (sessionId: string): Promise<ArtifactSelection | null> =>
     ipcRenderer.invoke(IPC.BROWSER_ARTIFACT_SELECTION, sessionId),

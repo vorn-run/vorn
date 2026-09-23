@@ -335,7 +335,9 @@ export function registerIpcHandlers(): void {
     IPC.ARTIFACT_SAVE_COMMENT,
     IPC.ARTIFACT_UPDATE_COMMENT,
     IPC.ARTIFACT_DELETE_COMMENT,
-    IPC.ARTIFACT_SEND
+    IPC.ARTIFACT_SEND,
+    IPC.ARTIFACT_READ_SOURCE,
+    IPC.ARTIFACT_SAVE_USER_VERSION
   ] as const) {
     safeHandle(method, (_, params) => requireBridge().request(method, params))
   }

@@ -1219,6 +1219,24 @@ export interface RequestMethods {
     params: { artifactId: string }
     result: { state: ArtifactSendState; count: number }
   }
+  /** A version's source: `sessionId` is set when an agent asks, and limits it to what it can see. */
+  'artifact:readSource': {
+    params: { sessionId?: string; artifactId: string; version?: number }
+    result: { version: ArtifactVersion; body: string } | null
+  }
+  /** The person's own edit of a doc, kept as its next version; each edit becomes a draft. */
+  'artifact:saveUserVersion': {
+    params: {
+      artifactId: string
+      body: string
+      edits: Array<{ before: string; after: string }>
+      send: boolean
+    }
+    result: {
+      version: ArtifactVersion
+      sent: { state: ArtifactSendState; count: number } | null
+    }
+  }
 
   // ─── Device (iOS simulator) ───────────────────────────────────
   //

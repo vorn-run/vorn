@@ -1,6 +1,7 @@
 import type {
   AgentStatus,
   Artifact,
+  ArtifactAuthor,
   ArtifactComment,
   ArtifactSendState
 } from '@vornrun/shared/types'
@@ -36,7 +37,11 @@ function line(c: ArtifactComment): string {
 }
 
 /** The message a batch becomes: the comments grouped by the version they were written on. */
-export function formatArtifactFeedback(artifact: Artifact, comments: ArtifactComment[]): string {
+export function formatArtifactFeedback(
+  artifact: Artifact,
+  comments: ArtifactComment[],
+  latestAuthor?: ArtifactAuthor
+): string {
   const title = quoted(artifact.title, 120)
   const versions = [...new Set(comments.map((c) => c.version))].sort((a, b) => a - b)
   const groups = versions.map((v) =>
@@ -49,6 +54,9 @@ export function formatArtifactFeedback(artifact: Artifact, comments: ArtifactCom
     '',
     groups.join('\n\n'),
     '',
+    latestAuthor === 'user'
+      ? `The latest version is v${artifact.latestVersion}, which the person saved with their own edits. Read it with read_artifact and build on it, not on your last version.`
+      : `The latest version is v${artifact.latestVersion}.`,
     `When it is revised, publish the next version with publish_artifact and artifactId "${artifact.id}".`
   ].join('\n')
 }
@@ -66,6 +74,8 @@ export interface DeliveryDeps {
   hasDrafts: (artifactId: string) => boolean
   artifact: (artifactId: string) => Artifact | null
   changed: (artifactId: string) => void
+  /** Who wrote the artifact's latest version, so the message can say which one to build on. */
+  latestAuthor?: (artifactId: string) => ArtifactAuthor | undefined
   later?: (fn: () => void, ms: number) => void
 }
 
@@ -84,7 +94,9 @@ export function createArtifactDelivery(deps: DeliveryDeps) {
     if (!batch) return 0
     deps.write(
       sessionId,
-      PASTE_START + formatArtifactFeedback(artifact, batch.comments) + PASTE_END
+      PASTE_START +
+        formatArtifactFeedback(artifact, batch.comments, deps.latestAuthor?.(artifact.id)) +
+        PASTE_END
     )
     later(() => deps.write(sessionId, '\r'), SUBMIT_DELAY_MS)
     return batch.comments.length

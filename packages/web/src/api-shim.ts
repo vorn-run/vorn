@@ -831,6 +831,14 @@ export function createApiShim(wsUrl: string) {
     deleteArtifactComment: (commentId: string) =>
       rpc.invoke('artifact:deleteComment', { commentId }),
     sendArtifactComments: (artifactId: string) => rpc.invoke('artifact:send', { artifactId }),
+    readArtifactSource: (artifactId: string, version?: number) =>
+      rpc.invoke('artifact:readSource', { artifactId, version }),
+    saveArtifactUserVersion: (params: {
+      artifactId: string
+      body: string
+      edits: Array<{ before: string; after: string }>
+      send: boolean
+    }) => rpc.invoke('artifact:saveUserVersion', params),
     onArtifactPublished: (
       callback: (event: {
         artifact: import('../../shared/src/types').Artifact

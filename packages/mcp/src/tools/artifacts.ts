@@ -100,4 +100,30 @@ export function registerArtifactTools(server: McpServer): void {
         )
       })
   )
+
+  server.tool(
+    'read_artifact',
+    'Read the source of an artifact version: Markdown for a doc, HTML for a page or design. ' +
+      'Use it before publishing the next version when the person saved edits of their own.',
+    {
+      artifactId: V.id,
+      version: z.number().int().min(1).optional().describe('Defaults to the latest version')
+    },
+    async (args) =>
+      withSession(async (id) => {
+        const found = await rpcCall<{ version: ArtifactVersion; body: string } | null>(
+          'artifact:readSource',
+          { sessionId: id, artifactId: args.artifactId, version: args.version }
+        )
+        if (!found) return text(`No such version of artifact ${args.artifactId}.`)
+        return pageResult(
+          {
+            version: found.version.version,
+            author: found.version.author === 'user' ? 'the person' : 'an agent',
+            source: found.body
+          },
+          'WEB PAGE CONTENT: ARTIFACT SOURCE'
+        )
+      })
+  )
 }

@@ -23,6 +23,8 @@ import { ArtifactBar } from './browser/ArtifactBar'
 import { ArtifactBanner } from './browser/ArtifactBanner'
 import { ArtifactRail } from './browser/ArtifactRail'
 import { CommentPopover } from './browser/CommentPopover'
+import { DocEditBar, DocEditor } from './browser/DocEditor'
+import { mergeDocEdit } from '../lib/doc-edits'
 import { latestSentBatch, marksFor, placePopover } from '../lib/artifact-comments'
 import { useArtifact } from '../hooks/useArtifact'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
@@ -167,6 +169,9 @@ export const BrowserCard = memo(
     const [comparing, setComparing] = useState(false)
     const [compareUrl, setCompareUrl] = useState<string | null>(null)
     const [dismissed, setDismissed] = useState<string | null>(null)
+    // A doc open for editing: the source it started from, and the words as they stand.
+    const [editing, setEditing] = useState<{ original: string; edited: string } | null>(null)
+    const [saving, setSaving] = useState(false)
     // Which tab the listeners below are bound to. A ref rather than the value
     // itself: the effect re-runs on a tab switch, but an in-flight navigation
     // can still land afterwards, and a stale closure would file the new page's
@@ -614,6 +619,45 @@ export const BrowserCard = memo(
         })
     }, [art, refreshArtifact])
 
+    const onLatest = Boolean(art && artState && art.version === artState.artifact.latestVersion)
+    const startEditing = useCallback(() => {
+      if (!art) return
+      void window.api
+        .readArtifactSource(art.id, art.version)
+        .then((found) => {
+          if (!found) return setFailed('Could not read the doc')
+          setCommenting(false)
+          setPending(null)
+          setEditing({ original: found.body, edited: found.body })
+        })
+        .catch(() => setFailed('Could not read the doc'))
+    }, [art])
+
+    // A tab switch or another version ends the edit; the words were never saved.
+    useEffect(() => setEditing(null), [bannerKey])
+
+    const saveEdit = useCallback(
+      (send: boolean) => {
+        if (!art || !editing || !pane) return
+        const { body, edits } = mergeDocEdit(editing.original, editing.edited)
+        if (edits.length === 0) return
+        setSaving(true)
+        const tab = pane.activeTab
+        void window.api
+          .saveArtifactUserVersion({ artifactId: art.id, body, edits, send })
+          .then(({ version }) => {
+            setEditing(null)
+            showVersion(tab, art.id, version.version)
+            refreshArtifact()
+          })
+          .catch((err: unknown) =>
+            setFailed(err instanceof Error ? err.message : 'Could not save the doc')
+          )
+          .finally(() => setSaving(false))
+      },
+      [art, editing, pane, showVersion, refreshArtifact]
+    )
+
     const [picking, setPicking] = useState(false)
 
     /**
@@ -831,7 +875,9 @@ export const BrowserCard = memo(
             hands the agent something, and a design is exactly what you point
             at. */}
         <div className="flex items-center gap-0.5 px-1.5 py-1 shrink-0">
-          {art ? (
+          {art && editing ? (
+            <DocEditBar version={art.version} onDiscard={() => setEditing(null)} />
+          ) : art ? (
             <>
               <ArtifactBar
                 version={art.version}
@@ -849,6 +895,9 @@ export const BrowserCard = memo(
                 }
                 onSelectVersion={(v) => showVersion(pane.activeTab, art.id, v)}
                 onSend={canComment ? sendComments : undefined}
+                onEdit={
+                  art.kind === 'doc' && canComment ? (onLatest ? startEditing : null) : undefined
+                }
                 sending={sending}
                 queued={artState?.queued ?? false}
                 btn={btn}
@@ -888,7 +937,7 @@ export const BrowserCard = memo(
               main holds for the session, which stays bound to the session's own
               browser. Offered here they would arm a mode over this page and
               report on a different one. */}
-          {!isCard && (
+          {!isCard && !editing && (
             <>
               <button
                 onClick={pickElement}
@@ -986,6 +1035,18 @@ export const BrowserCard = memo(
                   className="absolute inset-0 w-full h-full cursor-crosshair z-10"
                 />
               )}
+              {editing && art && (
+                <DocEditor
+                  original={editing.original}
+                  edited={editing.edited}
+                  onChange={(md) => setEditing((e) => (e ? { ...e, edited: md } : e))}
+                  drafts={drafts.length}
+                  next={(artState?.artifact.latestVersion ?? art.version) + 1}
+                  agent={terminal.session.agentType}
+                  saving={saving}
+                  onSave={saveEdit}
+                />
+              )}
               {pending && (
                 <CommentPopover
                   key={pending.anchor.quote}
@@ -997,7 +1058,7 @@ export const BrowserCard = memo(
               )}
             </div>
           </div>
-          {commenting && canComment && art && (
+          {commenting && canComment && art && !editing && (
             <ArtifactRail
               drafts={drafts}
               sent={sentBatch}

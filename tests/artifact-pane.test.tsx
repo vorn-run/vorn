@@ -9,6 +9,12 @@ import type {
   BrowserTabArtifact
 } from '../src/shared/types'
 
+vi.mock('../src/renderer/components/rich-editor/RichMarkdownEditor', () => ({
+  RichMarkdownEditor: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+    <textarea aria-label="Doc words" value={value} onChange={(e) => onChange(e.target.value)} />
+  )
+}))
+
 Object.defineProperty(window, 'matchMedia', {
   value: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
   writable: true,
@@ -58,6 +64,14 @@ const mockSend = vi.fn(async () => ({ state: 'delivered' as const, count: 2 }))
 const mockSelection = vi.fn(async () => null as unknown)
 const mockPaint = vi.fn(async () => ({ found: {} as Record<string, boolean> }))
 const mockSave = vi.fn(async (p: unknown) => p)
+const mockReadSource = vi.fn(async () => ({
+  version: version(4),
+  body: '# Triage\n\nIt always bothered me.\n'
+}))
+const mockSaveUser = vi.fn(async (_p: unknown) => ({
+  version: version(5, { author: 'user' }),
+  sent: { state: 'delivered' as const, count: 1 }
+}))
 
 Object.defineProperty(window, 'api', {
   value: {
@@ -83,7 +97,9 @@ Object.defineProperty(window, 'api', {
     artifactSelection: () => mockSelection(),
     paintArtifactMarks: () => mockPaint(),
     revealArtifactMark: vi.fn(async () => ({ ok: true })),
-    clearArtifactSelection: vi.fn(async () => ({ ok: true }))
+    clearArtifactSelection: vi.fn(async () => ({ ok: true })),
+    readArtifactSource: () => mockReadSource(),
+    saveArtifactUserVersion: (p: unknown) => mockSaveUser(p)
   },
   writable: true,
   configurable: true
@@ -284,5 +300,55 @@ describe('commenting on an artifact', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /Queued/ })).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: 'Comment on the page' }))
     expect(screen.getByText(/Queued\. It goes once claude is back at its prompt\./)).toBeTruthy()
+  })
+})
+
+describe('editing a doc', () => {
+  const DOC_TAB: BrowserTabArtifact = { id: 'a1', version: 4, kind: 'doc', title: 'Triage' }
+
+  it('offers Edit only on the latest version', async () => {
+    artifactState!.artifact = { ...ART, kind: 'doc' }
+    act(() => useAppStore.getState().openArtifactTab('t1', url(3), { ...DOC_TAB, version: 3 }))
+    render(<BrowserCard sessionId="t1" />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled())
+  })
+
+  it('saves the edit as the next version and sends each changed paragraph', async () => {
+    artifactState!.artifact = { ...ART, kind: 'doc' }
+    act(() => useAppStore.getState().openArtifactTab('t1', url(4), DOC_TAB))
+    render(<BrowserCard sessionId="t1" />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    const words = await screen.findByLabelText('Doc words')
+    expect(screen.getByText('doc · you are editing')).toBeTruthy()
+    const save = screen.getByRole('button', { name: 'Save v5 and send 0 to claude' })
+    expect(save).toBeDisabled()
+
+    fireEvent.change(words, { target: { value: '# Triage\n\nA few things kept me wondering.\n' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save v5 and send 1 to claude' }))
+    await waitFor(() =>
+      expect(mockSaveUser).toHaveBeenCalledWith({
+        artifactId: 'a1',
+        body: '# Triage\n\nA few things kept me wondering.\n',
+        edits: [{ before: 'It always bothered me.', after: 'A few things kept me wondering.' }],
+        send: true
+      })
+    )
+    await waitFor(() => expect(screen.queryByLabelText('Doc words')).toBeNull())
+    await waitFor(() =>
+      expect(useAppStore.getState().browserPanes.get('t1')!.tabs[0].artifact?.version).toBe(5)
+    )
+  })
+
+  it('leaves the doc as it was on Discard', async () => {
+    artifactState!.artifact = { ...ART, kind: 'doc' }
+    act(() => useAppStore.getState().openArtifactTab('t1', url(4), DOC_TAB))
+    render(<BrowserCard sessionId="t1" />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    fireEvent.change(await screen.findByLabelText('Doc words'), { target: { value: 'Gone.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    expect(screen.queryByLabelText('Doc words')).toBeNull()
+    expect(mockSaveUser).not.toHaveBeenCalled()
   })
 })

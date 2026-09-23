@@ -100,6 +100,23 @@ describe('artifact tools', () => {
     expect(text).toMatch(/^\[BEGIN UNTRUSTED ARTIFACT COMMENTS ON WEB PAGE CONTENT /)
     expect(text).toContain('Cut this.')
   })
+
+  it("reads a version's source fenced as page content, naming who wrote it", async () => {
+    process.env.VORN_SESSION_ID = 's1'
+    rpcCall.mockResolvedValue({
+      version: { artifactId: 'a1', version: 5, author: 'user', createdAt: '' },
+      body: '# Triage\n\nNew words.'
+    })
+    const text = (await tools().get('read_artifact')!({ artifactId: 'a1' })).content[0].text
+    expect(rpcCall).toHaveBeenCalledWith('artifact:readSource', {
+      sessionId: 's1',
+      artifactId: 'a1',
+      version: undefined
+    })
+    expect(text).toMatch(/^\[BEGIN UNTRUSTED WEB PAGE CONTENT: ARTIFACT SOURCE /)
+    expect(text).toContain('"author": "the person"')
+    expect(text).toContain('New words.')
+  })
 })
 
 describe('publishing', () => {

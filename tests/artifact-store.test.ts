@@ -27,7 +27,11 @@ import {
   versionFile,
   writeVersionBody
 } from '../packages/server/src/artifacts/bodies'
-import { sweepArtifacts } from '../packages/server/src/artifacts/service'
+import {
+  readArtifactSource,
+  saveUserVersion,
+  sweepArtifacts
+} from '../packages/server/src/artifacts/service'
 
 let teardown: () => void
 let dataDir: string
@@ -116,5 +120,38 @@ describe('artifact store', () => {
     sweepArtifacts(dataDir, Date.now() + 91 * 24 * 60 * 60 * 1000)
     expect(listArtifactIds()).toEqual([])
     expect(fs.existsSync(path.join(dataDir, 'artifacts', a.id))).toBe(false)
+  })
+})
+
+describe("the person's own version of a doc", () => {
+  const doc = () =>
+    insertArtifact({ kind: 'doc', title: 'Triage article', sessionId: 's1', projectName: 'triage' })
+      .artifact
+
+  it('keeps it as the next version by the person, with each edit a draft on it', () => {
+    const a = doc()
+    addArtifactVersion(a.id, 'agent')
+    writeVersionBody(dataDir, a.id, 1, 'doc', '# Title\n\nOld words.\n')
+    const { version, drafts } = saveUserVersion(dataDir, a.id, '# Title\n\nNew words.\n', [
+      { before: 'Old words.', after: 'New words.' }
+    ])
+    expect(version).toMatchObject({ version: 2, author: 'user' })
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]).toMatchObject({
+      version: 2,
+      state: 'draft',
+      anchor: { kind: 'edit', before: 'Old words.', after: 'New words.' }
+    })
+    expect(readArtifactSource(dataDir, a.id)).toMatchObject({
+      version: { version: 2, author: 'user' },
+      body: '# Title\n\nNew words.\n'
+    })
+    expect(readArtifactSource(dataDir, a.id, 1)?.body).toContain('Old words.')
+  })
+
+  it('refuses a page, which is only commented on', () => {
+    const a = figures()
+    addArtifactVersion(a.id, 'agent')
+    expect(() => saveUserVersion(dataDir, a.id, '<p>x</p>', [])).toThrow(/Only a doc/)
   })
 })
