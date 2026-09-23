@@ -1,12 +1,22 @@
 import { memo, forwardRef, useState, useRef, useEffect, useCallback } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { MousePointerClick, Pencil, Shapes, SquareArrowOutUpRight } from 'lucide-react'
+import {
+  AlignLeft,
+  FileText,
+  MousePointerClick,
+  Pencil,
+  Shapes,
+  SquareArrowOutUpRight
+} from 'lucide-react'
 import { useAppStore } from '../stores'
 import { tabUrl } from '../stores/types'
 import { browserPartition } from '../../shared/types'
-import type { ArtifactManifest } from '../../shared/types'
+import type { ArtifactKind, ArtifactManifest } from '../../shared/types'
 import { TweakBar } from './browser/TweakBar'
 import { AddressBar } from './browser/AddressBar'
+import { ArtifactBar } from './browser/ArtifactBar'
+import { ArtifactBanner } from './browser/ArtifactBanner'
+import { useArtifact } from '../hooks/useArtifact'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { PaneTabStrip } from './PaneTabStrip'
 import { PANE_SURFACE } from '../lib/pane-surface'
@@ -77,6 +87,12 @@ function designUrlOf(url: string | null): string | null {
   return normalized?.startsWith('file:') ? normalized : null
 }
 
+const KIND_ICONS: Record<ArtifactKind, typeof FileText> = {
+  page: FileText,
+  doc: AlignLeft,
+  design: Shapes
+}
+
 /**
  * A session's browser, as its own grid pane.
  *
@@ -103,7 +119,8 @@ export const BrowserCard = memo(
       closeBrowserTab,
       setActiveBrowserTab,
       syncBrowserTab,
-      promoteBrowserTab
+      promoteBrowserTab,
+      setArtifactTabVersion
     } = useAppStore(
       useShallow((s) => ({
         terminal: s.terminals.get(sessionId),
@@ -114,7 +131,8 @@ export const BrowserCard = memo(
         closeBrowserTab: s.closeBrowserTab,
         setActiveBrowserTab: s.setActiveBrowserTab,
         syncBrowserTab: s.syncBrowserTab,
-        promoteBrowserTab: s.promoteBrowserTab
+        promoteBrowserTab: s.promoteBrowserTab,
+        setArtifactTabVersion: s.setArtifactTabVersion
       }))
     )
 
@@ -126,6 +144,11 @@ export const BrowserCard = memo(
     // map below.
     const url = activeTabState ? tabUrl(activeTabState) : null
     const viewRef = useRef<WebviewElement | null>(null)
+    const art = activeTabState?.artifact
+    const { state: artState } = useArtifact(art?.id)
+    const [comparing, setComparing] = useState(false)
+    const [compareUrl, setCompareUrl] = useState<string | null>(null)
+    const [dismissed, setDismissed] = useState<string | null>(null)
     // Which tab the listeners below are bound to. A ref rather than the value
     // itself: the effect re-runs on a tab switch, but an in-flight navigation
     // can still land afterwards, and a stale closure would file the new page's
@@ -430,6 +453,56 @@ export const BrowserCard = memo(
       // resending then is pure IPC chatter.
     }, [sessionId, isCard, tabsSignature])
 
+    const showVersion = useCallback(
+      (index: number, artifactId: string, version: number) => {
+        void window.api.artifactVersionUrl(artifactId, version).then((found) => {
+          if (found) setArtifactTabVersion(key, index, found.url, version)
+        })
+      },
+      [key, setArtifactTabVersion]
+    )
+
+    // An artifact's address carries the server's port, which a restart changes; ask again once per tab.
+    const artifactTabs = pane?.tabs
+      .map((t, i) => (t.artifact ? `${i}:${t.artifact.id}:${t.artifact.version}` : ''))
+      .join('|')
+    const refreshed = useRef(new Set<string>())
+    useEffect(() => {
+      paneRef.current?.tabs.forEach((t, i) => {
+        if (!t.artifact) return
+        const tag = `${t.artifact.id}:${t.artifact.version}`
+        if (refreshed.current.has(tag)) return
+        refreshed.current.add(tag)
+        showVersion(i, t.artifact.id, t.artifact.version)
+      })
+    }, [artifactTabs, showVersion])
+
+    const shownVersion = artState?.versions.find((v) => v.version === art?.version)
+    const answeredBatch = shownVersion?.answersBatchId
+    const answeredComments = answeredBatch
+      ? (artState?.comments.filter((c) => c.batchId === answeredBatch) ?? [])
+      : []
+    const answeredOn = answeredComments.length
+      ? Math.max(...answeredComments.map((c) => c.version))
+      : undefined
+    const bannerKey = art ? `${art.id}:${art.version}` : null
+
+    // Compare shows the version the answered comments were written on, beside this one.
+    useEffect(() => {
+      setComparing(false)
+      setCompareUrl(null)
+    }, [bannerKey])
+    useEffect(() => {
+      if (!comparing || !art || !answeredOn) return
+      let stale = false
+      void window.api.artifactVersionUrl(art.id, answeredOn).then((found) => {
+        if (!stale) setCompareUrl(found?.url ?? null)
+      })
+      return () => {
+        stale = true
+      }
+    }, [comparing, art, answeredOn])
+
     const [picking, setPicking] = useState(false)
 
     /**
@@ -559,7 +632,7 @@ export const BrowserCard = memo(
       <PaneCard
         ref={ref}
         paneId={paneId}
-        title={displayHost(url)}
+        title={art?.title ?? displayHost(url)}
         onClose={() => closeBrowserPane(key)}
         isDragTarget={isDragTarget}
         onDragStart={onDragStart}
@@ -580,12 +653,16 @@ export const BrowserCard = memo(
               id: String(i),
               name: displayHost(shown),
               title: shown,
-              label: (isActive && manifest?.title) || displayHost(shown),
+              label: tab.artifact?.title || (isActive && manifest?.title) || displayHost(shown),
               // Only the active tab's manifest is known, so a design is marked only there.
-              icon:
-                isActive && manifest ? (
-                  <Shapes size={11} strokeWidth={2} className="shrink-0 text-bronzo" />
-                ) : undefined,
+              icon: tab.artifact ? (
+                (() => {
+                  const Icon = KIND_ICONS[tab.artifact.kind]
+                  return <Icon size={11} strokeWidth={2} className="shrink-0 text-ink" />
+                })()
+              ) : isActive && manifest ? (
+                <Shapes size={11} strokeWidth={2} className="shrink-0 text-bronzo" />
+              ) : undefined,
               closeLabel: `Close tab ${displayHost(shown)}`
             }
           })}
@@ -643,7 +720,24 @@ export const BrowserCard = memo(
             hands the agent something, and a design is exactly what you point
             at. */}
         <div className="flex items-center gap-0.5 px-1.5 py-1 shrink-0">
-          {manifest ? (
+          {art ? (
+            <>
+              <ArtifactBar
+                version={art.version}
+                versions={artState?.versions ?? []}
+                comments={artState?.comments ?? []}
+                agent={terminal.session.agentType}
+                commenting={false}
+                onSelectVersion={(v) => showVersion(pane.activeTab, art.id, v)}
+                sending={false}
+                queued={artState?.queued ?? false}
+                btn={btn}
+              />
+              {manifest?.tweaks && (
+                <TweakBar manifest={manifest} values={tweakValues} onChange={applyTweak} />
+              )}
+            </>
+          ) : manifest ? (
             <>
               {/* Controls only. The name lives on the tab, where every other
                   page's name lives — repeating it here would spend header
@@ -698,43 +792,82 @@ export const BrowserCard = memo(
           )}
         </div>
 
+        {art && artState && bannerKey !== dismissed && (
+          <ArtifactBanner
+            version={art.version}
+            answered={answeredComments.length}
+            answeredOn={answeredOn}
+            latest={artState.artifact.latestVersion}
+            comparing={comparing}
+            onCompare={() => setComparing((c) => !c)}
+            onOpenLatest={() =>
+              showVersion(pane.activeTab, art.id, artState.artifact.latestVersion)
+            }
+            onDismiss={() => setDismissed(bannerKey)}
+            btn={btn}
+          />
+        )}
+
         {failed && <div className="px-2 py-1 text-[10px] text-amber-400/90 shrink-0">{failed}</div>}
 
         {/* Every tab stays mounted so switching back keeps the page and its
             scroll position; only the active one is visible. */}
-        <div className="flex-1 min-h-0 relative" style={{ background: PANE_SURFACE }}>
-          {pane.tabs.map((tab, i) => (
-            <webview
-              key={i}
-              ref={
-                i === pane.activeTab ? (viewRef as unknown as React.Ref<HTMLElement>) : undefined
-              }
-              // Intent, never the observed url: re-setting `src` to the page the
-              // guest already reached would reload it and drop scroll position.
-              src={tab.url}
-              // Each session browses in its own partition, so logins and cookies
-              // in one session's pane don't leak into another's.
-              partition={browserPartition(sessionId)}
-              className="absolute inset-0 w-full h-full"
-              style={i === pane.activeTab ? undefined : { visibility: 'hidden' }}
-            />
-          ))}
-          {/* Only mounted while armed: an always-present overlay would eat
-              every click meant for the page. */}
-          {annotating && (
-            <canvas
-              ref={inkRef}
-              data-testid="browser-ink"
-              onPointerDown={(e) => {
-                drawingRef.current = true
-                e.currentTarget.setPointerCapture(e.pointerId)
-                draw(e, true)
-              }}
-              onPointerMove={(e) => drawingRef.current && draw(e, false)}
-              onPointerUp={() => (drawingRef.current = false)}
-              className="absolute inset-0 w-full h-full cursor-crosshair z-10"
-            />
+        <div className="flex-1 min-h-0 flex" style={{ background: PANE_SURFACE }}>
+          {comparing && compareUrl && (
+            <div className="flex-1 min-w-0 flex flex-col border-r border-white/[0.06]">
+              <div className="px-2.5 h-6 flex items-center font-mono text-[11px] text-ink-faint shrink-0">
+                v{answeredOn}
+              </div>
+              <webview
+                src={compareUrl}
+                partition={browserPartition(sessionId)}
+                className="flex-1 w-full"
+              />
+            </div>
           )}
+          <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+            {comparing && compareUrl && (
+              <div className="px-2.5 h-6 flex items-center font-mono text-[11px] text-ink-faint shrink-0">
+                v{art?.version}
+              </div>
+            )}
+            <div className="flex-1 min-h-0 relative">
+              {pane.tabs.map((tab, i) => (
+                <webview
+                  key={i}
+                  ref={
+                    i === pane.activeTab
+                      ? (viewRef as unknown as React.Ref<HTMLElement>)
+                      : undefined
+                  }
+                  // Intent, never the observed url: re-setting `src` to the page the
+                  // guest already reached would reload it and drop scroll position.
+                  src={tab.url}
+                  // Each session browses in its own partition, so logins and cookies
+                  // in one session's pane don't leak into another's.
+                  partition={browserPartition(sessionId)}
+                  className="absolute inset-0 w-full h-full"
+                  style={i === pane.activeTab ? undefined : { visibility: 'hidden' }}
+                />
+              ))}
+              {/* Only mounted while armed: an always-present overlay would eat
+              every click meant for the page. */}
+              {annotating && (
+                <canvas
+                  ref={inkRef}
+                  data-testid="browser-ink"
+                  onPointerDown={(e) => {
+                    drawingRef.current = true
+                    e.currentTarget.setPointerCapture(e.pointerId)
+                    draw(e, true)
+                  }}
+                  onPointerMove={(e) => drawingRef.current && draw(e, false)}
+                  onPointerUp={() => (drawingRef.current = false)}
+                  className="absolute inset-0 w-full h-full cursor-crosshair z-10"
+                />
+              )}
+            </div>
+          </div>
         </div>
       </PaneCard>
     )

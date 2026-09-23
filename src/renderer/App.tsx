@@ -383,12 +383,15 @@ export function App() {
 
     // The agent's browser tools reach the pane through these two: main can
     // drive a guest, but only the renderer can create one.
-    const removeBrowserOpenListener = window.api.onBrowserOpenPane(({ sessionId, url }) => {
-      // Main vetted this url — scheme, and for `file:` that the path is inside
-      // the session's root. The renderer has no filesystem to re-check the
-      // second half with, so re-normalizing here would drop it.
-      useAppStore.getState().openBrowserPane(sessionId, url, { trusted: true })
-    })
+    const removeBrowserOpenListener = window.api.onBrowserOpenPane(
+      ({ sessionId, url, artifact }) => {
+        // Main vetted this url — scheme, and for `file:` that the path is inside
+        // the session's root. The renderer has no filesystem to re-check the
+        // second half with, so re-normalizing here would drop it.
+        if (artifact && url) useAppStore.getState().openArtifactTab(sessionId, url, artifact)
+        else useAppStore.getState().openBrowserPane(sessionId, url, { trusted: true })
+      }
+    )
 
     const removeDeviceOpenListener = window.api.onDeviceOpenPane(({ sessionId, udid, name }) => {
       useAppStore.getState().openDevicePane(sessionId, { udid, name })

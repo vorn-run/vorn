@@ -54,7 +54,17 @@ export function registerArtifactMethods(port: () => number): void {
     let opened = false
     if (open !== false) {
       try {
-        await browserBridge.request('browser:openPane', { sessionId, url })
+        const { artifact, version } = outcome
+        await browserBridge.request('browser:openPane', {
+          sessionId,
+          url,
+          artifact: {
+            id: artifact.id,
+            version: version.version,
+            kind: artifact.kind,
+            title: artifact.title
+          }
+        })
         opened = true
       } catch (err) {
         log.info({ err }, '[artifacts] published without opening the pane')
@@ -83,7 +93,8 @@ export function registerArtifactMethods(port: () => number): void {
     return {
       artifact,
       versions: listArtifactVersions(artifactId),
-      comments: listArtifactComments(artifactId)
+      comments: listArtifactComments(artifactId),
+      queued: false
     }
   })
 

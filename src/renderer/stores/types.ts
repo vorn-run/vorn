@@ -20,7 +20,8 @@ import {
   ExtensionActivationState,
   ExtensionFooterReading,
   ExtensionOpenPane,
-  SdkConnectorIcon
+  SdkConnectorIcon,
+  BrowserTabArtifact
 } from '../../shared/types'
 import type { PortableRequirement } from '../../shared/workflow-portability'
 
@@ -137,6 +138,8 @@ export interface BrowserTabState {
   liveUrl?: string
   /** The guest's own title, once it reports one. */
   title?: string
+  /** Set when the tab shows a published artifact rather than an ordinary page. */
+  artifact?: BrowserTabArtifact
 }
 
 export interface BrowserPaneState {
@@ -583,6 +586,10 @@ export interface UISlice {
    */
   openBrowserPane: (sessionId: string, url?: string, opts?: { trusted?: boolean }) => void
   closeBrowserPane: (paneId: string) => void
+  /** Show an artifact in the session's browser: its own tab if one has it, else a new tab. */
+  openArtifactTab: (sessionId: string, url: string, artifact: BrowserTabArtifact) => void
+  /** Point an artifact tab at another version, or at the same one under a fresh address. */
+  setArtifactTabVersion: (paneId: string, index: number, url: string, version: number) => void
   toggleBrowserPane: (sessionId: string) => void
   /** Add a tab to the browser and make it active. See `openBrowserPane` for `trusted`. */
   addBrowserTab: (paneId: string, url?: string, opts?: { trusted?: boolean }) => void

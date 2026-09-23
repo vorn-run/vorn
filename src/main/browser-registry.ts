@@ -10,6 +10,7 @@ import type {
   BrowserPageRead,
   BrowserConsoleMessage,
   BrowserNetworkRequest,
+  BrowserTabArtifact,
   BrowserTabInfo,
   BrowserTarget,
   ArtifactManifest,
@@ -134,7 +135,7 @@ function loadableUrl(sessionId: string, url: string): string | null {
  * agent told "go read this page" could only ask for help.
  */
 export async function openPane(
-  params: { sessionId: string; url?: string },
+  params: { sessionId: string; url?: string; artifact?: BrowserTabArtifact },
   timeoutMs?: number
 ): Promise<{ url: string }> {
   const normalized =
@@ -142,7 +143,11 @@ export async function openPane(
   if (params.url !== undefined && !normalized) {
     throw new Error(`Refusing to open "${params.url}" — not an allowed web address.`)
   }
-  sendToRenderer(IPC.BROWSER_OPEN_PANE, { sessionId: params.sessionId, url: normalized })
+  sendToRenderer(IPC.BROWSER_OPEN_PANE, {
+    sessionId: params.sessionId,
+    url: normalized,
+    ...(params.artifact && normalized ? { artifact: params.artifact } : {})
+  })
   await waitForAttach(params.sessionId, timeoutMs)
   return { url: normalized ?? '' }
 }

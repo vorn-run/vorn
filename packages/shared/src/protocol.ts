@@ -4,6 +4,8 @@ import type {
   ArtifactAnchor,
   ArtifactComment,
   ArtifactKind,
+  ArtifactSendState,
+  BrowserTabArtifact,
   ArtifactVersion,
   ActionResult,
   SessionAnswer,
@@ -1133,7 +1135,7 @@ export interface RequestMethods {
     result: { ok: true }
   }
   'browser:openPane': {
-    params: { sessionId: string; url?: string }
+    params: { sessionId: string; url?: string; artifact?: BrowserTabArtifact }
     result: { url: string }
   }
   'browser:navigate': {
@@ -1188,6 +1190,8 @@ export interface RequestMethods {
       artifact: Artifact
       versions: ArtifactVersion[]
       comments: ArtifactComment[]
+      /** Drafts wait for the agent to reach its prompt before they go. */
+      queued: boolean
     } | null
   }
   'artifact:versionUrl': {
@@ -1210,6 +1214,10 @@ export interface RequestMethods {
   'artifact:deleteComment': {
     params: { commentId: string }
     result: { deleted: boolean }
+  }
+  'artifact:send': {
+    params: { artifactId: string }
+    result: { state: ArtifactSendState; count: number }
   }
 
   // ─── Device (iOS simulator) ───────────────────────────────────

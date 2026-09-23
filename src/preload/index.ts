@@ -12,6 +12,7 @@ import type {
   Artifact,
   ArtifactAnchor,
   ArtifactComment,
+  BrowserTabArtifact,
   ArtifactVersion
 } from '@vornrun/shared/types'
 import {
@@ -450,9 +451,13 @@ const api = {
    * without a person clicking. Fire-and-forget; main waits for the attach
    * report that follows rather than for a reply here.
    */
-  onBrowserOpenPane: (callback: (p: { sessionId: string; url?: string }) => void) => {
-    const listener = (_: Electron.IpcRendererEvent, p: { sessionId: string; url?: string }): void =>
-      callback(p)
+  onBrowserOpenPane: (
+    callback: (p: { sessionId: string; url?: string; artifact?: BrowserTabArtifact }) => void
+  ) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      p: { sessionId: string; url?: string; artifact?: BrowserTabArtifact }
+    ): void => callback(p)
     ipcRenderer.on(IPC.BROWSER_OPEN_PANE, listener)
     return () => {
       ipcRenderer.removeListener(IPC.BROWSER_OPEN_PANE, listener)
@@ -961,6 +966,7 @@ const api = {
     artifact: Artifact
     versions: ArtifactVersion[]
     comments: ArtifactComment[]
+    queued: boolean
   } | null> => ipcRenderer.invoke(IPC.ARTIFACT_GET, { artifactId }),
   artifactVersionUrl: (
     artifactId: string,

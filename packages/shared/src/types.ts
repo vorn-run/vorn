@@ -1901,6 +1901,13 @@ export const IPC = {
   ARTIFACT_SAVE_COMMENT: 'artifact:saveComment',
   ARTIFACT_UPDATE_COMMENT: 'artifact:updateComment',
   ARTIFACT_DELETE_COMMENT: 'artifact:deleteComment',
+  ARTIFACT_SEND: 'artifact:send',
+  /** Renderer asks main for the quote selected in the pane's artifact, if any. */
+  BROWSER_ARTIFACT_SELECTION: 'browser:artifactSelection',
+  /** Renderer asks main to highlight comment anchors in the pane's artifact. */
+  BROWSER_ARTIFACT_PAINT: 'browser:artifactPaint',
+  /** Renderer asks main to scroll one anchor into view. */
+  BROWSER_ARTIFACT_REVEAL: 'browser:artifactReveal',
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_MAXIMIZE: 'window:maximize',
   WINDOW_CLOSE: 'window:close',
@@ -2865,6 +2872,32 @@ export interface ArtifactComment {
   updatedAt: string
   sentAt?: string
 }
+
+/** The artifact a browser tab is showing, and which version of it. */
+export interface BrowserTabArtifact {
+  id: string
+  version: number
+  kind: ArtifactKind
+  title: string
+}
+
+/** A quote the person selected on an artifact, with where it sits in the pane. */
+export interface ArtifactSelection {
+  anchor: { kind: 'quote'; quote: string; prefix: string; suffix: string }
+  rect: { x: number; y: number; width: number; height: number }
+}
+
+/** One anchored comment to highlight on the page. */
+export interface ArtifactMark {
+  id: string
+  quote: string
+  prefix: string
+  suffix: string
+  state: 'draft' | 'sent' | 'focus'
+}
+
+/** What happened to a Send: handed to the agent, held until it is at its prompt, or nothing to send. */
+export type ArtifactSendState = 'delivered' | 'queued' | 'empty'
 
 /** Where an interaction lands: a ref from `read_page`, or raw viewport coords. */
 export type BrowserTarget = { ref: string } | { x: number; y: number }
