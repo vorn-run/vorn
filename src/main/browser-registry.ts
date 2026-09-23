@@ -10,6 +10,8 @@ import type {
   BrowserPageRead,
   BrowserConsoleMessage,
   BrowserNetworkRequest,
+  ArtifactMark,
+  ArtifactSelection,
   BrowserTabArtifact,
   BrowserTabInfo,
   BrowserTarget,
@@ -18,6 +20,7 @@ import type {
 } from '../shared/types'
 import { IPC } from '../shared/types'
 import log from './logger'
+import { anchorCall } from './artifact-anchors'
 
 /**
  * The agent's handle on a session's browser pane.
@@ -1356,3 +1359,54 @@ const HIT_TEST_FN = `function (pts) {
   }
   return JSON.stringify(out)
 }`
+
+async function evaluateAnchors<T>(sessionId: string, expression: string): Promise<T> {
+  const { wc } = contentsFor(sessionId)
+  const { result, exceptionDetails } = await send<{
+    result: { value?: T }
+    exceptionDetails?: { text?: string }
+  }>(wc, 'Runtime.evaluate', { expression, returnByValue: true })
+  if (exceptionDetails) throw new Error(exceptionDetails.text ?? 'The page refused the read.')
+  return result.value as T
+}
+
+/** The quote the person has selected on the artifact in front, or null when nothing is. */
+export async function artifactSelection(params: {
+  sessionId: string
+}): Promise<ArtifactSelection | null> {
+  const found = await evaluateAnchors<ArtifactSelection | null>(
+    params.sessionId,
+    anchorCall('selection')
+  )
+  if (!found || found.anchor?.kind !== 'quote' || typeof found.anchor.quote !== 'string')
+    return null
+  return found
+}
+
+/** Highlight these anchors on the page, answering which of them still find their words. */
+export async function paintArtifactMarks(params: {
+  sessionId: string
+  marks: ArtifactMark[]
+}): Promise<{ found: Record<string, boolean> }> {
+  const found = await evaluateAnchors<Record<string, boolean>>(
+    params.sessionId,
+    anchorCall('paint', params.marks.slice(0, 200))
+  )
+  return { found: found ?? {} }
+}
+
+/** Scroll one anchor into view; false when its words are gone. */
+export async function revealArtifactMark(params: {
+  sessionId: string
+  mark: ArtifactMark
+}): Promise<{ found: boolean }> {
+  return {
+    found: Boolean(await evaluateAnchors(params.sessionId, anchorCall('reveal', params.mark)))
+  }
+}
+
+/** Drop the page's selection once it has become a comment. */
+export async function clearArtifactSelection(params: { sessionId: string }): Promise<{ ok: true }> {
+  await evaluateAnchors(params.sessionId, anchorCall('clear'))
+  return { ok: true }
+}

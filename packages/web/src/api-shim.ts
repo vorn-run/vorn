@@ -830,6 +830,7 @@ export function createApiShim(wsUrl: string) {
     }) => rpc.invoke('artifact:updateComment', params),
     deleteArtifactComment: (commentId: string) =>
       rpc.invoke('artifact:deleteComment', { commentId }),
+    sendArtifactComments: (artifactId: string) => rpc.invoke('artifact:send', { artifactId }),
     onArtifactPublished: (
       callback: (event: {
         artifact: import('../../shared/src/types').Artifact
@@ -972,6 +973,10 @@ export function createApiShim(wsUrl: string) {
     cancelBrowserPick: (_sessionId: string): void => {},
     startBrowserPick: async () => null,
     annotateBrowser: unsupportedInWeb('Annotating the browser pane'),
+    artifactSelection: async () => null,
+    paintArtifactMarks: async () => ({ found: {} }),
+    revealArtifactMark: async () => ({ found: false }),
+    clearArtifactSelection: async () => ({ ok: true as const }),
     deviceList: async () => [],
     deviceClaim: unsupportedInWeb('Claiming a device'),
     deviceRelease: async () => ({ released: false }),

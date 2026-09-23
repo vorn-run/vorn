@@ -1908,6 +1908,8 @@ export const IPC = {
   BROWSER_ARTIFACT_PAINT: 'browser:artifactPaint',
   /** Renderer asks main to scroll one anchor into view. */
   BROWSER_ARTIFACT_REVEAL: 'browser:artifactReveal',
+  /** Renderer asks main to drop the page's selection once it became a comment. */
+  BROWSER_ARTIFACT_CLEAR: 'browser:artifactClear',
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_MAXIMIZE: 'window:maximize',
   WINDOW_CLOSE: 'window:close',

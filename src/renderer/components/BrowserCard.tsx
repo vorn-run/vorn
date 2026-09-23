@@ -11,11 +11,19 @@ import {
 import { useAppStore } from '../stores'
 import { tabUrl } from '../stores/types'
 import { browserPartition } from '../../shared/types'
-import type { ArtifactKind, ArtifactManifest } from '../../shared/types'
+import type {
+  ArtifactComment,
+  ArtifactKind,
+  ArtifactManifest,
+  ArtifactSelection
+} from '../../shared/types'
 import { TweakBar } from './browser/TweakBar'
 import { AddressBar } from './browser/AddressBar'
 import { ArtifactBar } from './browser/ArtifactBar'
 import { ArtifactBanner } from './browser/ArtifactBanner'
+import { ArtifactRail } from './browser/ArtifactRail'
+import { CommentPopover } from './browser/CommentPopover'
+import { latestSentBatch, marksFor, placePopover } from '../lib/artifact-comments'
 import { useArtifact } from '../hooks/useArtifact'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { PaneTabStrip } from './PaneTabStrip'
@@ -145,7 +153,17 @@ export const BrowserCard = memo(
     const url = activeTabState ? tabUrl(activeTabState) : null
     const viewRef = useRef<WebviewElement | null>(null)
     const art = activeTabState?.artifact
-    const { state: artState } = useArtifact(art?.id)
+    const { state: artState, refresh: refreshArtifact } = useArtifact(art?.id)
+    const [commenting, setCommenting] = useState(false)
+    const [pending, setPending] = useState<{
+      anchor: ArtifactSelection['anchor']
+      at: { x: number; y: number }
+    } | null>(null)
+    const [found, setFound] = useState<Record<string, boolean>>({})
+    const [focusId, setFocusId] = useState<string | null>(null)
+    const [sending, setSending] = useState(false)
+    const [loadTick, setLoadTick] = useState(0)
+    const areaRef = useRef<HTMLDivElement | null>(null)
     const [comparing, setComparing] = useState(false)
     const [compareUrl, setCompareUrl] = useState<string | null>(null)
     const [dismissed, setDismissed] = useState<string | null>(null)
@@ -233,6 +251,7 @@ export const BrowserCard = memo(
       }
       const onStop = (): void => {
         setLoading(false)
+        setLoadTick((t) => t + 1)
         syncNav()
         readManifest()
       }
@@ -503,6 +522,94 @@ export const BrowserCard = memo(
       }
     }, [comparing, art, answeredOn])
 
+    const canComment = Boolean(art) && !isCard
+    const drafts = (artState?.comments ?? []).filter((c) => c.state === 'draft')
+    const sentBatch = latestSentBatch(artState?.comments ?? [])
+    const marks = commenting && canComment ? marksFor(drafts, sentBatch, focusId) : []
+    const marksKey = JSON.stringify(marks)
+
+    // While commenting, watch the page for a selection; the page itself is never given a way to call in.
+    useEffect(() => {
+      if (!commenting || !canComment || pending) return
+      let stale = false
+      const timer = window.setInterval(() => {
+        void window.api
+          .artifactSelection(sessionId)
+          .then((sel) => {
+            const area = areaRef.current?.getBoundingClientRect()
+            if (stale || !sel || !area) return
+            setPending({ anchor: sel.anchor, at: placePopover(sel.rect, area) })
+          })
+          .catch(() => {})
+      }, 400)
+      return () => {
+        stale = true
+        window.clearInterval(timer)
+      }
+    }, [commenting, canComment, pending, sessionId])
+
+    useEffect(() => {
+      if (!canComment) return
+      let stale = false
+      void window.api
+        .paintArtifactMarks(sessionId, JSON.parse(marksKey))
+        .then((r) => {
+          if (!stale) setFound(r.found)
+        })
+        .catch(() => {})
+      return () => {
+        stale = true
+      }
+    }, [marksKey, loadTick, canComment, sessionId])
+
+    const dropSelection = useCallback(() => {
+      setPending(null)
+      void window.api.clearArtifactSelection(sessionId).catch(() => {})
+    }, [sessionId])
+
+    const addComment = useCallback(
+      (body: string) => {
+        if (!art || !pending) return
+        void window.api
+          .saveArtifactComment({
+            artifactId: art.id,
+            version: art.version,
+            anchor: pending.anchor,
+            body
+          })
+          .then(refreshArtifact)
+          .catch(() => setFailed('Could not save the comment'))
+        dropSelection()
+      },
+      [art, pending, refreshArtifact, dropSelection]
+    )
+
+    const revealComment = useCallback(
+      (c: ArtifactComment) => {
+        setFocusId(c.id)
+        if (c.anchor?.kind !== 'quote') return
+        const { quote, prefix, suffix } = c.anchor
+        void window.api
+          .revealArtifactMark(sessionId, { id: c.id, quote, prefix, suffix, state: 'focus' })
+          .catch(() => {})
+      },
+      [sessionId]
+    )
+
+    const sendComments = useCallback(() => {
+      if (!art) return
+      setSending(true)
+      void window.api
+        .sendArtifactComments(art.id)
+        .catch((err: unknown) =>
+          setFailed(err instanceof Error ? err.message : 'Could not send the comments')
+        )
+        .finally(() => {
+          setSending(false)
+          refreshArtifact()
+        })
+    }, [art, refreshArtifact])
+
     const [picking, setPicking] = useState(false)
 
     /**
@@ -727,9 +834,18 @@ export const BrowserCard = memo(
                 versions={artState?.versions ?? []}
                 comments={artState?.comments ?? []}
                 agent={terminal.session.agentType}
-                commenting={false}
+                commenting={commenting}
+                onToggleComments={
+                  canComment
+                    ? () => {
+                        if (commenting) dropSelection()
+                        setCommenting((c) => !c)
+                      }
+                    : undefined
+                }
                 onSelectVersion={(v) => showVersion(pane.activeTab, art.id, v)}
-                sending={false}
+                onSend={canComment ? sendComments : undefined}
+                sending={sending}
                 queued={artState?.queued ?? false}
                 btn={btn}
               />
@@ -831,7 +947,7 @@ export const BrowserCard = memo(
                 v{art?.version}
               </div>
             )}
-            <div className="flex-1 min-h-0 relative">
+            <div ref={areaRef} className="flex-1 min-h-0 relative">
               {pane.tabs.map((tab, i) => (
                 <webview
                   key={i}
@@ -866,8 +982,53 @@ export const BrowserCard = memo(
                   className="absolute inset-0 w-full h-full cursor-crosshair z-10"
                 />
               )}
+              {pending && (
+                <CommentPopover
+                  key={pending.anchor.quote}
+                  quote={pending.anchor.quote}
+                  at={pending.at}
+                  onAdd={addComment}
+                  onCancel={dropSelection}
+                />
+              )}
             </div>
           </div>
+          {commenting && canComment && art && (
+            <ArtifactRail
+              drafts={drafts}
+              sent={sentBatch}
+              version={art.version}
+              found={found}
+              agent={terminal.session.agentType}
+              queued={artState?.queued ?? false}
+              sending={sending}
+              onSend={sendComments}
+              onEdit={(id, body) =>
+                void window.api
+                  .updateArtifactComment({ commentId: id, body })
+                  .then(refreshArtifact)
+                  .catch(() => {})
+              }
+              onDelete={(id) =>
+                void window.api
+                  .deleteArtifactComment(id)
+                  .then(refreshArtifact)
+                  .catch(() => {})
+              }
+              onReveal={revealComment}
+              onAddNote={(body) =>
+                void window.api
+                  .saveArtifactComment({
+                    artifactId: art.id,
+                    version: art.version,
+                    anchor: null,
+                    body
+                  })
+                  .then(refreshArtifact)
+                  .catch(() => {})
+              }
+            />
+          )}
         </div>
       </PaneCard>
     )

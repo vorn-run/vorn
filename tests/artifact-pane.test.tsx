@@ -124,6 +124,8 @@ function seed(): void {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  mockSelection.mockResolvedValue(null)
+  mockPaint.mockResolvedValue({ found: {} })
   artifactState = {
     artifact: ART,
     versions: [version(1), version(2), version(3), version(4, { answersBatchId: 'b1' })],
@@ -230,5 +232,57 @@ describe('artifact tab in the browser pane', () => {
       expect(useAppStore.getState().browserPanes.get('t1')!.tabs[0].url).toBe(url(3))
     )
     expect(mockVersionUrl).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('commenting on an artifact', () => {
+  it('opens a comment on the selected words and saves it as a draft on this version', async () => {
+    const anchor = { kind: 'quote' as const, quote: 'two API models', prefix: 'and ', suffix: ',' }
+    mockSelection.mockResolvedValue({ anchor, rect: { x: 40, y: 60, width: 90, height: 16 } })
+    act(() => useAppStore.getState().openArtifactTab('t1', url(3), TAB))
+    render(<BrowserCard sessionId="t1" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on the page' }))
+    expect(screen.getByRole('complementary', { name: 'Comments' })).toHaveTextContent(
+      'Select words on the page'
+    )
+    const box = await screen.findByLabelText('Comment', {}, { timeout: 2000 })
+    fireEvent.change(box, { target: { value: 'Name them.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+
+    expect(mockSave).toHaveBeenCalledWith({
+      artifactId: 'a1',
+      version: 3,
+      anchor,
+      body: 'Name them.'
+    })
+    expect(window.api.clearArtifactSelection).toHaveBeenCalledWith('t1')
+  })
+
+  it('lists drafts, flags ones whose words are gone, and sends them together', async () => {
+    artifactState!.comments = [comment('c1'), comment('c2', { anchor: null, body: 'General.' })]
+    mockPaint.mockResolvedValue({ found: { c1: false } })
+    act(() => useAppStore.getState().openArtifactTab('t1', url(3), TAB))
+    render(<BrowserCard sessionId="t1" />)
+    await waitFor(() => expect(screen.getByRole('button', { name: /Send to agent/ })).toBeEnabled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on the page' }))
+    const rail = screen.getByRole('complementary', { name: 'Comments' })
+    expect(rail).toHaveTextContent('two API models')
+    expect(rail).toHaveTextContent('The whole version')
+    await waitFor(() => expect(rail).toHaveTextContent('words changed'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send 2 comments to claude' }))
+    await waitFor(() => expect(mockSend).toHaveBeenCalledTimes(1))
+  })
+
+  it('says a batch is queued until the agent is back at its prompt', async () => {
+    artifactState!.comments = [comment('c1')]
+    artifactState!.queued = true
+    act(() => useAppStore.getState().openArtifactTab('t1', url(3), TAB))
+    render(<BrowserCard sessionId="t1" />)
+    await waitFor(() => expect(screen.getByRole('button', { name: /Queued/ })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on the page' }))
+    expect(screen.getByText(/Queued\. It goes once claude is back at its prompt\./)).toBeTruthy()
   })
 })

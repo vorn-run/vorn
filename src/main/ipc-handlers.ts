@@ -334,7 +334,8 @@ export function registerIpcHandlers(): void {
     IPC.ARTIFACT_VERSION_URL,
     IPC.ARTIFACT_SAVE_COMMENT,
     IPC.ARTIFACT_UPDATE_COMMENT,
-    IPC.ARTIFACT_DELETE_COMMENT
+    IPC.ARTIFACT_DELETE_COMMENT,
+    IPC.ARTIFACT_SEND
   ] as const) {
     safeHandle(method, (_, params) => requireBridge().request(method, params))
   }
@@ -634,6 +635,14 @@ export function registerIpcHandlers(): void {
     browserRegistry.cancelPick(sessionId)
   })
   safeHandle(IPC.BROWSER_ANNOTATE, (_, params) => browserRegistry.annotate(params))
+  safeHandle(IPC.BROWSER_ARTIFACT_SELECTION, (_, sessionId: string) =>
+    browserRegistry.artifactSelection({ sessionId })
+  )
+  safeHandle(IPC.BROWSER_ARTIFACT_PAINT, (_, params) => browserRegistry.paintArtifactMarks(params))
+  safeHandle(IPC.BROWSER_ARTIFACT_REVEAL, (_, params) => browserRegistry.revealArtifactMark(params))
+  safeHandle(IPC.BROWSER_ARTIFACT_CLEAR, (_, sessionId: string) =>
+    browserRegistry.clearArtifactSelection({ sessionId })
+  )
 
   // ─── Device pane (Electron-only: the companion lives here) ─────
   //

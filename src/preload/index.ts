@@ -12,6 +12,9 @@ import type {
   Artifact,
   ArtifactAnchor,
   ArtifactComment,
+  ArtifactMark,
+  ArtifactSelection,
+  ArtifactSendState,
   BrowserTabArtifact,
   ArtifactVersion
 } from '@vornrun/shared/types'
@@ -986,6 +989,23 @@ const api = {
   }): Promise<ArtifactComment | null> => ipcRenderer.invoke(IPC.ARTIFACT_UPDATE_COMMENT, params),
   deleteArtifactComment: (commentId: string): Promise<{ deleted: boolean }> =>
     ipcRenderer.invoke(IPC.ARTIFACT_DELETE_COMMENT, { commentId }),
+  /** Turn every draft on an artifact into one message to the agent that published it. */
+  sendArtifactComments: (
+    artifactId: string
+  ): Promise<{ state: ArtifactSendState; count: number }> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_SEND, { artifactId }),
+  /** The quote selected on the artifact in the session's pane, if any. */
+  artifactSelection: (sessionId: string): Promise<ArtifactSelection | null> =>
+    ipcRenderer.invoke(IPC.BROWSER_ARTIFACT_SELECTION, sessionId),
+  paintArtifactMarks: (
+    sessionId: string,
+    marks: ArtifactMark[]
+  ): Promise<{ found: Record<string, boolean> }> =>
+    ipcRenderer.invoke(IPC.BROWSER_ARTIFACT_PAINT, { sessionId, marks }),
+  revealArtifactMark: (sessionId: string, mark: ArtifactMark): Promise<{ found: boolean }> =>
+    ipcRenderer.invoke(IPC.BROWSER_ARTIFACT_REVEAL, { sessionId, mark }),
+  clearArtifactSelection: (sessionId: string): Promise<{ ok: true }> =>
+    ipcRenderer.invoke(IPC.BROWSER_ARTIFACT_CLEAR, sessionId),
   onArtifactPublished: (
     callback: (event: { artifact: Artifact; version: ArtifactVersion }) => void
   ): (() => void) => {
