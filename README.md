@@ -106,6 +106,10 @@ A session holds its own terminals, a browser, an editor and an iOS simulator. Dr
   <img src="docs/screenshots/panes.png" alt="A session with a terminal and a browser pane side by side" width="700" />
 </p>
 
+### Artifacts
+
+An agent can publish a page, a doc or a design into its session's browser pane. Select the words you mean and comment on them, edit a doc yourself, and send everything back to the agent as one message. Each publish is a new version, and your earlier comments stay pinned to their words. Workflow review gates use the same viewer, so the steps a gate sends back read your comments one by one. See [docs/artifacts.md](docs/artifacts.md).
+
 ### Task Queue & Kanban Board
 
 Manage tasks per project with a list view or a drag-and-drop kanban board. Tasks support markdown descriptions, image attachments, git branch targeting, and worktree isolation. Start a task and it launches an agent with the description as the prompt. Tasks can also trigger workflows automatically when created or when their status changes.
