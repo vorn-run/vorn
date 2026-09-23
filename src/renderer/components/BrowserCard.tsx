@@ -532,12 +532,16 @@ export const BrowserCard = memo(
     useEffect(() => {
       if (!commenting || !canComment || pending) return
       let stale = false
+      let last = ''
       const timer = window.setInterval(() => {
         void window.api
           .artifactSelection(sessionId)
           .then((sel) => {
             const area = areaRef.current?.getBoundingClientRect()
-            if (stale || !sel || !area) return
+            // Open only once the same words are read twice, so a drag still in progress is left alone.
+            const seen = last
+            last = sel ? JSON.stringify(sel.anchor) : ''
+            if (stale || !sel || !area || last !== seen) return
             setPending({ anchor: sel.anchor, at: placePopover(sel.rect, area) })
           })
           .catch(() => {})
