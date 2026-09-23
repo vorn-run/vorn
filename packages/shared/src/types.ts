@@ -1065,6 +1065,12 @@ export interface GateFeedbackConfig {
 
 export type GateDecision = 'approve' | 'reject' | 'changes'
 
+/** A reviewer's comment on the review page: the words it is about, when it points at some. */
+export interface GateComment {
+  quote?: string
+  comment: string
+}
+
 export interface GateFeedbackEntry {
   round: number
   decision: GateDecision
@@ -1072,6 +1078,8 @@ export interface GateFeedbackEntry {
   at: string
   /** The reviewer's rewrite at this answer, when they made one. */
   edited?: string
+  /** Comments left on the review page with this answer. */
+  comments?: GateComment[]
 }
 
 /**
@@ -1893,6 +1901,26 @@ export const IPC = {
   SCHEDULER_GET_NEXT_RUN: 'scheduler:getNextRun',
   WORKFLOW_EXECUTION_COMPLETE: 'workflow:executionComplete',
   WORKFLOW_GATE_RESOLVED: 'workflow:gateResolved',
+  ARTIFACT_PUBLISHED: 'artifact:published',
+  ARTIFACT_COMMENTS_CHANGED: 'artifact:commentsChanged',
+  ARTIFACT_LIST: 'artifact:list',
+  ARTIFACT_GET: 'artifact:get',
+  ARTIFACT_VERSION_URL: 'artifact:versionUrl',
+  ARTIFACT_FOR_GATE: 'artifact:forGate',
+  ARTIFACT_SAVE_COMMENT: 'artifact:saveComment',
+  ARTIFACT_UPDATE_COMMENT: 'artifact:updateComment',
+  ARTIFACT_DELETE_COMMENT: 'artifact:deleteComment',
+  ARTIFACT_SEND: 'artifact:send',
+  ARTIFACT_READ_SOURCE: 'artifact:readSource',
+  ARTIFACT_SAVE_USER_VERSION: 'artifact:saveUserVersion',
+  /** Renderer asks main for the quote selected in the pane's artifact, if any. */
+  BROWSER_ARTIFACT_SELECTION: 'browser:artifactSelection',
+  /** Renderer asks main to highlight comment anchors in the pane's artifact. */
+  BROWSER_ARTIFACT_PAINT: 'browser:artifactPaint',
+  /** Renderer asks main to scroll one anchor into view. */
+  BROWSER_ARTIFACT_REVEAL: 'browser:artifactReveal',
+  /** Renderer asks main to drop the page's selection once it became a comment. */
+  BROWSER_ARTIFACT_CLEAR: 'browser:artifactClear',
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_MAXIMIZE: 'window:maximize',
   WINDOW_CLOSE: 'window:close',
@@ -1924,6 +1952,10 @@ export const IPC = {
   BROWSER_READ_MANIFEST: 'browser:readManifest',
   /** Renderer writes one declared tweak value into the page. */
   BROWSER_SET_TWEAK: 'browser:setTweak',
+  BROWSER_ARTBOARD_ATTACH: 'browser:artboardAttach',
+  BROWSER_ARTBOARD_DETACH: 'browser:artboardDetach',
+  BROWSER_ARTBOARD_TWEAKS: 'browser:artboardTweaks',
+  BROWSER_ARTBOARD_POINT: 'browser:artboardPoint',
   /** Renderer arms the element picker; main pushes the result back on pick. */
   BROWSER_PICK_START: 'browser:pickStart',
   BROWSER_PICK_CANCEL: 'browser:pickCancel',
@@ -2790,18 +2822,104 @@ export type ArtifactTweak =
  * throwing, because "this is not an artifact" is an ordinary answer.
  */
 export interface ArtifactManifest {
-  /**
-   * What sort of artifact this is. Deliberately one value for now — a second
-   * earns its place only when it needs different chrome, and a vocabulary of
-   * kinds that all render identically is how `lib/task-status.ts` ended up with
-   * five colour maps that disagreed.
-   */
-  kind: 'design'
+  /** What sort of artifact this is; only a design gets the tweak controls and a canvas. */
+  kind: ArtifactKind
   /** Shown in the pane header in place of the address. */
   title?: string
   /** Declared inputs, keyed by name. Absent when the artifact has none. */
   tweaks?: Record<string, ArtifactTweak>
+  /** A design's frames at their own sizes, drawn side by side on a canvas. */
+  artboards?: ArtifactArtboard[]
 }
+
+/** One frame of a design: the same page loaded at a screen size, told its id in the hash. */
+export interface ArtifactArtboard {
+  id: string
+  label: string
+  width: number
+  height: number
+}
+
+/** What an agent can publish: any HTML page, a Markdown doc, or a design with tweaks. */
+export type ArtifactKind = 'page' | 'doc' | 'design'
+
+export const ARTIFACT_KINDS: readonly ArtifactKind[] = ['page', 'doc', 'design']
+
+/** Who wrote a version: the agent that published it, or the person who edited a doc. */
+export type ArtifactAuthor = 'agent' | 'user'
+
+/** A published deliverable, kept with every version it has had. */
+export interface Artifact {
+  id: string
+  kind: ArtifactKind
+  title: string
+  /** The session that published it; null when a workflow gate did. */
+  sessionId: string | null
+  projectName: string | null
+  latestVersion: number
+  gateRunId?: string
+  gateNodeId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ArtifactVersion {
+  artifactId: string
+  version: number
+  author: ArtifactAuthor
+  /** The batch of comments this version was published in answer to. */
+  answersBatchId?: string
+  createdAt: string
+}
+
+/** Where a comment points: a quote with its surroundings, a point on an artboard, or a person's own edit of a doc. */
+export type ArtifactAnchor =
+  | { kind: 'quote'; quote: string; prefix: string; suffix: string }
+  | { kind: 'point'; artboard: string; x: number; y: number; element: string }
+  | { kind: 'edit'; before: string; after: string }
+
+export type ArtifactCommentState = 'draft' | 'sent'
+
+export interface ArtifactComment {
+  id: string
+  artifactId: string
+  /** The version the comment was written on. */
+  version: number
+  /** Null for a general note about the whole version. */
+  anchor: ArtifactAnchor | null
+  body: string
+  state: ArtifactCommentState
+  batchId?: string
+  createdAt: string
+  updatedAt: string
+  sentAt?: string
+}
+
+/** The artifact a browser tab is showing, and which version of it. */
+export interface BrowserTabArtifact {
+  id: string
+  version: number
+  kind: ArtifactKind
+  title: string
+}
+
+/** A quote the person selected on an artifact, with where it sits in the pane. */
+export interface ArtifactSelection {
+  anchor: { kind: 'quote'; quote: string; prefix: string; suffix: string }
+  rect: { x: number; y: number; width: number; height: number }
+}
+
+/** One anchored comment to highlight on the page. */
+export interface ArtifactMark {
+  id: string
+  quote: string
+  prefix: string
+  suffix: string
+  state: 'draft' | 'sent' | 'focus'
+}
+
+/** What happened to a Send: handed to the agent, held until it is at its prompt, or nothing to send. */
+export type ArtifactSendState = 'delivered' | 'queued' | 'empty'
 
 /** Where an interaction lands: a ref from `read_page`, or raw viewport coords. */
 export type BrowserTarget = { ref: string } | { x: number; y: number }

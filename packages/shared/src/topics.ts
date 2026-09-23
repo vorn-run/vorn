@@ -7,6 +7,7 @@
  * the notification need them for cards that are not on screen.
  */
 export const PHONE_BASE_TOPICS: readonly string[] = [
+  'artifact:*',
   'config:*',
   'connector:*',
   'extension:*',

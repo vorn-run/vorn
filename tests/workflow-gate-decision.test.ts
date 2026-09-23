@@ -254,6 +254,32 @@ describe('a gate that takes changes', () => {
     expect(run.status).toBe('running')
   })
 
+  it('carries the comments left on the review page, and takes them without a note', async () => {
+    const run = parked()
+    executions.set('run-3', run)
+    const comments = [
+      { quote: 'a tidy draft', comment: 'Too neat' },
+      { quote: '  ', comment: 'Shorter overall' },
+      { comment: '   ' }
+    ]
+
+    expect(gateTakesChanges('run-3', 'gate', '', comments)).toBe(true)
+    await applyGateDecision('run-3', 'gate', 'changes', undefined, undefined, comments)
+
+    expect(state(run, 'gate')).toMatchObject({
+      status: 'waiting',
+      round: 2,
+      feedback: [
+        {
+          round: 1,
+          decision: 'changes',
+          comment: '',
+          comments: [{ quote: 'a tidy draft', comment: 'Too neat' }, { comment: 'Shorter overall' }]
+        }
+      ]
+    })
+  })
+
   it('refuses a request with nothing in it, or past the last round', async () => {
     const run = parked()
     executions.set('run-3', run)

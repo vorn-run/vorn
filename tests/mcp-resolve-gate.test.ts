@@ -333,6 +333,36 @@ describe('sending a gate back', () => {
     expect(result.content[0].text).toContain('Sent back "Approval Gate"')
   })
 
+  it('carries comments on the review page, and needs no other note with them', async () => {
+    const result = await resolve({
+      run_id: 'run-1',
+      decision: 'changes',
+      comments: [{ quote: 'hello', comment: 'Say who it is for.' }, { comment: '   ' }]
+    })
+
+    expect(result.isError).toBeUndefined()
+    expect(rpcCall).toHaveBeenCalledWith('workflow:resolveGate', {
+      runId: 'run-1',
+      nodeId: 'approve',
+      decision: 'changes',
+      comments: [{ quote: 'hello', comment: 'Say who it is for.' }]
+    })
+  })
+
+  it('leaves page comments off an approval', async () => {
+    await resolve({
+      run_id: 'run-1',
+      decision: 'approve',
+      comments: [{ quote: 'hello', comment: 'Fine.' }]
+    })
+
+    expect(rpcCall).toHaveBeenCalledWith('workflow:resolveGate', {
+      runId: 'run-1',
+      nodeId: 'approve',
+      decision: 'approve'
+    })
+  })
+
   it('refuses a request for changes with nothing to say', async () => {
     const result = await resolve({ run_id: 'run-1', decision: 'changes' })
 

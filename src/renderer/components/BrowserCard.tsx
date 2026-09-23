@@ -1,12 +1,35 @@
 import { memo, forwardRef, useState, useRef, useEffect, useCallback } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { MousePointerClick, Pencil, Shapes, SquareArrowOutUpRight } from 'lucide-react'
+import {
+  AlignLeft,
+  FileText,
+  MousePointerClick,
+  Pencil,
+  Shapes,
+  SquareArrowOutUpRight
+} from 'lucide-react'
 import { useAppStore } from '../stores'
 import { tabUrl } from '../stores/types'
 import { browserPartition } from '../../shared/types'
-import type { ArtifactManifest } from '../../shared/types'
+import type {
+  ArtifactAnchor,
+  ArtifactComment,
+  ArtifactKind,
+  ArtifactManifest,
+  BrowserSelection
+} from '../../shared/types'
 import { TweakBar } from './browser/TweakBar'
 import { AddressBar } from './browser/AddressBar'
+import { ArtifactBar } from './browser/ArtifactBar'
+import { ArtifactBanner } from './browser/ArtifactBanner'
+import { ArtifactRail } from './browser/ArtifactRail'
+import { CommentPopover } from './browser/CommentPopover'
+import { DocEditBar, DocEditor } from './browser/DocEditor'
+import { DesignCanvas, type CanvasPin } from './browser/DesignCanvas'
+import { mergeDocEdit } from '../lib/doc-edits'
+import { placePopover } from '../lib/artifact-comments'
+import { useArtifact } from '../hooks/useArtifact'
+import { useQuoteComments } from '../hooks/useQuoteComments'
 import { PaneCard, PaneControls, PaneOwnerLabel, PromotedCardControls } from './PaneCard'
 import { PaneTabStrip } from './PaneTabStrip'
 import { PANE_SURFACE } from '../lib/pane-surface'
@@ -77,6 +100,19 @@ function designUrlOf(url: string | null): string | null {
   return normalized?.startsWith('file:') ? normalized : null
 }
 
+/** The element under a pinned point, as the rail and the agent read it. */
+function describeElement(sel: BrowserSelection | null): string {
+  if (!sel) return 'the page'
+  const text = sel.text ? ` "${flattenPageText(sel.text, 60)}"` : ''
+  return `${flattenPageText(sel.selector, 120)}${text}`
+}
+
+const KIND_ICONS: Record<ArtifactKind, typeof FileText> = {
+  page: FileText,
+  doc: AlignLeft,
+  design: Shapes
+}
+
 /**
  * A session's browser, as its own grid pane.
  *
@@ -103,7 +139,8 @@ export const BrowserCard = memo(
       closeBrowserTab,
       setActiveBrowserTab,
       syncBrowserTab,
-      promoteBrowserTab
+      promoteBrowserTab,
+      setArtifactTabVersion
     } = useAppStore(
       useShallow((s) => ({
         terminal: s.terminals.get(sessionId),
@@ -114,7 +151,8 @@ export const BrowserCard = memo(
         closeBrowserTab: s.closeBrowserTab,
         setActiveBrowserTab: s.setActiveBrowserTab,
         syncBrowserTab: s.syncBrowserTab,
-        promoteBrowserTab: s.promoteBrowserTab
+        promoteBrowserTab: s.promoteBrowserTab,
+        setArtifactTabVersion: s.setArtifactTabVersion
       }))
     )
 
@@ -126,6 +164,18 @@ export const BrowserCard = memo(
     // map below.
     const url = activeTabState ? tabUrl(activeTabState) : null
     const viewRef = useRef<WebviewElement | null>(null)
+    const art = activeTabState?.artifact
+    const { state: artState, refresh: refreshArtifact } = useArtifact(art?.id)
+    const [commenting, setCommenting] = useState(false)
+    const [sending, setSending] = useState(false)
+    const [loadTick, setLoadTick] = useState(0)
+    const areaRef = useRef<HTMLDivElement | null>(null)
+    const [comparing, setComparing] = useState(false)
+    const [compareUrl, setCompareUrl] = useState<string | null>(null)
+    const [dismissed, setDismissed] = useState<string | null>(null)
+    // A doc open for editing: the source it started from, and the words as they stand.
+    const [editing, setEditing] = useState<{ original: string; edited: string } | null>(null)
+    const [saving, setSaving] = useState(false)
     // Which tab the listeners below are bound to. A ref rather than the value
     // itself: the effect re-runs on a tab switch, but an in-flight navigation
     // can still land afterwards, and a stale closure would file the new page's
@@ -151,6 +201,11 @@ export const BrowserCard = memo(
     const [tweakValues, setTweakValues] = useState<Record<string, unknown>>({})
     const [loading, setLoading] = useState(false)
     const [failed, setFailed] = useState<string | null>(null)
+    // A design that declares artboards is drawn as a canvas of them instead of one page.
+    const boards = !isCard && manifest?.kind === 'design' ? manifest.artboards : undefined
+    const [board, setBoard] = useState<string | null>(null)
+    const selectedBoard = boards?.find((b) => b.id === board) ?? boards?.[0]
+    const [fileTick, setFileTick] = useState(0)
 
     /**
      * Turn one control, and show the result immediately.
@@ -210,6 +265,7 @@ export const BrowserCard = memo(
       }
       const onStop = (): void => {
         setLoading(false)
+        setLoadTick((t) => t + 1)
         syncNav()
         readManifest()
       }
@@ -264,7 +320,10 @@ export const BrowserCard = memo(
             setManifest(m)
             // Only a design gets watched, and only while it is the page in
             // front. An ordinary web page has no file to change.
-            window.api.watchBrowserFile(sessionId, m ? filePathRef.current : null)
+            window.api.watchBrowserFile(
+              sessionId,
+              m?.kind === 'design' ? filePathRef.current : null
+            )
             if (!m?.tweaks) {
               setTweakValues({})
               return
@@ -386,6 +445,7 @@ export const BrowserCard = memo(
         // longer showing.
         if (path !== filePathRef.current) return
         viewRef.current?.reload()
+        setFileTick((t) => t + 1)
       })
     }, [sessionId, isCard])
 
@@ -429,6 +489,178 @@ export const BrowserCard = memo(
       // hands back a new object for changes that leave the tabs alone, and
       // resending then is pure IPC chatter.
     }, [sessionId, isCard, tabsSignature])
+
+    const showVersion = useCallback(
+      (index: number, artifactId: string, version: number) => {
+        void window.api.artifactVersionUrl(artifactId, version).then((found) => {
+          if (found) setArtifactTabVersion(key, index, found.url, version)
+        })
+      },
+      [key, setArtifactTabVersion]
+    )
+
+    // An artifact's address carries the server's port, which a restart changes; ask again once per tab.
+    const artifactTabs = pane?.tabs
+      .map((t, i) => (t.artifact ? `${i}:${t.artifact.id}:${t.artifact.version}` : ''))
+      .join('|')
+    const refreshed = useRef(new Set<string>())
+    useEffect(() => {
+      paneRef.current?.tabs.forEach((t, i) => {
+        if (!t.artifact) return
+        const tag = `${t.artifact.id}:${t.artifact.version}`
+        if (refreshed.current.has(tag)) return
+        refreshed.current.add(tag)
+        showVersion(i, t.artifact.id, t.artifact.version)
+      })
+    }, [artifactTabs, showVersion])
+
+    const shownVersion = artState?.versions.find((v) => v.version === art?.version)
+    const answeredBatch = shownVersion?.answersBatchId
+    const answeredComments = answeredBatch
+      ? (artState?.comments.filter((c) => c.batchId === answeredBatch) ?? [])
+      : []
+    const answeredOn = answeredComments.length
+      ? Math.max(...answeredComments.map((c) => c.version))
+      : undefined
+    const bannerKey = art ? `${art.id}:${art.version}` : null
+
+    // Compare shows the version the answered comments were written on, beside this one.
+    useEffect(() => {
+      setComparing(false)
+      setCompareUrl(null)
+    }, [bannerKey])
+    useEffect(() => {
+      if (!comparing || !art || !answeredOn) return
+      let stale = false
+      void window.api.artifactVersionUrl(art.id, answeredOn).then((found) => {
+        if (!stale) setCompareUrl(found?.url ?? null)
+      })
+      return () => {
+        stale = true
+      }
+    }, [comparing, art, answeredOn])
+
+    const canComment = Boolean(art) && !isCard
+    const {
+      pending,
+      setPending,
+      found,
+      focusId,
+      drafts,
+      sentBatch,
+      dropSelection,
+      addComment,
+      addNote,
+      editComment,
+      deleteComment,
+      revealComment: revealQuote
+    } = useQuoteComments({
+      guestKey: sessionId,
+      artifact: art,
+      comments: artState?.comments ?? [],
+      attached: canComment,
+      enabled: commenting && canComment,
+      watching: !boards,
+      loadTick,
+      area: areaRef,
+      onSaved: refreshArtifact,
+      onError: setFailed
+    })
+
+    const revealComment = useCallback(
+      (c: ArtifactComment) => {
+        if (c.anchor?.kind === 'point') setBoard(c.anchor.artboard)
+        revealQuote(c)
+      },
+      [revealQuote]
+    )
+
+    const sendComments = useCallback(() => {
+      if (!art) return
+      setSending(true)
+      void window.api
+        .sendArtifactComments(art.id)
+        .catch((err: unknown) =>
+          setFailed(err instanceof Error ? err.message : 'Could not send the comments')
+        )
+        .finally(() => {
+          setSending(false)
+          refreshArtifact()
+        })
+    }, [art, refreshArtifact])
+
+    // A click on an artboard while commenting: name the element under it, then ask what to say.
+    const pinPoint = useCallback(
+      (artboardId: string, point: { x: number; y: number }, at: { x: number; y: number }) => {
+        const area = areaRef.current?.getBoundingClientRect()
+        const label = boards?.find((b) => b.id === artboardId)?.label ?? artboardId
+        void window.api
+          .describeArtboardPoint({ sessionId, artboardId, ...point })
+          .catch(() => null)
+          .then((sel) => {
+            const element = describeElement(sel)
+            setPending({
+              anchor: { kind: 'point', artboard: artboardId, ...point, element },
+              label: `${label} · ${element}`,
+              at: area ? placePopover({ ...at, width: 0, height: 0 }, area) : at
+            })
+          })
+      },
+      [boards, sessionId, setPending]
+    )
+    const pins: CanvasPin[] = [...drafts, ...sentBatch]
+      .filter((c) => c.anchor?.kind === 'point')
+      .map((c, i) => {
+        const a = c.anchor as Extract<ArtifactAnchor, { kind: 'point' }>
+        return {
+          id: c.id,
+          artboard: a.artboard,
+          x: a.x,
+          y: a.y,
+          n: i + 1,
+          state: c.id === focusId ? 'focus' : c.state === 'draft' ? 'draft' : 'sent'
+        }
+      })
+
+    const onLatest = Boolean(art && artState && art.version === artState.artifact.latestVersion)
+    const startEditing = useCallback(() => {
+      if (!art) return
+      void window.api
+        .readArtifactSource(art.id, art.version)
+        .then((found) => {
+          if (!found) return setFailed('Could not read the doc')
+          setCommenting(false)
+          setPending(null)
+          setEditing({ original: found.body, edited: found.body })
+        })
+        .catch(() => setFailed('Could not read the doc'))
+    }, [art, setPending])
+
+    // A tab switch or another version ends the edit; the words were never saved.
+    useEffect(() => setEditing(null), [bannerKey])
+
+    const saveEdit = useCallback(
+      (send: boolean) => {
+        if (!art || !editing || !pane) return
+        const { body, edits } = mergeDocEdit(editing.original, editing.edited)
+        if (edits.length === 0) return
+        setSaving(true)
+        const tab = pane.activeTab
+        void window.api
+          .saveArtifactUserVersion({ artifactId: art.id, body, edits, send })
+          .then(({ version, sendError }) => {
+            setEditing(null)
+            showVersion(tab, art.id, version.version)
+            refreshArtifact()
+            if (sendError) setFailed(`Saved v${version.version}, not sent: ${sendError}`)
+          })
+          .catch((err: unknown) =>
+            setFailed(err instanceof Error ? err.message : 'Could not save the doc')
+          )
+          .finally(() => setSaving(false))
+      },
+      [art, editing, pane, showVersion, refreshArtifact]
+    )
 
     const [picking, setPicking] = useState(false)
 
@@ -559,7 +791,7 @@ export const BrowserCard = memo(
       <PaneCard
         ref={ref}
         paneId={paneId}
-        title={displayHost(url)}
+        title={art?.title ?? displayHost(url)}
         onClose={() => closeBrowserPane(key)}
         isDragTarget={isDragTarget}
         onDragStart={onDragStart}
@@ -580,12 +812,16 @@ export const BrowserCard = memo(
               id: String(i),
               name: displayHost(shown),
               title: shown,
-              label: (isActive && manifest?.title) || displayHost(shown),
+              label: tab.artifact?.title || (isActive && manifest?.title) || displayHost(shown),
               // Only the active tab's manifest is known, so a design is marked only there.
-              icon:
-                isActive && manifest ? (
-                  <Shapes size={11} strokeWidth={2} className="shrink-0 text-bronzo" />
-                ) : undefined,
+              icon: tab.artifact ? (
+                (() => {
+                  const Icon = KIND_ICONS[tab.artifact.kind]
+                  return <Icon size={11} strokeWidth={2} className="shrink-0 text-ink" />
+                })()
+              ) : isActive && manifest?.kind === 'design' ? (
+                <Shapes size={11} strokeWidth={2} className="shrink-0 text-bronzo" />
+              ) : undefined,
               closeLabel: `Close tab ${displayHost(shown)}`
             }
           })}
@@ -643,12 +879,45 @@ export const BrowserCard = memo(
             hands the agent something, and a design is exactly what you point
             at. */}
         <div className="flex items-center gap-0.5 px-1.5 py-1 shrink-0">
-          {manifest ? (
+          {art && editing ? (
+            <DocEditBar version={art.version} onDiscard={() => setEditing(null)} />
+          ) : art ? (
+            <>
+              <ArtifactBar
+                version={art.version}
+                versions={artState?.versions ?? []}
+                comments={artState?.comments ?? []}
+                agent={terminal.session.agentType}
+                commenting={commenting}
+                onToggleComments={
+                  canComment
+                    ? () => {
+                        if (commenting) dropSelection()
+                        setCommenting((c) => !c)
+                      }
+                    : undefined
+                }
+                onSelectVersion={(v) => showVersion(pane.activeTab, art.id, v)}
+                onSend={canComment ? sendComments : undefined}
+                onEdit={
+                  art.kind === 'doc' && canComment ? (onLatest ? startEditing : null) : undefined
+                }
+                sending={sending}
+                queued={artState?.queued ?? false}
+                btn={btn}
+              />
+              {manifest?.tweaks && !boards && (
+                <TweakBar manifest={manifest} values={tweakValues} onChange={applyTweak} />
+              )}
+            </>
+          ) : manifest?.kind === 'design' ? (
             <>
               {/* Controls only. The name lives on the tab, where every other
                   page's name lives — repeating it here would spend header
                   width on something already on screen. */}
-              <TweakBar manifest={manifest} values={tweakValues} onChange={applyTweak} />
+              {!boards && (
+                <TweakBar manifest={manifest} values={tweakValues} onChange={applyTweak} />
+              )}
               <span className="flex-1" />
             </>
           ) : (
@@ -674,7 +943,7 @@ export const BrowserCard = memo(
               main holds for the session, which stays bound to the session's own
               browser. Offered here they would arm a mode over this page and
               report on a different one. */}
-          {!isCard && (
+          {!isCard && !editing && !boards && (
             <>
               <button
                 onClick={pickElement}
@@ -698,41 +967,160 @@ export const BrowserCard = memo(
           )}
         </div>
 
+        {art && artState && bannerKey !== dismissed && (
+          <ArtifactBanner
+            version={art.version}
+            answered={answeredComments.length}
+            answeredOn={answeredOn}
+            latest={artState.artifact.latestVersion}
+            comparing={comparing}
+            onCompare={() => setComparing((c) => !c)}
+            onOpenLatest={() =>
+              showVersion(pane.activeTab, art.id, artState.artifact.latestVersion)
+            }
+            onDismiss={() => setDismissed(bannerKey)}
+            btn={btn}
+          />
+        )}
+
         {failed && <div className="px-2 py-1 text-[10px] text-amber-400/90 shrink-0">{failed}</div>}
 
         {/* Every tab stays mounted so switching back keeps the page and its
             scroll position; only the active one is visible. */}
-        <div className="flex-1 min-h-0 relative" style={{ background: PANE_SURFACE }}>
-          {pane.tabs.map((tab, i) => (
-            <webview
-              key={i}
-              ref={
-                i === pane.activeTab ? (viewRef as unknown as React.Ref<HTMLElement>) : undefined
-              }
-              // Intent, never the observed url: re-setting `src` to the page the
-              // guest already reached would reload it and drop scroll position.
-              src={tab.url}
-              // Each session browses in its own partition, so logins and cookies
-              // in one session's pane don't leak into another's.
-              partition={browserPartition(sessionId)}
-              className="absolute inset-0 w-full h-full"
-              style={i === pane.activeTab ? undefined : { visibility: 'hidden' }}
-            />
-          ))}
-          {/* Only mounted while armed: an always-present overlay would eat
+        <div className="flex-1 min-h-0 flex" style={{ background: PANE_SURFACE }}>
+          {comparing && compareUrl && (
+            <div className="flex-1 min-w-0 flex flex-col border-r border-white/[0.06]">
+              <div className="px-2.5 h-6 flex items-center font-mono text-[11px] text-ink-faint shrink-0">
+                v{answeredOn}
+              </div>
+              <webview
+                src={compareUrl}
+                partition={browserPartition(sessionId)}
+                className="flex-1 w-full"
+              />
+            </div>
+          )}
+          <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+            {comparing && compareUrl && (
+              <div className="px-2.5 h-6 flex items-center font-mono text-[11px] text-ink-faint shrink-0">
+                v{art?.version}
+              </div>
+            )}
+            <div ref={areaRef} className="flex-1 min-h-0 relative">
+              {pane.tabs.map((tab, i) => (
+                <webview
+                  key={i}
+                  ref={
+                    i === pane.activeTab
+                      ? (viewRef as unknown as React.Ref<HTMLElement>)
+                      : undefined
+                  }
+                  // Intent, never the observed url: re-setting `src` to the page the
+                  // guest already reached would reload it and drop scroll position.
+                  src={tab.url}
+                  // Each session browses in its own partition, so logins and cookies
+                  // in one session's pane don't leak into another's.
+                  partition={browserPartition(sessionId)}
+                  className="absolute inset-0 w-full h-full"
+                  style={i === pane.activeTab ? undefined : { visibility: 'hidden' }}
+                />
+              ))}
+              {/* Only mounted while armed: an always-present overlay would eat
               every click meant for the page. */}
-          {annotating && (
-            <canvas
-              ref={inkRef}
-              data-testid="browser-ink"
-              onPointerDown={(e) => {
-                drawingRef.current = true
-                e.currentTarget.setPointerCapture(e.pointerId)
-                draw(e, true)
-              }}
-              onPointerMove={(e) => drawingRef.current && draw(e, false)}
-              onPointerUp={() => (drawingRef.current = false)}
-              className="absolute inset-0 w-full h-full cursor-crosshair z-10"
+              {annotating && (
+                <canvas
+                  ref={inkRef}
+                  data-testid="browser-ink"
+                  onPointerDown={(e) => {
+                    drawingRef.current = true
+                    e.currentTarget.setPointerCapture(e.pointerId)
+                    draw(e, true)
+                  }}
+                  onPointerMove={(e) => drawingRef.current && draw(e, false)}
+                  onPointerUp={() => (drawingRef.current = false)}
+                  className="absolute inset-0 w-full h-full cursor-crosshair z-10"
+                />
+              )}
+              {editing && art && (
+                <DocEditor
+                  original={editing.original}
+                  edited={editing.edited}
+                  onChange={(md) => setEditing((e) => (e ? { ...e, edited: md } : e))}
+                  drafts={drafts.length}
+                  next={(artState?.artifact.latestVersion ?? art.version) + 1}
+                  agent={terminal.session.agentType}
+                  saving={saving}
+                  onSave={saveEdit}
+                />
+              )}
+              {boards && selectedBoard && activeTabState && (
+                <DesignCanvas
+                  sessionId={sessionId}
+                  partition={browserPartition(sessionId)}
+                  url={activeTabState.url}
+                  artboards={boards}
+                  selected={selectedBoard.id}
+                  onSelect={setBoard}
+                  tweaks={tweakValues}
+                  reloadKey={fileTick}
+                  pinning={commenting && canComment && !pending}
+                  pins={commenting ? pins : []}
+                  onPoint={pinPoint}
+                  onPinClick={(id) => {
+                    const c = [...drafts, ...sentBatch].find((d) => d.id === id)
+                    if (c) revealComment(c)
+                  }}
+                />
+              )}
+              {pending && (
+                <CommentPopover
+                  key={pending.label}
+                  quote={pending.label}
+                  at={pending.at}
+                  onAdd={addComment}
+                  onCancel={dropSelection}
+                />
+              )}
+            </div>
+          </div>
+          {boards && selectedBoard && manifest?.tweaks && (
+            <aside
+              aria-label="Tweaks"
+              className="w-[220px] shrink-0 flex flex-col min-h-0 overflow-y-auto border-l
+                         border-white/[0.06] bg-surface-panel"
+            >
+              <h4
+                className="px-3 py-2 border-b border-white/[0.04] font-mono text-[11px]
+                           font-semibold tracking-wider uppercase text-ink-faint truncate"
+              >
+                Tweaks · {selectedBoard.label}
+              </h4>
+              <TweakBar
+                manifest={manifest}
+                values={tweakValues}
+                onChange={applyTweak}
+                layout="column"
+              />
+              <p className="mt-auto px-3 py-2.5 text-[11.5px] text-ink-faint">
+                Every artboard takes the same values.
+              </p>
+            </aside>
+          )}
+          {commenting && canComment && art && !editing && (
+            <ArtifactRail
+              drafts={drafts}
+              sent={sentBatch}
+              version={art.version}
+              found={found}
+              agent={terminal.session.agentType}
+              queued={artState?.queued ?? false}
+              sending={sending}
+              onSend={sendComments}
+              onEdit={editComment}
+              onDelete={deleteComment}
+              onReveal={revealComment}
+              hint={boards ? 'Click an artboard to pin a comment there.' : undefined}
+              onAddNote={addNote}
             />
           )}
         </div>

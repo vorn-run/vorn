@@ -2,7 +2,8 @@ import { StateCreator } from 'zustand'
 import {
   TerminalSession,
   type ExtensionActivationState,
-  type ExtensionFooterReading
+  type ExtensionFooterReading,
+  type BrowserTabArtifact
 } from '../../shared/types'
 import {
   AppStore,
@@ -415,7 +416,7 @@ export function parsePersistedBrowsers(
         string,
         | string
         | {
-            tabs?: (string | { url?: string })[]
+            tabs?: (string | { url?: string; artifact?: BrowserTabArtifact })[]
             activeTab?: number
             sessionId?: string
           }
@@ -427,15 +428,24 @@ export function parsePersistedBrowsers(
       if (typeof entry === 'string') {
         return [id, { tabs: [{ url: entry }], activeTab: 0, sessionId: id }]
       }
-      const urls = (entry.tabs ?? [])
-        .map((t) => (typeof t === 'string' ? t : t?.url))
-        .filter((u): u is string => typeof u === 'string' && u.length > 0)
-      const tabs: BrowserTabState[] = (urls.length ? urls : [DEFAULT_BROWSER_URL]).map((url) => ({
-        url
-      }))
+      const saved = (entry.tabs ?? [])
+        .map((t) => (typeof t === 'string' ? { url: t } : { url: t?.url, artifact: t?.artifact }))
+        .filter((t): t is BrowserTabState => typeof t.url === 'string' && t.url.length > 0)
+        .map((t) => (isTabArtifact(t.artifact) ? t : { url: t.url }))
+      const tabs: BrowserTabState[] = saved.length ? saved : [{ url: DEFAULT_BROWSER_URL }]
       const activeTab = Math.min(Math.max(entry.activeTab ?? 0, 0), tabs.length - 1)
       return [id, { tabs, activeTab, sessionId: entry.sessionId ?? id }]
     })
+  )
+}
+
+function isTabArtifact(a: unknown): a is BrowserTabArtifact {
+  const v = a as BrowserTabArtifact | undefined
+  return (
+    typeof v?.id === 'string' &&
+    typeof v.version === 'number' &&
+    typeof v.title === 'string' &&
+    (v.kind === 'page' || v.kind === 'doc' || v.kind === 'design')
   )
 }
 
@@ -463,7 +473,10 @@ function savePanes(
               // Intent only. `liveUrl` and `title` are what a live guest
               // reported; writing them to disk would have the next run assert
               // as observed fact something no guest has said yet.
-              tabs: s.tabs.map((t) => ({ url: t.url })),
+              tabs: s.tabs.map((t) => ({
+                url: t.url,
+                ...(t.artifact && { artifact: t.artifact })
+              })),
               activeTab: s.activeTab,
               sessionId: s.sessionId
             }
@@ -1322,6 +1335,38 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       }
     }),
 
+  openArtifactTab: (sessionId, url, artifact) =>
+    set((state) => {
+      const next = new Map(state.browserPanes)
+      const existing = next.get(sessionId) ?? state.browserMemory.get(sessionId)
+      const tab: BrowserTabState = { url, artifact }
+      if (!existing) {
+        next.set(sessionId, { tabs: [tab], activeTab: 0, sessionId })
+      } else {
+        const tabs = [...existing.tabs]
+        const at = tabs.findIndex((t) => t.artifact?.id === artifact.id)
+        if (at >= 0) tabs[at] = tab
+        else tabs.push(tab)
+        next.set(sessionId, { ...existing, tabs, activeTab: at >= 0 ? at : tabs.length - 1 })
+      }
+      savePanes(state.filesPanes, state.editorPanes, next)
+      return { browserPanes: next }
+    }),
+
+  setArtifactTabVersion: (paneId, index, url, version) =>
+    set((state) => {
+      const existing = state.browserPanes.get(paneId)
+      const tab = existing?.tabs[index]
+      if (!existing || !tab?.artifact) return {}
+      if (tab.url === url && tab.artifact.version === version) return {}
+      const tabs = [...existing.tabs]
+      tabs[index] = { url, artifact: { ...tab.artifact, version } }
+      const next = new Map(state.browserPanes)
+      next.set(paneId, { ...existing, tabs })
+      savePanes(state.filesPanes, state.editorPanes, next)
+      return { browserPanes: next }
+    }),
+
   toggleBrowserPane: (sessionId) => {
     const { browserPanes, openBrowserPane, closeBrowserPane } = get()
     if (browserPanes.has(sessionId)) closeBrowserPane(sessionId)
@@ -1411,7 +1456,12 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
       if (liveUrl === tab.liveUrl && title === tab.title) return {}
 
       const tabs = [...existing.tabs]
-      tabs[index] = { url: tab.url, ...(liveUrl ? { liveUrl } : {}), ...(title ? { title } : {}) }
+      tabs[index] = {
+        url: tab.url,
+        ...(liveUrl ? { liveUrl } : {}),
+        ...(title ? { title } : {}),
+        ...(tab.artifact ? { artifact: tab.artifact } : {})
+      }
       const next = new Map(state.browserPanes)
       next.set(paneId, { ...existing, tabs })
       // Not persisted: `savePanes` writes intent only, so an observation is
@@ -1711,7 +1761,8 @@ export const createUISlice: StateCreator<AppStore, [], [], UISlice> = (set, get)
     // address bar assert the redirected location while its guest is still at
     // the original one — and for a page that always redirects, permanently.
     // The new guest reports for itself the moment it navigates.
-    const tab = { url: pane.tabs[index].url }
+    const { url, artifact } = pane.tabs[index]
+    const tab = { url, ...(artifact && { artifact }) }
     const cardId = nextCardId(pane.sessionId)
     // Out of the strip before into the card: leaving it in both would mount two
     // guests on one url, each with its own scroll position and half-typed form,

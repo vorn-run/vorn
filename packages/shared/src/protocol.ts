@@ -1,5 +1,13 @@
 import type { AgentModelRequest, AgentModelCatalog } from './agent-models'
 import type {
+  Artifact,
+  GateComment,
+  ArtifactAnchor,
+  ArtifactComment,
+  ArtifactKind,
+  ArtifactSendState,
+  BrowserTabArtifact,
+  ArtifactVersion,
   ActionResult,
   SessionAnswer,
   SessionRequest,
@@ -582,6 +590,8 @@ export interface RequestMethods {
       comment?: string
       /** The reviewer's rewrite of the gate's editable text, when they made one. */
       edited?: string
+      /** Comments left on the review page; a request for changes carries them back. */
+      comments?: GateComment[]
     }
     result: { accepted: boolean; reason?: string }
   }
@@ -1128,7 +1138,7 @@ export interface RequestMethods {
     result: { ok: true }
   }
   'browser:openPane': {
-    params: { sessionId: string; url?: string }
+    params: { sessionId: string; url?: string; artifact?: BrowserTabArtifact }
     result: { url: string }
   }
   'browser:navigate': {
@@ -1147,6 +1157,91 @@ export interface RequestMethods {
   'browser:find': {
     params: { sessionId: string; text: string; limit?: number }
     result: BrowserNode[]
+  }
+
+  // Artifacts: `sessionId` is the calling session, resolved by the MCP layer from VORN_SESSION_ID.
+  'artifact:publish': {
+    params: {
+      sessionId: string
+      kind: ArtifactKind
+      title: string
+      file?: string
+      content?: string
+      artifactId?: string
+      /** Open it in the session's browser pane; defaults to true. */
+      open?: boolean
+    }
+    result: {
+      artifact: Artifact
+      version: ArtifactVersion
+      /** Loopback address of the version, for the desktop's pane. */
+      url: string
+      answered: number
+      opened: boolean
+    }
+  }
+  'artifact:list': {
+    params: { sessionId?: string; projectName?: string; limit?: number }
+    result: Artifact[]
+  }
+  'artifact:get': {
+    params: { artifactId: string }
+    result: {
+      artifact: Artifact
+      versions: ArtifactVersion[]
+      comments: ArtifactComment[]
+      /** Drafts wait for the agent to reach its prompt before they go. */
+      queued: boolean
+    } | null
+  }
+  'artifact:versionUrl': {
+    params: { artifactId: string; version?: number }
+    /** `path` is relative to the server's origin; `url` is the loopback address of it. */
+    result: { path: string; url: string } | null
+  }
+  /** The artifact a gate's review page is kept as, with the address of the round it is asking. */
+  'artifact:forGate': {
+    params: { runId: string; nodeId: string }
+    result: { artifact: Artifact; version: number; url: string } | null
+  }
+  'artifact:readComments': {
+    params: { sessionId: string; artifactId: string; version?: number }
+    result: ArtifactComment[]
+  }
+  'artifact:saveComment': {
+    params: { artifactId: string; version: number; anchor: ArtifactAnchor | null; body: string }
+    result: ArtifactComment
+  }
+  'artifact:updateComment': {
+    params: { commentId: string; body?: string; anchor?: ArtifactAnchor | null }
+    result: ArtifactComment | null
+  }
+  'artifact:deleteComment': {
+    params: { commentId: string }
+    result: { deleted: boolean }
+  }
+  'artifact:send': {
+    params: { artifactId: string }
+    result: { state: ArtifactSendState; count: number }
+  }
+  /** A version's source: `sessionId` is set when an agent asks, and limits it to what it can see. */
+  'artifact:readSource': {
+    params: { sessionId?: string; artifactId: string; version?: number }
+    result: { version: ArtifactVersion; body: string } | null
+  }
+  /** The person's own edit of a doc, kept as its next version; each edit becomes a draft. */
+  'artifact:saveUserVersion': {
+    params: {
+      artifactId: string
+      body: string
+      edits: Array<{ before: string; after: string }>
+      send: boolean
+    }
+    result: {
+      version: ArtifactVersion
+      sent: { state: ArtifactSendState; count: number } | null
+      sendError?: string
+    }
   }
 
   // ─── Device (iOS simulator) ───────────────────────────────────
@@ -1319,6 +1414,10 @@ export interface ServerNotifications {
    * second window re-read the database and hoped.
    */
   'workflow:runUpdated': WorkflowExecution
+  /** A new artifact, or a new version of one. */
+  'artifact:published': { artifact: Artifact; version: ArtifactVersion }
+  /** Comments on an artifact were written, changed, removed or sent. */
+  'artifact:commentsChanged': { artifactId: string }
   'workflow:gateResolved': { runId: string; nodeId: string; decision: 'approve' | 'reject' }
   'session-exit': TerminalSession
   /** A phone offered a valid pairing code and is waiting to be approved. */

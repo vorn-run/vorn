@@ -1,10 +1,27 @@
-import { useEffect, useState } from 'react'
-import { Lock, X } from 'lucide-react'
-import type { ApprovalConfig, NodeExecutionState, WorkflowNode } from '../../../shared/types'
+import { useCallback, useEffect, useState } from 'react'
+import { Lock, MessageSquare, X } from 'lucide-react'
+import type {
+  ApprovalConfig,
+  ArtifactComment,
+  GateComment,
+  NodeExecutionState,
+  WorkflowNode
+} from '../../../shared/types'
 import { NODE_TYPE_ICON } from '../workflow-editor/node-visuals'
 import { gateViewUrl } from '../../lib/gate-view-url'
 import { GateActions } from './GateActions'
 import { roundLabel } from '../../lib/gate-round'
+import { isElectron } from '../../lib/platform'
+import { ICON_BUTTON } from '../../lib/icon-button'
+import { GateArtifactView } from './GateArtifactView'
+
+/** The drafts on the page as the comments a request for changes carries. */
+function asGateComments(drafts: ArtifactComment[]): GateComment[] {
+  return drafts.map((d) => ({
+    ...(d.anchor?.kind === 'quote' && { quote: d.anchor.quote }),
+    comment: d.body
+  }))
+}
 
 interface Props {
   runId: string
@@ -26,9 +43,14 @@ export function GateReviewModal({ runId, workflowName, state, node, nodes, onClo
   const token = state.viewToken
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
+  // Desktop reads the page in a guest it can comment on; the web client, and a gate kept before that, get the frame.
+  const [plain, setPlain] = useState(!isElectron)
+  const [commenting, setCommenting] = useState(true)
+  const [drafts, setDrafts] = useState<ArtifactComment[]>([])
+  const onUnavailable = useCallback(() => setPlain(true), [])
 
   useEffect(() => {
-    if (!token) return
+    if (!token || !plain) return
     let live = true
     gateViewUrl(runId, state.nodeId, token).then(
       (next) => live && setUrl(next),
@@ -37,7 +59,7 @@ export function GateReviewModal({ runId, workflowName, state, node, nodes, onClo
     return () => {
       live = false
     }
-  }, [runId, state.nodeId, token])
+  }, [runId, state.nodeId, token, plain])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -65,17 +87,40 @@ export function GateReviewModal({ runId, workflowName, state, node, nodes, onClo
           {Icon && <Icon size={13} strokeWidth={1.5} className="text-ink-faint shrink-0" />}
           <span className="text-[13px] font-medium text-ink shrink-0">{node.label}</span>
           <span className="font-mono text-[11.5px] text-ink-faint truncate">{meta}</span>
+          <span className="flex-1" />
+          {!plain && (
+            <button
+              type="button"
+              onClick={() => setCommenting((on) => !on)}
+              aria-pressed={commenting}
+              aria-label={commenting ? 'Hide comments' : 'Comment on the page'}
+              title={commenting ? 'Hide comments' : 'Comment on the page'}
+              className={`${ICON_BUTTON} ${commenting ? 'bg-white/[0.10] text-ink' : ''}`}
+            >
+              <MessageSquare size={13} strokeWidth={1.75} />
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
             aria-label="Close review"
-            className="ml-auto p-1 rounded-md text-ink-faint hover:text-ink transition-colors"
+            className="p-1 rounded-md text-ink-faint hover:text-ink transition-colors"
           >
             <X size={14} />
           </button>
         </div>
 
-        {url ? (
+        {!plain && token ? (
+          <GateArtifactView
+            runId={runId}
+            nodeId={state.nodeId}
+            round={state.round ?? 1}
+            label={node.label}
+            commenting={commenting}
+            onDrafts={setDrafts}
+            onUnavailable={onUnavailable}
+          />
+        ) : url ? (
           <iframe
             title={`Review page for ${node.label}`}
             src={url}
@@ -98,11 +143,19 @@ export function GateReviewModal({ runId, workflowName, state, node, nodes, onClo
                   Built by <span className="text-ink-secondary">{producer}</span>.{' '}
                 </>
               )}
-              It runs sandboxed: nothing loads from the network and it can&apos;t reach Vorn.
+              {plain
+                ? "It runs sandboxed: nothing loads from the network and it can't reach Vorn."
+                : 'Sandboxed. Comments are added by Vorn, never by the page.'}
             </span>
           </div>
           <div className="shrink-0 w-[min(440px,55%)]">
-            <GateActions runId={runId} state={state} config={config} nodes={nodes} />
+            <GateActions
+              runId={runId}
+              state={state}
+              config={config}
+              nodes={nodes}
+              comments={plain ? undefined : asGateComments(drafts)}
+            />
           </div>
         </div>
       </div>

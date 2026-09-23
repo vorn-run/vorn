@@ -803,6 +803,7 @@ export function createApiShim(wsUrl: string) {
       decision: 'approve' | 'reject' | 'changes'
       comment?: string
       edited?: string
+      comments?: import('../../shared/src/types').GateComment[]
     }) => rpc.invoke('workflow:resolveGate', params),
     retryWorkflowRun: (runId: string) => rpc.invoke('workflow:retryRun', { runId }),
     rerunWorkflowRun: (runId: string) => rpc.invoke('workflow:rerun', { runId }),
@@ -812,6 +813,43 @@ export function createApiShim(wsUrl: string) {
       rpc.on('workflow:runUpdated', (params) =>
         callback(params as import('../../shared/src/types').WorkflowExecution)
       ),
+    listArtifacts: (params: { projectName?: string; limit?: number }) =>
+      rpc.invoke('artifact:list', params),
+    getArtifact: (artifactId: string) => rpc.invoke('artifact:get', { artifactId }),
+    artifactVersionUrl: (artifactId: string, version?: number) =>
+      rpc.invoke('artifact:versionUrl', { artifactId, version }),
+    artifactForGate: (runId: string, nodeId: string) =>
+      rpc.invoke('artifact:forGate', { runId, nodeId }),
+    saveArtifactComment: (params: {
+      artifactId: string
+      version: number
+      anchor: import('../../shared/src/types').ArtifactAnchor | null
+      body: string
+    }) => rpc.invoke('artifact:saveComment', params),
+    updateArtifactComment: (params: {
+      commentId: string
+      body?: string
+      anchor?: import('../../shared/src/types').ArtifactAnchor | null
+    }) => rpc.invoke('artifact:updateComment', params),
+    deleteArtifactComment: (commentId: string) =>
+      rpc.invoke('artifact:deleteComment', { commentId }),
+    sendArtifactComments: (artifactId: string) => rpc.invoke('artifact:send', { artifactId }),
+    readArtifactSource: (artifactId: string, version?: number) =>
+      rpc.invoke('artifact:readSource', { artifactId, version }),
+    saveArtifactUserVersion: (params: {
+      artifactId: string
+      body: string
+      edits: Array<{ before: string; after: string }>
+      send: boolean
+    }) => rpc.invoke('artifact:saveUserVersion', params),
+    onArtifactPublished: (
+      callback: (event: {
+        artifact: import('../../shared/src/types').Artifact
+        version: import('../../shared/src/types').ArtifactVersion
+      }) => void
+    ) => rpc.on('artifact:published', callback as (p: unknown) => void),
+    onArtifactCommentsChanged: (callback: (event: { artifactId: string }) => void) =>
+      rpc.on('artifact:commentsChanged', callback as (p: unknown) => void),
 
     runWorkflowManual: (workflowId: string, inputs?: Record<string, unknown>) =>
       rpc.invoke('workflow:runManual', { workflowId, inputs }),
@@ -943,9 +981,17 @@ export function createApiShim(wsUrl: string) {
     onBrowserFileChanged: (_callback: (p: unknown) => void) => () => {},
     readBrowserManifest: async () => ({ manifest: null }),
     setBrowserTweak: async () => ({ ok: true as const }),
+    attachArtboard: (_sessionId: string, _artboardId: string, _webContentsId: number): void => {},
+    detachArtboard: (_sessionId: string, _artboardId: string): void => {},
+    setArtboardTweaks: async () => ({ ok: true as const }),
+    describeArtboardPoint: async () => null,
     cancelBrowserPick: (_sessionId: string): void => {},
     startBrowserPick: async () => null,
     annotateBrowser: unsupportedInWeb('Annotating the browser pane'),
+    artifactSelection: async () => null,
+    paintArtifactMarks: async () => ({ found: {} }),
+    revealArtifactMark: async () => ({ found: false }),
+    clearArtifactSelection: async () => ({ ok: true as const }),
     deviceList: async () => [],
     deviceClaim: unsupportedInWeb('Claiming a device'),
     deviceRelease: async () => ({ released: false }),

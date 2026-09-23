@@ -10,13 +10,18 @@ import type {
   BrowserPageRead,
   BrowserConsoleMessage,
   BrowserNetworkRequest,
+  ArtifactMark,
+  ArtifactSelection,
+  BrowserTabArtifact,
   BrowserTabInfo,
   BrowserTarget,
+  ArtifactArtboard,
   ArtifactManifest,
   ArtifactTweak
 } from '../shared/types'
 import { IPC } from '../shared/types'
 import log from './logger'
+import { anchorCall } from './artifact-anchors'
 
 /**
  * The agent's handle on a session's browser pane.
@@ -134,7 +139,7 @@ function loadableUrl(sessionId: string, url: string): string | null {
  * agent told "go read this page" could only ask for help.
  */
 export async function openPane(
-  params: { sessionId: string; url?: string },
+  params: { sessionId: string; url?: string; artifact?: BrowserTabArtifact },
   timeoutMs?: number
 ): Promise<{ url: string }> {
   const normalized =
@@ -142,7 +147,11 @@ export async function openPane(
   if (params.url !== undefined && !normalized) {
     throw new Error(`Refusing to open "${params.url}" — not an allowed web address.`)
   }
-  sendToRenderer(IPC.BROWSER_OPEN_PANE, { sessionId: params.sessionId, url: normalized })
+  sendToRenderer(IPC.BROWSER_OPEN_PANE, {
+    sessionId: params.sessionId,
+    url: normalized,
+    ...(params.artifact && normalized ? { artifact: params.artifact } : {})
+  })
   await waitForAttach(params.sessionId, timeoutMs)
   return { url: normalized ?? '' }
 }
@@ -605,9 +614,9 @@ export function parseManifest(text: string): ArtifactManifest | null {
   }
   if (!raw || typeof raw !== 'object') return null
   const m = raw as Record<string, unknown>
-  if (m.kind !== 'design') return null
+  if (m.kind !== 'page' && m.kind !== 'doc' && m.kind !== 'design') return null
 
-  const manifest: ArtifactManifest = { kind: 'design' }
+  const manifest: ArtifactManifest = { kind: m.kind }
   if (typeof m.title === 'string' && m.title.trim()) manifest.title = m.title.trim().slice(0, 120)
 
   if (m.tweaks && typeof m.tweaks === 'object' && !Array.isArray(m.tweaks)) {
@@ -623,7 +632,34 @@ export function parseManifest(text: string): ArtifactManifest | null {
     if (Object.keys(tweaks).length > 0) manifest.tweaks = tweaks
   }
 
+  if (manifest.kind === 'design' && Array.isArray(m.artboards)) {
+    const boards: ArtifactArtboard[] = []
+    for (const raw of m.artboards) {
+      if (boards.length >= MAX_ARTBOARDS) break
+      const board = parseArtboard(raw)
+      if (board && !boards.some((b) => b.id === board.id)) boards.push(board)
+    }
+    if (boards.length > 0) manifest.artboards = boards
+  }
+
   return manifest
+}
+
+/** Artboards a canvas draws at once, each a live page of its own. */
+const MAX_ARTBOARDS = 8
+
+/** One declared artboard, or nothing: an id, a label and a size a screen could have. */
+function parseArtboard(raw: unknown): ArtifactArtboard | null {
+  if (!raw || typeof raw !== 'object') return null
+  const b = raw as Record<string, unknown>
+  if (typeof b.id !== 'string' || !ARTBOARD_ID.test(b.id)) return null
+  const size = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) && v >= 120 && v <= 4096 ? Math.round(v) : null
+  const width = size(b.width)
+  const height = size(b.height)
+  if (width === null || height === null) return null
+  const label = typeof b.label === 'string' && b.label.trim() ? b.label.trim().slice(0, 40) : b.id
+  return { id: b.id, label, width, height }
 }
 
 /**
@@ -667,12 +703,16 @@ export async function setTweak(params: {
   // hit-test uses. `JSON.stringify` of a JSON value is a valid JS literal, so
   // the value stays data — a quote inside a select option cannot end it and
   // start being source.
-  await send(wc, 'Runtime.evaluate', {
-    expression: `(${SET_TWEAK_FN})(${JSON.stringify(params.key)}, ${JSON.stringify(
-      params.value ?? null
-    )})`,
-    returnByValue: true
-  })
+  const expression = `(${SET_TWEAK_FN})(${JSON.stringify(params.key)}, ${JSON.stringify(
+    params.value ?? null
+  )})`
+  await send(wc, 'Runtime.evaluate', { expression, returnByValue: true })
+  // Every artboard is the same design at another size, so each takes the value too.
+  await Promise.all(
+    artboardContents(params.sessionId).map((board) =>
+      send(board, 'Runtime.evaluate', { expression, returnByValue: true }).catch(() => {})
+    )
+  )
   return { ok: true }
 }
 
@@ -1351,3 +1391,151 @@ const HIT_TEST_FN = `function (pts) {
   }
   return JSON.stringify(out)
 }`
+
+async function evaluateAnchors<T>(sessionId: string, expression: string): Promise<T> {
+  const { wc } = contentsFor(sessionId)
+  const { result, exceptionDetails } = await send<{
+    result: { value?: T }
+    exceptionDetails?: { text?: string }
+  }>(wc, 'Runtime.evaluate', { expression, returnByValue: true })
+  if (exceptionDetails) throw new Error(exceptionDetails.text ?? 'The page refused the read.')
+  return result.value as T
+}
+
+/** The quote the person has selected on the artifact in front, or null when nothing is. */
+export async function artifactSelection(params: {
+  sessionId: string
+}): Promise<ArtifactSelection | null> {
+  const found = await evaluateAnchors<ArtifactSelection | null>(
+    params.sessionId,
+    anchorCall('selection')
+  )
+  if (!found || found.anchor?.kind !== 'quote' || typeof found.anchor.quote !== 'string')
+    return null
+  return found
+}
+
+/** Highlight these anchors on the page, answering which of them still find their words. */
+export async function paintArtifactMarks(params: {
+  sessionId: string
+  marks: ArtifactMark[]
+}): Promise<{ found: Record<string, boolean> }> {
+  const found = await evaluateAnchors<Record<string, boolean>>(
+    params.sessionId,
+    anchorCall('paint', params.marks.slice(0, 200))
+  )
+  return { found: found ?? {} }
+}
+
+/** Scroll one anchor into view; false when its words are gone. */
+export async function revealArtifactMark(params: {
+  sessionId: string
+  mark: ArtifactMark
+}): Promise<{ found: boolean }> {
+  return {
+    found: Boolean(await evaluateAnchors(params.sessionId, anchorCall('reveal', params.mark)))
+  }
+}
+
+/** Drop the page's selection once it has become a comment. */
+export async function clearArtifactSelection(params: { sessionId: string }): Promise<{ ok: true }> {
+  await evaluateAnchors(params.sessionId, anchorCall('clear'))
+  return { ok: true }
+}
+
+// ─── Artboards ──────────────────────────────────────────────────
+
+/** The extra guests a design canvas shows, by session and then by artboard id. */
+const artboards = new Map<string, Map<string, number>>()
+
+/** What an artboard may be called: the same rule as a tweak name, plus hyphens. */
+export const ARTBOARD_ID = /^[a-zA-Z_][\w-]{0,39}$/
+
+function artboardContents(sessionId: string): WebContents[] {
+  const out: WebContents[] = []
+  for (const id of artboards.get(sessionId)?.values() ?? []) {
+    const wc = webContents.fromId(id)
+    if (wc && !wc.isDestroyed() && wc.debugger.isAttached()) out.push(wc)
+  }
+  return out
+}
+
+/** Start driving one artboard of a session's design canvas. */
+export function attachArtboard(sessionId: string, artboardId: string, webContentsId: number): void {
+  if (!ARTBOARD_ID.test(artboardId)) return
+  const wc = webContents.fromId(webContentsId)
+  // Only a pane's own guest; the renderer's window is not something a canvas may name.
+  if (!wc || wc.isDestroyed() || wc.getType() !== 'webview') return
+  detachArtboard(sessionId, artboardId)
+  try {
+    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3')
+  } catch (err) {
+    log.warn({ err }, `[browser] could not attach artboard ${artboardId} for ${sessionId}`)
+    return
+  }
+  const boards = artboards.get(sessionId) ?? new Map<string, number>()
+  boards.set(artboardId, webContentsId)
+  artboards.set(sessionId, boards)
+}
+
+export function detachArtboard(sessionId: string, artboardId?: string): void {
+  const boards = artboards.get(sessionId)
+  if (!boards) return
+  for (const [id, wcId] of [...boards]) {
+    if (artboardId !== undefined && id !== artboardId) continue
+    boards.delete(id)
+    const wc = webContents.fromId(wcId)
+    try {
+      if (wc && !wc.isDestroyed() && wc.debugger.isAttached()) wc.debugger.detach()
+    } catch {
+      // Already gone with its guest.
+    }
+  }
+  if (boards.size === 0) artboards.delete(sessionId)
+}
+
+function artboardFor(sessionId: string, artboardId: string): WebContents {
+  const id = artboards.get(sessionId)?.get(artboardId)
+  const wc = id === undefined ? undefined : webContents.fromId(id)
+  if (!wc || wc.isDestroyed() || !wc.debugger.isAttached()) {
+    throw new Error(`The artboard ${artboardId} is not open.`)
+  }
+  return wc
+}
+
+/** Put the values the person set into an artboard that has just loaded. */
+export async function setArtboardTweaks(params: {
+  sessionId: string
+  artboardId: string
+  values: Record<string, unknown>
+}): Promise<{ ok: true }> {
+  const wc = artboardFor(params.sessionId, params.artboardId)
+  for (const [key, value] of Object.entries(params.values)) {
+    if (!TWEAK_NAME.test(key)) continue
+    await send(wc, 'Runtime.evaluate', {
+      expression: `(${SET_TWEAK_FN})(${JSON.stringify(key)}, ${JSON.stringify(value ?? null)})`,
+      returnByValue: true
+    })
+  }
+  return { ok: true }
+}
+
+/** The element under a point of an artboard, in its own CSS pixels, described as a pick is. */
+export async function describeArtboardPoint(params: {
+  sessionId: string
+  artboardId: string
+  x: number
+  y: number
+}): Promise<BrowserSelection | null> {
+  const wc = artboardFor(params.sessionId, params.artboardId)
+  const x = Number.isFinite(params.x) ? params.x : 0
+  const y = Number.isFinite(params.y) ? params.y : 0
+  const { result } = await send<{ result: { value?: string | null } }>(wc, 'Runtime.evaluate', {
+    expression: `(() => {
+      const el = document.elementFromPoint(${x}, ${y})
+      return el ? (${DESCRIBE_FN}).call(el) : null
+    })()`,
+    returnByValue: true
+  })
+  return result.value ? (JSON.parse(result.value) as BrowserSelection) : null
+}

@@ -878,9 +878,26 @@ export function registerWorkflowTools(server: McpServer): void {
         .describe(
           "Your rewrite of the gate's editable text, when it has one. Kept beside the original, and read by later steps as {{steps.<gate>.text}}. Ignored on reject."
         ),
+      comments: z
+        .array(
+          z.object({
+            quote: z
+              .string()
+              .max(2000)
+              .optional()
+              .describe('The words on the review page it is about'),
+            comment: z.string().min(1).max(4000)
+          })
+        )
+        .max(100)
+        .optional()
+        .describe(
+          'Comments on the review page, each on the words it quotes. Carried back with changes and read by the redone steps as {{steps.<gate>.comments}}; ignored on approve and reject.'
+        ),
       node_id: V.id.optional().describe('The waiting node, when a run has more than one gate open')
     },
     async (args) => {
+      const comments = (args.comments ?? []).filter((c) => c.comment.trim())
       // The decision is broadcast, so an id nothing matches would report success and answer no gate at all.
       const run = await runById(args.run_id)
       if (!run) {
@@ -913,7 +930,7 @@ export function registerWorkflowTools(server: McpServer): void {
         }
       }
 
-      if (args.decision === 'changes' && !args.comment?.trim()) {
+      if (args.decision === 'changes' && !args.comment?.trim() && comments.length === 0) {
         return {
           content: [
             { type: 'text', text: 'Error: changes needs a comment saying what to change.' }
@@ -935,7 +952,8 @@ export function registerWorkflowTools(server: McpServer): void {
             nodeId: target.nodeId,
             decision: args.decision,
             ...(args.comment?.trim() && { comment: args.comment.trim() }),
-            ...(args.edited?.trim() && { edited: args.edited.trim() })
+            ...(args.edited?.trim() && { edited: args.edited.trim() }),
+            ...(args.decision === 'changes' && comments.length > 0 && { comments })
           }
         )
         if (answer?.accepted === false) {

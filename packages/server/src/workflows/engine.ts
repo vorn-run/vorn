@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import {
   AiAgentType,
   WorkflowDefinition,
@@ -10,6 +11,7 @@ import {
   LoopConfig,
   ApprovalConfig,
   GateDecision,
+  GateComment,
   GateFeedbackEntry,
   NodeExecutionState,
   CreateTaskFromItemConfig,
@@ -82,6 +84,7 @@ import {
 import { reopenTask, startTask } from './tasks'
 import { getDataDir, listWorkflowRuns } from '../database'
 import { gateViewFile, publishGateView, sameToken } from './gate-views'
+import { publishGateArtifact } from '../artifacts/service'
 import log from '../logger'
 
 // Re-exported because the editor and the run views import them from here. They
@@ -767,6 +770,7 @@ async function executeNode(
         )
       : undefined
     if (page && 'error' in page) log.warn(`[workflow] approval gate "${node.label}": ${page.error}`)
+    if (page && 'token' in page) keepGatePage(execution.runId, node.id, node.label, round)
 
     updateNodeState(execution, node.id, {
       status: 'waiting',
@@ -1639,7 +1643,8 @@ export async function applyGateDecision(
   nodeId: string,
   decision: GateDecision,
   comment?: string,
-  edited?: string
+  edited?: string,
+  comments?: GateComment[]
 ): Promise<void> {
   const execution = activeRuns.get(runId)?.execution ?? runById(runId)
   if (!execution) return
@@ -1655,7 +1660,17 @@ export async function applyGateDecision(
   }
   if (decision === 'approve') await approveWorkflowGate(execution, nodeId, comment, edited)
   else if (decision === 'reject') await rejectWorkflowGate(execution, nodeId, { note: comment })
-  else await requestGateChanges(execution, nodeId, comment ?? '', edited)
+  else await requestGateChanges(execution, nodeId, comment ?? '', edited, comments)
+}
+
+/** The round's review page as a version of the gate's artifact, so a desktop reviewer can comment on its words. */
+function keepGatePage(runId: string, nodeId: string, title: string, round: number): void {
+  try {
+    const html = fs.readFileSync(gateViewFile(getDataDir(), runId, nodeId, round), 'utf8')
+    publishGateArtifact(getDataDir(), { runId, nodeId, title }, html)
+  } catch (err) {
+    log.warn({ err }, `[workflow] gate ${nodeId}: the review page could not be kept for comments`)
+  }
 }
 
 /** The file of a gate's review page, when the token is this round's and the gate still asks. */
@@ -2036,24 +2051,27 @@ function resolveWaitingGate(
   return { workflow }
 }
 
-/** The gate's comments with this answer's added, when it carried a comment or a rewrite. */
+/** The gate's comments with this answer's added, when it carried a comment, a rewrite or page comments. */
 function withFeedback(
   execution: WorkflowExecution,
   nodeId: string,
   decision: GateDecision,
   comment: string | undefined,
-  edited?: string
+  edited?: string,
+  comments?: GateComment[]
 ): Pick<NodeExecutionState, 'feedback'> {
   const state = execution.nodeStates.find((s) => s.nodeId === nodeId)
   const text = comment?.trim()
   const rewrite = edited?.trim()
-  if (!text && !rewrite) return { feedback: state?.feedback }
+  const pinned = cleanComments(comments)
+  if (!text && !rewrite && !pinned.length) return { feedback: state?.feedback }
   const entry: GateFeedbackEntry = {
     round: state?.round ?? 1,
     decision,
     comment: text ?? '',
     at: new Date().toISOString(),
-    ...(rewrite && { edited: rewrite })
+    ...(rewrite && { edited: rewrite }),
+    ...(pinned.length > 0 && { comments: pinned })
   }
   return { feedback: [...(state?.feedback ?? []), entry] }
 }
@@ -2133,11 +2151,22 @@ export async function rejectWorkflowGate(
   return runExecution(workflow, execution, context)
 }
 
+/** Page comments with words in them, each quote kept only when it names some. */
+function cleanComments(comments: GateComment[] | undefined): GateComment[] {
+  return (comments ?? []).flatMap((c) => {
+    const comment = typeof c?.comment === 'string' ? c.comment.trim() : ''
+    if (!comment) return []
+    const quote = typeof c.quote === 'string' ? c.quote.trim() : ''
+    return [{ ...(quote && { quote }), comment }]
+  })
+}
+
 /** Which steps a request for changes sends back, or why the gate cannot take it. */
 function changesPlan(
   execution: WorkflowExecution,
   nodeId: string,
-  comment: string
+  comment: string,
+  comments?: GateComment[]
 ): { from: string; reset: Set<string> } | { refused: string } {
   const workflow = definitionOf(execution)
   const node = workflow?.nodes.find((n) => n.id === nodeId)
@@ -2146,7 +2175,8 @@ function changesPlan(
   const state = execution.nodeStates.find((s) => s.nodeId === nodeId)
   if (state?.status !== 'waiting' || isSignInWait(state))
     return { refused: `${nodeId} is not asking` }
-  if (!comment.trim()) return { refused: 'a request for changes needs a comment' }
+  if (!comment.trim() && !cleanComments(comments).length)
+    return { refused: 'a request for changes needs a comment' }
   const config = node.config as ApprovalConfig
   if (!canRequestChanges(config, state)) return { refused: `${nodeId} takes no more changes` }
   const from = config.feedback!.from
@@ -2166,10 +2196,15 @@ export function gateEditIsRefused(
   return gateEditRefusal(state?.editableText, edited)
 }
 
-/** Whether a request for changes with this comment would be taken, so the asker hears at once. */
-export function gateTakesChanges(runId: string, nodeId: string, comment: string): boolean {
+/** Whether a request for changes with these comments would be taken, so the asker hears at once. */
+export function gateTakesChanges(
+  runId: string,
+  nodeId: string,
+  comment: string,
+  comments?: GateComment[]
+): boolean {
   const execution = activeRuns.get(runId)?.execution ?? runById(runId)
-  return !!execution && !('refused' in changesPlan(execution, nodeId, comment))
+  return !!execution && !('refused' in changesPlan(execution, nodeId, comment, comments))
 }
 
 /** Send the work back: every step from the gate's `from` to the gate runs again, and the gate asks again. */
@@ -2177,9 +2212,10 @@ export async function requestGateChanges(
   execution: WorkflowExecution,
   nodeId: string,
   comment: string,
-  edited?: string
+  edited?: string,
+  comments?: GateComment[]
 ): Promise<WorkflowExecution> {
-  const plan = changesPlan(execution, nodeId, comment)
+  const plan = changesPlan(execution, nodeId, comment, comments)
   if ('refused' in plan) {
     log.warn(`[workflow] requestGateChanges: ${plan.refused}`)
     return execution
@@ -2189,7 +2225,7 @@ export async function requestGateChanges(
   const { workflow } = resolved
 
   const round = (execution.nodeStates.find((s) => s.nodeId === nodeId)?.round ?? 1) + 1
-  const { feedback } = withFeedback(execution, nodeId, 'changes', comment, edited)
+  const { feedback } = withFeedback(execution, nodeId, 'changes', comment, edited, comments)
   const rewrite = edited?.trim()
   for (const state of execution.nodeStates) {
     if (plan.reset.has(state.nodeId))

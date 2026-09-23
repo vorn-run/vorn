@@ -25,6 +25,7 @@
     "./item-list": "./src/item-list.ts",
     "./terminal-frame": "./src/terminal-frame.ts",
     "./connector-origins": "./src/connector-origins.ts",
-    "./connector-protocol": "./src/connector-protocol.ts"
+    "./connector-protocol": "./src/connector-protocol.ts",
+    "./markdown": "./src/markdown.ts"
   }
 }

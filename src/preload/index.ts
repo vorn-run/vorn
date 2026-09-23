@@ -8,6 +8,16 @@ import {
 } from '../shared/adoption-channels'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
 import type { TerminalData } from '@vornrun/shared/protocol'
+import type {
+  Artifact,
+  ArtifactAnchor,
+  ArtifactComment,
+  ArtifactMark,
+  ArtifactSelection,
+  ArtifactSendState,
+  BrowserTabArtifact,
+  ArtifactVersion
+} from '@vornrun/shared/types'
 import {
   CreateTerminalPayload,
   TerminalSession,
@@ -63,7 +73,7 @@ import {
   ServerRuntimeStatus,
   AuthProbeReport
 } from '../shared/types'
-import type { GateDecision } from '../shared/types'
+import type { GateComment, GateDecision } from '../shared/types'
 
 const api = {
   createTerminal: (payload: CreateTerminalPayload) =>
@@ -444,9 +454,13 @@ const api = {
    * without a person clicking. Fire-and-forget; main waits for the attach
    * report that follows rather than for a reply here.
    */
-  onBrowserOpenPane: (callback: (p: { sessionId: string; url?: string }) => void) => {
-    const listener = (_: Electron.IpcRendererEvent, p: { sessionId: string; url?: string }): void =>
-      callback(p)
+  onBrowserOpenPane: (
+    callback: (p: { sessionId: string; url?: string; artifact?: BrowserTabArtifact }) => void
+  ) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      p: { sessionId: string; url?: string; artifact?: BrowserTabArtifact }
+    ): void => callback(p)
     ipcRenderer.on(IPC.BROWSER_OPEN_PANE, listener)
     return () => {
       ipcRenderer.removeListener(IPC.BROWSER_OPEN_PANE, listener)
@@ -773,6 +787,24 @@ const api = {
   /** Write one declared tweak value into the page. */
   setBrowserTweak: (sessionId: string, key: string, value: unknown): Promise<{ ok: true }> =>
     ipcRenderer.invoke(IPC.BROWSER_SET_TWEAK, { sessionId, key, value }),
+  /** Tell main which guest shows an artboard of the session's design canvas. */
+  attachArtboard: (sessionId: string, artboardId: string, webContentsId: number): void =>
+    ipcRenderer.send(IPC.BROWSER_ARTBOARD_ATTACH, { sessionId, artboardId, webContentsId }),
+  detachArtboard: (sessionId: string, artboardId: string): void =>
+    ipcRenderer.send(IPC.BROWSER_ARTBOARD_DETACH, { sessionId, artboardId }),
+  setArtboardTweaks: (
+    sessionId: string,
+    artboardId: string,
+    values: Record<string, unknown>
+  ): Promise<{ ok: true }> =>
+    ipcRenderer.invoke(IPC.BROWSER_ARTBOARD_TWEAKS, { sessionId, artboardId, values }),
+  /** The element under a point of an artboard, in the artboard's own pixels. */
+  describeArtboardPoint: (params: {
+    sessionId: string
+    artboardId: string
+    x: number
+    y: number
+  }): Promise<BrowserSelection | null> => ipcRenderer.invoke(IPC.BROWSER_ARTBOARD_POINT, params),
   /** Arm the element picker. Resolves with the pick, or null if cancelled. */
   startBrowserPick: (sessionId: string): Promise<BrowserSelection | null> =>
     ipcRenderer.invoke(IPC.BROWSER_PICK_START, sessionId),
@@ -933,6 +965,7 @@ const api = {
     decision: GateDecision
     comment?: string
     edited?: string
+    comments?: GateComment[]
   }): Promise<{ accepted: boolean; reason?: string }> =>
     ipcRenderer.invoke(IPC.WORKFLOW_RESOLVE_GATE, params),
   retryWorkflowRun: (runId: string): Promise<WorkflowExecution | null> =>
@@ -944,6 +977,92 @@ const api = {
     ipcRenderer.on(IPC.WORKFLOW_RUN_UPDATED, listener)
     return () => {
       ipcRenderer.removeListener(IPC.WORKFLOW_RUN_UPDATED, listener)
+    }
+  },
+
+  listArtifacts: (params: { projectName?: string; limit?: number }): Promise<Artifact[]> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_LIST, params),
+  getArtifact: (
+    artifactId: string
+  ): Promise<{
+    artifact: Artifact
+    versions: ArtifactVersion[]
+    comments: ArtifactComment[]
+    queued: boolean
+  } | null> => ipcRenderer.invoke(IPC.ARTIFACT_GET, { artifactId }),
+  artifactVersionUrl: (
+    artifactId: string,
+    version?: number
+  ): Promise<{ path: string; url: string } | null> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_VERSION_URL, { artifactId, version }),
+  /** The artifact a gate's review page is kept as, and the address of the round it asks. */
+  artifactForGate: (
+    runId: string,
+    nodeId: string
+  ): Promise<{ artifact: Artifact; version: number; url: string } | null> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_FOR_GATE, { runId, nodeId }),
+  saveArtifactComment: (params: {
+    artifactId: string
+    version: number
+    anchor: ArtifactAnchor | null
+    body: string
+  }): Promise<ArtifactComment> => ipcRenderer.invoke(IPC.ARTIFACT_SAVE_COMMENT, params),
+  updateArtifactComment: (params: {
+    commentId: string
+    body?: string
+    anchor?: ArtifactAnchor | null
+  }): Promise<ArtifactComment | null> => ipcRenderer.invoke(IPC.ARTIFACT_UPDATE_COMMENT, params),
+  deleteArtifactComment: (commentId: string): Promise<{ deleted: boolean }> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_DELETE_COMMENT, { commentId }),
+  /** Turn every draft on an artifact into one message to the agent that published it. */
+  sendArtifactComments: (
+    artifactId: string
+  ): Promise<{ state: ArtifactSendState; count: number }> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_SEND, { artifactId }),
+  /** A version's source: Markdown for a doc, HTML otherwise. */
+  readArtifactSource: (
+    artifactId: string,
+    version?: number
+  ): Promise<{ version: ArtifactVersion; body: string } | null> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_READ_SOURCE, { artifactId, version }),
+  /** Keep the person's edit of a doc as its next version, and send it with the drafts when asked. */
+  saveArtifactUserVersion: (params: {
+    artifactId: string
+    body: string
+    edits: Array<{ before: string; after: string }>
+    send: boolean
+  }): Promise<{
+    version: ArtifactVersion
+    sent: { state: ArtifactSendState; count: number } | null
+    sendError?: string
+  }> => ipcRenderer.invoke(IPC.ARTIFACT_SAVE_USER_VERSION, params),
+  /** The quote selected on the artifact in the session's pane, if any. */
+  artifactSelection: (sessionId: string): Promise<ArtifactSelection | null> =>
+    ipcRenderer.invoke(IPC.BROWSER_ARTIFACT_SELECTION, sessionId),
+  paintArtifactMarks: (
+    sessionId: string,
+    marks: ArtifactMark[]
+  ): Promise<{ found: Record<string, boolean> }> =>
+    ipcRenderer.invoke(IPC.BROWSER_ARTIFACT_PAINT, { sessionId, marks }),
+  revealArtifactMark: (sessionId: string, mark: ArtifactMark): Promise<{ found: boolean }> =>
+    ipcRenderer.invoke(IPC.BROWSER_ARTIFACT_REVEAL, { sessionId, mark }),
+  clearArtifactSelection: (sessionId: string): Promise<{ ok: true }> =>
+    ipcRenderer.invoke(IPC.BROWSER_ARTIFACT_CLEAR, sessionId),
+  onArtifactPublished: (
+    callback: (event: { artifact: Artifact; version: ArtifactVersion }) => void
+  ): (() => void) => {
+    const listener = (_e: unknown, event: { artifact: Artifact; version: ArtifactVersion }): void =>
+      callback(event)
+    ipcRenderer.on(IPC.ARTIFACT_PUBLISHED, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.ARTIFACT_PUBLISHED, listener)
+    }
+  },
+  onArtifactCommentsChanged: (callback: (event: { artifactId: string }) => void): (() => void) => {
+    const listener = (_e: unknown, event: { artifactId: string }): void => callback(event)
+    ipcRenderer.on(IPC.ARTIFACT_COMMENTS_CHANGED, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.ARTIFACT_COMMENTS_CHANGED, listener)
     }
   },
 

@@ -328,6 +328,20 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.WORKFLOW_RESOLVE_GATE, (_, params) =>
     requireBridge().request(IPC.WORKFLOW_RESOLVE_GATE, params)
   )
+  for (const method of [
+    IPC.ARTIFACT_LIST,
+    IPC.ARTIFACT_GET,
+    IPC.ARTIFACT_VERSION_URL,
+    IPC.ARTIFACT_FOR_GATE,
+    IPC.ARTIFACT_SAVE_COMMENT,
+    IPC.ARTIFACT_UPDATE_COMMENT,
+    IPC.ARTIFACT_DELETE_COMMENT,
+    IPC.ARTIFACT_SEND,
+    IPC.ARTIFACT_READ_SOURCE,
+    IPC.ARTIFACT_SAVE_USER_VERSION
+  ] as const) {
+    safeHandle(method, (_, params) => requireBridge().request(method, params))
+  }
   safeHandle(IPC.WORKFLOW_RETRY_RUN, (_, params) =>
     requireBridge().request(IPC.WORKFLOW_RETRY_RUN, params)
   )
@@ -583,6 +597,7 @@ export function registerIpcHandlers(): void {
   })
   ipcMain.on(IPC.BROWSER_DETACH, (_, sessionId: string) => {
     browserRegistry.detach(sessionId)
+    browserRegistry.detachArtboard(sessionId)
     setFileRoot(sessionId, undefined)
     // The watcher outlives nothing. A pane that closed has no design showing,
     // and a descriptor left open would report changes to a session that is gone.
@@ -612,6 +627,16 @@ export function registerIpcHandlers(): void {
     async (_, { sessionId, key, value }: { sessionId: string; key: string; value: unknown }) =>
       browserRegistry.setTweak({ sessionId, key, value })
   )
+  ipcMain.on(IPC.BROWSER_ARTBOARD_ATTACH, (_, { sessionId, artboardId, webContentsId }) =>
+    browserRegistry.attachArtboard(sessionId, artboardId, webContentsId)
+  )
+  ipcMain.on(IPC.BROWSER_ARTBOARD_DETACH, (_, { sessionId, artboardId }) =>
+    browserRegistry.detachArtboard(sessionId, artboardId)
+  )
+  safeHandle(IPC.BROWSER_ARTBOARD_TWEAKS, (_, params) => browserRegistry.setArtboardTweaks(params))
+  safeHandle(IPC.BROWSER_ARTBOARD_POINT, (_, params) =>
+    browserRegistry.describeArtboardPoint(params)
+  )
   safeHandle(IPC.BROWSER_PICK_START, async (_, sessionId: string) => {
     try {
       return await browserRegistry.startPick({ sessionId })
@@ -624,6 +649,14 @@ export function registerIpcHandlers(): void {
     browserRegistry.cancelPick(sessionId)
   })
   safeHandle(IPC.BROWSER_ANNOTATE, (_, params) => browserRegistry.annotate(params))
+  safeHandle(IPC.BROWSER_ARTIFACT_SELECTION, (_, sessionId: string) =>
+    browserRegistry.artifactSelection({ sessionId })
+  )
+  safeHandle(IPC.BROWSER_ARTIFACT_PAINT, (_, params) => browserRegistry.paintArtifactMarks(params))
+  safeHandle(IPC.BROWSER_ARTIFACT_REVEAL, (_, params) => browserRegistry.revealArtifactMark(params))
+  safeHandle(IPC.BROWSER_ARTIFACT_CLEAR, (_, sessionId: string) =>
+    browserRegistry.clearArtifactSelection({ sessionId })
+  )
 
   // ─── Device pane (Electron-only: the companion lives here) ─────
   //

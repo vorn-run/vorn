@@ -37,6 +37,8 @@ import {
   releaseSpawningTranscriptsFor
 } from './transcript-claims'
 import { browserBridge } from './browser-bridge'
+import { registerArtifactMethods, sealGateDrafts } from './artifacts/methods'
+import { gateDraftComments } from './artifacts/service'
 import { activationFor, subjectOf } from './extensions/activation'
 import { footerReadings, stopFooters, syncFooters } from './extensions/footers'
 import { matchLinks, runHandler } from './extensions/handlers'
@@ -787,23 +789,31 @@ export function registerAllMethods(): void {
     return tasks.map((task) => ({ ...task, description: '' }))
   })
 
-  registerMethod('workflow:resolveGate', ({ runId, nodeId, decision, comment, edited }) => {
-    // A sign-in wait ends when the connection signs in again, never by approval.
-    if (decision === 'approve' && runWaitsForSignIn(runId, nodeId)) return { accepted: false }
-    if (decision === 'changes' && !gateTakesChanges(runId, nodeId, comment ?? '')) {
-      return { accepted: false }
+  registerMethod(
+    'workflow:resolveGate',
+    ({ runId, nodeId, decision, comment, edited, comments }) => {
+      // A sign-in wait ends when the connection signs in again, never by approval.
+      if (decision === 'approve' && runWaitsForSignIn(runId, nodeId)) return { accepted: false }
+      // Answered from anywhere, a request for changes takes the comments left on the review page.
+      const pinned =
+        decision === 'changes' ? (comments ?? gateDraftComments(runId, nodeId)) : undefined
+      if (decision === 'changes' && !gateTakesChanges(runId, nodeId, comment ?? '', pinned)) {
+        return { accepted: false }
+      }
+      const editRefused =
+        decision === 'reject' ? undefined : gateEditIsRefused(runId, nodeId, edited)
+      if (editRefused) return { accepted: false, reason: editRefused }
+      // Applied here, where the run is. It used to be broadcast for whichever
+      // window held the run to apply, which is why answering from a phone with
+      // nothing open did nothing at all.
+      log.info({ runId, nodeId, decision }, '[workflow] a gate was answered')
+      void applyGateDecision(runId, nodeId, decision, comment, edited, pinned)
+      if (decision === 'changes') sealGateDrafts(runId, nodeId)
+      // Still broadcast: a window showing the pill needs to stop showing it.
+      clientRegistry.broadcast(IPC.WORKFLOW_GATE_RESOLVED, { runId, nodeId, decision })
+      return { accepted: true }
     }
-    const editRefused = decision === 'reject' ? undefined : gateEditIsRefused(runId, nodeId, edited)
-    if (editRefused) return { accepted: false, reason: editRefused }
-    // Applied here, where the run is. It used to be broadcast for whichever
-    // window held the run to apply, which is why answering from a phone with
-    // nothing open did nothing at all.
-    log.info({ runId, nodeId, decision }, '[workflow] a gate was answered')
-    void applyGateDecision(runId, nodeId, decision, comment, edited)
-    // Still broadcast: a window showing the pill needs to stop showing it.
-    clientRegistry.broadcast(IPC.WORKFLOW_GATE_RESOLVED, { runId, nodeId, decision })
-    return { accepted: true }
-  })
+  )
 
   registerMethod('workflow:sessionRestored', ({ sessionId, restore, environment }) => {
     const session = ptyManager.getActiveSessions().find((s) => s.id === sessionId)
@@ -2172,6 +2182,8 @@ export function registerAllMethods(): void {
   registerMethod('browser:history', (p) => browserBridge.request('browser:history', p))
   registerMethod('browser:listTabs', (p) => browserBridge.request('browser:listTabs', p))
   registerMethod('browser:find', (p) => browserBridge.request('browser:find', p))
+
+  registerArtifactMethods(() => serverPort)
 
   // Device pane (relayed to Electron main, same bridge, same reasoning: the
   // idb_companion child process and its unix socket live only in main).

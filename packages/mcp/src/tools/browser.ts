@@ -30,7 +30,7 @@ import { rpcCall } from '@vornrun/server/rpc-client'
  * rather than pretending here that it is already done.
  */
 
-type ToolResult = {
+export type ToolResult = {
   content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>
   isError?: boolean
 }
@@ -120,7 +120,7 @@ export function pageResult(data: unknown, label = 'WEB PAGE CONTENT'): ToolResul
 }
 
 /** Resolve the caller's session or hand back the failure, in one step. */
-async function withSession(run: (id: string) => Promise<ToolResult>): Promise<ToolResult> {
+export async function withSession(run: (id: string) => Promise<ToolResult>): Promise<ToolResult> {
   const id = sessionId()
   if (!id) return noSessionResult()
   try {

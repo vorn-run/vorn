@@ -79,8 +79,43 @@ describe('what a gate tells the steps it sends back', () => {
       text: '',
       feedback: 'Shorter',
       feedbackAll: 'Round 1: Too neat\nRound 2: Shorter',
+      comments: [],
       round: 3
     })
+  })
+
+  it("reads the latest round's page comments, each marked by whether it quotes the page", () => {
+    const outputs = buildStepOutputsMap(
+      run({
+        nodeId: 'gate',
+        status: 'pending',
+        round: 3,
+        feedback: [
+          {
+            round: 1,
+            decision: 'changes',
+            comment: '',
+            at: '',
+            comments: [{ quote: 'old words', comment: 'Gone by now' }]
+          },
+          {
+            round: 2,
+            decision: 'changes',
+            comment: 'Shorter',
+            at: '',
+            comments: [
+              { quote: '79.8% of the time', comment: 'Add the baseline right after.' },
+              { comment: 'Lead with the result.' }
+            ]
+          }
+        ]
+      }),
+      nodes
+    )
+    expect(outputs.approve.comments).toEqual([
+      { quote: '79.8% of the time', comment: 'Add the baseline right after.', anchored: true },
+      { quote: '', comment: 'Lead with the result.', anchored: false }
+    ])
   })
 
   it('leaves a gate that has not asked yet out of the outputs', () => {

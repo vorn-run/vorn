@@ -54,3 +54,25 @@ describe('VariableAutocomplete', () => {
     expect(getByText('Connector Item')).toBeInTheDocument()
   })
 })
+
+describe('what a gate offers the steps after it', () => {
+  it('offers its page comments beside its text and notes, described as they read', async () => {
+    const { buildStepGroups } = await import('@vornrun/shared/template-vars')
+    const gate = {
+      id: 'g',
+      type: 'approval',
+      slug: 'my_review',
+      label: 'Review the draft',
+      config: {},
+      position: { x: 0, y: 0 }
+    } as unknown as Parameters<typeof buildStepGroups>[0][number]
+    const [group] = buildStepGroups([gate])
+    const described = Object.fromEntries(group.keys.map((k) => [k.key, k.description]))
+    expect(described.comments).toBe(
+      'Anchored comments from the latest round, as JSON: quote, comment, anchored'
+    )
+    expect(described.feedback).toBe('The general note from the latest round')
+    expect(described.feedbackAll).toBe('Every note, one line per round')
+    expect(described.text).toBeTruthy()
+  })
+})
