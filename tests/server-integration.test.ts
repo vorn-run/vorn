@@ -81,6 +81,8 @@ vi.mock(
       saveWorkflowRun: vi.fn(),
       listWorkflowRuns: vi.fn(() => []),
       listWorkflowRunIds: vi.fn(() => []),
+      deleteArtifactsUpdatedBefore: vi.fn(() => []),
+      listArtifactIds: vi.fn(() => []),
       listWorkflowRunsByTask: vi.fn(() => []),
       updateWorkflowRunStatus: vi.fn(),
       dbReleaseConnectorInboxLeases: vi.fn(),

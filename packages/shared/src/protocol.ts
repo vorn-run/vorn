@@ -1,5 +1,10 @@
 import type { AgentModelRequest, AgentModelCatalog } from './agent-models'
 import type {
+  Artifact,
+  ArtifactAnchor,
+  ArtifactComment,
+  ArtifactKind,
+  ArtifactVersion,
   ActionResult,
   SessionAnswer,
   SessionRequest,
@@ -1149,6 +1154,64 @@ export interface RequestMethods {
     result: BrowserNode[]
   }
 
+  // ─── Artifacts ────────────────────────────────────────────────
+  //
+  // `sessionId` on publish, list and readComments is the calling session,
+  // resolved by the MCP layer from VORN_SESSION_ID; the rest are for the app.
+  'artifact:publish': {
+    params: {
+      sessionId: string
+      kind: ArtifactKind
+      title: string
+      file?: string
+      content?: string
+      artifactId?: string
+      /** Open it in the session's browser pane; defaults to true. */
+      open?: boolean
+    }
+    result: {
+      artifact: Artifact
+      version: ArtifactVersion
+      /** Loopback address of the version, for the desktop's pane. */
+      url: string
+      answered: number
+      opened: boolean
+    }
+  }
+  'artifact:list': {
+    params: { sessionId?: string; projectName?: string; limit?: number }
+    result: Artifact[]
+  }
+  'artifact:get': {
+    params: { artifactId: string }
+    result: {
+      artifact: Artifact
+      versions: ArtifactVersion[]
+      comments: ArtifactComment[]
+    } | null
+  }
+  'artifact:versionUrl': {
+    params: { artifactId: string; version?: number }
+    /** `path` is relative to the server's origin; `url` is the loopback address of it. */
+    result: { path: string; url: string } | null
+  }
+  'artifact:readComments': {
+    params: { sessionId: string; artifactId: string; version?: number }
+    result: ArtifactComment[]
+  }
+  'artifact:saveComment': {
+    params: { artifactId: string; version: number; anchor: ArtifactAnchor | null; body: string }
+    result: ArtifactComment
+  }
+  'artifact:updateComment': {
+    params: { commentId: string; body?: string; anchor?: ArtifactAnchor | null }
+    result: ArtifactComment | null
+  }
+  'artifact:deleteComment': {
+    params: { commentId: string }
+    result: { deleted: boolean }
+  }
+
   // ─── Device (iOS simulator) ───────────────────────────────────
   //
   // Forwarded to main over the same bridge and for a sharper version of the
@@ -1319,6 +1382,10 @@ export interface ServerNotifications {
    * second window re-read the database and hoped.
    */
   'workflow:runUpdated': WorkflowExecution
+  /** A new artifact, or a new version of one. */
+  'artifact:published': { artifact: Artifact; version: ArtifactVersion }
+  /** Comments on an artifact were written, changed, removed or sent. */
+  'artifact:commentsChanged': { artifactId: string }
   'workflow:gateResolved': { runId: string; nodeId: string; decision: 'approve' | 'reject' }
   'session-exit': TerminalSession
   /** A phone offered a valid pairing code and is waiting to be approved. */

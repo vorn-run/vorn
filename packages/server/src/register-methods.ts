@@ -37,6 +37,7 @@ import {
   releaseSpawningTranscriptsFor
 } from './transcript-claims'
 import { browserBridge } from './browser-bridge'
+import { registerArtifactMethods } from './artifacts/methods'
 import { activationFor, subjectOf } from './extensions/activation'
 import { footerReadings, stopFooters, syncFooters } from './extensions/footers'
 import { matchLinks, runHandler } from './extensions/handlers'
@@ -2172,6 +2173,8 @@ export function registerAllMethods(): void {
   registerMethod('browser:history', (p) => browserBridge.request('browser:history', p))
   registerMethod('browser:listTabs', (p) => browserBridge.request('browser:listTabs', p))
   registerMethod('browser:find', (p) => browserBridge.request('browser:find', p))
+
+  registerArtifactMethods(() => serverPort)
 
   // Device pane (relayed to Electron main, same bridge, same reasoning: the
   // idb_companion child process and its unix socket live only in main).

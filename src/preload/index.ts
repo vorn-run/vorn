@@ -8,6 +8,12 @@ import {
 } from '../shared/adoption-channels'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
 import type { TerminalData } from '@vornrun/shared/protocol'
+import type {
+  Artifact,
+  ArtifactAnchor,
+  ArtifactComment,
+  ArtifactVersion
+} from '@vornrun/shared/types'
 import {
   CreateTerminalPayload,
   TerminalSession,
@@ -944,6 +950,51 @@ const api = {
     ipcRenderer.on(IPC.WORKFLOW_RUN_UPDATED, listener)
     return () => {
       ipcRenderer.removeListener(IPC.WORKFLOW_RUN_UPDATED, listener)
+    }
+  },
+
+  listArtifacts: (params: { projectName?: string; limit?: number }): Promise<Artifact[]> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_LIST, params),
+  getArtifact: (
+    artifactId: string
+  ): Promise<{
+    artifact: Artifact
+    versions: ArtifactVersion[]
+    comments: ArtifactComment[]
+  } | null> => ipcRenderer.invoke(IPC.ARTIFACT_GET, { artifactId }),
+  artifactVersionUrl: (
+    artifactId: string,
+    version?: number
+  ): Promise<{ path: string; url: string } | null> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_VERSION_URL, { artifactId, version }),
+  saveArtifactComment: (params: {
+    artifactId: string
+    version: number
+    anchor: ArtifactAnchor | null
+    body: string
+  }): Promise<ArtifactComment> => ipcRenderer.invoke(IPC.ARTIFACT_SAVE_COMMENT, params),
+  updateArtifactComment: (params: {
+    commentId: string
+    body?: string
+    anchor?: ArtifactAnchor | null
+  }): Promise<ArtifactComment | null> => ipcRenderer.invoke(IPC.ARTIFACT_UPDATE_COMMENT, params),
+  deleteArtifactComment: (commentId: string): Promise<{ deleted: boolean }> =>
+    ipcRenderer.invoke(IPC.ARTIFACT_DELETE_COMMENT, { commentId }),
+  onArtifactPublished: (
+    callback: (event: { artifact: Artifact; version: ArtifactVersion }) => void
+  ): (() => void) => {
+    const listener = (_e: unknown, event: { artifact: Artifact; version: ArtifactVersion }): void =>
+      callback(event)
+    ipcRenderer.on(IPC.ARTIFACT_PUBLISHED, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.ARTIFACT_PUBLISHED, listener)
+    }
+  },
+  onArtifactCommentsChanged: (callback: (event: { artifactId: string }) => void): (() => void) => {
+    const listener = (_e: unknown, event: { artifactId: string }): void => callback(event)
+    ipcRenderer.on(IPC.ARTIFACT_COMMENTS_CHANGED, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.ARTIFACT_COMMENTS_CHANGED, listener)
     }
   },
 

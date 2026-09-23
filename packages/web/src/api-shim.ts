@@ -812,6 +812,32 @@ export function createApiShim(wsUrl: string) {
       rpc.on('workflow:runUpdated', (params) =>
         callback(params as import('../../shared/src/types').WorkflowExecution)
       ),
+    listArtifacts: (params: { projectName?: string; limit?: number }) =>
+      rpc.invoke('artifact:list', params),
+    getArtifact: (artifactId: string) => rpc.invoke('artifact:get', { artifactId }),
+    artifactVersionUrl: (artifactId: string, version?: number) =>
+      rpc.invoke('artifact:versionUrl', { artifactId, version }),
+    saveArtifactComment: (params: {
+      artifactId: string
+      version: number
+      anchor: import('../../shared/src/types').ArtifactAnchor | null
+      body: string
+    }) => rpc.invoke('artifact:saveComment', params),
+    updateArtifactComment: (params: {
+      commentId: string
+      body?: string
+      anchor?: import('../../shared/src/types').ArtifactAnchor | null
+    }) => rpc.invoke('artifact:updateComment', params),
+    deleteArtifactComment: (commentId: string) =>
+      rpc.invoke('artifact:deleteComment', { commentId }),
+    onArtifactPublished: (
+      callback: (event: {
+        artifact: import('../../shared/src/types').Artifact
+        version: import('../../shared/src/types').ArtifactVersion
+      }) => void
+    ) => rpc.on('artifact:published', callback as (p: unknown) => void),
+    onArtifactCommentsChanged: (callback: (event: { artifactId: string }) => void) =>
+      rpc.on('artifact:commentsChanged', callback as (p: unknown) => void),
 
     runWorkflowManual: (workflowId: string, inputs?: Record<string, unknown>) =>
       rpc.invoke('workflow:runManual', { workflowId, inputs }),

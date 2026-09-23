@@ -328,6 +328,16 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.WORKFLOW_RESOLVE_GATE, (_, params) =>
     requireBridge().request(IPC.WORKFLOW_RESOLVE_GATE, params)
   )
+  for (const method of [
+    IPC.ARTIFACT_LIST,
+    IPC.ARTIFACT_GET,
+    IPC.ARTIFACT_VERSION_URL,
+    IPC.ARTIFACT_SAVE_COMMENT,
+    IPC.ARTIFACT_UPDATE_COMMENT,
+    IPC.ARTIFACT_DELETE_COMMENT
+  ] as const) {
+    safeHandle(method, (_, params) => requireBridge().request(method, params))
+  }
   safeHandle(IPC.WORKFLOW_RETRY_RUN, (_, params) =>
     requireBridge().request(IPC.WORKFLOW_RETRY_RUN, params)
   )
