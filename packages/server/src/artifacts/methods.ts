@@ -180,7 +180,13 @@ export function registerArtifactMethods(port: () => number): void {
     const artifact = getArtifact(artifactId)!
     clientRegistry.broadcast(IPC.ARTIFACT_PUBLISHED, { artifact, version })
     commentsChanged(artifactId)
-    return { version, sent: send ? delivery.send(artifactId) : null }
+    if (!send) return { version, sent: null }
+    // The version is kept even when it can't be sent, so a retry never saves it twice.
+    try {
+      return { version, sent: delivery.send(artifactId) }
+    } catch (err) {
+      return { version, sent: null, sendError: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   registerMethod('artifact:deleteComment', ({ commentId }) => {

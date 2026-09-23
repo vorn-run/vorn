@@ -648,10 +648,11 @@ export const BrowserCard = memo(
         const tab = pane.activeTab
         void window.api
           .saveArtifactUserVersion({ artifactId: art.id, body, edits, send })
-          .then(({ version }) => {
+          .then(({ version, sendError }) => {
             setEditing(null)
             showVersion(tab, art.id, version.version)
             refreshArtifact()
+            if (sendError) setFailed(`Saved v${version.version}, not sent: ${sendError}`)
           })
           .catch((err: unknown) =>
             setFailed(err instanceof Error ? err.message : 'Could not save the doc')

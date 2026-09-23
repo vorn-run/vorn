@@ -1034,6 +1034,7 @@ const api = {
   }): Promise<{
     version: ArtifactVersion
     sent: { state: ArtifactSendState; count: number } | null
+    sendError?: string
   }> => ipcRenderer.invoke(IPC.ARTIFACT_SAVE_USER_VERSION, params),
   /** The quote selected on the artifact in the session's pane, if any. */
   artifactSelection: (sessionId: string): Promise<ArtifactSelection | null> =>

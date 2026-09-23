@@ -1159,10 +1159,7 @@ export interface RequestMethods {
     result: BrowserNode[]
   }
 
-  // ─── Artifacts ────────────────────────────────────────────────
-  //
-  // `sessionId` on publish, list and readComments is the calling session,
-  // resolved by the MCP layer from VORN_SESSION_ID; the rest are for the app.
+  // Artifacts: `sessionId` is the calling session, resolved by the MCP layer from VORN_SESSION_ID.
   'artifact:publish': {
     params: {
       sessionId: string
@@ -1243,6 +1240,7 @@ export interface RequestMethods {
     result: {
       version: ArtifactVersion
       sent: { state: ArtifactSendState; count: number } | null
+      sendError?: string
     }
   }
 

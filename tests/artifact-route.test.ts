@@ -84,6 +84,10 @@ describe('markdownToHtml', () => {
       '<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>'
     )
     expect(markdownToHtml('[go](javascript:void0)')).toBe('<p>go</p>')
+    expect(markdownToHtml('[go](data:text/html,x)')).toBe('<p>go</p>')
+    expect(markdownToHtml('[notes](docs/notes.md)')).toBe(
+      '<p><a href="docs/notes.md">notes</a></p>'
+    )
     expect(markdownToHtml('[site](https://vorn.run)')).toBe(
       '<p><a href="https://vorn.run">site</a></p>'
     )

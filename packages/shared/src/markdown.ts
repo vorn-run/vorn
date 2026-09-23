@@ -1,8 +1,4 @@
-/**
- * Markdown to semantic HTML, for the rich editor to load and for a doc artifact to be read as a page.
- *
- * Text is escaped before inline marks are applied, so Markdown can never smuggle raw HTML through.
- */
+// Text is escaped before inline marks, so Markdown can't smuggle raw HTML through.
 
 export function markdownToHtml(md: string): string {
   if (!md.trim()) return ''
@@ -129,6 +125,8 @@ function inlineMarkdown(text: string): string {
     .replace(/~~(.+?)~~/g, '<s>$1</s>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label: string, href: string) =>
-      /^(https?:|mailto:|#)/i.test(href) ? `<a href="${href}">${label}</a>` : label
+      /^(https?|mailto):/i.test(href) || !/^[a-z][a-z0-9+.-]*:/i.test(href)
+        ? `<a href="${href}">${label}</a>`
+        : label
     )
 }

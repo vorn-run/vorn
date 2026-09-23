@@ -19,10 +19,7 @@ function key(paragraph: string): string {
     .trim()
 }
 
-/**
- * The person's edit, merged onto the source: untouched paragraphs keep the source's own
- * Markdown, changed ones take the edit, and each run of changed paragraphs is one edit.
- */
+// Untouched paragraphs keep the source's Markdown; each run of changed ones is one edit.
 export function mergeDocEdit(original: string, edited: string): { body: string; edits: DocEdit[] } {
   const a = paragraphs(original)
   const b = paragraphs(edited)
