@@ -16,6 +16,8 @@ interface Props {
   onDelete: (id: string) => void
   onReveal: (comment: ArtifactComment) => void
   onAddNote: (body: string) => void
+  /** What to do to start a comment, which differs on a canvas. */
+  hint?: string
 }
 
 /** Where a comment points, as the rail quotes it. */
@@ -129,7 +131,8 @@ export function ArtifactRail({
   onEdit,
   onDelete,
   onReveal,
-  onAddNote
+  onAddNote,
+  hint = 'Select words on the page to comment on them.'
 }: Props): React.JSX.Element {
   const [note, setNote] = useState('')
   const sentOn = sent.length ? Math.max(...sent.map((c) => c.version)) : 0
@@ -152,9 +155,7 @@ export function ArtifactRail({
           <span>{drafts.length}</span>
         </h4>
         {drafts.length === 0 ? (
-          <p className="px-3 py-3 text-[12px] text-ink-faint">
-            Select words on the page to comment on them.
-          </p>
+          <p className="px-3 py-3 text-[12px] text-ink-faint">{hint}</p>
         ) : (
           <ul>
             {drafts.map((c) => (

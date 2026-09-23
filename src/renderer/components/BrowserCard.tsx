@@ -12,10 +12,11 @@ import { useAppStore } from '../stores'
 import { tabUrl } from '../stores/types'
 import { browserPartition } from '../../shared/types'
 import type {
+  ArtifactAnchor,
   ArtifactComment,
   ArtifactKind,
   ArtifactManifest,
-  ArtifactSelection
+  BrowserSelection
 } from '../../shared/types'
 import { TweakBar } from './browser/TweakBar'
 import { AddressBar } from './browser/AddressBar'
@@ -24,6 +25,7 @@ import { ArtifactBanner } from './browser/ArtifactBanner'
 import { ArtifactRail } from './browser/ArtifactRail'
 import { CommentPopover } from './browser/CommentPopover'
 import { DocEditBar, DocEditor } from './browser/DocEditor'
+import { DesignCanvas, type CanvasPin } from './browser/DesignCanvas'
 import { mergeDocEdit } from '../lib/doc-edits'
 import { latestSentBatch, marksFor, placePopover } from '../lib/artifact-comments'
 import { useArtifact } from '../hooks/useArtifact'
@@ -97,6 +99,13 @@ function designUrlOf(url: string | null): string | null {
   return normalized?.startsWith('file:') ? normalized : null
 }
 
+/** The element under a pinned point, as the rail and the agent read it. */
+function describeElement(sel: BrowserSelection | null): string {
+  if (!sel) return 'the page'
+  const text = sel.text ? ` "${flattenPageText(sel.text, 60)}"` : ''
+  return `${flattenPageText(sel.selector, 120)}${text}`
+}
+
 const KIND_ICONS: Record<ArtifactKind, typeof FileText> = {
   page: FileText,
   doc: AlignLeft,
@@ -157,8 +166,10 @@ export const BrowserCard = memo(
     const art = activeTabState?.artifact
     const { state: artState, refresh: refreshArtifact } = useArtifact(art?.id)
     const [commenting, setCommenting] = useState(false)
+    // A comment being written: what it is anchored to, how the popover names that, and where it opens.
     const [pending, setPending] = useState<{
-      anchor: ArtifactSelection['anchor']
+      anchor: ArtifactAnchor
+      label: string
       at: { x: number; y: number }
     } | null>(null)
     const [found, setFound] = useState<Record<string, boolean>>({})
@@ -197,6 +208,11 @@ export const BrowserCard = memo(
     const [tweakValues, setTweakValues] = useState<Record<string, unknown>>({})
     const [loading, setLoading] = useState(false)
     const [failed, setFailed] = useState<string | null>(null)
+    // A design that declares artboards is drawn as a canvas of them instead of one page.
+    const boards = !isCard && manifest?.kind === 'design' ? manifest.artboards : undefined
+    const [board, setBoard] = useState<string | null>(null)
+    const selectedBoard = boards?.find((b) => b.id === board) ?? boards?.[0]
+    const [fileTick, setFileTick] = useState(0)
 
     /**
      * Turn one control, and show the result immediately.
@@ -311,7 +327,10 @@ export const BrowserCard = memo(
             setManifest(m)
             // Only a design gets watched, and only while it is the page in
             // front. An ordinary web page has no file to change.
-            window.api.watchBrowserFile(sessionId, m ? filePathRef.current : null)
+            window.api.watchBrowserFile(
+              sessionId,
+              m?.kind === 'design' ? filePathRef.current : null
+            )
             if (!m?.tweaks) {
               setTweakValues({})
               return
@@ -433,6 +452,7 @@ export const BrowserCard = memo(
         // longer showing.
         if (path !== filePathRef.current) return
         viewRef.current?.reload()
+        setFileTick((t) => t + 1)
       })
     }, [sessionId, isCard])
 
@@ -535,7 +555,7 @@ export const BrowserCard = memo(
 
     // While commenting, watch the page for a selection; the page itself is never given a way to call in.
     useEffect(() => {
-      if (!commenting || !canComment || pending) return
+      if (!commenting || !canComment || pending || boards) return
       let stale = false
       let last = ''
       const timer = window.setInterval(() => {
@@ -547,7 +567,11 @@ export const BrowserCard = memo(
             const seen = last
             last = sel ? JSON.stringify(sel.anchor) : ''
             if (stale || !sel || !area || last !== seen) return
-            setPending({ anchor: sel.anchor, at: placePopover(sel.rect, area) })
+            setPending({
+              anchor: sel.anchor,
+              label: sel.anchor.quote,
+              at: placePopover(sel.rect, area)
+            })
           })
           .catch(() => {})
       }, 400)
@@ -555,7 +579,7 @@ export const BrowserCard = memo(
         stale = true
         window.clearInterval(timer)
       }
-    }, [commenting, canComment, pending, sessionId])
+    }, [commenting, canComment, pending, sessionId, boards])
 
     useEffect(() => {
       if (!canComment) return
@@ -596,6 +620,7 @@ export const BrowserCard = memo(
     const revealComment = useCallback(
       (c: ArtifactComment) => {
         setFocusId(c.id)
+        if (c.anchor?.kind === 'point') setBoard(c.anchor.artboard)
         if (c.anchor?.kind !== 'quote') return
         const { quote, prefix, suffix } = c.anchor
         void window.api
@@ -618,6 +643,39 @@ export const BrowserCard = memo(
           refreshArtifact()
         })
     }, [art, refreshArtifact])
+
+    // A click on an artboard while commenting: name the element under it, then ask what to say.
+    const pinPoint = useCallback(
+      (artboardId: string, point: { x: number; y: number }, at: { x: number; y: number }) => {
+        const area = areaRef.current?.getBoundingClientRect()
+        const label = boards?.find((b) => b.id === artboardId)?.label ?? artboardId
+        void window.api
+          .describeArtboardPoint({ sessionId, artboardId, ...point })
+          .catch(() => null)
+          .then((sel) => {
+            const element = describeElement(sel)
+            setPending({
+              anchor: { kind: 'point', artboard: artboardId, ...point, element },
+              label: `${label} · ${element}`,
+              at: area ? placePopover({ ...at, width: 0, height: 0 }, area) : at
+            })
+          })
+      },
+      [boards, sessionId]
+    )
+    const pins: CanvasPin[] = [...drafts, ...sentBatch]
+      .filter((c) => c.anchor?.kind === 'point')
+      .map((c, i) => {
+        const a = c.anchor as Extract<ArtifactAnchor, { kind: 'point' }>
+        return {
+          id: c.id,
+          artboard: a.artboard,
+          x: a.x,
+          y: a.y,
+          n: i + 1,
+          state: c.id === focusId ? 'focus' : c.state === 'draft' ? 'draft' : 'sent'
+        }
+      })
 
     const onLatest = Boolean(art && artState && art.version === artState.artifact.latestVersion)
     const startEditing = useCallback(() => {
@@ -815,7 +873,7 @@ export const BrowserCard = memo(
                   const Icon = KIND_ICONS[tab.artifact.kind]
                   return <Icon size={11} strokeWidth={2} className="shrink-0 text-ink" />
                 })()
-              ) : isActive && manifest ? (
+              ) : isActive && manifest?.kind === 'design' ? (
                 <Shapes size={11} strokeWidth={2} className="shrink-0 text-bronzo" />
               ) : undefined,
               closeLabel: `Close tab ${displayHost(shown)}`
@@ -902,16 +960,18 @@ export const BrowserCard = memo(
                 queued={artState?.queued ?? false}
                 btn={btn}
               />
-              {manifest?.tweaks && (
+              {manifest?.tweaks && !boards && (
                 <TweakBar manifest={manifest} values={tweakValues} onChange={applyTweak} />
               )}
             </>
-          ) : manifest ? (
+          ) : manifest?.kind === 'design' ? (
             <>
               {/* Controls only. The name lives on the tab, where every other
                   page's name lives — repeating it here would spend header
                   width on something already on screen. */}
-              <TweakBar manifest={manifest} values={tweakValues} onChange={applyTweak} />
+              {!boards && (
+                <TweakBar manifest={manifest} values={tweakValues} onChange={applyTweak} />
+              )}
               <span className="flex-1" />
             </>
           ) : (
@@ -937,7 +997,7 @@ export const BrowserCard = memo(
               main holds for the session, which stays bound to the session's own
               browser. Offered here they would arm a mode over this page and
               report on a different one. */}
-          {!isCard && !editing && (
+          {!isCard && !editing && !boards && (
             <>
               <button
                 onClick={pickElement}
@@ -1047,10 +1107,29 @@ export const BrowserCard = memo(
                   onSave={saveEdit}
                 />
               )}
+              {boards && selectedBoard && activeTabState && (
+                <DesignCanvas
+                  sessionId={sessionId}
+                  partition={browserPartition(sessionId)}
+                  url={activeTabState.url}
+                  artboards={boards}
+                  selected={selectedBoard.id}
+                  onSelect={setBoard}
+                  tweaks={tweakValues}
+                  reloadKey={fileTick}
+                  pinning={commenting && canComment && !pending}
+                  pins={commenting ? pins : []}
+                  onPoint={pinPoint}
+                  onPinClick={(id) => {
+                    const c = [...drafts, ...sentBatch].find((d) => d.id === id)
+                    if (c) revealComment(c)
+                  }}
+                />
+              )}
               {pending && (
                 <CommentPopover
-                  key={pending.anchor.quote}
-                  quote={pending.anchor.quote}
+                  key={pending.label}
+                  quote={pending.label}
                   at={pending.at}
                   onAdd={addComment}
                   onCancel={dropSelection}
@@ -1058,6 +1137,29 @@ export const BrowserCard = memo(
               )}
             </div>
           </div>
+          {boards && selectedBoard && manifest?.tweaks && (
+            <aside
+              aria-label="Tweaks"
+              className="w-[220px] shrink-0 flex flex-col min-h-0 overflow-y-auto border-l
+                         border-white/[0.06] bg-surface-panel"
+            >
+              <h4
+                className="px-3 py-2 border-b border-white/[0.04] font-mono text-[11px]
+                           font-semibold tracking-wider uppercase text-ink-faint truncate"
+              >
+                Tweaks · {selectedBoard.label}
+              </h4>
+              <TweakBar
+                manifest={manifest}
+                values={tweakValues}
+                onChange={applyTweak}
+                layout="column"
+              />
+              <p className="mt-auto px-3 py-2.5 text-[11.5px] text-ink-faint">
+                Every artboard takes the same values.
+              </p>
+            </aside>
+          )}
           {commenting && canComment && art && !editing && (
             <ArtifactRail
               drafts={drafts}
@@ -1081,6 +1183,7 @@ export const BrowserCard = memo(
                   .catch(() => {})
               }
               onReveal={revealComment}
+              hint={boards ? 'Click an artboard to pin a comment there.' : undefined}
               onAddNote={(body) =>
                 void window.api
                   .saveArtifactComment({

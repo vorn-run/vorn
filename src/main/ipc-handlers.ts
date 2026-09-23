@@ -596,6 +596,7 @@ export function registerIpcHandlers(): void {
   })
   ipcMain.on(IPC.BROWSER_DETACH, (_, sessionId: string) => {
     browserRegistry.detach(sessionId)
+    browserRegistry.detachArtboard(sessionId)
     setFileRoot(sessionId, undefined)
     // The watcher outlives nothing. A pane that closed has no design showing,
     // and a descriptor left open would report changes to a session that is gone.
@@ -624,6 +625,16 @@ export function registerIpcHandlers(): void {
     IPC.BROWSER_SET_TWEAK,
     async (_, { sessionId, key, value }: { sessionId: string; key: string; value: unknown }) =>
       browserRegistry.setTweak({ sessionId, key, value })
+  )
+  ipcMain.on(IPC.BROWSER_ARTBOARD_ATTACH, (_, { sessionId, artboardId, webContentsId }) =>
+    browserRegistry.attachArtboard(sessionId, artboardId, webContentsId)
+  )
+  ipcMain.on(IPC.BROWSER_ARTBOARD_DETACH, (_, { sessionId, artboardId }) =>
+    browserRegistry.detachArtboard(sessionId, artboardId)
+  )
+  safeHandle(IPC.BROWSER_ARTBOARD_TWEAKS, (_, params) => browserRegistry.setArtboardTweaks(params))
+  safeHandle(IPC.BROWSER_ARTBOARD_POINT, (_, params) =>
+    browserRegistry.describeArtboardPoint(params)
   )
   safeHandle(IPC.BROWSER_PICK_START, async (_, sessionId: string) => {
     try {

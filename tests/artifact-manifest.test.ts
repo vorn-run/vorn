@@ -365,3 +365,53 @@ describe('what the injected snippet does inside the guest', () => {
     expect(live).toBeNull()
   })
 })
+
+describe('kinds and artboards', () => {
+  it('knows a page and a doc as well as a design', () => {
+    expect(parseManifest(declare({ kind: 'page', title: 'Figures' }))).toEqual({
+      kind: 'page',
+      title: 'Figures'
+    })
+    expect(parseManifest(declare({ kind: 'doc' }))).toEqual({ kind: 'doc' })
+  })
+
+  it("reads a design's artboards, labelled by id when they have no label", () => {
+    const m = parseManifest(
+      declare({
+        kind: 'design',
+        artboards: [
+          { id: 'desktop', label: 'Desktop', width: 1440, height: 900 },
+          { id: 'phone', width: 390.4, height: 844 }
+        ]
+      })
+    )
+    expect(m?.artboards).toEqual([
+      { id: 'desktop', label: 'Desktop', width: 1440, height: 900 },
+      { id: 'phone', label: 'phone', width: 390, height: 844 }
+    ])
+  })
+
+  it('drops artboards it could not draw, repeats, and any past eight', () => {
+    const boards = [
+      { id: 'ok', width: 800, height: 600 },
+      { id: 'ok', width: 400, height: 600 },
+      { id: 'bad id!', width: 800, height: 600 },
+      { id: 'tiny', width: 10, height: 600 },
+      { id: 'huge', width: 800, height: 99999 },
+      { id: 'nan', width: 'wide', height: 600 },
+      ...Array.from({ length: 10 }, (_, i) => ({ id: `b${i}`, width: 800, height: 600 }))
+    ]
+    const m = parseManifest(declare({ kind: 'design', artboards: boards }))
+    expect(m?.artboards?.map((b) => b.id)).toEqual(['ok', 'b0', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6'])
+  })
+
+  it('gives artboards only to a design', () => {
+    const page = parseManifest(
+      declare({ kind: 'page', artboards: [{ id: 'desktop', width: 1440, height: 900 }] })
+    )
+    expect(page?.artboards).toBeUndefined()
+    expect(parseManifest(declare({ kind: 'design', artboards: 'many' }))).toEqual({
+      kind: 'design'
+    })
+  })
+})

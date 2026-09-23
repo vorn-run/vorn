@@ -787,6 +787,24 @@ const api = {
   /** Write one declared tweak value into the page. */
   setBrowserTweak: (sessionId: string, key: string, value: unknown): Promise<{ ok: true }> =>
     ipcRenderer.invoke(IPC.BROWSER_SET_TWEAK, { sessionId, key, value }),
+  /** Tell main which guest shows an artboard of the session's design canvas. */
+  attachArtboard: (sessionId: string, artboardId: string, webContentsId: number): void =>
+    ipcRenderer.send(IPC.BROWSER_ARTBOARD_ATTACH, { sessionId, artboardId, webContentsId }),
+  detachArtboard: (sessionId: string, artboardId: string): void =>
+    ipcRenderer.send(IPC.BROWSER_ARTBOARD_DETACH, { sessionId, artboardId }),
+  setArtboardTweaks: (
+    sessionId: string,
+    artboardId: string,
+    values: Record<string, unknown>
+  ): Promise<{ ok: true }> =>
+    ipcRenderer.invoke(IPC.BROWSER_ARTBOARD_TWEAKS, { sessionId, artboardId, values }),
+  /** The element under a point of an artboard, in the artboard's own pixels. */
+  describeArtboardPoint: (params: {
+    sessionId: string
+    artboardId: string
+    x: number
+    y: number
+  }): Promise<BrowserSelection | null> => ipcRenderer.invoke(IPC.BROWSER_ARTBOARD_POINT, params),
   /** Arm the element picker. Resolves with the pick, or null if cancelled. */
   startBrowserPick: (sessionId: string): Promise<BrowserSelection | null> =>
     ipcRenderer.invoke(IPC.BROWSER_PICK_START, sessionId),

@@ -22,6 +22,8 @@ interface Props {
   /** Current values, defaulting to what the manifest declared. */
   values: Record<string, unknown>
   onChange: (key: string, value: unknown) => void
+  /** A row in the pane header, or a column in the canvas's side panel. */
+  layout?: 'row' | 'column'
 }
 
 const LABEL = 'text-[10.5px] text-ink-faint select-none'
@@ -165,19 +167,31 @@ function Control({
 export const TweakBar = memo(function TweakBar({
   manifest,
   values,
-  onChange
+  onChange,
+  layout = 'row'
 }: Props): React.JSX.Element | null {
   const tweaks = manifest.tweaks
   if (!tweaks || Object.keys(tweaks).length === 0) return null
 
   return (
     <div
-      className="flex items-center gap-3 px-2 py-1 shrink-0 flex-wrap"
+      className={
+        layout === 'column'
+          ? 'flex flex-col shrink-0'
+          : 'flex items-center gap-3 px-2 py-1 shrink-0 flex-wrap'
+      }
       role="group"
       aria-label="Design controls"
     >
       {Object.entries(tweaks).map(([name, tweak]) => (
-        <span key={name} className="flex items-center gap-1.5">
+        <span
+          key={name}
+          className={
+            layout === 'column'
+              ? 'flex flex-col items-start gap-1.5 px-3 py-2.5 border-b border-white/[0.04]'
+              : 'flex items-center gap-1.5'
+          }
+        >
           <span className={LABEL}>{labelFor(name, tweak)}</span>
           <Control
             name={name}

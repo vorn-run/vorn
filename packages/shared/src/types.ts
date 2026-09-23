@@ -1943,6 +1943,10 @@ export const IPC = {
   BROWSER_READ_MANIFEST: 'browser:readManifest',
   /** Renderer writes one declared tweak value into the page. */
   BROWSER_SET_TWEAK: 'browser:setTweak',
+  BROWSER_ARTBOARD_ATTACH: 'browser:artboardAttach',
+  BROWSER_ARTBOARD_DETACH: 'browser:artboardDetach',
+  BROWSER_ARTBOARD_TWEAKS: 'browser:artboardTweaks',
+  BROWSER_ARTBOARD_POINT: 'browser:artboardPoint',
   /** Renderer arms the element picker; main pushes the result back on pick. */
   BROWSER_PICK_START: 'browser:pickStart',
   BROWSER_PICK_CANCEL: 'browser:pickCancel',
@@ -2809,17 +2813,22 @@ export type ArtifactTweak =
  * throwing, because "this is not an artifact" is an ordinary answer.
  */
 export interface ArtifactManifest {
-  /**
-   * What sort of artifact this is. Deliberately one value for now — a second
-   * earns its place only when it needs different chrome, and a vocabulary of
-   * kinds that all render identically is how `lib/task-status.ts` ended up with
-   * five colour maps that disagreed.
-   */
-  kind: 'design'
+  /** What sort of artifact this is; only a design gets the tweak controls and a canvas. */
+  kind: ArtifactKind
   /** Shown in the pane header in place of the address. */
   title?: string
   /** Declared inputs, keyed by name. Absent when the artifact has none. */
   tweaks?: Record<string, ArtifactTweak>
+  /** A design's frames at their own sizes, drawn side by side on a canvas. */
+  artboards?: ArtifactArtboard[]
+}
+
+/** One frame of a design: the same page loaded at a screen size, told its id in the hash. */
+export interface ArtifactArtboard {
+  id: string
+  label: string
+  width: number
+  height: number
 }
 
 /** What an agent can publish: any HTML page, a Markdown doc, or a design with tweaks. */

@@ -64,6 +64,10 @@ const mockSend = vi.fn(async () => ({ state: 'delivered' as const, count: 2 }))
 const mockSelection = vi.fn(async () => null as unknown)
 const mockPaint = vi.fn(async () => ({ found: {} as Record<string, boolean> }))
 const mockSave = vi.fn(async (p: unknown) => p)
+const mockManifest = vi.fn(async () => ({ manifest: null }) as unknown)
+const mockPoint = vi.fn(async (_p: unknown) => null as unknown)
+const mockArtboardAttach = vi.fn()
+const mockTweak = vi.fn(async () => ({ ok: true }))
 const mockReadSource = vi.fn(async () => ({
   version: version(4),
   body: '# Triage\n\nIt always bothered me.\n'
@@ -80,8 +84,12 @@ Object.defineProperty(window, 'api', {
     syncBrowserTabs: vi.fn(),
     watchBrowserFile: vi.fn(),
     onBrowserFileChanged: () => () => {},
-    readBrowserManifest: async () => ({ manifest: null }),
-    setBrowserTweak: async () => ({ ok: true }),
+    readBrowserManifest: () => mockManifest(),
+    setBrowserTweak: (...a: unknown[]) => mockTweak(...(a as [])),
+    attachArtboard: (...a: unknown[]) => mockArtboardAttach(...a),
+    detachArtboard: vi.fn(),
+    setArtboardTweaks: vi.fn(async () => ({ ok: true })),
+    describeArtboardPoint: (p: unknown) => mockPoint(p),
     cancelBrowserPick: vi.fn(),
     startBrowserPick: vi.fn(),
     annotateBrowser: vi.fn(),
@@ -141,6 +149,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
   mockSelection.mockResolvedValue(null)
+  mockManifest.mockResolvedValue({ manifest: null })
   mockPaint.mockResolvedValue({ found: {} })
   artifactState = {
     artifact: ART,
@@ -350,5 +359,98 @@ describe('editing a doc', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
     expect(screen.queryByLabelText('Doc words')).toBeNull()
     expect(mockSaveUser).not.toHaveBeenCalled()
+  })
+})
+
+describe('a design with artboards', () => {
+  const DESIGN_TAB: BrowserTabArtifact = {
+    id: 'a1',
+    version: 4,
+    kind: 'design',
+    title: 'vorn.run hero'
+  }
+  const MANIFEST = {
+    kind: 'design',
+    title: 'vorn.run hero',
+    tweaks: { headline: { type: 'number', default: 72, unit: 'px', label: 'Headline size' } },
+    artboards: [
+      { id: 'desktop', label: 'Desktop', width: 1440, height: 900 },
+      { id: 'phone', label: 'Phone', width: 390, height: 844 },
+      { id: 'dark', label: 'Dark', width: 1440, height: 900 }
+    ]
+  }
+
+  beforeEach(() => {
+    artifactState!.artifact = { ...ART, kind: 'design', title: 'vorn.run hero' }
+    mockManifest.mockResolvedValue({ manifest: MANIFEST, values: { headline: 72 } })
+  })
+
+  it('draws each artboard as its own page at its own size, with the tweaks beside them', async () => {
+    act(() => useAppStore.getState().openArtifactTab('t1', url(4), DESIGN_TAB))
+    render(<BrowserCard sessionId="t1" />)
+    await waitFor(() => expect(screen.getByTestId('design-canvas')).toBeTruthy())
+    const srcs = [...document.querySelectorAll('[data-testid="design-canvas"] webview')].map((w) =>
+      w.getAttribute('src')
+    )
+    expect(srcs).toEqual([
+      `${url(4)}#artboard=desktop`,
+      `${url(4)}#artboard=phone`,
+      `${url(4)}#artboard=dark`
+    ])
+    expect(screen.getByText('Tweaks · Desktop')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Phone/ }))
+    expect(screen.getByText('Tweaks · Phone')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Fit every artboard' })).toBeTruthy()
+    expect(screen.queryByLabelText('Pick an element for the agent')).toBeNull()
+  })
+
+  it('pins a comment to the element under a click on an artboard', async () => {
+    mockPoint.mockResolvedValue({ selector: 'div.hero > h1', text: 'Your agents, one step ahead.' })
+    act(() => useAppStore.getState().openArtifactTab('t1', url(4), DESIGN_TAB))
+    render(<BrowserCard sessionId="t1" />)
+    await waitFor(() => expect(screen.getByTestId('design-canvas')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on the page' }))
+    expect(screen.getByText('Click an artboard to pin a comment there.')).toBeTruthy()
+
+    fireEvent.click(screen.getByLabelText('Pin a comment on Desktop'), { clientX: 0, clientY: 0 })
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Desktop · div.hero > h1 "Your agents, one step ahead."/)
+      ).toBeTruthy()
+    )
+    expect(mockPoint).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 't1', artboardId: 'desktop' })
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: /comment/i }), {
+      target: { value: 'Too long on one line at 1280.' }
+    })
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /comment/i }), {
+      key: 'Enter',
+      metaKey: true
+    })
+    await waitFor(() =>
+      expect(mockSave).toHaveBeenCalledWith({
+        artifactId: 'a1',
+        version: 4,
+        anchor: expect.objectContaining({
+          kind: 'point',
+          artboard: 'desktop',
+          element: 'div.hero > h1 "Your agents, one step ahead."'
+        }),
+        body: 'Too long on one line at 1280.'
+      })
+    )
+  })
+
+  it('keeps a design without artboards on its one page, controls in the header', async () => {
+    mockManifest.mockResolvedValue({
+      manifest: { ...MANIFEST, artboards: undefined },
+      values: { headline: 72 }
+    })
+    act(() => useAppStore.getState().openArtifactTab('t1', url(4), DESIGN_TAB))
+    render(<BrowserCard sessionId="t1" />)
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Design controls' })).toBeTruthy())
+    expect(screen.queryByTestId('design-canvas')).toBeNull()
+    expect(screen.queryByText(/Tweaks ·/)).toBeNull()
   })
 })
