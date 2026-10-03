@@ -17,6 +17,7 @@ import type {
 } from '@vornrun/shared/types'
 import {
   AppConfig,
+  ExperimentalConfig,
   ProjectConfig,
   WorkflowDefinition,
   WorkflowExecution,
@@ -1602,8 +1603,24 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
     }),
     ...(map.worktreeRetention !== undefined && {
       worktreeRetention: map.worktreeRetention as AppConfig['defaults']['worktreeRetention']
-    })
+    }),
+    ...(isPlainObject(map.experimental) && { experimental: experimentalFlags(map.experimental) })
   }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Settings › Experimental, kept to booleans. The server reads these to pick a
+ * code path per terminal, so a value someone edited into the row must not
+ * read as a switch that is on.
+ */
+function experimentalFlags(raw: Record<string, unknown>): ExperimentalConfig {
+  const flags: Record<string, boolean> = {}
+  for (const [key, value] of Object.entries(raw)) if (typeof value === 'boolean') flags[key] = value
+  return flags as ExperimentalConfig
 }
 
 function loadProjects(d: Database.Database): ProjectConfig[] {

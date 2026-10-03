@@ -104,6 +104,20 @@ describe('the four keys that were declared but never listed', () => {
     expect(loadConfig().defaults[key as keyof AppConfig['defaults']]).toBe(value)
   })
 
+  it('experimental, which picks the code path for each new terminal', () => {
+    saveConfig(configWith({ experimental: { nativeScreen: true } }))
+    expect(loadConfig().defaults.experimental).toEqual({ nativeScreen: true })
+  })
+
+  it('experimental, keeping only switches that are true or false', () => {
+    const edited = {
+      nativeScreen: 'yes',
+      other: false
+    } as unknown as AppConfig['defaults']['experimental']
+    saveConfig(configWith({ experimental: edited }))
+    expect(loadConfig().defaults.experimental).toEqual({ other: false })
+  })
+
   it('worktreeRetention, which the server reads', () => {
     const retention = { mode: 'days', days: 7 } as AppConfig['defaults']['worktreeRetention']
     saveConfig(configWith({ worktreeRetention: retention }))
