@@ -144,6 +144,7 @@ import {
 } from '../packages/server/src/history/writer'
 import { historyDir, LOG_FILE } from '../packages/server/src/history/checkpoint'
 import { readFrames, readHeader, type LogRecord } from '../packages/server/src/history/log'
+import { MAX_FLUSH_UNITS } from '../packages/server/src/output-buffer'
 import { readScrollback, resetScrollback } from '../packages/server/src/terminal-scrollback'
 
 vi.mocked(isGitRepo).mockReturnValue(false)
@@ -393,6 +394,59 @@ describe('the terminal is recorded where it is fed', () => {
       fake.emitData('c')
 
       expect(seen).toEqual(['a', 'b', 'c'])
+    })
+
+    it('sends a burst in flushes of at most 64 KB, in order, starting on the next turn', async () => {
+      // A program printing a megabyte in one read must not hold the loop for a
+      // megabyte's worth of framing, parsing and recording in one flush.
+      const { session, fake } = createAgent()
+      const seen = flushesOf(session.id)
+      const burst = Array.from({ length: 200 }, (_, i) => `line ${i} `.padEnd(1000, '.')).join('')
+
+      fake.emitData('x'.repeat(100))
+      fake.emitData(burst)
+      expect(seen).toEqual([])
+
+      await new Promise((r) => setImmediate(r))
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toHaveLength(MAX_FLUSH_UNITS)
+
+      await afterFlush()
+      await afterFlush()
+      expect(seen.every((f) => f.length <= MAX_FLUSH_UNITS)).toBe(true)
+      expect(seen.join('')).toBe('x'.repeat(100) + burst)
+    })
+
+    it('takes turns between sessions rather than draining one first', async () => {
+      const a = createAgent()
+      const b = createAgent()
+      const order: string[] = []
+      const listener = (channel: string, payload: unknown): void => {
+        const p = payload as { id: string }
+        if (channel !== 'terminal:data') return
+        if (p.id === a.session.id) order.push('a')
+        else if (p.id === b.session.id) order.push('b')
+      }
+      ptyManager.on('client-message', listener)
+      listeners.push(listener)
+
+      a.fake.emitData('a'.repeat(3 * MAX_FLUSH_UNITS))
+      b.fake.emitData('b'.repeat(3 * MAX_FLUSH_UNITS))
+      for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r))
+
+      expect(order.slice(0, 4)).toEqual(['a', 'b', 'a', 'b'])
+    })
+
+    it('sends everything held when the session exits, still capped per flush', () => {
+      const { session, fake } = createAgent()
+      const seen = flushesOf(session.id)
+
+      fake.emitData('x'.repeat(100))
+      fake.emitData('y'.repeat(2 * MAX_FLUSH_UNITS))
+      fake.emitExit(0)
+
+      expect(seen.join('')).toBe('x'.repeat(100) + 'y'.repeat(2 * MAX_FLUSH_UNITS))
+      expect(seen.every((f) => f.length <= MAX_FLUSH_UNITS)).toBe(true)
     })
 
     it('is quick again once the stream has gone quiet', async () => {

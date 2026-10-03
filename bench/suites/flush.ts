@@ -10,9 +10,8 @@
  * xterm parse the flush queues runs in later turns and is timed by
  * `screen-model`; the two add up to what a megabyte costs the server.
  *
- * There is no cap on how much one flush carries and no backpressure from the
- * socket; WP4 adds both. The per-flush grouping here is the 64 KB cap WP4 sets,
- * so the after-number is comparable.
+ * The per-flush grouping here is the 64 KB cap a flush carries at most
+ * (`MAX_FLUSH_UNITS`), so each call is one real flush.
  */
 import fs from 'node:fs'
 import os from 'node:os'
@@ -52,7 +51,7 @@ async function main(): Promise<void> {
           addSession(id)
           const ms = time(() => {
             for (const f of flushes) {
-              pm.dataBuffers.set(id, f)
+              pm.dataBuffers.set(id, { chunks: [f], units: f.length })
               pm.flushBuffer(id)
             }
           })

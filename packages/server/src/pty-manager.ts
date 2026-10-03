@@ -43,6 +43,7 @@ import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
 import { coreFor, NATIVE_STATUS, type NativeAnalyzer } from './native-core'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
+import { holdOutput, takeOutput, MAX_FLUSH_UNITS, type HeldOutput } from './output-buffer'
 import {
   createScreen,
   hasScreen,
@@ -115,7 +116,7 @@ class PtyManager extends EventEmitter {
   private normalizedPaths = new Map<string, string>()
   private agentCommands: Record<AiAgentType, AgentCommandConfig> = { ...DEFAULT_AGENT_COMMANDS }
   private remoteHosts: RemoteHost[] = []
-  private dataBuffers = new Map<string, string>()
+  private dataBuffers = new Map<string, HeldOutput>()
   private flushTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private tempKeyPaths = new Map<string, string>()
   private outputLines = new Map<string, string[]>()
@@ -129,13 +130,13 @@ class PtyManager extends EventEmitter {
   /** Sessions that asked and were given the JS path, so the switch is read once each. */
   private jsAnalysis = new Set<string>()
   /** Raw chunks since the last native analysis, joined (a rope, so O(1) per chunk). */
-  private pendingAnalysis = new Map<string, string>()
+  private pendingAnalysis = new Map<string, HeldOutput>()
   /**
-   * Where in a pending batch the last read that switched bracketed paste ends.
-   * The JS path takes status per read: a read with the switch sets it, and the
-   * reads after it fall back to the patterns. A batch analyzed whole would let
-   * the switch win over every read that followed it, so it is analyzed in two
-   * parts, split here.
+   * Where in a pending batch the last read that switched bracketed paste ends,
+   * in units from its front. The JS path takes status per read: a read with
+   * the switch sets it, and the reads after it fall back to the patterns. A
+   * batch analyzed whole would let the switch win over every read that
+   * followed it, so a batch is never taken past this point in one call.
    */
   private analysisSignalEnd = new Map<string, number>()
   private analysisTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -697,13 +698,75 @@ class PtyManager extends EventEmitter {
 
   private bufferData(id: string, data: string): void {
     const existing = this.dataBuffers.get(id)
-    this.dataBuffers.set(id, existing ? existing + data : data)
+    const held = holdOutput(existing, data)
+    if (!existing) this.dataBuffers.set(id, held)
+    // A full flush's worth goes out on the next turn rather than waiting out
+    // the timer: holding more would only make that flush longer.
+    if (held.units >= MAX_FLUSH_UNITS) this.queueDrain(id)
     // A pending timer means a stream is in flight, and this read joins it.
     if (this.flushTimers.has(id)) return
 
     // An echo held for company that never comes is what a keystroke feels as lag.
     if (!existing && Buffer.byteLength(data) <= PtyManager.ECHO_MAX_BYTES) this.flushBuffer(id)
     this.armFlush(id)
+  }
+
+  /**
+   * Sessions with more than one flush's worth held, served one flush per turn.
+   *
+   * One queue for every session, and one flush per turn of the event loop,
+   * rather than draining each session to empty or each on its own
+   * `setImmediate`. Immediates queued together all run in the same turn, so a
+   * burst across eight terminals would hold the loop for eight flushes at once;
+   * this holds it for one, and lets timers -- a keystroke's echo, an RPC reply
+   * -- in between. Round-robin, so a session printing a gigabyte does not
+   * starve one printing a line.
+   */
+  private drainQueue = new Set<string>()
+  /** The same, for native analysis that a burst left more than 64 KB of. */
+  private analysisQueue = new Set<string>()
+  private drainScheduled = false
+
+  private queueDrain(id: string): void {
+    this.drainQueue.add(id)
+    this.scheduleDrain()
+  }
+
+  private queueAnalysis(id: string): void {
+    this.analysisQueue.add(id)
+    this.scheduleDrain()
+  }
+
+  private scheduleDrain(): void {
+    if (this.drainScheduled) return
+    this.drainScheduled = true
+    setImmediate(() => this.drainOne())
+  }
+
+  /**
+   * One flush's worth of flushing and one of analysis, then back to the loop.
+   *
+   * By size rather than by count: small flushes from many quiet sessions go
+   * out together in one turn, and one large one goes out alone.
+   */
+  private drainOne(): void {
+    this.drainScheduled = false
+    let budget = MAX_FLUSH_UNITS
+    while (budget > 0) {
+      const id = first(this.drainQueue)
+      if (id === undefined) break
+      this.drainQueue.delete(id)
+      // Flushing re-queues it at the back if a full flush's worth is still held.
+      budget -= this.flushBuffer(id)
+    }
+    budget = MAX_FLUSH_UNITS
+    while (budget > 0) {
+      const id = first(this.analysisQueue)
+      if (id === undefined) break
+      this.analysisQueue.delete(id)
+      budget -= this.flushAnalysis(id)
+    }
+    if (this.drainQueue.size || this.analysisQueue.size) this.scheduleDrain()
   }
 
   /** The hold, re-armed while a stream keeps coming so quiet is the timer lapsing with nothing to send. */
@@ -713,7 +776,10 @@ class PtyManager extends EventEmitter {
       setTimeout(() => {
         this.flushTimers.delete(id)
         if (!this.dataBuffers.has(id)) return
-        this.flushBuffer(id)
+        // Through the shared queue rather than flushed here: every session's
+        // timer can fire in the same turn, and eight flushes at once is the
+        // stall the cap exists to prevent.
+        this.queueDrain(id)
         this.armFlush(id)
       }, PtyManager.BUFFER_FLUSH_MS)
     )
@@ -778,9 +844,13 @@ class PtyManager extends EventEmitter {
     return header
   }
 
-  private flushBuffer(id: string): void {
-    const data = this.dataBuffers.get(id)
-    this.dataBuffers.delete(id)
+  /** Send up to one flush's worth of what is held, and say how much that was. */
+  private flushBuffer(id: string): number {
+    const held = this.dataBuffers.get(id)
+    if (!held) return 0
+    const data = takeOutput(held, MAX_FLUSH_UNITS)
+    if (held.units === 0) this.dataBuffers.delete(id)
+    else if (held.units >= MAX_FLUSH_UNITS) this.queueDrain(id)
     if (data) {
       const seq = this.lastFlushSeq(id) + 1
       this.flushSeq.set(id, seq)
@@ -825,6 +895,7 @@ class PtyManager extends EventEmitter {
         this.emit('client-message', IPC.TERMINAL_BELL, { id })
       }
     }
+    return data.length
   }
 
   private clearBuffer(id: string): void {
@@ -832,6 +903,7 @@ class PtyManager extends EventEmitter {
     if (timer) clearTimeout(timer)
     this.flushTimers.delete(id)
     this.dataBuffers.delete(id)
+    this.drainQueue.delete(id)
   }
 
   /** Push what is buffered now, without waiting out the timer that would. */
@@ -840,7 +912,10 @@ class PtyManager extends EventEmitter {
     if (timer) clearTimeout(timer)
     // Forgotten as well as cleared: a timer left in the map reads as a stream in flight, and every read after it would wait for a flush that never comes.
     this.flushTimers.delete(id)
-    this.flushBuffer(id)
+    this.drainQueue.delete(id)
+    // All of it, still in flushes of at most the cap: this is the last chance.
+    while (this.dataBuffers.has(id)) this.flushBuffer(id)
+    this.drainQueue.delete(id)
   }
 
   private clearSessionTracking(id: string): void {
@@ -851,6 +926,7 @@ class PtyManager extends EventEmitter {
     this.jsAnalysis.delete(id)
     this.pendingAnalysis.delete(id)
     this.analysisSignalEnd.delete(id)
+    this.analysisQueue.delete(id)
     const analysisTimer = this.analysisTimers.get(id)
     if (analysisTimer) clearTimeout(analysisTimer)
     this.analysisTimers.delete(id)
@@ -886,10 +962,12 @@ class PtyManager extends EventEmitter {
     this.analysisTimers.clear()
     const pending = [...this.pendingAnalysis]
     this.pendingAnalysis.clear()
-    for (const [id, data] of pending) {
+    this.analysisQueue.clear()
+    for (const [id, held] of pending) {
       const session = this.sessions.get(id)
-      const parts = this.splitAtSignal(id, data)
-      if (session) for (const part of parts) this.analyzeJs(id, session, part, true)
+      if (session) {
+        for (const part of this.takeAnalysisParts(id, held)) this.analyzeJs(id, session, part, true)
+      }
     }
   }
 
@@ -934,9 +1012,10 @@ class PtyManager extends EventEmitter {
 
     if (this.analyzerFor(id)) {
       const pending = this.pendingAnalysis.get(id)
-      const batch = pending === undefined ? data : pending + data
-      this.pendingAnalysis.set(id, batch)
-      if (data.includes('\x1b[?2004')) this.analysisSignalEnd.set(id, batch.length)
+      const held = holdOutput(pending, data)
+      if (!pending) this.pendingAnalysis.set(id, held)
+      if (data.includes('\x1b[?2004')) this.analysisSignalEnd.set(id, held.units)
+      if (held.units >= MAX_FLUSH_UNITS) this.queueAnalysis(id)
       if (this.analysisTimers.has(id)) return
       this.flushAnalysis(id)
       this.armAnalysis(id)
@@ -952,52 +1031,71 @@ class PtyManager extends EventEmitter {
       setTimeout(() => {
         this.analysisTimers.delete(id)
         if (!this.pendingAnalysis.has(id)) return
-        this.flushAnalysis(id)
+        this.queueAnalysis(id)
         this.armAnalysis(id)
       }, PtyManager.ANALYSIS_MS)
     )
   }
 
-  /** Analyze what is waiting for a native session now. */
-  private flushAnalysis(id: string): void {
-    const data = this.pendingAnalysis.get(id)
-    if (data === undefined) return
-    this.pendingAnalysis.delete(id)
-    const parts = this.splitAtSignal(id, data)
+  /**
+   * Analyze what is waiting for a native session now, up to one flush's worth.
+   * The rest is analyzed on the turns that follow, like a capped flush, so a
+   * burst never holds the loop for more than 64 KB of analysis at once.
+   */
+  private flushAnalysis(id: string): number {
+    const held = this.pendingAnalysis.get(id)
+    if (held === undefined) return 0
+    const data = this.takeAnalysis(id, held, MAX_FLUSH_UNITS)
+    if (held.units === 0) this.pendingAnalysis.delete(id)
+    else this.queueAnalysis(id)
     const session = this.sessions.get(id)
     const analyzer = this.analyzers.get(id)
-    if (!session || !analyzer) return
-    let done = 0
+    if (!session || !analyzer) return data.length
     try {
-      for (const part of parts) {
-        const newStatus = NATIVE_STATUS[analyzer.append(part, session.statusSource !== 'hooks')]
-        done += 1
-        if (newStatus && newStatus !== session.status) this.updateSessionStatus(id, newStatus)
-      }
+      const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
+      if (newStatus && newStatus !== session.status) this.updateSessionStatus(id, newStatus)
     } catch (err) {
       // This can run from a timer, where a throw has nothing behind it. Every
       // session goes back to the JS path from here on.
       log.warn({ err, id }, '[core] native output analysis failed; using js')
       this.nativeAnalysisFailed = true
+      // What was still waiting behind this batch comes after it, so it is
+      // kept out of the hand-over, which analyzes every pending batch first.
+      const rest = this.pendingAnalysis.get(id)
+      this.pendingAnalysis.delete(id)
       this.handOutputToJs()
       // The core may have taken some or all of this batch before it threw, and
       // that is in the history just handed over: adding it again would
       // duplicate it. At worst the unread tail of one batch is lost.
-      this.analyzeJs(id, session, parts[done]!, false)
-      // A second part the core never saw is new to the history.
-      for (const part of parts.slice(done + 1)) this.analyzeJs(id, session, part, true)
-      return
+      this.analyzeJs(id, session, data, false)
+      // The rest the core never saw, in the parts its status is taken from.
+      if (rest) {
+        for (const part of this.takeAnalysisParts(id, rest)) this.analyzeJs(id, session, part, true)
+      }
+      return data.length
     }
     // Re-armed per batch rather than per read, which is most of what the JS
     // path spends on a spinner.
     this.armIdle(id, session)
+    return data.length
   }
 
-  /** A batch as the parts its status is taken from: see `analysisSignalEnd`. */
-  private splitAtSignal(id: string, data: string): string[] {
+  /** Take up to `cap` units of a pending batch, never past `analysisSignalEnd`. */
+  private takeAnalysis(id: string, held: HeldOutput, cap: number): string {
     const end = this.analysisSignalEnd.get(id)
-    this.analysisSignalEnd.delete(id)
-    return end !== undefined && end < data.length ? [data.slice(0, end), data.slice(end)] : [data]
+    const data = takeOutput(held, end === undefined ? cap : Math.min(cap, end))
+    if (end !== undefined) {
+      if (end > data.length) this.analysisSignalEnd.set(id, end - data.length)
+      else this.analysisSignalEnd.delete(id)
+    }
+    return data
+  }
+
+  /** All of a pending batch, in the parts its status is taken from. */
+  private takeAnalysisParts(id: string, held: HeldOutput): string[] {
+    const parts: string[] = []
+    while (held.units > 0) parts.push(this.takeAnalysis(id, held, Infinity))
+    return parts
   }
 
   private analyzeJs(
@@ -1319,8 +1417,11 @@ class PtyManager extends EventEmitter {
    * right while nothing outlived the process.
    */
   flushPendingOutput(): void {
-    // Copied because `flushBuffer` deletes from the map it is walking.
-    for (const id of [...this.flushTimers.keys()]) this.drainBuffer(id)
+    // Copied because `flushBuffer` deletes from the maps it is walking. Both,
+    // because a session can hold output between a drained flush and its timer.
+    for (const id of new Set([...this.flushTimers.keys(), ...this.dataBuffers.keys()])) {
+      this.drainBuffer(id)
+    }
   }
 
   /**
@@ -1413,6 +1514,8 @@ class PtyManager extends EventEmitter {
       clearTimeout(timer)
     }
     this.dataBuffers.clear()
+    this.drainQueue.clear()
+    this.analysisQueue.clear()
     this.flushTimers.clear()
     this.flushSeq.clear()
     this.cursors.clear()
@@ -1559,8 +1662,8 @@ class PtyManager extends EventEmitter {
 
   getOutput(id: string, lines?: number): string[] {
     if (!this.sessions.has(id)) throw new Error(`Session not found: ${id}`)
-    // What has arrived counts, analyzed or not.
-    this.flushAnalysis(id)
+    // What has arrived counts, analyzed or not -- all of it, past the cap.
+    while (this.pendingAnalysis.has(id)) this.flushAnalysis(id)
     const analyzer = this.analyzers.get(id)
     if (analyzer) return analyzer.output(lines)
     const buf = this.outputLines.get(id) ?? []
@@ -1625,3 +1728,8 @@ class PtyManager extends EventEmitter {
 }
 
 export const ptyManager = new PtyManager()
+
+/** The oldest entry of a set, which iterates in insertion order. */
+function first<T>(set: Set<T>): T | undefined {
+  return set.values().next().value
+}
