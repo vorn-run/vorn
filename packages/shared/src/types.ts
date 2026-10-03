@@ -1817,7 +1817,6 @@ export interface BranchDeleteResult {
   failed: { branch: string; error: string }[]
 }
 
-/** Retention preferences for the worktree manager. */
 /**
  * Work in progress that can be tried before it is the default.
  *
@@ -1841,8 +1840,11 @@ export interface CoreStatus {
   error: string | null
   /** Set when `VORN_CORE` in the server's environment overrides the switches. */
   forced: 'js' | 'native' | null
+  /** Switches the loaded binary was built without, which stay on JavaScript. */
+  missing: (keyof ExperimentalConfig)[]
 }
 
+/** Retention preferences for the worktree manager. */
 export interface WorktreeRetentionConfig {
   /**
    * A merged, clean worktree idle for at least this many days is pre-selected

@@ -180,6 +180,11 @@ const FEATURE_FLAGS: Record<NativeFeature, keyof ExperimentalConfig> = {
   screen: 'nativeScreen'
 }
 
+/** Whether a loaded binary carries a feature; a build without libghostty-vt has no `Screen`. */
+const FEATURE_EXPORTS: Record<NativeFeature, (core: NativeCore) => boolean> = {
+  screen: (core) => typeof core.Screen === 'function'
+}
+
 type FlagSource = () => ExperimentalConfig | undefined
 let readFlags: FlagSource = () => undefined
 
@@ -239,13 +244,20 @@ function flagsNow(): ExperimentalConfig | undefined {
  */
 export function coreStatus(): CoreStatus {
   const forced = forcedCoreMode(process.env.VORN_CORE)
-  if (forced === 'js') return { loaded: null, version: null, error: null, forced }
+  if (forced === 'js') return { loaded: null, version: null, error: null, forced, missing: [] }
   const selection = forced === 'native' ? activeCore() : flaggedCore()
+  const core = selection.native
+  const missing = core
+    ? (Object.keys(FEATURE_FLAGS) as NativeFeature[])
+        .filter((feature) => !FEATURE_EXPORTS[feature](core))
+        .map((feature) => FEATURE_FLAGS[feature])
+    : []
   return {
-    loaded: selection.native !== null,
+    loaded: core !== null,
     version: selection.info?.version ?? null,
-    error: selection.native ? null : (selection.fallback ?? null),
-    forced
+    error: core ? null : (selection.fallback ?? null),
+    forced,
+    missing
   }
 }
 

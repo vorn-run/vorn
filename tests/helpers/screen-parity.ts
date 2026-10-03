@@ -23,6 +23,15 @@ export const PALETTE_AS_256 = 'palette-colours-written-as-256-colour-indexes'
  */
 export const BLANKS_AS_SPACES = 'gaps-written-as-spaces'
 
+/**
+ * Ghostty's VT formatter skips a row with no text in it (`hasTextAny` in
+ * `terminal/formatter.zig`), so a line that is only background colour, from an
+ * erase while a background is set, comes back as an empty line. Blanks with a
+ * background on a row that has text are kept. A program that redraws on
+ * reattach paints the line again; a restored screen alone does not have it.
+ */
+export const BACKGROUND_ONLY_ROWS = 'rows-with-only-background-written-as-empty'
+
 /** The SGR that selects palette foreground `n` (0-15), in either form. */
 export function paletteForeground(n: number): RegExp {
   const short = n < 8 ? `${30 + n}` : `${90 + n - 8}`

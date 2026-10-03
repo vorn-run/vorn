@@ -228,7 +228,13 @@ describe('experimental switches', () => {
     setExperimentalSource(() => ({ nativeScreen: true }))
     vi.stubEnv('VORN_CORE', 'js')
     expect(coreFor('screen')).toBeNull()
-    expect(coreStatus()).toEqual({ loaded: null, version: null, error: null, forced: 'js' })
+    expect(coreStatus()).toEqual({
+      loaded: null,
+      version: null,
+      error: null,
+      forced: 'js',
+      missing: []
+    })
     vi.stubEnv('VORN_CORE', 'native')
     setExperimentalSource(() => ({ nativeScreen: false }))
     expect(coreFor('screen')).toBe(fakeCore)
@@ -255,8 +261,18 @@ describe('experimental switches', () => {
       loaded: false,
       version: null,
       error: 'vorn_core.node not found',
-      forced: null
+      forced: null,
+      missing: []
     })
+  })
+
+  it('names the switches a binary was built without', () => {
+    vi.stubEnv('VORN_CORE', '')
+    resetCoreSelection(() => fakeCore)
+    expect(coreStatus()).toMatchObject({ loaded: true, missing: ['nativeScreen'] })
+    class Screen {}
+    resetCoreSelection(() => ({ ...fakeCore, Screen }) as unknown as NativeCore)
+    expect(coreStatus()).toMatchObject({ loaded: true, missing: [] })
   })
 })
 

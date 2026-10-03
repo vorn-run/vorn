@@ -23,12 +23,20 @@ const SWITCHES: { key: keyof ExperimentalConfig; label: string; description: str
 function coreNote(status: CoreStatus | null): string | null {
   if (!status) return null
   if (status.forced === 'js') return 'VORN_CORE=js is set for the server, so every switch is off.'
-  if (status.forced === 'native')
-    return 'VORN_CORE=native is set for the server, so every switch is on.'
+  // Before the forced-native note: a binary that will not load leaves every
+  // terminal on JavaScript whatever VORN_CORE asks for.
   if (status.loaded === false) {
     return `The native core is not available in this build, so these stay on JavaScript${
       status.error ? `: ${status.error}` : '.'
     }`
+  }
+  if (status.forced === 'native')
+    return 'VORN_CORE=native is set for the server, so every switch is on.'
+  if (status.missing?.length) {
+    const names = SWITCHES.filter((s) => status.missing.includes(s.key)).map((s) => s.label)
+    return `This build of the native core does not include ${names.join(', ')}, so ${
+      names.length === 1 ? 'that stays' : 'those stay'
+    } on JavaScript.`
   }
   return null
 }
@@ -79,15 +87,18 @@ export function ExperimentalSettings() {
         </div>
       )}
       <div className="space-y-1">
-        {SWITCHES.map((s) => (
-          <SettingRow key={s.key} label={s.label} description={s.description} disabled={locked}>
-            <ToggleSwitch
-              checked={flags[s.key] === true}
-              onChange={(value) => setFlag(s.key, value)}
-              disabled={locked}
-            />
-          </SettingRow>
-        ))}
+        {SWITCHES.map((s) => {
+          const off = locked || status?.missing?.includes(s.key) === true
+          return (
+            <SettingRow key={s.key} label={s.label} description={s.description} disabled={off}>
+              <ToggleSwitch
+                checked={flags[s.key] === true}
+                onChange={(value) => setFlag(s.key, value)}
+                disabled={off}
+              />
+            </SettingRow>
+          )
+        })}
       </div>
       {status?.version && (
         <div className="mt-4 text-xs text-gray-500">Native core {status.version}</div>

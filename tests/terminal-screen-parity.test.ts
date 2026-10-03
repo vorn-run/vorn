@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest'
 import * as headless from '@xterm/headless'
 import * as serializeAddon from '@xterm/addon-serialize'
 import { loadNativeCore, type NativeScreen } from '../packages/server/src/native-core'
-import { BLANKS_AS_SPACES, PALETTE_AS_256 } from './helpers/screen-parity'
+import { BACKGROUND_ONLY_ROWS, BLANKS_AS_SPACES, PALETTE_AS_256 } from './helpers/screen-parity'
 
 /**
  * The native screen model against the headless xterm it replaces, per feature.
@@ -52,10 +52,11 @@ function view(term: Term): View {
   const styles: string[] = []
   for (let y = 0; y < term.rows; y++) {
     const line = buf.getLine(y)
-    rows.push(line?.translateToString(true) ?? '')
+    // BLANKS_AS_SPACES: trailing blanks are compared as cells, below, not as text.
+    rows.push((line?.translateToString(true) ?? '').trimEnd())
     for (let x = 0; x < term.cols; x++) {
       const cell = line?.getCell(x)
-      if (!cell || cell.getChars() === '') continue
+      if (!cell) continue
       const style = [
         `${x},${y}`,
         colour(cell.isFgDefault(), cell.isFgRGB(), cell.getFgColor()),
@@ -67,9 +68,11 @@ function view(term: Term): View {
         cell.isDim(),
         cell.getWidth()
       ].join(' ')
-      // BLANKS_AS_SPACES: an unstyled space is the same as an empty cell.
-      if (cell.getChars() === ' ' && style === `${x},${y} default default 0 0 0 0 0 1`) continue
-      styles.push(style)
+      // BLANKS_AS_SPACES: an unstyled space is the same as an empty cell. A blank
+      // with a style (a background, say) is visible, so it is compared.
+      const blank = cell.getChars() === '' || cell.getChars() === ' '
+      if (blank && style === `${x},${y} default default 0 0 0 0 0 1`) continue
+      styles.push(`${style} ${blank ? ' ' : cell.getChars()}`)
     }
   }
   return {
@@ -147,6 +150,10 @@ const CASES: Array<{ name: string; input: string; cols?: number; rows?: number }
     input: 'shell prompt $ \x1b[?1049h\x1b[2J\x1b[H\x1b[7m TUI header \x1b[0m\r\nbody'
   },
   {
+    name: 'blank cells with a background',
+    input: 'a\x1b[44m     \x1b[0mb\r\nc\x1b[42m\x1b[3X\x1b[0m\r\nd\x1b[45m\x1b[K\x1b[0m'
+  },
+  {
     name: 'a scroll region',
     input: '\x1b[2;5r\x1b[2;1Ha\r\nb\r\nc\r\nd\r\ne\r\nf\x1b[r\x1b[8;1Hbottom'
   }
@@ -162,6 +169,16 @@ describe.runIf(core?.Screen)('native screen parity with xterm', () => {
       expect(native.styles, `${PALETTE_AS_256}, ${BLANKS_AS_SPACES}`).toEqual(js.styles)
     })
   }
+
+  it(`${BACKGROUND_ONLY_ROWS}: a row of only background is written as empty`, async () => {
+    // When this fails, Ghostty has started writing these rows: drop the
+    // fixture and let the case above cover them.
+    const { js, native } = await both('top\r\n\x1b[41m\x1b[K\x1b[0m\r\nbottom')
+    const row = (v: View): string[] => v.styles.filter((s) => s.split(' ')[0].endsWith(',1'))
+    expect(row(js)).toHaveLength(40)
+    expect(row(native)).toEqual([])
+    expect(native.rows).toEqual(js.rows)
+  })
 
   it('the title', async () => {
     const { jsTitle, nativeTitle } = await both('\x1b]0;first\x07\x1b]2;✳ claude\x07')
