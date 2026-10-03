@@ -16,8 +16,11 @@ import type { EventEmitter } from 'node:events'
 import type { WebSocket } from 'ws'
 import { ptyManager } from '../../packages/server/src/pty-manager'
 import { ClientRegistry } from '../../packages/server/src/broadcast'
+import { clearScrollback } from '../../packages/server/src/terminal-scrollback'
+import { clearScreen } from '../../packages/server/src/terminal-screen'
+import { stopHistory } from '../../packages/server/src/history/writer'
 import type { ManagedPty } from '../../packages/server/src/handoff/adopted-pty'
-import type { TerminalSession } from '@vornrun/shared/types'
+import { IPC, type TerminalSession } from '@vornrun/shared/types'
 
 interface PtyInternals extends Pick<EventEmitter, 'on' | 'off'> {
   sessions: Map<string, TerminalSession>
@@ -30,6 +33,7 @@ interface PtyInternals extends Pick<EventEmitter, 'on' | 'off'> {
   clearSessionTracking(id: string): void
   setupPtyEvents(id: string, pty: ManagedPty, cols: number, rows: number): void
   dataBuffers: Map<string, string>
+  flushSeq: Map<string, number>
 }
 
 export const pm = ptyManager as unknown as PtyInternals
@@ -94,9 +98,17 @@ export function addAnalysisSession(id: string): void {
   } as TerminalSession)
 }
 
+/**
+ * The teardown `onExit` does, so a removed session leaves no history queue,
+ * checkpoint retries or files behind to run on in the next scenario's numbers.
+ */
 export function removeSession(id: string): void {
   pm.clearBuffer(id)
   pm.clearSessionTracking(id)
+  pm.flushSeq.delete(id)
+  clearScrollback(id)
+  clearScreen(id)
+  stopHistory(id)
   pm.sessions.delete(id)
   pm.ptys.delete(id)
 }
@@ -117,7 +129,12 @@ export class CountingSocket {
  * Wire `client-message` to a registry the way `register-methods.ts` does, with
  * `count` desktop-style clients (terminal output as binary frames).
  */
-export function connectClients(count: number): { sockets: CountingSocket[]; disconnect(): void } {
+export function connectClients(count: number): {
+  sockets: CountingSocket[]
+  /** UTF-8 bytes of terminal output handed to the clients, without frame headers or notifications. */
+  outputBytes(): number
+  disconnect(): void
+} {
   const registry = new ClientRegistry()
   const sockets: CountingSocket[] = []
   for (let i = 0; i < count; i++) {
@@ -126,10 +143,19 @@ export function connectClients(count: number): { sockets: CountingSocket[]; disc
     registry.setTopics(ws as unknown as WebSocket, undefined, true)
     sockets.push(ws)
   }
+  let output = 0
   const listener = (channel: string, payload: unknown): void => {
     const id = (payload as { id?: unknown } | null)?.id
+    if (channel === IPC.TERMINAL_DATA) {
+      const data = (payload as { data?: unknown }).data
+      if (typeof data === 'string') output += Buffer.byteLength(data)
+    }
     registry.broadcast(channel, payload, typeof id === 'string' ? id : undefined)
   }
   pm.on('client-message', listener)
-  return { sockets, disconnect: () => pm.off('client-message', listener) }
+  return {
+    sockets,
+    outputBytes: () => output,
+    disconnect: () => pm.off('client-message', listener)
+  }
 }

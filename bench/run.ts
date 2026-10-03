@@ -7,6 +7,7 @@
  *   yarn bench --runs=5             more runs
  *   yarn bench --quick              one short run, a smoke check rather than a number
  *   yarn bench --save               write the baseline for this platform and the doc table
+ *   yarn bench --max-regression=10  fail when a metric is more than 10% worse than the baseline
  *
  * Runs are interleaved (suite A, B, C, then A, B, C again) rather than batched,
  * so a machine that slows down halfway spreads its drift across every suite
@@ -45,6 +46,8 @@ const PROCESSES: Record<string, number> = {
   memory: 3
 }
 const SPREAD_LIMIT = 10
+/** Baselines this close to zero (e.g. no long tasks at all) give a meaningless %. */
+const ZERO_BASELINE = 1e-9
 
 const args = new Map<string, string>()
 for (const a of process.argv.slice(2)) {
@@ -54,6 +57,10 @@ for (const a of process.argv.slice(2)) {
 const quick = args.has('quick')
 const runs = Number(args.get('runs') ?? (quick ? 1 : 3))
 const only = args.get('only')?.split(',')
+const maxRegression = args.has('max-regression') ? Number(args.get('max-regression')) : null
+if (maxRegression !== null && !(maxRegression >= 0)) {
+  throw new Error(`--max-regression needs a percentage, got ${args.get('max-regression')}`)
+}
 const suites = only ? SUITES.filter((s) => only.includes(s)) : SUITES
 const platformKey = `${process.platform}-${process.arch}`
 const baselinePath =
@@ -188,20 +195,41 @@ function main(): void {
     ? (JSON.parse(fs.readFileSync(baselinePath, 'utf-8')) as Baseline)
     : null
 
+  const here = machine()
+  if (baseline) {
+    const was = baseline.machine
+    const differs = (['cpu', 'cores', 'memoryGB'] as const).filter((k) => was[k] !== here[k])
+    if (differs.length > 0) {
+      console.warn(
+        `warning: the baseline was recorded on a different machine (${differs
+          .map((k) => `${k}: ${String(was[k])} vs ${String(here[k])}`)
+          .join('; ')}); compare with care`
+      )
+    }
+  }
+
   let misses = 0
+  let regressions = 0
   const rows: string[][] = [['metric', 'median', 'spread', 'baseline', 'Δ']]
   for (const [suite, { metrics }] of Object.entries(summary)) {
     for (const [name, s] of Object.entries(metrics)) {
       const base = baseline?.suites[suite]?.metrics[name]
-      const delta = base ? ((s.value - base.value) / base.value) * 100 : null
+      const delta =
+        base && Math.abs(base.value) > ZERO_BASELINE
+          ? ((s.value - base.value) / base.value) * 100
+          : null
       const wide = runs > 1 && s.spreadPct > SPREAD_LIMIT
       if (wide) misses++
+      // Worse means up for a cost and down for a rate.
+      const worse = delta === null ? 0 : s.better === 'lower' ? delta : -delta
+      const regressed = maxRegression !== null && worse > maxRegression
+      if (regressed) regressions++
       rows.push([
         `${suite}/${name}`,
         `${s.value} ${s.unit}`,
         runs > 1 ? `${s.spreadPct}%${wide ? ' !' : ''}` : '-',
         base ? `${base.value} ${base.unit}` : '-',
-        delta === null ? '-' : pct(delta)
+        delta === null ? '-' : `${pct(delta)}${regressed ? ' ✗' : ''}`
       ])
     }
   }
@@ -209,12 +237,9 @@ function main(): void {
   for (const r of rows) console.log(r.map((c, i) => c.padEnd(widths[i])).join('  '))
 
   const record: Baseline = {
-    machine: { ...machine(), core: process.env.VORN_CORE ?? 'js' },
+    machine: { ...here, core: process.env.VORN_CORE ?? 'js' },
     recordedAt: new Date().toISOString(),
-    commit: execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
-      cwd: ROOT,
-      encoding: 'utf-8'
-    }).trim(),
+    commit: currentCommit(),
     runs,
     suites: summary
   }
@@ -255,7 +280,24 @@ function main(): void {
     )
   }
 
+  if (maxRegression !== null) {
+    console.log(
+      regressions === 0
+        ? `no metric regressed more than ${maxRegression}% against the baseline`
+        : `${regressions} metric(s) regressed more than ${maxRegression}% against the baseline (marked ✗)`
+    )
+  }
+
   if (args.has('strict') && misses > 0) process.exit(1)
+  if (regressions > 0) process.exit(1)
+}
+
+/** HEAD, marked dirty when the tree has changes, so a baseline says what it measured. */
+function currentCommit(): string {
+  const git = (...a: string[]): string =>
+    execFileSync('git', a, { cwd: ROOT, encoding: 'utf-8' }).trim()
+  const head = git('rev-parse', '--short', 'HEAD')
+  return git('status', '--porcelain', '--untracked-files=no') ? `${head}-dirty` : head
 }
 
 /** Keep the numbers in the roadmap doc in step with the committed baseline. */

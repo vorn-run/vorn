@@ -167,13 +167,16 @@ export function transcript(name: string): Transcript {
 export function asFlushes(t: Transcript, perFlush = 100, maxBytes = 64 * 1024): string[] {
   const out: string[] = []
   let cur = ''
+  let curBytes = 0
   let n = 0
   for (const c of t.chunks) {
     cur += c
+    curBytes += Buffer.byteLength(c)
     n++
-    if (n >= perFlush || cur.length >= maxBytes) {
+    if (n >= perFlush || curBytes >= maxBytes) {
       out.push(cur)
       cur = ''
+      curBytes = 0
       n = 0
     }
   }

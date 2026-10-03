@@ -91,6 +91,8 @@ async function runScenario(
   for (let i = 0; i < s.sessions; i++)
     cursors[i] = Math.floor((i * s.source.chunks.length) / s.sessions)
   const readBytes = s.source.bytes / s.source.chunks.length
+  // The budget is in UTF-8 bytes, so each read is charged its byte length too.
+  const sizes = s.source.chunks.map((c) => Buffer.byteLength(c))
   const maxOwed = (s.bytesPerSecond * 20) / 1000
 
   // Let the spawn-time work settle before the clock starts.
@@ -118,10 +120,11 @@ async function runScenario(
         const i = session
         session = (session + 1) % s.sessions
         const chunk = s.source.chunks[cursors[i]]
+        const size = sizes[cursors[i]]
         cursors[i] = (cursors[i] + 1) % s.source.chunks.length
         ptys[i].emit(chunk)
-        owedCarry -= chunk.length
-        sent += chunk.length
+        owedCarry -= size
+        sent += size
       }
       setTimeout(tick, 1)
     }
@@ -134,7 +137,7 @@ async function runScenario(
 
   // Let the last flushes land before counting what reached the client.
   await sleep(50)
-  const delivered = wire.sockets[0].bytes
+  const delivered = wire.outputBytes()
   wire.disconnect()
   for (const id of ids) removeSession(id)
   resetScreens()
