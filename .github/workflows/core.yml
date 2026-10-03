@@ -95,6 +95,8 @@ jobs:
       # Unsigned and not notarized: this checks that the app packages with the
       # core in it, not that it is ready to publish.
       - name: Package app
+        # bash on Windows too: PowerShell splits -c.mac.notarize=false at the dot.
+        shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: yarn dist --publish never -c.mac.notarize=false
