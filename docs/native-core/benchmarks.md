@@ -12,6 +12,7 @@ yarn bench --only=git,flush   # a subset
 yarn bench --quick            # one short run: a smoke check, not a number
 yarn bench --save             # record this machine as the baseline and rewrite the table below
 yarn bench --strict           # exit non-zero if any metric spreads more than 10% across runs
+yarn bench --doc              # rewrite the tables below from bench/baselines/*.json
 ```
 
 Every suite runs in a process of its own, as the `*.process.test.ts`
@@ -74,6 +75,83 @@ path exists, running the bench under each value gives the before and after.
   same platform, recorded on the same machine.
 
 ## Baselines
+
+What the two machines say, before the tables:
+
+- **The server misses WP4 by an order of magnitude on both.** Event-loop p99
+  under a 50 MB/s burst is 14-19 ms on an M2 Pro and 55-76 ms on the Linux VM,
+  against a 2 ms target. The M2 keeps up with the burst (49.6 MB/s delivered);
+  the VM delivers about 30 MB/s of it.
+- **Git dominates the loop when it runs.** One `getGitDiffFull` on a 460 KB diff
+  stalls the loop for 63 ms on the M2 (32 ms on the VM), and eight busy agents
+  with that diff every 250 ms go from 6.5 ms p99 to 101 ms on the M2.
+- **`appendOutput` is the per-read hotspot**, mostly the status regexes on small
+  reads: 125 ms/MB for 62-byte reads on the M2, of which 72 ms is
+  `analyzeOutput`. The spinner transcript, WP3's target, is 52 ms/MB.
+- **The renderer is not the bottleneck on a real GPU at this feed.** On the M2
+  with Metal, the mean frame interval holds at the 120 Hz vsync (8.4-8.6 ms) at
+  1, 8 and 32 terminals each streaming 32 KB/s, and long-task time is near
+  zero, which makes those long-task figures noise rather than signal. WP7 needs
+  a heavier feed to have something to move; the Linux table's renderer rows are
+  software GL and say little about the app.
+- **Reproducibility.** On the Linux VM 40 of 41 metrics landed within 10%. On the
+  M2, 12 did not: one of the three runs was about 20% slower for every git call
+  (the machine was busy, not the code), the 32-session burst p99 swung between
+  14 and 28 ms, and the near-zero long-task rows are not measurable at all.
+  Everything else, including every ms/MB row, held within 10%.
+
+<!-- bench:darwin-arm64:start -->
+
+Apple M2 Pro, 10 cores, 16 GB, Node v22.23.2, git version 2.54.0 (Apple Git-157). Recorded 2026-10-03 at `2fc17d96`, median of 3 runs.
+
+| Metric                                  |      Median | Spread | What                                                                                                   |
+| --------------------------------------- | ----------: | -----: | ------------------------------------------------------------------------------------------------------ |
+| `output-analysis/appendOutput.agent`    | 124.5 ms/MB |   4.9% | appendOutput per raw chunk, agent transcript                                                           |
+| `output-analysis/stripAnsi.agent`       |  5.63 ms/MB |   6.9% | stripAnsi alone, agent                                                                                 |
+| `output-analysis/statusRegex.agent`     | 72.46 ms/MB |   5.9% | analyzeOutput alone (status regexes), agent                                                            |
+| `output-analysis/appendOutput.spinner`  | 52.33 ms/MB |   7.9% | appendOutput per raw chunk, spinner transcript                                                         |
+| `output-analysis/stripAnsi.spinner`     | 35.16 ms/MB |   8.3% | stripAnsi alone, spinner                                                                               |
+| `output-analysis/statusRegex.spinner`   | 13.06 ms/MB |   9.1% | analyzeOutput alone (status regexes), spinner                                                          |
+| `output-analysis/appendOutput.bulk`     |  3.46 ms/MB |   8.4% | appendOutput per raw chunk, bulk transcript                                                            |
+| `output-analysis/stripAnsi.bulk`        |  1.94 ms/MB |   7.7% | stripAnsi alone, bulk                                                                                  |
+| `output-analysis/statusRegex.bulk`      |  0.68 ms/MB |   7.4% | analyzeOutput alone (status regexes), bulk                                                             |
+| `screen-model/parse.agent`              | 12.16 ms/MB |   7.3% | headless xterm parse to drain, agent, fed per flush                                                    |
+| `screen-model/parse.spinner`            | 19.24 ms/MB |   0.2% | headless xterm parse to drain, spinner, fed per flush                                                  |
+| `screen-model/parse.bulk`               | 13.27 ms/MB |     5% | headless xterm parse to drain, bulk, fed per flush                                                     |
+| `screen-model/serialize.200x50`         |    1.681 ms |   2.6% | serializeScreen of one 200x50 coloured screen (checkpoint cost per session)                            |
+| `flush/flush.agent.1client`             |  3.14 ms/MB |   4.8% | flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), agent, 1 client(s)     |
+| `flush/flush.spinner.1client`           |  2.28 ms/MB |   3.1% | flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), spinner, 1 client(s)   |
+| `flush/flush.bulk.1client`              |  0.66 ms/MB |   7.6% | flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), bulk, 1 client(s)      |
+| `flush/flush.agent.8client`             |  3.01 ms/MB |     4% | flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), agent, 8 client(s)     |
+| `flush/flush.spinner.8client`           |  2.27 ms/MB |   3.5% | flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), spinner, 8 client(s)   |
+| `flush/flush.bulk.8client`              |  0.68 ms/MB |   4.4% | flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), bulk, 8 client(s)      |
+| `git/stall.isGitRepo`                   |    12.24 ms |  21.5% | event-loop stall per isGitRepo call (execFileSync)                                                     |
+| `git/stall.getGitBranch`                |    12.39 ms |  20.5% | event-loop stall per getGitBranch call (execFileSync)                                                  |
+| `git/stall.getGitStatusPorcelain`       |    16.18 ms |  22.4% | event-loop stall per getGitStatusPorcelain call (execFileSync)                                         |
+| `git/stall.getGitDiffStat`              |    19.71 ms |  21.4% | event-loop stall per getGitDiffStat call (execFileSync)                                                |
+| `git/stall.getGitDiffText`              |    22.47 ms |  19.9% | event-loop stall per getGitDiffText call (execFileSync)                                                |
+| `git/stall.getGitDiffFull`              |    62.84 ms |  21.6% | event-loop stall per getGitDiffFull call (execFileSync)                                                |
+| `git/stall.listWorktrees`               |    12.45 ms |    25% | event-loop stall per listWorktrees call (execFileSync)                                                 |
+| `event-loop/burst.50MBps.1s.p99`        |    13.84 ms |   7.8% | event-loop delay p99, 50 MB/s of build log across 1 session(s)                                         |
+| `event-loop/burst.50MBps.1s.delivered`  |  49.64 MB/s |   0.1% | output that reached the client, 50 MB/s of build log across 1 session(s)                               |
+| `event-loop/burst.50MBps.8s.p99`        |    14.46 ms |  17.5% | event-loop delay p99, 50 MB/s of build log across 8 session(s)                                         |
+| `event-loop/burst.50MBps.8s.delivered`  |  49.72 MB/s |   0.2% | output that reached the client, 50 MB/s of build log across 8 session(s)                               |
+| `event-loop/burst.50MBps.32s.p99`       |    19.17 ms |    48% | event-loop delay p99, 50 MB/s of build log across 32 session(s)                                        |
+| `event-loop/burst.50MBps.32s.delivered` |  48.86 MB/s |   1.4% | output that reached the client, 50 MB/s of build log across 32 session(s)                              |
+| `event-loop/agents.p99`                 |      6.5 ms |  12.9% | event-loop delay p99, 8 agent TUIs at 1 MB/s each                                                      |
+| `event-loop/agents.delivered`           |   8.64 MB/s |   0.1% | output that reached the client, 8 agent TUIs at 1 MB/s each                                            |
+| `event-loop/agents+git.p99`             |   100.66 ms |   2.2% | event-loop delay p99, 8 agent TUIs at 1 MB/s each, getGitDiffFull (460 KB diff) every 250 ms           |
+| `event-loop/agents+git.delivered`       |   6.09 MB/s |     1% | output that reached the client, 8 agent TUIs at 1 MB/s each, getGitDiffFull (460 KB diff) every 250 ms |
+| `renderer/frame.mean.1t`                |     8.46 ms |   0.2% | mean frame interval, 1 terminal(s) streaming                                                           |
+| `renderer/longtask.1t`                  |   14.5 ms/s |  43.7% | main-thread long-task time per second, 1 terminal(s) streaming                                         |
+| `renderer/frame.mean.8t`                |     8.44 ms |   0.4% | mean frame interval, 8 terminal(s) streaming                                                           |
+| `renderer/longtask.8t`                  |   8.58 ms/s | 107.8% | main-thread long-task time per second, 8 terminal(s) streaming                                         |
+| `renderer/frame.mean.32t`               |     8.63 ms |   7.6% | mean frame interval, 32 terminal(s) streaming                                                          |
+| `renderer/longtask.32t`                 |      0 ms/s |   100% | main-thread long-task time per second, 32 terminal(s) streaming                                        |
+
+Renderer GPU: ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version).
+
+<!-- bench:darwin-arm64:end -->
 
 <!-- bench:linux-x64:start -->
 

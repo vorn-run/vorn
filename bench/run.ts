@@ -114,11 +114,37 @@ function runSuite(suite: string): SuiteResult {
   return { ...results[0], metrics }
 }
 
+/**
+ * How far the furthest run sits from the median, in per cent. A zero median
+ * with any non-zero run is reported as 100% rather than 0%: nothing about
+ * `[0, 0, 13.5]` is reproducible.
+ */
+function spread(samples: number[], m: number): number {
+  const furthest = Math.max(...samples.map((x) => Math.abs(x - m)))
+  if (m === 0) return furthest === 0 ? 0 : 100
+  return round((furthest / m) * 100, 1)
+}
+
 function pct(n: number): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`
 }
 
 function main(): void {
+  if (args.has('doc')) {
+    // Rewrite the doc tables from the committed baselines, for one recorded elsewhere.
+    const dir = path.join(ROOT, 'bench', 'baselines')
+    for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.json'))) {
+      const record = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf-8')) as Baseline
+      const doc = writeDocTable(record, file.replace(/\.json$/, ''))
+      if (doc)
+        execFileSync(
+          process.execPath,
+          [require.resolve('prettier/bin/prettier.cjs'), '--write', doc],
+          { stdio: 'ignore' }
+        )
+    }
+    return
+  }
   const collected: Record<string, SuiteResult[]> = {}
   for (let r = 0; r < runs; r++) {
     for (const suite of suites) {
@@ -143,8 +169,7 @@ function main(): void {
         better: first.better,
         label: first.label,
         samples,
-        spreadPct:
-          m === 0 ? 0 : round((Math.max(...samples.map((x) => Math.abs(x - m))) / m) * 100, 1)
+        spreadPct: spread(samples, m)
       }
     }
     summary[suite] = { metrics, info: results[results.length - 1].info }
@@ -223,11 +248,11 @@ function main(): void {
 }
 
 /** Keep the numbers in the roadmap doc in step with the committed baseline. */
-function writeDocTable(record: Baseline): string | null {
+function writeDocTable(record: Baseline, key = platformKey): string | null {
   const doc = path.join(ROOT, 'docs', 'native-core', 'benchmarks.md')
   if (!fs.existsSync(doc)) return null
-  const start = `<!-- bench:${platformKey}:start -->`
-  const end = `<!-- bench:${platformKey}:end -->`
+  const start = `<!-- bench:${key}:start -->`
+  const end = `<!-- bench:${key}:end -->`
   const text = fs.readFileSync(doc, 'utf-8')
   const from = text.indexOf(start)
   const to = text.indexOf(end)
