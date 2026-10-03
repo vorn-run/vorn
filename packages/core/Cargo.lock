@@ -619,6 +619,7 @@ dependencies = [
  "criterion",
  "memchr",
  "regex",
+ "serde_json",
 ]
 
 [[package]]

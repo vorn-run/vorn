@@ -34,8 +34,12 @@ export interface NativeAnalyzer {
 }
 
 export interface NativeScreen {
-  /** Returns the cwd an OSC 5522 in `data` moved to, for the session record. */
-  feed(data: string): string | null
+  /**
+   * Null when the flush moved no cwd and rang no bell. `cwd` is where an OSC
+   * 5522 moved to, for the session record; `bell` is a real BEL, not one that
+   * ends an OSC.
+   */
+  feed(data: string): { cwd: string | null; bell: boolean } | null
   restoreLabels(title?: string | null, cwd?: string | null): void
   /** Releases the terminal, whose memory V8 does not see, now rather than at GC. */
   free(): void
@@ -174,10 +178,11 @@ export function activeCore(): CoreSelection {
  * A piece of the terminal pipeline that can run on the core, each behind its
  * own switch in Settings › Experimental.
  */
-export type NativeFeature = 'screen'
+export type NativeFeature = 'screen' | 'analysis'
 
 const FEATURE_FLAGS: Record<NativeFeature, keyof ExperimentalConfig> = {
-  screen: 'nativeScreen'
+  screen: 'nativeScreen',
+  analysis: 'nativeAnalysis'
 }
 
 /** Whether a loaded binary carries a feature; a build without libghostty-vt has no `Screen`. */

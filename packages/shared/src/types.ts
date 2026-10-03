@@ -1829,6 +1829,8 @@ export interface BranchDeleteResult {
 export interface ExperimentalConfig {
   /** The screen model on libghostty-vt instead of a headless xterm. */
   nativeScreen?: boolean
+  /** Agent status and the output lines MCP reads, analyzed in Rust once per flush. */
+  nativeAnalysis?: boolean
 }
 
 /** What `core:status` reports: whether the Rust core can run, and what decides it. */

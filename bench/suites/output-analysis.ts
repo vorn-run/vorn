@@ -9,13 +9,19 @@
  *
  * The parts are timed on their own as well as together, so a regression can be
  * placed without a profiler.
+ *
+ * With native analysis the per-read work is only queueing the chunk; the core
+ * analyzes each burst once, when the stream pauses or 8 ms pass. The timed loop
+ * runs that analysis at the same boundaries every other suite flushes at
+ * (`asFlushes`: 100 reads or 64 KB), so the number includes it. On the JS path
+ * there is nothing queued and the call is a no-op.
  */
 import { stripAnsi } from '../../packages/server/src/ansi-strip'
 import { analyzeOutput, createStatusContext } from '../../packages/server/src/status-parser'
 import { addAnalysisSession, pm, removeSession } from '../lib/server-harness'
 import { MB, repeat, round, time } from '../lib/stats'
 import { emit, metric, QUICK, type Metric } from '../lib/suite'
-import { transcripts } from '../lib/transcripts'
+import { FLUSH_BYTES, FLUSH_READS, transcripts } from '../lib/transcripts'
 import { nativeCore } from '../lib/core'
 
 /**
@@ -41,6 +47,7 @@ let run = 0
 for (const t of transcripts()) {
   const mb = t.bytes / MB
   info[t.name] = { bytes: t.bytes, chunks: t.chunks.length, description: t.description }
+  const sizes = t.chunks.map((c) => Buffer.byteLength(c))
 
   const full = repeat(
     REPS,
@@ -48,7 +55,19 @@ for (const t of transcripts()) {
       const id = `analysis-${t.name}-${run++}`
       addAnalysisSession(id)
       const elapsed = time(() => {
-        for (const c of t.chunks) pm.appendOutput(id, c)
+        let reads = 0
+        let bytes = 0
+        for (let i = 0; i < t.chunks.length; i++) {
+          pm.appendOutput(id, t.chunks[i])
+          reads++
+          bytes += sizes[i]
+          if (reads >= FLUSH_READS || bytes >= FLUSH_BYTES) {
+            pm.flushAnalysis(id)
+            reads = 0
+            bytes = 0
+          }
+        }
+        pm.flushAnalysis(id)
       })
       removeSession(id)
       return elapsed
@@ -58,7 +77,7 @@ for (const t of transcripts()) {
   metrics[`appendOutput.${t.name}`] = metric(
     round(full / mb),
     'ms/MB',
-    `appendOutput per raw chunk, ${t.name} transcript`
+    `appendOutput per raw chunk, plus native analysis per flush, ${t.name} transcript`
   )
 
   let sink = 0

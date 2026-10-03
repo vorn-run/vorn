@@ -278,22 +278,27 @@ const screens = new Map<string, Held>()
  * attached client, and a screen model is worth nothing beside a terminal that
  * stopped updating — so a terminal that faults is dropped and the session
  * carries on without one.
+ *
+ * Returns whether the output rang the bell when the model can say: the native
+ * model counts BELs as a terminal acts on them, so the one ending an OSC title
+ * is not a bell. Null when it cannot, and the caller looks at the bytes.
  */
-export function feedScreen(id: string, data: string): void {
+export function feedScreen(id: string, data: string): boolean | null {
   const native = natives.get(id)
   if (native) {
     try {
       // Only OSC 5522 is reported, after the same plausibility check as below;
       // OSC 7 moves the model's cwd without moving the session's.
-      const reported = native.feed(data)
-      if (reported) reportCwd?.(id, reported)
+      const fed = native.feed(data)
+      if (fed?.cwd) reportCwd?.(id, fed.cwd)
+      return fed?.bell ?? false
     } catch (err) {
       drop(id, err)
+      return null
     }
-    return
   }
   const held = screens.get(id)
-  if (!held) return
+  if (!held) return null
 
   // Dropped rather than queued when the model is behind.
   //
@@ -312,7 +317,7 @@ export function feedScreen(id: string, data: string): void {
       held.behind = true
       log.warn({ id }, '[screen] output is outrunning the screen model; skipping ahead')
     }
-    return
+    return null
   }
 
   try {
@@ -324,6 +329,7 @@ export function feedScreen(id: string, data: string): void {
   } catch (err) {
     drop(id, err)
   }
+  return null
 }
 
 /**

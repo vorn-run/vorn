@@ -25,17 +25,18 @@ const { fakeCore, screens, analyzers } = vi.hoisted(() => {
       this.size = [cols, rows]
       screens.push(this)
     }
-    /** The core's contract: returns the cwd an OSC 5522 moved to, else null. */
-    feed(data: string): string | null {
+    /** The core's contract: what moved or rang, else null. A bare `!` stands in for a BEL here. */
+    feed(data: string): { cwd: string | null; bell: boolean } | null {
       if (this.failNext) throw new Error('core fault')
       this.fed.push(data)
+      const bell = data.includes('!')
       // eslint-disable-next-line no-control-regex
       const m = /\x1b\]5522;cwd;([^\x07]*)\x07/.exec(data)
       if (m && m[1] !== this.cwd) {
         this.cwd = m[1]
-        return m[1]
+        return { cwd: m[1], bell }
       }
-      return null
+      return bell ? { cwd: null, bell } : null
     }
     restoreLabels(title?: string | null, cwd?: string | null): void {
       if (title) this.title = title
@@ -128,6 +129,7 @@ import { ptyManager } from '../packages/server/src/pty-manager'
 interface Internals {
   sessions: Map<string, TerminalSession>
   appendOutput(id: string, data: string): void
+  flushAnalysis(id: string): void
   clearSessionTracking(id: string): void
 }
 const pm = ptyManager as unknown as Internals
@@ -158,6 +160,13 @@ describe('the screen model on the native core', () => {
     feedScreen('s', 'plain')
     feedScreen('s', '\x1b]5522;cwd;/tmp/b\x07')
     expect(reported).toEqual(['/tmp/a', '/tmp/b'])
+  })
+
+  it('says whether the bell rang, so the flush need not guess from the bytes', () => {
+    createScreen('b', 80, 24)
+    expect(feedScreen('b', 'quiet')).toBe(false)
+    expect(feedScreen('b', 'ding!')).toBe(true)
+    expect(feedScreen('none', 'x')).toBeNull()
   })
 
   it('puts restored labels back on a native screen', async () => {
@@ -207,15 +216,21 @@ describe('output analysis on the native core', () => {
     return session
   }
 
-  it('hands each raw chunk to one analyzer per session and takes its status', () => {
+  it('analyzes the first read at once and the rest of a burst together', () => {
     const session = addSession('a')
     pm.appendOutput('a', 'one\n')
+    // Quiet before it, so it went straight in.
+    expect(analyzers[0].calls).toEqual([['one\n', true]])
+    pm.appendOutput('a', 'and ')
     analyzers[0].next = 2 // waiting
     pm.appendOutput('a', 'two? ')
+    // The rest of the burst waits for the window.
+    expect(analyzers[0].calls).toHaveLength(1)
+    pm.flushAnalysis('a')
     expect(analyzers).toHaveLength(1)
     expect(analyzers[0].calls).toEqual([
       ['one\n', true],
-      ['two? ', true]
+      ['and two? ', true]
     ])
     expect(session.status).toBe('waiting')
     expect(ptyManager.getOutput('a', 1)).toEqual(['one'])
@@ -233,6 +248,19 @@ describe('output analysis on the native core', () => {
     pm.sessions.delete('h')
   })
 
+  it('analyzes the rest of a burst on its own, and before getOutput reads', async () => {
+    const session = addSession('w')
+    pm.appendOutput('w', 'ready\n')
+    pm.appendOutput('w', 'set\n')
+    expect(ptyManager.getOutput('w')).toEqual(['ready', 'set'])
+    analyzers[0].next = 2
+    pm.appendOutput('w', 'more? ')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(session.status).toBe('waiting')
+    pm.clearSessionTracking('w')
+    pm.sessions.delete('w')
+  })
+
   it('reads all lines for getOutput(id, 0), as the JS path does', () => {
     addSession('z')
     pm.appendOutput('z', 'one\n')
@@ -248,13 +276,16 @@ describe('output analysis on the native core', () => {
     pm.appendOutput('t', 'first\n')
     pm.appendOutput('u', 'other\npar')
     analyzers[0].failNext = true
-    expect(() => pm.appendOutput('t', 'second\n')).not.toThrow()
+    pm.appendOutput('t', 'second\n')
+    // A chunk waiting on the other session when the core fails goes to JS too.
+    pm.appendOutput('u', 'tial')
+    expect(() => pm.flushAnalysis('t')).not.toThrow()
     // Output read before the fault survives, for every session, and the chunk
     // the core already took is not added twice.
     expect(ptyManager.getOutput('t')).toEqual(['first', 'second'])
     pm.appendOutput('t', 'third\n')
     expect(ptyManager.getOutput('t')).toEqual(['first', 'second', 'third'])
-    pm.appendOutput('u', 'tial\n')
+    pm.appendOutput('u', '\n')
     expect(ptyManager.getOutput('u')).toEqual(['other', 'partial'])
     expect(analyzers.every((a) => a.freed)).toBe(true)
     for (const id of ['t', 'u']) {

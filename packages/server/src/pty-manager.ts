@@ -40,7 +40,7 @@ import {
 import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
-import { activeCore, NATIVE_STATUS, type NativeAnalyzer } from './native-core'
+import { coreFor, NATIVE_STATUS, type NativeAnalyzer } from './native-core'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
 import {
   createScreen,
@@ -118,8 +118,17 @@ class PtyManager extends EventEmitter {
   private tempKeyPaths = new Map<string, string>()
   private outputLines = new Map<string, string[]>()
   private outputPartials = new Map<string, string>()
-  /** `VORN_CORE=native`: the Rust core's per-session analysis, replacing the three maps around it. */
+  /**
+   * Settings › Experimental › native output analysis: the Rust core's
+   * per-session analysis, replacing the three maps around it. Chosen on a
+   * session's first output and kept for its life.
+   */
   private analyzers = new Map<string, NativeAnalyzer>()
+  /** Sessions that asked and were given the JS path, so the switch is read once each. */
+  private jsAnalysis = new Set<string>()
+  /** Raw chunks since the last native analysis, joined (a rope, so O(1) per chunk). */
+  private pendingAnalysis = new Map<string, string>()
+  private analysisTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private nativeAnalysisFailed = false
   private statusContexts = new Map<string, StatusContext>()
   private idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -749,7 +758,7 @@ class PtyManager extends EventEmitter {
       // bytes then arrived again as log frames after it, and a restore counted
       // them twice. Fed from one point they cannot disagree.
       appendScrollback(id, data)
-      feedScreen(id, data)
+      const rang = feedScreen(id, data)
       recordOutput(id, data)
 
       // The bell, said out loud rather than left for whoever happens to be
@@ -761,7 +770,11 @@ class PtyManager extends EventEmitter {
       // On the raw bytes, before any stripping: BEL is exactly what `stripAnsi`
       // exists to remove. Here rather than in `appendOutput`, which returns
       // early for a plain shell -- a shell rings too.
-      if (data.includes('\x07')) {
+      //
+      // The native screen model says whether a BEL actually rang, which tells
+      // a bell from the BEL that ends every OSC title an agent sets; without
+      // it, any 0x07 counts.
+      if (rang ?? data.includes('\x07')) {
         this.emit('client-message', IPC.TERMINAL_BELL, { id })
       }
     }
@@ -788,6 +801,11 @@ class PtyManager extends EventEmitter {
     this.outputPartials.delete(id)
     this.analyzers.get(id)?.free()
     this.analyzers.delete(id)
+    this.jsAnalysis.delete(id)
+    this.pendingAnalysis.delete(id)
+    const analysisTimer = this.analysisTimers.get(id)
+    if (analysisTimer) clearTimeout(analysisTimer)
+    this.analysisTimers.delete(id)
     this.statusContexts.delete(id)
     this.extensionPtys.delete(id)
     const idleTimer = this.idleTimers.get(id)
@@ -798,7 +816,8 @@ class PtyManager extends EventEmitter {
   /**
    * After a native failure: carry each session's output so far into the JS
    * maps, so `getOutput` keeps what was read before, then free the analyzers.
-   * An analyzer that can't be read loses its history, not the others'.
+   * An analyzer that can't be read loses its history, not the others'. Chunks
+   * other sessions had waiting for analysis go through the JS path now.
    */
   private handOutputToJs(): void {
     for (const [id, analyzer] of this.analyzers) {
@@ -815,7 +834,46 @@ class PtyManager extends EventEmitter {
       }
     }
     this.analyzers.clear()
+    for (const timer of this.analysisTimers.values()) clearTimeout(timer)
+    this.analysisTimers.clear()
+    const pending = [...this.pendingAnalysis]
+    this.pendingAnalysis.clear()
+    for (const [id, data] of pending) {
+      const session = this.sessions.get(id)
+      if (session) this.analyzeJs(id, session, data, true)
+    }
   }
+
+  /** The session's native analyzer, created on its first output, or null for the JS path. */
+  private analyzerFor(id: string): NativeAnalyzer | null {
+    if (this.nativeAnalysisFailed || this.jsAnalysis.has(id)) return null
+    const existing = this.analyzers.get(id)
+    if (existing) return existing
+    const Analyzer = coreFor('analysis')?.Analyzer
+    if (!Analyzer) {
+      this.jsAnalysis.add(id)
+      return null
+    }
+    try {
+      const analyzer = new Analyzer()
+      this.analyzers.set(id, analyzer)
+      return analyzer
+    } catch (err) {
+      log.warn({ err, id }, '[core] could not create a native analyzer; using js for this session')
+      this.jsAnalysis.add(id)
+      return null
+    }
+  }
+
+  /**
+   * How native analysis batches: the first read after a quiet spell is
+   * analyzed at once, so a prompt reads as waiting the moment it appears and
+   * the idle countdown starts from it. Reads that follow within this window
+   * wait and go into the core together, one call per window rather than per
+   * read, for as long as the stream keeps coming. Status during a stream lags
+   * its bytes by at most this long.
+   */
+  static readonly ANALYSIS_MS = 8
 
   private appendOutput(id: string, data: string): void {
     const session = this.sessions.get(id)
@@ -825,33 +883,64 @@ class PtyManager extends EventEmitter {
     // They stay 'running' until the PTY exits (setupPtyEvents sets 'idle').
     if (session.agentType === 'shell') return
 
-    const Analyzer = activeCore().native?.Analyzer
-    // Whether this chunk still goes into the JS line buffer below.
-    let recordLines = true
-    if (Analyzer && !this.nativeAnalysisFailed) {
-      try {
-        let analyzer = this.analyzers.get(id)
-        if (!analyzer) {
-          analyzer = new Analyzer()
-          this.analyzers.set(id, analyzer)
-        }
-        const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
-        if (newStatus && newStatus !== session.status) this.updateSessionStatus(id, newStatus)
-        this.armIdle(id, session)
-        return
-      } catch (err) {
-        // This runs inside the pty's data handler, where a throw has nothing
-        // behind it. Every session goes back to the JS path from here on.
-        log.warn({ err, id }, '[core] native output analysis failed; using js')
-        this.nativeAnalysisFailed = true
-        this.handOutputToJs()
-        // The core may have taken some or all of this chunk before it threw,
-        // and that is in the history just handed over: adding the chunk again
-        // would duplicate it. At worst the unread tail of one chunk is lost.
-        recordLines = false
-      }
+    if (this.analyzerFor(id)) {
+      const pending = this.pendingAnalysis.get(id)
+      this.pendingAnalysis.set(id, pending === undefined ? data : pending + data)
+      if (this.analysisTimers.has(id)) return
+      this.flushAnalysis(id)
+      this.armAnalysis(id)
+      return
     }
+    this.analyzeJs(id, session, data, true)
+  }
 
+  /** The batching window, re-armed while reads keep arriving so quiet is it lapsing with nothing queued. */
+  private armAnalysis(id: string): void {
+    this.analysisTimers.set(
+      id,
+      setTimeout(() => {
+        this.analysisTimers.delete(id)
+        if (!this.pendingAnalysis.has(id)) return
+        this.flushAnalysis(id)
+        this.armAnalysis(id)
+      }, PtyManager.ANALYSIS_MS)
+    )
+  }
+
+  /** Analyze what is waiting for a native session now. */
+  private flushAnalysis(id: string): void {
+    const data = this.pendingAnalysis.get(id)
+    if (data === undefined) return
+    this.pendingAnalysis.delete(id)
+    const session = this.sessions.get(id)
+    const analyzer = this.analyzers.get(id)
+    if (!session || !analyzer) return
+    try {
+      const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
+      if (newStatus && newStatus !== session.status) this.updateSessionStatus(id, newStatus)
+    } catch (err) {
+      // This can run from a timer, where a throw has nothing behind it. Every
+      // session goes back to the JS path from here on.
+      log.warn({ err, id }, '[core] native output analysis failed; using js')
+      this.nativeAnalysisFailed = true
+      this.handOutputToJs()
+      // The core may have taken some or all of this batch before it threw, and
+      // that is in the history just handed over: adding it again would
+      // duplicate it. At worst the unread tail of one batch is lost.
+      this.analyzeJs(id, session, data, false)
+      return
+    }
+    // Re-armed per batch rather than per read, which is most of what the JS
+    // path spends on a spinner.
+    this.armIdle(id, session)
+  }
+
+  private analyzeJs(
+    id: string,
+    session: TerminalSession,
+    data: string,
+    recordLines: boolean
+  ): void {
     const clean = stripAnsi(data)
     if (recordLines) {
       let buf = this.outputLines.get(id)
@@ -1273,6 +1362,10 @@ class PtyManager extends EventEmitter {
     this.outputPartials.clear()
     for (const analyzer of this.analyzers.values()) analyzer.free()
     this.analyzers.clear()
+    this.jsAnalysis.clear()
+    this.pendingAnalysis.clear()
+    for (const timer of this.analysisTimers.values()) clearTimeout(timer)
+    this.analysisTimers.clear()
     this.nativeAnalysisFailed = false
     this.statusContexts.clear()
     for (const timer of this.idleTimers.values()) clearTimeout(timer)
@@ -1396,6 +1489,8 @@ class PtyManager extends EventEmitter {
 
   getOutput(id: string, lines?: number): string[] {
     if (!this.sessions.has(id)) throw new Error(`Session not found: ${id}`)
+    // What has arrived counts, analyzed or not.
+    this.flushAnalysis(id)
     const analyzer = this.analyzers.get(id)
     if (analyzer) return analyzer.output(lines)
     const buf = this.outputLines.get(id) ?? []

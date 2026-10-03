@@ -12,6 +12,8 @@
 //! `tests/terminal-screen-parity.test.ts`.
 
 use std::fmt;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
 use libghostty_vt::terminal::{Options, Terminal};
@@ -62,8 +64,21 @@ pub struct Snapshot {
     pub cwd: String,
 }
 
+/// What one feed changed that the server acts on.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Fed {
+    /// The cwd an OSC 5522 moved to, for the session record. OSC 7 moves the
+    /// model's cwd without reporting, as the JS model does.
+    pub cwd: Option<String>,
+    /// How many BELs rang: a real 0x07 as a terminal acts on it, not one
+    /// that ends an OSC title.
+    pub bells: u32,
+}
+
 pub struct Screen {
     term: Terminal<'static, 'static>,
+    /// Counted by Ghostty's bell effect during `vt_write`, read and reset by `feed`.
+    bells: Arc<AtomicU32>,
     cols: u32,
     rows: u32,
     title: String,
@@ -73,14 +88,20 @@ pub struct Screen {
 
 impl Screen {
     pub fn new(cols: u32, rows: u32) -> Result<Self> {
-        let term = Terminal::new(Options {
+        let mut term = Terminal::new(Options {
             cols: dimension(cols)?,
             rows: dimension(rows)?,
             // Same as the xterm model: the screen, not history.
             max_scrollback: 0,
         })?;
+        let bells = Arc::new(AtomicU32::new(0));
+        let rung = Arc::clone(&bells);
+        term.on_bell(move |_| {
+            rung.fetch_add(1, Ordering::Relaxed);
+        })?;
         Ok(Self {
             term,
+            bells,
             cols,
             rows,
             title: String::new(),
@@ -89,11 +110,10 @@ impl Screen {
         })
     }
 
-    /// One flush of output. Returns the cwd an OSC 5522 in it moved to, for the
-    /// server to record, as the JS model's handler reports it; OSC 7 updates the
-    /// model's cwd without reporting.
-    pub fn feed(&mut self, bytes: &[u8]) -> Option<String> {
+    /// One flush of output.
+    pub fn feed(&mut self, bytes: &[u8]) -> Fed {
         self.term.vt_write(bytes);
+        let bells = self.bells.swap(0, Ordering::Relaxed);
         // Titles and cwds are read off the stream here rather than from Ghostty,
         // which drops a title over 2 KB instead of keeping its start, and so the
         // xterm model's rules apply: last writer wins, OSC 7 is percent-decoded,
@@ -123,7 +143,10 @@ impl Screen {
             }
             _ => {}
         });
-        reported
+        Fed {
+            cwd: reported,
+            bells,
+        }
     }
 
     /// Title and cwd from a checkpoint: neither is an escape sequence, so a
@@ -377,17 +400,29 @@ mod tests {
     #[test]
     fn feeds_titles_and_cwds() {
         let mut s = Screen::new(80, 24).unwrap();
-        assert_eq!(s.feed(b"\x1b]2;vim\x07"), None);
+        assert_eq!(s.feed(b"\x1b]2;vim\x07"), Fed::default());
         assert_eq!(s.title(), "vim");
         assert_eq!(s.ghostty_title().unwrap(), "vim");
         // OSC 7 moves the model's cwd, percent-decoded, without reporting it.
-        assert_eq!(s.feed(b"\x1b]7;file://host/a/my%20dir\x07"), None);
+        assert_eq!(s.feed(b"\x1b]7;file://host/a/my%20dir\x07").cwd, None);
         assert_eq!(s.cwd(), "/a/my dir");
         // OSC 5522 reports, once per move, and only a plausible path.
-        assert_eq!(s.feed(b"\x1b]5522;cwd;/srv\x07").as_deref(), Some("/srv"));
-        assert_eq!(s.feed(b"\x1b]5522;cwd;/srv\x07"), None);
-        assert_eq!(s.feed(b"\x1b]5522;cwd;relative\x07"), None);
+        assert_eq!(
+            s.feed(b"\x1b]5522;cwd;/srv\x07").cwd.as_deref(),
+            Some("/srv")
+        );
+        assert_eq!(s.feed(b"\x1b]5522;cwd;/srv\x07").cwd, None);
+        assert_eq!(s.feed(b"\x1b]5522;cwd;relative\x07").cwd, None);
         assert_eq!(s.cwd(), "/srv");
+    }
+
+    #[test]
+    fn counts_real_bells_only() {
+        let mut s = Screen::new(80, 24).unwrap();
+        // BEL ending an OSC is a terminator, not a bell.
+        assert_eq!(s.feed(b"\x1b]0;\xe2\x9c\xb3 claude\x07working").bells, 0);
+        assert_eq!(s.feed(b"done\x07\x07").bells, 2);
+        assert_eq!(s.feed(b"quiet").bells, 0);
     }
 
     #[test]

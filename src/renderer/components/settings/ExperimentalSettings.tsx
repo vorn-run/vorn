@@ -16,6 +16,12 @@ const SWITCHES: { key: keyof ExperimentalConfig; label: string; description: str
     label: 'Native screen model',
     description:
       "Keep each terminal's screen in Ghostty's engine instead of a second xterm, for history and restore"
+  },
+  {
+    key: 'nativeAnalysis',
+    label: 'Native output analysis',
+    description:
+      'Work out agent status and the output agents read back in Rust, once per flush instead of on every read'
   }
 ]
 
