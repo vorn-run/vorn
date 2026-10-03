@@ -12,6 +12,7 @@ PACKAGES=(
   "packages/shared"
   "packages/mcp"
   "packages/connector-sdk"
+  "packages/core"
 )
 
 OUT_OF_SYNC=0
@@ -33,6 +34,22 @@ for pkg in "${PACKAGES[@]}"; do
     fi
   fi
 done
+
+# The crate reports its version to the server, so it follows the app's too.
+CARGO_FILE="$ROOT_DIR/packages/core/Cargo.toml"
+if [ -f "$CARGO_FILE" ]; then
+  CARGO_CHANGED=$(node -e "
+    const fs = require('fs');
+    const toml = fs.readFileSync('$CARGO_FILE', 'utf8');
+    const next = toml.replace(/^version = \".*\"$/m, 'version = \"$ROOT_VERSION\"');
+    if (next !== toml) { fs.writeFileSync('$CARGO_FILE', next); console.log('yes'); }
+  ")
+  if [ -n "$CARGO_CHANGED" ]; then
+    echo "Syncing packages/core/Cargo.toml → $ROOT_VERSION"
+    git add "$CARGO_FILE"
+    OUT_OF_SYNC=1
+  fi
+fi
 
 if [ "$OUT_OF_SYNC" -eq 1 ]; then
   echo "✓ All package versions synced to $ROOT_VERSION"

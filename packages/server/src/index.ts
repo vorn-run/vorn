@@ -81,6 +81,7 @@ import {
   setLaunchDataDir
 } from './process-utils'
 import log from './logger'
+import { selectCore } from './native-core'
 import { appFrameAncestors } from './extensions/frame-ancestors'
 
 /**
@@ -180,6 +181,15 @@ export async function startServer(
   // and then never recorded. Nothing is written until a terminal exists, and a
   // server that loses the endpoint claim exits without ever having one.
   configureHistory(dataDir)
+
+  // VORN_CORE=native opts into the Rust core. It does no work yet beyond proving
+  // it loads; the log line is how a run with the flag on shows it took effect.
+  const core = selectCore()
+  if (core.native) {
+    log.info({ core: core.native.info() }, `[core] native: ${core.native.hello('server')}`)
+  } else if (core.fallback) {
+    log.warn(`[core] staying on js: ${core.fallback}`)
+  }
 
   // Who this server is, so a desktop can decide whether to adopt it instead of
   // starting a second one on the same data directory. The channel is passed by
