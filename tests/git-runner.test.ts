@@ -11,6 +11,17 @@ vi.mock('../packages/server/src/native-core', () => ({
   nativeBinary: () => binary.loaded
 }))
 
+const ssh = vi.hoisted(() => ({
+  sync: vi.fn((): string => 'sync out'),
+  async: vi.fn(async (): Promise<string> => 'async out')
+}))
+
+vi.mock('../packages/server/src/process-utils', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  sshExecSync: ssh.sync,
+  sshExec: ssh.async
+}))
+
 import {
   DEFAULT_MAX_BUFFER,
   gitRunner,
@@ -20,6 +31,9 @@ import {
 } from '../packages/server/src/git-runner'
 import { setExperimentalFlags } from '../packages/server/src/experimental'
 import type { NativeGitRequest } from '../packages/server/src/native-core'
+import type { RemoteHost } from '../packages/shared/src/types'
+
+const host = { id: 'h', hostname: 'box', user: 'dev', port: 22 } as RemoteHost
 
 afterEach(() => {
   delete process.env.VORN_GIT
@@ -120,5 +134,27 @@ describe('the native path', () => {
     await expect(
       gitRunner().local(['checkout', 'nope'], '/repo', { timeout: 5000 })
     ).rejects.toThrow(/^Command failed: git checkout nope/)
+  })
+})
+
+describe('a remote host', () => {
+  it('blocks on the JS path, as sshExecSync always did', async () => {
+    await expect(jsRunner.remote(host, 'git status', { timeout: 1000 })).resolves.toBe('sync out')
+    expect(ssh.sync).toHaveBeenCalledWith(host, 'git status', { timeout: 1000 })
+    ssh.sync.mockImplementationOnce(() => {
+      throw new Error('ssh: connect to host box port 22: Connection refused')
+    })
+    await expect(jsRunner.remote(host, 'git status', { timeout: 1000 })).rejects.toThrow(
+      /Connection refused/
+    )
+  })
+
+  it('goes over async ssh on the native path, since it is a wait rather than work', async () => {
+    binary.loaded = { native: { gitRun: vi.fn() } }
+    process.env.VORN_GIT = 'native'
+    await expect(gitRunner().remote(host, 'git status', { timeout: 1000 })).resolves.toBe(
+      'async out'
+    )
+    expect(ssh.async).toHaveBeenCalledWith(host, 'git status', { timeout: 1000 })
   })
 })
