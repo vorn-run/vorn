@@ -45,7 +45,7 @@ pub(crate) fn available() -> bool {
 }
 
 pub(crate) fn answer(req: &Request) -> Option<String> {
-    if !available() || steered(req) {
+    if !available() || steered(req) || !plain_git(req) {
         return None;
     }
     let args: Vec<&str> = req.args.iter().map(String::as_str).collect();
@@ -64,6 +64,45 @@ fn steered(req: &Request) -> bool {
     STEERING_ENV
         .iter()
         .any(|name| req.env.iter().any(|(key, _)| key == name))
+}
+
+/// Whether `req.bin` is git itself rather than something standing in for it.
+///
+/// An answer from gix is what git prints, so it is only a stand-in for a git
+/// binary. A wrapper script on PATH (a shim, a logging or sandboxing wrapper)
+/// may print something else or refuse, and then it is the wrapper's to run. A
+/// script is recognised by its `#!`; a compiled wrapper named `git` cannot be
+/// told apart from git, and is taken at its name.
+fn plain_git(req: &Request) -> bool {
+    use std::io::Read;
+    let bin = Path::new(&req.bin);
+    if bin.file_name().and_then(|n| n.to_str()) != Some("git") {
+        return false;
+    }
+    let Some(path) = locate(bin, req) else {
+        return false;
+    };
+    let mut magic = [0u8; 2];
+    match std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut magic)) {
+        Ok(()) => &magic != b"#!",
+        Err(_) => false,
+    }
+}
+
+/// Where `bin` resolves, as the child process would find it: as given when it
+/// is a path, else the first match on the request's PATH.
+fn locate(bin: &Path, req: &Request) -> Option<PathBuf> {
+    if bin.components().count() > 1 {
+        return Some(bin.to_path_buf());
+    }
+    let path = req
+        .env
+        .iter()
+        .find(|(key, _)| key == "PATH")
+        .map(|(_, value)| value.as_str())?;
+    std::env::split_paths(path)
+        .map(|dir| dir.join(bin))
+        .find(|candidate| candidate.is_file())
 }
 
 /// The repository `cwd` is in, when gix can be trusted to see it as git does.

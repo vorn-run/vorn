@@ -151,3 +151,57 @@ describe('git-utils on a remote host', () => {
     expect(runner.local).not.toHaveBeenCalled()
   })
 })
+
+describe('changes to one repository', () => {
+  it('take turns, so one commit never stages between another add and commit', async () => {
+    const log: string[] = []
+    const runner: GitRunner = {
+      mode: 'native',
+      // Every command yields, as native git does, so unserialized calls would interleave.
+      local: async (args, cwd) => {
+        log.push(`${cwd} ${args[0]}`)
+        await new Promise((r) => setTimeout(r, 5))
+        return ''
+      },
+      remote: async () => ''
+    }
+    process.env.VORN_GIT = 'native'
+    resetGitRunner(runner)
+
+    const results = await Promise.all([
+      git.gitCommit('/repo', 'one', true),
+      git.gitCommit('/repo', 'two', true),
+      git.gitCommit('/elsewhere', 'three', false)
+    ])
+
+    expect(results.every((r) => r.success)).toBe(true)
+    expect(log.filter((c) => c.startsWith('/repo '))).toEqual([
+      '/repo add',
+      '/repo commit',
+      '/repo add',
+      '/repo commit'
+    ])
+    // Another repository does not wait its turn behind these.
+    expect(log.indexOf('/elsewhere commit')).toBeLessThan(log.indexOf('/repo commit'))
+  })
+
+  it('carries on after a change that failed', async () => {
+    let calls = 0
+    const runner: GitRunner = {
+      mode: 'native',
+      local: async () => {
+        if (calls++ === 0) throw new Error('Command failed: git commit')
+        return ''
+      },
+      remote: async () => ''
+    }
+    process.env.VORN_GIT = 'native'
+    resetGitRunner(runner)
+    const [first, second] = await Promise.all([
+      git.gitCommit('/repo', 'one', false),
+      git.gitCommit('/repo', 'two', false)
+    ])
+    expect(first.success).toBe(false)
+    expect(second).toEqual({ success: true })
+  })
+})

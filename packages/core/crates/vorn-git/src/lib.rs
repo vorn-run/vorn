@@ -85,6 +85,12 @@ impl fmt::Display for Error {
 
 fn errno_name(error: &std::io::Error) -> Option<&'static str> {
     use std::io::ErrorKind::*;
+    // A missing working directory is ERROR_DIRECTORY on Windows, which Node
+    // reports as ENOENT, as it does everywhere else.
+    #[cfg(windows)]
+    if error.raw_os_error() == Some(267) {
+        return Some("ENOENT");
+    }
     Some(match error.kind() {
         NotFound => "ENOENT",
         PermissionDenied => "EACCES",

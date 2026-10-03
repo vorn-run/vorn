@@ -216,6 +216,7 @@ import { captureAgentSessionId } from './agent-session-capture'
 import { listAgentModels } from './agent-model-catalog'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
 import log from './logger'
+import { onePerKey } from './one-per-key'
 
 const copilotInstallations = new Map<string, CopilotHookInstallation>()
 
@@ -705,6 +706,9 @@ function startedRun(
   })
 }
 
+/** Creates that name a conversation, by its id, while they prepare. */
+const createNamed = onePerKey<TerminalSession>()
+
 export function registerAllMethods(): void {
   // Wire headless worktree counter into pty-manager for cleanup gating
   ptyManager.setHeadlessWorktreeCounter((worktreePath, excludeId) =>
@@ -718,16 +722,21 @@ export function registerAllMethods(): void {
     // rather than starting a second agent on it, as a resume does.
     const running = sessionToBindOnCreate(named, ptyManager.getLiveSessions())
     if (running) return running
-    const prepared = await ptyManager.prepareSession(payload)
-    // Asked again: with native git the preparation lets another create for the
-    // same conversation run. From here to the claim nothing else can.
-    const started = sessionToBindOnCreate(named, ptyManager.getLiveSessions())
-    if (started) return started
-    const session = ptyManager.spawnPty(payload, prepared)
-    // Only until the session names the conversation itself: an agent that can be
-    // told an id already carries it, and one that cannot reports seconds later.
-    if (named && !session.agentSessionId) claimSpawningTranscript(named, session.id)
-    return session
+    if (!named) return ptyManager.createPty(payload)
+    // Preparing awaits git, and may create a worktree or check out a branch. A
+    // second create for the same conversation in that window gets the first
+    // one's session, rather than preparing a workspace of its own to discard.
+    return createNamed(named, async () => {
+      const prepared = await ptyManager.prepareSession(payload)
+      // A resume can still have started it meanwhile.
+      const started = sessionToBindOnCreate(named, ptyManager.getLiveSessions())
+      if (started) return started
+      const session = ptyManager.spawnPty(payload, prepared)
+      // Only until the session names the conversation itself: an agent that can be
+      // told an id already carries it, and one that cannot reports seconds later.
+      if (!session.agentSessionId) claimSpawningTranscript(named, session.id)
+      return session
+    })
   })
   /**
    * Let go of what was kept for a session from the last run.

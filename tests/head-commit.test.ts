@@ -84,4 +84,21 @@ describe('keeping the recorded HEAD following the tree', () => {
     new HeadRefresh(read).refresh([session({ id: 'a' }), session({ id: 'b' })], 1000)
     expect(read).toHaveBeenCalledTimes(2)
   })
+
+  it('keeps the newer HEAD when an older read lands after it', async () => {
+    // Native git answers out of order: a read from before a commit can be the
+    // last to arrive, and must not put the old hash back.
+    const answers: Array<(head: string) => void> = []
+    const read = vi.fn(() => new Promise<string>((resolve) => answers.push(resolve)))
+    const heads = new HeadRefresh(read)
+    const s = session()
+    heads.refresh([s], 1000)
+    heads.invalidate('a')
+    heads.refresh([s], 1001)
+    answers[1]('after')
+    await flush()
+    answers[0]('before')
+    await flush()
+    expect(s.headCommit).toBe('after')
+  })
 })

@@ -7,10 +7,6 @@ use std::thread;
 
 use crate::{command_line, Error, Request};
 
-/// Stderr kept for the error message. The rest is read and dropped, so a
-/// chatty git never blocks on a full pipe.
-const STDERR_KEPT: usize = 64 * 1024;
-
 pub(crate) fn run(req: &Request) -> Result<String, Error> {
     let mut cmd = Command::new(&req.bin);
     cmd.args(&req.args)
@@ -38,10 +34,11 @@ pub(crate) fn run(req: &Request) -> Result<String, Error> {
     let (tx, rx) = mpsc::channel();
     let out_tx = tx.clone();
     thread::spawn(move || {
-        let _ = out_tx.send(Stream::Out(read_capped(stdout, Some(limit))));
+        let _ = out_tx.send(Stream::Out(read_capped(stdout, limit)));
     });
+    // `maxBuffer` bounds stderr too, as it does for `execFileSync`.
     thread::spawn(move || {
-        let _ = tx.send(Stream::Err(read_capped(stderr, None)));
+        let _ = tx.send(Stream::Err(read_capped(stderr, limit)));
     });
 
     // Both pipes close when git exits; until then this thread only waits.
@@ -50,16 +47,14 @@ pub(crate) fn run(req: &Request) -> Result<String, Error> {
     while out.is_none() || err.is_none() {
         let left = deadline.saturating_duration_since(std::time::Instant::now());
         match rx.recv_timeout(left) {
-            Ok(Stream::Out(read)) => {
-                if read.overflowed {
-                    stop(&mut child);
-                    return Err(Error::TooLarge {
-                        bin: req.bin.clone(),
-                        limit,
-                    });
-                }
-                out = Some(read.bytes);
+            Ok(Stream::Out(read) | Stream::Err(read)) if read.overflowed => {
+                stop(&mut child);
+                return Err(Error::TooLarge {
+                    bin: req.bin.clone(),
+                    limit,
+                });
             }
+            Ok(Stream::Out(read)) => out = Some(read.bytes),
             Ok(Stream::Err(read)) => err = Some(read.bytes),
             Err(_) => {
                 stop(&mut child);
@@ -96,9 +91,8 @@ struct Capped {
     overflowed: bool,
 }
 
-/// Reads to the end. Past `limit` it stops and says so; with no limit it keeps
-/// the first `STDERR_KEPT` bytes and drains the rest.
-fn read_capped(pipe: Option<impl Read>, limit: Option<usize>) -> Capped {
+/// Reads to the end, or stops at the first byte past `limit` and says so.
+fn read_capped(pipe: Option<impl Read>, limit: usize) -> Capped {
     let mut bytes = Vec::new();
     let Some(mut pipe) = pipe else {
         return Capped {
@@ -112,19 +106,13 @@ fn read_capped(pipe: Option<impl Read>, limit: Option<usize>) -> Capped {
             Ok(0) | Err(_) => break,
             Ok(n) => n,
         };
-        match limit {
-            Some(limit) if bytes.len() + n > limit => {
-                return Capped {
-                    bytes,
-                    overflowed: true,
-                }
-            }
-            Some(_) => bytes.extend_from_slice(&buf[..n]),
-            None => {
-                let room = STDERR_KEPT.saturating_sub(bytes.len()).min(n);
-                bytes.extend_from_slice(&buf[..room]);
-            }
+        if bytes.len() + n > limit {
+            return Capped {
+                bytes,
+                overflowed: true,
+            };
         }
+        bytes.extend_from_slice(&buf[..n]);
     }
     Capped {
         bytes,

@@ -31,6 +31,32 @@ async function gitExec(
   return out.trim()
 }
 
+/**
+ * One mutation at a time per repository. On the JS path every git call blocked,
+ * so a commit's `add` and `commit` could never have another request's git
+ * between them; on the native path they can, so the commands that change a
+ * repository take turns here. Reads do not: they see one state or the next.
+ */
+const turns = new Map<string, Promise<unknown>>()
+
+function repoKey(cwd: string, remote?: RemoteHost): string {
+  return remote ? `${remote.id}:${cwd}` : path.resolve(cwd)
+}
+
+function serialized<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const previous = turns.get(key) ?? Promise.resolve()
+  const mine = previous.then(run, run)
+  const settled = mine.then(
+    () => undefined,
+    () => undefined
+  )
+  turns.set(key, settled)
+  void settled.then(() => {
+    if (turns.get(key) === settled) turns.delete(key)
+  })
+  return mine
+}
+
 /** As much diff as a reader can use; past this it is a file to open, not a thing to read. */
 const MAX_DIFF_TEXT_BYTES = 500 * 1024
 
@@ -305,50 +331,52 @@ export async function createWorktree(
   worktreeName?: string,
   remote?: RemoteHost
 ): Promise<{ worktreePath: string; branch: string; name: string }> {
-  // Use posix path separators for remote (always Linux)
-  const sep = remote ? '/' : path.sep
-  const projectName = remote ? projectPath.split('/').pop()! : path.basename(projectPath)
-  const shortId = crypto.randomUUID().slice(0, 8)
-  const rawName = worktreeName || generateName()
-  const name = rawName.replace(/[^a-zA-Z0-9-]/g, '-')
-  const parentDir = remote
-    ? projectPath.split('/').slice(0, -1).join('/')
-    : path.dirname(projectPath)
-  const baseDir = `${parentDir}${sep}.vorn-worktrees${sep}${projectName}`
-  const worktreeDir = `${baseDir}${sep}${name}-${shortId}`
+  return serialized(repoKey(projectPath, remote), async () => {
+    // Use posix path separators for remote (always Linux)
+    const sep = remote ? '/' : path.sep
+    const projectName = remote ? projectPath.split('/').pop()! : path.basename(projectPath)
+    const shortId = crypto.randomUUID().slice(0, 8)
+    const rawName = worktreeName || generateName()
+    const name = rawName.replace(/[^a-zA-Z0-9-]/g, '-')
+    const parentDir = remote
+      ? projectPath.split('/').slice(0, -1).join('/')
+      : path.dirname(projectPath)
+    const baseDir = `${parentDir}${sep}.vorn-worktrees${sep}${projectName}`
+    const worktreeDir = `${baseDir}${sep}${name}-${shortId}`
 
-  if (remote) {
-    await gitRunner().remote(remote, `mkdir -p ${shellEscape(baseDir, 'posix')}`, {
-      timeout: 5000
-    })
-  } else {
-    fs.mkdirSync(baseDir, { recursive: true })
-  }
-
-  const localBranches = await listBranches(projectPath, remote)
-
-  if (localBranches.includes(branch)) {
-    try {
-      await gitExec(['worktree', 'add', worktreeDir, branch], projectPath, {
-        timeout: 30000,
-        remote
+    if (remote) {
+      await gitRunner().remote(remote, `mkdir -p ${shellEscape(baseDir, 'posix')}`, {
+        timeout: 5000
       })
-    } catch {
-      const newBranch = localBranches.includes(name) ? `${name}-${shortId}` : name
-      await gitExec(['worktree', 'add', '-b', newBranch, worktreeDir, branch], projectPath, {
-        timeout: 30000,
-        remote
-      })
-      return { worktreePath: worktreeDir, branch: newBranch, name }
+    } else {
+      fs.mkdirSync(baseDir, { recursive: true })
     }
-  } else {
-    await gitExec(['worktree', 'add', '-b', branch, worktreeDir], projectPath, {
-      timeout: 30000,
-      remote
-    })
-  }
 
-  return { worktreePath: worktreeDir, branch, name }
+    const localBranches = await listBranches(projectPath, remote)
+
+    if (localBranches.includes(branch)) {
+      try {
+        await gitExec(['worktree', 'add', worktreeDir, branch], projectPath, {
+          timeout: 30000,
+          remote
+        })
+      } catch {
+        const newBranch = localBranches.includes(name) ? `${name}-${shortId}` : name
+        await gitExec(['worktree', 'add', '-b', newBranch, worktreeDir, branch], projectPath, {
+          timeout: 30000,
+          remote
+        })
+        return { worktreePath: worktreeDir, branch: newBranch, name }
+      }
+    } else {
+      await gitExec(['worktree', 'add', '-b', branch, worktreeDir], projectPath, {
+        timeout: 30000,
+        remote
+      })
+    }
+
+    return { worktreePath: worktreeDir, branch, name }
+  })
 }
 
 /**
@@ -413,20 +441,22 @@ export async function renameWorktreeBranch(
   newBranch: string,
   remote?: RemoteHost
 ): Promise<boolean> {
-  const trimmed = newBranch.trim()
-  if (!trimmed || trimmed.startsWith('-')) return false
+  return serialized(repoKey(worktreePath, remote), async () => {
+    const trimmed = newBranch.trim()
+    if (!trimmed || trimmed.startsWith('-')) return false
 
-  try {
-    const currentBranch = await getGitBranch(worktreePath, remote)
-    if (!currentBranch) {
-      await gitExec(['switch', '-c', trimmed], worktreePath, { timeout: 10000, remote })
-    } else {
-      await gitExec(['branch', '-m', trimmed], worktreePath, { timeout: 10000, remote })
+    try {
+      const currentBranch = await getGitBranch(worktreePath, remote)
+      if (!currentBranch) {
+        await gitExec(['switch', '-c', trimmed], worktreePath, { timeout: 10000, remote })
+      } else {
+        await gitExec(['branch', '-m', trimmed], worktreePath, { timeout: 10000, remote })
+      }
+      return true
+    } catch {
+      return false
     }
-    return true
-  } catch {
-    return false
-  }
+  })
 }
 
 export async function renameWorktree(
@@ -434,45 +464,47 @@ export async function renameWorktree(
   newName: string,
   remote?: RemoteHost
 ): Promise<{ newPath: string; name: string } | null> {
-  const trimmed = newName
-    .trim()
-    .replace(/[^a-zA-Z0-9-]/g, '-')
-    .replace(/-{2,}/g, '-')
-    .replace(/^-|-$/g, '')
-  if (!trimmed) return null
+  return serialized(repoKey(worktreePath, remote), async () => {
+    const trimmed = newName
+      .trim()
+      .replace(/[^a-zA-Z0-9-]/g, '-')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-|-$/g, '')
+    if (!trimmed) return null
 
-  const sep = remote ? '/' : path.sep
-  const dir = remote ? worktreePath.split('/').slice(0, -1).join('/') : path.dirname(worktreePath)
-  const basename = remote ? worktreePath.split('/').pop()! : path.basename(worktreePath)
-  const idMatch = basename.match(/-([0-9a-f]{8})$/)
-  if (!idMatch) return null
-  const shortId = idMatch[1]
-  const newDir = `${dir}${sep}${trimmed}-${shortId}`
+    const sep = remote ? '/' : path.sep
+    const dir = remote ? worktreePath.split('/').slice(0, -1).join('/') : path.dirname(worktreePath)
+    const basename = remote ? worktreePath.split('/').pop()! : path.basename(worktreePath)
+    const idMatch = basename.match(/-([0-9a-f]{8})$/)
+    if (!idMatch) return null
+    const shortId = idMatch[1]
+    const newDir = `${dir}${sep}${trimmed}-${shortId}`
 
-  if (newDir === worktreePath) return null
+    if (newDir === worktreePath) return null
 
-  if (remote) {
-    const check = (
-      await gitRunner().remote(
-        remote,
-        `test -d ${shellEscape(newDir, 'posix')} && echo EXISTS || echo MISSING`,
-        { timeout: 5000 }
-      )
-    ).trim()
-    if (check === 'EXISTS') return null
-  } else {
-    if (fs.existsSync(newDir)) return null
-  }
+    if (remote) {
+      const check = (
+        await gitRunner().remote(
+          remote,
+          `test -d ${shellEscape(newDir, 'posix')} && echo EXISTS || echo MISSING`,
+          { timeout: 5000 }
+        )
+      ).trim()
+      if (check === 'EXISTS') return null
+    } else {
+      if (fs.existsSync(newDir)) return null
+    }
 
-  try {
-    await gitExec(['worktree', 'move', worktreePath, newDir], worktreePath, {
-      timeout: 10000,
-      remote
-    })
-    return { newPath: newDir, name: trimmed }
-  } catch {
-    return null
-  }
+    try {
+      await gitExec(['worktree', 'move', worktreePath, newDir], worktreePath, {
+        timeout: 10000,
+        remote
+      })
+      return { newPath: newDir, name: trimmed }
+    } catch {
+      return null
+    }
+  })
 }
 
 export async function removeWorktree(
@@ -482,22 +514,24 @@ export async function removeWorktree(
   remote?: RemoteHost,
   deleteBranch = false
 ): Promise<boolean> {
-  // Read the branch before removal — afterwards git no longer associates it
-  // with a path, and we would have nothing left to delete.
-  const branch = deleteBranch ? await getGitBranch(worktreePath, remote) : null
-  try {
-    const args = ['worktree', 'remove', worktreePath]
-    if (force) args.push('--force')
-    await gitExec(args, projectPath, { timeout: 10000, remote })
-  } catch {
-    return false
-  }
-  // Best-effort, and never forced: `force` here means "discard uncommitted
-  // changes", which is not permission to drop unmerged commits. A branch git
-  // refuses to delete is left alone rather than failing a removal that
-  // already succeeded.
-  if (branch) await deleteBranches(projectPath, [branch], false, remote)
-  return true
+  return serialized(repoKey(projectPath, remote), async () => {
+    // Read the branch before removal — afterwards git no longer associates it
+    // with a path, and we would have nothing left to delete.
+    const branch = deleteBranch ? await getGitBranch(worktreePath, remote) : null
+    try {
+      const args = ['worktree', 'remove', worktreePath]
+      if (force) args.push('--force')
+      await gitExec(args, projectPath, { timeout: 10000, remote })
+    } catch {
+      return false
+    }
+    // Best-effort, and never forced: `force` here means "discard uncommitted
+    // changes", which is not permission to drop unmerged commits. A branch git
+    // refuses to delete is left alone rather than failing a removal that
+    // already succeeded.
+    if (branch) await deleteBranches(projectPath, [branch], false, remote)
+    return true
+  })
 }
 
 /**
@@ -807,16 +841,18 @@ export async function gitCommit(
   includeUnstaged: boolean,
   remote?: RemoteHost
 ): Promise<{ success: boolean; error?: string }> {
-  try {
-    if (includeUnstaged) {
-      await gitExec(['add', '-A'], cwd, { timeout: 10000, remote })
+  return serialized(repoKey(cwd, remote), async () => {
+    try {
+      if (includeUnstaged) {
+        await gitExec(['add', '-A'], cwd, { timeout: 10000, remote })
+      }
+      await gitExec(['commit', '-m', message], cwd, { timeout: 15000, remote })
+      return { success: true }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { success: false, error: msg }
     }
-    await gitExec(['commit', '-m', message], cwd, { timeout: 15000, remote })
-    return { success: true }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return { success: false, error: msg }
-  }
+  })
 }
 
 export async function gitPush(

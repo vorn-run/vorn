@@ -286,3 +286,44 @@ fn a_command_past_its_timeout_is_stopped() {
     assert!(matches!(run(&req), Err(vorn_git::Error::TimedOut { .. })));
     assert!(started.elapsed() < Duration::from_secs(2));
 }
+
+#[test]
+fn stderr_past_the_limit_is_an_error_too() {
+    let t = tmp();
+    let dir = repo(t.path(), "noisy");
+    // git names every missing path on stderr, and fails.
+    let mut req = request(&dir, &["rm", "--cached", "-q"]);
+    for i in 0..400 {
+        req.args
+            .push(format!("missing-path-with-a-long-enough-name-{i}"));
+    }
+    req.max_buffer = 64;
+    assert!(
+        matches!(run(&req), Err(vorn_git::Error::TooLarge { .. })),
+        "{:?}",
+        run(&req)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_git_wrapper_on_path_is_run_not_bypassed() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = tmp();
+    let dir = repo(t.path(), "wrapped");
+    let bin = t.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let wrapper = bin.join("git");
+    std::fs::write(&wrapper, "#!/bin/sh\necho wrapped\n").unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    for bin_name in [wrapper.display().to_string(), "git".to_string()] {
+        let mut req = request(&dir, &["rev-parse", "--show-toplevel"]);
+        req.bin = bin_name;
+        req.env.retain(|(key, _)| key != "PATH");
+        req.env.push(("PATH".into(), bin.display().to_string()));
+        let reply = run(&req).unwrap();
+        assert_eq!(reply.stdout, "wrapped\n");
+        assert_eq!(reply.engine, Engine::Git);
+    }
+}
