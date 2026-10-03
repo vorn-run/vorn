@@ -185,6 +185,7 @@ describe('the screen model on the native core', () => {
     createScreen('serialize', 80, 24)
     screens[2].failNext = true
     expect(await serializeScreen('serialize')).toBeNull()
+    expect(hasScreen('serialize')).toBe(false)
   })
 })
 

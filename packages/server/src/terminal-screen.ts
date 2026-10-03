@@ -493,7 +493,8 @@ export async function serializeScreen(id: string): Promise<ScreenSnapshot | null
     try {
       return native.serialize()
     } catch (err) {
-      log.warn({ err, id }, '[screen] could not serialize')
+      // As for feed and resize: a model that faulted is not retried on every checkpoint.
+      drop(id, err)
       return null
     }
   }

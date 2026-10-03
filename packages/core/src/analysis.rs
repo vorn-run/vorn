@@ -200,6 +200,11 @@ impl Analyzer {
                 // text slice above relies on (and which would panic otherwise).
                 (State::Str, _) if b < 0x80 || self.str_len < MAX_STRING_BYTES => {}
                 (_, 0x80..) => {
+                    // An overlong string can hit its limit mid-character: skip
+                    // the rest of that character so `i` is on a boundary again.
+                    while i < bytes.len() && bytes[i] & 0xc0 == 0x80 {
+                        i += 1;
+                    }
                     self.state = State::Ground;
                     continue;
                 }
@@ -375,7 +380,9 @@ impl Analyzer {
                 .error
                 .get_or_insert_with(|| error_patterns().is_match(&l.text));
         }
-        let current = self.line.as_str();
+        // Only the window `analyzeOutput` keeps: a long stream with no newline
+        // would otherwise be rescanned in full on every chunk.
+        let current = tail(&self.line, WAITING_WINDOW_CHARS);
         if error || error_patterns().is_match(current) {
             return STATUS_ERROR;
         }
@@ -384,7 +391,12 @@ impl Analyzer {
         // prompt don't hide it.
         let mut budget = WAITING_WINDOW_CHARS;
         let mut last = "";
-        for l in std::iter::once(current).chain(self.lines.iter().rev().map(|l| l.text.as_str())) {
+        let completed = self
+            .lines
+            .iter()
+            .rev()
+            .map(|l| tail(&l.text, WAITING_WINDOW_CHARS));
+        for l in std::iter::once(current).chain(completed) {
             let trimmed = l.trim_end();
             if !trimmed.is_empty() {
                 last = trimmed;
@@ -400,6 +412,15 @@ impl Analyzer {
             return STATUS_WAITING;
         }
         STATUS_RUNNING
+    }
+}
+
+/// The last `n` characters of `s`, found from the end so the cost is `n`, not `s`.
+fn tail(s: &str, n: usize) -> &str {
+    match n.checked_sub(1).and_then(|k| s.char_indices().rev().nth(k)) {
+        Some((i, _)) => &s[i..],
+        None if n == 0 => "",
+        None => s,
     }
 }
 
@@ -532,6 +553,28 @@ mod tests {
             STATUS_RUNNING
         );
         assert_eq!(a.append_str("plain", false), STATUS_NONE);
+    }
+
+    #[test]
+    fn overlong_multibyte_string_is_dropped_on_a_boundary() {
+        // An OSC whose payload hits the limit mid-character must not leave the
+        // scanner inside that character.
+        for pad in 0..3 {
+            let mut a = Analyzer::new();
+            let osc = format!("\x1b]0;{}{}", "x".repeat(pad), "€".repeat(MAX_STRING_BYTES));
+            a.append_str(&osc, true);
+            a.append_str("after\n", true);
+            // The rest of the payload is text now, as after any dropped string.
+            assert!(a.output(None).last().unwrap().ends_with("after"));
+        }
+    }
+
+    #[test]
+    fn tail_counts_chars() {
+        assert_eq!(tail("héllo", 3), "llo");
+        assert_eq!(tail("hé", 5), "hé");
+        assert_eq!(tail("hé", 0), "");
+        assert_eq!(tail("€€€", 2), "€€");
     }
 
     #[test]
