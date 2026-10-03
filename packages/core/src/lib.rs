@@ -74,7 +74,7 @@ fn ghostty_version() -> Option<String> {
 
 /// Takes a chunk and does nothing with it: what one napi crossing with a string
 /// argument costs, for the bench to set beside the real calls.
-#[napi]
+#[napi(catch_unwind)]
 pub fn noop(data: String) -> u32 {
     data.len() as u32
 }

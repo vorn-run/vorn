@@ -81,7 +81,7 @@ import {
   setLaunchDataDir
 } from './process-utils'
 import log from './logger'
-import { selectCore } from './native-core'
+import { activeCore } from './native-core'
 import { appFrameAncestors } from './extensions/frame-ancestors'
 
 /**
@@ -182,9 +182,10 @@ export async function startServer(
   // server that loses the endpoint claim exits without ever having one.
   configureHistory(dataDir)
 
-  // VORN_CORE=native opts into the Rust core. It does no work yet beyond proving
-  // it loads; the log line is how a run with the flag on shows it took effect.
-  const core = selectCore()
+  // VORN_CORE=native opts into the Rust core for the screen model and output
+  // analysis. This is the selection they dispatch on, made once here so the log
+  // line names the core actually in use.
+  const core = activeCore()
   if (core.native) {
     log.info({ core: core.info }, `[core] native ${core.info?.version}`)
   } else if (core.fallback) {
