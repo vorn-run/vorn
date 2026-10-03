@@ -12,6 +12,7 @@
     "dev": "electron-vite dev",
     "build:server": "cd packages/server && npx tsup",
     "build:web": "cd packages/web && npx vite build",
+    "build:core": "yarn workspace @vornrun/core build",
     "build": "yarn build:server && yarn build:web && electron-vite build",
     "preview": "electron-vite preview",
     "postinstall": "electron-builder install-app-deps",

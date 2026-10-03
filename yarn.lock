@@ -4806,6 +4806,12 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@vornrun/core@workspace:packages/core":
+  version: 0.0.0-use.local
+  resolution: "@vornrun/core@workspace:packages/core"
+  languageName: unknown
+  linkType: soft
+
 "@vornrun/desktop@workspace:packages/desktop":
   version: 0.0.0-use.local
   resolution: "@vornrun/desktop@workspace:packages/desktop"
