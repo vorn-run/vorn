@@ -104,7 +104,8 @@ jobs:
       - name: Packaged core loads
         shell: bash
         run: |
-          file=$(find dist -path '*/resources/core/vorn_core.node' -print -quit)
+          # -ipath: the mac app keeps it under Contents/Resources.
+          file=$(find dist -ipath '*/resources/core/vorn_core.node' -print -quit)
           if [ -z "$file" ]; then
             echo "ERROR: vorn_core.node is not in the packaged resources"
             exit 1
