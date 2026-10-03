@@ -69,8 +69,9 @@ const { fakeCore, screens, analyzers } = vi.hoisted(() => {
       analyzers.push(this)
     }
     append(data: string, analyze: boolean): number {
-      if (this.failNext) throw new Error('core fault')
+      // The worst case: the chunk is taken in, then the status step throws.
       this.calls.push([data, analyze])
+      if (this.failNext) throw new Error('core fault')
       return this.next
     }
     free(): void {
@@ -247,8 +248,11 @@ describe('output analysis on the native core', () => {
     pm.appendOutput('u', 'other\npar')
     analyzers[0].failNext = true
     expect(() => pm.appendOutput('t', 'second\n')).not.toThrow()
-    // Output read before the fault survives, for every session.
+    // Output read before the fault survives, for every session, and the chunk
+    // the core already took is not added twice.
     expect(ptyManager.getOutput('t')).toEqual(['first', 'second'])
+    pm.appendOutput('t', 'third\n')
+    expect(ptyManager.getOutput('t')).toEqual(['first', 'second', 'third'])
     pm.appendOutput('u', 'tial\n')
     expect(ptyManager.getOutput('u')).toEqual(['other', 'partial'])
     expect(analyzers.every((a) => a.freed)).toBe(true)

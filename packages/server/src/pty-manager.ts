@@ -826,6 +826,8 @@ class PtyManager extends EventEmitter {
     if (session.agentType === 'shell') return
 
     const Analyzer = activeCore().native?.Analyzer
+    // Whether this chunk still goes into the JS line buffer below.
+    let recordLines = true
     if (Analyzer && !this.nativeAnalysisFailed) {
       try {
         let analyzer = this.analyzers.get(id)
@@ -843,28 +845,34 @@ class PtyManager extends EventEmitter {
         log.warn({ err, id }, '[core] native output analysis failed; using js')
         this.nativeAnalysisFailed = true
         this.handOutputToJs()
+        // The core may have taken some or all of this chunk before it threw,
+        // and that is in the history just handed over: adding the chunk again
+        // would duplicate it. At worst the unread tail of one chunk is lost.
+        recordLines = false
       }
     }
 
-    let buf = this.outputLines.get(id)
-    if (!buf) {
-      buf = []
-      this.outputLines.set(id, buf)
-    }
-
     const clean = stripAnsi(data)
-    const partial = this.outputPartials.get(id) ?? ''
-    const combined = partial + clean
-    const segments = combined.split('\n')
+    if (recordLines) {
+      let buf = this.outputLines.get(id)
+      if (!buf) {
+        buf = []
+        this.outputLines.set(id, buf)
+      }
 
-    // Last segment is incomplete (no trailing \n) — save for next chunk
-    this.outputPartials.set(id, segments.pop()!)
+      const partial = this.outputPartials.get(id) ?? ''
+      const combined = partial + clean
+      const segments = combined.split('\n')
 
-    for (const line of segments) {
-      buf.push(line)
-    }
-    if (buf.length > MAX_OUTPUT_LINES) {
-      buf.splice(0, buf.length - MAX_OUTPUT_LINES)
+      // Last segment is incomplete (no trailing \n) — save for next chunk
+      this.outputPartials.set(id, segments.pop()!)
+
+      for (const line of segments) {
+        buf.push(line)
+      }
+      if (buf.length > MAX_OUTPUT_LINES) {
+        buf.splice(0, buf.length - MAX_OUTPUT_LINES)
+      }
     }
 
     // Bracketed paste mode detection — works for all agents using readline.

@@ -407,12 +407,9 @@ impl Analyzer {
         // prompt don't hide it.
         let mut budget = WAITING_WINDOW_CHARS;
         let mut last = "";
-        let completed = self
-            .lines
-            .iter()
-            .rev()
-            .map(|l| tail(&l.text, WAITING_WINDOW_CHARS));
-        for l in std::iter::once(current).chain(completed) {
+        let mut completed = self.lines.iter().rev();
+        let mut l = current;
+        loop {
             let trimmed = l.trim_end();
             if !trimmed.is_empty() {
                 last = trimmed;
@@ -420,8 +417,10 @@ impl Analyzer {
             }
             // The line and the newline after it.
             budget = budget.saturating_sub(l.chars().count() + 1);
-            if budget == 0 {
-                break;
+            match completed.next() {
+                // Each earlier line only as far as the window still reaches.
+                Some(next) if budget > 0 => l = tail(&next.text, budget),
+                _ => break,
             }
         }
         if waiting_patterns().is_match(last) {
@@ -601,6 +600,17 @@ mod tests {
         assert_eq!(a.append_str("error: boom\n", true), STATUS_ERROR);
         let long = "x".repeat(2100);
         assert_eq!(a.append_str(&format!("{long}\n"), true), STATUS_RUNNING);
+    }
+
+    #[test]
+    fn waiting_window_is_shared_like_js() {
+        // The prompt is 1500 blank characters and a newline back, so only
+        // the last 499 characters of its line are in the window: no prompt.
+        let mut a = Analyzer::new();
+        let line = format!("Continue? (y/n){}\n", " ".repeat(1000));
+        let pad = format!("{}\n", " ".repeat(1499));
+        a.append_str(&line, true);
+        assert_eq!(a.append_str(&pad, true), STATUS_RUNNING);
     }
 
     #[test]
