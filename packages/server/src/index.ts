@@ -81,7 +81,7 @@ import {
   setLaunchDataDir
 } from './process-utils'
 import log from './logger'
-import { activeCore } from './native-core'
+import { activeCore, preloadFlaggedCore, setExperimentalSource } from './native-core'
 import { appFrameAncestors } from './extensions/frame-ancestors'
 
 /**
@@ -190,6 +190,19 @@ export async function startServer(
     log.info({ core: core.info }, `[core] native ${core.info?.version}`)
   } else if (core.fallback) {
     log.warn(`[core] staying on js: ${core.fallback}`)
+  }
+  // Settings › Experimental: each switch moves one piece onto the core for the
+  // terminals opened after it is turned on. Read from the cached config, so
+  // asking per terminal costs a field read.
+  setExperimentalSource(() => configManager.loadConfig().defaults.experimental)
+  const flagged = preloadFlaggedCore()
+  if (flagged?.native) {
+    log.info(
+      { core: flagged.info },
+      `[core] native ${flagged.info?.version} for experimental switches`
+    )
+  } else if (flagged?.fallback) {
+    log.warn(`[core] experimental switches stay on js: ${flagged.fallback}`)
   }
 
   // Who this server is, so a desktop can decide whether to adopt it instead of

@@ -366,6 +366,7 @@ export type SettingsCategory =
   | 'connectors'
   | 'keys'
   | 'network'
+  | 'experimental'
   | 'about'
 
 export interface UISlice {

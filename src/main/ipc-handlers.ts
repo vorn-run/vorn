@@ -211,6 +211,7 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.WORKTREE_INVENTORY, (_, params) =>
     requireBridge().request(IPC.WORKTREE_INVENTORY, params)
   )
+  safeHandle(IPC.CORE_STATUS, () => requireBridge().request(IPC.CORE_STATUS))
   safeHandle(IPC.WORKTREE_RECLAIM_ARTIFACTS, (_, params) =>
     requireBridge().request(IPC.WORKTREE_RECLAIM_ARTIFACTS, params)
   )

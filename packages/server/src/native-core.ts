@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import type { CoreStatus, ExperimentalConfig } from '@vornrun/shared/types'
 
 /**
  * Which implementation of the terminal pipeline this server runs.
@@ -157,12 +158,111 @@ function serverDir(): string {
 }
 
 let active: CoreSelection | null = null
+/** Test-only, through `resetCoreSelection`. */
+let loadOverride: ((candidates: string[]) => NativeCore) | undefined
 
 /**
  * The core this process runs, resolved once from `VORN_CORE` and cached, so
  * the per-chunk lookup in the output path is a field read.
  */
 export function activeCore(): CoreSelection {
-  active ??= selectCore()
+  active ??= selectCore({ load: loadOverride })
   return active
+}
+
+/**
+ * A piece of the terminal pipeline that can run on the core, each behind its
+ * own switch in Settings › Experimental.
+ */
+export type NativeFeature = 'screen'
+
+const FEATURE_FLAGS: Record<NativeFeature, keyof ExperimentalConfig> = {
+  screen: 'nativeScreen'
+}
+
+type FlagSource = () => ExperimentalConfig | undefined
+let readFlags: FlagSource = () => undefined
+
+/**
+ * Where the switches are read from. The server points this at its config; with
+ * nothing set, as in tests and the bench, only `VORN_CORE` turns a feature on.
+ */
+export function setExperimentalSource(source: FlagSource | null): void {
+  readFlags = source ?? (() => undefined)
+}
+
+/**
+ * `VORN_CORE` when it was set at all: `native` turns every feature on and `js`
+ * every feature off, whatever the switches say. Anything unrecognized counts as
+ * `js`, as `selectCore` treats it.
+ */
+export function forcedCoreMode(value: string | undefined): CoreMode | null {
+  if (!value?.trim()) return null
+  return requestedCoreMode(value) ?? 'js'
+}
+
+let flagged: CoreSelection | null = null
+
+/** The binary, loaded the first time a switch asks for it, and only tried once. */
+function flaggedCore(): CoreSelection {
+  flagged ??= selectCore({ env: { ...process.env, VORN_CORE: 'native' }, load: loadOverride })
+  return flagged
+}
+
+/**
+ * The core a terminal opening now should use for `feature`, or null for the JS
+ * path. Read once per terminal rather than per chunk, so a switch flipped while
+ * a session runs leaves that session on what it started with.
+ *
+ * Never throws: a switch that is on with a binary that will not load is the JS
+ * path, and `coreStatus` says why.
+ */
+export function coreFor(feature: NativeFeature): NativeCore | null {
+  const forced = forcedCoreMode(process.env.VORN_CORE)
+  if (forced === 'js') return null
+  if (forced === 'native') return activeCore().native
+  return flagsNow()?.[FEATURE_FLAGS[feature]] === true ? flaggedCore().native : null
+}
+
+function flagsNow(): ExperimentalConfig | undefined {
+  try {
+    return readFlags()
+  } catch {
+    // A config that cannot be read is no switch at all.
+    return undefined
+  }
+}
+
+/**
+ * What Settings › Experimental shows beside the switches. Tries the binary if
+ * nothing has yet, so the page can say whether turning a switch on would work.
+ */
+export function coreStatus(): CoreStatus {
+  const forced = forcedCoreMode(process.env.VORN_CORE)
+  if (forced === 'js') return { loaded: null, version: null, error: null, forced }
+  const selection = forced === 'native' ? activeCore() : flaggedCore()
+  return {
+    loaded: selection.native !== null,
+    version: selection.info?.version ?? null,
+    error: selection.native ? null : (selection.fallback ?? null),
+    forced
+  }
+}
+
+/**
+ * Loads the binary now if any switch is on, so a missing build is in the log at
+ * startup rather than when the first terminal opens. Returns what it found.
+ */
+export function preloadFlaggedCore(): CoreSelection | null {
+  if (forcedCoreMode(process.env.VORN_CORE) !== null) return null
+  const flags = flagsNow()
+  const anyOn = Object.values(FEATURE_FLAGS).some((key) => flags?.[key] === true)
+  return anyOn ? flaggedCore() : null
+}
+
+/** Test-only: forget every cached selection, and load through `load` from now on. */
+export function resetCoreSelection(load?: (candidates: string[]) => NativeCore): void {
+  active = null
+  flagged = null
+  loadOverride = load
 }

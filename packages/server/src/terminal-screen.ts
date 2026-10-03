@@ -2,19 +2,15 @@ import * as headless from '@xterm/headless'
 import * as serializeAddon from '@xterm/addon-serialize'
 import log from './logger'
 import { OSC_PRIVATE } from './shell-integration/protocol'
-import { activeCore, type NativeScreen } from './native-core'
+import { coreFor, type NativeScreen } from './native-core'
 
 /**
- * `VORN_CORE=native`: the model is a libghostty-vt terminal in the Rust core
- * instead of a headless xterm. Parsed synchronously, so there is no queue to
- * bound and nothing to wait for before reading it.
+ * Settings › Experimental › native screen model, or `VORN_CORE=native`: the
+ * model is a libghostty-vt terminal in the Rust core instead of a headless
+ * xterm. Parsed synchronously, so there is no queue to bound and nothing to
+ * wait for before reading it. Chosen when the model is created, so a switch
+ * flipped later leaves running terminals on what they started with.
  */
-type NativeScreenCtor = new (cols: number, rows: number) => NativeScreen
-let nativeCtor: NativeScreenCtor | null | undefined
-function nativeScreen(): NativeScreenCtor | null {
-  if (nativeCtor === undefined) nativeCtor = activeCore().native?.Screen ?? null
-  return nativeCtor
-}
 const natives = new Map<string, NativeScreen>()
 
 /**
@@ -345,7 +341,7 @@ export function createScreen(
   labels?: { title?: string; cwd?: string }
 ): void {
   clearScreen(id)
-  const Native = nativeScreen()
+  const Native = coreFor('screen')?.Screen
   if (Native) {
     try {
       const native = new Native(cols, rows)

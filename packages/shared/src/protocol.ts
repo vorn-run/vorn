@@ -17,6 +17,7 @@ import type {
   TerminalSession,
   HeadlessSession,
   AppConfig,
+  CoreStatus,
   ResizePayload,
   FileEntry,
   FileStamp,
@@ -672,6 +673,8 @@ export interface RequestMethods {
   'shell:create': { params: string | undefined; result: TerminalSession }
   'config:load': { params: void; result: AppConfig }
   'config:save': { params: AppConfig; result: void }
+  /** Whether the Rust core loaded, for Settings › Experimental. */
+  'core:status': { params: void; result: CoreStatus }
   /**
    * Sessions from the last run that no pane has taken yet.
    *

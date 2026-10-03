@@ -110,7 +110,8 @@ vi.mock('../packages/server/src/logger', () => ({
 }))
 vi.mock('../packages/server/src/native-core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../packages/server/src/native-core')>()),
-  activeCore: () => ({ mode: 'native', native: fakeCore })
+  activeCore: () => ({ mode: 'native', native: fakeCore }),
+  coreFor: () => fakeCore
 }))
 
 import {

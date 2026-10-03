@@ -545,6 +545,7 @@ export function createApiShim(wsUrl: string) {
       rpc.invoke('worktree:activeSessions', worktreePath),
     getWorktreeInventory: (params?: { projectPaths?: string[]; refresh?: boolean }) =>
       rpc.invoke('worktree:inventory', params),
+    getCoreStatus: () => rpc.invoke('core:status'),
     reclaimWorktreeArtifacts: (paths: string[]) =>
       rpc.invoke('worktree:reclaimArtifacts', { paths }),
     removeWorktrees: (

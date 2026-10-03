@@ -4,9 +4,29 @@ Vorn's Rust core, loaded into the server as `vorn_core.node` through
 [napi-rs](https://napi.rs). It parses terminal output with
 [libghostty-vt](https://crates.io/crates/libghostty-vt), Ghostty's VT engine.
 
-Off by default. The server only loads it when started with `VORN_CORE=native`,
-and falls back to the JS path, with a warning in the log, when the binary is
-missing or will not load. `VORN_CORE_PATH` points it at a specific binary.
+Off by default. Each piece it can take over has a switch in **Settings ›
+Experimental**, which applies to terminals opened after it is turned on.
+`VORN_CORE=native` in the server's environment turns every switch on and
+`VORN_CORE=js` turns every switch off. A switch that is on with a binary that is
+missing or will not load stays on the JS path, says why in the log and on the
+settings page. `VORN_CORE_PATH` points the server at a specific binary.
+
+## Layout
+
+A Cargo workspace. The logic is in plain crates with no napi in them, so it can
+later serve a daemon or the native UI, and its tests and benchmarks are ordinary
+Rust binaries:
+
+| Crate                               | What                                                              |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| `crates/screen` (`vorn-screen`)     | A terminal's screen on libghostty-vt: feed, title, cwd, serialize |
+| `crates/analysis` (`vorn-analysis`) | Stripped line ring, bracketed paste and status patterns           |
+| `.` (`vorn-core`)                   | The napi adapters the server loads as `vorn_core.node`            |
+
+```sh
+cargo test -p vorn-screen -p vorn-analysis   # the logic, on any platform
+cargo bench -p vorn-analysis                 # Criterion, without napi
+```
 
 ## Build
 
