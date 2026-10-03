@@ -164,9 +164,12 @@ export class ServerBridge extends EventEmitter {
             this.helloVersion = hello?.protocolVersion
             log.info({ hello }, '[bridge] server protocol')
             // Frame layout 1 is the one this build reads; asked per connection, since the choice dies with the socket.
-            if (hello?.capabilities?.terminalBytes === 1) {
-              this.notify('subscribe:set', { terminalBytes: true })
+            // The renderer re-attaches on `terminal:resync`, so a burst it cannot keep up with is withheld, not queued.
+            const ask = {
+              ...(hello?.capabilities?.terminalBytes === 1 && { terminalBytes: true }),
+              ...(hello?.capabilities?.terminalResync === 1 && { resync: true })
             }
+            if (Object.keys(ask).length) this.notify('subscribe:set', ask)
           }
           if (msg.method === 'server:identity') {
             this.identity = (msg as RpcNotification).params as ServerIdentity

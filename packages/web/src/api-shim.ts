@@ -199,6 +199,7 @@ class RpcClient {
       if (msg.method === 'server:hello') {
         const hello = msg.params as ServerHello | undefined
         this.terminalBytes = hello?.capabilities?.terminalBytes === 1
+        this.terminalResync = hello?.capabilities?.terminalResync === 1
         const serverVersion = hello?.protocolVersion
         if (typeof serverVersion === 'number' && serverVersion !== RUNTIME_PROTOCOL_VERSION) {
           this.onVersionMismatch?.(serverVersion, RUNTIME_PROTOCOL_VERSION)
@@ -319,8 +320,14 @@ class RpcClient {
   /** Frame layout 1 is the one this build reads. */
   private terminalBytes = false
 
-  private bytesAsk(): { terminalBytes?: true } {
-    return this.terminalBytes ? { terminalBytes: true } : {}
+  /** The renderer re-attaches on `terminal:resync`, so it can be asked to. */
+  private terminalResync = false
+
+  private bytesAsk(): { terminalBytes?: true; resync?: true } {
+    return {
+      ...(this.terminalBytes && { terminalBytes: true }),
+      ...(this.terminalResync && { resync: true })
+    }
   }
 
   notify(method: string, params?: unknown): void {
@@ -434,6 +441,8 @@ export function createApiShim(wsUrl: string) {
       rpc.on('terminal:data', callback as (p: unknown) => void),
     onTerminalBell: (callback: (event: { id: string }) => void) =>
       rpc.on('terminal:bell', callback as (p: unknown) => void),
+    onTerminalResync: (callback: (event: { id: string }) => void) =>
+      rpc.on('terminal:resync', callback as (p: unknown) => void),
     onTerminalExit: (callback: (event: { id: string; exitCode: number }) => void) =>
       rpc.on('terminal:exit', callback as (p: unknown) => void),
     onSessionCreated: (callback: (session: unknown) => void) =>

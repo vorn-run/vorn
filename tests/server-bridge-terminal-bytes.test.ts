@@ -61,6 +61,19 @@ describe('terminal output as bytes, at the bridge', () => {
     })
   })
 
+  it('promises to re-attach when the server can withhold output', async () => {
+    const { socket } = await connect()
+    const asked = new Promise<string>((resolve) =>
+      socket.on('message', (raw) => {
+        if (raw.toString().includes('subscribe:set')) resolve(raw.toString())
+      })
+    )
+
+    socket.send(hello({ auth: 1, subscribe: 1, terminalBytes: 1, terminalResync: 1 }))
+
+    expect(JSON.parse(await asked).params).toEqual({ terminalBytes: true, resync: true })
+  })
+
   it('asks for nothing of a frame layout it does not read', async () => {
     const { socket } = await connect()
     const received: string[] = []

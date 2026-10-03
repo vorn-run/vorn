@@ -2,7 +2,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const { created } = vi.hoisted(() => ({
-  created: [] as Array<{ id: number; write: ReturnType<typeof vi.fn> }>
+  created: [] as Array<{
+    id: number
+    write: ReturnType<typeof vi.fn>
+    reset: ReturnType<typeof vi.fn>
+  }>
 }))
 
 vi.mock('@xterm/xterm', () => {
@@ -28,13 +32,14 @@ vi.mock('@xterm/xterm', () => {
     dispose = vi.fn()
     focus = vi.fn()
     write = vi.fn()
+    reset = vi.fn()
     clearSelection = vi.fn()
     paste = vi.fn()
     scrollToBottom = vi.fn()
     scrollToLine = vi.fn()
     refresh = vi.fn()
     constructor() {
-      created.push({ id: n++, write: this.write })
+      created.push({ id: n++, write: this.write, reset: this.reset })
     }
     open(el: HTMLElement): void {
       this.element = el
@@ -65,12 +70,17 @@ vi.mock('@xterm/xterm/css/xterm.css', () => ({}))
 
 type Chunk = { id: string; data: string | Uint8Array; seq: number }
 let emit: (c: Chunk) => void = () => {}
+let resync: (e: { id: string }) => void = () => {}
 const attachTerminal = vi.fn()
 
 Object.defineProperty(window, 'api', {
   value: {
     onTerminalData: (cb: (c: Chunk) => void) => {
       emit = cb
+      return () => {}
+    },
+    onTerminalResync: (cb: (e: { id: string }) => void) => {
+      resync = cb
       return () => {}
     },
     attachTerminal,
@@ -85,6 +95,7 @@ import {
   registerSlot,
   destroyTerminal,
   hydrateTerminal,
+  resyncTerminal,
   initGlobalDataListener,
   disposeGlobalDataListener
 } from '../src/renderer/lib/terminal-registry'
@@ -319,5 +330,56 @@ describe('output that arrives as bytes', () => {
     emit({ id: ID, data: ' text', seq: 2 })
 
     expect(written()).toEqual(['text:plain', 'text: text'])
+  })
+})
+
+/**
+ * The server withheld output from a window that fell behind, and says so once
+ * the window has caught up. What it skipped is not coming, so the screen here
+ * is wrong until it is seeded again.
+ */
+describe('a resync', () => {
+  it('clears the screen and seeds it again from the server', async () => {
+    attachTerminal.mockResolvedValueOnce({ data: 'FIRST SEED', seq: 3, live: true })
+    await open()
+    emit({ id: ID, data: 'before the gap', seq: 4 })
+
+    let answer: (v: unknown) => void = () => {}
+    attachTerminal.mockReturnValueOnce(new Promise((r) => (answer = r)))
+    resync({ id: ID })
+    await Promise.resolve()
+    // Sent after the resync, so it is in the new seed or numbered above it.
+    emit({ id: ID, data: 'in the new seed', seq: 90 })
+    emit({ id: ID, data: 'after the new seed', seq: 91 })
+    answer({ data: 'SECOND SEED', seq: 90, live: true })
+    // Joins the seed the resync started.
+    await hydrateTerminal(ID)
+
+    expect(created.at(-1)!.reset).toHaveBeenCalledOnce()
+    expect(attachTerminal).toHaveBeenCalledTimes(2)
+    expect(writes()).toEqual(['FIRST SEED', 'before the gap', 'SECOND SEED', 'after the new seed'])
+  })
+
+  it('waits for a seed already in flight, then asks again', async () => {
+    // The seed in flight may have been asked for before the gap; its answer
+    // would leave the gap on screen.
+    let first: (v: unknown) => void = () => {}
+    attachTerminal.mockReturnValueOnce(new Promise((r) => (first = r)))
+    attachTerminal.mockResolvedValueOnce({ data: 'AFTER THE GAP', seq: 50, live: true })
+
+    const opening = open()
+    const resyncing = resyncTerminal(ID)
+    expect(created.at(-1)!.reset).not.toHaveBeenCalled()
+    first({ data: 'BEFORE THE GAP', seq: 2, live: true })
+    await opening
+    await resyncing
+
+    expect(attachTerminal).toHaveBeenCalledTimes(2)
+    expect(writes()).toEqual(['BEFORE THE GAP', 'AFTER THE GAP'])
+  })
+
+  it('does nothing for a terminal this window does not show', async () => {
+    await resyncTerminal('not-here')
+    expect(attachTerminal).not.toHaveBeenCalled()
   })
 })

@@ -119,6 +119,15 @@ const api = {
     }
   },
 
+  /** Output for a terminal was withheld while this window fell behind; re-attach it. */
+  onTerminalResync: (callback: (event: { id: string }) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, event: { id: string }): void => callback(event)
+    ipcRenderer.on(IPC.TERMINAL_RESYNC, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.TERMINAL_RESYNC, listener)
+    }
+  },
+
   onTerminalExit: (callback: (event: { id: string; exitCode: number }) => void) => {
     const listener = (
       _: Electron.IpcRendererEvent,

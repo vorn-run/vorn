@@ -1,10 +1,15 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
 
-import { ClientRegistry, parseTopics } from '../packages/server/src/broadcast'
+import {
+  ClientRegistry,
+  parseTopics,
+  RESYNC_HIGH_WATER,
+  RESYNC_LOW_WATER
+} from '../packages/server/src/broadcast'
 import { decodeTerminalFrame } from '../packages/shared/src/terminal-frame'
 
 function mockWs(open = true) {
@@ -364,5 +369,118 @@ describe('terminal output as bytes', () => {
     reg.broadcast('terminal:data', { id: 'a', data: 'x', seq: 1 }, 'a')
 
     expect(typeof sent(ws)[0]).toBe('string')
+  })
+})
+
+/**
+ * A client that cannot keep up with a burst.
+ *
+ * Every flush queued for a socket that is not draining only lengthens the wait
+ * before that client sees the present, and grows the server by however fast the
+ * program prints. A client that promised to re-attach has its output withheld
+ * past the high mark and is told to re-attach once it has drained.
+ */
+describe('a client that falls behind', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** A socket whose queue is whatever the test says it is. */
+  function slowWs(): import('ws').WebSocket & { bufferedAmount: number } {
+    const ws = mockWs() as unknown as import('ws').WebSocket & { bufferedAmount: number }
+    ws.bufferedAmount = 0
+    return ws
+  }
+  const output = (id: string, seq: number) => ({ id, data: `${id}${seq}`, seq })
+  /** What the socket was sent, as `method id` or `data <text>`. */
+  const said = (ws: import('ws').WebSocket): string[] =>
+    (ws.send as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => {
+      const msg = JSON.parse(c[0] as string)
+      return msg.method === 'terminal:data'
+        ? `data ${msg.params.data}`
+        : `${msg.method} ${msg.params.id}`
+    })
+
+  function behind() {
+    const reg = new ClientRegistry()
+    const ws = slowWs()
+    reg.add(ws)
+    reg.setTopics(ws, undefined, undefined, true)
+    return { reg, ws }
+  }
+
+  it('withholds output past the high mark, and only terminal output', () => {
+    const { reg, ws } = behind()
+    reg.broadcast('terminal:data', output('a', 1), 'a')
+    ws.bufferedAmount = RESYNC_HIGH_WATER + 1
+    reg.broadcast('terminal:data', output('a', 2), 'a')
+    reg.broadcast('session:updated', { id: 'a' })
+
+    expect(said(ws)).toEqual(['data a1', 'session:updated a'])
+  })
+
+  it('keeps withholding until the queue has drained well below the mark', () => {
+    // Between the marks it stays behind: resuming at the high mark would flap
+    // on every flush, each one costing the client a whole re-attach.
+    const { reg, ws } = behind()
+    ws.bufferedAmount = RESYNC_HIGH_WATER + 1
+    reg.broadcast('terminal:data', output('a', 1), 'a')
+    ws.bufferedAmount = RESYNC_LOW_WATER + 1
+    reg.broadcast('terminal:data', output('a', 2), 'a')
+    ws.bufferedAmount = RESYNC_LOW_WATER
+    reg.broadcast('terminal:data', output('a', 3), 'a')
+
+    // The resync goes first, so the client is holding when the flush arrives.
+    expect(said(ws)).toEqual(['terminal:resync a', 'data a3'])
+  })
+
+  it('tells a client it caught up on a terminal that went quiet', () => {
+    vi.useFakeTimers()
+    const { reg, ws } = behind()
+    ws.bufferedAmount = RESYNC_HIGH_WATER + 1
+    reg.broadcast('terminal:data', output('a', 1), 'a')
+    reg.broadcast('terminal:data', output('b', 1), 'b')
+    vi.advanceTimersByTime(100)
+    expect(said(ws)).toEqual([])
+
+    ws.bufferedAmount = 0
+    vi.advanceTimersByTime(100)
+    expect(said(ws)).toEqual(['terminal:resync a', 'terminal:resync b'])
+    // Once, not on every tick after.
+    vi.advanceTimersByTime(100)
+    expect(said(ws)).toHaveLength(2)
+  })
+
+  it('does not hold back other clients', () => {
+    const { reg, ws } = behind()
+    const fast = slowWs()
+    reg.add(fast)
+    reg.setTopics(fast, undefined, undefined, true)
+    ws.bufferedAmount = RESYNC_HIGH_WATER + 1
+    reg.broadcast('terminal:data', output('a', 1), 'a')
+
+    expect(said(ws)).toEqual([])
+    expect(said(fast)).toEqual(['data a1'])
+  })
+
+  it('never withholds from a client that did not promise to re-attach', () => {
+    // Its screen would stay wrong for good: nothing would ever tell it to ask again.
+    const reg = new ClientRegistry()
+    const ws = slowWs()
+    reg.add(ws)
+    ws.bufferedAmount = RESYNC_HIGH_WATER * 8
+    reg.broadcast('terminal:data', output('a', 1), 'a')
+
+    expect(said(ws)).toEqual(['data a1'])
+  })
+
+  it('owes a client that withdraws the promise what it missed, at once', () => {
+    const { reg, ws } = behind()
+    ws.bufferedAmount = RESYNC_HIGH_WATER + 1
+    reg.broadcast('terminal:data', output('a', 1), 'a')
+    reg.setTopics(ws, undefined, undefined, false)
+    reg.broadcast('terminal:data', output('a', 2), 'a')
+
+    expect(said(ws)).toEqual(['terminal:resync a', 'data a2'])
   })
 })

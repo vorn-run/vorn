@@ -91,7 +91,31 @@ interface Client {
   subscription: Subscription | null
   /** Terminal output as a frame of bytes rather than a JSON string. */
   terminalBytes: boolean
+  /** Whether this client re-attaches on `terminal:resync`, and so may have output withheld. */
+  resync: boolean
+  /** Terminals whose output this client has missed, owed a resync once it catches up. */
+  behind: Set<string>
 }
+
+/**
+ * How far behind a client may fall before its terminal output is withheld.
+ *
+ * The Terminal State Protocol's per-client queue, measured where it actually
+ * is: the bytes the socket has accepted and not yet put on the wire. Past this,
+ * every further flush only lengthens the wait before the client sees the
+ * present, and grows the server's memory by however fast the program prints.
+ * So output stops going to that client, and once it has drained it is told to
+ * re-attach, which gives it the screen as it is now in one piece.
+ *
+ * Only for a client that said it can re-attach. One that did not keeps getting
+ * every byte, as it always has: withholding output from a client that will not
+ * ask for it again would leave its screen wrong for good.
+ */
+export const RESYNC_HIGH_WATER = 1024 * 1024
+/** Drained to here, a withheld client is told to re-attach. Well below the high mark, so it does not flap. */
+export const RESYNC_LOW_WATER = 256 * 1024
+/** How often a withheld client is checked when no output arrives to check it. */
+const RESYNC_POLL_MS = 25
 
 /** Terminal output before the wire: the pty hands over text. */
 export type TerminalText = Omit<TerminalData, 'data'> & { data: string }
@@ -108,8 +132,16 @@ export class ClientRegistry {
   private clients = new Map<WebSocket, Client>()
   private lastActivity = Date.now()
 
+  /** Runs while any client is behind, so a terminal that goes quiet is still caught up. */
+  private catchUp: ReturnType<typeof setInterval> | null = null
+
   add(ws: WebSocket, topics?: TopicFilter): void {
-    this.clients.set(ws, { subscription: subscriptionFrom(topics), terminalBytes: false })
+    this.clients.set(ws, {
+      subscription: subscriptionFrom(topics),
+      terminalBytes: false,
+      resync: false,
+      behind: new Set()
+    })
     log.info(`[ws] client connected (total: ${this.clients.size})`)
   }
 
@@ -151,12 +183,17 @@ export class ClientRegistry {
    * Ignored for a socket that was never admitted, so this cannot be used to add
    * an unauthenticated connection to the broadcast set.
    */
-  setTopics(ws: WebSocket, topics: TopicFilter, terminalBytes?: unknown): void {
+  setTopics(ws: WebSocket, topics: TopicFilter, terminalBytes?: unknown, resync?: unknown): void {
     const client = this.clients.get(ws)
     if (!client) return
     // A field left out stays as it was: the desktop asks for bytes alone, the web client sends topics alone.
     if (topics !== undefined) client.subscription = subscriptionFrom(topics)
     if (terminalBytes !== undefined) client.terminalBytes = terminalBytes === true
+    if (resync !== undefined) {
+      client.resync = resync === true
+      // Withdrawing the promise to re-attach: owe it what was withheld now, while it still listens for it.
+      if (!client.resync) this.resume(ws, client)
+    }
   }
 
   /**
@@ -171,6 +208,7 @@ export class ClientRegistry {
     for (const [ws, client] of this.clients) {
       if (ws.readyState !== ws.OPEN) continue
       if (client.subscription && !client.subscription.wants(method, scope)) continue
+      if (method === 'terminal:data' && client.resync && this.withhold(ws, client, params)) continue
       if (client.terminalBytes && method === 'terminal:data') {
         ws.send((frame ??= terminalFrame(params as TerminalText)))
       } else {
@@ -181,6 +219,59 @@ export class ClientRegistry {
 
   get size(): number {
     return this.clients.size
+  }
+
+  /**
+   * Whether this flush of terminal output is to be left out for this client.
+   *
+   * A terminal already behind stays behind until the socket has drained; then
+   * it is told to re-attach before this flush goes, so the flush lands in the
+   * client's hold behind the attach and is dropped there by its number if the
+   * attach already has it.
+   */
+  private withhold(ws: WebSocket, client: Client, params: unknown): boolean {
+    const id = (params as TerminalText).id
+    if (client.behind.has(id)) {
+      if (ws.bufferedAmount > RESYNC_LOW_WATER) return true
+      client.behind.delete(id)
+      ws.send(JSON.stringify(createNotification('terminal:resync', { id })))
+      return false
+    }
+    if (ws.bufferedAmount <= RESYNC_HIGH_WATER) return false
+    client.behind.add(id)
+    this.watchBehind()
+    return true
+  }
+
+  /** Tell a client every terminal it is behind on, now. */
+  private resume(ws: WebSocket, client: Client): void {
+    for (const id of client.behind) {
+      ws.send(JSON.stringify(createNotification('terminal:resync', { id })))
+    }
+    client.behind.clear()
+  }
+
+  private watchBehind(): void {
+    if (this.catchUp) return
+    this.catchUp = setInterval(() => {
+      let waiting = false
+      for (const [ws, client] of this.clients) {
+        if (!client.behind.size) continue
+        if (ws.readyState !== ws.OPEN) {
+          client.behind.clear()
+        } else if (ws.bufferedAmount <= RESYNC_LOW_WATER) {
+          this.resume(ws, client)
+        } else {
+          waiting = true
+        }
+      }
+      if (!waiting && this.catchUp) {
+        clearInterval(this.catchUp)
+        this.catchUp = null
+      }
+    }, RESYNC_POLL_MS)
+    // Never what keeps the process alive: a server shutting down has nobody to catch up.
+    this.catchUp.unref?.()
   }
 }
 
