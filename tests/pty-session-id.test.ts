@@ -11,13 +11,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
  * session's browser pane.
  */
 
-// `packages/server` pins its own node-pty (1.2.0-beta.14) while the root pins
-// beta.13, so the bare specifier 'node-pty' resolves to two different files
-// depending on who asks. Mocking it from here would patch the *root* copy and
-// leave pty-manager's nested one untouched — the spawn would be real and these
-// assertions would silently pass against zero recorded calls. Name the nested
-// copy explicitly. If the versions are ever deduped this path stops existing
-// and the mock fails loudly, which is the outcome we want.
+// The root and `packages/server` both pin node-pty 1.2.0-beta.15, so there is
+// a single copy and the bare specifier 'node-pty' resolves to it from here and
+// from pty-manager alike. If the two pins ever diverge again, the server would
+// get its own nested copy and this mock would stop reaching pty-manager: the
+// spawn would be real and the assertions below would fail on zero recorded
+// calls.
 const spawn = vi.hoisted(() =>
   vi.fn(() => ({
     pid: 4242,
