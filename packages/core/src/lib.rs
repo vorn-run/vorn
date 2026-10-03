@@ -7,6 +7,10 @@
 
 use napi_derive::napi;
 
+// Every exported function uses `#[napi(catch_unwind)]`: napi-rs only turns a
+// panic into a JS exception when asked to, and an uncaught one unwinding into
+// Node aborts the server and every terminal it hosts.
+
 /// What the loaded binary was built from, so the server can log it.
 #[napi(object)]
 pub struct CoreInfo {
@@ -16,7 +20,7 @@ pub struct CoreInfo {
     pub ghostty: Option<String>,
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn info() -> CoreInfo {
     CoreInfo {
         version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -24,7 +28,7 @@ pub fn info() -> CoreInfo {
     }
 }
 
-#[napi]
+#[napi(catch_unwind)]
 pub fn hello(name: String) -> String {
     format!("hello {name} from vorn-core {}", env!("CARGO_PKG_VERSION"))
 }
@@ -33,7 +37,7 @@ pub fn hello(name: String) -> String {
 ///
 /// A smoke test for the libghostty-vt link: an OSC 2 sequence in, the title out.
 #[cfg(feature = "ghostty")]
-#[napi]
+#[napi(catch_unwind)]
 pub fn parse_title(bytes: napi::bindgen_prelude::Buffer) -> napi::Result<String> {
     use libghostty_vt::terminal::{Options, Terminal};
 

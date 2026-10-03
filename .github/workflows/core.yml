@@ -20,6 +20,13 @@ on:
     paths: *paths
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: core-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   core:
     strategy:
@@ -49,14 +56,14 @@ jobs:
 
       # libghostty-vt-sys builds Ghostty's VT library from source with Zig. The
       # Ghostty commit it pins refuses any Zig but 0.15.2.
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.15.2
 
+      # The version comes from packages/core/rust-toolchain.toml.
       - name: Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal --component clippy,rustfmt
-          rustup default stable
+        working-directory: packages/core
+        run: rustup toolchain install
 
       # target/ holds the Ghostty checkout and Zig's caches as well as cargo's,
       # which is most of a cold build.
@@ -66,7 +73,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             packages/core/target
-          key: core-${{ runner.os }}-${{ hashFiles('packages/core/Cargo.lock') }}
+          key: core-${{ runner.os }}-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
           restore-keys: core-${{ runner.os }}-
 
       - name: Install dependencies
@@ -79,7 +86,7 @@ jobs:
 
       - name: Clippy
         working-directory: packages/core
-        run: cargo clippy --release -- -D warnings
+        run: cargo clippy --release --locked -- -D warnings
 
       - name: Build vorn_core.node
         run: yarn build:core

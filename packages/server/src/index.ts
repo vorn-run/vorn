@@ -186,7 +186,7 @@ export async function startServer(
   // it loads; the log line is how a run with the flag on shows it took effect.
   const core = selectCore()
   if (core.native) {
-    log.info({ core: core.native.info() }, `[core] native: ${core.native.hello('server')}`)
+    log.info({ core: core.info }, `[core] native ${core.info?.version}`)
   } else if (core.fallback) {
     log.warn(`[core] staying on js: ${core.fallback}`)
   }

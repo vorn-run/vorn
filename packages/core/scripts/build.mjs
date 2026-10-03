@@ -13,7 +13,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const args = new Set(process.argv.slice(2))
 const profile = args.has('--debug') ? 'debug' : 'release'
 
-const cargoArgs = ['build']
+const cargoArgs = ['build', '--locked']
 if (profile === 'release') cargoArgs.push('--release')
 if (args.has('--no-ghostty')) cargoArgs.push('--no-default-features')
 
