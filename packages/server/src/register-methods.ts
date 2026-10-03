@@ -28,6 +28,7 @@ import { clearScrollback, readScrollback } from './terminal-scrollback'
 import {
   claimTranscriptFor,
   sessionToBindOnCreate,
+  transcriptScope,
   transcriptHolder,
   transcriptNamedOnCreate
 } from './agent-transcript'
@@ -556,9 +557,10 @@ function liveSession(sessionId: string): TerminalSession {
 }
 
 /** What every installed extension shows on one session's card. */
-function activationStates(sessionId: string): ExtensionActivationState[] {
-  const subject = subjectOf(liveSession(sessionId))
-  return installedExtensions().map((pack) => ({
+async function activationStates(sessionId: string): Promise<ExtensionActivationState[]> {
+  const packs = installedExtensions()
+  const subject = await subjectOf(liveSession(sessionId), packs)
+  return packs.map((pack) => ({
     extensionId: pack.id,
     extensionName: pack.name,
     ...activationFor(pack, subject)
@@ -586,16 +588,17 @@ export function announceSession(session: TerminalSession): void {
  * longer shows is stopped by the same call.
  */
 export function syncExtensionsFor(session: TerminalSession): void {
-  try {
-    syncFooters(session)
+  const settle = async (): Promise<void> => {
+    await syncFooters(session)
     clientRegistry.broadcast(
       IPC.EXTENSION_ACTIVATION,
-      { sessionId: session.id, states: activationStates(session.id) },
+      { sessionId: session.id, states: await activationStates(session.id) },
       session.id
     )
-  } catch (err) {
-    log.warn(`[extensions] could not settle ${session.id}: ${err}`)
   }
+  // Not awaited: a session is announced now, and what its extensions show
+  // follows once any git remote they name has been read.
+  settle().catch((err) => log.warn(`[extensions] could not settle ${session.id}: ${err}`))
 }
 
 /**
@@ -709,13 +712,18 @@ export function registerAllMethods(): void {
   )
 
   // Terminal
-  registerMethod('terminal:create', (payload) => {
+  registerMethod('terminal:create', async (payload) => {
     const named = transcriptNamedOnCreate(payload.agentType, payload.resumeSessionId)
     // Naming a conversation that is already running: show what is writing it
     // rather than starting a second agent on it, as a resume does.
     const running = sessionToBindOnCreate(named, ptyManager.getLiveSessions())
     if (running) return running
-    const session = ptyManager.createPty(payload)
+    const prepared = await ptyManager.prepareSession(payload)
+    // Asked again: with native git the preparation lets another create for the
+    // same conversation run. From here to the claim nothing else can.
+    const started = sessionToBindOnCreate(named, ptyManager.getLiveSessions())
+    if (started) return started
+    const session = ptyManager.spawnPty(payload, prepared)
     // Only until the session names the conversation itself: an agent that can be
     // told an id already carries it, and one that cannot reports seconds later.
     if (named && !session.agentSessionId) claimSpawningTranscript(named, session.id)
@@ -1200,10 +1208,21 @@ export function registerAllMethods(): void {
         ? { ...previous, worktreePath: undefined, isWorktree: false }
         : previous
 
-      transcriptId = claimTranscriptFor(grounded, live, id, headlessManager.getActiveSessions())
+      // Read before the claim, so the claim and what it is checked against are
+      // one synchronous step: with native git this await lets other calls run.
+      const scope = await transcriptScope(grounded)
+      transcriptId = claimTranscriptFor(
+        grounded,
+        ptyManager.getLiveSessions(),
+        id,
+        headlessManager.getActiveSessions(),
+        scope
+      )
 
-      // Same id, same reasons as the shell branch above.
-      const session = ptyManager.createPty(buildRestorePayload(grounded, transcriptId), id)
+      // Same id, same reasons as the shell branch above. The claim stands in for
+      // the session while its workspace is prepared, as it does for any spawn.
+      const payload = buildRestorePayload(grounded, transcriptId)
+      const session = ptyManager.spawnPty(payload, await ptyManager.prepareSession(payload), id)
       // Carried on the server rather than through the payload, so membership is
       // never something a client can set on a spawn.
       if (grounded.groupId !== undefined) session.groupId = grounded.groupId
@@ -1267,12 +1286,12 @@ export function registerAllMethods(): void {
   }
 
   registerMethod('git:isGitRepo', (projectPath) => gitUtils.isGitRepo(projectPath))
-  registerMethod('git:listBranches', (projectPath) => {
+  registerMethod('git:listBranches', async (projectPath) => {
     const remote = resolveRemoteHost(projectPath)
-    const isRepo = remote || gitUtils.isGitRepo(projectPath)
+    const isRepo = remote || (await gitUtils.isGitRepo(projectPath))
     return {
-      local: isRepo ? gitUtils.listBranches(projectPath, remote) : [],
-      current: isRepo ? gitUtils.getGitBranch(projectPath, remote) : null,
+      local: isRepo ? await gitUtils.listBranches(projectPath, remote) : [],
+      current: isRepo ? await gitUtils.getGitBranch(projectPath, remote) : null,
       isGitRepo: !!isRepo
     }
   })
@@ -1289,9 +1308,9 @@ export function registerAllMethods(): void {
     invalidateSizeCache(worktreePath)
     return gitUtils.removeWorktree(projectPath, worktreePath, force, remote, deleteBranch)
   })
-  registerMethod('git:checkoutBranch', ({ cwd, branch }) => {
+  registerMethod('git:checkoutBranch', async ({ cwd, branch }) => {
     const remote = resolveRemoteHostByPath(cwd)
-    const result = gitUtils.checkoutBranch(cwd, branch, remote)
+    const result = await gitUtils.checkoutBranch(cwd, branch, remote)
     if (result.ok) {
       ptyManager.updateSessionsForWorktree(cwd, { branch })
       headlessManager.updateSessionsForWorktree(cwd, { branch })
@@ -1302,18 +1321,18 @@ export function registerAllMethods(): void {
     const remote = resolveRemoteHostByPath(worktreePath)
     return gitUtils.getGitBranch(worktreePath, remote)
   })
-  registerMethod('git:renameWorktreeBranch', ({ worktreePath, newBranch }) => {
+  registerMethod('git:renameWorktreeBranch', async ({ worktreePath, newBranch }) => {
     const remote = resolveRemoteHostByPath(worktreePath)
-    const result = gitUtils.renameWorktreeBranch(worktreePath, newBranch, remote)
+    const result = await gitUtils.renameWorktreeBranch(worktreePath, newBranch, remote)
     if (result) {
       ptyManager.updateSessionsForWorktree(worktreePath, { branch: newBranch })
       headlessManager.updateSessionsForWorktree(worktreePath, { branch: newBranch })
     }
     return result
   })
-  registerMethod('git:renameWorktree', ({ worktreePath, newName }) => {
+  registerMethod('git:renameWorktree', async ({ worktreePath, newName }) => {
     const remote = resolveRemoteHostByPath(worktreePath)
-    const result = gitUtils.renameWorktree(worktreePath, newName, remote)
+    const result = await gitUtils.renameWorktree(worktreePath, newName, remote)
     if (result) {
       ptyManager.updateSessionsForWorktree(worktreePath, {
         worktreePath: result.newPath,
@@ -1464,8 +1483,8 @@ export function registerAllMethods(): void {
   )
 
   // Headless
-  registerMethod('headless:create', (payload) => {
-    const session = headlessManager.createHeadless(payload)
+  registerMethod('headless:create', async (payload) => {
+    const session = await headlessManager.createHeadless(payload)
     logSessionEvent(session.id, 'created', {
       agentType: payload.agentType,
       projectName: payload.projectName,
@@ -2114,7 +2133,7 @@ export function registerAllMethods(): void {
     return result
   })
 
-  registerMethod('connector:detectRepo', (projectPath) => {
+  registerMethod('connector:detectRepo', async (projectPath) => {
     return detectRepoSlug(projectPath)
   })
 

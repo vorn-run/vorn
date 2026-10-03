@@ -473,3 +473,24 @@ export function sshExecSync(
   }
   return execFileSync('ssh', sshArgs, execOpts) as unknown as string
 }
+
+/**
+ * `sshExecSync` without blocking the event loop: the same arguments, timeout
+ * and environment, and the same error when the command fails.
+ */
+export function sshExec(
+  host: RemoteHost,
+  remoteCommand: string,
+  opts?: { timeout?: number }
+): Promise<string> {
+  const sshArgs = buildSshArgs(host)
+  sshArgs.push(remoteCommand)
+  return new Promise((resolve, reject) => {
+    execFile(
+      'ssh',
+      sshArgs,
+      { encoding: 'utf-8', timeout: opts?.timeout ?? 15000, env: getSafeEnv() },
+      (err, stdout) => (err ? reject(err) : resolve(stdout))
+    )
+  })
+}

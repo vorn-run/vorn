@@ -14,13 +14,14 @@
  * so "delivered" below is what the server actually sustained.
  *
  * WP4 is accepted on `burst.50MBps.8s.p99` going under 2 ms, WP5 on the
- * `agents+git` row matching the `agents` row.
+ * `agents+git` row matching the `agents` row with `VORN_GIT=native`.
  */
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createHistogram, type RecordableHistogram } from 'node:perf_hooks'
 import { getGitDiffFull } from '../../packages/server/src/git-utils'
+import { gitRunner } from '../../packages/server/src/git-runner'
 import { configureHistory, resetHistory } from '../../packages/server/src/history/writer'
 import { resetScreens } from '../../packages/server/src/terminal-screen'
 import { resetScrollback } from '../../packages/server/src/terminal-scrollback'
@@ -104,7 +105,18 @@ async function runScenario(
   let last = started
   let session = 0
   let gitTimer: NodeJS.Timeout | undefined
-  if (s.gitEveryMs) gitTimer = setInterval(() => void getGitDiffFull(repoDir), s.gitEveryMs)
+  let gitBusy = false
+  if (s.gitEveryMs) {
+    // One at a time, as the diff panel asks: a slow answer delays the next
+    // request rather than stacking them up.
+    gitTimer = setInterval(() => {
+      if (gitBusy) return
+      gitBusy = true
+      getGitDiffFull(repoDir)
+        .catch(() => null)
+        .finally(() => (gitBusy = false))
+    }, s.gitEveryMs)
+  }
 
   const stopProbe = probeLag(lag)
   await new Promise<void>((resolve) => {
@@ -223,7 +235,13 @@ async function main(): Promise<void> {
   emit({
     suite: 'event-loop',
     metrics,
-    info: { durationMs: DURATION_MS, rounds: ROUNDS, idleP99Ms: idleP99, maxDelayMs: maxima }
+    info: {
+      git: gitRunner().mode,
+      durationMs: DURATION_MS,
+      rounds: ROUNDS,
+      idleP99Ms: idleP99,
+      maxDelayMs: maxima
+    }
   })
   process.exit(0)
 }

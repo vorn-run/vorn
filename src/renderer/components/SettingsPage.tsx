@@ -15,6 +15,7 @@ import { ConnectorSettings } from './settings/ConnectorSettings'
 import { KeysSettings } from './settings/KeysSettings'
 import { NetworkSettings } from './settings/NetworkSettings'
 import { AboutSettings } from './settings/AboutSettings'
+import { ExperimentalSettings } from './settings/ExperimentalSettings'
 
 interface SidebarSection {
   header: string
@@ -226,6 +227,29 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
         )
       }
     ]
+  },
+  {
+    header: 'ADVANCED',
+    items: [
+      {
+        key: 'experimental',
+        label: 'Experimental',
+        icon: (
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <path d="M9 3h6" />
+            <path d="M10 3v6l-5 9a2 2 0 001.7 3h10.6a2 2 0 001.7-3l-5-9V3" />
+            <path d="M7.5 15h9" />
+          </svg>
+        )
+      }
+    ]
   }
 ]
 
@@ -346,6 +370,7 @@ export function SettingsPage() {
           {settingsCategory === 'connectors' && <ConnectorSettings />}
           {settingsCategory === 'keys' && <KeysSettings />}
           {settingsCategory === 'network' && <NetworkSettings />}
+          {settingsCategory === 'experimental' && <ExperimentalSettings />}
           {settingsCategory === 'about' && <AboutSettings />}
         </div>
       </div>

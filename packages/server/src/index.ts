@@ -82,6 +82,7 @@ import {
 } from './process-utils'
 import log from './logger'
 import { activeCore } from './native-core'
+import { setExperimentalFlags } from './experimental'
 import { appFrameAncestors } from './extensions/frame-ancestors'
 
 /**
@@ -223,6 +224,7 @@ export async function startServer(
   // Load initial config and wire up managers
   const config = configManager.loadConfig()
   setEnvPassthrough(config.defaults.envPassthrough)
+  setExperimentalFlags(config.defaults.experimental)
   ptyManager.setAgentCommands(config.agentCommands)
   ptyManager.setRemoteHosts(config.remoteHosts ?? [])
   headlessManager.setAgentCommands(config.agentCommands)
@@ -231,6 +233,7 @@ export async function startServer(
   // Re-sync managers and broadcast to clients when config changes
   configManager.onConfigChanged((cfg) => {
     setEnvPassthrough(cfg.defaults.envPassthrough)
+    setExperimentalFlags(cfg.defaults.experimental)
     ptyManager.setAgentCommands(cfg.agentCommands)
     ptyManager.setRemoteHosts(cfg.remoteHosts ?? [])
     headlessManager.setAgentCommands(cfg.agentCommands)

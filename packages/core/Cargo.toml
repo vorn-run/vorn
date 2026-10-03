@@ -1,3 +1,8 @@
+# Plain library crates live in crates/ and know nothing of Node; this crate is
+# the napi adapter over them, so the same logic can later serve vornd.
+[workspace]
+members = ["crates/*"]
+
 [package]
 name = "vorn-core"
 version = "0.7.5"
@@ -17,11 +22,13 @@ default = ["ghostty"]
 ghostty = ["dep:libghostty-vt"]
 
 [dependencies]
-napi = { version = "3", default-features = false, features = ["napi6"] }
+napi = { version = "3", default-features = false, features = ["napi6", "async", "tokio_rt"] }
 napi-derive = "3"
 libghostty-vt = { version = "0.2.2", default-features = false, optional = true }
 memchr = "2"
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "sync"] }
+vorn-git = { path = "crates/vorn-git" }
 
 [build-dependencies]
 napi-build = "2"

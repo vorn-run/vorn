@@ -218,8 +218,12 @@ describe('findOwningWorktree', () => {
     vi.mocked(execFileSync).mockReturnValue(porcelain as never)
   })
 
-  it('finds a worktree git owns even though it sits outside .vorn-worktrees', () => {
-    const owner = findOwningWorktree('/Users/dev/eclat-codex-oauth', projects, () => undefined)
+  it('finds a worktree git owns even though it sits outside .vorn-worktrees', async () => {
+    const owner = await findOwningWorktree(
+      '/Users/dev/eclat-codex-oauth',
+      projects,
+      () => undefined
+    )
     expect(owner).toEqual({
       projectPath: '/Users/dev/eclat',
       worktreePath: '/Users/dev/eclat-codex-oauth',
@@ -227,19 +231,21 @@ describe('findOwningWorktree', () => {
     })
   })
 
-  it('never returns the main worktree — the project itself is not a cleanup target', () => {
-    expect(findOwningWorktree('/Users/dev/eclat', projects, () => undefined)).toBeNull()
+  it('never returns the main worktree — the project itself is not a cleanup target', async () => {
+    expect(await findOwningWorktree('/Users/dev/eclat', projects, () => undefined)).toBeNull()
   })
 
-  it('returns null for a path no project claims', () => {
-    expect(findOwningWorktree('/Users/dev/somewhere-else', projects, () => undefined)).toBeNull()
+  it('returns null for a path no project claims', async () => {
+    expect(
+      await findOwningWorktree('/Users/dev/somewhere-else', projects, () => undefined)
+    ).toBeNull()
   })
 
-  it('lists each project only once across a batch', () => {
+  it('lists each project only once across a batch', async () => {
     const cache = new Map()
-    findOwningWorktree('/Users/dev/eclat-codex-oauth', projects, () => undefined, cache)
+    await findOwningWorktree('/Users/dev/eclat-codex-oauth', projects, () => undefined, cache)
     const callsAfterFirst = vi.mocked(execFileSync).mock.calls.length
-    findOwningWorktree('/Users/dev/eclat-codex-oauth', projects, () => undefined, cache)
+    await findOwningWorktree('/Users/dev/eclat-codex-oauth', projects, () => undefined, cache)
     expect(vi.mocked(execFileSync).mock.calls.length).toBe(callsAfterFirst)
   })
 })

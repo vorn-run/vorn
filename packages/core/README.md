@@ -8,6 +8,14 @@ Off by default. The server only loads it when started with `VORN_CORE=native`,
 and falls back to the JS path, with a warning in the log, when the binary is
 missing or will not load. `VORN_CORE_PATH` points it at a specific binary.
 
+Git is switched on its own, from Settings › Experimental › Native Git, or with
+`VORN_GIT=native|js`, which wins over the setting. On, every git command the
+server runs goes to `gitRun`, which runs it on a thread pool instead of on
+Node's event loop. The logic lives in `crates/vorn-git`, a plain crate: git as a
+child process with `execFileSync`'s limits and error messages, plus a
+[gix](https://crates.io/crates/gitoxide) fast path that answers the
+`rev-parse` queries in-process where it can match git byte for byte.
+
 ## Build
 
 Needs a Rust toolchain and [Zig 0.15.2](https://ziglang.org/download/), which

@@ -1,0 +1,288 @@
+//! Every command gix answers, against git itself, in the repositories that
+//! make either of them think twice. An answer from gix must be what git prints,
+//! byte for byte; where gix declines, git's own answer (or failure) is what the
+//! caller gets, so declining is always allowed and answering wrong never is.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Duration;
+
+use vorn_git::{run, run_git, Engine, Request};
+
+const FAST: &[&[&str]] = &[
+    &["rev-parse", "--is-inside-work-tree"],
+    &["rev-parse", "--show-toplevel"],
+    &["rev-parse", "--absolute-git-dir"],
+    &["rev-parse", "HEAD"],
+    &["rev-parse", "--abbrev-ref", "HEAD"],
+];
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("git runs");
+    assert!(
+        out.status.success(),
+        "git {args:?} in {dir:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn request(cwd: &Path, args: &[&str]) -> Request {
+    Request {
+        bin: "git".into(),
+        args: args.iter().map(|a| a.to_string()).collect(),
+        cwd: cwd.to_path_buf(),
+        env: std::env::vars().collect(),
+        timeout: Duration::from_secs(10),
+        max_buffer: 1024 * 1024,
+    }
+}
+
+/// A repository with one commit on `main`.
+fn repo(root: &Path, name: &str) -> PathBuf {
+    let dir = root.join(name);
+    std::fs::create_dir_all(dir.join("src/deep")).unwrap();
+    git(&dir, &["init", "-q", "-b", "main"]);
+    git(&dir, &["config", "user.email", "t@vorn.invalid"]);
+    git(&dir, &["config", "user.name", "t"]);
+    git(&dir, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(dir.join("src/deep/a.txt"), "a\n").unwrap();
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-q", "-m", "one"]);
+    dir
+}
+
+/// Asserts gix and git agree on every fast command in `cwd`, and returns which
+/// of them gix answered itself.
+fn agree(cwd: &Path) -> Vec<String> {
+    let mut answered = Vec::new();
+    for args in FAST {
+        let req = request(cwd, args);
+        let git_says = run_git(&req).map_err(|e| e.to_string());
+        let ours = run(&req);
+        match ours {
+            Ok(reply) if reply.engine == Engine::Gix => {
+                assert_eq!(
+                    Ok(reply.stdout.clone()),
+                    git_says,
+                    "gix answered `git {}` in {cwd:?} differently from git",
+                    args.join(" ")
+                );
+                answered.push(args.join(" "));
+            }
+            Ok(reply) => assert_eq!(Ok(reply.stdout), git_says, "{args:?} in {cwd:?}"),
+            Err(err) => assert!(git_says.is_err(), "{args:?} in {cwd:?}: {err}"),
+        }
+    }
+    answered
+}
+
+/// All of them, where gix answers at all. In an environment that steers git
+/// (CI sandboxes inject config through `GIT_CONFIG_COUNT`) gix declines
+/// everything, and the comparisons above still hold.
+fn all() -> usize {
+    if vorn_git::gix_answers_here() {
+        FAST.len()
+    } else {
+        eprintln!("gix declines in this environment; checking git's answers only");
+        0
+    }
+}
+
+fn tmp() -> tempfile::TempDir {
+    tempfile::tempdir().unwrap()
+}
+
+#[test]
+fn a_plain_repository_from_its_root_and_below() {
+    let t = tmp();
+    let dir = repo(t.path(), "plain");
+    assert_eq!(
+        agree(&dir).len(),
+        all(),
+        "gix should answer all of them here"
+    );
+    assert_eq!(agree(&dir.join("src/deep")).len(), all());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_repository_reached_through_a_symlink() {
+    let t = tmp();
+    let dir = repo(t.path(), "real");
+    let link = t.path().join("link");
+    std::os::unix::fs::symlink(&dir, &link).unwrap();
+    assert_eq!(agree(&link).len(), all());
+    assert_eq!(agree(&link.join("src")).len(), all());
+}
+
+#[test]
+fn a_linked_worktree_on_a_branch_with_a_slash() {
+    let t = tmp();
+    let dir = repo(t.path(), "main");
+    let wt = t.path().join("wt");
+    git(
+        &dir,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feature/x",
+            wt.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(agree(&wt).len(), all());
+    assert_eq!(agree(&wt.join("src/deep")).len(), all());
+    assert_eq!(
+        run(&request(&wt, &["rev-parse", "--abbrev-ref", "HEAD"]))
+            .unwrap()
+            .stdout,
+        "feature/x\n"
+    );
+}
+
+#[test]
+fn a_detached_head() {
+    let t = tmp();
+    let dir = repo(t.path(), "detached");
+    git(&dir, &["checkout", "-q", "--detach"]);
+    assert_eq!(agree(&dir).len(), all());
+}
+
+#[test]
+fn a_repository_with_no_commits_yet() {
+    let t = tmp();
+    let dir = t.path().join("unborn");
+    std::fs::create_dir_all(&dir).unwrap();
+    git(&dir, &["init", "-q", "-b", "main"]);
+    let answered = agree(&dir);
+    assert!(!answered.contains(&"rev-parse HEAD".to_string()));
+    assert!(!answered.contains(&"rev-parse --abbrev-ref HEAD".to_string()));
+}
+
+#[test]
+fn a_bare_repository_and_the_inside_of_a_git_directory() {
+    let t = tmp();
+    let bare = t.path().join("bare.git");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q", "--bare"]);
+    assert!(agree(&bare).is_empty());
+    let dir = repo(t.path(), "inside");
+    assert!(agree(&dir.join(".git")).is_empty());
+    assert!(agree(&dir.join(".git/refs")).is_empty());
+}
+
+#[test]
+fn a_branch_that_shares_its_name_with_a_tag() {
+    let t = tmp();
+    let dir = repo(t.path(), "ambiguous");
+    git(&dir, &["checkout", "-q", "-b", "dup"]);
+    git(&dir, &["tag", "dup"]);
+    let answered = agree(&dir);
+    assert!(!answered.contains(&"rev-parse --abbrev-ref HEAD".to_string()));
+    // And git's own answer comes back, disambiguated.
+    assert_eq!(
+        run(&request(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]))
+            .unwrap()
+            .stdout,
+        "heads/dup\n"
+    );
+}
+
+#[test]
+fn a_directory_in_no_repository() {
+    let t = tmp();
+    let plain = t.path().join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    // A ceiling, so the search cannot walk up into a repository around the temp dir.
+    let mut req = request(&plain, &["rev-parse", "--is-inside-work-tree"]);
+    req.env.push((
+        "GIT_CEILING_DIRECTORIES".into(),
+        t.path().display().to_string(),
+    ));
+    assert!(run(&req).is_err());
+    assert!(run_git(&req).is_err());
+}
+
+#[test]
+fn a_submodule_which_sets_core_worktree() {
+    let t = tmp();
+    let inner = repo(t.path(), "inner");
+    let outer = repo(t.path(), "outer");
+    git(
+        &outer,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            inner.to_str().unwrap(),
+            "sub",
+        ],
+    );
+    agree(&outer.join("sub"));
+    assert_eq!(agree(&outer).len(), all());
+}
+
+#[test]
+fn an_environment_that_steers_git_leaves_it_to_git() {
+    let t = tmp();
+    let dir = repo(t.path(), "steered");
+    let other = repo(t.path(), "other");
+    let mut req = request(&dir, &["rev-parse", "--show-toplevel"]);
+    req.env
+        .push(("GIT_DIR".into(), other.join(".git").display().to_string()));
+    let reply = run(&req).unwrap();
+    assert_eq!(reply.engine, Engine::Git);
+}
+
+#[test]
+fn a_command_gix_does_not_know_runs_git() {
+    let t = tmp();
+    let dir = repo(t.path(), "other-cmds");
+    let reply = run(&request(&dir, &["log", "-1", "--format=%s"])).unwrap();
+    assert_eq!(reply.engine, Engine::Git);
+    assert_eq!(reply.stdout, "one\n");
+}
+
+#[test]
+fn git_failures_read_as_node_words_them() {
+    let t = tmp();
+    let dir = repo(t.path(), "fails");
+    let err = run(&request(&dir, &["checkout", "no-such-branch"])).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.starts_with("Command failed: git checkout no-such-branch\n"),
+        "{msg}"
+    );
+    assert!(msg.contains("no-such-branch"), "{msg}");
+}
+
+#[test]
+fn output_past_the_limit_is_an_error_not_a_truncation() {
+    let t = tmp();
+    let dir = repo(t.path(), "big");
+    std::fs::write(dir.join("big.txt"), "x\n".repeat(100_000)).unwrap();
+    let mut req = request(&dir, &["diff", "--no-index", "/dev/null", "big.txt"]);
+    req.max_buffer = 1000;
+    assert!(matches!(run(&req), Err(vorn_git::Error::TooLarge { .. })));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_command_past_its_timeout_is_stopped() {
+    let t = tmp();
+    let mut req = request(t.path(), &[]);
+    req.bin = "sleep".into();
+    req.args = vec!["5".into()];
+    req.timeout = Duration::from_millis(100);
+    let started = std::time::Instant::now();
+    assert!(matches!(run(&req), Err(vorn_git::Error::TimedOut { .. })));
+    assert!(started.elapsed() < Duration::from_secs(2));
+}

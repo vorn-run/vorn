@@ -81,6 +81,32 @@ const BRACKETED_PASTE_ON = /\x1b\[\?2004h/
 // eslint-disable-next-line no-control-regex
 const BRACKETED_PASTE_OFF = /\x1b\[\?2004l/
 
+/** What `prepareSession` worked out, for `spawnPty` to use without doing any of it again. */
+export type PreparedSession = { remoteHost: RemoteHost } | { local: PreparedLocal }
+
+interface PreparedLocal {
+  agentSessionId?: string
+  launchLine: string
+  /** Where the shell starts: the worktree when there is one, else the project. */
+  effectivePath: string
+  worktreePath?: string
+  worktreeName?: string
+  branch: string | null
+  headCommit: string | null
+}
+
+/**
+ * Refused rather than created: a session started on an endpoint this process
+ * no longer holds is reachable through a name that now points elsewhere, so
+ * nobody would ever see it. Existing sessions are untouched -- their clients
+ * hold a descriptor, not a name.
+ */
+function refuseWhileClosing(): void {
+  if (isDraining()) throw new Error(DRAINING_MESSAGE)
+  // A pane created now would be in neither the manifest nor the replacement.
+  if (isHandingOver()) throw new Error(HANDOVER_MESSAGE)
+}
+
 type WorktreeSessionCounter = (
   worktreePath: string,
   excludeId?: string
@@ -235,35 +261,51 @@ class PtyManager extends EventEmitter {
    * also means the new run's history supersedes the old run's under the same
    * name, which `startHistory` does on its own queue.
    */
-  createPty(payload: CreateTerminalPayload, reuseId?: string): TerminalSession {
-    // Refused rather than created: a session started on an endpoint this process
-    // no longer holds is reachable through a name that now points elsewhere, so
-    // nobody would ever see it. Existing sessions are untouched -- their clients
-    // hold a descriptor, not a name.
-    if (isDraining()) throw new Error(DRAINING_MESSAGE)
-    // A pane created now would be in neither the manifest nor the replacement.
-    if (isHandingOver()) throw new Error(HANDOVER_MESSAGE)
-    const id = reuseId ?? crypto.randomUUID()
-    const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
+  async createPty(payload: CreateTerminalPayload, reuseId?: string): Promise<TerminalSession> {
+    return this.spawnPty(payload, await this.prepareSession(payload), reuseId)
+  }
 
-    // Check if this is a remote session
+  /**
+   * Everything a session needs before its PTY exists: which host it runs on,
+   * and for a local one the agent's launch line and the worktree or branch it
+   * runs on. Async because that can mean git, and a worktree add takes seconds
+   * on a big repository; with native git it no longer holds the event loop.
+   *
+   * Split from `spawnPty` so a caller that checks and claims around a spawn
+   * (a resume claiming its transcript) can await this first and then do the
+   * check, the claim and the spawn in one synchronous step, with nothing able
+   * to run between them.
+   */
+  async prepareSession(payload: CreateTerminalPayload): Promise<PreparedSession> {
+    refuseWhileClosing()
     const remoteHost = payload.remoteHostId
       ? this.remoteHosts.find((h) => h.id === payload.remoteHostId)
       : undefined
+    if (remoteHost) return { remoteHost }
+    return { local: await this.prepareLocal(payload) }
+  }
 
-    const session = remoteHost
-      ? this.createRemotePty(id, shell, payload, remoteHost)
-      : this.createLocalPty(id, shell, payload)
+  /** @param prepared From `prepareSession` on this same payload. */
+  spawnPty(
+    payload: CreateTerminalPayload,
+    prepared: PreparedSession,
+    reuseId?: string
+  ): TerminalSession {
+    // Checked again: closing may have begun while the workspace was prepared.
+    refuseWhileClosing()
+    const id = reuseId ?? crypto.randomUUID()
+    const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
+
+    const session =
+      'remoteHost' in prepared
+        ? this.createRemotePty(id, shell, payload, prepared.remoteHost)
+        : this.createLocalPty(id, shell, payload, prepared.local)
 
     this.emit('session-created', session, payload)
     return session
   }
 
-  private createLocalPty(
-    id: string,
-    shell: string,
-    payload: CreateTerminalPayload
-  ): TerminalSession {
+  private async prepareLocal(payload: CreateTerminalPayload): Promise<PreparedLocal> {
     // Session ID pinning: agents that support it (supportsSessionIdPinning) get a
     // UUID assigned on fresh launch via --session-id, enabling exact --resume later.
     // Other agents rely on history-based fallback for resume.
@@ -296,13 +338,17 @@ class PtyManager extends EventEmitter {
         worktreeName = payload.worktreeName || extractWorktreeName(payload.existingWorktreePath)
       }
     } else if ((payload.useWorktree || payload.existingWorktreePath) && payload.branch) {
-      if (isGitRepo(payload.projectPath)) {
+      if (await isGitRepo(payload.projectPath)) {
         if (payload.existingWorktreePath) {
           log.warn(
             `[pty] worktree path no longer exists, creating new: ${payload.existingWorktreePath}`
           )
         }
-        const result = createWorktree(payload.projectPath, payload.branch, payload.worktreeName)
+        const result = await createWorktree(
+          payload.projectPath,
+          payload.branch,
+          payload.worktreeName
+        )
         effectivePath = result.worktreePath
         worktreePath = result.worktreePath
         worktreeName = result.name
@@ -313,15 +359,43 @@ class PtyManager extends EventEmitter {
     }
     // Handle branch checkout (no worktree)
     else if (payload.branch) {
-      if (isGitRepo(payload.projectPath)) {
-        const currentBranch = getGitBranch(payload.projectPath)
+      if (await isGitRepo(payload.projectPath)) {
+        const currentBranch = await getGitBranch(payload.projectPath)
         if (currentBranch !== payload.branch) {
-          checkoutBranch(payload.projectPath, payload.branch)
+          await checkoutBranch(payload.projectPath, payload.branch)
         }
         effectiveBranch = payload.branch
       }
     }
 
+    const branch = effectiveBranch || (await getGitBranch(effectivePath))
+    const headCommit = await getGitHead(effectivePath)
+    return {
+      agentSessionId,
+      launchLine,
+      effectivePath,
+      worktreePath,
+      worktreeName,
+      branch,
+      headCommit
+    }
+  }
+
+  private createLocalPty(
+    id: string,
+    shell: string,
+    payload: CreateTerminalPayload,
+    prepared: PreparedLocal
+  ): TerminalSession {
+    const {
+      agentSessionId,
+      launchLine,
+      effectivePath,
+      worktreePath,
+      worktreeName,
+      branch,
+      headCommit
+    } = prepared
     const ptyProcess = pty.spawn(shell, getShellArgs(), {
       name: 'xterm-256color',
       cols: INITIAL_COLS,
@@ -345,8 +419,6 @@ class PtyManager extends EventEmitter {
     this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
     this.ptys.set(id, ptyProcess)
 
-    const branch = effectiveBranch || getGitBranch(effectivePath)
-    const headCommit = getGitHead(effectivePath)
     const session: TerminalSession = {
       id,
       agentType: payload.agentType,

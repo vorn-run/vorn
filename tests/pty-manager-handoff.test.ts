@@ -77,12 +77,12 @@ vi.mock('../packages/server/src/config-manager', () => ({
 }))
 
 vi.mock('../packages/server/src/git-utils', () => ({
-  getGitBranch: vi.fn(() => 'main'),
-  getGitHead: vi.fn(() => 'cafe0000'),
-  checkoutBranch: vi.fn(),
+  getGitBranch: vi.fn(async () => 'main'),
+  getGitHead: vi.fn(async () => 'cafe0000'),
+  checkoutBranch: vi.fn(async () => {}),
   createWorktree: vi.fn(),
   extractWorktreeName: vi.fn((p: string) => path.basename(p)),
-  isGitRepo: vi.fn(() => false)
+  isGitRepo: vi.fn(async () => false)
 }))
 
 vi.mock('../packages/server/src/shell-integration', () => ({
@@ -109,8 +109,10 @@ import { hasScreen } from '../packages/server/src/terminal-screen'
 import type { AdoptedPane } from '../packages/server/src/handoff/heir'
 import type { AdoptedPty } from '../packages/server/src/handoff/adopted-pty'
 
-function createAgent(name: string): { session: TerminalSession; fake: FakePtyInstance } {
-  const session = ptyManager.createPty({
+async function createAgent(
+  name: string
+): Promise<{ session: TerminalSession; fake: FakePtyInstance }> {
+  const session = await ptyManager.createPty({
     agentType: 'claude',
     projectName: name,
     projectPath: `/tmp/${name}`
@@ -125,9 +127,9 @@ beforeEach(() => {
 })
 
 describe('describing a machine for a handoff', () => {
-  it('names every live pane, in the order they are held', () => {
-    const first = createAgent('one')
-    const second = createAgent('two')
+  it('names every live pane, in the order they are held', async () => {
+    const first = await createAgent('one')
+    const second = await createAgent('two')
 
     const panes = ptyManager.describeForHandoff()
     expect(panes?.map((p) => p.session.id)).toEqual([first.session.id, second.session.id])
@@ -138,8 +140,8 @@ describe('describing a machine for a handoff', () => {
     expect(panes?.[0]?.rows).toBe(first.session.rows)
   })
 
-  it('follows a resize, so the replacement rebuilds at the right width', () => {
-    const { session } = createAgent('resized')
+  it('follows a resize, so the replacement rebuilds at the right width', async () => {
+    const { session } = await createAgent('resized')
     ptyManager.resizePty(session.id, 132, 43)
 
     const pane = ptyManager.describeForHandoff()?.[0]
@@ -147,9 +149,9 @@ describe('describing a machine for a handoff', () => {
     expect(pane?.rows).toBe(43)
   })
 
-  it('refuses the whole machine when one pane has no descriptor', () => {
-    createAgent('describable')
-    const { fake } = createAgent('not-describable')
+  it('refuses the whole machine when one pane has no descriptor', async () => {
+    await createAgent('describable')
+    const { fake } = await createAgent('not-describable')
     // What win32 looks like from here: a pty with nothing to hand over.
     fake.fd = undefined
 
@@ -158,9 +160,9 @@ describe('describing a machine for a handoff', () => {
     expect(ptyManager.describeForHandoff()).toBeNull()
   })
 
-  it('stops and starts every reader', () => {
-    const first = createAgent('one')
-    const second = createAgent('two')
+  it('stops and starts every reader', async () => {
+    const first = await createAgent('one')
+    const second = await createAgent('two')
 
     ptyManager.pauseAllForHandoff()
     expect([first.fake.paused, second.fake.paused]).toEqual([1, 1])

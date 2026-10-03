@@ -1456,6 +1456,16 @@ export type ServerUpgradeOutcome =
   | { kind: 'failed'; why: string }
   | { kind: 'working' }
 
+/**
+ * Switches in Settings › Experimental. Each one moves a piece of the server onto
+ * the Rust core while the code it replaces stays the default; once a switch has
+ * been on without trouble it becomes the default and is removed with the old path.
+ */
+export interface ExperimentalFlags {
+  /** Run git through the Rust core, off the server's event loop. */
+  nativeGit?: boolean
+}
+
 export interface AppConfig {
   version: number
   /**
@@ -1566,6 +1576,8 @@ export interface AppConfig {
     hasSeededDevServerWorkflow?: boolean
     /** Which worktrees the manager treats as stale, and what counts as build output. */
     worktreeRetention?: WorktreeRetentionConfig
+    /** Native replacements being tried out, each off until turned on in Settings › Experimental. */
+    experimental?: ExperimentalFlags
   }
   projects: ProjectConfig[]
   agentCommands?: Partial<Record<AiAgentType, AgentCommandConfig>>

@@ -8,7 +8,7 @@ export class HeadRefresh {
   private checkedAt = new Map<string, number>()
 
   constructor(
-    private readonly read: (cwd: string) => string | null,
+    private readonly read: (cwd: string) => Promise<string | null>,
     private readonly every: number = HEAD_REFRESH_MS
   ) {}
 
@@ -18,8 +18,14 @@ export class HeadRefresh {
       const last = this.checkedAt.get(s.id)
       if (last !== undefined && now - last < this.every) continue
       this.checkedAt.set(s.id, now)
-      const head = this.read(s.worktreePath ?? s.projectPath)
-      if (head) s.headCommit = head
+      // Not awaited: the save that asked carries on with what the session has,
+      // and the next one writes the new HEAD. A failed read leaves the old one.
+      this.read(s.worktreePath ?? s.projectPath).then(
+        (head) => {
+          if (head) s.headCommit = head
+        },
+        () => {}
+      )
     }
   }
 

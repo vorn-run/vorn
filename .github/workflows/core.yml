@@ -10,7 +10,10 @@ on:
     paths: &paths
       - 'packages/core/**'
       - 'packages/server/src/native-core.ts'
+      - 'packages/server/src/git-runner.ts'
+      - 'packages/server/src/git-utils.ts'
       - 'tests/native-core.test.ts'
+      - 'tests/git-native-parity.test.ts'
       - 'electron-builder.yml'
       - 'package.json'
       - 'yarn.lock'
@@ -82,11 +85,11 @@ jobs:
       - name: Rust format
         if: runner.os == 'Linux'
         working-directory: packages/core
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       - name: Clippy
         working-directory: packages/core
-        run: cargo clippy --release --locked -- -D warnings
+        run: cargo clippy --release --locked --workspace -- -D warnings
 
       # Linux only: the test binary links napi's symbols directly, which a
       # macOS executable can't leave undefined the way the cdylib does.
@@ -95,13 +98,19 @@ jobs:
         working-directory: packages/core
         run: cargo test --release --locked
 
+      # The git crate links nothing from napi, so it runs everywhere, and its
+      # parity tests compare against the git each runner has.
+      - name: Git crate tests
+        working-directory: packages/core
+        run: cargo test --release --locked -p vorn-git
+
       - name: Build vorn_core.node
         run: yarn build:core
 
       # With the binary present these run the real call from Node, including a
       # parse through libghostty-vt.
       - name: Native call
-        run: yarn vitest run tests/native-core.test.ts
+        run: yarn vitest run tests/native-core.test.ts tests/git-native-parity.test.ts
 
       - name: Build app
         run: yarn build

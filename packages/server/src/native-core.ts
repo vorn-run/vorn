@@ -21,6 +21,23 @@ export interface NativeCore {
   Analyzer?: new () => NativeAnalyzer
   /** The screen model, on libghostty-vt. Only present when built with it. */
   Screen?: new (cols: number, rows: number) => NativeScreen
+  /**
+   * Runs one git command off the event loop: answered in-process by gix when it
+   * can be answered byte-for-byte as git would, otherwise by `git` on a core
+   * thread. Resolves with stdout; rejects as `execFileSync` throws.
+   */
+  gitRun?(request: NativeGitRequest): Promise<string>
+}
+
+export interface NativeGitRequest {
+  /** The git executable, resolved as the JS path resolves it. */
+  bin: string
+  args: string[]
+  cwd: string
+  env: Record<string, string>
+  timeoutMs: number
+  /** Stdout past this many bytes is an error, as `maxBuffer` is for `execFileSync`. */
+  maxBuffer: number
 }
 
 export interface NativeAnalyzer {
@@ -135,7 +152,7 @@ export function selectCore(
   if (requested === 'js') return { mode: 'js', native: null }
 
   const dir = options.dir ?? serverDir()
-  const load = options.load ?? ((candidates) => loadNativeCore(candidates))
+  const load = options.load ?? loadShared
   try {
     const native = load(nativeCoreCandidates(dir, env.VORN_CORE_PATH))
     // Call into the binary here, inside the try: a stale or mismatched build can
@@ -165,4 +182,40 @@ let active: CoreSelection | null = null
 export function activeCore(): CoreSelection {
   active ??= selectCore()
   return active
+}
+
+let shared: { native: NativeCore } | { error: Error } | null = null
+
+/**
+ * `loadNativeCore`, at most once per process. `activeCore` and the switches in
+ * Settings › Experimental share one copy of the binary: a napi module opened a
+ * second time registers its classes again.
+ */
+function loadShared(candidates: string[]): NativeCore {
+  shared ??= (() => {
+    try {
+      return { native: loadNativeCore(candidates) }
+    } catch (err) {
+      return { error: err instanceof Error ? err : new Error(String(err)) }
+    }
+  })()
+  if ('error' in shared) throw shared.error
+  return shared.native
+}
+
+/**
+ * The binary for a switch other than `VORN_CORE`, which may be off while that
+ * switch is on. Null, with the reason, when it cannot be loaded; never throws.
+ */
+export function nativeBinary(options: { env?: NodeJS.ProcessEnv; dir?: string } = {}): {
+  native: NativeCore | null
+  error?: string
+} {
+  const env = options.env ?? process.env
+  try {
+    const native = loadShared(nativeCoreCandidates(options.dir ?? serverDir(), env.VORN_CORE_PATH))
+    return { native }
+  } catch (err) {
+    return { native: null, error: err instanceof Error ? err.message : String(err) }
+  }
 }

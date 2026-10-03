@@ -148,8 +148,8 @@ function scan(overrides: Partial<Parameters<typeof scanWorktreeInventory>[0]> = 
 }
 
 describe('scanWorktreeInventory', () => {
-  it('reports the main worktree without measuring or offering it', () => {
-    const main = scan().projects[0].entries.find((e) => e.isMain)
+  it('reports the main worktree without measuring or offering it', async () => {
+    const main = (await scan()).projects[0].entries.find((e) => e.isMain)
     expect(main).toBeDefined()
     expect(main!.verdict.level).toBe('keep')
     expect(main!.sizeBytes).toBe(0)
@@ -157,42 +157,45 @@ describe('scanWorktreeInventory', () => {
     expect(shellCalls.some((c) => c.startsWith('du') && c.includes(PROJECT + ' '))).toBe(false)
   })
 
-  it('measures each linked worktree and splits build output from source', () => {
-    const a = scan().projects[0].entries.find((e) => e.path === WT_A)!
+  it('measures each linked worktree and splits build output from source', async () => {
+    const a = (await scan()).projects[0].entries.find((e) => e.path === WT_A)!
     // One `du` for the tree, one for the two build directories find reported.
     expect(a.sizeBytes).toBe(1024 * 1024)
     expect(a.artifactBytes).toBe(2 * 1024 * 1024 > a.sizeBytes ? a.sizeBytes : 2 * 1024 * 1024)
     expect(a.sizeMeasured).toBe(true)
   })
 
-  it('never lets build output exceed the tree it lives in', () => {
-    const a = scan().projects[0].entries.find((e) => e.path === WT_A)!
+  it('never lets build output exceed the tree it lives in', async () => {
+    const a = (await scan()).projects[0].entries.find((e) => e.path === WT_A)!
     expect(a.artifactBytes).toBeLessThanOrEqual(a.sizeBytes)
   })
 
-  it('reads merged and upstream state from one pass over the refs', () => {
-    const [a, b] = [WT_A, WT_B].map((p) => scan().projects[0].entries.find((e) => e.path === p)!)
+  it('reads merged and upstream state from one pass over the refs', async () => {
+    const { entries } = (await scan()).projects[0]
+    const [a, b] = [WT_A, WT_B].map((p) => entries.find((e) => e.path === p)!)
     expect(a).toMatchObject({ isMerged: true, hasUpstream: false })
     expect(b).toMatchObject({ isMerged: false, hasUpstream: true })
     expect(b.verdict.level).toBe('reclaim')
   })
 
-  it('carries uncommitted changes into the verdict', () => {
+  it('carries uncommitted changes into the verdict', async () => {
     worktrees[WT_A].dirty = true
-    const a = scan().projects[0].entries.find((e) => e.path === WT_A)!
+    const a = (await scan()).projects[0].entries.find((e) => e.path === WT_A)!
     expect(a.isDirty).toBe(true)
     expect(a.verdict.level).toBe('review')
   })
 
-  it('marks a worktree with live sessions as keep', () => {
-    const a = scan({
-      getActiveSessions: (p) => (p === WT_A ? ['s1', 's2'] : [])
-    }).projects[0].entries.find((e) => e.path === WT_A)!
+  it('marks a worktree with live sessions as keep', async () => {
+    const a = (
+      await scan({
+        getActiveSessions: (p) => (p === WT_A ? ['s1', 's2'] : [])
+      })
+    ).projects[0].entries.find((e) => e.path === WT_A)!
     expect(a.activeSessionIds).toEqual(['s1', 's2'])
     expect(a.verdict.level).toBe('keep')
   })
 
-  it('finds directories on disk that git no longer lists', () => {
+  it('finds directories on disk that git no longer lists', async () => {
     mockFs.readdirSync.mockImplementation(((dir: string) =>
       dir === '/dev/.vorn-worktrees/repo'
         ? [
@@ -202,38 +205,40 @@ describe('scanWorktreeInventory', () => {
           ]
         : []) as never)
 
-    const orphan = scan().projects[0].entries.find((e) => e.kind === 'orphan-dir')
+    const orphan = (await scan()).projects[0].entries.find((e) => e.kind === 'orphan-dir')
     expect(orphan?.path).toBe(ORPHAN)
     expect(orphan?.verdict.level).toBe('orphan')
   })
 
-  it('lists branches left behind, and only vorn-generated ones', () => {
-    const { staleBranches } = scan().projects[0]
+  it('lists branches left behind, and only vorn-generated ones', async () => {
+    const { staleBranches } = (await scan()).projects[0]
     expect(staleBranches.map((b) => b.name)).toEqual(['gilded-sketch'])
     expect(staleBranches[0].isMerged).toBe(true)
   })
 
-  it('records a project that is not a git repository instead of throwing', () => {
+  it('records a project that is not a git repository instead of throwing', async () => {
     mockExec.mockImplementation(((_b: string, args: string[]) =>
       args.join(' ') === 'rev-parse --is-inside-work-tree' ? 'false' : '') as never)
-    const project = scan().projects[0]
+    const project = (await scan()).projects[0]
     expect(project.error).toBe('not a git repository')
     expect(project.entries).toEqual([])
   })
 
-  it('honours a retention threshold and pinned paths', () => {
-    const result = scan({
-      retention: { idleDaysThreshold: 0, pinnedPaths: [WT_A] }
-    }).projects[0]
+  it('honours a retention threshold and pinned paths', async () => {
+    const result = (
+      await scan({
+        retention: { idleDaysThreshold: 0, pinnedPaths: [WT_A] }
+      })
+    ).projects[0]
     expect(result.entries.find((e) => e.path === WT_A)!.verdict.level).toBe('keep')
   })
 
-  it('limits the scan to the requested projects', () => {
-    expect(scan({ projectPaths: ['/other'] }).projects).toEqual([])
+  it('limits the scan to the requested projects', async () => {
+    expect((await scan({ projectPaths: ['/other'] })).projects).toEqual([])
   })
 
-  it('stamps the scan time', () => {
-    expect(Date.parse(scan().scannedAt)).not.toBeNaN()
+  it('stamps the scan time', async () => {
+    expect(Date.parse((await scan()).scannedAt)).not.toBeNaN()
   })
 })
 
@@ -292,21 +297,26 @@ describe('listOrphanDirs', () => {
 })
 
 describe('reclaimArtifacts', () => {
-  it('deletes every build directory inside the worktree and reports the bytes', () => {
-    const result = reclaimArtifacts([WT_A], ['node_modules', 'dist'], projects, () => undefined)
+  it('deletes every build directory inside the worktree and reports the bytes', async () => {
+    const result = await reclaimArtifacts(
+      [WT_A],
+      ['node_modules', 'dist'],
+      projects,
+      () => undefined
+    )
     expect(result.succeeded).toEqual([WT_A])
     expect(removedDirs).toEqual([`${WT_A}/node_modules`, `${WT_A}/packages/web/dist`])
     expect(result.freedBytes).toBe(2 * 1024 * 1024)
   })
 
-  it('succeeds without deleting anything when there is no build output', () => {
-    const result = reclaimArtifacts([WT_B], ['node_modules'], projects, () => undefined)
+  it('succeeds without deleting anything when there is no build output', async () => {
+    const result = await reclaimArtifacts([WT_B], ['node_modules'], projects, () => undefined)
     expect(result.succeeded).toEqual([WT_B])
     expect(removedDirs).toEqual([])
   })
 
-  it('refuses a path no project claims as a worktree', () => {
-    const result = reclaimArtifacts(
+  it('refuses a path no project claims as a worktree', async () => {
+    const result = await reclaimArtifacts(
       ['/Users/me/Documents'],
       ['node_modules'],
       projects,
@@ -317,16 +327,16 @@ describe('reclaimArtifacts', () => {
     expect(removedDirs).toEqual([])
   })
 
-  it('refuses the main worktree — the project itself is not build output', () => {
-    const result = reclaimArtifacts([PROJECT], ['node_modules'], projects, () => undefined)
+  it('refuses the main worktree — the project itself is not build output', async () => {
+    const result = await reclaimArtifacts([PROJECT], ['node_modules'], projects, () => undefined)
     expect(result.failed[0].error).toMatch(/not a worktree/)
     expect(removedDirs).toEqual([])
   })
 
-  it('stops a symlinked build directory from reaching outside the worktree', () => {
+  it('stops a symlinked build directory from reaching outside the worktree', async () => {
     mockFs.realpathSync.mockImplementation(((p: string) =>
       p === `${WT_A}/node_modules` ? '/usr/local/lib' : p) as never)
-    const result = reclaimArtifacts([WT_A], ['node_modules'], projects, () => undefined)
+    const result = await reclaimArtifacts([WT_A], ['node_modules'], projects, () => undefined)
     expect(result.failed[0].error).toMatch(/outside the worktree/)
     expect(removedDirs).toEqual([])
   })
@@ -335,8 +345,8 @@ describe('reclaimArtifacts', () => {
 describe('removeWorktrees', () => {
   const sizeOf = () => 5 * 1024 * 1024
 
-  it('removes a worktree and reports the bytes it freed', () => {
-    const result = removeWorktrees(
+  it('removes a worktree and reports the bytes it freed', async () => {
+    const result = await removeWorktrees(
       [{ projectPath: PROJECT, worktreePath: WT_A }],
       sizeOf,
       projects,
@@ -346,9 +356,9 @@ describe('removeWorktrees', () => {
     expect(result.freedBytes).toBe(5 * 1024 * 1024)
   })
 
-  it('reports a branch as deleted only once it is actually gone', () => {
+  it('reports a branch as deleted only once it is actually gone', async () => {
     refs = refs.filter((r) => !r.startsWith('royal-stanza'))
-    const result = removeWorktrees(
+    const result = await removeWorktrees(
       [{ projectPath: PROJECT, worktreePath: WT_A, deleteBranch: true }],
       sizeOf,
       projects,
@@ -357,8 +367,8 @@ describe('removeWorktrees', () => {
     expect(result.deletedBranches).toEqual(['royal-stanza'])
   })
 
-  it('does not claim a branch was deleted when it survived', () => {
-    const result = removeWorktrees(
+  it('does not claim a branch was deleted when it survived', async () => {
+    const result = await removeWorktrees(
       [{ projectPath: PROJECT, worktreePath: WT_A, deleteBranch: true }],
       sizeOf,
       projects,
@@ -367,8 +377,8 @@ describe('removeWorktrees', () => {
     expect(result.deletedBranches).toEqual([])
   })
 
-  it('refuses a path git does not report as a worktree', () => {
-    const result = removeWorktrees(
+  it('refuses a path git does not report as a worktree', async () => {
+    const result = await removeWorktrees(
       [{ projectPath: PROJECT, worktreePath: '/tmp/elsewhere' }],
       sizeOf,
       projects,
@@ -377,14 +387,14 @@ describe('removeWorktrees', () => {
     expect(result.failed[0].error).toMatch(/not a worktree of any known project/)
   })
 
-  it('surfaces a git failure as a per-item error and frees nothing', () => {
+  it('surfaces a git failure as a per-item error and frees nothing', async () => {
     mockExec.mockImplementation(((bin: string, args: string[], opts?: { cwd?: string }) => {
       currentCwd = opts?.cwd ?? ''
       if (args.join(' ').startsWith('worktree remove')) throw new Error('is dirty')
       return route(bin, args)
     }) as never)
 
-    const result = removeWorktrees(
+    const result = await removeWorktrees(
       [{ projectPath: PROJECT, worktreePath: WT_A }],
       sizeOf,
       projects,
@@ -399,7 +409,7 @@ describe('removeWorktrees', () => {
 describe('pruneOrphanDirs', () => {
   const sizeOf = () => 1024
 
-  it('deletes a directory git has forgotten', () => {
+  it('deletes a directory git has forgotten', async () => {
     mockExec.mockImplementation(((bin: string, args: string[], opts?: { cwd?: string }) => {
       currentCwd = opts?.cwd ?? ''
       // No git directory here — that is what makes it an orphan.
@@ -407,20 +417,20 @@ describe('pruneOrphanDirs', () => {
       return route(bin, args)
     }) as never)
 
-    const result = pruneOrphanDirs([ORPHAN], sizeOf, () => undefined)
+    const result = await pruneOrphanDirs([ORPHAN], sizeOf, () => undefined)
     expect(result.succeeded).toEqual([ORPHAN])
     expect(removedDirs).toEqual([ORPHAN])
     expect(result.freedBytes).toBe(1024)
   })
 
-  it('refuses a path git still claims — that one goes through git worktree remove', () => {
-    const result = pruneOrphanDirs([WT_A], sizeOf, () => undefined)
+  it('refuses a path git still claims — that one goes through git worktree remove', async () => {
+    const result = await pruneOrphanDirs([WT_A], sizeOf, () => undefined)
     expect(result.failed[0].error).toMatch(/still registered with git/)
     expect(removedDirs).toEqual([])
   })
 
-  it('refuses anything outside the worktree root, whatever git says', () => {
-    const result = pruneOrphanDirs(['/Users/me/Documents'], sizeOf, () => undefined)
+  it('refuses anything outside the worktree root, whatever git says', async () => {
+    const result = await pruneOrphanDirs(['/Users/me/Documents'], sizeOf, () => undefined)
     expect(result.failed[0].error).toMatch(/outside \.vorn-worktrees/)
     expect(removedDirs).toEqual([])
   })

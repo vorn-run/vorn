@@ -17,6 +17,7 @@ import type {
 } from '@vornrun/shared/types'
 import {
   AppConfig,
+  ExperimentalFlags,
   ProjectConfig,
   WorkflowDefinition,
   WorkflowExecution,
@@ -1602,8 +1603,24 @@ function loadDefaults(d: Database.Database): AppConfig['defaults'] {
     }),
     ...(map.worktreeRetention !== undefined && {
       worktreeRetention: map.worktreeRetention as AppConfig['defaults']['worktreeRetention']
+    }),
+    // Object-checked like envPassthrough: a hand-edited row must not reach a
+    // reader that trusts the declaration.
+    ...(isPlainObject(map.experimental) && {
+      experimental: experimentalFlags(map.experimental)
     })
   }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Only the known switches, and only as booleans. */
+function experimentalFlags(raw: Record<string, unknown>): ExperimentalFlags {
+  const flags: ExperimentalFlags = {}
+  if (typeof raw.nativeGit === 'boolean') flags.nativeGit = raw.nativeGit
+  return flags
 }
 
 function loadProjects(d: Database.Database): ProjectConfig[] {

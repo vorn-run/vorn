@@ -8,6 +8,7 @@
 use napi_derive::napi;
 
 pub mod analysis;
+pub mod git;
 #[cfg(feature = "ghostty")]
 pub mod screen;
 
