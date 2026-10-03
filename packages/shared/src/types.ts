@@ -1833,6 +1833,22 @@ export interface ExperimentalConfig {
   nativeAnalysis?: boolean
 }
 
+/**
+ * Where a state of a terminal ends, in its record log: the first record and the
+ * first byte that state does not include. The Session Recovery Contract's
+ * cursor, with the same meaning everywhere it appears -- a checkpoint's resume
+ * point, a log's starting point, what an attach reflects.
+ *
+ * `epoch` changes whenever the log starts again from nothing (a new process
+ * under the id), so a cursor from another epoch names nothing in this one.
+ * Offsets count UTF-8 bytes of output, not UTF-16 units.
+ */
+export interface RecordCursor {
+  epoch: number
+  nextRseq: number
+  nextOffset: number
+}
+
 /** What `core:status` reports: whether the Rust core can run, and what decides it. */
 export interface CoreStatus {
   /** Whether `vorn_core.node` loaded. Null when `VORN_CORE=js` keeps it from being tried. */

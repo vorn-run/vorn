@@ -143,7 +143,7 @@ import {
   resetHistory
 } from '../packages/server/src/history/writer'
 import { historyDir, LOG_FILE } from '../packages/server/src/history/checkpoint'
-import { readFrames, type Frame } from '../packages/server/src/history/log'
+import { readFrames, readHeader, type LogRecord } from '../packages/server/src/history/log'
 import { readScrollback, resetScrollback } from '../packages/server/src/terminal-scrollback'
 
 vi.mocked(isGitRepo).mockReturnValue(false)
@@ -301,8 +301,9 @@ describe('the terminal is recorded where it is fed', () => {
     }
   }
 
-  function framesFor(id: string): Frame[] {
-    return readFrames(fs.readFileSync(path.join(historyDir(dir, id), LOG_FILE))).frames
+  function framesFor(id: string): LogRecord[] {
+    const buf = fs.readFileSync(path.join(historyDir(dir, id), LOG_FILE))
+    return readFrames(buf, readHeader(buf)!).records
   }
 
   it('does not let the byte buffer run ahead of the screen model', async () => {
@@ -421,12 +422,13 @@ describe('the terminal is recorded where it is fed', () => {
     ptyManager.resizePty(session.id, 132, 43)
     await settled()
 
-    expect(framesFor(session.id)).toEqual(
-      expect.arrayContaining<Frame>([
-        { kind: 'output', data: 'tests passed, 402 of them\r\n' },
-        { kind: 'resize', cols: 132, rows: 43 }
-      ])
-    )
+    expect(framesFor(session.id)).toEqual([
+      { kind: 'data', rseq: 0, startOffset: 0, stream: 0, data: 'tests passed, 402 of them\r\n' },
+      { kind: 'resize', rseq: 1, startOffset: 27, cols: 132, rows: 43, pxWidth: 0, pxHeight: 0 }
+    ])
+    // And an attach is told the same place: the record after the resize, the
+    // byte after the output.
+    expect(ptyManager.recordCursor(session.id)).toMatchObject({ nextRseq: 2, nextOffset: 27 })
   })
 
   it('records once per flush rather than once per chunk', async () => {
@@ -438,10 +440,10 @@ describe('the terminal is recorded where it is fed', () => {
     await afterFlush()
     await settled()
 
-    const output = framesFor(session.id).filter((f) => f.kind === 'output')
-    expect(output).toEqual([
-      { kind: 'output', data: 'x' },
-      { kind: 'output', data: 'x'.repeat(29) }
+    const output = framesFor(session.id).filter((f) => f.kind === 'data')
+    expect(output).toMatchObject([
+      { rseq: 0, startOffset: 0, data: 'x' },
+      { rseq: 1, startOffset: 1, data: 'x'.repeat(29) }
     ])
   })
 

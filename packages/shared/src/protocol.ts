@@ -18,6 +18,7 @@ import type {
   HeadlessSession,
   AppConfig,
   CoreStatus,
+  RecordCursor,
   ResizePayload,
   FileEntry,
   FileStamp,
@@ -668,7 +669,8 @@ export interface RequestMethods {
    */
   'terminal:attach': {
     params: { id: string }
-    result: { data: string; seq: number; live: boolean }
+    /** `cursor` is where `data` ends in the session's record log; absent with no live process. */
+    result: { data: string; seq: number; live: boolean; cursor?: RecordCursor }
   }
   'shell:create': { params: string | undefined; result: TerminalSession }
   'config:load': { params: void; result: AppConfig }

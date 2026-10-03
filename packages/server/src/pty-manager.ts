@@ -13,6 +13,7 @@ import {
   CreateTerminalPayload,
   IPC,
   TerminalSession,
+  RecordCursor,
   RemoteHost,
   supportsSessionIdPinning,
   supportsExactSessionResume
@@ -54,6 +55,7 @@ import type { ManagedPty } from './handoff/adopted-pty'
 import type { AdoptedPane } from './handoff/heir'
 import type { DonorPane } from './handoff/donor'
 import { startHistory, recordOutput, recordResize, stopHistory } from './history/writer'
+import type { RecordHeader } from './history/log'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 import { isHandingOver, HANDOVER_MESSAGE } from './handoff/donor'
@@ -739,6 +741,43 @@ class PtyManager extends EventEmitter {
     return this.flushSeq.get(id) ?? 0
   }
 
+  /**
+   * Where each session's record log has reached: the first record and byte
+   * not yet given out. The Session Recovery Contract's cursor, assigned here
+   * because this is the one place that sees output and resizes in the order
+   * they happened. Moves in the same synchronous block as `flushSeq`, so an
+   * attach that reads both in one turn gets numbers that agree.
+   */
+  private cursors = new Map<string, RecordCursor>()
+
+  /** The cursor after this session's last record, or null when it has none. */
+  recordCursor(id: string): RecordCursor | null {
+    const at = this.cursors.get(id)
+    return at ? { ...at } : null
+  }
+
+  /**
+   * Start a session's record log again, in an epoch of its own.
+   *
+   * Random rather than counted, so it cannot repeat across server restarts
+   * without anything persisted: a cursor from a previous run of this id names
+   * nothing in this one, and comparing epochs is how a reader finds that out.
+   */
+  private openRecords(id: string): RecordCursor {
+    const at = { epoch: crypto.randomInt(1, 0xffffffff), nextRseq: 0, nextOffset: 0 }
+    this.cursors.set(id, at)
+    return { ...at }
+  }
+
+  /** Number the next record, `bytes` long, and move the cursor past it. */
+  private nextRecord(id: string, bytes: number): RecordHeader {
+    const at = this.cursors.get(id) ?? this.openRecords(id)
+    const header = { rseq: at.nextRseq, startOffset: at.nextOffset }
+    at.nextRseq += 1
+    at.nextOffset += bytes
+    return header
+  }
+
   private flushBuffer(id: string): void {
     const data = this.dataBuffers.get(id)
     this.dataBuffers.delete(id)
@@ -767,7 +806,7 @@ class PtyManager extends EventEmitter {
       // them twice. Fed from one point they cannot disagree.
       appendScrollback(id, data)
       const rang = feedScreen(id, data)
-      recordOutput(id, data)
+      recordOutput(id, this.nextRecord(id, Buffer.byteLength(data, 'utf-8')), data)
 
       // The bell, said out loud rather than left for whoever happens to be
       // attached. A client only sees bytes for terminals it has opened, so a
@@ -1054,7 +1093,7 @@ class PtyManager extends EventEmitter {
     if (!adopted || !hasScreen(id)) createScreen(id, cols, rows)
     // Replaces whatever was left under this id. A recovered session that is
     // being respawned has history describing a process that is gone.
-    startHistory(id)
+    startHistory(id, this.openRecords(id))
 
     ptyProcess.onData((data: string) => {
       this.bufferData(id, data)
@@ -1071,6 +1110,7 @@ class PtyManager extends EventEmitter {
       this.deleteTempKey(id)
       this.clearSessionTracking(id)
       this.flushSeq.delete(id)
+      this.cursors.delete(id)
       clearScrollback(id)
       // Beside the scrollback it belongs to: the PTY is gone and nothing will
       // draw into it again. The session record survives so the card can show an
@@ -1159,7 +1199,7 @@ class PtyManager extends EventEmitter {
     // this is reached from a fire-and-forget notification, and the model drains
     // its own queue before applying the size.
     void resizeScreen(id, cols, rows)
-    recordResize(id, cols, rows)
+    recordResize(id, this.nextRecord(id, 0), cols, rows)
   }
 
   /**
@@ -1186,6 +1226,7 @@ class PtyManager extends EventEmitter {
     this.normalizedPaths.delete(id)
     this.clearSessionTracking(id)
     this.flushSeq.delete(id)
+    this.cursors.delete(id)
     clearScreen(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.ptys.delete(id)
@@ -1225,6 +1266,7 @@ class PtyManager extends EventEmitter {
     this.normalizedPaths.delete(id)
     this.clearSessionTracking(id)
     this.flushSeq.delete(id)
+    this.cursors.delete(id)
     // Not beside a `clearScrollback`, because there is not one here -- but this
     // path deletes the session outright, so nothing would ever feed or free the
     // model again. A `Terminal` holds buffers; leaving it is a leak per closed
@@ -1373,6 +1415,7 @@ class PtyManager extends EventEmitter {
     this.dataBuffers.clear()
     this.flushTimers.clear()
     this.flushSeq.clear()
+    this.cursors.clear()
 
     // Clean up any remaining temp key files
     for (const sessionId of this.tempKeyPaths.keys()) {

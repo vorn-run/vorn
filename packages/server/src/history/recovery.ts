@@ -3,7 +3,8 @@ import path from 'path'
 import log from '../logger'
 import { createScreen, feedScreen, resizeScreen } from '../terminal-screen'
 import { seedScrollback } from '../terminal-scrollback'
-import { readHeader, readFrames, type Frame, type StopReason } from './log'
+import type { RecordCursor } from '@vornrun/shared/types'
+import { cursorAfter, readHeader, readFrames, type LogRecord, type StopReason } from './log'
 import { readCheckpointAsync, LOG_FILE, CHECKPOINT_FILE } from './checkpoint'
 
 /**
@@ -48,12 +49,19 @@ export interface Recovered {
   /** Frames replayed from the log on top of the checkpoint. */
   replayed: number
   /** Why the replay stopped. Anything but `end` is damage worth knowing about. */
-  stopped: StopReason
+  stopped: ReplayStop
   /** Whether a checkpoint was found to replay onto. */
   fromCheckpoint: boolean
   /** The last run shut down rather than being stopped under it. */
   closedCleanly: boolean
 }
+
+/**
+ * Why a replay ended. `discontinuous` is a log whose records do not follow on
+ * from the point the screen was rebuilt to -- a hole, or a log of another
+ * epoch -- so nothing past that point can be laid over it.
+ */
+export type ReplayStop = StopReason | 'discontinuous'
 
 export interface RecoverableSession {
   id: string
@@ -239,8 +247,8 @@ function decode(entry: string): string | null {
 async function restore(dir: string, session: RecoverableSession): Promise<Recovered | null> {
   await sweepScratch(dir)
   const checkpoint = await readCheckpointAsync(dir)
-  const { frames, stopped } = await readLog(dir, checkpoint?.generation)
-  if (!checkpoint && !frames.length) return null
+  const { records, stopped } = await readLog(dir, checkpoint?.generation, checkpoint?.resume)
+  if (!checkpoint && !records.length) return null
 
   // The geometry the checkpoint was taken at, not the one the session record
   // remembers: the screen is being rebuilt from bytes that wrapped at those
@@ -257,15 +265,15 @@ async function restore(dir: string, session: RecoverableSession): Promise<Recove
   let scrollback = checkpoint?.scrollback ?? ''
   if (checkpoint?.screen) feedScreen(session.id, checkpoint.screen)
 
-  for (const frame of frames) {
-    await apply(session.id, frame)
-    if (frame.kind === 'output') scrollback += frame.data
+  for (const record of records) {
+    await apply(session.id, record)
+    if (record.kind === 'data') scrollback += record.data
   }
 
   seedScrollback(session.id, scrollback)
   return {
     id: session.id,
-    replayed: frames.length,
+    replayed: records.length,
     stopped,
     fromCheckpoint: checkpoint !== null,
     closedCleanly: checkpoint?.closedCleanly === true
@@ -274,17 +282,18 @@ async function restore(dir: string, session: RecoverableSession): Promise<Recove
 
 async function readLog(
   dir: string,
-  generation: number | undefined
-): Promise<{ frames: Frame[]; stopped: StopReason }> {
+  generation: number | undefined,
+  resume: RecordCursor | undefined
+): Promise<{ records: LogRecord[]; stopped: ReplayStop }> {
   let buf: Buffer
   try {
     buf = await fs.readFile(path.join(dir, LOG_FILE))
   } catch {
-    return { frames: [], stopped: 'end' }
+    return { records: [], stopped: 'end' }
   }
 
   const header = readHeader(buf)
-  if (!header) return { frames: [], stopped: 'malformed' }
+  if (!header) return { records: [], stopped: 'malformed' }
   // The refusal this whole scheme rests on. Not a warning and a replay anyway:
   // a log from before the checkpoint beside it is not a shorter history, it is a
   // second copy of one already restored.
@@ -293,24 +302,56 @@ async function readLog(
       { dir, log: header.generation, checkpoint: generation },
       '[history] this log belongs to an earlier checkpoint; ignoring it'
     )
-    return { frames: [], stopped: 'end' }
+    return { records: [], stopped: 'end' }
   }
 
-  const read = readFrames(buf)
-  return { frames: read.frames, stopped: read.reason }
+  const read = readFrames(buf, header)
+  // A version 1 log has no positions to check: it was always exactly what came
+  // after the checkpoint beside it.
+  if (!header.start) return { records: read.records, stopped: read.reason }
+  // Another epoch is another run of the process: its numbers name nothing here.
+  if (resume && resume.epoch !== header.start.epoch)
+    return { records: [], stopped: 'discontinuous' }
+  return follow(read.records, resume ?? header.start, read.reason)
 }
 
-async function apply(id: string, frame: Frame): Promise<void> {
-  switch (frame.kind) {
-    case 'output':
-      feedScreen(id, frame.data)
+/**
+ * The records that continue on from `from`, and why they end.
+ *
+ * Replay is `rseq >= from.nextRseq`, never "bytes after an offset": a record
+ * below the cursor is already in the screen and is skipped, which is what makes
+ * the log safe to have written twice. Each record kept must start exactly where
+ * the last one left off. One that does not is a hole, and the replay stops
+ * before it rather than laying output over a screen it does not follow.
+ */
+function follow(
+  records: LogRecord[],
+  from: RecordCursor,
+  read: StopReason
+): {
+  records: LogRecord[]
+  stopped: ReplayStop
+} {
+  const kept: LogRecord[] = []
+  let at = from
+  for (const record of records) {
+    if (record.rseq < at.nextRseq) continue
+    if (record.rseq !== at.nextRseq || record.startOffset !== at.nextOffset) {
+      return { records: kept, stopped: 'discontinuous' }
+    }
+    kept.push(record)
+    at = cursorAfter(at.epoch, record)
+  }
+  return { records: kept, stopped: read }
+}
+
+async function apply(id: string, record: LogRecord): Promise<void> {
+  switch (record.kind) {
+    case 'data':
+      feedScreen(id, record.data)
       return
     case 'resize':
-      await resizeScreen(id, frame.cols, frame.rows)
-      return
-    case 'batch':
-      // A boundary, not a thing that happened. It marks where one flush ended so
-      // a torn tail can be found; there is nothing to apply.
+      await resizeScreen(id, record.cols, record.rows)
       return
   }
 }

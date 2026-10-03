@@ -12,20 +12,15 @@ import {
   LOG_FILE,
   type Checkpoint
 } from '../packages/server/src/history/checkpoint'
+import { crc32, writeHeader } from '../packages/server/src/history/log'
 import {
-  writeHeader,
-  frameBatch,
-  frameOutput,
-  frameResize
-} from '../packages/server/src/history/log'
-import {
-  configureHistory,
-  startHistory,
-  recordOutput,
-  recordResize,
-  flushHistory,
-  resetHistory
-} from '../packages/server/src/history/writer'
+  framesFrom,
+  recordSize,
+  recordText,
+  resetRecording,
+  startRecording
+} from './helpers/records'
+import { configureHistory, flushHistory, resetHistory } from '../packages/server/src/history/writer'
 import {
   createScreen,
   feedScreen,
@@ -57,6 +52,7 @@ beforeEach(() => {
   resetScreens()
   resetScrollback()
   resetHistory()
+  resetRecording()
 })
 
 afterEach(() => {
@@ -75,9 +71,17 @@ const sample = (over: Partial<Checkpoint> = {}): Checkpoint => ({
   title: '',
   cwd: '',
   generation: 4,
-  seq: 9,
+  resume: RESUME,
   ...over
 })
+
+/** Where the sample checkpoint's screen ends, and the log beside it starts. */
+const RESUME = { epoch: 7, nextRseq: 10, nextOffset: 500 }
+/** Where a session's log starts when it has never been checkpointed. */
+const SPAWN = { epoch: 7, nextRseq: 0, nextOffset: 0 }
+
+/** Records following on from the sample checkpoint. */
+const after = (...items: Array<string | [number, number]>): Buffer[] => framesFrom(RESUME, ...items)
 
 async function put(
   checkpoint: Checkpoint | null,
@@ -88,9 +92,10 @@ async function put(
   fs.mkdirSync(at, { recursive: true })
   if (checkpoint) await writeCheckpoint(at, checkpoint)
   if (logGeneration !== undefined) {
+    const start = checkpoint?.resume ?? SPAWN
     fs.writeFileSync(
       path.join(at, LOG_FILE),
-      Buffer.concat([writeHeader(logGeneration), ...frames])
+      Buffer.concat([writeHeader(logGeneration, start), ...frames])
     )
   }
 }
@@ -109,12 +114,12 @@ async function screenText(id = ID): Promise<string> {
 
 describe('a checkpoint and the log that follows it', () => {
   it('replays the log on top of the checkpoint', async () => {
-    await put(sample(), 4, frameBatch(1), frameOutput(' and then the log'))
+    await put(sample(), 4, ...after(' and then the log'))
 
     const report = await recoverHistory(dir, only)
 
     expect(report.recovered).toEqual([
-      { id: ID, replayed: 2, stopped: 'end', fromCheckpoint: true, closedCleanly: false }
+      { id: ID, replayed: 1, stopped: 'end', fromCheckpoint: true, closedCleanly: false }
     ])
     expect(readScrollback(ID)).toBe('from the checkpoint and then the log')
     expect(await screenText()).toContain('from the checkpoint and then the log')
@@ -131,7 +136,7 @@ describe('a checkpoint and the log that follows it', () => {
   })
 
   it('follows a resize that happened after it', async () => {
-    await put(sample(), 4, frameBatch(1), frameResize(132, 43))
+    await put(sample(), 4, ...after([132, 43]))
 
     await recoverHistory(dir, only)
 
@@ -144,7 +149,7 @@ describe('a log that does not belong to the checkpoint beside it', () => {
     // The crash window the writer cannot close: the checkpoint landed and the
     // log had not been replaced yet, so the log holds bytes the checkpoint
     // already contains.
-    await put(sample({ generation: 5 }), 4, frameBatch(1), frameOutput('from the checkpoint'))
+    await put(sample({ generation: 5 }), 4, ...after('from the checkpoint'))
 
     const report = await recoverHistory(dir, only)
 
@@ -153,7 +158,7 @@ describe('a log that does not belong to the checkpoint beside it', () => {
   })
 
   it('still restores the checkpoint itself', async () => {
-    await put(sample({ generation: 5 }), 4, frameBatch(1), frameOutput('stale'))
+    await put(sample({ generation: 5 }), 4, ...after('stale'))
 
     await recoverHistory(dir, only)
 
@@ -162,12 +167,88 @@ describe('a log that does not belong to the checkpoint beside it', () => {
   })
 })
 
+describe('records and the cursor they follow on from', () => {
+  it('skips a record the checkpoint already includes, so a log written twice replays once', async () => {
+    const older = framesFrom({ ...RESUME, nextRseq: 9, nextOffset: 495 }, 'early')
+    await put(sample(), 4, ...older, ...after(' and later'))
+
+    const report = await recoverHistory(dir, only)
+
+    expect(report.recovered[0]).toMatchObject({ replayed: 1, stopped: 'end' })
+    expect(readScrollback(ID)).toBe('from the checkpoint and later')
+  })
+
+  it('stops before a hole rather than laying output over a screen it does not follow', async () => {
+    const [first] = after(' kept')
+    const beyond = framesFrom({ ...RESUME, nextRseq: 12, nextOffset: 600 }, ' past a hole')
+    await put(sample(), 4, first!, ...beyond)
+
+    const report = await recoverHistory(dir, only)
+
+    expect(report.recovered[0]).toMatchObject({ replayed: 1, stopped: 'discontinuous' })
+    expect(readScrollback(ID)).toBe('from the checkpoint kept')
+  })
+
+  it('stops at a record whose offset does not follow on, even with the right number', async () => {
+    const shifted = framesFrom({ ...RESUME, nextOffset: RESUME.nextOffset + 1 }, ' misplaced')
+    await put(sample(), 4, ...shifted)
+
+    const report = await recoverHistory(dir, only)
+
+    expect(report.recovered[0]).toMatchObject({ replayed: 0, stopped: 'discontinuous' })
+  })
+
+  it('refuses a log from another epoch: its numbers name nothing in this run', async () => {
+    await put(sample({ resume: { ...RESUME, epoch: 8 } }))
+    fs.writeFileSync(
+      path.join(historyDir(dir, ID), LOG_FILE),
+      Buffer.concat([writeHeader(4, RESUME), ...after(' from another run')])
+    )
+
+    const report = await recoverHistory(dir, only)
+
+    expect(report.recovered[0]).toMatchObject({ replayed: 0, stopped: 'discontinuous' })
+    expect(readScrollback(ID)).toBe('from the checkpoint')
+  })
+})
+
+describe('history written by the build before records had places', () => {
+  it('is still restored, so an update does not lose the terminals it finds', async () => {
+    const at = historyDir(dir, ID)
+    fs.mkdirSync(at, { recursive: true })
+    // The previous build's checkpoint: a batch number, no cursor.
+    const { resume: _, ...previous } = sample()
+    await writeCheckpoint(at, { ...previous, seq: 9 })
+    const frame = (kind: number, payload: Buffer): Buffer => {
+      const out = Buffer.alloc(9 + payload.length)
+      out.writeUInt8(kind, 0)
+      out.writeUInt32LE(payload.length, 1)
+      out.writeUInt32LE(crc32(payload), 5)
+      payload.copy(out, 9)
+      return out
+    }
+    const header = Buffer.alloc(9)
+    header.write('VRNL', 0, 'ascii')
+    header.writeUInt8(1, 4)
+    header.writeUInt32LE(4, 5)
+    fs.writeFileSync(
+      path.join(at, LOG_FILE),
+      Buffer.concat([header, frame(0x01, Buffer.alloc(4)), frame(0x02, Buffer.from(' and v1'))])
+    )
+
+    const report = await recoverHistory(dir, only)
+
+    expect(report.recovered[0]).toMatchObject({ replayed: 1, stopped: 'end', fromCheckpoint: true })
+    expect(readScrollback(ID)).toBe('from the checkpoint and v1')
+  })
+})
+
 describe('a log with no checkpoint', () => {
   it('is rebuilt at the size a PTY is spawned at, which is where the log begins', async () => {
     // Not a guess and not a default. A log with no checkpoint opens at the
     // spawn, and a PTY is spawned at 80 by 24; any resize the terminal saw is a
     // frame further down that same log.
-    await put(null, 1, frameBatch(1), frameOutput('from the very beginning'))
+    await put(null, 1, ...framesFrom(SPAWN, 'from the very beginning'))
 
     await recoverHistory(dir, only)
 
@@ -177,24 +258,24 @@ describe('a log with no checkpoint', () => {
   it('is replayed from nothing, because it starts from nothing', async () => {
     // A session that crashed before its first checkpoint has a complete log --
     // exactly the short-lived session an interval was never going to cover.
-    await put(null, 1, frameBatch(1), frameOutput('everything this terminal ever printed'))
+    await put(null, 1, ...framesFrom(SPAWN, 'everything this terminal ever printed'))
 
     const report = await recoverHistory(dir, only)
 
-    expect(report.recovered[0]).toMatchObject({ fromCheckpoint: false, replayed: 2 })
+    expect(report.recovered[0]).toMatchObject({ fromCheckpoint: false, replayed: 1 })
     expect(readScrollback(ID)).toBe('everything this terminal ever printed')
   })
 })
 
 describe('a file the crash was in the middle of', () => {
   it('replays its whole prefix and says where it stopped', async () => {
-    const whole = Buffer.concat([frameBatch(1), frameOutput('kept'), frameOutput('torn away')])
+    const whole = Buffer.concat(after('kept', 'torn away'))
     const at = historyDir(dir, ID)
     fs.mkdirSync(at, { recursive: true })
     await writeCheckpoint(at, sample())
     fs.writeFileSync(
       path.join(at, LOG_FILE),
-      Buffer.concat([writeHeader(4), whole.subarray(0, whole.length - 4)])
+      Buffer.concat([writeHeader(4, RESUME), whole.subarray(0, whole.length - 4)])
     )
 
     const report = await recoverHistory(dir, only)
@@ -207,13 +288,10 @@ describe('a file the crash was in the middle of', () => {
     const at = historyDir(dir, ID)
     fs.mkdirSync(at, { recursive: true })
     await writeCheckpoint(at, sample())
-    const body = Buffer.concat([
-      writeHeader(4),
-      frameOutput('good'),
-      frameOutput('corrupted'),
-      frameOutput('after')
-    ])
-    body[writeHeader(4).length + frameOutput('good').length + 9 + 2] ^= 0x20
+    const frames = after('good', 'corrupted', 'after')
+    const body = Buffer.concat([writeHeader(4, RESUME), ...frames])
+    // Inside the middle record's text: past the frame prefix, its place and its stream.
+    body[writeHeader(4, RESUME).length + frames[0]!.length + 9 + 17 + 2] ^= 0x20
     fs.writeFileSync(path.join(at, LOG_FILE), body)
 
     const report = await recoverHistory(dir, only)
@@ -369,18 +447,18 @@ describe('the whole round trip', () => {
     // what a fresh process can rebuild.
     configureHistory(dir, { tickMs: 5, quiesceMs: 500, checkpointMs: 60_000 })
     createScreen(ID, 120, 40)
-    startHistory(ID)
+    startRecording(ID)
 
     const said = '\x1b[32m✓\x1b[0m tests passed, 402 of them\r\n'
     for (const chunk of [said, 'and then some more output\r\n']) {
       appendScrollback(ID, chunk)
       feedScreen(ID, chunk)
-      recordOutput(ID, chunk)
+      recordText(ID, chunk)
     }
     // Both halves, the way `resizePty` does it: the model follows the program
-    // and the frame records that it did.
+    // and the record says that it did.
     await resizeScreen(ID, 132, 43)
-    recordResize(ID, 132, 43)
+    recordSize(ID, 132, 43)
     await flushHistory()
 
     // Everything this process was holding, gone.
@@ -403,9 +481,9 @@ describe('the whole round trip', () => {
   it('leaves the files it recovered from in place', async () => {
     configureHistory(dir, { tickMs: 5, quiesceMs: 500, checkpointMs: 60_000 })
     createScreen(ID, 80, 24)
-    startHistory(ID)
+    startRecording(ID)
     feedScreen(ID, 'output')
-    recordOutput(ID, 'output')
+    recordText(ID, 'output')
     await flushHistory()
     resetScreens()
     resetScrollback()

@@ -13,14 +13,13 @@ import {
 } from '../packages/server/src/restored-sessions'
 import {
   configureHistory,
-  startHistory,
-  recordOutput,
   discardHistory,
   settleHistory,
   flushHistory,
   resetHistory
 } from '../packages/server/src/history/writer'
 import { historyDir } from '../packages/server/src/history/checkpoint'
+import { recordText, startRecording } from './helpers/records'
 import { createScreen, feedScreen, resetScreens } from '../packages/server/src/terminal-screen'
 import {
   resetScrollback,
@@ -78,9 +77,9 @@ afterEach(() => {
 /** Put real files on disk for a session, the way a previous run would have. */
 async function wrote(id: string): Promise<void> {
   createScreen(id, 80, 24)
-  startHistory(id)
+  startRecording(id)
   feedScreen(id, 'output from the run before')
-  recordOutput(id, 'output from the run before')
+  recordText(id, 'output from the run before')
   await settleHistory()
 }
 

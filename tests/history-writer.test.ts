@@ -5,9 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   configureHistory,
-  startHistory,
   recordOutput,
-  recordResize,
   stopHistory,
   flushHistory,
   settleHistory,
@@ -22,7 +20,16 @@ import {
   CHECKPOINT_FILE,
   LOG_FILE
 } from '../packages/server/src/history/checkpoint'
-import { readHeader, readFrames, type Frame } from '../packages/server/src/history/log'
+import type { RecordCursor } from '../packages/shared/src/types'
+import { readHeader, readFrames, type LogRecord } from '../packages/server/src/history/log'
+import {
+  EPOCH,
+  recordSize,
+  recordText,
+  resetRecording,
+  startRecording,
+  textOf
+} from './helpers/records'
 import {
   createScreen,
   feedScreen,
@@ -57,6 +64,7 @@ beforeEach(() => {
   resetScreens()
   resetScrollback()
   resetHistory()
+  resetRecording()
   configureHistory(dir, TIMING)
 })
 
@@ -72,12 +80,12 @@ afterEach(() => {
 function emit(id: string, data: string): void {
   appendScrollback(id, data)
   feedScreen(id, data)
-  recordOutput(id, data)
+  recordText(id, data)
 }
 
 function begin(id = ID, cols = 80, rows = 24): void {
   createScreen(id, cols, rows)
-  startHistory(id)
+  startRecording(id)
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
@@ -111,17 +119,21 @@ async function until(done: () => boolean, within = 2_000): Promise<void> {
   throw new Error('the condition never became true')
 }
 
-function logOf(id = ID): { generation: number | null; frames: Frame[] } {
+function logOf(id = ID): {
+  generation: number | null
+  start?: RecordCursor
+  frames: LogRecord[]
+} {
   const buf = fs.readFileSync(path.join(historyDir(dir, id), LOG_FILE))
   const header = readHeader(buf)
-  return { generation: header?.generation ?? null, frames: readFrames(buf).frames }
+  return {
+    generation: header?.generation ?? null,
+    start: header?.start,
+    frames: header ? readFrames(buf, header).records : []
+  }
 }
 
-const outputs = (frames: Frame[]): string =>
-  frames
-    .filter((f): f is Extract<Frame, { kind: 'output' }> => f.kind === 'output')
-    .map((f) => f.data)
-    .join('')
+const outputs = textOf
 
 describe('what reaches the log', () => {
   it('writes a header before anything else, so a reader can refuse a file that is not ours', async () => {
@@ -135,28 +147,46 @@ describe('what reaches the log', () => {
   it('carries output and resizes, in the order they happened', async () => {
     begin()
     emit(ID, 'first')
-    recordResize(ID, 120, 40)
+    recordSize(ID, 120, 40)
     emit(ID, 'second')
     await settle()
 
-    expect(logOf().frames).toEqual<Frame[]>([
-      { kind: 'batch', seq: 1 },
-      { kind: 'output', data: 'first' },
-      { kind: 'resize', cols: 120, rows: 40 },
-      { kind: 'output', data: 'second' }
+    expect(logOf().frames).toEqual<LogRecord[]>([
+      { kind: 'data', rseq: 0, startOffset: 0, stream: 0, data: 'first' },
+      { kind: 'resize', rseq: 1, startOffset: 5, cols: 120, rows: 40, pxWidth: 0, pxHeight: 0 },
+      { kind: 'data', rseq: 2, startOffset: 5, stream: 0, data: 'second' }
     ])
   })
 
-  it('coalesces a tick of writes into one batch rather than one each', async () => {
-    // A batch is what reaches the disk together, which is the unit a torn tail
-    // cuts. Numbering per write would make that boundary meaningless and cost
-    // thirteen bytes per keystroke.
+  it('starts a log at the cursor the session started at, even with output already waiting', async () => {
+    // The reset that writes the header runs on the session's queue, after
+    // output may already have been recorded. The header must still name where
+    // the session started, or replay would skip that output as already seen.
     begin()
-    for (let i = 0; i < 20; i++) emit(ID, `${i}`)
+    emit(ID, 'early')
     await settle()
+    expect(logOf().start).toEqual({ epoch: EPOCH, nextRseq: 0, nextOffset: 0 })
+    expect(outputs(logOf().frames)).toBe('early')
+  })
 
-    const batches = logOf().frames.filter((f) => f.kind === 'batch')
-    expect(batches).toEqual([{ kind: 'batch', seq: 1 }])
+  it('writes a record it is offered twice only once', async () => {
+    // The contract's idempotence rule: a record below what the writer already
+    // holds is already on its way to disk, and a second copy would replay its
+    // bytes twice.
+    begin()
+    emit(ID, 'once')
+    recordOutput(ID, { rseq: 0, startOffset: 0 }, 'once')
+    await settle()
+    expect(outputs(logOf().frames)).toBe('once')
+  })
+
+  it('stops appending past a record it was never given, until a checkpoint replaces the log', async () => {
+    begin()
+    emit(ID, 'before')
+    recordOutput(ID, { rseq: 5, startOffset: 99 }, 'after a hole')
+    await settle()
+    expect(historyState(ID)?.broken).toBe(true)
+    expect(outputs(logOf().frames)).toBe('')
   })
 
   it('writes nothing at all before a data directory is configured', async () => {
@@ -444,7 +474,7 @@ describe('a log that outgrows its cap', () => {
     expect(readCheckpoint(historyDir(dir, ID))?.generation).toBe(2)
 
     clearScreen(ID)
-    recordOutput(ID, past())
+    recordText(ID, past())
     await settle(3)
 
     expect(historyState(ID)?.logBytes).toBeLessThanOrEqual(MAX_LOG_BYTES)
