@@ -12,13 +12,14 @@
  * the methods the plan names as hotspots, and widening their visibility for a
  * benchmark would change the product for the sake of a measurement.
  */
+import type { EventEmitter } from 'node:events'
 import type { WebSocket } from 'ws'
 import { ptyManager } from '../../packages/server/src/pty-manager'
 import { ClientRegistry } from '../../packages/server/src/broadcast'
 import type { ManagedPty } from '../../packages/server/src/handoff/adopted-pty'
 import type { TerminalSession } from '@vornrun/shared/types'
 
-interface PtyInternals {
+interface PtyInternals extends Pick<EventEmitter, 'on' | 'off'> {
   sessions: Map<string, TerminalSession>
   ptys: Map<string, ManagedPty>
   appendOutput(id: string, data: string): void
@@ -31,7 +32,7 @@ interface PtyInternals {
   dataBuffers: Map<string, string>
 }
 
-export const pm = ptyManager as unknown as PtyInternals & typeof ptyManager
+export const pm = ptyManager as unknown as PtyInternals
 
 /** A pty that is only a place to push bytes from. */
 export class FakePty implements ManagedPty {

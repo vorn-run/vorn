@@ -36,7 +36,7 @@ const calls: Array<[string, () => unknown]> = [
 ]
 
 for (const [name, call] of calls) {
-  const ms = repeat(REPS, () => time(() => void call()), { minSampleMs: 100 })
+  const ms = repeat(REPS, () => time(() => void call()), { minSampleMs: 100, estimator: 'min' })
   metrics[`stall.${name}`] = metric(
     round(ms),
     'ms',

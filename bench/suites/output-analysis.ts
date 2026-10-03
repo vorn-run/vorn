@@ -17,7 +17,7 @@ import { MB, repeat, round, time } from '../lib/stats'
 import { emit, metric, QUICK, type Metric } from '../lib/suite'
 import { transcripts } from '../lib/transcripts'
 
-const REPS = QUICK ? 2 : 11
+const REPS = QUICK ? 2 : 7
 const CPU = { estimator: 'min', warmup: 5, minSampleMs: 200 } as const
 const metrics: Record<string, Metric> = {}
 const info: Record<string, unknown> = {}

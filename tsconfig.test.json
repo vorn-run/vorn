@@ -42,5 +42,5 @@
       "@vornrun/shared/*": ["./packages/shared/src/*"]
     }
   },
-  "include": ["tests/**/*", "src/renderer/env.d.ts"]
+  "include": ["tests/**/*", "bench/**/*", "src/renderer/env.d.ts"]
 }

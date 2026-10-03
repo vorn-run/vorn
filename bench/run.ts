@@ -23,6 +23,18 @@ import type { Metric, SuiteResult } from './lib/suite'
 
 const ROOT = path.resolve(__dirname, '..')
 const SUITES = ['output-analysis', 'screen-model', 'flush', 'git', 'event-loop', 'renderer']
+/**
+ * Processes per run, for suites whose numbers move between processes more than
+ * within one: the regex-heavy analysis and the xterm parse land up to 15% apart
+ * from one process to the next on the same machine, and event-loop percentiles
+ * depend on how the OS schedules that one process. One run of these is the
+ * median of three processes.
+ */
+const PROCESSES: Record<string, number> = {
+  'output-analysis': 3,
+  'screen-model': 3,
+  'event-loop': 3
+}
 const SPREAD_LIMIT = 10
 
 const args = new Map<string, string>()
@@ -73,7 +85,7 @@ function machine(): Record<string, unknown> {
   }
 }
 
-function runSuite(suite: string): SuiteResult {
+function runOnce(suite: string): SuiteResult {
   const file = path.join(ROOT, 'bench', 'suites', `${suite}.ts`)
   const run = spawnSync(process.execPath, ['--expose-gc', '--import', 'tsx', file], {
     cwd: ROOT,
@@ -89,6 +101,17 @@ function runSuite(suite: string): SuiteResult {
   }
   const line = run.stdout.trim().split('\n').pop() ?? ''
   return JSON.parse(line) as SuiteResult
+}
+
+function runSuite(suite: string): SuiteResult {
+  const procs = quick ? 1 : (PROCESSES[suite] ?? 1)
+  const results = Array.from({ length: procs }, () => runOnce(suite))
+  if (procs === 1) return results[0]
+  const metrics: SuiteResult['metrics'] = {}
+  for (const [name, first] of Object.entries(results[0].metrics)) {
+    metrics[name] = { ...first, value: round(median(results.map((r) => r.metrics[name].value)), 3) }
+  }
+  return { ...results[0], metrics }
 }
 
 function pct(n: number): string {
