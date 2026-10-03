@@ -16,6 +16,21 @@ import { addAnalysisSession, pm, removeSession } from '../lib/server-harness'
 import { MB, repeat, round, time } from '../lib/stats'
 import { emit, metric, QUICK, type Metric } from '../lib/suite'
 import { transcripts } from '../lib/transcripts'
+import { nativeCore } from '../lib/core'
+
+/**
+ * `VORN_CORE=native` runs `appendOutput` through the Rust core. The JS parts
+ * (`stripAnsi`, `analyzeOutput`) are not on that path, so in that mode they are
+ * replaced by `batched`, the same analysis with every chunk in one napi call,
+ * and `napiFloor`, a call per chunk that does nothing: together they place what
+ * crossing the boundary per chunk costs.
+ */
+const native = nativeCore as
+  | (NonNullable<typeof nativeCore> & {
+      analyzeBatch(chunks: string[], analyze: boolean): number
+      noop(data: string): number
+    })
+  | null
 
 const REPS = QUICK ? 2 : 7
 const CPU = { estimator: 'min', warmup: 5, minSampleMs: 200 } as const
@@ -47,6 +62,32 @@ for (const t of transcripts()) {
   )
 
   let sink = 0
+  if (native) {
+    const batched = repeat(
+      REPS,
+      () => time(() => void (sink += native.analyzeBatch(t.chunks, true))),
+      CPU
+    )
+    metrics[`batched.${t.name}`] = metric(
+      round(batched / mb),
+      'ms/MB',
+      `native analysis, every chunk in one napi call, ${t.name}`
+    )
+    const floor = repeat(
+      REPS,
+      () =>
+        time(() => {
+          for (const c of t.chunks) sink += native.noop(c)
+        }),
+      CPU
+    )
+    metrics[`napiFloor.${t.name}`] = metric(
+      round(floor / mb),
+      'ms/MB',
+      `one napi call per chunk that only receives the string, ${t.name}`
+    )
+    continue
+  }
   const strip = repeat(
     REPS,
     () =>

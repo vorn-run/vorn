@@ -143,6 +143,16 @@ describe('selectCore', () => {
     expect(core).toEqual({ mode: 'js', native: null, fallback: 'stale binary' })
   })
 
+  it('says why it fell back even when what was thrown is not an Error', () => {
+    const core = selectCore({
+      env: { VORN_CORE: 'native' },
+      load: () => {
+        throw 'dlopen said no'
+      }
+    })
+    expect(core).toEqual({ mode: 'js', native: null, fallback: 'dlopen said no' })
+  })
+
   it('keeps what the binary reported about itself', () => {
     const core = selectCore({ env: { VORN_CORE: 'native' }, load: () => fakeCore })
     expect(core.info).toEqual({ version: '0.0.0', ghostty: null })

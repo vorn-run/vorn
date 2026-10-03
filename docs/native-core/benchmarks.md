@@ -18,9 +18,17 @@ yarn bench --doc              # rewrite the tables below from bench/baselines/*.
 Every suite runs in a process of its own, as the `*.process.test.ts`
 measurements do, and the runs are interleaved so a machine that slows down part
 way spreads its drift over every suite. Each reported value is the median of the
-three runs, and each run's value is itself a median of several repetitions. The
-spread column is how far the furthest run sits from that median, as a share of
-it; WP0's acceptance bar is 10%.
+three runs. Within a run, each suite reduces its own repetitions: the CPU suites
+(output analysis, screen model, flush, git) keep the fastest repetition, the one
+least disturbed by the rest of the machine; the event-loop suite pools every
+round into one histogram before taking its percentiles; the renderer suite
+pools frame intervals across rounds. The spread column is how far the furthest
+run sits from the median, as a share of it; WP0's acceptance bar is 10%.
+
+The renderer suite drives Chromium through `playwright-core`, which does not
+download a browser. It uses Playwright's own Chromium when one is installed
+(`npx playwright-core install chromium`), then an installed Google Chrome, and
+`VORN_BENCH_CHROMIUM=<path>` picks one explicitly.
 
 Results from the last run are written to `bench/results/latest.json`
 (untracked). Baselines are per platform in `bench/baselines/<platform>-<arch>.json`;
@@ -50,8 +58,9 @@ capped at the flush size WP4 introduces, so before and after are fed alike.
 The server suites call `PtyManager`'s private handlers through a cast instead of
 copying them. A fake pty is wired with the same `setupPtyEvents` a spawned one
 gets, so the bench exercises the code WP2 to WP5 replace rather than a model of
-it. The `VORN_CORE=js|native` switch from WP1 is not read yet; once the native
-path exists, running the bench under each value gives the before and after.
+it. Running it under `VORN_CORE=native` measures the Rust core instead; that
+run keeps its own baseline (`<platform>-native.json`) and never touches the
+JS one or the tables here. `yarn bench:compare` runs both, taking turns.
 
 ## Caveats
 

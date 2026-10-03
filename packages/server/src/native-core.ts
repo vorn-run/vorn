@@ -17,7 +17,35 @@ export interface NativeCore {
   hello(name: string): string
   /** Only present when the crate was built with libghostty-vt. */
   parseTitle?(bytes: Buffer): string
+  /** `appendOutput`'s per-chunk analysis. Returns a `NATIVE_STATUS` code. */
+  Analyzer?: new () => NativeAnalyzer
+  /** The screen model, on libghostty-vt. Only present when built with it. */
+  Screen?: new (cols: number, rows: number) => NativeScreen
 }
+
+export interface NativeAnalyzer {
+  append(data: string, analyze: boolean): number
+  output(lines?: number): string[]
+  /** The line in progress, stripped: what the JS path keeps as the partial. */
+  partial(): string
+  /** Drops the line ring, which V8 does not see, now rather than at GC. */
+  free(): void
+}
+
+export interface NativeScreen {
+  /** Returns the cwd an OSC 5522 in `data` moved to, for the session record. */
+  feed(data: string): string | null
+  restoreLabels(title?: string | null, cwd?: string | null): void
+  /** Releases the terminal, whose memory V8 does not see, now rather than at GC. */
+  free(): void
+  resize(cols: number, rows: number): void
+  serialize(): { screen: string; cols: number; rows: number; title: string; cwd: string }
+  readonly title: string
+  readonly cwd: string
+}
+
+/** What `NativeAnalyzer.append` returns, in order. */
+export const NATIVE_STATUS = [null, 'running', 'waiting', 'error'] as const
 
 export interface CoreSelection {
   mode: CoreMode
@@ -118,7 +146,7 @@ export function selectCore(
     }
     return { mode: 'native', native, info }
   } catch (err) {
-    return { mode: 'js', native: null, fallback: (err as Error).message }
+    return { mode: 'js', native: null, fallback: err instanceof Error ? err.message : String(err) }
   }
 }
 
@@ -126,4 +154,15 @@ export function selectCore(
 // directory under tsx.
 function serverDir(): string {
   return typeof __dirname !== 'undefined' ? __dirname : path.dirname(process.argv[1])
+}
+
+let active: CoreSelection | null = null
+
+/**
+ * The core this process runs, resolved once from `VORN_CORE` and cached, so
+ * the per-chunk lookup in the output path is a field read.
+ */
+export function activeCore(): CoreSelection {
+  active ??= selectCore()
+  return active
 }

@@ -40,6 +40,7 @@ import {
 import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
+import { activeCore, NATIVE_STATUS, type NativeAnalyzer } from './native-core'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
 import {
   createScreen,
@@ -117,6 +118,9 @@ class PtyManager extends EventEmitter {
   private tempKeyPaths = new Map<string, string>()
   private outputLines = new Map<string, string[]>()
   private outputPartials = new Map<string, string>()
+  /** `VORN_CORE=native`: the Rust core's per-session analysis, replacing the three maps around it. */
+  private analyzers = new Map<string, NativeAnalyzer>()
+  private nativeAnalysisFailed = false
   private statusContexts = new Map<string, StatusContext>()
   private idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private sessionOrder: string[] = []
@@ -782,11 +786,35 @@ class PtyManager extends EventEmitter {
   private clearSessionTracking(id: string): void {
     this.outputLines.delete(id)
     this.outputPartials.delete(id)
+    this.analyzers.get(id)?.free()
+    this.analyzers.delete(id)
     this.statusContexts.delete(id)
     this.extensionPtys.delete(id)
     const idleTimer = this.idleTimers.get(id)
     if (idleTimer) clearTimeout(idleTimer)
     this.idleTimers.delete(id)
+  }
+
+  /**
+   * After a native failure: carry each session's output so far into the JS
+   * maps, so `getOutput` keeps what was read before, then free the analyzers.
+   * An analyzer that can't be read loses its history, not the others'.
+   */
+  private handOutputToJs(): void {
+    for (const [id, analyzer] of this.analyzers) {
+      try {
+        this.outputLines.set(id, analyzer.output())
+        this.outputPartials.set(id, analyzer.partial())
+      } catch {
+        // Its history is lost; the session carries on from the next chunk.
+      }
+      try {
+        analyzer.free()
+      } catch {
+        // Nothing more to release.
+      }
+    }
+    this.analyzers.clear()
   }
 
   private appendOutput(id: string, data: string): void {
@@ -797,25 +825,54 @@ class PtyManager extends EventEmitter {
     // They stay 'running' until the PTY exits (setupPtyEvents sets 'idle').
     if (session.agentType === 'shell') return
 
-    let buf = this.outputLines.get(id)
-    if (!buf) {
-      buf = []
-      this.outputLines.set(id, buf)
+    const Analyzer = activeCore().native?.Analyzer
+    // Whether this chunk still goes into the JS line buffer below.
+    let recordLines = true
+    if (Analyzer && !this.nativeAnalysisFailed) {
+      try {
+        let analyzer = this.analyzers.get(id)
+        if (!analyzer) {
+          analyzer = new Analyzer()
+          this.analyzers.set(id, analyzer)
+        }
+        const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
+        if (newStatus && newStatus !== session.status) this.updateSessionStatus(id, newStatus)
+        this.armIdle(id, session)
+        return
+      } catch (err) {
+        // This runs inside the pty's data handler, where a throw has nothing
+        // behind it. Every session goes back to the JS path from here on.
+        log.warn({ err, id }, '[core] native output analysis failed; using js')
+        this.nativeAnalysisFailed = true
+        this.handOutputToJs()
+        // The core may have taken some or all of this chunk before it threw,
+        // and that is in the history just handed over: adding the chunk again
+        // would duplicate it. At worst the unread tail of one chunk is lost.
+        recordLines = false
+      }
     }
 
     const clean = stripAnsi(data)
-    const partial = this.outputPartials.get(id) ?? ''
-    const combined = partial + clean
-    const segments = combined.split('\n')
+    if (recordLines) {
+      let buf = this.outputLines.get(id)
+      if (!buf) {
+        buf = []
+        this.outputLines.set(id, buf)
+      }
 
-    // Last segment is incomplete (no trailing \n) — save for next chunk
-    this.outputPartials.set(id, segments.pop()!)
+      const partial = this.outputPartials.get(id) ?? ''
+      const combined = partial + clean
+      const segments = combined.split('\n')
 
-    for (const line of segments) {
-      buf.push(line)
-    }
-    if (buf.length > MAX_OUTPUT_LINES) {
-      buf.splice(0, buf.length - MAX_OUTPUT_LINES)
+      // Last segment is incomplete (no trailing \n) — save for next chunk
+      this.outputPartials.set(id, segments.pop()!)
+
+      for (const line of segments) {
+        buf.push(line)
+      }
+      if (buf.length > MAX_OUTPUT_LINES) {
+        buf.splice(0, buf.length - MAX_OUTPUT_LINES)
+      }
     }
 
     // Bracketed paste mode detection — works for all agents using readline.
@@ -844,8 +901,12 @@ class PtyManager extends EventEmitter {
       }
     }
 
-    // Idle timer — if no output arrives within timeout, mark idle.
-    // Hook sessions use a longer timeout as safety net (hooks are primary).
+    this.armIdle(id, session)
+  }
+
+  // Idle timer — if no output arrives within timeout, mark idle.
+  // Hook sessions use a longer timeout as safety net (hooks are primary).
+  private armIdle(id: string, session: TerminalSession): void {
     const timeout = session.statusSource === 'hooks' ? IDLE_TIMEOUT_HOOKS_MS : IDLE_TIMEOUT_MS
     const existingTimer = this.idleTimers.get(id)
     if (existingTimer) clearTimeout(existingTimer)
@@ -1210,6 +1271,9 @@ class PtyManager extends EventEmitter {
     this.sessions.clear()
     this.outputLines.clear()
     this.outputPartials.clear()
+    for (const analyzer of this.analyzers.values()) analyzer.free()
+    this.analyzers.clear()
+    this.nativeAnalysisFailed = false
     this.statusContexts.clear()
     for (const timer of this.idleTimers.values()) clearTimeout(timer)
     this.idleTimers.clear()
@@ -1332,6 +1396,8 @@ class PtyManager extends EventEmitter {
 
   getOutput(id: string, lines?: number): string[] {
     if (!this.sessions.has(id)) throw new Error(`Session not found: ${id}`)
+    const analyzer = this.analyzers.get(id)
+    if (analyzer) return analyzer.output(lines)
     const buf = this.outputLines.get(id) ?? []
     if (lines && lines < buf.length) {
       return buf.slice(-lines)

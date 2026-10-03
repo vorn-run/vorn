@@ -27,6 +27,7 @@ import { resetScrollback } from '../../packages/server/src/terminal-scrollback'
 import { addSession, connectClients, pm, removeSession } from '../lib/server-harness'
 import { MB, repeatAsync, round, time } from '../lib/stats'
 import { emit, metric, QUICK, type Metric } from '../lib/suite'
+import '../lib/core'
 import { asFlushes, transcripts } from '../lib/transcripts'
 
 const REPS = QUICK ? 2 : 9

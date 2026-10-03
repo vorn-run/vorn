@@ -27,5 +27,5 @@ been built, and skips it otherwise.
 ```sh
 yarn build:core
 VORN_CORE=native yarn workspace @vornrun/server dev
-# [core] native: hello server from vorn-core 0.7.5
+# [core] native 0.7.5
 ```

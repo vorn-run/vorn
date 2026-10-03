@@ -28,6 +28,7 @@ import { makeRepo } from '../lib/git-fixture'
 import { addSession, connectClients, removeSession, type FakePty } from '../lib/server-harness'
 import { MB, nowMs, round } from '../lib/stats'
 import { emit, metric, QUICK, type Metric } from '../lib/suite'
+import '../lib/core'
 import { transcript, type Transcript } from '../lib/transcripts'
 
 const DURATION_MS = QUICK ? 1000 : 2000

@@ -7,6 +7,10 @@
 
 use napi_derive::napi;
 
+pub mod analysis;
+#[cfg(feature = "ghostty")]
+pub mod screen;
+
 // Every exported function uses `#[napi(catch_unwind)]`: napi-rs only turns a
 // panic into a JS exception when asked to, and an uncaught one unwinding into
 // Node aborts the server and every terminal it hosts.
@@ -52,7 +56,7 @@ pub fn parse_title(bytes: napi::bindgen_prelude::Buffer) -> napi::Result<String>
 }
 
 #[cfg(feature = "ghostty")]
-fn to_napi(err: libghostty_vt::Error) -> napi::Error {
+pub(crate) fn to_napi(err: libghostty_vt::Error) -> napi::Error {
     napi::Error::from_reason(format!("libghostty-vt: {err:?}"))
 }
 
@@ -66,4 +70,11 @@ fn ghostty_version() -> Option<String> {
 #[cfg(not(feature = "ghostty"))]
 fn ghostty_version() -> Option<String> {
     None
+}
+
+/// Takes a chunk and does nothing with it: what one napi crossing with a string
+/// argument costs, for the bench to set beside the real calls.
+#[napi(catch_unwind)]
+pub fn noop(data: String) -> u32 {
+    data.len() as u32
 }

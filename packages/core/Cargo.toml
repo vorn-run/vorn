@@ -20,6 +20,8 @@ ghostty = ["dep:libghostty-vt"]
 napi = { version = "3", default-features = false, features = ["napi6"] }
 napi-derive = "3"
 libghostty-vt = { version = "0.2.2", default-features = false, optional = true }
+memchr = "2"
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }
 
 [build-dependencies]
 napi-build = "2"
@@ -28,3 +30,6 @@ napi-build = "2"
 lto = true
 codegen-units = 1
 strip = "symbols"
+
+[dev-dependencies]
+serde_json = "1"
