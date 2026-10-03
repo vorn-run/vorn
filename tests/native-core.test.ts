@@ -142,15 +142,19 @@ describe('selectCore', () => {
 // Runs only where `yarn build:core` has produced the binary, as the core CI job does.
 const builtCore = path.resolve(__dirname, '../packages/core/vorn_core.node')
 describe.runIf(fs.existsSync(builtCore))('vorn_core.node', () => {
-  const core = loadNativeCore([builtCore])
-
   it('answers a call from Node', () => {
+    const core = loadNativeCore([builtCore])
     expect(core.hello('test')).toMatch(/^hello test from vorn-core \d+\.\d+\.\d+/)
     expect(core.info().version).toMatch(/^\d+\.\d+\.\d+/)
   })
 
-  it.runIf(typeof core.parseTitle === 'function')('parses with libghostty-vt', () => {
-    expect(core.parseTitle!(Buffer.from('\x1b]2;vorn\x07'))).toBe('vorn')
-    expect(core.info().ghostty).toBeTruthy()
+  it('parses with libghostty-vt exactly when it reports being built with it', () => {
+    const core = loadNativeCore([builtCore])
+    if (core.parseTitle) {
+      expect(core.parseTitle(Buffer.from('\x1b]2;vorn\x07'))).toBe('vorn')
+      expect(core.info().ghostty).toBeTruthy()
+    } else {
+      expect(core.info().ghostty ?? null).toBeNull()
+    }
   })
 })
