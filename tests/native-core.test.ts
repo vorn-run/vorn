@@ -130,6 +130,24 @@ describe('selectCore', () => {
     expect(core).toEqual({ mode: 'js', native: null, fallback: 'vorn_core.node not found' })
   })
 
+  it('falls back to js when a loaded binary throws from info()', () => {
+    const core = selectCore({
+      env: { VORN_CORE: 'native' },
+      load: () => ({
+        ...fakeCore,
+        info: () => {
+          throw new Error('stale binary')
+        }
+      })
+    })
+    expect(core).toEqual({ mode: 'js', native: null, fallback: 'stale binary' })
+  })
+
+  it('keeps what the binary reported about itself', () => {
+    const core = selectCore({ env: { VORN_CORE: 'native' }, load: () => fakeCore })
+    expect(core.info).toEqual({ version: '0.0.0', ghostty: null })
+  })
+
   it('looks in the default places when given nothing', () => {
     const core = selectCore({ env: { VORN_CORE: 'native', VORN_CORE_PATH: '/nonexistent/x.node' } })
     // Only meaningful as a smoke test of the defaults: either a built core is

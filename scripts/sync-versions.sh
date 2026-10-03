@@ -47,6 +47,16 @@ if [ -f "$CARGO_FILE" ]; then
   if [ -n "$CARGO_CHANGED" ]; then
     echo "Syncing packages/core/Cargo.toml → $ROOT_VERSION"
     git add "$CARGO_FILE"
+    # Cargo.lock records the crate's own version too; CI builds with --locked.
+    LOCK_FILE="$ROOT_DIR/packages/core/Cargo.lock"
+    if [ -f "$LOCK_FILE" ]; then
+      node -e "
+        const fs = require('fs');
+        const lock = fs.readFileSync('$LOCK_FILE', 'utf8');
+        fs.writeFileSync('$LOCK_FILE', lock.replace(/(name = \"vorn-core\"\nversion = )\".*\"/, '\$1\"$ROOT_VERSION\"'));
+      "
+      git add "$LOCK_FILE"
+    fi
     OUT_OF_SYNC=1
   fi
 fi

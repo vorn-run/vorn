@@ -43,6 +43,8 @@ export interface CoreSelection {
   mode: CoreMode
   /** Loaded only when `mode` is `native`. */
   native: NativeCore | null
+  /** What the loaded binary reported about itself, when `mode` is `native`. */
+  info?: ReturnType<NativeCore['info']>
   /** Why the server is on `js` although something else was asked for. */
   fallback?: string
 }
@@ -127,7 +129,14 @@ export function selectCore(
   const dir = options.dir ?? serverDir()
   const load = options.load ?? ((candidates) => loadNativeCore(candidates))
   try {
-    return { mode: 'native', native: load(nativeCoreCandidates(dir, env.VORN_CORE_PATH)) }
+    const native = load(nativeCoreCandidates(dir, env.VORN_CORE_PATH))
+    // Call into the binary here, inside the try: a stale or mismatched build can
+    // export info() and still throw from it, and that must fall back too.
+    const info = native.info()
+    if (!info || typeof info.version !== 'string') {
+      throw new Error('vorn core info() returned no version')
+    }
+    return { mode: 'native', native, info }
   } catch (err) {
     return { mode: 'js', native: null, fallback: (err as Error).message }
   }
