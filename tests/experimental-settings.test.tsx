@@ -104,6 +104,20 @@ describe('ExperimentalSettings', () => {
     expect(screenSwitch()).toBeDisabled()
   })
 
+  it('says a switch stays on JavaScript under VORN_CORE=native when the binary lacks it', async () => {
+    status = core({ forced: 'native', missing: ['nativeScreen'] })
+    render(<ExperimentalSettings />)
+    expect(
+      await screen.findByText(/does not include Native screen model.*even with VORN_CORE=native/)
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/every switch is on/)).not.toBeInTheDocument()
+  })
+
+  it('names each switch for a screen reader', () => {
+    render(<ExperimentalSettings />)
+    expect(screen.getByRole('switch', { name: 'Native screen model' })).toBeInTheDocument()
+  })
+
   it('carries on without a note when the status cannot be read', async () => {
     status = new Error('older server')
     render(<ExperimentalSettings />)

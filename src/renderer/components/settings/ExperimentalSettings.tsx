@@ -30,14 +30,16 @@ function coreNote(status: CoreStatus | null): string | null {
       status.error ? `: ${status.error}` : '.'
     }`
   }
-  if (status.forced === 'native')
-    return 'VORN_CORE=native is set for the server, so every switch is on.'
+  // Before the forced-native note too: VORN_CORE=native cannot turn on what the
+  // binary was built without.
   if (status.missing?.length) {
     const names = SWITCHES.filter((s) => status.missing.includes(s.key)).map((s) => s.label)
     return `This build of the native core does not include ${names.join(', ')}, so ${
       names.length === 1 ? 'that stays' : 'those stay'
-    } on JavaScript.`
+    } on JavaScript${status.forced === 'native' ? ', even with VORN_CORE=native set' : ''}.`
   }
+  if (status.forced === 'native')
+    return 'VORN_CORE=native is set for the server, so every switch is on.'
   return null
 }
 
@@ -95,6 +97,7 @@ export function ExperimentalSettings() {
                 checked={flags[s.key] === true}
                 onChange={(value) => setFlag(s.key, value)}
                 disabled={off}
+                label={s.label}
               />
             </SettingRow>
           )

@@ -103,6 +103,15 @@ jobs:
       - name: Native call
         run: yarn vitest run tests/native-core.test.ts tests/terminal-screen-parity.test.ts
 
+      # The native screen model's memory ceiling and release, which the main
+      # suite skips because it has no binary. One platform is enough for a
+      # ceiling.
+      - name: Native screen memory
+        if: runner.os == 'Linux'
+        env:
+          VORN_CORE: native
+        run: yarn vitest run tests/terminal-screen-memory.process.test.ts
+
       - name: Build app
         run: yarn build
 

@@ -66,12 +66,16 @@ function view(term: Term): View {
         cell.isUnderline(),
         cell.isInverse(),
         cell.isDim(),
+        cell.isStrikethrough(),
+        cell.isBlink(),
+        cell.isInvisible(),
+        cell.isOverline(),
         cell.getWidth()
       ].join(' ')
       // BLANKS_AS_SPACES: an unstyled space is the same as an empty cell. A blank
       // with a style (a background, say) is visible, so it is compared.
       const blank = cell.getChars() === '' || cell.getChars() === ' '
-      if (blank && style === `${x},${y} default default 0 0 0 0 0 1`) continue
+      if (blank && style === `${x},${y} default default 0 0 0 0 0 0 0 0 0 1`) continue
       styles.push(`${style} ${blank ? ' ' : cell.getChars()}`)
     }
   }
@@ -129,6 +133,12 @@ const CASES: Array<{ name: string; input: string; cols?: number; rows?: number }
     input:
       '\x1b[32m✓\x1b[0m passed\r\n\x1b[1;31merror\x1b[0m: \x1b[38;5;208mwarn\x1b[0m ' +
       '\x1b[38;2;10;20;30mrgb\x1b[48;5;17m bg\x1b[0m\r\n\x1b[3;4;7mstyled\x1b[0m'
+  },
+  {
+    name: 'strikethrough, blink, invisible and overline',
+    input:
+      '\x1b[9mstruck\x1b[29m \x1b[5mblink\x1b[25m \x1b[8mhidden\x1b[28m ' +
+      '\x1b[53mover\x1b[55m \x1b[2;9;53mall\x1b[0m'
   },
   { name: 'wide characters', input: '漢字 and 😀 emoji\r\n全角テキスト' },
   {
