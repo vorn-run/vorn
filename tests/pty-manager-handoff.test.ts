@@ -61,7 +61,7 @@ const { spawnMock, FakePty } = vi.hoisted(() => {
 
 type FakePtyInstance = InstanceType<typeof FakePty>
 
-vi.mock('node-pty', () => ({
+vi.mock('../packages/server/node_modules/node-pty', () => ({
   default: { spawn: spawnMock },
   spawn: spawnMock
 }))

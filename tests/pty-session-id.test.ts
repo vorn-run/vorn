@@ -29,7 +29,7 @@ const spawn = vi.hoisted(() =>
   }))
 )
 
-vi.mock('node-pty', () => ({
+vi.mock('../packages/server/node_modules/node-pty', () => ({
   default: { spawn },
   spawn
 }))

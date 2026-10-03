@@ -25,7 +25,9 @@ const { spawnMock } = vi.hoisted(() => {
   return { spawnMock: vi.fn(() => new FakePty()) }
 })
 
-vi.mock('node-pty', () => ({
+// The nested copy by name: `packages/server` pins its own, and mocking the bare
+// specifier would patch the root one and leave the spawns real.
+vi.mock('../packages/server/node_modules/node-pty', () => ({
   spawn: spawnMock,
   default: { spawn: spawnMock }
 }))
