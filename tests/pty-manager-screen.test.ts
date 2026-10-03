@@ -83,7 +83,11 @@ const { spawnMock, FakePty } = vi.hoisted(() => {
 
 type FakePtyInstance = InstanceType<typeof FakePty>
 
-vi.mock('node-pty', () => ({
+// The nested copy by name, not the bare specifier. `packages/server` pins its
+// own node-pty, so mocking 'node-pty' from here patches the root copy and
+// leaves pty-manager's untouched — the spawns would be real. Same reasoning as
+// `pty-session-id.test.ts`, which is where this convention comes from.
+vi.mock('../packages/server/node_modules/node-pty', () => ({
   default: { spawn: spawnMock },
   spawn: spawnMock
 }))
