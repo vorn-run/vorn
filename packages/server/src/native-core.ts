@@ -159,8 +159,8 @@ function serverDir(): string {
 let active: CoreSelection | null = null
 
 /**
- * The core this process runs, resolved once from `VORN_CORE`. The output path
- * reads it per session rather than per chunk.
+ * The core this process runs, resolved once from `VORN_CORE` and cached, so
+ * the per-chunk lookup in the output path is a field read.
  */
 export function activeCore(): CoreSelection {
   active ??= selectCore()

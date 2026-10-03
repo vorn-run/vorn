@@ -374,16 +374,32 @@ impl Analyzer {
     /// `analyzeOutput`: errors on the last five lines, the line in progress
     /// included; the waiting prompt anywhere in the last 2000 characters.
     fn status(&mut self) -> u32 {
-        let mut error = false;
-        for l in self.lines.iter_mut().rev().take(RECENT_COMPLETED) {
-            error |= *l
-                .error
-                .get_or_insert_with(|| error_patterns().is_match(&l.text));
-        }
-        // Only the window `analyzeOutput` keeps: a long stream with no newline
+        // Only the window `analyzeOutput` keeps, 2000 characters of the stream
+        // shared across its last five lines: a long stream with no newline
         // would otherwise be rescanned in full on every chunk.
-        let current = tail(&self.line, WAITING_WINDOW_CHARS);
-        if error || error_patterns().is_match(current) {
+        let mut left = WAITING_WINDOW_CHARS;
+        let current = tail(&self.line, left);
+        let mut error = error_patterns().is_match(current);
+        left = left.saturating_sub(current.chars().count());
+        for l in self.lines.iter_mut().rev().take(RECENT_COMPLETED) {
+            if left == 0 {
+                break;
+            }
+            // The newline that ends this line is inside the window too.
+            left -= 1;
+            let t = tail(&l.text, left);
+            if t.len() == l.text.len() {
+                // Whole in the window: the verdict can be kept for the next chunk.
+                left -= t.chars().count();
+                error |= *l
+                    .error
+                    .get_or_insert_with(|| error_patterns().is_match(&l.text));
+            } else {
+                error |= error_patterns().is_match(t);
+                left = 0;
+            }
+        }
+        if error {
             return STATUS_ERROR;
         }
         // The last line with something on it, as `trimEnd().split('\n').pop()`
@@ -575,6 +591,16 @@ mod tests {
         assert_eq!(tail("hé", 5), "hé");
         assert_eq!(tail("hé", 0), "");
         assert_eq!(tail("€€€", 2), "€€");
+    }
+
+    #[test]
+    fn error_window_is_shared_like_js() {
+        // An error more than 2000 characters back is out of the JS window,
+        // even when it is within the last five lines.
+        let mut a = Analyzer::new();
+        assert_eq!(a.append_str("error: boom\n", true), STATUS_ERROR);
+        let long = "x".repeat(2100);
+        assert_eq!(a.append_str(&format!("{long}\n"), true), STATUS_RUNNING);
     }
 
     #[test]

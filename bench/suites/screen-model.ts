@@ -14,6 +14,7 @@ import {
   createScreen,
   drainScreen,
   feedScreen,
+  hasScreen,
   serializeScreen,
   resetScreens
 } from '../../packages/server/src/terminal-screen'
@@ -43,6 +44,8 @@ async function main(): Promise<void> {
           // Drain only: serialization is measured on its own below.
           await drainScreen(id)
         })
+        // A core fault drops the model, which would time as a fast no-op.
+        if (!hasScreen(id)) throw new Error(`screen model for ${t.name} was dropped mid-run`)
         resetScreens()
         return elapsed
       },
@@ -59,12 +62,13 @@ async function main(): Promise<void> {
   const agent = asFlushes(transcripts()[0])
   createScreen('serialize', COLS, ROWS)
   for (const f of agent) feedScreen('serialize', f)
-  await serializeScreen('serialize')
+  if (!(await serializeScreen('serialize'))) throw new Error('serializeScreen returned nothing')
   const serialize = await repeatAsync(
     QUICK ? 5 : 30,
     () => timeAsync(async () => void (await serializeScreen('serialize'))),
     { ...CPU, warmup: 3 }
   )
+  if (!hasScreen('serialize')) throw new Error('screen model was dropped while serializing')
   metrics['serialize.200x50'] = metric(
     round(serialize, 3),
     'ms',

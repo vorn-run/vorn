@@ -5,14 +5,14 @@ Spike branch `claude/ghostty-vs-js-spike-j19qh3`, on top of the WP0 bench (#639)
 - **Screen model**: `terminal-screen.ts` feeds a libghostty-vt `Terminal` instead of a headless xterm, and serializes with Ghostty's VT formatter.
 - **Output analysis**: `appendOutput`'s ANSI strip, line ring, bracketed-paste and status patterns run in one Rust pass per raw chunk (`packages/core/src/analysis.rs`).
 
-Everything else (flush fan-out, scrollback, history, idle timers) is the same code in both modes. `yarn bench:compare --runs=3` runs every suite under each core in separate processes. Numbers include the napi crossing on every chunk and flush, with the bench's real chunk sizes (62 B keystroke-sized reads, 1-60 frame reads, 4 KB pages).
+Everything else (flush fan-out, scrollback, history, idle timers) is the same code in both modes. `yarn bench:compare --runs=3` runs the five suites the core touches (output-analysis, screen-model, flush, event-loop, memory; not git or renderer) under each core in separate processes, taking turns on which goes first. Numbers include the napi crossing on every chunk and flush, with the bench's real chunk sizes (62 B keystroke-sized reads, 1-60 frame reads, 4 KB pages).
 
 ## Verdict
 
 The native core is faster on everything it replaces, on both machines.
 
 - **End to end, one megabyte of terminal output costs the server 4-6x less CPU** (agent 6.4x, spinner 5.8x, build log 4.3x on the M2 Pro).
-- **Event-loop p99 drops 3x under a 50 MB/s burst** (15.5 to 5.6 ms on the M2 Pro) and **16x with git running beside 8 agents** (104 to 6.4 ms).
+- **Event-loop p99 drops 3x under a 50 MB/s burst** (15.5 to 5.6 ms on the M2 Pro) and **16x for 8 agents with git polling beside them** (104 to 6.4 ms). That is the loop's p99 over the whole run; the git calls themselves are unchanged, and their few stalls sit above the 99th percentile, so this row says nothing about git latency.
 - **Memory per session drops 2.5x in RSS and 14x in what Node accounts for** (`heapUsed + external`; the core's own allocations show only in RSS).
 - **Checkpoint serialize is 40-46x faster** (1.6 ms to 0.04 ms per 200x50 screen).
 
@@ -26,7 +26,7 @@ Two of the plan's acceptance bars are **not met yet** by this spike, and neither
 ## Caveats
 
 - The native analysis is closer to a real terminal than the JS one: escape sequences split across reads are still stripped, `\r` and erase-in-line apply across reads, so a redrawn status line stays one line. Status detection tests pass unchanged with `VORN_CORE=native`.
-- With `VORN_CORE=native`, 34 of 37 `terminal-screen` tests pass. The three failures are known WP2 gaps: labels restored from a checkpoint, the title length bound, and percent-decoding an OSC 7 path.
+- With `VORN_CORE=native`, all 37 `terminal-screen` tests pass (restored labels, the title bound and OSC 7 percent-decoding are implemented). Across the full suite two native-only failures remain, both xterm assumptions: `history-recovery` expects green as SGR `32` where Ghostty writes `38;5;2`, and the terminal-screen memory test measures the V8 heap, which native memory is not on.
 - Ghostty is built for the baseline CPU (shippable). On the Linux sandbox its raw parse is 150-270 MB/s, about 10% faster with `-Dcpu=native`.
 - Building on macOS 27.2 fails out of the box: the SDK `.tbd` stubs list only `arm64e`, so Zig 0.15.2 cannot link. The Mac run used a scratch copy of the 26.5 SDK with `arm64-macos` added and an `xcrun` shim, without changing the system.
 - Linux sandbox native numbers spread up to 28% across runs (shared VM); the M2 Pro run is the one to quote.

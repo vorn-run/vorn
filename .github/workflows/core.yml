@@ -88,6 +88,13 @@ jobs:
         working-directory: packages/core
         run: cargo clippy --release --locked -- -D warnings
 
+      # Linux only: the test binary links napi's symbols directly, which a
+      # macOS executable can't leave undefined the way the cdylib does.
+      - name: Rust tests
+        if: runner.os == 'Linux'
+        working-directory: packages/core
+        run: cargo test --release --locked
+
       - name: Build vorn_core.node
         run: yarn build:core
 
