@@ -1,0 +1,413 @@
+{
+  "machine": {
+    "platform": "darwin-arm64",
+    "cpu": "Apple M2 Pro",
+    "cores": 10,
+    "memoryGB": 16,
+    "node": "v22.23.2",
+    "git": "git version 2.54.0 (Apple Git-157)"
+  },
+  "recordedAt": "2026-10-03T15:50:07.319Z",
+  "commit": "2fc17d96",
+  "runs": 3,
+  "suites": {
+    "output-analysis": {
+      "metrics": {
+        "appendOutput.agent": {
+          "value": 124.5,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "appendOutput per raw chunk, agent transcript",
+          "samples": [122.69, 130.6, 124.5],
+          "spreadPct": 4.9
+        },
+        "stripAnsi.agent": {
+          "value": 5.63,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "stripAnsi alone, agent",
+          "samples": [5.59, 6.02, 5.63],
+          "spreadPct": 6.9
+        },
+        "statusRegex.agent": {
+          "value": 72.46,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "analyzeOutput alone (status regexes), agent",
+          "samples": [70.55, 76.74, 72.46],
+          "spreadPct": 5.9
+        },
+        "appendOutput.spinner": {
+          "value": 52.33,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "appendOutput per raw chunk, spinner transcript",
+          "samples": [51.76, 56.45, 52.33],
+          "spreadPct": 7.9
+        },
+        "stripAnsi.spinner": {
+          "value": 35.16,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "stripAnsi alone, spinner",
+          "samples": [35.16, 38.08, 35.01],
+          "spreadPct": 8.3
+        },
+        "statusRegex.spinner": {
+          "value": 13.06,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "analyzeOutput alone (status regexes), spinner",
+          "samples": [12.96, 14.25, 13.06],
+          "spreadPct": 9.1
+        },
+        "appendOutput.bulk": {
+          "value": 3.46,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "appendOutput per raw chunk, bulk transcript",
+          "samples": [3.46, 3.75, 3.44],
+          "spreadPct": 8.4
+        },
+        "stripAnsi.bulk": {
+          "value": 1.94,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "stripAnsi alone, bulk",
+          "samples": [1.92, 2.09, 1.94],
+          "spreadPct": 7.7
+        },
+        "statusRegex.bulk": {
+          "value": 0.68,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "analyzeOutput alone (status regexes), bulk",
+          "samples": [0.67, 0.73, 0.68],
+          "spreadPct": 7.4
+        }
+      },
+      "info": {
+        "agent": {
+          "bytes": 1320290,
+          "chunks": 20000,
+          "description": "the process tests’ generator: coloured, cursor-addressed lines, one per read (~62 B)"
+        },
+        "spinner": {
+          "bytes": 1048675,
+          "chunks": 2406,
+          "description": "1 MB of an agent TUI redrawing its status line, with tool calls between; reads of 1-60 frames"
+        },
+        "bulk": {
+          "bytes": 2097201,
+          "chunks": 513,
+          "description": "2 MB of build log in 4 KB reads"
+        }
+      }
+    },
+    "screen-model": {
+      "metrics": {
+        "parse.agent": {
+          "value": 12.16,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "headless xterm parse to drain, agent, fed per flush",
+          "samples": [12.16, 13.05, 11.75],
+          "spreadPct": 7.3
+        },
+        "parse.spinner": {
+          "value": 19.24,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "headless xterm parse to drain, spinner, fed per flush",
+          "samples": [19.24, 19.27, 19.24],
+          "spreadPct": 0.2
+        },
+        "parse.bulk": {
+          "value": 13.27,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "headless xterm parse to drain, bulk, fed per flush",
+          "samples": [13.27, 13.89, 12.6],
+          "spreadPct": 5
+        },
+        "serialize.200x50": {
+          "value": 1.681,
+          "unit": "ms",
+          "better": "lower",
+          "label": "serializeScreen of one 200x50 coloured screen (checkpoint cost per session)",
+          "samples": [1.681, 1.725, 1.662],
+          "spreadPct": 2.6
+        }
+      },
+      "info": { "cols": 200, "rows": 50 }
+    },
+    "flush": {
+      "metrics": {
+        "flush.agent.1client": {
+          "value": 3.14,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), agent, 1 client(s)",
+          "samples": [3.17, 3.14, 2.99],
+          "spreadPct": 4.8
+        },
+        "flush.spinner.1client": {
+          "value": 2.28,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), spinner, 1 client(s)",
+          "samples": [2.28, 2.35, 2.25],
+          "spreadPct": 3.1
+        },
+        "flush.bulk.1client": {
+          "value": 0.66,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), bulk, 1 client(s)",
+          "samples": [0.66, 0.71, 0.66],
+          "spreadPct": 7.6
+        },
+        "flush.agent.8client": {
+          "value": 3.01,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), agent, 8 client(s)",
+          "samples": [3.01, 3.13, 2.98],
+          "spreadPct": 4
+        },
+        "flush.spinner.8client": {
+          "value": 2.27,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), spinner, 8 client(s)",
+          "samples": [2.27, 2.35, 2.25],
+          "spreadPct": 3.5
+        },
+        "flush.bulk.8client": {
+          "value": 0.68,
+          "unit": "ms/MB",
+          "better": "lower",
+          "label": "flushBuffer on the loop (frame, scrollback, screen queue, history frame, bell), bulk, 8 client(s)",
+          "samples": [0.68, 0.71, 0.67],
+          "spreadPct": 4.4
+        }
+      }
+    },
+    "git": {
+      "metrics": {
+        "stall.isGitRepo": {
+          "value": 12.24,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop stall per isGitRepo call (execFileSync)",
+          "samples": [12.24, 14.87, 12.17],
+          "spreadPct": 21.5
+        },
+        "stall.getGitBranch": {
+          "value": 12.39,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop stall per getGitBranch call (execFileSync)",
+          "samples": [12.39, 14.93, 12.33],
+          "spreadPct": 20.5
+        },
+        "stall.getGitStatusPorcelain": {
+          "value": 16.18,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop stall per getGitStatusPorcelain call (execFileSync)",
+          "samples": [16.18, 19.8, 16.13],
+          "spreadPct": 22.4
+        },
+        "stall.getGitDiffStat": {
+          "value": 19.71,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop stall per getGitDiffStat call (execFileSync)",
+          "samples": [19.6, 23.92, 19.71],
+          "spreadPct": 21.4
+        },
+        "stall.getGitDiffText": {
+          "value": 22.47,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop stall per getGitDiffText call (execFileSync)",
+          "samples": [22.47, 26.95, 22.42],
+          "spreadPct": 19.9
+        },
+        "stall.getGitDiffFull": {
+          "value": 62.84,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop stall per getGitDiffFull call (execFileSync)",
+          "samples": [62.72, 76.41, 62.84],
+          "spreadPct": 21.6
+        },
+        "stall.listWorktrees": {
+          "value": 12.45,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop stall per listWorktrees call (execFileSync)",
+          "samples": [12.45, 15.56, 12.4],
+          "spreadPct": 25
+        }
+      },
+      "info": { "diffBytes": 462635, "git": "git version 2.54.0 (Apple Git-157)" }
+    },
+    "event-loop": {
+      "metrics": {
+        "burst.50MBps.1s.p99": {
+          "value": 13.84,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop delay p99, 50 MB/s of build log across 1 session(s)",
+          "samples": [13.84, 14.92, 13.42],
+          "spreadPct": 7.8
+        },
+        "burst.50MBps.1s.delivered": {
+          "value": 49.64,
+          "unit": "MB/s",
+          "better": "higher",
+          "label": "output that reached the client, 50 MB/s of build log across 1 session(s)",
+          "samples": [49.68, 49.6, 49.64],
+          "spreadPct": 0.1
+        },
+        "burst.50MBps.8s.p99": {
+          "value": 14.46,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop delay p99, 50 MB/s of build log across 8 session(s)",
+          "samples": [14.27, 16.99, 14.46],
+          "spreadPct": 17.5
+        },
+        "burst.50MBps.8s.delivered": {
+          "value": 49.72,
+          "unit": "MB/s",
+          "better": "higher",
+          "label": "output that reached the client, 50 MB/s of build log across 8 session(s)",
+          "samples": [49.83, 49.71, 49.72],
+          "spreadPct": 0.2
+        },
+        "burst.50MBps.32s.p99": {
+          "value": 19.17,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop delay p99, 50 MB/s of build log across 32 session(s)",
+          "samples": [14.07, 19.17, 28.38],
+          "spreadPct": 48
+        },
+        "burst.50MBps.32s.delivered": {
+          "value": 48.86,
+          "unit": "MB/s",
+          "better": "higher",
+          "label": "output that reached the client, 50 MB/s of build log across 32 session(s)",
+          "samples": [49.13, 48.86, 48.16],
+          "spreadPct": 1.4
+        },
+        "agents.p99": {
+          "value": 6.5,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop delay p99, 8 agent TUIs at 1 MB/s each",
+          "samples": [6.3, 6.5, 7.34],
+          "spreadPct": 12.9
+        },
+        "agents.delivered": {
+          "value": 8.64,
+          "unit": "MB/s",
+          "better": "higher",
+          "label": "output that reached the client, 8 agent TUIs at 1 MB/s each",
+          "samples": [8.64, 8.63, 8.64],
+          "spreadPct": 0.1
+        },
+        "agents+git.p99": {
+          "value": 100.66,
+          "unit": "ms",
+          "better": "lower",
+          "label": "event-loop delay p99, 8 agent TUIs at 1 MB/s each, getGitDiffFull (460 KB diff) every 250 ms",
+          "samples": [100.27, 102.83, 100.66],
+          "spreadPct": 2.2
+        },
+        "agents+git.delivered": {
+          "value": 6.09,
+          "unit": "MB/s",
+          "better": "higher",
+          "label": "output that reached the client, 8 agent TUIs at 1 MB/s each, getGitDiffFull (460 KB diff) every 250 ms",
+          "samples": [6.13, 6.03, 6.09],
+          "spreadPct": 1
+        }
+      },
+      "info": {
+        "durationMs": 2000,
+        "rounds": 3,
+        "idleP99Ms": 0.96,
+        "maxDelayMs": {
+          "burst.50MBps.1s": 35.09,
+          "burst.50MBps.8s": 25.76,
+          "burst.50MBps.32s": 36.31,
+          "agents": 14.8,
+          "agents+git": 84.02
+        }
+      }
+    },
+    "renderer": {
+      "metrics": {
+        "frame.mean.1t": {
+          "value": 8.46,
+          "unit": "ms",
+          "better": "lower",
+          "label": "mean frame interval, 1 terminal(s) streaming",
+          "samples": [8.48, 8.45, 8.46],
+          "spreadPct": 0.2
+        },
+        "longtask.1t": {
+          "value": 14.5,
+          "unit": "ms/s",
+          "better": "lower",
+          "label": "main-thread long-task time per second, 1 terminal(s) streaming",
+          "samples": [8.17, 14.5, 18.92],
+          "spreadPct": 43.7
+        },
+        "frame.mean.8t": {
+          "value": 8.44,
+          "unit": "ms",
+          "better": "lower",
+          "label": "mean frame interval, 8 terminal(s) streaming",
+          "samples": [8.41, 8.44, 8.46],
+          "spreadPct": 0.4
+        },
+        "longtask.8t": {
+          "value": 8.58,
+          "unit": "ms/s",
+          "better": "lower",
+          "label": "main-thread long-task time per second, 8 terminal(s) streaming",
+          "samples": [0, 8.58, 17.83],
+          "spreadPct": 107.8
+        },
+        "frame.mean.32t": {
+          "value": 8.63,
+          "unit": "ms",
+          "better": "lower",
+          "label": "mean frame interval, 32 terminal(s) streaming",
+          "samples": [9.29, 8.58, 8.63],
+          "spreadPct": 7.6
+        },
+        "longtask.32t": {
+          "value": 0,
+          "unit": "ms/s",
+          "better": "lower",
+          "label": "main-thread long-task time per second, 32 terminal(s) streaming",
+          "samples": [0, 0, 13.5],
+          "spreadPct": 100
+        }
+      },
+      "info": {
+        "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)",
+        "webglCanvasesSeen": 65,
+        "browser": "141.0.7390.37",
+        "bytesPerSecondEach": 32768,
+        "durationMs": 3000
+      }
+    }
+  }
+}
