@@ -205,22 +205,33 @@ function main(): void {
     fs.mkdirSync(path.dirname(baselinePath), { recursive: true })
     fs.writeFileSync(baselinePath, JSON.stringify(record, null, 2) + '\n')
     console.log(`baseline written to ${path.relative(ROOT, baselinePath)}`)
-    writeDocTable(record)
+    const doc = writeDocTable(record)
+    // Formatted as the repo formats them, so committing a baseline is not also a style diff.
+    execFileSync(
+      process.execPath,
+      [
+        require.resolve('prettier/bin/prettier.cjs'),
+        '--write',
+        baselinePath,
+        ...(doc ? [doc] : [])
+      ],
+      { cwd: ROOT, stdio: 'ignore' }
+    )
   }
 
   if (args.has('strict') && misses > 0) process.exit(1)
 }
 
 /** Keep the numbers in the roadmap doc in step with the committed baseline. */
-function writeDocTable(record: Baseline): void {
+function writeDocTable(record: Baseline): string | null {
   const doc = path.join(ROOT, 'docs', 'native-core', 'benchmarks.md')
-  if (!fs.existsSync(doc)) return
+  if (!fs.existsSync(doc)) return null
   const start = `<!-- bench:${platformKey}:start -->`
   const end = `<!-- bench:${platformKey}:end -->`
   const text = fs.readFileSync(doc, 'utf-8')
   const from = text.indexOf(start)
   const to = text.indexOf(end)
-  if (from === -1 || to === -1) return
+  if (from === -1 || to === -1) return null
   const m = record.machine
   const lines = [
     start,
@@ -241,6 +252,7 @@ function writeDocTable(record: Baseline): void {
   lines.push('', end)
   fs.writeFileSync(doc, text.slice(0, from) + lines.join('\n') + text.slice(to + end.length))
   console.log(`table updated in ${path.relative(ROOT, doc)}`)
+  return doc
 }
 
 main()

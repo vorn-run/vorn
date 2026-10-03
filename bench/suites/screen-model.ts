@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     metrics[`parse.${t.name}`] = metric(
       round(parse / mb),
       'ms/MB',
-      `headless xterm parse to drain ${t.name}, fed per flush`
+      `headless xterm parse to drain, ${t.name}, fed per flush`
     )
   }
 
