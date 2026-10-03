@@ -478,6 +478,15 @@ function drop(id: string, err: unknown): void {
  * occasionally most of it. That failure is invisible in a test that happens to
  * yield and reappears under load.
  */
+/**
+ * Wait until everything fed so far has been parsed, without serializing. For
+ * measuring the parse on its own; the native model parses synchronously.
+ */
+export async function drainScreen(id: string): Promise<void> {
+  const held = screens.get(id)
+  if (held) await atDrain(held, () => undefined)
+}
+
 export async function serializeScreen(id: string): Promise<ScreenSnapshot | null> {
   const native = natives.get(id)
   if (native) {

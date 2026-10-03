@@ -56,7 +56,14 @@ for (const a of process.argv.slice(2)) {
 }
 const quick = args.has('quick')
 const runs = Number(args.get('runs') ?? (quick ? 1 : 3))
+if (!Number.isInteger(runs) || runs < 1) {
+  throw new Error(`--runs needs a positive whole number, got ${args.get('runs')}`)
+}
 const only = args.get('only')?.split(',')
+const unknown = only?.filter((s) => !SUITES.includes(s)) ?? []
+if (unknown.length > 0) {
+  throw new Error(`unknown suite(s) in --only: ${unknown.join(', ')} (have ${SUITES.join(', ')})`)
+}
 const maxRegression = args.has('max-regression') ? Number(args.get('max-regression')) : null
 if (maxRegression !== null && !(maxRegression >= 0)) {
   throw new Error(`--max-regression needs a percentage, got ${args.get('max-regression')}`)
@@ -81,7 +88,16 @@ export interface Baseline {
   recordedAt: string
   commit: string
   runs: number
-  suites: Record<string, { metrics: Record<string, Summary>; info?: Record<string, unknown> }>
+  suites: Record<
+    string,
+    {
+      metrics: Record<string, Summary>
+      info?: Record<string, unknown>
+      /** Where this suite was measured, when a partial save kept it from an older run. */
+      commit?: string
+      recordedAt?: string
+    }
+  >
 }
 
 function machine(): Record<string, unknown> {
@@ -194,6 +210,10 @@ function main(): void {
   const baseline: Baseline | null = fs.existsSync(baselinePath)
     ? (JSON.parse(fs.readFileSync(baselinePath, 'utf-8')) as Baseline)
     : null
+  if (maxRegression !== null && !baseline) {
+    // A gate with nothing to compare against would pass without checking anything.
+    throw new Error(`--max-regression needs a baseline, and ${baselinePath} does not exist`)
+  }
 
   const here = machine()
   if (baseline) {
@@ -260,8 +280,17 @@ function main(): void {
   if (args.has('save')) {
     if (quick) throw new Error('--save needs full runs, not --quick')
     if (only && baseline) {
-      // A partial run updates its own suites and keeps the rest.
-      record.suites = { ...baseline.suites, ...record.suites }
+      // A partial run updates its own suites and keeps the rest, each kept
+      // suite still saying which commit and date it was measured at.
+      const kept: Baseline['suites'] = {}
+      for (const [name, s] of Object.entries(baseline.suites)) {
+        kept[name] = {
+          ...s,
+          commit: s.commit ?? baseline.commit,
+          recordedAt: s.recordedAt ?? baseline.recordedAt
+        }
+      }
+      record.suites = { ...kept, ...record.suites }
     }
     fs.mkdirSync(path.dirname(baselinePath), { recursive: true })
     fs.writeFileSync(baselinePath, JSON.stringify(record, null, 2) + '\n')
@@ -311,12 +340,19 @@ function writeDocTable(record: Baseline, key = platformKey): string | null {
   const to = text.indexOf(end)
   if (from === -1 || to === -1) return null
   const m = record.machine
+  const olderSuites = Object.entries(record.suites)
+    .filter(([, s]) => s.commit && s.commit !== record.commit)
+    .map(
+      ([name, s]) =>
+        `\`${name}\` was recorded ${s.recordedAt?.slice(0, 10)} at \`${s.commit}\`, in an earlier run.`
+    )
   const lines = [
     start,
     '',
     `${m.cpu}, ${m.cores} cores, ${m.memoryGB} GB, Node ${m.node}, ${m.git}. ` +
       `Recorded ${record.recordedAt.slice(0, 10)} at \`${record.commit}\`, median of ${record.runs} runs.`,
     '',
+    ...olderSuites.flatMap((note) => [note, '']),
     '| Metric | Median | Spread | What |',
     '| --- | ---: | ---: | --- |'
   ]

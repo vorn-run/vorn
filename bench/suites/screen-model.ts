@@ -12,6 +12,7 @@
  */
 import {
   createScreen,
+  drainScreen,
   feedScreen,
   serializeScreen,
   resetScreens
@@ -39,7 +40,8 @@ async function main(): Promise<void> {
         createScreen(id, COLS, ROWS)
         const elapsed = await timeAsync(async () => {
           for (const f of flushes) feedScreen(id, f)
-          await serializeScreen(id)
+          // Drain only: serialization is measured on its own below.
+          await drainScreen(id)
         })
         resetScreens()
         return elapsed

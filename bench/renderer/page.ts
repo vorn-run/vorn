@@ -102,15 +102,20 @@ async function run(opts: {
   const perFlush = (opts.bytesPerSecondEach * 8) / 1000
   const cursors = ids.map((_, i) => Math.floor((i * opts.chunks.length) / ids.length))
   const seqs = ids.map(() => 0)
+  // The budget is in UTF-8 bytes, so each chunk is charged its encoded size.
+  const encoder = new TextEncoder()
+  const sizes = opts.chunks.map((c) => encoder.encode(c).length)
   let bytesWritten = 0
   const feed = setInterval(() => {
     for (let i = 0; i < ids.length; i++) {
       let out = ''
-      while (out.length < perFlush) {
+      let size = 0
+      while (size < perFlush) {
         out += opts.chunks[cursors[i]]
+        size += sizes[cursors[i]]
         cursors[i] = (cursors[i] + 1) % opts.chunks.length
       }
-      bytesWritten += out.length
+      bytesWritten += size
       listener?.({ id: ids[i], data: out, seq: ++seqs[i] } as TerminalData & { data: string })
     }
   }, 8)

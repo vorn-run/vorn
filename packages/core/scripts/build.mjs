@@ -30,8 +30,9 @@ const library =
     win32: 'vorn_core.dll'
   }[process.platform] ?? 'libvorn_core.so'
 
+// Relative to the crate, as cargo (which runs there) resolves it.
 const targetDir = process.env.CARGO_TARGET_DIR
-  ? path.resolve(process.env.CARGO_TARGET_DIR)
+  ? path.resolve(root, process.env.CARGO_TARGET_DIR)
   : path.join(root, 'target')
 const from = path.join(targetDir, profile, library)
 if (!existsSync(from)) {

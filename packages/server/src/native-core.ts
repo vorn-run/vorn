@@ -144,7 +144,7 @@ export function selectCore(
     }
     return { mode: 'native', native, info }
   } catch (err) {
-    return { mode: 'js', native: null, fallback: (err as Error).message }
+    return { mode: 'js', native: null, fallback: err instanceof Error ? err.message : String(err) }
   }
 }
 
