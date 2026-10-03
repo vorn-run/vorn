@@ -84,18 +84,32 @@ function serve(dir: string): Promise<http.Server> {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)))
 }
 
+/**
+ * Headless Chromium on macOS draws WebGL with SwiftShader, a software
+ * rasteriser, which measures the CPU rather than the GPU the app actually uses.
+ * So on macOS the browser opens a visible window with Metal, unless
+ * `VORN_BENCH_HEADLESS=1` asks otherwise. Elsewhere it stays headless: a Linux
+ * CI box or container has no display and no GPU to gain.
+ */
 async function launch(pw: Playwright): Promise<import('playwright-core').Browser> {
+  const headless =
+    process.env.VORN_BENCH_HEADLESS === '1' ||
+    (process.platform !== 'darwin' && process.env.VORN_BENCH_HEADLESS !== '0')
   const args = [
     '--ignore-gpu-blocklist',
     '--enable-unsafe-swiftshader',
-    '--disable-background-timer-throttling'
+    '--disable-background-timer-throttling',
+    '--disable-renderer-backgrounding',
+    '--disable-backgrounding-occluded-windows',
+    ...(process.platform === 'darwin' ? ['--use-angle=metal'] : [])
   ]
+  const options = { headless, args }
   const explicit = process.env.VORN_BENCH_CHROMIUM
-  if (explicit) return pw.chromium.launch({ executablePath: explicit, args })
+  if (explicit) return pw.chromium.launch({ ...options, executablePath: explicit })
   try {
-    return await pw.chromium.launch({ args })
+    return await pw.chromium.launch(options)
   } catch {
-    return pw.chromium.launch({ channel: 'chrome', args })
+    return pw.chromium.launch({ ...options, channel: 'chrome' })
   }
 }
 
@@ -147,6 +161,11 @@ async function main(): Promise<void> {
     )
   }
 
+  if (/swiftshader/i.test(gpu)) {
+    console.error(
+      `renderer: drawn with a software rasteriser (${gpu}); these are CPU numbers, not GPU ones`
+    )
+  }
   await browser.close()
   server.close()
   fs.rmSync(outDir, { recursive: true, force: true })

@@ -57,7 +57,9 @@ path exists, running the bench under each value gives the before and after.
 - The renderer suite runs in Chromium, not Electron (the same engine, without the
   rest of the app). In a container without a GPU, Chromium falls back to
   SwiftShader and the renderer numbers are CPU-bound; the GPU string is recorded
-  with each baseline. Record a macOS baseline on real hardware before WP7.
+  with each baseline. Headless Chromium on macOS uses SwiftShader too, so on
+  macOS the suite opens a visible Chromium window with Metal instead; leave it
+  in front while it runs. `VORN_BENCH_HEADLESS=1` forces headless anywhere.
 - Event-loop numbers under saturation reflect the longest single turn; when the
   loop cannot keep up the generator drops owed output rather than queueing it,
   so read `delivered` beside `p99`.
