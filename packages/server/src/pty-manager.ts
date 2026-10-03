@@ -4,6 +4,7 @@ import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
+import { holdWorkspace } from './workspace-holds'
 import { HeadRefresh } from './head-commit'
 import log from './logger'
 import {
@@ -93,6 +94,8 @@ interface PreparedLocal {
   worktreeName?: string
   branch: string | null
   headCommit: string | null
+  /** Lets go of the worktree held while preparing; `spawnPty` calls it. */
+  release?: () => void
 }
 
 /**
@@ -282,7 +285,19 @@ class PtyManager extends EventEmitter {
       ? this.remoteHosts.find((h) => h.id === payload.remoteHostId)
       : undefined
     if (remoteHost) return { remoteHost }
-    return { local: await this.prepareLocal(payload) }
+    // Held from here until `spawnPty` makes it a session, so a worktree action
+    // in between sees it as in use.
+    const release = payload.existingWorktreePath
+      ? holdWorkspace(payload.existingWorktreePath)
+      : undefined
+    try {
+      const local = await this.prepareLocal(payload)
+      if (release) local.release = release
+      return { local }
+    } catch (err) {
+      release?.()
+      throw err
+    }
   }
 
   /** @param prepared From `prepareSession` on this same payload. */
@@ -291,18 +306,22 @@ class PtyManager extends EventEmitter {
     prepared: PreparedSession,
     reuseId?: string
   ): TerminalSession {
-    // Checked again: closing may have begun while the workspace was prepared.
-    refuseWhileClosing()
-    const id = reuseId ?? crypto.randomUUID()
-    const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
+    try {
+      // Checked again: closing may have begun while the workspace was prepared.
+      refuseWhileClosing()
+      const id = reuseId ?? crypto.randomUUID()
+      const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
 
-    const session =
-      'remoteHost' in prepared
-        ? this.createRemotePty(id, shell, payload, prepared.remoteHost)
-        : this.createLocalPty(id, shell, payload, prepared.local)
+      const session =
+        'remoteHost' in prepared
+          ? this.createRemotePty(id, shell, payload, prepared.remoteHost)
+          : this.createLocalPty(id, shell, payload, prepared.local)
 
-    this.emit('session-created', session, payload)
-    return session
+      this.emit('session-created', session, payload)
+      return session
+    } finally {
+      if ('local' in prepared) prepared.local.release?.()
+    }
   }
 
   private async prepareLocal(payload: CreateTerminalPayload): Promise<PreparedLocal> {

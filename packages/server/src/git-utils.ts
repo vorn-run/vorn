@@ -39,8 +39,51 @@ async function gitExec(
  */
 const turns = new Map<string, Promise<unknown>>()
 
+/**
+ * The repository `cwd` belongs to, shared by its main checkout and every linked
+ * worktree, so a commit in a worktree and that worktree's removal from the
+ * project take turns. Read from disk rather than asked of git, which would be
+ * one more command per change.
+ */
 function repoKey(cwd: string, remote?: RemoteHost): string {
-  return remote ? `${remote.id}:${cwd}` : path.resolve(cwd)
+  if (remote) return `${remote.id}:${vornWorktreeProject(cwd, '/') ?? cwd}`
+  const dir = path.resolve(cwd)
+  return commonGitDir(dir) ?? vornWorktreeProject(dir, path.sep) ?? dir
+}
+
+/** `<parent>/<project>` for a worktree vorn made at `<parent>/.vorn-worktrees/<project>/<name>`. */
+function vornWorktreeProject(dir: string, sep: string): string | null {
+  const parts = dir.split(sep)
+  const at = parts.lastIndexOf('.vorn-worktrees')
+  if (at < 0 || at + 1 >= parts.length) return null
+  return [...parts.slice(0, at), parts[at + 1]].join(sep)
+}
+
+/** The git dir every worktree of `dir`'s repository shares, from `.git` as git reads it. */
+function commonGitDir(dir: string): string | null {
+  try {
+    for (let at = dir; ; at = path.dirname(at)) {
+      const dotGit = path.join(at, '.git')
+      const stat = fs.statSync(dotGit, { throwIfNoEntry: false })
+      if (stat?.isDirectory()) return dotGit
+      if (stat?.isFile()) {
+        // A linked worktree: `gitdir: <common>/worktrees/<name>`, whose
+        // `commondir` names the shared dir relative to it.
+        const gitDir = path.resolve(
+          at,
+          fs
+            .readFileSync(dotGit, 'utf-8')
+            .replace(/^gitdir:\s*/, '')
+            .trim()
+        )
+        const common = fs.readFileSync(path.join(gitDir, 'commondir'), 'utf-8').trim()
+        return path.resolve(gitDir, common)
+      }
+      if (path.dirname(at) === at) return null
+    }
+  } catch {
+    return null
+  }
 }
 
 function serialized<T>(key: string, run: () => Promise<T>): Promise<T> {

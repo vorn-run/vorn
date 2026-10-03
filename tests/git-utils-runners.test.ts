@@ -12,10 +12,15 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import type { RemoteHost } from '../packages/shared/src/types'
+import type { ProjectConfig, RemoteHost } from '../packages/shared/src/types'
 import * as git from '../packages/server/src/git-utils'
 import { nativeRunner, resetGitRunner, type GitRunner } from '../packages/server/src/git-runner'
 import type { NativeGitRequest } from '../packages/server/src/native-core'
+import {
+  pruneOrphanDirs,
+  reclaimArtifacts,
+  removeWorktrees
+} from '../packages/server/src/worktree-inventory'
 
 function sh(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -204,5 +209,85 @@ describe('changes to one repository', () => {
     ])
     expect(first.success).toBe(false)
     expect(second).toEqual({ success: true })
+  })
+})
+
+describe('turns are per repository, not per path', () => {
+  it('makes a commit in a linked worktree and its removal from the project take turns', async () => {
+    const project = path.join(root, 'shared')
+    fs.mkdirSync(project)
+    sh(project, 'init', '-q', '-b', 'main')
+    sh(project, 'config', 'user.email', 'runners@vorn.invalid')
+    sh(project, 'config', 'user.name', 'runners')
+    sh(project, 'commit', '-q', '--allow-empty', '-m', 'base')
+    const linked = path.join(root, '.vorn-worktrees', 'shared', 'wt')
+    sh(project, 'worktree', 'add', '-q', '-b', 'wt', linked)
+
+    const log: string[] = []
+    const runner: GitRunner = {
+      mode: 'native',
+      local: async (args) => {
+        log.push(args.slice(0, 2).join(' '))
+        await new Promise((r) => setTimeout(r, 5))
+        return ''
+      },
+      remote: async () => ''
+    }
+    process.env.VORN_GIT = 'native'
+    resetGitRunner(runner)
+
+    await Promise.all([
+      git.gitCommit(linked, 'work', true),
+      git.removeWorktree(project, linked, true)
+    ])
+    // The commit's add and commit run back to back; the removal comes after.
+    expect(log.slice(0, 2)).toEqual(['add -A', 'commit -m'])
+    expect(log.slice(2).some((c) => c.startsWith('worktree remove'))).toBe(true)
+  })
+})
+
+describe('worktree actions re-check for sessions just before deleting', () => {
+  const busy = (): void => {
+    throw new Error('has a session starting — close it first')
+  }
+
+  it('leaves a worktree that became busy while git ran', async () => {
+    const wt = path.join(root, '.vorn-worktrees', 'repo', 'busy')
+    sh(repo, 'worktree', 'add', '-q', '-b', 'busy', wt)
+    const projects = [{ name: 'repo', path: repo }] as ProjectConfig[]
+
+    const removed = await removeWorktrees(
+      [{ projectPath: repo, worktreePath: wt }],
+      () => 0,
+      projects,
+      () => undefined,
+      busy
+    )
+    expect(removed.failed[0].error).toMatch(/session starting/)
+    expect(fs.existsSync(wt)).toBe(true)
+
+    fs.mkdirSync(path.join(wt, 'node_modules'))
+    const reclaimed = await reclaimArtifacts(
+      [wt],
+      ['node_modules'],
+      projects,
+      () => undefined,
+      busy
+    )
+    expect(reclaimed.failed[0].error).toMatch(/session starting/)
+    expect(fs.existsSync(path.join(wt, 'node_modules'))).toBe(true)
+  })
+
+  it('leaves an orphan directory that became busy', async () => {
+    const orphan = path.join(root, '.vorn-worktrees', 'repo', 'orphan')
+    fs.mkdirSync(orphan, { recursive: true })
+    const pruned = await pruneOrphanDirs(
+      [orphan],
+      () => 0,
+      () => undefined,
+      busy
+    )
+    expect(pruned.failed[0].error).toMatch(/session starting/)
+    expect(fs.existsSync(orphan)).toBe(true)
   })
 })

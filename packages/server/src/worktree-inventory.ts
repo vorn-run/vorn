@@ -824,7 +824,8 @@ export async function reclaimArtifacts(
   paths: string[],
   artifactDirs: string[],
   projects: ProjectConfig[],
-  resolveRemote: (project: ProjectConfig) => RemoteHost | undefined
+  resolveRemote: (project: ProjectConfig) => RemoteHost | undefined,
+  assertIdle: (path: string) => void = () => {}
 ): Promise<WorktreeActionResult> {
   const result = EMPTY_RESULT()
   const listCache = new Map<string, { path: string; isMain: boolean }[]>()
@@ -847,6 +848,9 @@ export async function reclaimArtifacts(
         ? duBytes(dirs, remote, DU_TIMEOUT_MS)
         : dirs.reduce((sum, d) => sum + walkBytes(d, new Set()), 0)
 
+      // Again, after the git above: a session can have started here meanwhile.
+      // From this check to the last directory gone nothing else runs.
+      assertIdle(worktreePath)
       for (const dir of dirs) {
         // Each artifact directory is re-checked on its own: `find` follows the
         // worktree's real layout, and a symlinked build dir must not become a
@@ -886,7 +890,8 @@ export async function removeWorktrees(
   items: RemoveItem[],
   sizeOf: (worktreePath: string) => number,
   projects: ProjectConfig[],
-  resolveRemote: (project: ProjectConfig) => RemoteHost | undefined
+  resolveRemote: (project: ProjectConfig) => RemoteHost | undefined,
+  assertIdle: (path: string) => void = () => {}
 ): Promise<WorktreeActionResult> {
   const result = EMPTY_RESULT()
   const listCache = new Map<string, { path: string; isMain: boolean }[]>()
@@ -903,6 +908,8 @@ export async function removeWorktrees(
         ? await gitUtils.getGitBranch(item.worktreePath, remote)
         : null
 
+      // Again, after the git above, which let other requests run.
+      assertIdle(item.worktreePath)
       // Use the project git resolved, not the one the client claimed.
       const ok = await gitUtils.removeWorktree(
         owner.projectPath,
@@ -935,7 +942,8 @@ export async function removeWorktrees(
 export async function pruneOrphanDirs(
   paths: string[],
   sizeOf: (p: string) => number,
-  resolveRemoteByPath: (p: string) => RemoteHost | undefined
+  resolveRemoteByPath: (p: string) => RemoteHost | undefined,
+  assertIdle: (path: string) => void = () => {}
 ): Promise<WorktreeActionResult> {
   const result = EMPTY_RESULT()
 
@@ -949,6 +957,8 @@ export async function pruneOrphanDirs(
         throw new Error('still registered with git — remove it as a worktree instead')
       }
       const bytes = sizeOf(target)
+      // Again, after the git above, and nothing runs between this and the delete.
+      assertIdle(target)
       removeDir(target, remote)
       invalidateSizeCache(target)
       result.freedBytes += bytes

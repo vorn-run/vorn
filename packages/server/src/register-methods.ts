@@ -217,6 +217,7 @@ import { listAgentModels } from './agent-model-catalog'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
 import log from './logger'
 import { onePerKey } from './one-per-key'
+import { isWorkspaceHeld } from './workspace-holds'
 
 const copilotInstallations = new Map<string, CopilotHookInstallation>()
 
@@ -709,6 +710,9 @@ function startedRun(
 /** Creates that name a conversation, by its id, while they prepare. */
 const createNamed = onePerKey<TerminalSession>()
 
+/** Resumes between claiming their conversation and spawning, by session id. */
+const resuming = new Map<string, Promise<TerminalSession | undefined>>()
+
 export function registerAllMethods(): void {
   // Wire headless worktree counter into pty-manager for cleanup gating
   ptyManager.setHeadlessWorktreeCounter((worktreePath, excludeId) =>
@@ -727,15 +731,31 @@ export function registerAllMethods(): void {
     // second create for the same conversation in that window gets the first
     // one's session, rather than preparing a workspace of its own to discard.
     return createNamed(named, async () => {
-      const prepared = await ptyManager.prepareSession(payload)
-      // A resume can still have started it meanwhile.
-      const started = sessionToBindOnCreate(named, ptyManager.getLiveSessions())
-      if (started) return started
-      const session = ptyManager.spawnPty(payload, prepared)
-      // Only until the session names the conversation itself: an agent that can be
-      // told an id already carries it, and one that cannot reports seconds later.
-      if (!session.agentSessionId) claimSpawningTranscript(named, session.id)
-      return session
+      // Claimed before preparing, under the id the session will have, so a
+      // resume of the same conversation sees it in flight and chooses another.
+      const id = crypto.randomUUID()
+      const holder = claimSpawningTranscript(named, id)
+      if (holder !== undefined) {
+        // A resume got there first: wait for it, then show what it started.
+        await resuming.get(holder)
+        const live = ptyManager.getLiveSessions()
+        const bound =
+          sessionToBindOnCreate(named, live) ?? live.find((session) => session.id === holder)
+        if (bound) return bound
+        if (claimSpawningTranscript(named, id) !== undefined) {
+          throw new Error('This conversation is already starting in another pane')
+        }
+      }
+      try {
+        const session = ptyManager.spawnPty(payload, await ptyManager.prepareSession(payload), id)
+        // An agent that was told the id names the conversation itself; one that
+        // cannot be keeps the claim until it reports, seconds later.
+        if (session.agentSessionId) releaseSpawningTranscript(named, id)
+        return session
+      } catch (err) {
+        releaseSpawningTranscript(named, id)
+        throw err
+      }
     })
   })
   /**
@@ -1140,6 +1160,7 @@ export function registerAllMethods(): void {
 
     const live = ptyManager.getLiveSessions()
     let transcriptId: string | undefined
+    let settleResume: ((session: TerminalSession | undefined) => void) | undefined
     const pinned = previous.agentSessionId
     const holder = pinned ? transcriptHolder(pinned, live) : undefined
     if (holder) {
@@ -1227,11 +1248,20 @@ export function registerAllMethods(): void {
         headlessManager.getActiveSessions(),
         scope
       )
+      // A create naming this conversation while it prepares waits for this spawn.
+      const spawned = new Promise<TerminalSession | undefined>(
+        (resolve) => (settleResume = resolve)
+      )
+      resuming.set(id, spawned)
+      void spawned.then(() => {
+        if (resuming.get(id) === spawned) resuming.delete(id)
+      })
 
       // Same id, same reasons as the shell branch above. The claim stands in for
       // the session while its workspace is prepared, as it does for any spawn.
       const payload = buildRestorePayload(grounded, transcriptId)
       const session = ptyManager.spawnPty(payload, await ptyManager.prepareSession(payload), id)
+      settleResume?.(session)
       // Carried on the server rather than through the payload, so membership is
       // never something a client can set on a spawn.
       if (grounded.groupId !== undefined) session.groupId = grounded.groupId
@@ -1250,6 +1280,7 @@ export function registerAllMethods(): void {
       if (restored) restoreHeld(restored)
       else if (dead) ptyManager.restoreReleased(dead)
       if (transcriptId) releaseSpawningTranscript(transcriptId, id)
+      settleResume?.(undefined)
       return {
         ok: false as const,
         reason: 'failed' as const,
@@ -1402,14 +1433,19 @@ export function registerAllMethods(): void {
    * start while the panel is open.
    */
   function assertNoActiveSessions(paths: string[]): void {
-    for (const p of paths) {
-      const count = activeSessionIds(p).length
-      if (count > 0) {
-        throw new Error(
-          `${p} has ${count} active session${count > 1 ? 's' : ''} — close them first`
-        )
-      }
+    for (const p of paths) assertIdle(p)
+  }
+
+  /**
+   * Checked up front, and again by the action just before it deletes: the git
+   * in between lets a session start, or finish preparing, in the same path.
+   */
+  function assertIdle(p: string): void {
+    const count = activeSessionIds(p).length
+    if (count > 0) {
+      throw new Error(`${p} has ${count} active session${count > 1 ? 's' : ''} — close them first`)
     }
+    if (isWorkspaceHeld(p)) throw new Error(`${p} has a session starting — close it first`)
   }
 
   /** Resolve a project to its remote host, or undefined when it is local. */
@@ -1434,18 +1470,18 @@ export function registerAllMethods(): void {
   registerMethod('worktree:reclaimArtifacts', ({ paths }) => {
     assertNoActiveSessions(paths)
     const cfg = configManager.loadConfig()
-    return reclaimArtifacts(paths, artifactDirNames(), cfg.projects, remoteForProject)
+    return reclaimArtifacts(paths, artifactDirNames(), cfg.projects, remoteForProject, assertIdle)
   })
 
   registerMethod('worktree:removeMany', ({ items }) => {
     assertNoActiveSessions(items.map((i) => i.worktreePath))
     const cfg = configManager.loadConfig()
-    return removeWorktrees(items, cachedSizeOf, cfg.projects, remoteForProject)
+    return removeWorktrees(items, cachedSizeOf, cfg.projects, remoteForProject, assertIdle)
   })
 
   registerMethod('worktree:pruneOrphans', ({ paths }) => {
     assertNoActiveSessions(paths)
-    return pruneOrphanDirs(paths, cachedSizeOf, resolveRemoteHostByPath)
+    return pruneOrphanDirs(paths, cachedSizeOf, resolveRemoteHostByPath, assertIdle)
   })
 
   registerMethod('git:deleteBranches', ({ projectPath, branches, force }) => {

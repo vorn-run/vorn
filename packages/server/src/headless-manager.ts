@@ -22,6 +22,7 @@ import { getLaunchEnv, shellEscape } from './process-utils'
 import { buildHeadlessSpawnArgs } from './agent-launch'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import log from './logger'
+import { holdWorkspace } from './workspace-holds'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 
 const MAX_OUTPUT_LINES = 1000
@@ -77,40 +78,49 @@ class HeadlessManager extends EventEmitter {
     let effectivePath = payload.projectPath
     let effectiveBranch: string | undefined
     let worktreeName: string | undefined
-
-    if (payload.existingWorktreePath && fs.existsSync(payload.existingWorktreePath)) {
-      effectivePath = payload.existingWorktreePath
-      worktreeName = payload.worktreeName || extractWorktreeName(payload.existingWorktreePath)
-      effectiveBranch = payload.branch
-    }
-    // Handle worktree creation (or fallback if existing path gone)
-    else if ((payload.useWorktree || payload.existingWorktreePath) && payload.branch) {
-      if (await isGitRepo(payload.projectPath)) {
-        const result = await createWorktree(
-          payload.projectPath,
-          payload.branch,
-          payload.worktreeName
-        )
-        effectivePath = result.worktreePath
-        worktreeName = result.name
-        effectiveBranch = result.branch
-      } else {
-        log.warn(`[headless] skipping worktree for non-git project: ${payload.projectPath}`)
-        payload.useWorktree = false
-      }
-    } else if (payload.branch) {
-      if (await isGitRepo(payload.projectPath)) {
-        const currentBranch = await getGitBranch(payload.projectPath)
-        if (currentBranch !== payload.branch) {
-          await checkoutBranch(payload.projectPath, payload.branch)
-        }
+    let branch: string | undefined
+    // Held while the git below runs, so a worktree action in between sees it in use.
+    const release = payload.existingWorktreePath
+      ? holdWorkspace(payload.existingWorktreePath)
+      : undefined
+    try {
+      if (payload.existingWorktreePath && fs.existsSync(payload.existingWorktreePath)) {
+        effectivePath = payload.existingWorktreePath
+        worktreeName = payload.worktreeName || extractWorktreeName(payload.existingWorktreePath)
         effectiveBranch = payload.branch
       }
+      // Handle worktree creation (or fallback if existing path gone)
+      else if ((payload.useWorktree || payload.existingWorktreePath) && payload.branch) {
+        if (await isGitRepo(payload.projectPath)) {
+          const result = await createWorktree(
+            payload.projectPath,
+            payload.branch,
+            payload.worktreeName
+          )
+          effectivePath = result.worktreePath
+          worktreeName = result.name
+          effectiveBranch = result.branch
+        } else {
+          log.warn(`[headless] skipping worktree for non-git project: ${payload.projectPath}`)
+          payload.useWorktree = false
+        }
+      } else if (payload.branch) {
+        if (await isGitRepo(payload.projectPath)) {
+          const currentBranch = await getGitBranch(payload.projectPath)
+          if (currentBranch !== payload.branch) {
+            await checkoutBranch(payload.projectPath, payload.branch)
+          }
+          effectiveBranch = payload.branch
+        }
+      }
+      // getGitBranch answers null for a detached head or a non-repo; the session
+      // field is optional rather than nullable, so it is normalised here instead of
+      // widening the type everything else reads.
+      branch = effectiveBranch || (await getGitBranch(effectivePath)) || undefined
+    } finally {
+      // From here to the session being registered is synchronous.
+      release?.()
     }
-    // getGitBranch answers null for a detached head or a non-repo; the session
-    // field is optional rather than nullable, so it is normalised here instead of
-    // widening the type everything else reads.
-    const branch = effectiveBranch || (await getGitBranch(effectivePath)) || undefined
     // Again, after the git above, which with native git lets the loop run.
     if (isDraining()) throw new Error(DRAINING_MESSAGE)
 
