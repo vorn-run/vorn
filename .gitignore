@@ -18,3 +18,6 @@ CLAUDE.md
 supabase/
 # Design notes are written for this workspace, not for the people reading it.
 docs/design/
+
+# Benchmark output from the last `yarn bench`; baselines live in bench/baselines.
+bench/results/
