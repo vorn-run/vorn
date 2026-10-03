@@ -87,7 +87,8 @@ describe.each([
     expect(await git.getGitHead(repo)).toBe(head)
     expect(await git.getGitHeadAsync(repo)).toBe(head)
     expect(await git.getGitHeadAsync(path.join(root, 'nowhere'))).toBeNull()
-    expect(await git.listRemoteBranches(repo)).toEqual(['main'])
+    // Some gits also list origin/HEAD, which shortens to `origin`.
+    expect(await git.listRemoteBranches(repo)).toContain('main')
     expect(await git.getBranchUpstream(repo, 'main')).toBe('origin/main')
     expect(await git.getBranchUpstream(repo, 'side')).toBeNull()
     expect(await git.getLastCommitDate(repo)).toMatch(/^\d{4}-\d{2}-\d{2}/)
