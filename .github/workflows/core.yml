@@ -1,0 +1,125 @@
+name: Core
+
+# Builds the Rust core (packages/core) on every desktop platform and packages
+# the app with it, so a change that breaks the crate, the libghostty-vt build or
+# the way the binary ships shows up before anyone sets VORN_CORE=native.
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'packages/core/**'
+      - 'packages/server/src/native-core.ts'
+      - 'tests/native-core.test.ts'
+      - 'electron-builder.yml'
+      - 'package.json'
+      - 'yarn.lock'
+      - '.github/workflows/core.yml'
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15, not latest: Zig 0.15.2 cannot read the newer macOS SDK's
+        # libSystem and fails to link even its own build runner there.
+        os: [ubuntu-latest, macos-15, windows-2022]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install Python setuptools
+        run: pip install setuptools
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      # libghostty-vt-sys builds Ghostty's VT library from source with Zig. The
+      # Ghostty commit it pins refuses any Zig but 0.15.2.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      # The version comes from packages/core/rust-toolchain.toml.
+      - name: Rust toolchain
+        working-directory: packages/core
+        run: rustup toolchain install
+
+      # target/ holds the Ghostty checkout and Zig's caches as well as cargo's,
+      # which is most of a cold build.
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/core/target
+          key: core-${{ runner.os }}-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
+          restore-keys: core-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Rust format
+        if: runner.os == 'Linux'
+        working-directory: packages/core
+        run: cargo fmt --check
+
+      - name: Clippy
+        working-directory: packages/core
+        run: cargo clippy --release --locked -- -D warnings
+
+      - name: Build vorn_core.node
+        run: yarn build:core
+
+      # With the binary present these run the real call from Node, including a
+      # parse through libghostty-vt.
+      - name: Native call
+        run: yarn vitest run tests/native-core.test.ts
+
+      - name: Build app
+        run: yarn build
+
+      # Unsigned and not notarized: this checks that the app packages with the
+      # core in it, not that it is ready to publish.
+      - name: Package app
+        # bash on Windows too: PowerShell splits -c.mac.notarize=false at the dot.
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: yarn dist --publish never -c.mac.notarize=false
+
+      - name: Packaged core loads
+        shell: bash
+        run: |
+          # -ipath: the mac app keeps it under Contents/Resources.
+          file=$(find dist -ipath '*/resources/core/vorn_core.node' -print -quit)
+          if [ -z "$file" ]; then
+            echo "ERROR: vorn_core.node is not in the packaged resources"
+            exit 1
+          fi
+          echo "found $file"
+          node -e "
+            const m = { exports: {} };
+            process.dlopen(m, process.argv[1]);
+            console.log(m.exports.hello('ci'), m.exports.info());
+          " "$file"

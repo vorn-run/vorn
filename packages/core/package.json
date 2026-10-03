@@ -1,0 +1,11 @@
+{
+  "name": "@vornrun/core",
+  "version": "0.7.5",
+  "private": true,
+  "description": "Vorn's Rust core, built into vorn_core.node and loaded by the server when VORN_CORE=native",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:debug": "node scripts/build.mjs --debug",
+    "test": "cargo test"
+  }
+}

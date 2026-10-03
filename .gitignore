@@ -18,3 +18,7 @@ CLAUDE.md
 supabase/
 # Design notes are written for this workspace, not for the people reading it.
 docs/design/
+
+# Rust core build output
+packages/core/target/
+packages/core/vorn_core.node
