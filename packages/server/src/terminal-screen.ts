@@ -287,14 +287,10 @@ export function feedScreen(id: string, data: string): void {
   const native = natives.get(id)
   if (native) {
     try {
-      if (data.includes('\x1b]')) {
-        const before = native.cwd
-        native.feed(data)
-        const after = native.cwd
-        if (after && after !== before) reportCwd?.(id, after)
-      } else {
-        native.feed(data)
-      }
+      // Only OSC 5522 is reported, after the same plausibility check as below;
+      // OSC 7 moves the model's cwd without moving the session's.
+      const reported = native.feed(data)
+      if (reported) reportCwd?.(id, reported)
     } catch (err) {
       drop(id, err)
     }
@@ -352,7 +348,9 @@ export function createScreen(
   const Native = nativeScreen()
   if (Native) {
     try {
-      natives.set(id, new Native(cols, rows))
+      const native = new Native(cols, rows)
+      if (labels) native.restoreLabels(labels.title, labels.cwd)
+      natives.set(id, native)
     } catch (err) {
       drop(id, err)
     }
@@ -514,7 +512,15 @@ export async function serializeScreen(id: string): Promise<ScreenSnapshot | null
  * resident for the life of the server.
  */
 export function clearScreen(id: string): void {
-  natives.delete(id)
+  const native = natives.get(id)
+  if (native) {
+    natives.delete(id)
+    try {
+      native.free()
+    } catch (err) {
+      log.warn({ err, id }, '[screen] could not free a terminal')
+    }
+  }
   const held = screens.get(id)
   if (!held) return
   screens.delete(id)

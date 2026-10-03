@@ -24,6 +24,9 @@ use napi_derive::napi;
 use regex::Regex;
 
 const MAX_OUTPUT_LINES: usize = 1000;
+/// An OSC/DCS/APC payload longer than this is taken as unterminated and
+/// dropped, so one stray `ESC ]` cannot swallow the rest of a session's output.
+const MAX_STRING_BYTES: usize = 4096;
 /// `analyzeOutput` reads the last five lines: four completed and the current one.
 const RECENT_COMPLETED: usize = 4;
 
@@ -73,6 +76,8 @@ pub struct Analyzer {
     /// The first CSI parameter and whether the sequence is private (`CSI ?`).
     csi_param: u32,
     csi_private: bool,
+    /// Bytes of the current string payload, for [`MAX_STRING_BYTES`].
+    str_len: usize,
     /// The line being written, its length in characters, and the cursor
     /// column. Text is appended in place while the cursor sits at the end, which
     /// is nearly always; only an overwrite after `\r` goes through characters.
@@ -98,6 +103,7 @@ impl Analyzer {
             state: State::Ground,
             csi_param: 0,
             csi_private: false,
+            str_len: 0,
             line: String::with_capacity(256),
             line_chars: 0,
             col: 0,
@@ -109,20 +115,31 @@ impl Analyzer {
     /// Feed one raw chunk. `analyze` is false for hook-driven sessions, which
     /// only take status from bracketed paste. Returns one of the `STATUS_*`
     /// codes: none, running, waiting, error.
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn append(&mut self, data: String, analyze: bool) -> u32 {
         self.append_str(&data, analyze)
     }
 
-    /// The last `lines` completed lines, oldest first; all of them when omitted.
-    #[napi]
+    /// The last `lines` completed lines, oldest first; all of them when omitted
+    /// or zero, as `getOutput` reads it.
+    #[napi(catch_unwind)]
     pub fn output(&self, lines: Option<u32>) -> Vec<String> {
-        let n = lines.map_or(self.lines.len(), |n| (n as usize).min(self.lines.len()));
+        let n = lines
+            .filter(|&n| n > 0)
+            .map_or(self.lines.len(), |n| (n as usize).min(self.lines.len()));
         self.lines
             .iter()
             .skip(self.lines.len() - n)
             .map(|l| l.text.clone())
             .collect()
+    }
+
+    /// Release the line ring now; the analyzer starts empty if fed again.
+    #[napi]
+    pub fn free(&mut self) {
+        *self = Self::new();
+        self.lines.shrink_to_fit();
+        self.line.shrink_to_fit();
     }
 }
 
@@ -168,6 +185,34 @@ impl Analyzer {
                 continue;
             }
             let b = bytes[i];
+            match (self.state, b) {
+                // A non-ASCII byte cannot be part of an escape sequence. Leaving
+                // it for the ground state keeps `i` on a char boundary, which the
+                // text slice above relies on (and which would panic otherwise).
+                (State::Str, _) if b < 0x80 || self.str_len < MAX_STRING_BYTES => {}
+                (_, 0x80..) => {
+                    self.state = State::Ground;
+                    continue;
+                }
+                // CAN and SUB cancel any sequence.
+                (_, 0x18 | 0x1a) => {
+                    self.state = State::Ground;
+                    i += 1;
+                    continue;
+                }
+                // CR and LF inside CSI or ESC still act, as a terminal does.
+                (State::Esc | State::Csi | State::Charset, b'\r') => {
+                    self.carriage_return();
+                    i += 1;
+                    continue;
+                }
+                (State::Esc | State::Csi | State::Charset, b'\n') => {
+                    self.line_feed();
+                    i += 1;
+                    continue;
+                }
+                _ => {}
+            }
             i += 1;
             self.escape_byte(b);
         }
@@ -183,7 +228,10 @@ impl Analyzer {
                         self.csi_private = false;
                         State::Csi
                     }
-                    b']' | b'P' | b'X' | b'^' | b'_' => State::Str,
+                    b']' | b'P' | b'X' | b'^' | b'_' => {
+                        self.str_len = 0;
+                        State::Str
+                    }
                     b'(' | b')' => State::Charset,
                     0x1b => State::Esc,
                     _ => State::Ground,
@@ -191,7 +239,10 @@ impl Analyzer {
             }
             State::Csi => match b {
                 b'0'..=b'9' => {
-                    self.csi_param = self.csi_param.saturating_mul(10) + u32::from(b - b'0')
+                    self.csi_param = self
+                        .csi_param
+                        .saturating_mul(10)
+                        .saturating_add(u32::from(b - b'0'))
                 }
                 b'?' | b'<' | b'=' | b'>' => self.csi_private = true,
                 // Later parameters and intermediates: nothing here reads them.
@@ -207,7 +258,12 @@ impl Analyzer {
             State::Str => match b {
                 0x07 => self.state = State::Ground,
                 0x1b => self.state = State::StrEsc,
-                _ => {}
+                _ => {
+                    self.str_len += 1;
+                    if self.str_len > MAX_STRING_BYTES {
+                        self.state = State::Ground;
+                    }
+                }
             },
             State::StrEsc => {
                 if b == b'\\' {
@@ -330,7 +386,7 @@ impl Analyzer {
 /// Every chunk through one analyzer in a single call: the same work as
 /// [`Analyzer::append`] per chunk without a napi crossing per chunk, so the
 /// bench can show what the boundary costs. Returns the last status code.
-#[napi]
+#[napi(catch_unwind)]
 pub fn analyze_batch(chunks: Vec<String>, analyze: bool) -> u32 {
     let mut a = Analyzer::new();
     let mut last = STATUS_NONE;
@@ -380,6 +436,67 @@ mod tests {
         a.feed("a\x1b[3");
         a.feed("8;5;1mb\n");
         assert_eq!(lines(&a), ["ab"]);
+    }
+
+    #[test]
+    fn non_ascii_after_escape_does_not_panic() {
+        let mut a = Analyzer::new();
+        a.feed("\x1bé\n");
+        a.feed("\x1b[1é\n");
+        a.feed("x\x1b");
+        a.feed("ü\n");
+        a.feed("\x1b]0;t\x1bé\n");
+        assert_eq!(lines(&a), ["é", "é", "xü", "é"]);
+    }
+
+    #[test]
+    fn arbitrary_input_never_panics() {
+        // A small deterministic fuzz: every mix of escapes, controls and multibyte text.
+        let pieces = [
+            "\x1b", "[", "]", "1", ";", "?", "K", "\r", "\n", "\x07", "\\", "é", "😀", "a", "\x18",
+            "P",
+        ];
+        let mut seed = 0x9e3779b97f4a7c15u64;
+        for _ in 0..2000 {
+            let mut a = Analyzer::new();
+            for _ in 0..8 {
+                let mut chunk = String::new();
+                for _ in 0..12 {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    chunk.push_str(pieces[(seed % pieces.len() as u64) as usize]);
+                }
+                a.append_str(&chunk, true);
+            }
+        }
+        let mut a = Analyzer::new();
+        a.feed("\x1b[99999999999999K");
+    }
+
+    #[test]
+    fn unterminated_string_gives_up() {
+        let mut a = Analyzer::new();
+        a.feed("\x1b]0;never ends\n");
+        a.feed(&"x".repeat(MAX_STRING_BYTES));
+        a.feed("\nvisible\n");
+        assert_eq!(lines(&a).last().map(String::as_str), Some("visible"));
+    }
+
+    #[test]
+    fn controls_inside_csi_still_act() {
+        // The newline acts; the `b` after it is the CSI's final byte, as on a terminal.
+        let mut a = Analyzer::new();
+        a.feed("a\x1b[\nb\nc\n");
+        assert_eq!(lines(&a), ["a", "", "c"]);
+    }
+
+    #[test]
+    fn output_zero_means_all() {
+        let mut a = Analyzer::new();
+        a.feed("1\n2\n");
+        assert_eq!(a.output(Some(0)), ["1", "2"]);
+        assert_eq!(a.output(Some(1)), ["2"]);
     }
 
     #[test]

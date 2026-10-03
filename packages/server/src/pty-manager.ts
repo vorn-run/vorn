@@ -120,6 +120,7 @@ class PtyManager extends EventEmitter {
   private outputPartials = new Map<string, string>()
   /** `VORN_CORE=native`: the Rust core's per-session analysis, replacing the three maps around it. */
   private analyzers = new Map<string, NativeAnalyzer>()
+  private nativeAnalysisFailed = false
   private statusContexts = new Map<string, StatusContext>()
   private idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private sessionOrder: string[] = []
@@ -785,6 +786,7 @@ class PtyManager extends EventEmitter {
   private clearSessionTracking(id: string): void {
     this.outputLines.delete(id)
     this.outputPartials.delete(id)
+    this.analyzers.get(id)?.free()
     this.analyzers.delete(id)
     this.statusContexts.delete(id)
     this.extensionPtys.delete(id)
@@ -802,16 +804,24 @@ class PtyManager extends EventEmitter {
     if (session.agentType === 'shell') return
 
     const Analyzer = activeCore().native?.Analyzer
-    if (Analyzer) {
-      let analyzer = this.analyzers.get(id)
-      if (!analyzer) {
-        analyzer = new Analyzer()
-        this.analyzers.set(id, analyzer)
+    if (Analyzer && !this.nativeAnalysisFailed) {
+      try {
+        let analyzer = this.analyzers.get(id)
+        if (!analyzer) {
+          analyzer = new Analyzer()
+          this.analyzers.set(id, analyzer)
+        }
+        const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
+        if (newStatus && newStatus !== session.status) this.updateSessionStatus(id, newStatus)
+        this.armIdle(id, session)
+        return
+      } catch (err) {
+        // This runs inside the pty's data handler, where a throw has nothing
+        // behind it. Every session goes back to the JS path from here on.
+        log.warn({ err, id }, '[core] native output analysis failed; using js')
+        this.nativeAnalysisFailed = true
+        this.analyzers.clear()
       }
-      const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
-      if (newStatus && newStatus !== session.status) this.updateSessionStatus(id, newStatus)
-      this.armIdle(id, session)
-      return
     }
 
     let buf = this.outputLines.get(id)
@@ -1231,7 +1241,9 @@ class PtyManager extends EventEmitter {
     this.sessions.clear()
     this.outputLines.clear()
     this.outputPartials.clear()
+    for (const analyzer of this.analyzers.values()) analyzer.free()
     this.analyzers.clear()
+    this.nativeAnalysisFailed = false
     this.statusContexts.clear()
     for (const timer of this.idleTimers.values()) clearTimeout(timer)
     this.idleTimers.clear()

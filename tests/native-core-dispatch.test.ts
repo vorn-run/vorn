@@ -20,16 +20,29 @@ const { fakeCore, screens, analyzers } = vi.hoisted(() => {
     cwd = ''
     title = ''
     failNext = false
+    freed = false
     constructor(cols: number, rows: number) {
       this.size = [cols, rows]
       screens.push(this)
     }
-    feed(data: string): void {
+    /** The core's contract: returns the cwd an OSC 5522 moved to, else null. */
+    feed(data: string): string | null {
       if (this.failNext) throw new Error('core fault')
       this.fed.push(data)
       // eslint-disable-next-line no-control-regex
       const m = /\x1b\]5522;cwd;([^\x07]*)\x07/.exec(data)
-      if (m) this.cwd = m[1]
+      if (m && m[1] !== this.cwd) {
+        this.cwd = m[1]
+        return m[1]
+      }
+      return null
+    }
+    restoreLabels(title?: string | null, cwd?: string | null): void {
+      if (title) this.title = title
+      if (cwd) this.cwd = cwd
+    }
+    free(): void {
+      this.freed = true
     }
     resize(cols: number, rows: number): void {
       if (this.failNext) throw new Error('core fault')
@@ -50,12 +63,18 @@ const { fakeCore, screens, analyzers } = vi.hoisted(() => {
   class FakeAnalyzer {
     calls: Array<[string, boolean]> = []
     next = 0
+    failNext = false
+    freed = false
     constructor() {
       analyzers.push(this)
     }
     append(data: string, analyze: boolean): number {
+      if (this.failNext) throw new Error('core fault')
       this.calls.push([data, analyze])
       return this.next
+    }
+    free(): void {
+      this.freed = true
     }
     output(lines?: number): string[] {
       const all = this.calls.map(([d]) => d)
@@ -127,6 +146,19 @@ describe('the screen model on the native core', () => {
     expect(reported).toEqual(['/tmp/a', '/tmp/b'])
   })
 
+  it('puts restored labels back on a native screen', async () => {
+    createScreen('r', 80, 24, { title: 'vim', cwd: '/srv' })
+    const snap = await serializeScreen('r')
+    expect(snap?.title).toBe('vim')
+    expect(snap?.cwd).toBe('/srv')
+  })
+
+  it('frees the native terminal when the screen is cleared', () => {
+    createScreen('f', 80, 24)
+    resetScreens()
+    expect(screens[0].freed).toBe(true)
+  })
+
   it('drops the model, not the session, when the core throws', async () => {
     createScreen('feed', 80, 24)
     screens[0].failNext = true
@@ -182,6 +214,26 @@ describe('output analysis on the native core', () => {
     expect(analyzers[0].calls).toEqual([['x', false]])
     expect(session.status).toBe('running')
     pm.clearSessionTracking('h')
+    expect(analyzers[0].freed).toBe(true)
     pm.sessions.delete('h')
+  })
+
+  it('reads all lines for getOutput(id, 0), as the JS path does', () => {
+    addSession('z')
+    pm.appendOutput('z', 'one\n')
+    pm.appendOutput('z', 'two\n')
+    expect(ptyManager.getOutput('z', 0)).toEqual(['one\n', 'two\n'])
+    pm.clearSessionTracking('z')
+    pm.sessions.delete('z')
+  })
+
+  it('falls back to the JS analysis when the core throws, instead of throwing from the pty', () => {
+    addSession('t')
+    pm.appendOutput('t', 'first\n')
+    analyzers[0].failNext = true
+    expect(() => pm.appendOutput('t', 'second\n')).not.toThrow()
+    expect(ptyManager.getOutput('t')).toEqual(['second'])
+    pm.clearSessionTracking('t')
+    pm.sessions.delete('t')
   })
 })

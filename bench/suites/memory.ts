@@ -1,6 +1,6 @@
 /**
  * What the per-session state costs to hold: the screen model plus the analysis
- * state, after each of 32 sessions at 200x50 has taken the 1 MB agent
+ * state, after each of 32 sessions at 200x50 has taken the 1 MB spinner
  * transcript.
  *
  * Measured as growth over a baseline taken after start-up, with the GC forced on

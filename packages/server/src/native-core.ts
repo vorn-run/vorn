@@ -26,10 +26,16 @@ export interface NativeCore {
 export interface NativeAnalyzer {
   append(data: string, analyze: boolean): number
   output(lines?: number): string[]
+  /** Drops the line ring, which V8 does not see, now rather than at GC. */
+  free(): void
 }
 
 export interface NativeScreen {
-  feed(data: string): void
+  /** Returns the cwd an OSC 5522 in `data` moved to, for the session record. */
+  feed(data: string): string | null
+  restoreLabels(title?: string | null, cwd?: string | null): void
+  /** Releases the terminal, whose memory V8 does not see, now rather than at GC. */
+  free(): void
   resize(cols: number, rows: number): void
   serialize(): { screen: string; cols: number; rows: number; title: string; cwd: string }
   readonly title: string
