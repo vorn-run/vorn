@@ -40,6 +40,7 @@ import {
 import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
 import { stripAnsi } from './ansi-strip'
+import { activeCore, NATIVE_STATUS, type NativeAnalyzer } from './native-core'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
 import {
   createScreen,
@@ -117,6 +118,8 @@ class PtyManager extends EventEmitter {
   private tempKeyPaths = new Map<string, string>()
   private outputLines = new Map<string, string[]>()
   private outputPartials = new Map<string, string>()
+  /** `VORN_CORE=native`: the Rust core's per-session analysis, replacing the three maps around it. */
+  private analyzers = new Map<string, NativeAnalyzer>()
   private statusContexts = new Map<string, StatusContext>()
   private idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private sessionOrder: string[] = []
@@ -782,6 +785,7 @@ class PtyManager extends EventEmitter {
   private clearSessionTracking(id: string): void {
     this.outputLines.delete(id)
     this.outputPartials.delete(id)
+    this.analyzers.delete(id)
     this.statusContexts.delete(id)
     this.extensionPtys.delete(id)
     const idleTimer = this.idleTimers.get(id)
@@ -796,6 +800,19 @@ class PtyManager extends EventEmitter {
     // Plain shells don't run agents — skip bracketed-paste / pattern / idle analysis.
     // They stay 'running' until the PTY exits (setupPtyEvents sets 'idle').
     if (session.agentType === 'shell') return
+
+    const Analyzer = activeCore().native?.Analyzer
+    if (Analyzer) {
+      let analyzer = this.analyzers.get(id)
+      if (!analyzer) {
+        analyzer = new Analyzer()
+        this.analyzers.set(id, analyzer)
+      }
+      const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
+      if (newStatus && newStatus !== session.status) this.updateSessionStatus(id, newStatus)
+      this.armIdle(id, session)
+      return
+    }
 
     let buf = this.outputLines.get(id)
     if (!buf) {
@@ -844,8 +861,12 @@ class PtyManager extends EventEmitter {
       }
     }
 
-    // Idle timer — if no output arrives within timeout, mark idle.
-    // Hook sessions use a longer timeout as safety net (hooks are primary).
+    this.armIdle(id, session)
+  }
+
+  // Idle timer — if no output arrives within timeout, mark idle.
+  // Hook sessions use a longer timeout as safety net (hooks are primary).
+  private armIdle(id: string, session: TerminalSession): void {
     const timeout = session.statusSource === 'hooks' ? IDLE_TIMEOUT_HOOKS_MS : IDLE_TIMEOUT_MS
     const existingTimer = this.idleTimers.get(id)
     if (existingTimer) clearTimeout(existingTimer)
@@ -1210,6 +1231,7 @@ class PtyManager extends EventEmitter {
     this.sessions.clear()
     this.outputLines.clear()
     this.outputPartials.clear()
+    this.analyzers.clear()
     this.statusContexts.clear()
     for (const timer of this.idleTimers.values()) clearTimeout(timer)
     this.idleTimers.clear()
@@ -1332,6 +1354,8 @@ class PtyManager extends EventEmitter {
 
   getOutput(id: string, lines?: number): string[] {
     if (!this.sessions.has(id)) throw new Error(`Session not found: ${id}`)
+    const analyzer = this.analyzers.get(id)
+    if (analyzer) return analyzer.output(lines)
     const buf = this.outputLines.get(id) ?? []
     if (lines && lines < buf.length) {
       return buf.slice(-lines)

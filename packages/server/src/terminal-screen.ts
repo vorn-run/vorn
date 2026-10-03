@@ -2,6 +2,20 @@ import * as headless from '@xterm/headless'
 import * as serializeAddon from '@xterm/addon-serialize'
 import log from './logger'
 import { OSC_PRIVATE } from './shell-integration/protocol'
+import { activeCore, type NativeScreen } from './native-core'
+
+/**
+ * `VORN_CORE=native`: the model is a libghostty-vt terminal in the Rust core
+ * instead of a headless xterm. Parsed synchronously, so there is no queue to
+ * bound and nothing to wait for before reading it.
+ */
+type NativeScreenCtor = new (cols: number, rows: number) => NativeScreen
+let nativeCtor: NativeScreenCtor | null | undefined
+function nativeScreen(): NativeScreenCtor | null {
+  if (nativeCtor === undefined) nativeCtor = activeCore().native?.Screen ?? null
+  return nativeCtor
+}
+const natives = new Map<string, NativeScreen>()
 
 /**
  * Reached through an interop dance rather than by name, and it earns its keep.
@@ -270,6 +284,22 @@ const screens = new Map<string, Held>()
  * carries on without one.
  */
 export function feedScreen(id: string, data: string): void {
+  const native = natives.get(id)
+  if (native) {
+    try {
+      if (data.includes('\x1b]')) {
+        const before = native.cwd
+        native.feed(data)
+        const after = native.cwd
+        if (after && after !== before) reportCwd?.(id, after)
+      } else {
+        native.feed(data)
+      }
+    } catch (err) {
+      drop(id, err)
+    }
+    return
+  }
   const held = screens.get(id)
   if (!held) return
 
@@ -319,6 +349,15 @@ export function createScreen(
   labels?: { title?: string; cwd?: string }
 ): void {
   clearScreen(id)
+  const Native = nativeScreen()
+  if (Native) {
+    try {
+      natives.set(id, new Native(cols, rows))
+    } catch (err) {
+      drop(id, err)
+    }
+    return
+  }
   try {
     const held = create(id, cols, rows)
     // A restored screen is rebuilt from escape sequences, and neither of these
@@ -342,6 +381,15 @@ export function createScreen(
  * and every line after the first divergence is wrong.
  */
 export async function resizeScreen(id: string, cols: number, rows: number): Promise<void> {
+  const native = natives.get(id)
+  if (native) {
+    try {
+      native.resize(cols, rows)
+    } catch (err) {
+      drop(id, err)
+    }
+    return
+  }
   const held = screens.get(id)
   if (!held) return
   try {
@@ -433,6 +481,15 @@ function drop(id: string, err: unknown): void {
  * yield and reappears under load.
  */
 export async function serializeScreen(id: string): Promise<ScreenSnapshot | null> {
+  const native = natives.get(id)
+  if (native) {
+    try {
+      return native.serialize()
+    } catch (err) {
+      log.warn({ err, id }, '[screen] could not serialize')
+      return null
+    }
+  }
   const held = screens.get(id)
   if (!held) return null
   try {
@@ -457,6 +514,7 @@ export async function serializeScreen(id: string): Promise<ScreenSnapshot | null
  * resident for the life of the server.
  */
 export function clearScreen(id: string): void {
+  natives.delete(id)
   const held = screens.get(id)
   if (!held) return
   screens.delete(id)
@@ -484,14 +542,14 @@ export function setCwdReporter(fn: CwdReporter | null): void {
 /** How many models are held. For the measurement that bounds this. */
 /** For the one caller that must not clear a screen recovery has just rebuilt. */
 export function hasScreen(id: string): boolean {
-  return screens.has(id)
+  return screens.has(id) || natives.has(id)
 }
 
 export function screenCount(): number {
-  return screens.size
+  return screens.size + natives.size
 }
 
 /** Test-only, mirroring `resetScrollback`. */
 export function resetScreens(): void {
-  for (const id of [...screens.keys()]) clearScreen(id)
+  for (const id of [...screens.keys(), ...natives.keys()]) clearScreen(id)
 }

@@ -18,6 +18,7 @@ import {
 } from '../../packages/server/src/terminal-screen'
 import { MB, repeatAsync, round, timeAsync } from '../lib/stats'
 import { emit, metric, QUICK, type Metric } from '../lib/suite'
+import '../lib/core'
 import { asFlushes, transcripts } from '../lib/transcripts'
 
 const REPS = QUICK ? 2 : 9

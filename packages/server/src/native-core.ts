@@ -17,7 +17,27 @@ export interface NativeCore {
   hello(name: string): string
   /** Only present when the crate was built with libghostty-vt. */
   parseTitle?(bytes: Buffer): string
+  /** `appendOutput`'s per-chunk analysis. Returns a `NATIVE_STATUS` code. */
+  Analyzer?: new () => NativeAnalyzer
+  /** The screen model, on libghostty-vt. Only present when built with it. */
+  Screen?: new (cols: number, rows: number) => NativeScreen
 }
+
+export interface NativeAnalyzer {
+  append(data: string, analyze: boolean): number
+  output(lines?: number): string[]
+}
+
+export interface NativeScreen {
+  feed(data: string): void
+  resize(cols: number, rows: number): void
+  serialize(): { screen: string; cols: number; rows: number; title: string; cwd: string }
+  readonly title: string
+  readonly cwd: string
+}
+
+/** What `NativeAnalyzer.append` returns, in order. */
+export const NATIVE_STATUS = [null, 'running', 'waiting', 'error'] as const
 
 export interface CoreSelection {
   mode: CoreMode
@@ -117,4 +137,15 @@ export function selectCore(
 // directory under tsx.
 function serverDir(): string {
   return typeof __dirname !== 'undefined' ? __dirname : path.dirname(process.argv[1])
+}
+
+let active: CoreSelection | null = null
+
+/**
+ * The core this process runs, resolved once from `VORN_CORE`. The output path
+ * reads it per session rather than per chunk.
+ */
+export function activeCore(): CoreSelection {
+  active ??= selectCore()
+  return active
 }

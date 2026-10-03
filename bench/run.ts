@@ -22,7 +22,15 @@ import { median, round } from './lib/stats'
 import type { Metric, SuiteResult } from './lib/suite'
 
 const ROOT = path.resolve(__dirname, '..')
-const SUITES = ['output-analysis', 'screen-model', 'flush', 'git', 'event-loop', 'renderer']
+const SUITES = [
+  'output-analysis',
+  'screen-model',
+  'flush',
+  'git',
+  'event-loop',
+  'renderer',
+  'memory'
+]
 /**
  * Processes per run, for suites whose numbers move between processes more than
  * within one: the regex-heavy analysis and the xterm parse land up to 15% apart
@@ -33,7 +41,8 @@ const SUITES = ['output-analysis', 'screen-model', 'flush', 'git', 'event-loop',
 const PROCESSES: Record<string, number> = {
   'output-analysis': 3,
   'screen-model': 3,
-  'event-loop': 3
+  'event-loop': 3,
+  memory: 3
 }
 const SPREAD_LIMIT = 10
 
@@ -200,7 +209,7 @@ function main(): void {
   for (const r of rows) console.log(r.map((c, i) => c.padEnd(widths[i])).join('  '))
 
   const record: Baseline = {
-    machine: machine(),
+    machine: { ...machine(), core: process.env.VORN_CORE ?? 'js' },
     recordedAt: new Date().toISOString(),
     commit: execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
       cwd: ROOT,
@@ -212,6 +221,8 @@ function main(): void {
   const resultsDir = path.join(ROOT, 'bench', 'results')
   fs.mkdirSync(resultsDir, { recursive: true })
   fs.writeFileSync(path.join(resultsDir, 'latest.json'), JSON.stringify(record, null, 2) + '\n')
+  const out = args.get('out')
+  if (out) fs.writeFileSync(path.resolve(out), JSON.stringify(record, null, 2) + '\n')
 
   if (runs > 1) {
     console.log(
