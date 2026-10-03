@@ -76,9 +76,21 @@ const { fakeCore, screens, analyzers } = vi.hoisted(() => {
     free(): void {
       this.freed = true
     }
+    /** Completed lines without their `\n`, as the real analyzer keeps them. */
     output(lines?: number): string[] {
-      const all = this.calls.map(([d]) => d)
+      const all = this.calls
+        .map(([d]) => d)
+        .join('')
+        .split('\n')
+      all.pop()
       return lines ? all.slice(-lines) : all
+    }
+    partial(): string {
+      return this.calls
+        .map(([d]) => d)
+        .join('')
+        .split('\n')
+        .pop()!
     }
   }
 
@@ -203,7 +215,7 @@ describe('output analysis on the native core', () => {
       ['two? ', true]
     ])
     expect(session.status).toBe('waiting')
-    expect(ptyManager.getOutput('a', 1)).toEqual(['two? '])
+    expect(ptyManager.getOutput('a', 1)).toEqual(['one'])
     pm.clearSessionTracking('a')
     pm.sessions.delete('a')
   })
@@ -222,18 +234,26 @@ describe('output analysis on the native core', () => {
     addSession('z')
     pm.appendOutput('z', 'one\n')
     pm.appendOutput('z', 'two\n')
-    expect(ptyManager.getOutput('z', 0)).toEqual(['one\n', 'two\n'])
+    expect(ptyManager.getOutput('z', 0)).toEqual(['one', 'two'])
     pm.clearSessionTracking('z')
     pm.sessions.delete('z')
   })
 
   it('falls back to the JS analysis when the core throws, instead of throwing from the pty', () => {
     addSession('t')
+    addSession('u')
     pm.appendOutput('t', 'first\n')
+    pm.appendOutput('u', 'other\npar')
     analyzers[0].failNext = true
     expect(() => pm.appendOutput('t', 'second\n')).not.toThrow()
-    expect(ptyManager.getOutput('t')).toEqual(['second'])
-    pm.clearSessionTracking('t')
-    pm.sessions.delete('t')
+    // Output read before the fault survives, for every session.
+    expect(ptyManager.getOutput('t')).toEqual(['first', 'second'])
+    pm.appendOutput('u', 'tial\n')
+    expect(ptyManager.getOutput('u')).toEqual(['other', 'partial'])
+    expect(analyzers.every((a) => a.freed)).toBe(true)
+    for (const id of ['t', 'u']) {
+      pm.clearSessionTracking(id)
+      pm.sessions.delete(id)
+    }
   })
 })

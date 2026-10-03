@@ -29,6 +29,9 @@ const MAX_OUTPUT_LINES: usize = 1000;
 const MAX_STRING_BYTES: usize = 4096;
 /// `analyzeOutput` reads the last five lines: four completed and the current one.
 const RECENT_COMPLETED: usize = 4;
+/// How far back `analyzeOutput` looks for the last non-blank line: its buffer
+/// holds the last 2000 characters of stripped output.
+const WAITING_WINDOW_CHARS: usize = 2000;
 
 /// Returned by [`Analyzer::append`].
 pub const STATUS_NONE: u32 = 0;
@@ -97,7 +100,7 @@ impl Default for Analyzer {
 
 #[napi]
 impl Analyzer {
-    #[napi(constructor)]
+    #[napi(constructor, catch_unwind)]
     pub fn new() -> Self {
         Self {
             state: State::Ground,
@@ -134,8 +137,14 @@ impl Analyzer {
             .collect()
     }
 
+    /// The line in progress, stripped, as the JS path keeps it between chunks.
+    #[napi(catch_unwind)]
+    pub fn partial(&self) -> String {
+        self.line.clone()
+    }
+
     /// Release the line ring now; the analyzer starts empty if fed again.
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn free(&mut self) {
         *self = Self::new();
         self.lines.shrink_to_fit();
@@ -357,7 +366,8 @@ impl Analyzer {
         }
     }
 
-    /// `analyzeOutput` on the last five lines, the line in progress included.
+    /// `analyzeOutput`: errors on the last five lines, the line in progress
+    /// included; the waiting prompt anywhere in the last 2000 characters.
     fn status(&mut self) -> u32 {
         let mut error = false;
         for l in self.lines.iter_mut().rev().take(RECENT_COMPLETED) {
@@ -366,16 +376,26 @@ impl Analyzer {
                 .get_or_insert_with(|| error_patterns().is_match(&l.text));
         }
         let current = self.line.as_str();
-        let recent = self.lines.iter().rev().take(RECENT_COMPLETED);
         if error || error_patterns().is_match(current) {
             return STATUS_ERROR;
         }
-        // The last line with something on it, as `trimEnd().split('\n').pop()` finds it.
-        let last = std::iter::once(current)
-            .chain(recent.map(|l| l.text.as_str()))
-            .map(str::trim_end)
-            .find(|l| !l.is_empty())
-            .unwrap_or("");
+        // The last line with something on it, as `trimEnd().split('\n').pop()`
+        // finds it in the JS path's 2000-character buffer: blank lines after a
+        // prompt don't hide it.
+        let mut budget = WAITING_WINDOW_CHARS;
+        let mut last = "";
+        for l in std::iter::once(current).chain(self.lines.iter().rev().map(|l| l.text.as_str())) {
+            let trimmed = l.trim_end();
+            if !trimmed.is_empty() {
+                last = trimmed;
+                break;
+            }
+            // The line and the newline after it.
+            budget = budget.saturating_sub(l.chars().count() + 1);
+            if budget == 0 {
+                break;
+            }
+        }
         if waiting_patterns().is_match(last) {
             return STATUS_WAITING;
         }
@@ -512,6 +532,30 @@ mod tests {
             STATUS_RUNNING
         );
         assert_eq!(a.append_str("plain", false), STATUS_NONE);
+    }
+
+    #[test]
+    fn prompt_found_past_blank_lines() {
+        // `analyzeOutput` trims its whole buffer, so blank lines after a
+        // prompt still leave the prompt as the last line.
+        let mut a = Analyzer::new();
+        assert_eq!(
+            a.append_str(
+                "$ 
+
+
+
+
+
+
+",
+                true
+            ),
+            STATUS_WAITING
+        );
+        // Beyond the 2000-character window it is gone, as in JS.
+        let blank = format!("{}\n", " ".repeat(100)).repeat(25);
+        assert_eq!(a.append_str(&blank, true), STATUS_RUNNING);
     }
 }
 

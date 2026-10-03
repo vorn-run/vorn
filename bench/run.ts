@@ -7,6 +7,7 @@
  *   yarn bench --runs=5             more runs
  *   yarn bench --quick              one short run, a smoke check rather than a number
  *   yarn bench --save               write the baseline for this platform and the doc table
+ *                                   (with VORN_CORE=native, its own baseline and no table)
  *   yarn bench --max-regression=10  fail when a metric is more than 10% worse than the baseline
  *
  * Runs are interleaved (suite A, B, C, then A, B, C again) rather than batched,
@@ -70,8 +71,12 @@ if (maxRegression !== null && !(maxRegression >= 0)) {
 }
 const suites = only ? SUITES.filter((s) => only.includes(s)) : SUITES
 const platformKey = `${process.platform}-${process.arch}`
+const core = process.env.VORN_CORE === 'native' ? 'native' : 'js'
+// Each core keeps its own baseline, so a native run never overwrites or is
+// judged against the JS numbers. The JS one keeps the original name.
 const baselinePath =
-  args.get('baseline') ?? path.join(ROOT, 'bench', 'baselines', `${platformKey}.json`)
+  args.get('baseline') ??
+  path.join(ROOT, 'bench', 'baselines', `${platformKey}${core === 'native' ? '-native' : ''}.json`)
 
 export interface Summary {
   value: number
@@ -217,6 +222,13 @@ function main(): void {
 
   const here = machine()
   if (baseline) {
+    const baseCore = (baseline.machine.core as string | undefined) ?? 'js'
+    if (baseCore !== core) {
+      const msg = `the baseline at ${path.relative(ROOT, baselinePath)} was recorded with VORN_CORE=${baseCore}, this run is ${core}`
+      // A gate across cores would pass or fail on the core, not the change.
+      if (maxRegression !== null) throw new Error(`${msg}; --max-regression needs the same core`)
+      console.warn(`warning: ${msg}; compare with care`)
+    }
     const was = baseline.machine
     const differs = (['cpu', 'cores', 'memoryGB'] as const).filter((k) => was[k] !== here[k])
     if (differs.length > 0) {
@@ -257,7 +269,7 @@ function main(): void {
   for (const r of rows) console.log(r.map((c, i) => c.padEnd(widths[i])).join('  '))
 
   const record: Baseline = {
-    machine: { ...here, core: process.env.VORN_CORE ?? 'js' },
+    machine: { ...here, core },
     recordedAt: new Date().toISOString(),
     commit: currentCommit(),
     runs,
@@ -295,7 +307,8 @@ function main(): void {
     fs.mkdirSync(path.dirname(baselinePath), { recursive: true })
     fs.writeFileSync(baselinePath, JSON.stringify(record, null, 2) + '\n')
     console.log(`baseline written to ${path.relative(ROOT, baselinePath)}`)
-    const doc = writeDocTable(record)
+    // The doc tables are the JS numbers; a native baseline has no markers there.
+    const doc = core === 'native' ? null : writeDocTable(record)
     // Formatted as the repo formats them, so committing a baseline is not also a style diff.
     execFileSync(
       process.execPath,

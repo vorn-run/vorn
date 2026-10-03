@@ -13,7 +13,7 @@ The native core is faster on everything it replaces, on both machines.
 
 - **End to end, one megabyte of terminal output costs the server 4-6x less CPU** (agent 6.4x, spinner 5.8x, build log 4.3x on the M2 Pro).
 - **Event-loop p99 drops 3x under a 50 MB/s burst** (15.5 to 5.6 ms on the M2 Pro) and **16x with git running beside 8 agents** (104 to 6.4 ms).
-- **Memory per session drops 2.5x in RSS and 14x on the V8 heap.**
+- **Memory per session drops 2.5x in RSS and 14x in what Node accounts for** (`heapUsed + external`; the core's own allocations show only in RSS).
 - **Checkpoint serialize is 40-46x faster** (1.6 ms to 0.04 ms per 200x50 screen).
 
 Two of the plan's acceptance bars are **not met yet** by this spike, and neither is the core's fault:

@@ -58,8 +58,9 @@ capped at the flush size WP4 introduces, so before and after are fed alike.
 The server suites call `PtyManager`'s private handlers through a cast instead of
 copying them. A fake pty is wired with the same `setupPtyEvents` a spawned one
 gets, so the bench exercises the code WP2 to WP5 replace rather than a model of
-it. The `VORN_CORE=js|native` switch from WP1 is not read yet; once the native
-path exists, running the bench under each value gives the before and after.
+it. Running it under `VORN_CORE=native` measures the Rust core instead; that
+run keeps its own baseline (`<platform>-native.json`) and never touches the
+JS one or the tables here. `yarn bench:compare` runs both, taking turns.
 
 ## Caveats
 

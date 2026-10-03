@@ -43,7 +43,7 @@ pub struct Screen {
 
 #[napi]
 impl Screen {
-    #[napi(constructor)]
+    #[napi(constructor, catch_unwind)]
     pub fn new(cols: u32, rows: u32) -> napi::Result<Self> {
         let term = Terminal::new(Options {
             cols: dimension(cols)?,
@@ -125,19 +125,19 @@ impl Screen {
     }
 
     /// The last OSC 0/2 title.
-    #[napi(getter)]
+    #[napi(getter, catch_unwind)]
     pub fn title(&self) -> String {
         self.title.clone()
     }
 
     /// The last cwd from OSC 7 or OSC 5522, whichever came last.
-    #[napi(getter)]
+    #[napi(getter, catch_unwind)]
     pub fn cwd(&self) -> String {
         self.cwd.clone()
     }
 
     /// Release the terminal now. Every later call is a no-op or an error.
-    #[napi]
+    #[napi(catch_unwind)]
     pub fn free(&mut self) {
         self.term = None;
     }

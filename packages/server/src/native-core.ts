@@ -26,6 +26,8 @@ export interface NativeCore {
 export interface NativeAnalyzer {
   append(data: string, analyze: boolean): number
   output(lines?: number): string[]
+  /** The line in progress, stripped: what the JS path keeps as the partial. */
+  partial(): string
   /** Drops the line ring, which V8 does not see, now rather than at GC. */
   free(): void
 }

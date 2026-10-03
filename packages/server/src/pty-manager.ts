@@ -795,6 +795,28 @@ class PtyManager extends EventEmitter {
     this.idleTimers.delete(id)
   }
 
+  /**
+   * After a native failure: carry each session's output so far into the JS
+   * maps, so `getOutput` keeps what was read before, then free the analyzers.
+   * An analyzer that can't be read loses its history, not the others'.
+   */
+  private handOutputToJs(): void {
+    for (const [id, analyzer] of this.analyzers) {
+      try {
+        this.outputLines.set(id, analyzer.output())
+        this.outputPartials.set(id, analyzer.partial())
+      } catch {
+        // Its history is lost; the session carries on from the next chunk.
+      }
+      try {
+        analyzer.free()
+      } catch {
+        // Nothing more to release.
+      }
+    }
+    this.analyzers.clear()
+  }
+
   private appendOutput(id: string, data: string): void {
     const session = this.sessions.get(id)
     if (!session) return
@@ -820,7 +842,7 @@ class PtyManager extends EventEmitter {
         // behind it. Every session goes back to the JS path from here on.
         log.warn({ err, id }, '[core] native output analysis failed; using js')
         this.nativeAnalysisFailed = true
-        this.analyzers.clear()
+        this.handOutputToJs()
       }
     }
 
