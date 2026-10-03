@@ -9,21 +9,20 @@ import log from '../logger'
  * the bare specifier, and a subpath is bundled instead -- taking node-pty's
  * loader with it, whose relative `require` then resolves against dist/ and finds
  * nothing. Absent from the typings, hence the cast and nothing more.
+ *
+ * Read inside a try: a test that mocks node-pty without `native` gets a module
+ * whose missing exports throw on access, and this runs at import time.
  */
-const binding =
-  (
-    pty as unknown as {
-      native?: {
-        resize(
-          fd: number,
-          cols: number,
-          rows: number,
-          pixelWidth: number,
-          pixelHeight: number
-        ): void
-      } | null
-    }
-  ).native ?? null
+type ResizeBinding = {
+  resize(fd: number, cols: number, rows: number, pixelWidth: number, pixelHeight: number): void
+}
+const binding: ResizeBinding | null = (() => {
+  try {
+    return (pty as unknown as { native?: ResizeBinding | null }).native ?? null
+  } catch {
+    return null
+  }
+})()
 
 /** Answers rather than throws: a pane at the wrong width must not end a server holding every terminal. */
 export function resizeFd(fd: number, cols: number, rows: number): boolean {

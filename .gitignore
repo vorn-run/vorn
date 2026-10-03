@@ -21,3 +21,6 @@ docs/design/
 
 # Benchmark output from the last `yarn bench`; baselines live in bench/baselines.
 bench/results/
+# Rust core build output
+packages/core/target/
+packages/core/vorn_core.node

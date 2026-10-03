@@ -55,6 +55,10 @@ afterPack: scripts/afterPack.cjs
 files:
   - 'out/**/*'
   - 'node_modules/**/*'
+  # The core workspace is linked into node_modules like every workspace, and
+  # would bring its cargo target/ with it. Its one binary ships as an
+  # extraResource below.
+  - '!node_modules/@vornrun/core/**'
 asarUnpack:
   - 'node_modules/libsql/**'
   - 'node_modules/@libsql/**'
@@ -69,6 +73,12 @@ extraResources:
     to: 'web/dist'
     filter:
       - '**/*'
+  # The Rust core, beside the server that loads it rather than in asarUnpack:
+  # the server runs from resources/server, outside the asar, and looks for
+  # ../core/vorn_core.node. Built per platform by `yarn build:core`; when it was
+  # not built the entry is skipped and VORN_CORE=native falls back to js.
+  - from: 'packages/core/vorn_core.node'
+    to: 'core/vorn_core.node'
   # Data, not a native module, so extraResources rather than asarUnpack.
   # idb_companion serves no reflection, so the client cannot discover the
   # schema at runtime — the proto has to ship.
