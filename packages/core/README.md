@@ -10,7 +10,7 @@ missing or will not load. `VORN_CORE_PATH` points it at a specific binary.
 
 ## Build
 
-Needs a Rust toolchain and [Zig 0.16](https://ziglang.org/download/), which
+Needs a Rust toolchain and [Zig 0.15.2](https://ziglang.org/download/), which
 builds libghostty-vt from source on the first build.
 
 ```sh

@@ -45,10 +45,11 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      # libghostty-vt-sys builds Ghostty's VT library from source with Zig.
+      # libghostty-vt-sys builds Ghostty's VT library from source with Zig. The
+      # Ghostty commit it pins refuses any Zig but 0.15.2.
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: 0.15.2
 
       - name: Rust toolchain
         run: |

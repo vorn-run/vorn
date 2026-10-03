@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 
 [features]
 default = ["ghostty"]
-# libghostty-vt is built from source by Zig 0.16. Turning it off lets the crate
+# libghostty-vt is built from source by Zig 0.15.2, the version the pinned Ghostty commit requires. Turning it off lets the crate
 # build on a machine without Zig, which is enough for the boundary itself.
 ghostty = ["dep:libghostty-vt"]
 

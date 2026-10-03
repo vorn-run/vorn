@@ -3,7 +3,7 @@
 // server and electron-builder look for on every platform.
 //
 //   --debug        unoptimized build
-//   --no-ghostty   skip libghostty-vt, for a machine without Zig 0.16
+//   --no-ghostty   skip libghostty-vt, for a machine without Zig 0.15.2
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
