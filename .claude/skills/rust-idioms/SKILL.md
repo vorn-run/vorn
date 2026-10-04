@@ -35,7 +35,7 @@ code and raise it in the PR.
 - Library crates return `Result<T, CrateError>` with an error enum per crate
   (implement `std::error::Error` and `Display`, by hand or with `thiserror` if
   it is already in the tree). The message says what failed and with which
-  input, in the words the JS path used when parity matters.
+  input, in the words the TypeScript used when parity matters.
 - `?` to propagate, with `From` impls between layers. No `Box<dyn Error>` in a
   library's public API.
 - `unwrap()`/`expect()` only for invariants the code itself establishes, with

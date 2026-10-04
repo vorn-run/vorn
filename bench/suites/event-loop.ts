@@ -4,7 +4,7 @@
  *
  * Fake ptys push output at a fixed rate through `PtyManager`'s real handlers --
  * `appendOutput` per read, the 8 ms coalescing timer, `flushBuffer` to a client,
- * the scrollback, the headless xterm and history on disk -- while
+ * the scrollback, the screen model and history on disk -- while
  * a 1 ms probe timer records how late the loop gets to it. A late
  * loop is a late keystroke echo and a late RPC answer for every session at once.
  *
@@ -13,8 +13,7 @@
  * it carries at most 20 ms of owed output into the next turn and drops the rest,
  * so "delivered" below is what the server actually sustained.
  *
- * WP4 is accepted on `burst.50MBps.8s.p99` going under 2 ms, WP5 on the
- * `agents+git` row matching the `agents` row with `VORN_GIT=native`.
+ * The `agents+git` row should match the `agents` row: git runs off the loop.
  */
 import fs from 'node:fs'
 import os from 'node:os'

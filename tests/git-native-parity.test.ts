@@ -1,7 +1,8 @@
 /**
  * The server's git functions, run on both paths against the same repositories,
- * must give the same answers. The JS path is the reference: it is what shipped,
- * and the native one is only allowed to be faster.
+ * must give the same answers. The child process path is the reference: it is
+ * what a server without the core uses, and the native one is only allowed to
+ * be faster.
  *
  * Runs only where `yarn build:core` has produced a binary with `gitRun`, as the
  * Core CI job does.
@@ -12,42 +13,53 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import * as git from '../packages/server/src/git-utils'
-import { resetGitRunner } from '../packages/server/src/git-runner'
+import {
+  nativeRunner,
+  processRunner,
+  resetGitRunner,
+  type GitRunner
+} from '../packages/server/src/git-runner'
 import { loadNativeCore } from '../packages/server/src/native-core'
 
 const builtCore = path.resolve(__dirname, '../packages/core/vorn_core.node')
-const hasGitRun =
-  fs.existsSync(builtCore) && typeof loadNativeCore([builtCore]).gitRun === 'function'
+const gitRun = fs.existsSync(builtCore) ? loadNativeCore([builtCore]).gitRun : undefined
+const hasGitRun = typeof gitRun === 'function'
+const native: GitRunner | null = gitRun ? nativeRunner(gitRun) : null
 
 function sh(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
 }
 
-/** Both answers, the JS path's first. */
+/** Both answers, the child process path's first. */
 async function both<T>(call: () => Promise<T>): Promise<[T, T]> {
-  process.env.VORN_GIT = 'js'
-  const js = await call()
-  process.env.VORN_GIT = 'native'
-  const native = await call()
-  return [js, native]
+  resetGitRunner(processRunner)
+  const reference = await call()
+  resetGitRunner(native)
+  const fromCore = await call()
+  return [reference, fromCore]
 }
 
 async function same<T>(call: () => Promise<T>): Promise<T> {
-  const [js, native] = await both(call)
-  expect(native).toEqual(js)
-  return js
+  const [reference, fromCore] = await both(call)
+  expect(fromCore).toEqual(reference)
+  return reference
 }
 
-/** The error each path rejects with, as a caller would read it. */
+/**
+ * The error each path rejects with, as a caller would read it. The core words
+ * a failure to start git as `execFileSync` did ("spawnSync git ENOENT") and a
+ * child process as `execFile` does ("spawn git ENOENT"); that prefix is the
+ * one difference allowed.
+ */
 async function sameFailure(call: () => Promise<unknown>): Promise<string> {
-  const [js, native] = await both(() =>
+  const [reference, fromCore] = await both(() =>
     call().then(
       () => 'resolved',
-      (err: Error) => err.message
+      (err: Error) => err.message.replace(/^spawnSync /, 'spawn ')
     )
   )
-  expect(native).toBe(js)
-  return js
+  expect(fromCore).toBe(reference)
+  return reference
 }
 
 let root: string
@@ -57,7 +69,6 @@ let plain: string
 
 beforeAll(() => {
   if (!hasGitRun) return
-  process.env.VORN_CORE_PATH = builtCore
   root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-git-parity-')))
   repo = path.join(root, 'repo')
   plain = path.join(root, 'plain')
@@ -88,16 +99,14 @@ beforeAll(() => {
 })
 
 afterEach(() => {
-  delete process.env.VORN_GIT
   resetGitRunner()
 })
 
 afterAll(() => {
-  delete process.env.VORN_CORE_PATH
   if (root) fs.rmSync(root, { recursive: true, force: true })
 })
 
-describe.runIf(hasGitRun)('git on the native path answers as on the JS path', () => {
+describe.runIf(hasGitRun)('git on the native path answers as a child process does', () => {
   it('reads where a path is', async () => {
     for (const cwd of [() => repo, () => path.join(repo, 'src', 'deep'), () => worktree]) {
       expect(await same(() => git.isGitRepo(cwd()))).toBe(true)
@@ -143,7 +152,7 @@ describe.runIf(hasGitRun)('git on the native path answers as on the JS path', ()
     await same(() => git.getGitDiffFull(repo, undefined, { from: `${head}~0`, to: head }))
   })
 
-  it('fails as the JS path fails', async () => {
+  it('fails as the child process fails', async () => {
     const message = await sameFailure(() =>
       git.getGitStatusPorcelain(path.join(root, 'does-not-exist'))
     )
@@ -156,17 +165,17 @@ describe.runIf(hasGitRun)('git on the native path answers as on the JS path', ()
 
   it('makes the same changes', async () => {
     // Each path commits into a copy of its own, so both start from the same tree.
-    const copies = ['js', 'native'].map((mode) => {
+    const copies = ['process', 'native'].map((mode) => {
       const dir = path.join(root, `commit-${mode}`)
       fs.cpSync(repo, dir, { recursive: true })
       return dir
     })
-    process.env.VORN_GIT = 'js'
-    const js = await git.gitCommit(copies[0], 'parity', true)
-    process.env.VORN_GIT = 'native'
-    const native = await git.gitCommit(copies[1], 'parity', true)
-    expect(native).toEqual(js)
-    expect(js).toEqual({ success: true })
+    resetGitRunner(processRunner)
+    const reference = await git.gitCommit(copies[0], 'parity', true)
+    resetGitRunner(native)
+    const fromCore = await git.gitCommit(copies[1], 'parity', true)
+    expect(fromCore).toEqual(reference)
+    expect(reference).toEqual({ success: true })
     expect(sh(copies[1], 'status', '--porcelain')).toBe('')
   })
 })

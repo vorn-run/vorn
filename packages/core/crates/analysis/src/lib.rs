@@ -1,10 +1,11 @@
-//! Output analysis: what `appendOutput`, `stripAnsi` and `status-parser.ts` do
-//! per raw PTY chunk, in one pass over the bytes.
+//! Output analysis: what the server's JavaScript `appendOutput`, `stripAnsi` and
+//! status parser did per raw PTY chunk, in one pass over the bytes.
 //!
-//! Plain Rust with no Node in it; `vorn-core` wraps it for the server. It keeps the JS path's outputs
-//! (a ring of stripped lines, bracketed-paste status, the status patterns on the
-//! last lines) so the bench compares the same job, with differences that make it
-//! closer to a terminal rather than further:
+//! Plain Rust with no Node in it; `vorn-core` wraps it for the server. It keeps
+//! the JavaScript's outputs (a ring of stripped lines, bracketed-paste status,
+//! the status patterns on the last lines), recorded in
+//! `tests/fixtures/js-reference`, with differences that make it closer to a
+//! terminal rather than further:
 //!
 //! - parser state outlives the chunk, so an escape sequence split across two
 //!   reads is still stripped;
@@ -13,7 +14,7 @@
 //!   instead of growing by every frame until the next newline;
 //! - the status patterns run line by line on the last five lines, so a
 //!   completed line is checked at most once and only the line in progress is
-//!   checked on every chunk. They still only see what falls in the JS path's
+//!   checked on every chunk. They still only see what falls in the JavaScript's
 //!   2000-character window: a line, or the part of one, further back than that
 //!   is not matched even when it is among the last five.
 
@@ -70,7 +71,7 @@ struct Line {
     text: String,
     /// Whether an error pattern matches, worked out the first time the line is
     /// among the recent ones when a chunk ends. Lines that scroll past inside
-    /// one chunk are never checked, as in the JS path.
+    /// one chunk are never checked, as in the JavaScript.
     error: Option<bool>,
 }
 
@@ -127,7 +128,7 @@ impl Analyzer {
             .collect()
     }
 
-    /// The line in progress, stripped, as the JS path keeps it between chunks.
+    /// The line in progress, stripped, as the JavaScript kept it between chunks.
     pub fn partial(&self) -> String {
         self.line.clone()
     }
@@ -428,7 +429,7 @@ impl Analyzer {
             return STATUS_ERROR;
         }
         // The last line with something on it, as `trimEnd().split('\n').pop()`
-        // finds it in the JS path's 2000-character buffer: blank lines after a
+        // found it in the JavaScript's 2000-character buffer: blank lines after a
         // prompt don't hide it.
         let mut budget = WAITING_WINDOW_CHARS;
         let mut last = "";

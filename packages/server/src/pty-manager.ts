@@ -41,15 +41,12 @@ import {
 
 import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
-import { stripAnsi } from './ansi-strip'
-import { coreFor, NATIVE_STATUS, type NativeAnalyzer } from './native-core'
+import { nativeCore, NATIVE_STATUS, type NativeAnalyzer } from './native-core'
 import { appendScrollback, clearScrollback } from './terminal-scrollback'
 import { holdOutput, takeOutput, MAX_FLUSH_UNITS, type HeldOutput } from './output-buffer'
 import {
   createScreen,
   hasScreen,
-  feedScreen,
-  resizeScreen,
   clearScreen,
   setCwdReporter,
   setBellReporter
@@ -68,11 +65,8 @@ import {
 } from './history/writer'
 import { pipelineFor } from './core-pipeline'
 import type { RecordHeader } from './history/log'
-import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 import { isHandingOver, HANDOVER_MESSAGE } from './handoff/donor'
-
-const MAX_OUTPUT_LINES = 1000
 
 /**
  * What a PTY starts at, before any client has fitted itself to a pane.
@@ -88,12 +82,6 @@ const INITIAL_COLS = 80
 const INITIAL_ROWS = 24
 const IDLE_TIMEOUT_MS = 5000
 const IDLE_TIMEOUT_HOOKS_MS = 30_000
-
-// Bracketed paste mode: programs enable this when ready for input
-// eslint-disable-next-line no-control-regex
-const BRACKETED_PASTE_ON = /\x1b\[\?2004h/
-// eslint-disable-next-line no-control-regex
-const BRACKETED_PASTE_OFF = /\x1b\[\?2004l/
 
 /** What `prepareSession` worked out, for `spawnPty` to use without doing any of it again. */
 export type PreparedSession = { remoteHost: RemoteHost } | { local: PreparedLocal }
@@ -158,31 +146,24 @@ class PtyManager extends EventEmitter {
   private dataBuffers = new Map<string, HeldOutput>()
   private flushTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private tempKeyPaths = new Map<string, string>()
-  private outputLines = new Map<string, string[]>()
-  private outputPartials = new Map<string, string>()
   /**
-   * Settings › Experimental › native output analysis: the Rust core's
-   * per-session analysis, replacing the three maps around it. Chosen when the
-   * terminal opens and kept for its life; created on its first output.
+   * Each session's output analysis on the Rust core: agent status, and the
+   * output lines agents read back. Created on its first output.
    */
   private analyzers = new Map<string, NativeAnalyzer>()
-  /** What each terminal chose when it opened: the core's analyzer, or null for JS. */
-  private analysisChoice = new Map<string, (new () => NativeAnalyzer) | null>()
-  /** Sessions that asked and were given the JS path, so the switch is read once each. */
-  private jsAnalysis = new Set<string>()
+  /** Sessions with no analysis: the core is missing, or its analyzer failed for them. */
+  private unanalyzed = new Set<string>()
   /** Raw chunks since the last native analysis, joined (a rope, so O(1) per chunk). */
   private pendingAnalysis = new Map<string, HeldOutput>()
   /**
    * Where in a pending batch the last read that switched bracketed paste ends,
-   * in units from its front. The JS path takes status per read: a read with
-   * the switch sets it, and the reads after it fall back to the patterns. A
-   * batch analyzed whole would let the switch win over every read that
-   * followed it, so a batch is never taken past this point in one call.
+   * in units from its front. Status is taken per read: a read with the switch
+   * sets it, and the reads after it fall back to the patterns. A batch
+   * analyzed whole would let the switch win over every read that followed it,
+   * so a batch is never taken past this point in one call.
    */
   private analysisSignalEnd = new Map<string, number>()
   private analysisTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  private nativeAnalysisFailed = false
-  private statusContexts = new Map<string, StatusContext>()
   private idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private sessionOrder: string[] = []
   private headlessWorktreeCounter?: WorktreeSessionCounter
@@ -1014,8 +995,9 @@ class PtyManager extends EventEmitter {
         }
         return data.length
       }
+      // No pipeline: no core, or its thread stopped. The scrollback and the
+      // history are kept here instead, with no screen model.
       appendScrollback(id, data)
-      const rang = feedScreen(id, data)
       recordOutput(id, at, data)
 
       // The bell, said out loud rather than left for whoever happens to be
@@ -1028,10 +1010,9 @@ class PtyManager extends EventEmitter {
       // exists to remove. Here rather than in `appendOutput`, which returns
       // early for a plain shell -- a shell rings too.
       //
-      // The native screen model says whether a BEL actually rang, which tells
-      // a bell from the BEL that ends every OSC title an agent sets; without
-      // it, any 0x07 counts.
-      if (rang ?? data.includes('\x07')) {
+      // With a pipeline, its screen model tells a bell from the BEL that ends
+      // every OSC title an agent sets; without one, any 0x07 counts.
+      if (data.includes('\x07')) {
         this.emit('client-message', IPC.TERMINAL_BELL, { id })
       }
     }
@@ -1059,91 +1040,41 @@ class PtyManager extends EventEmitter {
   }
 
   private clearSessionTracking(id: string): void {
-    this.outputLines.delete(id)
-    this.outputPartials.delete(id)
     this.analyzers.get(id)?.free()
     this.analyzers.delete(id)
-    this.jsAnalysis.delete(id)
-    this.analysisChoice.delete(id)
+    this.unanalyzed.delete(id)
     this.pendingAnalysis.delete(id)
     this.analysisSignalEnd.delete(id)
     this.analysisQueue.delete(id)
     const analysisTimer = this.analysisTimers.get(id)
     if (analysisTimer) clearTimeout(analysisTimer)
     this.analysisTimers.delete(id)
-    this.statusContexts.delete(id)
     this.extensionPtys.delete(id)
     const idleTimer = this.idleTimers.get(id)
     if (idleTimer) clearTimeout(idleTimer)
     this.idleTimers.delete(id)
   }
 
-  /**
-   * After a native failure: carry each session's output so far into the JS
-   * maps, so `getOutput` keeps what was read before, then free the analyzers.
-   * An analyzer that can't be read loses its history, not the others'. Chunks
-   * other sessions had waiting for analysis go through the JS path now.
-   */
-  private handOutputToJs(): void {
-    for (const [id, analyzer] of this.analyzers) {
-      try {
-        this.outputLines.set(id, analyzer.output())
-        this.outputPartials.set(id, analyzer.partial())
-      } catch {
-        // Its history is lost; the session carries on from the next chunk.
-      }
-      try {
-        analyzer.free()
-      } catch {
-        // Nothing more to release.
-      }
-    }
-    this.analyzers.clear()
-    for (const timer of this.analysisTimers.values()) clearTimeout(timer)
-    this.analysisTimers.clear()
-    const pending = [...this.pendingAnalysis]
-    this.pendingAnalysis.clear()
-    this.analysisQueue.clear()
-    for (const [id, held] of pending) {
-      const session = this.sessions.get(id)
-      if (session) {
-        for (const part of this.takeAnalysisParts(id, held)) this.analyzeJs(id, session, part, true)
-      }
-    }
-  }
-
-  /**
-   * Read the switch for a terminal as it opens, as the screen model does, so
-   * one that stays quiet until after the switch moves keeps what it opened with.
-   */
-  private chooseAnalysis(id: string): void {
-    this.analysisChoice.set(id, coreFor('analysis')?.Analyzer ?? null)
-  }
-
-  /** The session's native analyzer, created on its first output, or null for the JS path. */
+  /** The session's analyzer, created on its first output, or null when it has none. */
   private analyzerFor(id: string): NativeAnalyzer | null {
-    if (this.nativeAnalysisFailed || this.jsAnalysis.has(id)) return null
     const existing = this.analyzers.get(id)
     if (existing) return existing
-    if (!this.analysisChoice.has(id)) this.chooseAnalysis(id)
-    const Analyzer = this.analysisChoice.get(id)
-    if (!Analyzer) {
-      this.jsAnalysis.add(id)
-      return null
-    }
+    if (this.unanalyzed.has(id)) return null
+    const Analyzer = nativeCore()?.Analyzer
     try {
+      if (!Analyzer) throw new Error('the vorn core is not loaded')
       const analyzer = new Analyzer()
       this.analyzers.set(id, analyzer)
       return analyzer
     } catch (err) {
-      log.warn({ err, id }, '[core] could not create a native analyzer; using js for this session')
-      this.jsAnalysis.add(id)
+      log.warn({ err, id }, '[core] no output analysis for this session')
+      this.unanalyzed.add(id)
       return null
     }
   }
 
   /**
-   * How native analysis batches: the first read after a quiet spell is
+   * How analysis batches: the first read after a quiet spell is
    * analyzed at once, so a prompt reads as waiting the moment it appears and
    * the idle countdown starts from it. Reads that follow within this window
    * wait and go into the core together, one call per window rather than per
@@ -1160,18 +1091,19 @@ class PtyManager extends EventEmitter {
     // They stay 'running' until the PTY exits (setupPtyEvents sets 'idle').
     if (session.agentType === 'shell') return
 
-    if (this.analyzerFor(id)) {
-      const pending = this.pendingAnalysis.get(id)
-      const held = holdOutput(pending, data)
-      if (!pending) this.pendingAnalysis.set(id, held)
-      if (data.includes('\x1b[?2004')) this.analysisSignalEnd.set(id, held.units)
-      if (held.units >= MAX_FLUSH_UNITS) this.queueAnalysis(id)
-      if (this.analysisTimers.has(id)) return
-      this.flushAnalysis(id)
-      this.armAnalysis(id)
+    if (!this.analyzerFor(id)) {
+      // No status to take, but the session still goes idle when output stops.
+      this.armIdle(id, session)
       return
     }
-    this.analyzeJs(id, session, data, true)
+    const pending = this.pendingAnalysis.get(id)
+    const held = holdOutput(pending, data)
+    if (!pending) this.pendingAnalysis.set(id, held)
+    if (data.includes('\x1b[?2004')) this.analysisSignalEnd.set(id, held.units)
+    if (held.units >= MAX_FLUSH_UNITS) this.queueAnalysis(id)
+    if (this.analysisTimers.has(id)) return
+    this.flushAnalysis(id)
+    this.armAnalysis(id)
   }
 
   /** The batching window, re-armed while reads keep arriving so quiet is it lapsing with nothing queued. */
@@ -1188,7 +1120,7 @@ class PtyManager extends EventEmitter {
   }
 
   /**
-   * Analyze what is waiting for a native session now, up to one flush's worth.
+   * Analyze what is waiting for a session now, up to one flush's worth.
    * The rest is analyzed on the turns that follow, like a capped flush, so a
    * burst never holds the loop for more than 64 KB of analysis at once.
    */
@@ -1205,27 +1137,14 @@ class PtyManager extends EventEmitter {
       const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
       if (newStatus && newStatus !== session.status) this.setStatus(id, newStatus)
     } catch (err) {
-      // This can run from a timer, where a throw has nothing behind it. Every
-      // session goes back to the JS path from here on.
-      log.warn({ err, id }, '[core] native output analysis failed; using js')
-      this.nativeAnalysisFailed = true
-      // What was still waiting behind this batch comes after it, so it is
-      // kept out of the hand-over, which analyzes every pending batch first.
-      const rest = this.pendingAnalysis.get(id)
-      this.pendingAnalysis.delete(id)
-      this.handOutputToJs()
-      // The core may have taken some or all of this batch before it threw, and
-      // that is in the history just handed over: adding it again would
-      // duplicate it. At worst the unread tail of one batch is lost.
-      this.analyzeJs(id, session, data, false)
-      // The rest the core never saw, in the parts its status is taken from.
-      if (rest) {
-        for (const part of this.takeAnalysisParts(id, rest)) this.analyzeJs(id, session, part, true)
-      }
-      return data.length
+      // This can run from a timer, where a throw has nothing behind it. The
+      // session carries on without status, rather than ask a faulted analyzer
+      // again on every read.
+      log.warn({ err, id }, '[core] output analysis failed; this session has no status from here')
+      this.dropAnalysis(id)
     }
-    // Re-armed per batch rather than per read, which is most of what the JS
-    // path spends on a spinner.
+    // Re-armed per batch rather than per read, which is most of what analysis
+    // per read spent on a spinner.
     this.armIdle(id, session)
     return data.length
   }
@@ -1241,69 +1160,22 @@ class PtyManager extends EventEmitter {
     return data
   }
 
-  /** All of a pending batch, in the parts its status is taken from. */
-  private takeAnalysisParts(id: string, held: HeldOutput): string[] {
-    const parts: string[] = []
-    while (held.units > 0) parts.push(this.takeAnalysis(id, held, Infinity))
-    return parts
-  }
-
-  private analyzeJs(
-    id: string,
-    session: TerminalSession,
-    data: string,
-    recordLines: boolean
-  ): void {
-    const clean = stripAnsi(data)
-    if (recordLines) {
-      let buf = this.outputLines.get(id)
-      if (!buf) {
-        buf = []
-        this.outputLines.set(id, buf)
-      }
-
-      const partial = this.outputPartials.get(id) ?? ''
-      const combined = partial + clean
-      const segments = combined.split('\n')
-
-      // Last segment is incomplete (no trailing \n) — save for next chunk
-      this.outputPartials.set(id, segments.pop()!)
-
-      for (const line of segments) {
-        buf.push(line)
-      }
-      if (buf.length > MAX_OUTPUT_LINES) {
-        buf.splice(0, buf.length - MAX_OUTPUT_LINES)
-      }
+  /** Stop analyzing a session whose analyzer failed, letting go of what it held. */
+  private dropAnalysis(id: string): void {
+    const analyzer = this.analyzers.get(id)
+    this.analyzers.delete(id)
+    this.unanalyzed.add(id)
+    this.pendingAnalysis.delete(id)
+    this.analysisSignalEnd.delete(id)
+    this.analysisQueue.delete(id)
+    const timer = this.analysisTimers.get(id)
+    if (timer) clearTimeout(timer)
+    this.analysisTimers.delete(id)
+    try {
+      analyzer?.free()
+    } catch {
+      // Nothing more to release.
     }
-
-    // Bracketed paste mode detection — works for all agents using readline.
-    // Programs enable \x1b[?2004h when ready for input, disable with 'l' when executing.
-    const hasBracketedOn = BRACKETED_PASTE_ON.test(data)
-    const hasBracketedOff = BRACKETED_PASTE_OFF.test(data)
-
-    if (hasBracketedOn || hasBracketedOff) {
-      // Use the last signal in the chunk (a chunk may contain both off then on)
-      const lastOn = data.lastIndexOf('\x1b[?2004h')
-      const lastOff = data.lastIndexOf('\x1b[?2004l')
-      const newStatus = lastOn > lastOff ? 'waiting' : 'running'
-      if (newStatus !== session.status) {
-        this.setStatus(id, newStatus as AgentStatus)
-      }
-    } else if (session.statusSource !== 'hooks') {
-      // Pattern-based fallback for non-hook sessions without bracketed paste
-      let ctx = this.statusContexts.get(id)
-      if (!ctx) {
-        ctx = createStatusContext()
-        this.statusContexts.set(id, ctx)
-      }
-      const newStatus = analyzeOutput(ctx, clean)
-      if (newStatus !== session.status) {
-        this.setStatus(id, newStatus)
-      }
-    }
-
-    this.armIdle(id, session)
   }
 
   // Idle timer — if no output arrives within timeout, mark idle.
@@ -1339,7 +1211,6 @@ class PtyManager extends EventEmitter {
     adopted = false
   ): void {
     if (!adopted || !hasScreen(id)) createScreen(id, cols, rows)
-    this.chooseAnalysis(id)
     // Replaces whatever was left under this id. A recovered session that is
     // being respawned has history describing a process that is gone.
     startHistory(id, this.openRecords(id))
@@ -1461,7 +1332,6 @@ class PtyManager extends EventEmitter {
       }
       return
     }
-    void resizeScreen(id, cols, rows)
     recordResize(id, at, cols, rows)
   }
 
@@ -1695,18 +1565,13 @@ class PtyManager extends EventEmitter {
       this.ptys.delete(id)
     }
     this.sessions.clear()
-    this.outputLines.clear()
-    this.outputPartials.clear()
     for (const analyzer of this.analyzers.values()) analyzer.free()
     this.analyzers.clear()
-    this.jsAnalysis.clear()
-    this.analysisChoice.clear()
+    this.unanalyzed.clear()
     this.pendingAnalysis.clear()
     this.analysisSignalEnd.clear()
     for (const timer of this.analysisTimers.values()) clearTimeout(timer)
     this.analysisTimers.clear()
-    this.nativeAnalysisFailed = false
-    this.statusContexts.clear()
     for (const timer of this.idleTimers.values()) clearTimeout(timer)
     this.idleTimers.clear()
     this.sessionOrder = []
@@ -1847,13 +1712,7 @@ class PtyManager extends EventEmitter {
     if (!this.sessions.has(id)) throw new Error(`Session not found: ${id}`)
     // What has arrived counts, analyzed or not -- all of it, past the cap.
     this.settleAnalysis(id)
-    const analyzer = this.analyzers.get(id)
-    if (analyzer) return analyzer.output(lines)
-    const buf = this.outputLines.get(id) ?? []
-    if (lines && lines < buf.length) {
-      return buf.slice(-lines)
-    }
-    return [...buf]
+    return this.analyzers.get(id)?.output(lines) ?? []
   }
 
   getActiveSessionsForWorktree(

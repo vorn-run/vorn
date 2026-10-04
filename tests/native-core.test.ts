@@ -1,16 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { describe, it, expect, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import {
-  coreFor,
+  activeCore,
   coreStatus,
-  forcedCoreMode,
   loadNativeCore,
-  preloadFlaggedCore,
+  nativeCore,
   resetCoreSelection,
-  setExperimentalSource,
   nativeCoreCandidates,
-  requestedCoreMode,
   selectCore,
   type NativeCore
 } from '../packages/server/src/native-core'
@@ -19,23 +16,6 @@ const fakeCore: NativeCore = {
   info: () => ({ version: '0.0.0', ghostty: null }),
   hello: (name) => `hello ${name}`
 }
-
-describe('requestedCoreMode', () => {
-  it('defaults to js when unset or empty', () => {
-    expect(requestedCoreMode(undefined)).toBe('js')
-    expect(requestedCoreMode('')).toBe('js')
-    expect(requestedCoreMode('  ')).toBe('js')
-  })
-
-  it('accepts js and native in any case', () => {
-    expect(requestedCoreMode('js')).toBe('js')
-    expect(requestedCoreMode('Native ')).toBe('native')
-  })
-
-  it('rejects anything else', () => {
-    expect(requestedCoreMode('rust')).toBeNull()
-  })
-})
 
 describe('nativeCoreCandidates', () => {
   it('looks beside the packaged server, then in the checkout', () => {
@@ -90,55 +70,33 @@ describe('loadNativeCore', () => {
 })
 
 describe('selectCore', () => {
-  it('stays on js without loading anything when the flag is off', () => {
-    let loaded = false
-    const core = selectCore({
-      env: {},
-      load: () => {
-        loaded = true
-        return fakeCore
-      }
-    })
-    expect(core).toEqual({ mode: 'js', native: null })
-    expect(loaded).toBe(false)
-  })
-
-  it('reports an unrecognized value and stays on js', () => {
-    expect(selectCore({ env: { VORN_CORE: 'rust' } })).toEqual({
-      mode: 'js',
-      native: null,
-      fallback: 'unrecognized VORN_CORE=rust'
-    })
-  })
-
-  it('loads the native core from the override and the server directory', () => {
+  it('loads the core from the override and the server directory', () => {
     let seen: string[] = []
     const core = selectCore({
-      env: { VORN_CORE: 'native', VORN_CORE_PATH: '/opt/vorn_core.node' },
+      env: { VORN_CORE_PATH: '/opt/vorn_core.node' },
       dir: '/app/resources/server',
       load: (candidates) => {
         seen = candidates
         return fakeCore
       }
     })
-    expect(core.mode).toBe('native')
     expect(core.native?.hello('server')).toBe('hello server')
     expect(seen[0]).toBe(path.resolve('/opt/vorn_core.node'))
   })
 
-  it('falls back to js with the reason when the binary will not load', () => {
+  it('says why when the binary will not load', () => {
     const core = selectCore({
-      env: { VORN_CORE: 'native' },
+      env: {},
       load: () => {
         throw new Error('vorn_core.node not found')
       }
     })
-    expect(core).toEqual({ mode: 'js', native: null, fallback: 'vorn_core.node not found' })
+    expect(core).toEqual({ native: null, error: 'vorn_core.node not found' })
   })
 
-  it('falls back to js when a loaded binary throws from info()', () => {
+  it('counts a loaded binary that throws from info() as none', () => {
     const core = selectCore({
-      env: { VORN_CORE: 'native' },
+      env: {},
       load: () => ({
         ...fakeCore,
         info: () => {
@@ -146,164 +104,79 @@ describe('selectCore', () => {
         }
       })
     })
-    expect(core).toEqual({ mode: 'js', native: null, fallback: 'stale binary' })
+    expect(core).toEqual({ native: null, error: 'stale binary' })
   })
 
-  it('says why it fell back even when what was thrown is not an Error', () => {
+  it('says why even when what was thrown is not an Error', () => {
     const core = selectCore({
-      env: { VORN_CORE: 'native' },
+      env: {},
       load: () => {
         throw 'dlopen said no'
       }
     })
-    expect(core).toEqual({ mode: 'js', native: null, fallback: 'dlopen said no' })
+    expect(core).toEqual({ native: null, error: 'dlopen said no' })
   })
 
   it('keeps what the binary reported about itself', () => {
-    const core = selectCore({ env: { VORN_CORE: 'native' }, load: () => fakeCore })
+    const core = selectCore({ env: {}, load: () => fakeCore })
     expect(core.info).toEqual({ version: '0.0.0', ghostty: null })
   })
 
   it('looks in the default places when given nothing', () => {
-    const core = selectCore({ env: { VORN_CORE: 'native', VORN_CORE_PATH: '/nonexistent/x.node' } })
+    const core = selectCore({ env: { VORN_CORE_PATH: '/nonexistent/x.node' } })
     // Only meaningful as a smoke test of the defaults: either a built core is
-    // in the checkout, or the fallback names what it looked for.
+    // in the checkout, or the error names what it looked for.
     if (core.native) expect(typeof core.native.info().version).toBe('string')
-    else expect(core.fallback).toMatch(/nonexistent/)
+    else expect(core.error).toMatch(/nonexistent/)
   })
 })
 
-describe('experimental switches', () => {
+describe('the active core', () => {
   afterEach(() => {
-    vi.unstubAllEnvs()
-    setExperimentalSource(null)
     resetCoreSelection()
   })
 
-  function countingLoader(): { loads: () => number; load: () => NativeCore } {
-    let n = 0
-    return {
-      loads: () => n,
-      load: () => {
-        n++
-        return fakeCore
-      }
-    }
-  }
-
-  it('reads VORN_CORE as forced only when it is set', () => {
-    expect(forcedCoreMode(undefined)).toBeNull()
-    expect(forcedCoreMode('  ')).toBeNull()
-    expect(forcedCoreMode('Native')).toBe('native')
-    expect(forcedCoreMode('js')).toBe('js')
-    expect(forcedCoreMode('rust')).toBe('js')
-  })
-
-  it('stays on js, loading nothing, while every switch is off', () => {
-    vi.stubEnv('VORN_CORE', '')
-    const loader = countingLoader()
-    resetCoreSelection(loader.load)
-    setExperimentalSource(() => ({ nativeScreen: false }))
-    expect(coreFor('screen')).toBeNull()
-    expect(preloadFlaggedCore()).toBeNull()
-    expect(loader.loads()).toBe(0)
-  })
-
-  it('loads the core once for a switch that is on, and follows the switch per call', () => {
-    vi.stubEnv('VORN_CORE', '')
-    const loader = countingLoader()
-    resetCoreSelection(loader.load)
-    let flags = { nativeScreen: true }
-    setExperimentalSource(() => flags)
-    expect(coreFor('screen')).toBe(fakeCore)
-    expect(coreFor('screen')).toBe(fakeCore)
-    flags = { nativeScreen: false }
-    expect(coreFor('screen')).toBeNull()
-    expect(loader.loads()).toBe(1)
-  })
-
-  it('lets VORN_CORE override the switches both ways', () => {
-    const loader = countingLoader()
-    resetCoreSelection(loader.load)
-    setExperimentalSource(() => ({ nativeScreen: true }))
-    vi.stubEnv('VORN_CORE', 'js')
-    expect(coreFor('screen')).toBeNull()
-    expect(coreStatus()).toEqual({
-      loaded: null,
-      version: null,
-      error: null,
-      forced: 'js',
-      missing: []
+  it('is loaded once and kept', () => {
+    let loads = 0
+    resetCoreSelection(() => {
+      loads++
+      return fakeCore
     })
-    vi.stubEnv('VORN_CORE', 'rust')
-    expect(coreFor('screen')).toBeNull()
-    expect(coreStatus()).toMatchObject({
-      forced: 'js',
-      error: 'VORN_CORE=rust is not recognized'
-    })
-    vi.stubEnv('VORN_CORE', 'native')
-    setExperimentalSource(() => ({ nativeScreen: false }))
-    expect(coreFor('screen')).toBe(fakeCore)
-    expect(coreStatus()).toMatchObject({ loaded: true, version: '0.0.0', forced: 'native' })
+    expect(nativeCore()).toBe(fakeCore)
+    expect(activeCore().native).toBe(fakeCore)
+    expect(loads).toBe(1)
   })
 
-  it('treats a switch whose config cannot be read as off', () => {
-    vi.stubEnv('VORN_CORE', '')
-    resetCoreSelection(() => fakeCore)
-    setExperimentalSource(() => {
-      throw new Error('no database')
-    })
-    expect(coreFor('screen')).toBeNull()
-  })
-
-  it('reports a binary that will not load, and keeps the switch on js', () => {
-    vi.stubEnv('VORN_CORE', '')
+  it('reports a binary that will not load', () => {
     resetCoreSelection(() => {
       throw new Error('vorn_core.node not found')
     })
-    setExperimentalSource(() => ({ nativeScreen: true }))
-    expect(coreFor('screen')).toBeNull()
+    expect(nativeCore()).toBeNull()
     expect(coreStatus()).toEqual({
       loaded: false,
       version: null,
       error: 'vorn_core.node not found',
-      forced: null,
       missing: []
     })
   })
 
-  it('names the switches a binary was built without', () => {
-    vi.stubEnv('VORN_CORE', '')
+  it('names what a binary was built without', () => {
     resetCoreSelection(() => fakeCore)
-    expect(coreStatus()).toMatchObject({
+    expect(coreStatus()).toEqual({
       loaded: true,
-      missing: ['nativeScreen', 'nativeAnalysis', 'nativeGit', 'nativePipeline']
-    })
-    class Screen {}
-    // A binary whose `feed` still answers with a cwd string has no usable model.
-    resetCoreSelection(() => ({ ...fakeCore, Screen }) as unknown as NativeCore)
-    expect(coreStatus()).toMatchObject({
-      loaded: true,
-      missing: ['nativeScreen', 'nativeAnalysis', 'nativeGit', 'nativePipeline']
-    })
-    resetCoreSelection(() => ({ ...fakeCore, Screen, SCREEN_API: 2 }) as unknown as NativeCore)
-    expect(coreStatus()).toMatchObject({
-      loaded: true,
-      missing: ['nativeAnalysis', 'nativeGit', 'nativePipeline']
+      version: '0.0.0',
+      error: null,
+      missing: [
+        'the screen model',
+        'agent status and the terminal output agents read',
+        'git off the main thread'
+      ]
     })
     class Analyzer {}
     class TerminalPipeline {}
     const gitRun = async (): Promise<string> => ''
     resetCoreSelection(
-      () =>
-        ({
-          ...fakeCore,
-          Screen,
-          SCREEN_API: 2,
-          Analyzer,
-          gitRun,
-          TerminalPipeline
-        }) as unknown as NativeCore
+      () => ({ ...fakeCore, Analyzer, gitRun, TerminalPipeline }) as unknown as NativeCore
     )
     expect(coreStatus()).toMatchObject({ loaded: true, missing: [] })
   })

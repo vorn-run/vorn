@@ -3,7 +3,7 @@
 //!
 //! The logic is all in `crates/vorn-git`; this only converts the request,
 //! bounds how many commands run at once, and turns an error into the message
-//! the JS path's `execFileSync` would have thrown.
+//! Node's `execFileSync` would have thrown.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -20,7 +20,7 @@ static SLOTS: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(MAX_CONCURRE
 
 #[napi(object)]
 pub struct GitRequest {
-    /// The git executable, resolved as the JS path resolves it.
+    /// The git executable, resolved as the server's `gitBin` resolves it.
     pub bin: String,
     pub args: Vec<String>,
     pub cwd: String,

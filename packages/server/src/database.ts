@@ -1613,9 +1613,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Settings › Experimental, kept to booleans. The server reads these to pick a
- * code path per terminal, so a value someone edited into the row must not
- * read as a switch that is on.
+ * Settings › Experimental, kept to booleans: a value someone edited into the
+ * row must not read as a switch that is on.
  */
 function experimentalFlags(raw: Record<string, unknown>): ExperimentalConfig {
   const flags: Record<string, boolean> = {}

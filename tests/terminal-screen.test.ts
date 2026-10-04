@@ -1,6 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import fs from 'node:fs'
-import path from 'node:path'
 import { Terminal } from '@xterm/headless'
 import {
   createScreen,
@@ -15,11 +13,12 @@ import {
 /**
  * Modelling the screen rather than the bytes.
  *
- * A headless terminal is a pure function from bytes to a buffer, so almost all
- * of this needs no PTY: feed the bytes a program would emit and ask what the
- * screen became. The one thing that cannot be tested here is that `pty-manager`
- * calls these at all, which is why the wiring is three lines with nothing to get
- * wrong.
+ * The model is a libghostty-vt terminal on a core thread, a pure function from
+ * bytes to a screen, so almost all of this needs no PTY: feed the bytes a
+ * program would emit and ask what the screen became. A restored screen is read
+ * back through a headless xterm, the client's own emulator.
+ *
+ * Needs the binary built with libghostty-vt (`yarn build:core`).
  */
 
 const ESC = '\x1b'
@@ -75,38 +74,24 @@ function row(term: Terminal, y: number): string {
 }
 
 describe('a terminal that goes away while it is being read', () => {
-  it.each([
-    ['a snapshot', (id: string) => serializeScreen(id)],
-    ['a resize', (id: string) => resizeScreen(id, 132, 43)]
-  ])(
-    'lets %s finish rather than leaving it pending for ever',
-    async (_label, start) => {
-      // Both read the buffer from inside xterm's write callback, which is the only
-      // point that means what they need it to mean. That leaves a question with a
-      // consequence: if `dispose()` dropped a pending callback, the promise would
-      // never settle -- and since every disk operation for a session runs behind
-      // the last, one unsettled promise would wedge that session's queue for the
-      // life of the server, so its history would never be written and never be
-      // removed.
-      //
-      // It does not: disposing does not cancel the parse xterm has already
-      // scheduled, so the callback still runs. That is a fact about this pinned
-      // version rather than a documented guarantee, which is exactly why it is
-      // asserted here -- a version bump is where it would change.
-      createScreen('going', 200, 50)
-      for (let i = 0; i < 4_000; i++) feedScreen('going', `line ${i} of output\r\n`)
+  it('lets a snapshot finish rather than leaving it pending for ever', async () => {
+    // If stopping the thread left a pending read unanswered, the promise would
+    // never settle -- and since every disk operation for a session runs behind
+    // the last, one unsettled promise would wedge that session's queue for the
+    // life of the server, so its history would never be written and never be
+    // removed.
+    createScreen('going', 200, 50)
+    for (let i = 0; i < 4_000; i++) feedScreen('going', `line ${i} of output\r\n`)
 
-      const pending = start('going')
-      clearScreen('going')
+    const pending = serializeScreen('going')
+    clearScreen('going')
 
-      const outcome = await Promise.race([
-        pending.then(() => 'settled'),
-        new Promise((resolve) => setTimeout(() => resolve('still pending'), 3_000))
-      ])
-      expect(outcome).toBe('settled')
-    },
-    10_000
-  )
+    const outcome = await Promise.race([
+      pending.then(() => 'settled'),
+      new Promise((resolve) => setTimeout(() => resolve('still pending'), 3_000))
+    ])
+    expect(outcome).toBe('settled')
+  }, 10_000)
 })
 
 describe('where the shell says it is', () => {
@@ -170,7 +155,7 @@ describe('a screen rebuilt from a checkpoint', () => {
 describe('what a program can make the model hold', () => {
   it('keeps a title bounded, whatever length the program sends', async () => {
     // Both the title and the cwd live for as long as the terminal does and both
-    // travel in the checkpoint, and xterm will hand over an OSC payload of ten
+    // travel in the checkpoint, and a program can send an OSC payload of ten
     // million characters. One long enough puts every checkpoint for that session
     // over its size cap -- permanently, since the field never goes back. An
     // agent printing a file it was asked to read can produce this without
@@ -194,11 +179,10 @@ describe('what a program can make the model hold', () => {
 
 describe('the moment a snapshot describes', () => {
   it('holds what was written before it was asked for, and nothing written after', async () => {
-    // The whole correctness argument for the checkpoint rests on this. xterm
-    // invokes a write's callback from inside its own parse loop and then keeps
-    // consuming the queue for up to twelve milliseconds before returning, so
-    // anything that reads the buffer in a `then` reads it a loop later --
-    // holding output that arrived after the snapshot was asked for.
+    // The whole correctness argument for the checkpoint rests on this. The
+    // thread parses after a write returns, so a read has to be answered at the
+    // point in the stream it was asked at, not whenever the thread gets to it
+    // -- or it holds output that arrived after the snapshot was asked for.
     //
     // Downstream that is not a stale screen, it is a duplicated one: those same
     // bytes are recorded as log frames written after the checkpoint, so a
@@ -217,8 +201,7 @@ describe('the moment a snapshot describes', () => {
   })
 
   it('still waits for everything that was written before it', async () => {
-    // The other half, and the reason this cannot simply serialize synchronously:
-    // `term.write` returns before anything is parsed at all.
+    // The other half: a write returns before anything is parsed at all.
     createScreen('earlier', 80, 24)
     feedScreen('earlier', 'queued but not yet parsed\r\n')
 
@@ -281,24 +264,10 @@ describe('what the screen looks like when it comes back', () => {
 })
 
 describe('answering queries, which it must never do', () => {
-  it('has no subscriber to answer through, and no way to grow one', () => {
-    // There was a test here that built a spy, never attached it to anything, and
-    // asserted it was not called. It passed against every possible version of
-    // this module, including one wired straight to the PTY, which is worth more
-    // as a warning than the assertion was worth as a test.
-    //
-    // The protection is that nothing subscribes, so the invariant *is* the
-    // absence, and the honest way to check an absence is to look for it. The
-    // end-to-end proof -- that a query reaches no PTY -- lives in
-    // `pty-manager-screen.test.ts`, where there is a PTY to watch.
-    const source = fs.readFileSync(
-      path.join(__dirname, '..', 'packages', 'server', 'src', 'terminal-screen.ts'),
-      'utf-8'
-    )
-
-    expect(source).not.toMatch(/\.onData\s*\(/)
-    expect(source).not.toMatch(/\.onBinary\s*\(/)
-  })
+  // The model has no channel to answer through: what its thread reports is a
+  // bell, a cwd or a failure, never bytes. The end-to-end proof -- that a query
+  // reaches no PTY -- lives in `pty-manager-screen.test.ts`, where there is a
+  // PTY to watch.
 
   it('produces a snapshot that asks nothing of whoever restores it', async () => {
     // The other half: a serialized screen is fed back into a live terminal, and
@@ -334,10 +303,9 @@ describe('answering queries, which it must never do', () => {
 
 describe('reading a screen that is still being written', () => {
   it('waits for the write rather than returning a half-parsed screen', async () => {
-    // `term.write` queues a macrotask; serializing straight after it would
-    // return whatever had been parsed by then, which is usually nothing. That
-    // failure is invisible in a test that happens to yield, and shows up under
-    // load instead.
+    // A write is parsed on the thread later; serializing straight after it
+    // must not return whatever had been parsed by then. That failure is
+    // invisible in a test that happens to yield, and shows up under load.
     feed('t', 'hello world')
     const snapshot = await serializeScreen('t')
     const dump = snapshot?.screen ?? ''
@@ -380,8 +348,8 @@ describe('following the terminal it models', () => {
     expect((await serializeScreen('t'))?.screen).toContain('hello world')
   })
 
-  it('ignores a resize for a session it does not model', async () => {
-    await expect(resizeScreen('absent', 100, 40)).resolves.toBeUndefined()
+  it('ignores a resize for a session it does not model', () => {
+    expect(() => resizeScreen('absent', 100, 40)).not.toThrow()
   })
 })
 
@@ -463,11 +431,9 @@ describe('what travels beside the screen', () => {
   })
 
   it('survives a working directory that is not valid percent-encoding', async () => {
-    // `cd /tmp/100%` and the shell reports exactly this. `decodeURIComponent`
-    // throws on a stray `%`, and the OSC handler runs inside xterm's own timer
-    // -- so the throw reaches the top of the process, which installs no handler
-    // for it. A directory somebody named would have killed the server and every
-    // session on it.
+    // `cd /tmp/100%` and the shell reports exactly this, which is not valid
+    // percent-encoding. A directory somebody named must not cost the session
+    // its model, or its cwd.
     feed('t', `${ESC}]7;file://host/tmp/100%${ESC}\\after`)
 
     const snapshot = await serializeScreen('t')
@@ -485,11 +451,10 @@ describe('what travels beside the screen', () => {
 
 describe('output arriving faster than it can be parsed', () => {
   it('skips ahead rather than holding it all, and keeps the model', async () => {
-    // xterm parses on a timer and holds what it has not reached. A `cat` of
-    // something large outruns that, and xterm's own answer at fifty megabytes is
-    // to throw -- which would cost the session its model for good, having held
-    // fifty megabytes to get there. A model missing part of a flood is repaired
-    // by the next repaint; a model that no longer exists is not.
+    // A `cat` of something large arrives faster than a VT parse. The model
+    // must come through it, rather than give up and cost the session its model
+    // for good: a model missing part of a flood is repaired by the next
+    // repaint; a model that no longer exists is not.
     createScreen('flood', 80, 24)
     const chunk = 'x'.repeat(64 * 1024)
     for (let i = 0; i < 200; i++) feedScreen('flood', chunk)
@@ -498,7 +463,7 @@ describe('output arriving faster than it can be parsed', () => {
     expect(screenCount()).toBe(1)
 
     // And usable again once the parser has caught up, which is what a session
-    // between two bursts of output looks like. Serializing drains the queue.
+    // between two bursts of output looks like. Serializing waits for it.
     await serializeScreen('flood')
     feedScreen('flood', `${ESC}[2J${ESC}[Hrepainted`)
 

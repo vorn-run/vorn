@@ -1817,42 +1817,13 @@ export interface BranchDeleteResult {
   failed: { branch: string; error: string }[]
 }
 
-/**
- * Work in progress that can be tried before it is the default.
- *
- * Each switch moves one piece of the terminal pipeline onto the Rust core in
- * `packages/core`, with the JS path kept beside it. A switch applies to
- * terminals opened after it changes; ones already open keep what they started
- * with. `VORN_CORE=native` or `VORN_CORE=js` in the server's environment
- * overrides all of them.
- */
+/** Work in progress that can be tried before it is the default. */
 export interface ExperimentalConfig {
-  /** The screen model on libghostty-vt instead of a headless xterm. */
-  nativeScreen?: boolean
-  /** Agent status and the output lines MCP reads, analyzed in Rust once per flush. */
-  nativeAnalysis?: boolean
-  /**
-   * Git on the core, off the server's event loop. Unlike the screen, it applies
-   * to the next git command rather than the next terminal.
-   */
-  nativeGit?: boolean
-  /**
-   * Each terminal's screen model, scrollback and history framing on a thread
-   * of its own instead of the server's event loop. Uses the native screen
-   * model whatever `nativeScreen` says.
-   */
-  nativePipeline?: boolean
   /**
    * The desktop app talks to the server through vornd, the native daemon,
    * instead of directly. Read by the app rather than the server, when it starts.
    */
   vornd?: boolean
-  /**
-   * The device pane's picture as H.264 from the companion, decoded in the pane,
-   * instead of a PNG polled twice a second. Stills stay as the fallback. Not a
-   * core switch: it works whether or not the Rust core loaded.
-   */
-  deviceVideo?: boolean
 }
 
 /**
@@ -1901,20 +1872,15 @@ export interface SessionHolders {
   error: string | null
 }
 
-/** What `core:status` reports: whether the Rust core can run, and what decides it. */
+/** What `core:status` reports: whether the server loaded the Rust core. */
 export interface CoreStatus {
-  /** Whether `vorn_core.node` loaded. Null when `VORN_CORE=js` keeps it from being tried. */
-  loaded: boolean | null
+  /** Whether `vorn_core.node` loaded. */
+  loaded: boolean
   version: string | null
-  /**
-   * Why the core is not in use when it was asked for, or, with `forced: 'js'`,
-   * the `VORN_CORE` value that was not recognized.
-   */
+  /** Why it did not load. */
   error: string | null
-  /** Set when `VORN_CORE` in the server's environment overrides the switches. */
-  forced: 'js' | 'native' | null
-  /** Switches the loaded binary was built without, which stay on JavaScript. */
-  missing: (keyof ExperimentalConfig)[]
+  /** What the loaded binary was built without, in words, as for a build without libghostty-vt. */
+  missing: string[]
 }
 
 /** Retention preferences for the worktree manager. */

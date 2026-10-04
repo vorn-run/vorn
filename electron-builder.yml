@@ -76,7 +76,7 @@ extraResources:
   # The Rust core, beside the server that loads it rather than in asarUnpack:
   # the server runs from resources/server, outside the asar, and looks for
   # ../core/vorn_core.node. Built per platform by `yarn build:core`; when it was
-  # not built the entry is skipped and VORN_CORE=native falls back to js.
+  # not built the entry is skipped and the server runs without a screen model.
   - from: 'packages/core/vorn_core.node'
     to: 'core/vorn_core.node'
   # vornd, from the same `yarn build:core`. Only one of the two exists on any

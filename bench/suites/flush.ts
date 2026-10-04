@@ -3,11 +3,11 @@
  *
  * One `flushBuffer` does all of: number the flush, frame it for every
  * desktop-style client (`Buffer.from` plus the binary header), append it to the
- * scrollback ring, queue it into the headless xterm, build a history frame
+ * scrollback ring, queue it into the screen model, build a history frame
  * (UTF-8 encode and CRC-32) and scan it for a bell. This times that whole call
  * per megabyte -- the part that runs on the loop inside the flush -- with
  * history recording to a scratch directory and the client count varied. The
- * xterm parse the flush queues runs in later turns and is timed by
+ * parse the flush queues runs on the terminal's own thread and is timed by
  * `screen-model`; the two add up to what a megabyte costs the server.
  *
  * The per-flush grouping here is the 64 KB cap a flush carries at most

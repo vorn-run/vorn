@@ -11,7 +11,7 @@ export interface Metric {
   unit: string
   /** Every metric here is a cost, so lower is better; kept explicit for the report. */
   better: 'lower' | 'higher'
-  /** One line on what was measured, shown in the report and the roadmap doc. */
+  /** One line on what was measured, shown in the report and the benchmarks doc. */
   label: string
 }
 

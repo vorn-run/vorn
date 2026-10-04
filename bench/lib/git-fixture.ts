@@ -1,8 +1,7 @@
 /**
  * A scratch repository with a working-tree diff of about 500 KB.
  *
- * The size WP5 is accepted at ("a 500 KB diff during a PTY burst adds no
- * measurable lag"), and the cap `getGitDiffText` truncates at, so the largest
+ * A size that should add no measurable lag during a PTY burst, and the cap `getGitDiffText` truncates at, so the largest
  * diff the UI ever asks for.
  */
 import { execFileSync } from 'node:child_process'

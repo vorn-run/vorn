@@ -4,12 +4,13 @@ Vorn's Rust core, loaded into the server as `vorn_core.node` through
 [napi-rs](https://napi.rs). It parses terminal output with
 [libghostty-vt](https://crates.io/crates/libghostty-vt), Ghostty's VT engine.
 
-Off by default. Each piece it can take over has a switch in **Settings ›
-Experimental**, which applies to terminals opened after it is turned on.
-`VORN_CORE=native` in the server's environment turns every switch on and
-`VORN_CORE=js` turns every switch off. A switch that is on with a binary that is
-missing or will not load stays on the JS path, says why in the log and on the
-settings page. `VORN_CORE_PATH` points the server at a specific binary.
+The server's terminals run on it: each one's screen model, scrollback and
+history framing on a thread of its own (`TerminalPipeline`), agent status from
+its output (`Analyzer`), and every git command the server runs (`gitRun`). A
+server whose binary is missing or will not load keeps running: its terminals
+are drawn and recorded but have no screen model or agent status, git runs as a
+child process, and the reason is in the log and on **Settings › Experimental**.
+`VORN_CORE_PATH` points the server at a specific binary.
 
 ## Layout
 
@@ -33,10 +34,8 @@ cargo test --workspace --exclude vorn-core   # the logic, on any platform
 cargo bench -p vorn-analysis                 # Criterion, without napi
 ```
 
-Git is switched on its own, from Settings › Experimental › Native Git, or with
-`VORN_GIT=native|js`, which wins over the setting. On, every git command the
-server runs goes to `gitRun`, which runs it on a thread pool instead of on
-Node's event loop. The logic lives in `crates/vorn-git`, a plain crate: git as a
+`gitRun` runs each git command on a thread pool instead of on Node's event
+loop. The logic lives in `crates/vorn-git`, a plain crate: git as a
 child process with `execFileSync`'s limits and error messages, plus a
 [gix](https://crates.io/crates/gitoxide) fast path that answers the
 `rev-parse` queries in-process where it can match git byte for byte.
@@ -72,12 +71,13 @@ yarn workspace @vornrun/core build --no-ghostty # without libghostty-vt, no Zig 
 ```
 
 `yarn dist` ships the binary at `resources/core/vorn_core.node` when it has
-been built, and skips it otherwise.
+been built, and skips it otherwise. The tests need it too: run `yarn build:core`
+before `yarn test`.
 
 ## Try it
 
 ```sh
 yarn build:core
-VORN_CORE=native yarn workspace @vornrun/server dev
+yarn workspace @vornrun/server dev
 # [core] native 0.7.5
 ```

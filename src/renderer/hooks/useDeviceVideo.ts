@@ -16,9 +16,9 @@ export interface DeviceVideoState {
 /**
  * The device's screen as video, decoded in the pane.
  *
- * Runs only while `enabled` (the Settings › Experimental switch), while the
- * pane can be seen, and once the pane knows the screen's size, so the stream
- * is asked for at the size the pane draws rather than the device's own. Until the first picture is decoded the pane keeps showing
+ * Runs while the pane can be seen, and once the pane knows the screen's size,
+ * so the stream is asked for at the size the pane draws rather than the
+ * device's own. Until the first picture is decoded the pane keeps showing
  * stills, so a stream that never produces anything costs nothing but the
  * attempt. Any failure (no WebCodecs, the companion refusing the stream, a
  * picture that will not decode) puts the pane back on stills, and video is
@@ -28,7 +28,6 @@ export interface DeviceVideoState {
 export function useDeviceVideo(args: {
   sessionId: string
   udid: string | null
-  enabled: boolean
   onScreen: boolean
   /** The pane knows the screen's size, so `maxEdge` has an answer. */
   sized: boolean
@@ -37,7 +36,7 @@ export function useDeviceVideo(args: {
   /** For tests; the browser's WebCodecs otherwise. */
   codecs?: DecoderDeps | null
 }): DeviceVideoState {
-  const { sessionId, udid, enabled, onScreen, sized, maxEdge } = args
+  const { sessionId, udid, onScreen, sized, maxEdge } = args
   // Made once: a new object each render would restart the stream each render.
   const [browserCodecs] = useState(() => (args.codecs === undefined ? webCodecs() : null))
   const codecs = args.codecs === undefined ? browserCodecs : args.codecs
@@ -82,7 +81,7 @@ export function useDeviceVideo(args: {
     return () => clearTimeout(t)
   }, [failedAt])
 
-  const run = enabled && onScreen && sized && udid !== null && codecs !== null && failedAt === null
+  const run = onScreen && sized && udid !== null && codecs !== null && failedAt === null
   const start = window.api?.deviceVideoStart
 
   useEffect(() => {
