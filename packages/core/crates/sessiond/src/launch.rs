@@ -208,15 +208,26 @@ fn log_tail(path: &Path) -> String {
 fn detached(binary: &Path, home: &Path) -> Command {
     // Its own transient user scope, when a user manager is there to make one.
     if systemd_scope_available() {
-        let mut cmd = Command::new("systemd-run");
-        cmd.args(["--user", "--scope", "--quiet", "--collect"])
-            .arg(format!("--unit={}", unit_name()))
-            .arg(binary)
-            .arg("--home")
-            .arg(home);
-        return cmd;
+        return scope("systemd-run", binary, home);
     }
     setsid(binary, home)
+}
+
+/// Start `binary` in a transient user scope through `runner` (systemd-run).
+/// The scope only moves it out of the launcher's cgroup; systemd-run then
+/// execs `binary` in place, so without its own session sessiond would stay
+/// in the launcher's process group and die with a Ctrl-C or hangup aimed
+/// at the launcher's terminal.
+#[cfg(target_os = "linux")]
+fn scope(runner: impl AsRef<std::ffi::OsStr>, binary: &Path, home: &Path) -> Command {
+    let mut cmd = Command::new(runner);
+    cmd.args(["--user", "--scope", "--quiet", "--collect"])
+        .arg(format!("--unit={}", unit_name()))
+        .arg(binary)
+        .arg("--home")
+        .arg(home);
+    new_session(&mut cmd);
+    cmd
 }
 
 /// A scope name no other start shares, even two from one process.
@@ -253,9 +264,17 @@ fn detached(binary: &Path, home: &Path) -> Command {
 
 #[cfg(unix)]
 fn setsid(binary: &Path, home: &Path) -> Command {
-    use std::os::unix::process::CommandExt;
     let mut cmd = Command::new(binary);
     cmd.arg("--home").arg(home);
+    new_session(&mut cmd);
+    cmd
+}
+
+/// Make the child the leader of a new session, out of the launcher's process
+/// group and away from its controlling terminal.
+#[cfg(unix)]
+fn new_session(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
     // SAFETY: setsid is async-signal-safe and touches only the child.
     unsafe {
         cmd.pre_exec(|| {
@@ -265,7 +284,6 @@ fn setsid(binary: &Path, home: &Path) -> Command {
             Ok(())
         });
     }
-    cmd
 }
 
 #[cfg(windows)]
@@ -395,6 +413,31 @@ mod tests {
         assert!(update_ends_sessions(&running, 2));
         assert!(!update_ends_sessions(&running, 1));
         assert!(!update_ends_sessions(&[], 3));
+    }
+
+    /// The scope wrapper starts sessiond in a session of its own, as the
+    /// plain start does, so a signal to the launcher's terminal misses it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_scope_wrapper_starts_in_its_own_session() {
+        let home = tempfile::tempdir().unwrap();
+        // `true` stands in for systemd-run: what matters is the process it
+        // starts as, which the wrapper turns into sessiond by exec.
+        let mut child = scope("true", Path::new("vorn-sessiond"), home.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        // Readable until it is reaped, even once it has exited.
+        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+        child.wait().unwrap();
+        // After the command name: state, ppid, pgrp, session.
+        let (_, rest) = stat.rsplit_once(')').unwrap();
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        assert_eq!(fields[2], pid.to_string(), "its own process group");
+        assert_eq!(fields[3], pid.to_string(), "its own session");
     }
 
     #[test]
