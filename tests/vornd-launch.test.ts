@@ -118,6 +118,31 @@ describe('starting vornd', () => {
     expect(vornd.upstream).toBe(50091)
   })
 
+  it('passes the session holder and its data directory when there is one', async () => {
+    let seen: string[] = []
+    const spawnImpl = ((binary: string, args: string[], options: object) => {
+      seen = args
+      return stubSpawn('ok')(binary, args, options as never)
+    }) as unknown as typeof spawn
+    started.push(await startVornd('vornd', 50091, { spawnImpl }))
+    expect(seen).not.toContain('--sessiond')
+    started.push(
+      await startVornd('vornd', 50091, {
+        spawnImpl,
+        sessiond: { binary: '/app/vornd/vorn-sessiond', home: '/Users/x/.vorn' }
+      })
+    )
+    expect(seen).toEqual([
+      '--upstream',
+      '127.0.0.1:50091',
+      '--exit-with-stdin',
+      '--sessiond',
+      '/app/vornd/vorn-sessiond',
+      '--home',
+      '/Users/x/.vorn'
+    ])
+  })
+
   it('stops it by closing its stdin, and does not report that as an exit', async () => {
     const vornd = await startVornd('vornd', 50091, { spawnImpl: stubSpawn('ok') })
     const onExit = vi.fn()

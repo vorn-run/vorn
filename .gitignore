@@ -27,3 +27,5 @@ packages/core/target/
 packages/core/vorn_core.node
 packages/core/vornd
 packages/core/vornd.exe
+packages/core/vorn-sessiond
+packages/core/vorn-sessiond.exe

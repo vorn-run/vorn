@@ -557,6 +557,8 @@ export function createApiShim(wsUrl: string) {
     getCoreStatus: () => rpc.invoke('core:status'),
     // Desktop only: a browser never runs vornd, and null hides its switch.
     getVorndStatus: async () => null,
+    getSessionHolders: async () => null,
+    endSessionHolder: async () => ({ ok: false as const, detail: 'not in a browser' }),
     reclaimWorktreeArtifacts: (paths: string[]) =>
       rpc.invoke('worktree:reclaimArtifacts', { paths }),
     removeWorktrees: (

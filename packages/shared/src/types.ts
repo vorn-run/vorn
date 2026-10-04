@@ -1878,6 +1878,29 @@ export type VorndStatus =
   /** The switch is on but vornd could not be used, so the app went straight to the server. */
   | { state: 'failed'; detail: string }
 
+/** One vorn-sessiond, as vornd reports it. */
+export interface SessionHolder {
+  pid: number
+  /** Its instance id, in hex. */
+  instance: string
+  build: string
+  proto: number
+  /** Sessions it still holds, or null when it did not say. */
+  sessions: number | null
+  /** Whether this vornd can talk to it. One it cannot is left holding its sessions. */
+  compatible: boolean
+}
+
+/** The session holders vornd knows about. */
+export interface SessionHolders {
+  /** The one new sessions go to. */
+  current: SessionHolder | null
+  /** Ones left by an older build, which exit after their last session. */
+  older: SessionHolder[]
+  /** Why there is no current one, when there is not. */
+  error: string | null
+}
+
 /** What `core:status` reports: whether the Rust core can run, and what decides it. */
 export interface CoreStatus {
   /** Whether `vorn_core.node` loaded. Null when `VORN_CORE=js` keeps it from being tried. */
@@ -1966,6 +1989,8 @@ export const IPC = {
   WORKTREE_INVENTORY: 'worktree:inventory',
   CORE_STATUS: 'core:status',
   VORND_STATUS: 'vornd:status',
+  VORND_SESSION_HOLDERS: 'vornd:session-holders',
+  VORND_END_SESSION_HOLDER: 'vornd:end-session-holder',
   WORKTREE_RECLAIM_ARTIFACTS: 'worktree:reclaimArtifacts',
   WORKTREE_REMOVE_MANY: 'worktree:removeMany',
   WORKTREE_PRUNE_ORPHANS: 'worktree:pruneOrphans',

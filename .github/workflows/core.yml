@@ -115,9 +115,13 @@ jobs:
         working-directory: packages/core
         run: cargo test --release --locked -p vorn-git
 
+      # The holder tests run the real vorn-sessiond, which cargo only builds
+      # for its own package's tests.
       - name: vornd tests
         working-directory: packages/core
-        run: cargo test --release --locked -p vornd
+        run: |
+          cargo build --release --locked -p vorn-sessiond
+          cargo test --release --locked -p vornd
 
       # The RPC test files again, with every client going through vornd. Linux
       # only for now: the files themselves only run on Linux in the main suite.
@@ -199,3 +203,10 @@ jobs:
             '{"port":'*) ;;
             *) echo "ERROR: vornd did not say where it listens"; exit 1 ;;
           esac
+          sessiond=$(find dist -ipath '*/resources/vornd/vorn-sessiond*' -type f -print -quit)
+          if [ -z "$sessiond" ]; then
+            echo "ERROR: vorn-sessiond is not in the packaged resources"
+            exit 1
+          fi
+          echo "found $sessiond"
+          "$sessiond" --version

@@ -1,0 +1,318 @@
+//! Keeping a session holder running for vornd.
+//!
+//! vornd finds the vorn-sessiond of its own build announced under
+//! `$VORN_HOME/run`, or installs and starts one, and stays connected so it
+//! knows when that one goes away. A sessiond of another build is drained: it
+//! takes no new sessions and exits after its last one ends. One that speaks a
+//! protocol this vornd cannot is left alone, still holding its sessions, and
+//! reported so the app can ask before ending them.
+
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
+
+use serde_json::{json, Value};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tracing::{info, warn};
+use vorn_sessiond::launch::{self, Instance};
+use vorn_sessiond::os;
+use vorn_sessiond::wire::{
+    Drain, FrameReader, Hello, Message, Nonce, ToSessiond, ToVornd, Welcome, PROTO,
+};
+
+/// The sessiond protocols this vornd speaks.
+pub const SESSIOND_PROTOS: std::ops::RangeInclusive<u16> = PROTO..=PROTO;
+
+const START_TIMEOUT: Duration = Duration::from_secs(10);
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
+const PING_EVERY: Duration = Duration::from_secs(15);
+const RESTART_AFTER: Duration = Duration::from_secs(1);
+
+/// Where the holder lives and what to run.
+#[derive(Debug, Clone)]
+pub struct HolderConfig {
+    /// `$VORN_HOME`.
+    pub home: PathBuf,
+    /// The sessiond binary shipped with this build.
+    pub bundled: PathBuf,
+}
+
+/// One running sessiond, as vornd last saw it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HolderInstance {
+    pub pid: u32,
+    pub instance: u128,
+    pub build: String,
+    pub proto: u16,
+    /// Sessions it still holds, when it answered.
+    pub sessions: Option<usize>,
+    /// Whether this vornd can talk to it.
+    pub compatible: bool,
+}
+
+#[derive(Debug, Default)]
+struct State {
+    current: Option<HolderInstance>,
+    older: Vec<HolderInstance>,
+    error: Option<String>,
+}
+
+/// What vornd knows about the session holders, for the health check.
+#[derive(Debug, Default)]
+pub struct Holder {
+    state: Mutex<State>,
+}
+
+impl Holder {
+    /// A holder that has seen no sessiond yet.
+    pub fn new() -> Holder {
+        Holder::default()
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The holder's part of the health check.
+    pub fn report(&self) -> Value {
+        let s = self.state();
+        let one = |i: &HolderInstance| {
+            json!({
+                "pid": i.pid,
+                "instance": format!("{:x}", i.instance),
+                "build": i.build,
+                "proto": i.proto,
+                "sessions": i.sessions,
+                "compatible": i.compatible,
+            })
+        };
+        json!({
+            "current": s.current.as_ref().map(one),
+            "older": s.older.iter().map(one).collect::<Vec<_>>(),
+            "error": s.error,
+        })
+    }
+
+    /// The sessiond new sessions go to, while one is up.
+    pub fn current(&self) -> Option<HolderInstance> {
+        self.state().current.clone()
+    }
+
+    /// The sessionds of other builds found at the last start.
+    pub fn older(&self) -> Vec<HolderInstance> {
+        self.state().older.clone()
+    }
+}
+
+/// Keep a sessiond of this build running for as long as vornd runs: find or
+/// start one, drain the others, and start another if it goes away.
+pub async fn keep(cfg: HolderConfig, holder: std::sync::Arc<Holder>) {
+    let version = match version_of(&cfg.bundled).await {
+        Ok(v) => v,
+        Err(err) => {
+            warn!(bundled = %cfg.bundled.display(), %err, "no session holder");
+            holder.state().error = Some(format!("cannot run {}: {err}", cfg.bundled.display()));
+            return;
+        }
+    };
+    loop {
+        match up(&cfg, &version, &holder).await {
+            Ok(mut conn) => {
+                holder.state().error = None;
+                let why = conn.hold().await;
+                warn!(%why, "session holder went away; starting another");
+                let mut s = holder.state();
+                s.current = None;
+                s.error = Some(format!("the session holder went away: {why}"));
+            }
+            Err(err) => {
+                warn!(%err, "could not start the session holder");
+                holder.state().error = Some(err.to_string());
+            }
+        }
+        tokio::time::sleep(RESTART_AFTER).await;
+    }
+}
+
+/// Find or start this build's sessiond, drain the rest, and connect.
+async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<Conn> {
+    let home = cfg.home.clone();
+    let bundled = cfg.bundled.clone();
+    let version_owned = version.to_owned();
+    let (installed, running) = tokio::task::spawn_blocking(move || {
+        let installed = launch::install(&bundled, &home, &version_owned)?;
+        io::Result::Ok((installed, launch::running(&home)))
+    })
+    .await
+    .map_err(io::Error::other)??;
+
+    let (mine, others): (Vec<Instance>, Vec<Instance>) = running
+        .into_iter()
+        .partition(|i| i.build == version && i.proto == PROTO);
+
+    let mut older = Vec::new();
+    for i in others {
+        older.push(drain(&i).await);
+    }
+    holder.state().older = older;
+
+    let instance = match mine.into_iter().next_back() {
+        Some(i) => {
+            info!(pid = i.pid, build = %i.build, "found the session holder");
+            i
+        }
+        None => {
+            let home = cfg.home.clone();
+            let i = tokio::task::spawn_blocking(move || {
+                launch::start(&installed, &home, START_TIMEOUT)
+            })
+            .await
+            .map_err(io::Error::other)??;
+            info!(pid = i.pid, build = %i.build, "started the session holder");
+            i
+        }
+    };
+    let (conn, welcome) = Conn::open(&instance).await?;
+    holder.state().current = Some(HolderInstance {
+        pid: instance.pid,
+        instance: instance.instance,
+        build: instance.build,
+        proto: welcome.proto,
+        sessions: Some(live(&welcome)),
+        compatible: true,
+    });
+    Ok(conn)
+}
+
+/// Tell an older sessiond to take no new sessions and exit after its last
+/// one. One whose protocol this vornd does not speak is only reported.
+async fn drain(i: &Instance) -> HolderInstance {
+    let mut seen = HolderInstance {
+        pid: i.pid,
+        instance: i.instance,
+        build: i.build.clone(),
+        proto: i.proto,
+        sessions: None,
+        compatible: SESSIOND_PROTOS.contains(&i.proto),
+    };
+    if !seen.compatible {
+        warn!(
+            pid = i.pid,
+            proto = i.proto,
+            "an older session holder speaks a protocol this vornd does not; leaving it"
+        );
+        return seen;
+    }
+    match Conn::open(i).await {
+        Ok((mut conn, welcome)) => {
+            seen.sessions = Some(live(&welcome));
+            if conn.send(&ToSessiond::Drain(Drain)).await.is_ok() {
+                info!(pid = i.pid, build = %i.build, sessions = live(&welcome), "draining an older session holder");
+            }
+        }
+        Err(err) => warn!(pid = i.pid, %err, "could not reach an older session holder"),
+    }
+    seen
+}
+
+fn live(w: &Welcome) -> usize {
+    w.sessions.iter().filter(|s| s.exited.is_none()).count()
+}
+
+/// What `bundled --version` prints.
+async fn version_of(bundled: &Path) -> io::Result<String> {
+    let out = tokio::process::Command::new(bundled)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await?;
+    let v = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if !out.status.success() || v.is_empty() {
+        return Err(io::Error::other(format!(
+            "--version failed ({})",
+            out.status
+        )));
+    }
+    Ok(v)
+}
+
+trait Duplex: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Duplex for T {}
+
+/// A connection to one sessiond.
+struct Conn {
+    s: Box<dyn Duplex>,
+    frames: FrameReader,
+    /// Kept across reads: `hold` starts a new read on every ping.
+    buf: Vec<u8>,
+}
+
+impl Conn {
+    async fn open(i: &Instance) -> io::Result<(Conn, Welcome)> {
+        let s = os::connect(&i.endpoint).await?;
+        let mut conn = Conn {
+            s: Box::new(s),
+            frames: FrameReader::default(),
+            buf: vec![0u8; 16 << 10],
+        };
+        conn.send(&ToSessiond::Hello(Hello {
+            proto_min: *SESSIOND_PROTOS.start(),
+            proto_max: *SESSIOND_PROTOS.end(),
+            vornd_instance: instance_id(),
+            vornd_build: env!("CARGO_PKG_VERSION").into(),
+        }))
+        .await?;
+        match tokio::time::timeout(ANSWER_TIMEOUT, conn.recv()).await {
+            Ok(Ok(ToVornd::Welcome(w))) => Ok((conn, w)),
+            Ok(Ok(_)) => Err(io::Error::other("answered without a Welcome")),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(io::Error::new(io::ErrorKind::TimedOut, "no Welcome")),
+        }
+    }
+
+    async fn send(&mut self, m: &ToSessiond) -> io::Result<()> {
+        self.s.write_all(&m.encode()).await
+    }
+
+    async fn recv(&mut self) -> io::Result<ToVornd> {
+        loop {
+            match self.frames.read::<ToVornd>() {
+                Ok(Some(m)) => return Ok(m),
+                Ok(None) => {}
+                Err(e) => return Err(io::Error::other(format!("{e:?}"))),
+            }
+            let n = self.s.read(&mut self.buf).await?;
+            if n == 0 {
+                return Err(io::ErrorKind::UnexpectedEof.into());
+            }
+            self.frames.push(&self.buf[..n]);
+        }
+    }
+
+    /// Stay connected, pinging, until the connection ends; answers why.
+    async fn hold(&mut self) -> String {
+        let mut nonce = 0u64;
+        let mut ping = tokio::time::interval(PING_EVERY);
+        ping.tick().await;
+        loop {
+            tokio::select! {
+                r = self.recv() => if let Err(e) = r { return e.to_string() },
+                _ = ping.tick() => {
+                    nonce += 1;
+                    if let Err(e) = self.send(&ToSessiond::Ping(Nonce { nonce })).await {
+                        return e.to_string();
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn instance_id() -> u128 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    nanos ^ (u128::from(std::process::id()) << 96)
+}

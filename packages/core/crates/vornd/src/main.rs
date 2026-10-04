@@ -1,4 +1,4 @@
-//! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--groups git=shadow] [--log-file PATH]`
+//! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--groups git=shadow] [--log-file PATH] [--sessiond PATH --home DIR]`
 //!
 //! Prints one line of JSON, `{"port":N,"protocol":P}`, once it is listening, so
 //! whoever started it knows where to connect.
@@ -6,16 +6,18 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use tokio::net::TcpListener;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+use vornd::holder::{self, Holder, HolderConfig};
 use vornd::protocol::VORND_PROTOCOL;
 use vornd::{proxy, Daemon, Groups};
 
-const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--groups group=mode,...] [--log-file PATH] [--exit-with-stdin]
+const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--groups group=mode,...] [--log-file PATH] [--exit-with-stdin] [--sessiond PATH --home DIR]
 
   --upstream   the Node server to forward to
   --listen     where to listen; loopback only (default 127.0.0.1:0)
@@ -24,7 +26,10 @@ const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT]
   --log-file   append the log here instead of stderr; VORND_LOG sets the level
   --exit-with-stdin
                stop when stdin closes, so vornd ends with whoever started it,
-               even if that process is killed";
+               even if that process is killed
+  --sessiond   the vorn-sessiond binary this build ships: keep one running under
+               --home (its run/ directory is where running ones are found)
+  --home       the data directory, $VORN_HOME";
 
 #[derive(Debug)]
 struct Args {
@@ -33,6 +38,7 @@ struct Args {
     groups: Groups,
     log_file: Option<String>,
     exit_with_stdin: bool,
+    holder: Option<HolderConfig>,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -41,6 +47,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut groups = std::env::var("VORND_GROUPS").ok();
     let mut log_file = None;
     let mut exit_with_stdin = false;
+    let mut sessiond = None;
+    let mut home = None;
     while let Some(flag) = args.next() {
         let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
         match flag.as_str() {
@@ -59,6 +67,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--groups" => groups = Some(value("--groups")?),
             "--log-file" => log_file = Some(value("--log-file")?),
             "--exit-with-stdin" => exit_with_stdin = true,
+            "--sessiond" => sessiond = Some(PathBuf::from(value("--sessiond")?)),
+            "--home" => home = Some(PathBuf::from(value("--home")?)),
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument `{other}`")),
         }
@@ -76,12 +86,18 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         Some(spec) => Groups::parse(&spec).map_err(|e| format!("--groups: {e}"))?,
         None => Groups::all_forward(),
     };
+    let holder = match (sessiond, home) {
+        (Some(bundled), Some(home)) => Some(HolderConfig { home, bundled }),
+        (None, None) => None,
+        _ => return Err("--sessiond and --home go together".into()),
+    };
     Ok(Args {
         upstream,
         listen,
         groups,
         log_file,
         exit_with_stdin,
+        holder,
     })
 }
 
@@ -171,7 +187,14 @@ fn main() -> ExitCode {
         for (group, mode) in args.groups.modes() {
             info!(group, %mode, "group switch");
         }
-        let daemon = Daemon::new(args.upstream, args.groups);
+        let daemon = match args.holder {
+            Some(cfg) => {
+                let holder = Arc::new(Holder::new());
+                tokio::spawn(holder::keep(cfg, holder.clone()));
+                Daemon::with_holder(args.upstream, args.groups, holder)
+            }
+            None => Daemon::new(args.upstream, args.groups),
+        };
         proxy::log_upstream(&daemon).await;
         info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
         let mut stdout = std::io::stdout().lock();
@@ -230,6 +253,28 @@ mod tests {
                 .unwrap()
                 .exit_with_stdin
         );
+    }
+
+    #[test]
+    fn keeps_a_session_holder_only_when_told_where() {
+        assert!(parse(&["--upstream", "127.0.0.1:1"])
+            .unwrap()
+            .holder
+            .is_none());
+        let args = parse(&[
+            "--upstream",
+            "127.0.0.1:1",
+            "--sessiond",
+            "/app/vorn-sessiond",
+            "--home",
+            "/h",
+        ])
+        .unwrap();
+        let holder = args.holder.unwrap();
+        assert_eq!(holder.home, PathBuf::from("/h"));
+        assert_eq!(holder.bundled, PathBuf::from("/app/vorn-sessiond"));
+        let err = parse(&["--upstream", "127.0.0.1:1", "--home", "/h"]).unwrap_err();
+        assert!(err.contains("go together"), "{err}");
     }
 
     #[test]

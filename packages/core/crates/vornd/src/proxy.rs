@@ -40,6 +40,7 @@ use tokio_tungstenite::WebSocketStream;
 use tracing::{debug, info, warn};
 
 use crate::groups::Groups;
+use crate::holder::Holder;
 use crate::protocol::{
     inspect_server_frame, method_of, ServerFrame, SERVER_PROTOCOLS, VORND_PROTOCOL,
 };
@@ -71,10 +72,20 @@ pub struct Daemon {
     open: AtomicU64,
     served: AtomicU64,
     started: Instant,
+    holder: Option<Arc<Holder>>,
 }
 
 impl Daemon {
     pub fn new(upstream: SocketAddr, groups: Groups) -> Arc<Daemon> {
+        Daemon::build(upstream, groups, None)
+    }
+
+    /// A daemon that also reports on the session holder it keeps.
+    pub fn with_holder(upstream: SocketAddr, groups: Groups, holder: Arc<Holder>) -> Arc<Daemon> {
+        Daemon::build(upstream, groups, Some(holder))
+    }
+
+    fn build(upstream: SocketAddr, groups: Groups, holder: Option<Arc<Holder>>) -> Arc<Daemon> {
         Arc::new(Daemon {
             upstream,
             groups,
@@ -83,6 +94,7 @@ impl Daemon {
             open: AtomicU64::new(0),
             served: AtomicU64::new(0),
             started: Instant::now(),
+            holder,
         })
     }
 
@@ -172,6 +184,7 @@ async fn health(daemon: &Daemon) -> Response<Body> {
         },
         "uptimeSeconds": daemon.started.elapsed().as_secs(),
         "groups": groups,
+        "sessiond": daemon.holder.as_ref().map(|h| h.report()),
     });
     let status = if reachable {
         StatusCode::OK
