@@ -1203,7 +1203,7 @@ class PtyManager extends EventEmitter {
     if (!session || !analyzer) return data.length
     try {
       const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
-      if (newStatus && newStatus !== session.status) this.updateSessionStatus(id, newStatus)
+      if (newStatus && newStatus !== session.status) this.setStatus(id, newStatus)
     } catch (err) {
       // This can run from a timer, where a throw has nothing behind it. Every
       // session goes back to the JS path from here on.
@@ -1288,7 +1288,7 @@ class PtyManager extends EventEmitter {
       const lastOff = data.lastIndexOf('\x1b[?2004l')
       const newStatus = lastOn > lastOff ? 'waiting' : 'running'
       if (newStatus !== session.status) {
-        this.updateSessionStatus(id, newStatus as AgentStatus)
+        this.setStatus(id, newStatus as AgentStatus)
       }
     } else if (session.statusSource !== 'hooks') {
       // Pattern-based fallback for non-hook sessions without bracketed paste
@@ -1299,7 +1299,7 @@ class PtyManager extends EventEmitter {
       }
       const newStatus = analyzeOutput(ctx, clean)
       if (newStatus !== session.status) {
-        this.updateSessionStatus(id, newStatus)
+        this.setStatus(id, newStatus)
       }
     }
 
@@ -1318,7 +1318,7 @@ class PtyManager extends EventEmitter {
         this.idleTimers.delete(id)
         const s = this.sessions.get(id)
         if (s && s.status === 'running') {
-          this.updateSessionStatus(id, 'idle')
+          this.setStatus(id, 'idle')
         }
       }, timeout)
     )
@@ -1401,6 +1401,8 @@ class PtyManager extends EventEmitter {
     // For non-hook sessions, user input means the session is active.
     // Hook sessions rely on hooks to transition to running (e.g. PreToolUse).
     const session = this.sessions.get(id)
+    // A prompt still waiting for analysis must not land after the input.
+    if (session && session.statusSource !== 'hooks') this.settleAnalysis(id)
     if (
       session &&
       session.statusSource !== 'hooks' &&
@@ -1761,7 +1763,22 @@ class PtyManager extends EventEmitter {
     return ordered
   }
 
+  /**
+   * A status from outside the output (a hook, a permission request). Output
+   * that arrived before it is analyzed first, so a deferred batch can't land
+   * after it and overwrite it.
+   */
   updateSessionStatus(id: string, status: AgentStatus): void {
+    this.settleAnalysis(id)
+    this.setStatus(id, status)
+  }
+
+  /** Analyze everything that has arrived for a native session, past the cap. */
+  private settleAnalysis(id: string): void {
+    while (this.pendingAnalysis.has(id)) this.flushAnalysis(id)
+  }
+
+  private setStatus(id: string, status: AgentStatus): void {
     const session = this.sessions.get(id)
     if (session && session.status !== status) {
       session.status = status
@@ -1773,6 +1790,8 @@ class PtyManager extends EventEmitter {
   promoteToHookStatus(id: string): void {
     const session = this.sessions.get(id)
     if (!session) return
+    // Output from before the hook is analyzed as the session was then.
+    this.settleAnalysis(id)
 
     if (session.statusSource !== 'hooks') {
       session.statusSource = 'hooks'
@@ -1790,7 +1809,7 @@ class PtyManager extends EventEmitter {
         setTimeout(() => {
           this.idleTimers.delete(id)
           if (session.status === 'running') {
-            this.updateSessionStatus(id, 'idle')
+            this.setStatus(id, 'idle')
           }
         }, IDLE_TIMEOUT_HOOKS_MS)
       )
@@ -1827,7 +1846,7 @@ class PtyManager extends EventEmitter {
   getOutput(id: string, lines?: number): string[] {
     if (!this.sessions.has(id)) throw new Error(`Session not found: ${id}`)
     // What has arrived counts, analyzed or not -- all of it, past the cap.
-    while (this.pendingAnalysis.has(id)) this.flushAnalysis(id)
+    this.settleAnalysis(id)
     const analyzer = this.analyzers.get(id)
     if (analyzer) return analyzer.output(lines)
     const buf = this.outputLines.get(id) ?? []

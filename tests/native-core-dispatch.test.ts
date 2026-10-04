@@ -266,6 +266,37 @@ describe('output analysis on the native core', () => {
     pm.sessions.delete('w')
   })
 
+  it('analyzes held output before a hook sets the status, so the hook has the last word', () => {
+    const session = addSession('k')
+    pm.appendOutput('k', 'one\n')
+    analyzers[0].next = 2 // waiting
+    pm.appendOutput('k', 'Allow? ')
+    expect(analyzers[0].calls).toHaveLength(1)
+    ptyManager.updateSessionStatus('k', 'running')
+    ptyManager.promoteToHookStatus('k')
+    expect(analyzers[0].calls).toEqual([
+      ['one\n', true],
+      ['Allow? ', true]
+    ])
+    pm.flushAnalysis('k')
+    expect(session.status).toBe('running')
+    pm.clearSessionTracking('k')
+    pm.sessions.delete('k')
+  })
+
+  it('analyzes held output before input decides the session is active', () => {
+    const session = addSession('i')
+    pm.appendOutput('i', 'one\n')
+    analyzers[0].next = 2 // waiting
+    pm.appendOutput('i', 'Continue? ')
+    ptyManager.writeToPty('i', 'y')
+    pm.flushAnalysis('i')
+    // The prompt was seen first, so the answer moves the session on.
+    expect(session.status).toBe('running')
+    pm.clearSessionTracking('i')
+    pm.sessions.delete('i')
+  })
+
   it('takes status from the reads after a bracketed-paste switch, as per-read analysis does', () => {
     const session = addSession('b')
     pm.appendOutput('b', 'start\n')
