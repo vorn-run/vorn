@@ -19,6 +19,11 @@ on:
       - 'tests/terminal-screen-memory.process.test.ts'
       - 'tests/helpers/measure-screens.ts'
       - 'tests/helpers/screen-parity.ts'
+      - 'tests/helpers/front-door.ts'
+      - 'tests/server-integration.test.ts'
+      - 'tests/task-write-methods.test.ts'
+      - 'tests/workflow-methods.test.ts'
+      - 'scripts/conformance.mjs'
       - 'electron-builder.yml'
       - 'package.json'
       - 'yarn.lock'
@@ -107,6 +112,16 @@ jobs:
       - name: Git crate tests
         working-directory: packages/core
         run: cargo test --release --locked -p vorn-git
+
+      - name: vornd tests
+        working-directory: packages/core
+        run: cargo test --release --locked -p vornd
+
+      # The RPC test files again, with every client going through vornd. Linux
+      # only for now: the files themselves only run on Linux in the main suite.
+      - name: Conformance through vornd
+        if: runner.os == 'Linux'
+        run: yarn test:conformance
 
       - name: Build vorn_core.node
         run: yarn build:core
