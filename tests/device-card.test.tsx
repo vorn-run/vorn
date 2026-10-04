@@ -770,6 +770,8 @@ describe('video', () => {
     await screen.findByTestId('device-frame-t1')
     await waitFor(() => expect(deviceVideoStart).toHaveBeenCalled())
     expect(deviceVideoStart.mock.calls[0]![0]).toBe('t1')
+    // Asked for at the size the pane draws, never the device's full size.
+    expect(deviceVideoStart.mock.calls[0]![1]).toEqual(expect.any(Number))
 
     await act(async () => {
       stream().data(key)
@@ -823,6 +825,26 @@ describe('video', () => {
     })
     expect(await screen.findByTestId('device-frame-t1')).toBeInTheDocument()
     expect(deviceScreenshot.mock.calls.length).toBeGreaterThan(stills)
+  })
+
+  it('opens a fresh stream, without waiting, when the decoder loses its place', async () => {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+    await waitFor(() => expect(deviceVideoStart).toHaveBeenCalled())
+    await act(async () => {
+      stream().data(key)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await screen.findByTestId('device-video-t1')
+    const calls = deviceVideoStart.mock.calls.length
+    await act(async () => {
+      // A payload that starts in the middle of a unit.
+      stream().data(new Uint8Array([0x88, 0x84, 0x21]))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(stopVideo).toHaveBeenCalled()
+    await waitFor(() => expect(deviceVideoStart.mock.calls.length).toBe(calls + 1))
   })
 
   it('stops the stream when the pane is hidden', async () => {

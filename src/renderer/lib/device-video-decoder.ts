@@ -16,8 +16,20 @@ export interface DecoderDeps {
   isSupported(config: VideoDecoderConfig): Promise<boolean>
 }
 
-/** A backlog this deep means the decoder is behind; drop to the next key frame. */
-const MAX_QUEUE = 8
+/**
+ * A backlog this deep (about two seconds of pictures) means the decoder cannot
+ * keep up. Dropping pictures would leave the pane on a stale one until the next
+ * key frame, which may never come while the screen is still, so the stream is
+ * restarted instead: a new stream opens with a key frame.
+ */
+export const MAX_BACKLOG = 60
+/** Pictures held while the decoder is being configured. */
+const MAX_PENDING = 60
+
+/** Why decoding stopped: `restart` asks for a fresh stream, `fatal` for stills. */
+export type DecoderStop = 'restart' | 'fatal'
+
+type Unit = { nals: Uint8Array[]; key: boolean }
 
 /**
  * Turns the companion's payloads into frames.
@@ -26,11 +38,18 @@ const MAX_QUEUE = 8
  * decoded as soon as it arrives: waiting for the next start code to prove a
  * picture complete would hold the last frame of every change until the screen
  * changed again. A payload that does not begin with a start code is the middle
- * of something, so it is dropped and decoding waits for the next key frame.
+ * of something, and every picture after it would decode against a missing
+ * one, so the stream is restarted.
+ *
+ * Nothing is dropped once the first key frame is in: each picture after it
+ * depends on the one before, and the companion sends a picture only when the
+ * screen changes, so a dropped one could leave the pane wrong until the screen
+ * next moves.
  *
  * `onFrame` owns the frame it is given and must close it. `onError` is called
- * once, when the stream cannot be decoded at all; the pane then goes back to
- * stills.
+ * once, when decoding stops: with `restart` when a fresh stream would recover,
+ * with `fatal` when the stream cannot be decoded at all and the pane should go
+ * back to stills.
  */
 export class DeviceVideoDecoder {
   private decoder: DecoderLike | null = null
@@ -49,17 +68,20 @@ export class DeviceVideoDecoder {
   constructor(
     private readonly deps: DecoderDeps,
     private readonly onFrame: (frame: VideoFrame) => void,
-    private readonly onError: (message: string) => void
+    private readonly onError: (message: string, stop: DecoderStop) => void
   ) {}
 
   push(payload: Uint8Array): void {
     if (this.failed) return
     const nals = splitNals(payload)
     if (!nals) {
-      this.dropped++
-      this.waitingForKey = true
-      this.carried = []
-      return
+      // Before the first key frame nothing depends on it yet.
+      if (this.waitingForKey) {
+        this.dropped++
+        this.carried = []
+        return
+      }
+      return this.fail('The video stream lost its place.', 'restart')
     }
     const { units, rest } = accessUnits([...this.carried, ...nals])
     this.carried = rest
@@ -72,15 +94,18 @@ export class DeviceVideoDecoder {
         continue
       }
       if (!this.ready || !this.decoder) {
-        // Still configuring: keep only the newest key frame until it is.
-        if (unit.key) this.queue(unit)
-        else this.dropped++
+        // Still configuring: hold the newest key frame and everything after
+        // it, since each later picture builds on the ones before.
+        if (unit.key) this.pending = [unit]
+        else this.pending.push(unit)
+        this.waitingForKey = false
+        if (this.pending.length > MAX_PENDING) {
+          return this.fail('The video decoder took too long to start.', 'restart')
+        }
         continue
       }
-      if (this.decoder.decodeQueueSize > MAX_QUEUE && !unit.key) {
-        this.dropped++
-        this.waitingForKey = true
-        continue
+      if (this.decoder.decodeQueueSize > MAX_BACKLOG) {
+        return this.fail('The video decoder fell behind.', 'restart')
       }
       this.decodeUnit(unit)
     }
@@ -94,12 +119,7 @@ export class DeviceVideoDecoder {
     this.decoder = null
   }
 
-  private pending: { nals: Uint8Array[]; key: boolean }[] = []
-
-  private queue(unit: { nals: Uint8Array[]; key: boolean }): void {
-    // Only the newest key frame matters once the decoder is ready.
-    this.pending = [unit]
-  }
+  private pending: Unit[] = []
 
   private configure(codec: string): void {
     this.codec = codec
@@ -113,20 +133,20 @@ export class DeviceVideoDecoder {
         supported = false
       }
       if (this.failed || this.codec !== codec) return
-      if (!supported) return this.fail(`This display cannot decode ${codec}.`)
+      if (!supported) return this.fail(`This display cannot decode ${codec}.`, 'fatal')
       if (!this.decoder || this.decoder.state === 'closed') {
         this.decoder = this.deps.createDecoder({
           output: (frame) => {
             if (this.failed) frame.close()
             else this.onFrame(frame)
           },
-          error: (e) => this.fail(e.message)
+          error: (e) => this.fail(e.message, 'fatal')
         })
       }
       try {
         this.decoder.configure(config)
       } catch (e) {
-        return this.fail(e instanceof Error ? e.message : String(e))
+        return this.fail(e instanceof Error ? e.message : String(e), 'fatal')
       }
       this.ready = true
       const pending = this.pending
@@ -136,7 +156,7 @@ export class DeviceVideoDecoder {
     this.configuring = (this.configuring ?? Promise.resolve()).then(run)
   }
 
-  private decodeUnit(unit: { nals: Uint8Array[]; key: boolean }): void {
+  private decodeUnit(unit: Unit): void {
     if (!this.decoder) return
     try {
       this.decoder.decode(
@@ -151,14 +171,14 @@ export class DeviceVideoDecoder {
       this.timestamp += 33_333
       if (unit.key) this.waitingForKey = false
     } catch (e) {
-      this.fail(e instanceof Error ? e.message : String(e))
+      this.fail(e instanceof Error ? e.message : String(e), 'fatal')
     }
   }
 
-  private fail(message: string): void {
+  private fail(message: string, stop: DecoderStop): void {
     if (this.failed) return
     this.close()
-    this.onError(message)
+    this.onError(message, stop)
   }
 }
 

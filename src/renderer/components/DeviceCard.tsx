@@ -108,6 +108,7 @@ export const DeviceCard = memo(
       udid: pane?.udid ?? null,
       enabled: videoEnabled,
       onScreen,
+      sized: screen !== null,
       maxEdge: () =>
         screen ? maxEdgeFor(screen, scaleRef.current, window.devicePixelRatio || 1) : undefined
     })

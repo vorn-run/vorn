@@ -11,6 +11,7 @@ import {
 } from '../src/renderer/lib/h264-annexb'
 import {
   DeviceVideoDecoder,
+  MAX_BACKLOG,
   type DecoderDeps,
   type DecoderLike
 } from '../src/renderer/lib/device-video-decoder'
@@ -167,20 +168,39 @@ describe('DeviceVideoDecoder', () => {
     expect(d.dropped).toBe(1)
   })
 
-  it('waits for the next key frame after a payload that starts mid-unit', async () => {
+  it('asks for a fresh stream when a payload starts mid-unit after the first key frame', async () => {
+    const c = fakeCodecs()
+    const stops: Array<[string, string]> = []
+    const d = new DeviceVideoDecoder(
+      c.deps,
+      () => {},
+      (m, how) => stops.push([m, how])
+    )
+    d.push(bytes(P_FIRST))
+    expect(stops).toEqual([])
+    d.push(keyPayload)
+    await flush()
+    d.push(bytes(P_FIRST))
+    d.push(deltaPayload)
+    expect(c.chunks.map((x) => x.type)).toEqual(['key'])
+    expect(stops).toEqual([['The video stream lost its place.', 'restart']])
+  })
+
+  it('keeps every picture after the key frame while the decoder is being configured', async () => {
     const c = fakeCodecs()
     const d = new DeviceVideoDecoder(
       c.deps,
       () => {},
       () => {}
     )
-    d.push(keyPayload)
-    await flush()
-    d.push(bytes(P_FIRST))
     d.push(deltaPayload)
-    expect(c.chunks.map((x) => x.type)).toEqual(['key'])
     d.push(keyPayload)
-    expect(c.chunks.map((x) => x.type)).toEqual(['key', 'key'])
+    d.push(deltaPayload)
+    d.push(deltaPayload)
+    await flush()
+    expect(c.chunks.map((x) => x.type)).toEqual(['key', 'delta', 'delta'])
+    expect(c.chunks.map((x) => x.timestamp)).toEqual([0, 33_333, 66_666])
+    expect(d.dropped).toBe(1)
   })
 
   it('gives up, once, on a codec the display cannot decode', async () => {
@@ -216,21 +236,23 @@ describe('DeviceVideoDecoder', () => {
     expect(c.decoder.state).toBe('closed')
   })
 
-  it('skips to the next key frame when the decoder falls behind', async () => {
+  it('asks for a fresh stream rather than dropping pictures when the decoder falls behind', async () => {
     const c = fakeCodecs()
+    const stops: string[] = []
     const d = new DeviceVideoDecoder(
       c.deps,
       () => {},
-      () => {}
+      (_m, how) => stops.push(how)
     )
     d.push(keyPayload)
     await flush()
     c.decoder.decodeQueueSize = 20
     d.push(deltaPayload)
-    c.decoder.decodeQueueSize = 0
+    expect(c.chunks.map((x) => x.type)).toEqual(['key', 'delta'])
+    c.decoder.decodeQueueSize = MAX_BACKLOG + 1
     d.push(deltaPayload)
-    expect(c.chunks.map((x) => x.type)).toEqual(['key'])
-    d.push(keyPayload)
-    expect(c.chunks.map((x) => x.type)).toEqual(['key', 'key'])
+    expect(c.chunks.map((x) => x.type)).toEqual(['key', 'delta'])
+    expect(stops).toEqual(['restart'])
+    expect(c.decoder.state).toBe('closed')
   })
 })
