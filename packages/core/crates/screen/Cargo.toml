@@ -1,0 +1,19 @@
+[package]
+name = "vorn-screen"
+version = "0.7.5"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "A terminal's screen on libghostty-vt: feed bytes, read title and cwd, serialize for a checkpoint"
+
+[dependencies]
+libghostty-vt = { version = "0.2.2", default-features = false }
+memchr = "2"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "screen"
+harness = false

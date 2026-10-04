@@ -1,0 +1,19 @@
+[package]
+name = "vorn-analysis"
+version = "0.7.5"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Output analysis for agent sessions: stripped line ring, bracketed paste and status patterns in one pass"
+
+[dependencies]
+memchr = "2"
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "analysis"
+harness = false

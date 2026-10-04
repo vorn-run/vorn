@@ -1,8 +1,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import {
+  coreFor,
+  coreStatus,
+  forcedCoreMode,
   loadNativeCore,
+  preloadFlaggedCore,
+  resetCoreSelection,
+  setExperimentalSource,
   nativeCoreCandidates,
   requestedCoreMode,
   selectCore,
@@ -164,6 +170,115 @@ describe('selectCore', () => {
     // in the checkout, or the fallback names what it looked for.
     if (core.native) expect(typeof core.native.info().version).toBe('string')
     else expect(core.fallback).toMatch(/nonexistent/)
+  })
+})
+
+describe('experimental switches', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    setExperimentalSource(null)
+    resetCoreSelection()
+  })
+
+  function countingLoader(): { loads: () => number; load: () => NativeCore } {
+    let n = 0
+    return {
+      loads: () => n,
+      load: () => {
+        n++
+        return fakeCore
+      }
+    }
+  }
+
+  it('reads VORN_CORE as forced only when it is set', () => {
+    expect(forcedCoreMode(undefined)).toBeNull()
+    expect(forcedCoreMode('  ')).toBeNull()
+    expect(forcedCoreMode('Native')).toBe('native')
+    expect(forcedCoreMode('js')).toBe('js')
+    expect(forcedCoreMode('rust')).toBe('js')
+  })
+
+  it('stays on js, loading nothing, while every switch is off', () => {
+    vi.stubEnv('VORN_CORE', '')
+    const loader = countingLoader()
+    resetCoreSelection(loader.load)
+    setExperimentalSource(() => ({ nativeScreen: false }))
+    expect(coreFor('screen')).toBeNull()
+    expect(preloadFlaggedCore()).toBeNull()
+    expect(loader.loads()).toBe(0)
+  })
+
+  it('loads the core once for a switch that is on, and follows the switch per call', () => {
+    vi.stubEnv('VORN_CORE', '')
+    const loader = countingLoader()
+    resetCoreSelection(loader.load)
+    let flags = { nativeScreen: true }
+    setExperimentalSource(() => flags)
+    expect(coreFor('screen')).toBe(fakeCore)
+    expect(coreFor('screen')).toBe(fakeCore)
+    flags = { nativeScreen: false }
+    expect(coreFor('screen')).toBeNull()
+    expect(loader.loads()).toBe(1)
+  })
+
+  it('lets VORN_CORE override the switches both ways', () => {
+    const loader = countingLoader()
+    resetCoreSelection(loader.load)
+    setExperimentalSource(() => ({ nativeScreen: true }))
+    vi.stubEnv('VORN_CORE', 'js')
+    expect(coreFor('screen')).toBeNull()
+    expect(coreStatus()).toEqual({
+      loaded: null,
+      version: null,
+      error: null,
+      forced: 'js',
+      missing: []
+    })
+    vi.stubEnv('VORN_CORE', 'rust')
+    expect(coreFor('screen')).toBeNull()
+    expect(coreStatus()).toMatchObject({
+      forced: 'js',
+      error: 'VORN_CORE=rust is not recognized'
+    })
+    vi.stubEnv('VORN_CORE', 'native')
+    setExperimentalSource(() => ({ nativeScreen: false }))
+    expect(coreFor('screen')).toBe(fakeCore)
+    expect(coreStatus()).toMatchObject({ loaded: true, version: '0.0.0', forced: 'native' })
+  })
+
+  it('treats a switch whose config cannot be read as off', () => {
+    vi.stubEnv('VORN_CORE', '')
+    resetCoreSelection(() => fakeCore)
+    setExperimentalSource(() => {
+      throw new Error('no database')
+    })
+    expect(coreFor('screen')).toBeNull()
+  })
+
+  it('reports a binary that will not load, and keeps the switch on js', () => {
+    vi.stubEnv('VORN_CORE', '')
+    resetCoreSelection(() => {
+      throw new Error('vorn_core.node not found')
+    })
+    setExperimentalSource(() => ({ nativeScreen: true }))
+    expect(coreFor('screen')).toBeNull()
+    expect(coreStatus()).toEqual({
+      loaded: false,
+      version: null,
+      error: 'vorn_core.node not found',
+      forced: null,
+      missing: []
+    })
+  })
+
+  it('names the switches a binary was built without', () => {
+    vi.stubEnv('VORN_CORE', '')
+    resetCoreSelection(() => fakeCore)
+    expect(coreStatus()).toMatchObject({ loaded: true, missing: ['nativeScreen'] })
+    class Screen {}
+    resetCoreSelection(() => ({ ...fakeCore, Screen }) as unknown as NativeCore)
+    expect(coreStatus()).toMatchObject({ loaded: true, missing: [] })
   })
 })
 

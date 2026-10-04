@@ -215,6 +215,7 @@ import { captureAgentSessionId } from './agent-session-capture'
 import { listAgentModels } from './agent-model-catalog'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
 import log from './logger'
+import { coreStatus } from './native-core'
 
 const copilotInstallations = new Map<string, CopilotHookInstallation>()
 
@@ -1067,6 +1068,7 @@ export function registerAllMethods(): void {
 
   // Config
   registerMethod('config:load', () => configManager.loadConfig())
+  registerMethod('core:status', () => coreStatus())
   registerMethod('config:save', (config) => {
     clearAgentDetectionCache()
     // Read before the write, so a task that changed status can be seen to have.

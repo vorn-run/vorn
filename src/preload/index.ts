@@ -53,6 +53,7 @@ import {
   ConnectorActionDef,
   InstalledShell,
   WorktreeInventory,
+  CoreStatus,
   WorktreeActionResult,
   BranchDeleteResult,
   ArtifactManifest,
@@ -307,6 +308,8 @@ const api = {
     projectPaths?: string[]
     refresh?: boolean
   }): Promise<WorktreeInventory> => ipcRenderer.invoke(IPC.WORKTREE_INVENTORY, params),
+
+  getCoreStatus: (): Promise<CoreStatus> => ipcRenderer.invoke(IPC.CORE_STATUS),
 
   reclaimWorktreeArtifacts: (paths: string[]): Promise<WorktreeActionResult> =>
     ipcRenderer.invoke(IPC.WORKTREE_RECLAIM_ARTIFACTS, { paths }),

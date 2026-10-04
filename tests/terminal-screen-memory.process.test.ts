@@ -35,7 +35,17 @@ interface Measurement {
   heldBytes: number
   residualFirst: number
   residualSecond: number
+  heldRss: number
+  rssAfterFirst: number
+  rssAfterSecond: number
 }
+
+/**
+ * With `VORN_CORE=native` the model lives in libghostty-vt, outside V8's heap,
+ * so the same budget is checked against RSS, and a leak shows as RSS that keeps
+ * growing on the second cycle instead of being reused from the first.
+ */
+const native = process.env.VORN_CORE?.trim().toLowerCase() === 'native'
 
 describe('fifty sessions', () => {
   const result = runMeasurement<Measurement>('measure-screens.ts', {
@@ -49,7 +59,20 @@ describe('fifty sessions', () => {
     expect(result.remaining).toBe(0)
   })
 
-  it('costs an amount worth paying', () => {
+  it.runIf(native)('costs an amount worth paying, natively', () => {
+    expect(result.heldRss, `held ${mb(result.heldRss)} RSS for ${result.sessions}`).toBeLessThan(
+      32 * 1024 * 1024
+    )
+  })
+
+  it.runIf(native)('reuses what it gave back, natively', () => {
+    // An allocator keeps freed pages, so RSS after release says little. What a
+    // leak does is make the second identical cycle need fresh pages again.
+    const growth = result.rssAfterSecond - result.rssAfterFirst
+    expect(growth, `grew ${mb(growth)} on the second cycle`).toBeLessThan(result.heldRss / 8)
+  })
+
+  it.skipIf(native)('costs an amount worth paying', () => {
     // Roughly 8 MB when this was written, at 200x50 with realistic coloured
     // output. The ceiling is generous on purpose: what would matter is a change
     // that made this an order of magnitude worse -- giving the model the
@@ -60,7 +83,7 @@ describe('fifty sessions', () => {
     )
   })
 
-  it('gives it back when the terminals go', () => {
+  it.skipIf(native)('gives it back when the terminals go', () => {
     // What this catches is a retained *reference* -- a `clearScreen` that stopped
     // removing the entry from the map would keep every session ever closed
     // resident, and this reports 3.9 MB against 51 KB when that happens.
