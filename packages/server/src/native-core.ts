@@ -187,7 +187,8 @@ const FEATURE_FLAGS: Record<NativeFeature, keyof ExperimentalConfig> = {
 
 /** Whether a loaded binary carries a feature; a build without libghostty-vt has no `Screen`. */
 const FEATURE_EXPORTS: Record<NativeFeature, (core: NativeCore) => boolean> = {
-  screen: (core) => typeof core.Screen === 'function'
+  screen: (core) => typeof core.Screen === 'function',
+  analysis: (core) => typeof core.Analyzer === 'function'
 }
 
 type FlagSource = () => ExperimentalConfig | undefined

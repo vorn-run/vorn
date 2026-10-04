@@ -1,5 +1,5 @@
-//! `cargo bench -p vorn-analysis`: the analysis alone, without napi, on the
-//! three shapes of output the server bench uses. Generated here so the crate
+//! `cargo bench -p vorn-analysis`: the analysis alone, without napi, on two of
+//! the shapes of output the server bench uses, a spinner and a bulk dump. Generated here so the crate
 //! needs nothing outside it; the server bench (`yarn bench`) is the number the
 //! work packages are accepted on.
 

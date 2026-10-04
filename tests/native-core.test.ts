@@ -275,9 +275,15 @@ describe('experimental switches', () => {
   it('names the switches a binary was built without', () => {
     vi.stubEnv('VORN_CORE', '')
     resetCoreSelection(() => fakeCore)
-    expect(coreStatus()).toMatchObject({ loaded: true, missing: ['nativeScreen'] })
+    expect(coreStatus()).toMatchObject({
+      loaded: true,
+      missing: ['nativeScreen', 'nativeAnalysis']
+    })
     class Screen {}
     resetCoreSelection(() => ({ ...fakeCore, Screen }) as unknown as NativeCore)
+    expect(coreStatus()).toMatchObject({ loaded: true, missing: ['nativeAnalysis'] })
+    class Analyzer {}
+    resetCoreSelection(() => ({ ...fakeCore, Screen, Analyzer }) as unknown as NativeCore)
     expect(coreStatus()).toMatchObject({ loaded: true, missing: [] })
   })
 })
