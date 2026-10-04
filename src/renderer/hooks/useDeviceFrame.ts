@@ -38,6 +38,8 @@ export interface DeviceFrameState {
   dismiss: () => void
   /** Report a failure from something other than the poll. */
   reportError: (err: unknown) => void
+  /** The pane can be seen, so a picture of it is worth fetching. */
+  onScreen: boolean
 }
 
 /**
@@ -59,8 +61,14 @@ export function useDeviceFrame(args: {
   udid: string | null
   /** CSS pixels per device point, as currently drawn. */
   scaleRef: React.MutableRefObject<number>
+  /**
+   * The picture is coming from the video stream, so the poll stops fetching
+   * stills and asks only for the screen's size and orientation.
+   */
+  stillsPaused?: boolean
 }): DeviceFrameState {
   const { sessionId, udid, scaleRef } = args
+  const stillsPaused = args.stillsPaused === true
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [frame, setFrame] = useState<string | null>(null)
   const [screen, setScreen] = useState<{ width: number; height: number } | null>(null)
@@ -71,6 +79,8 @@ export function useDeviceFrame(args: {
   // a new, different failure still surfaces.
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [visible, setVisible] = useState(false)
+  // What the observer cannot see; read on every tick.
+  const [cssHidden, setCssHidden] = useState(false)
   // Remembered separately from `visible` because the two answers can differ:
   // backgrounding the window must stop polling without making the observer
   // forget that the pane is still on screen, or nothing would ever restart it.
@@ -159,9 +169,11 @@ export function useDeviceFrame(args: {
         // Rescheduling rather than returning matters — bailing outright would
         // kill the loop for good, since un-hiding fires no event either.
         if (el && isCssHidden(el)) {
+          setCssHidden(true)
           if (!cancelled) timer = setTimeout(() => void tick(), POLL_MS)
           return
         }
+        setCssHidden(false)
         const rect = el?.getBoundingClientRect()
         // The stage is re-measured here rather than by a ResizeObserver: the
         // poll already runs twice a second, which is well inside the time it
@@ -187,11 +199,20 @@ export function useDeviceFrame(args: {
           : rect
             ? Math.ceil(Math.max(rect.width, rect.height) * dpr)
             : undefined
-        const shot = await window.api.deviceScreenshot(sessionId, maxEdge)
-        if (cancelled) return
-        setFrame(shot.data)
-        setScreen(shot.screen)
-        setOrientation(shot.orientation ?? 'portrait')
+        if (stillsPaused) {
+          // The video draws the picture; the bezel and every tap still need
+          // the screen in points, which the video cannot say.
+          const info = await window.api.deviceScreenInfo(sessionId)
+          if (cancelled) return
+          if (info.screen) setScreen(info.screen)
+          setOrientation(info.orientation ?? 'portrait')
+        } else {
+          const shot = await window.api.deviceScreenshot(sessionId, maxEdge)
+          if (cancelled) return
+          setFrame(shot.data)
+          setScreen(shot.screen)
+          setOrientation(shot.orientation ?? 'portrait')
+        }
         setError(null)
         // Forget what was waved away, too. Dismissal silences one message
         // while it keeps recurring; a frame that arrives means the condition
@@ -212,7 +233,7 @@ export function useDeviceFrame(args: {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [sessionId, udid, visible, scaleRef])
+  }, [sessionId, udid, visible, scaleRef, stillsPaused])
 
   const reportError = useCallback((err: unknown) => {
     setError(err instanceof Error ? err.message : String(err))
@@ -233,6 +254,7 @@ export function useDeviceFrame(args: {
     error,
     dismissed,
     dismiss,
-    reportError
+    reportError,
+    onScreen: visible && !cssHidden
   }
 }
