@@ -33,7 +33,8 @@ import {
   getLastAdoptionRefusal,
   AdoptionRefusedError,
   probeSessions,
-  onServerReplaced
+  onServerReplaced,
+  getVorndStatus
 } from './server/server-launcher'
 import { readHostSettings } from './server/host-store'
 import { registerConnectHandlers, showConnectWindow } from './server/connect-window'
@@ -681,6 +682,8 @@ app.whenReady().then(async () => {
   ipcMain.on(IPC.SERVER_GET_RUNTIME_STATUS, (event) => {
     event.returnValue = serverRuntimeStatus()
   })
+
+  ipcMain.handle(IPC.VORND_STATUS, () => getVorndStatus())
 
   ipcMain.handle(IPC.SERVER_UPGRADE, async () => {
     lastUpgrade = { kind: 'working' }

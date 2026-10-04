@@ -1842,6 +1842,17 @@ export interface ExperimentalConfig {
    * model whatever `nativeScreen` says.
    */
   nativePipeline?: boolean
+  /**
+   * The desktop app talks to the server through vornd, the native daemon,
+   * instead of directly. Read by the app rather than the server, when it starts.
+   */
+  vornd?: boolean
+  /**
+   * The device pane's picture as H.264 from the companion, decoded in the pane,
+   * instead of a PNG polled twice a second. Stills stay as the fallback. Not a
+   * core switch: it works whether or not the Rust core loaded.
+   */
+  deviceVideo?: boolean
 }
 
 /**
@@ -1859,6 +1870,13 @@ export interface RecordCursor {
   nextRseq: number
   nextOffset: number
 }
+
+/** Whether the desktop app is talking to its server through vornd. */
+export type VorndStatus =
+  | { state: 'off' }
+  | { state: 'on'; port: number }
+  /** The switch is on but vornd could not be used, so the app went straight to the server. */
+  | { state: 'failed'; detail: string }
 
 /** What `core:status` reports: whether the Rust core can run, and what decides it. */
 export interface CoreStatus {
@@ -1947,6 +1965,7 @@ export const IPC = {
   WORKTREE_ACTIVE_SESSIONS: 'worktree:activeSessions',
   WORKTREE_INVENTORY: 'worktree:inventory',
   CORE_STATUS: 'core:status',
+  VORND_STATUS: 'vornd:status',
   WORKTREE_RECLAIM_ARTIFACTS: 'worktree:reclaimArtifacts',
   WORKTREE_REMOVE_MANY: 'worktree:removeMany',
   WORKTREE_PRUNE_ORPHANS: 'worktree:pruneOrphans',
@@ -2041,6 +2060,9 @@ export const IPC = {
    *  unlike the browser pane there is nothing the renderer can drive directly —
    *  every frame and every touch goes through main. */
   DEVICE_SCREENSHOT: 'device:screenshot',
+  DEVICE_SCREEN_INFO: 'device:screenInfo',
+  DEVICE_VIDEO_START: 'device:videoStart',
+  DEVICE_VIDEO_STOP: 'device:videoStop',
   DEVICE_INTERACT: 'device:interact',
   DEVICE_LIST: 'device:list',
   DEVICE_CHROME: 'device:chrome',

@@ -21,6 +21,11 @@ on:
       - 'tests/helpers/screen-parity.ts'
       - 'packages/server/src/core-pipeline.ts'
       - 'tests/core-pipeline.test.ts'
+      - 'tests/helpers/front-door.ts'
+      - 'tests/server-integration.test.ts'
+      - 'tests/task-write-methods.test.ts'
+      - 'tests/workflow-methods.test.ts'
+      - 'scripts/conformance.mjs'
       - 'electron-builder.yml'
       - 'package.json'
       - 'yarn.lock'
@@ -110,6 +115,22 @@ jobs:
         working-directory: packages/core
         run: cargo test --release --locked -p vorn-git
 
+      - name: vornd tests
+        working-directory: packages/core
+        run: cargo test --release --locked -p vornd
+
+      # The RPC test files again, with every client going through vornd. Linux
+      # only for now: the files themselves only run on Linux in the main suite.
+      - name: Conformance through vornd
+        if: runner.os == 'Linux'
+        run: yarn test:conformance
+
+      # The session holder and the wire types it carries: no napi, no Ghostty,
+      # and the spool tests write to a temp dir on each platform.
+      - name: Session holder tests
+        working-directory: packages/core
+        run: cargo test --release --locked -p vorn-term-proto -p vorn-sessiond
+
       - name: Build vorn_core.node
         run: yarn build:core
 
@@ -160,3 +181,21 @@ jobs:
             process.dlopen(m, process.argv[1]);
             console.log(m.exports.hello('ci'), m.exports.info());
           " "$file"
+
+      # Started the way the app starts it. Stdin is already closed, so it says
+      # where it listens and then stops at once.
+      - name: Packaged vornd runs
+        shell: bash
+        run: |
+          file=$(find dist -ipath '*/resources/vornd/vornd*' -type f -print -quit)
+          if [ -z "$file" ]; then
+            echo "ERROR: vornd is not in the packaged resources"
+            exit 1
+          fi
+          echo "found $file"
+          out=$("$file" --upstream 127.0.0.1:9 --exit-with-stdin < /dev/null)
+          echo "$out"
+          case "$out" in
+            '{"port":'*) ;;
+            *) echo "ERROR: vornd did not say where it listens"; exit 1 ;;
+          esac

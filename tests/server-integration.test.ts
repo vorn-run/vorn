@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import WebSocket from 'ws'
 import type { RpcResponse } from '@vornrun/shared/protocol'
+import { frontDoor } from './helpers/front-door'
 
 const TEST_CREDENTIAL = 'integration-test-credential'
 
@@ -94,6 +95,9 @@ vi.mock(
 
 let serverPort: number
 let serverClose: () => Promise<void>
+/** The server's own port, which is `serverPort` unless the run goes through vornd. */
+let directPort: number
+let throughVornd = false
 
 async function sendRpc(
   ws: WebSocket,
@@ -131,8 +135,12 @@ describe('server integration', () => {
 
     try {
       const { app, port } = await startServer({ port: 0 })
-      serverPort = port
+      const door = await frontDoor(port)
+      serverPort = door.port
+      directPort = port
+      throughVornd = door.throughVornd
       serverClose = async () => {
+        await door.close()
         await app.close()
       }
     } finally {
@@ -508,5 +516,95 @@ describe('server integration', () => {
     expect(ws.readyState).toBe(WebSocket.OPEN)
 
     ws.close()
+  })
+
+  /**
+   * What vornd adds, and that it adds nothing else. These run only in the
+   * conformance pass (`yarn test:conformance`), where every other test in this
+   * file is already going through vornd.
+   */
+  describe.runIf(process.env.VORN_CONFORMANCE_VORND)('through vornd', () => {
+    function collect(port: number): { ws: WebSocket; frames: string[]; opened: Promise<void> } {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, authOptions())
+      const frames: string[] = []
+      ws.on('message', (raw, isBinary) => {
+        frames.push(isBinary ? `binary:${(raw as Buffer).toString('base64')}` : raw.toString())
+      })
+      return { ws, frames, opened: new Promise((r) => ws.on('open', () => r())) }
+    }
+
+    it('is in front of the server for this run', () => {
+      expect(throughVornd).toBe(true)
+      expect(serverPort).not.toBe(directPort)
+    })
+
+    it('names its protocol on the upgrade, and nowhere a client parses', async () => {
+      const header = (port: number): Promise<string | undefined> =>
+        new Promise((resolve, reject) => {
+          const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, authOptions())
+          ws.on('upgrade', (res) => resolve(res.headers['vornd-protocol'] as string | undefined))
+          ws.on('open', () => ws.close())
+          ws.on('error', reject)
+        })
+      expect(await header(serverPort)).toBe('1')
+      expect(await header(directPort)).toBeUndefined()
+    })
+
+    it('reports the server and every group it forwarded in its health check', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
+      await new Promise<void>((r) => ws.on('open', () => r()))
+      await sendRpc(ws, 41, 'conformance:probe')
+      ws.close()
+
+      const res = await fetch(`http://127.0.0.1:${serverPort}/vornd/health`)
+      expect(res.status).toBe(200)
+      const health = await res.json()
+      expect(health.ok).toBe(true)
+      expect(health.protocol).toBe(1)
+      expect(health.upstream).toMatchObject({ reachable: true, status: 200 })
+      expect(health.groups.conformance).toMatchObject({ mode: 'forward', forwarded: 1 })
+      // The server never sees the path vornd answers itself.
+      const direct = await fetch(`http://127.0.0.1:${directPort}/vornd/health`)
+      expect(direct.status).not.toBe(200)
+    })
+
+    it('delivers every frame the server sends, in order and byte for byte', async () => {
+      const direct = collect(directPort)
+      const behind = collect(serverPort)
+      await Promise.all([direct.opened, behind.opened])
+      // Both ask for bytes, so the binary terminal frames are compared too.
+      for (const side of [direct, behind]) {
+        side.ws.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 9,
+            method: 'subscribe:set',
+            params: { terminalBytes: true }
+          })
+        )
+      }
+      await new Promise((r) => setTimeout(r, 100))
+
+      const { clientRegistry } = await import('../packages/server/src/broadcast')
+      const big = 'x'.repeat(1 << 20)
+      for (let i = 0; i < 50; i++) {
+        clientRegistry.broadcast('session:updated', { id: `s${i}`, title: `ünïcødé ✓ ${i}` })
+        clientRegistry.broadcast(
+          'terminal:data',
+          { id: 'a', data: `\u001b[3${i % 8}m${i}`, seq: i },
+          'a'
+        )
+      }
+      clientRegistry.broadcast('session:updated', { id: 'big', note: big })
+
+      const done = (frames: string[]): boolean => frames.some((f) => f.includes('"big"'))
+      await vi.waitFor(() => expect(done(direct.frames) && done(behind.frames)).toBe(true), {
+        timeout: 5000
+      })
+      direct.ws.close()
+      behind.ws.close()
+      expect(behind.frames.length).toBeGreaterThan(100)
+      expect(behind.frames).toEqual(direct.frames)
+    })
   })
 })

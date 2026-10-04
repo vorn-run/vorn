@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/screen", "crates/analysis", "crates/pipeline", "crates/vorn-git"]
+members = [".", "crates/screen", "crates/analysis", "crates/pipeline", "crates/vorn-git", "crates/vornd", "crates/term-proto", "crates/sessiond"]
 
 [package]
 name = "vorn-core"

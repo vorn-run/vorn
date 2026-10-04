@@ -35,6 +35,8 @@ import {
   updateEndsSessions
 } from './handoff-request'
 import { askForHandoff } from './handoff-direct'
+import { findVornd, startVornd, upstreamPort, type Vornd } from './vornd'
+import type { AppConfig, VorndStatus } from '@vornrun/shared/types'
 
 /**
  * Thrown when a server is running that this app may not use.
@@ -528,12 +530,16 @@ function onServerExit(detail: string, endpointTaken = false): void {
       return
     }
     void spawnServer()
-      .then((port) => {
+      .then(async (port) => {
         const url = `ws://127.0.0.1:${port}/ws`
-        // Usually a no-op now that the port is remembered across restarts, which
-        // is the case the reconnect loop already handles on its own. It matters
-        // when the old port was taken in the moment between the two.
-        if (bridge && bridge.target() !== url) {
+        if (vorndWanted) {
+          // vornd keeps forwarding to the port it was started with, so it is
+          // kept when the server came back there and replaced when it did not.
+          await routeThroughVornd(port)
+        } else if (bridge && bridge.target() !== url) {
+          // Usually a no-op now that the port is remembered across restarts,
+          // which is the case the reconnect loop already handles on its own. It
+          // matters when the old port was taken in the moment between the two.
           log.info(`[launcher] server came back on ${port}; repointing the bridge`)
           bridge.retarget(url)
         }
@@ -906,10 +912,7 @@ export async function launchServer(): Promise<ServerBridge> {
   // candidate that answered and was then judged unusable is a refusal worth
   // stopping for.
   const adopted = await adoptSomethingRunning(dataDir)
-  if (adopted) {
-    bridge = adopted
-    return bridge
-  }
+  if (adopted) return connectedLocally(adopted, dataDir)
 
   lastSpawnStoodDown = false
   let port: number
@@ -922,25 +925,135 @@ export async function launchServer(): Promise<ServerBridge> {
     if (!lastSpawnStoodDown) throw err
     log.info('[launcher] the server we started stood down; adopting the one that won')
     const winner = await adoptSomethingRunning(dataDir)
-    if (winner) {
-      bridge = winner
-      return bridge
-    }
+    if (winner) return connectedLocally(winner, dataDir)
     throw err
   }
   log.info(`[launcher] server started on port ${port}`)
 
   // Connect bridge
-  bridge = new ServerBridge(`ws://127.0.0.1:${port}/ws`, bootstrapToken ?? undefined)
-  bridge.connect()
+  const spawned = new ServerBridge(`ws://127.0.0.1:${port}/ws`, bootstrapToken ?? undefined)
+  bridge = spawned
+  spawned.connect()
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Timed out connecting to the server')), 10_000)
-    bridge?.once('connected', () => {
+    spawned.once('connected', () => {
       clearTimeout(timer)
       resolve()
     })
   })
-  return bridge
+  return connectedLocally(spawned, dataDir)
+}
+
+/**
+ * The last step of every local launch, spawned or adopted: put vornd in front
+ * of the server if Settings › Experimental asks for it.
+ *
+ * Read once, here, rather than followed as the setting changes. Moving a
+ * running app onto vornd or off it would drop the socket under every pane for
+ * nothing the person asked to see, so the switch applies from the next start.
+ */
+async function connectedLocally(connected: ServerBridge, dataDir: string): Promise<ServerBridge> {
+  bridge = connected
+  const config = (await connected.request('config:load').catch(() => null)) as AppConfig | null
+  vorndWanted = config?.defaults?.experimental?.vornd === true
+  if (vorndWanted) {
+    await routeThroughVornd(upstreamPort(connected.target(), readPortFile(dataDir)?.port ?? null))
+  }
+  return connected
+}
+
+/** Read from the config when the app starts. */
+let vorndWanted = false
+let vornd: Vornd | null = null
+let vorndStatus: VorndStatus = { state: 'off' }
+
+/** How long the bridge has to connect through a vornd that just started. */
+const VORND_CONNECT_TIMEOUT_MS = 5_000
+
+/** Whether the app is talking to its server through vornd, for Settings › Experimental. */
+export function getVorndStatus(): VorndStatus {
+  return vorndStatus
+}
+
+function stopVornd(): void {
+  const running = vornd
+  vornd = null
+  running?.stop()
+}
+
+/**
+ * Point the bridge at a vornd forwarding to the server on `upstream`, starting
+ * one if none is, or leave it pointed at the server and say why.
+ *
+ * Every failure ends on the server's own port: the switch is an experiment, and
+ * the worst it may do is nothing.
+ */
+async function routeThroughVornd(upstream: number | null): Promise<void> {
+  const current = bridge
+  if (!current) return
+  if (vornd && vornd.upstream === upstream) return
+  stopVornd()
+
+  const direct = upstream === null ? null : portUrl(upstream)
+  const fallBack = (detail: string): void => {
+    vorndStatus = { state: 'failed', detail }
+    log.warn(`[launcher] not using vornd: ${detail}. Talking to the server directly.`)
+    if (direct && bridge === current && current.target() !== direct) current.retarget(direct)
+  }
+
+  if (upstream === null) {
+    fallBack('the server has no port for vornd to forward to')
+    return
+  }
+  const binary = findVornd({
+    packaged: buildChannel() === 'packaged',
+    resourcesPath: process.resourcesPath,
+    repoRoot: devRepoRoot(__dirname)
+  })
+  if (!binary) {
+    fallBack('vornd is not in this build')
+    return
+  }
+
+  let started: Vornd
+  try {
+    started = await startVornd(binary, upstream)
+  } catch (err) {
+    fallBack((err as Error).message)
+    return
+  }
+  // The app began quitting, or another server came up, while it started.
+  if (stoppingDeliberately || bridge !== current || vornd) {
+    started.stop()
+    return
+  }
+  vornd = started
+  started.onExit((detail) => {
+    if (vornd !== started) return
+    vornd = null
+    fallBack(`vornd exited (${detail})`)
+  })
+
+  current.retarget(portUrl(started.port))
+  const connected = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      current.off('connected', done)
+      resolve(false)
+    }, VORND_CONNECT_TIMEOUT_MS)
+    function done(): void {
+      clearTimeout(timer)
+      resolve(true)
+    }
+    current.once('connected', done)
+  })
+  if (vornd !== started) return
+  if (!connected) {
+    stopVornd()
+    fallBack('the server could not be reached through vornd')
+    return
+  }
+  vorndStatus = { state: 'on', port: started.port }
+  log.info(`[launcher] talking to the server on ${upstream} through vornd on ${started.port}`)
 }
 
 /**
@@ -1106,6 +1219,7 @@ export function detachFromServer(): void {
 
   bridge?.close()
   bridge = null
+  stopVornd()
 
   // In dev the child is not detached, and on POSIX nothing kills a plain child
   // when its parent exits -- it is simply reparented. Walking away would leave
@@ -1298,6 +1412,7 @@ export async function stopServer(): Promise<void> {
     bridge.close()
     bridge = null
   }
+  stopVornd()
 
   if (serverProcess) {
     const child = serverProcess

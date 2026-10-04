@@ -1,0 +1,25 @@
+[package]
+name = "vorn-sessiond"
+version = "0.7.5"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The session holder: owns terminals and piped agents, numbers what they print into a record log, and keeps it while vornd is away"
+
+[dependencies]
+crc32fast = "1"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+serde = { version = "1", features = ["derive"] }
+vorn-term-proto = { path = "../term-proto", features = ["serde"] }
+portable-pty = "0.9"
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "sync", "macros", "time"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_System_Pipes"] }
+
+[dev-dependencies]
+tempfile = "3"
