@@ -11,6 +11,7 @@ description = "A terminal's output on its own thread: screen model, scrollback r
 crc32fast = "1"
 memchr = "2"
 vorn-screen = { path = "../screen" }
+vorn-term-proto = { path = "../term-proto" }
 
 [dev-dependencies]
 serde_json = "1"

@@ -2336,6 +2336,7 @@ dependencies = [
  "memchr",
  "serde_json",
  "vorn-screen",
+ "vorn-term-proto",
 ]
 
 [[package]]
@@ -2360,6 +2361,13 @@ dependencies = [
  "tokio",
  "vorn-term-proto",
  "windows-sys",
+]
+
+[[package]]
+name = "vorn-term-mirror"
+version = "0.7.5"
+dependencies = [
+ "vorn-term-proto",
 ]
 
 [[package]]

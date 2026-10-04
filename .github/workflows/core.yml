@@ -107,7 +107,7 @@ jobs:
       # link on every platform. The adapter crate holds no tests of its own.
       - name: Rust tests
         working-directory: packages/core
-        run: cargo test --release --locked -p vorn-screen -p vorn-analysis -p vorn-pipeline
+        run: cargo test --release --locked -p vorn-screen -p vorn-analysis -p vorn-pipeline -p vorn-term-proto -p vorn-term-mirror
 
       # The git crate links nothing from napi, so it runs everywhere, and its
       # parity tests compare against the git each runner has.

@@ -180,6 +180,22 @@ describe('what reaches the log', () => {
     expect(outputs(logOf().frames)).toBe('once')
   })
 
+  it('holds each record once when a replay offers the ones it already wrote (RC-T6)', async () => {
+    // After a recovery, replay offers again records the log already holds.
+    begin()
+    emit(ID, 'a')
+    emit(ID, 'b')
+    emit(ID, 'c')
+    recordOutput(ID, { rseq: 1, startOffset: 1 }, 'b')
+    recordOutput(ID, { rseq: 2, startOffset: 2 }, 'c')
+    emit(ID, 'd')
+    await settle()
+
+    const rseqs = logOf().frames.map((f) => f.rseq)
+    expect(rseqs).toEqual([0, 1, 2, 3])
+    expect(outputs(logOf().frames)).toBe('abcd')
+  })
+
   it('stops appending past a record it was never given, until a checkpoint replaces the log', async () => {
     begin()
     emit(ID, 'before')

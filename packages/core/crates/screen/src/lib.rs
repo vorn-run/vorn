@@ -179,8 +179,10 @@ impl Screen {
             .with_charsets(true);
         let mut f = Formatter::new(&self.term, opts)?;
         let bytes = f.format_alloc(None)?;
+        let mut screen = String::from_utf8_lossy(&bytes).into_owned();
+        region_before_cursor(&mut screen);
         Ok(Snapshot {
-            screen: String::from_utf8_lossy(&bytes).into_owned(),
+            screen,
             cols: self.cols,
             rows: self.rows,
             title: self.title.clone(),
@@ -350,6 +352,55 @@ fn is_plausible_path(p: &str) -> bool {
             && b[1] == b':'
             && matches!(b[2], b'/' | b'\\'));
     absolute && !p.chars().any(|c| (c as u32) < 0x20 || c == '\u{7f}')
+}
+
+/// The formatter writes the cursor and then the scrolling region, but setting
+/// a region (DECSTBM) homes the cursor, so a screen restored from its output
+/// has the cursor at 1;1. Found by the round-trip test (RC-T4). Swap the two
+/// when they end the output. With origin mode on, the cursor position would
+/// also need to become relative to the region, so that case is left as the
+/// formatter wrote it and is a named fixture in `tests/round_trip.rs`.
+fn region_before_cursor(screen: &mut String) {
+    if screen.contains("\x1b[?6h") {
+        return;
+    }
+    let Some(region_at) = screen.rfind("\x1b[") else {
+        return;
+    };
+    if !is_csi(&screen[region_at..], 'r') {
+        return;
+    }
+    let Some(cursor_at) = screen[..region_at].rfind("\x1b[") else {
+        return;
+    };
+    if cursor_at + csi_len(&screen[cursor_at..]) != region_at
+        || !is_csi(&screen[cursor_at..region_at], 'H')
+    {
+        return;
+    }
+    let cursor = screen[cursor_at..region_at].to_owned();
+    let region = screen[region_at..].to_owned();
+    screen.truncate(cursor_at);
+    screen.push_str(&region);
+    screen.push_str(&cursor);
+}
+
+/// `s` is exactly one CSI with numeric parameters ending in `fin`.
+fn is_csi(s: &str, fin: char) -> bool {
+    s.len() == csi_len(s)
+        && s.ends_with(fin)
+        && s[2..s.len() - 1]
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b == b';')
+}
+
+/// The length of the CSI at the start of `s`: up to and including its final byte.
+fn csi_len(s: &str) -> usize {
+    s.bytes()
+        .enumerate()
+        .skip(2)
+        .find(|(_, b)| (0x40..=0x7e).contains(b))
+        .map_or(s.len(), |(i, _)| i + 1)
 }
 
 #[cfg(test)]

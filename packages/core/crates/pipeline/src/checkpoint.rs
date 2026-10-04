@@ -9,14 +9,9 @@
 
 use vorn_screen::Snapshot;
 
-/// The Session Recovery Contract's cursor: the first record and byte a state
-/// does not include.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Cursor {
-    pub epoch: u32,
-    pub next_rseq: u64,
-    pub next_offset: u64,
-}
+/// The Session Recovery Contract's cursor, the same type sessiond and vornd
+/// will use: the first record and byte a state does not include.
+pub use vorn_term_proto::Cursor;
 
 /// What the writer knows about a checkpoint that the stream does not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
