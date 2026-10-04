@@ -90,6 +90,20 @@ describe('defaults survive a save/load round trip', () => {
   })
 })
 
+describe('the experimental switches', () => {
+  it('round-trip, so a switch turned on stays on after a restart', () => {
+    saveConfig(configWith({ experimental: { nativeGit: true } }))
+    expect(loadConfig().defaults.experimental).toEqual({ nativeGit: true })
+    saveConfig(configWith({ experimental: { nativeGit: false } }))
+    expect(loadConfig().defaults.experimental).toEqual({ nativeGit: false })
+  })
+
+  it('are absent until one has been touched', () => {
+    saveConfig(configWith({}))
+    expect(loadConfig().defaults.experimental).toBeUndefined()
+  })
+})
+
 describe('the four keys that were declared but never listed', () => {
   // Each was written on save and dropped on the next load, so the setting looked
   // like it worked until a reload. `worktreeRetention` is read server-side, so it

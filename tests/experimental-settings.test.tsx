@@ -112,6 +112,16 @@ describe('ExperimentalSettings', () => {
       await screen.findByText(/does not include Native screen model, so that stays on JavaScript/)
     ).toBeInTheDocument()
     expect(screenSwitch()).toBeDisabled()
+    expect(screen.getByRole('switch', { name: 'Native git' })).not.toBeDisabled()
+  })
+
+  it('names both missing pieces when the binary has neither', async () => {
+    status = core({ missing: ['nativeScreen', 'nativeGit'] })
+    render(<ExperimentalSettings />)
+    expect(
+      await screen.findByText(/does not include Native screen model, Native git, so those stay/)
+    ).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Native git' })).toBeDisabled()
   })
 
   it('says a switch stays on JavaScript under VORN_CORE=native when the binary lacks it', async () => {
@@ -133,6 +143,7 @@ describe('ExperimentalSettings', () => {
   it('names each switch for a screen reader', () => {
     render(<ExperimentalSettings />)
     expect(screen.getByRole('switch', { name: 'Native screen model' })).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: 'Native git' })).toBeInTheDocument()
   })
 
   it('locks the switches when the server cannot report on the core', async () => {

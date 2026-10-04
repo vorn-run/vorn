@@ -28,11 +28,13 @@ import { clearScrollback, readScrollback } from './terminal-scrollback'
 import {
   claimTranscriptFor,
   sessionToBindOnCreate,
+  transcriptScope,
   transcriptHolder,
   transcriptNamedOnCreate
 } from './agent-transcript'
 import {
   claimSpawningTranscript,
+  holdClaimsWhilePreparing,
   releaseSpawningTranscript,
   releaseSpawningTranscriptsFor
 } from './transcript-claims'
@@ -215,6 +217,8 @@ import { captureAgentSessionId } from './agent-session-capture'
 import { listAgentModels } from './agent-model-catalog'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
 import log from './logger'
+import { onePerKey } from './one-per-key'
+import { isWorkspaceHeld } from './workspace-holds'
 import { coreStatus } from './native-core'
 
 const copilotInstallations = new Map<string, CopilotHookInstallation>()
@@ -557,9 +561,10 @@ function liveSession(sessionId: string): TerminalSession {
 }
 
 /** What every installed extension shows on one session's card. */
-function activationStates(sessionId: string): ExtensionActivationState[] {
-  const subject = subjectOf(liveSession(sessionId))
-  return installedExtensions().map((pack) => ({
+async function activationStates(sessionId: string): Promise<ExtensionActivationState[]> {
+  const packs = installedExtensions()
+  const subject = await subjectOf(liveSession(sessionId), packs)
+  return packs.map((pack) => ({
     extensionId: pack.id,
     extensionName: pack.name,
     ...activationFor(pack, subject)
@@ -587,16 +592,17 @@ export function announceSession(session: TerminalSession): void {
  * longer shows is stopped by the same call.
  */
 export function syncExtensionsFor(session: TerminalSession): void {
-  try {
-    syncFooters(session)
+  const settle = async (): Promise<void> => {
+    await syncFooters(session)
     clientRegistry.broadcast(
       IPC.EXTENSION_ACTIVATION,
-      { sessionId: session.id, states: activationStates(session.id) },
+      { sessionId: session.id, states: await activationStates(session.id) },
       session.id
     )
-  } catch (err) {
-    log.warn(`[extensions] could not settle ${session.id}: ${err}`)
   }
+  // Not awaited: a session is announced now, and what its extensions show
+  // follows once any git remote they name has been read.
+  settle().catch((err) => log.warn(`[extensions] could not settle ${session.id}: ${err}`))
 }
 
 /**
@@ -703,6 +709,12 @@ function startedRun(
   })
 }
 
+/** Creates that name a conversation, by its id, while they prepare. */
+const createNamed = onePerKey<TerminalSession>()
+
+/** Resumes between claiming their conversation and spawning, by session id. */
+const resuming = new Map<string, Promise<TerminalSession | undefined>>()
+
 export function registerAllMethods(): void {
   // Wire headless worktree counter into pty-manager for cleanup gating
   ptyManager.setHeadlessWorktreeCounter((worktreePath, excludeId) =>
@@ -710,17 +722,46 @@ export function registerAllMethods(): void {
   )
 
   // Terminal
-  registerMethod('terminal:create', (payload) => {
+  registerMethod('terminal:create', async (payload) => {
     const named = transcriptNamedOnCreate(payload.agentType, payload.resumeSessionId)
     // Naming a conversation that is already running: show what is writing it
     // rather than starting a second agent on it, as a resume does.
     const running = sessionToBindOnCreate(named, ptyManager.getLiveSessions())
     if (running) return running
-    const session = ptyManager.createPty(payload)
-    // Only until the session names the conversation itself: an agent that can be
-    // told an id already carries it, and one that cannot reports seconds later.
-    if (named && !session.agentSessionId) claimSpawningTranscript(named, session.id)
-    return session
+    if (!named) return ptyManager.createPty(payload)
+    // Preparing awaits git, and may create a worktree or check out a branch. A
+    // second create for the same conversation in that window gets the first
+    // one's session, rather than preparing a workspace of its own to discard.
+    return createNamed(named, async () => {
+      // Claimed before preparing, under the id the session will have, so a
+      // resume of the same conversation sees it in flight and chooses another.
+      const id = crypto.randomUUID()
+      const holder = claimSpawningTranscript(named, id)
+      if (holder !== undefined) {
+        // A resume got there first: wait for it, then show what it started.
+        await resuming.get(holder)
+        const live = ptyManager.getLiveSessions()
+        const bound =
+          sessionToBindOnCreate(named, live) ?? live.find((session) => session.id === holder)
+        if (bound) return bound
+        if (claimSpawningTranscript(named, id) !== undefined) {
+          throw new Error('This conversation is already starting in another pane')
+        }
+      }
+      const prepared = holdClaimsWhilePreparing(id)
+      try {
+        const session = ptyManager.spawnPty(payload, await ptyManager.prepareSession(payload), id)
+        prepared()
+        // An agent that was told the id names the conversation itself; one that
+        // cannot be keeps the claim until it reports, seconds later.
+        if (session.agentSessionId) releaseSpawningTranscript(named, id)
+        return session
+      } catch (err) {
+        prepared()
+        releaseSpawningTranscript(named, id)
+        throw err
+      }
+    })
   })
   /**
    * Let go of what was kept for a session from the last run.
@@ -1126,6 +1167,8 @@ export function registerAllMethods(): void {
 
     const live = ptyManager.getLiveSessions()
     let transcriptId: string | undefined
+    let settleResume: ((session: TerminalSession | undefined) => void) | undefined
+    let claimsPrepared: (() => void) | undefined
     const pinned = previous.agentSessionId
     const holder = pinned ? transcriptHolder(pinned, live) : undefined
     if (holder) {
@@ -1203,10 +1246,33 @@ export function registerAllMethods(): void {
         ? { ...previous, worktreePath: undefined, isWorktree: false }
         : previous
 
-      transcriptId = claimTranscriptFor(grounded, live, id, headlessManager.getActiveSessions())
+      // Read before the claim, so the claim and what it is checked against are
+      // one synchronous step: with native git this await lets other calls run.
+      const scope = await transcriptScope(grounded)
+      // Not lapsing while the workspace below is prepared, however long git takes.
+      claimsPrepared = holdClaimsWhilePreparing(id)
+      transcriptId = claimTranscriptFor(
+        grounded,
+        ptyManager.getLiveSessions(),
+        id,
+        headlessManager.getActiveSessions(),
+        scope
+      )
+      // A create naming this conversation while it prepares waits for this spawn.
+      const spawned = new Promise<TerminalSession | undefined>(
+        (resolve) => (settleResume = resolve)
+      )
+      resuming.set(id, spawned)
+      void spawned.then(() => {
+        if (resuming.get(id) === spawned) resuming.delete(id)
+      })
 
-      // Same id, same reasons as the shell branch above.
-      const session = ptyManager.createPty(buildRestorePayload(grounded, transcriptId), id)
+      // Same id, same reasons as the shell branch above. The claim stands in for
+      // the session while its workspace is prepared, as it does for any spawn.
+      const payload = buildRestorePayload(grounded, transcriptId)
+      const session = ptyManager.spawnPty(payload, await ptyManager.prepareSession(payload), id)
+      claimsPrepared()
+      settleResume?.(session)
       // Carried on the server rather than through the payload, so membership is
       // never something a client can set on a spawn.
       if (grounded.groupId !== undefined) session.groupId = grounded.groupId
@@ -1224,7 +1290,9 @@ export function registerAllMethods(): void {
       // one that ended during this run goes back to the pty manager it came from.
       if (restored) restoreHeld(restored)
       else if (dead) ptyManager.restoreReleased(dead)
+      claimsPrepared?.()
       if (transcriptId) releaseSpawningTranscript(transcriptId, id)
+      settleResume?.(undefined)
       return {
         ok: false as const,
         reason: 'failed' as const,
@@ -1270,12 +1338,12 @@ export function registerAllMethods(): void {
   }
 
   registerMethod('git:isGitRepo', (projectPath) => gitUtils.isGitRepo(projectPath))
-  registerMethod('git:listBranches', (projectPath) => {
+  registerMethod('git:listBranches', async (projectPath) => {
     const remote = resolveRemoteHost(projectPath)
-    const isRepo = remote || gitUtils.isGitRepo(projectPath)
+    const isRepo = remote || (await gitUtils.isGitRepo(projectPath))
     return {
-      local: isRepo ? gitUtils.listBranches(projectPath, remote) : [],
-      current: isRepo ? gitUtils.getGitBranch(projectPath, remote) : null,
+      local: isRepo ? await gitUtils.listBranches(projectPath, remote) : [],
+      current: isRepo ? await gitUtils.getGitBranch(projectPath, remote) : null,
       isGitRepo: !!isRepo
     }
   })
@@ -1292,9 +1360,9 @@ export function registerAllMethods(): void {
     invalidateSizeCache(worktreePath)
     return gitUtils.removeWorktree(projectPath, worktreePath, force, remote, deleteBranch)
   })
-  registerMethod('git:checkoutBranch', ({ cwd, branch }) => {
+  registerMethod('git:checkoutBranch', async ({ cwd, branch }) => {
     const remote = resolveRemoteHostByPath(cwd)
-    const result = gitUtils.checkoutBranch(cwd, branch, remote)
+    const result = await gitUtils.checkoutBranch(cwd, branch, remote)
     if (result.ok) {
       ptyManager.updateSessionsForWorktree(cwd, { branch })
       headlessManager.updateSessionsForWorktree(cwd, { branch })
@@ -1305,18 +1373,18 @@ export function registerAllMethods(): void {
     const remote = resolveRemoteHostByPath(worktreePath)
     return gitUtils.getGitBranch(worktreePath, remote)
   })
-  registerMethod('git:renameWorktreeBranch', ({ worktreePath, newBranch }) => {
+  registerMethod('git:renameWorktreeBranch', async ({ worktreePath, newBranch }) => {
     const remote = resolveRemoteHostByPath(worktreePath)
-    const result = gitUtils.renameWorktreeBranch(worktreePath, newBranch, remote)
+    const result = await gitUtils.renameWorktreeBranch(worktreePath, newBranch, remote)
     if (result) {
       ptyManager.updateSessionsForWorktree(worktreePath, { branch: newBranch })
       headlessManager.updateSessionsForWorktree(worktreePath, { branch: newBranch })
     }
     return result
   })
-  registerMethod('git:renameWorktree', ({ worktreePath, newName }) => {
+  registerMethod('git:renameWorktree', async ({ worktreePath, newName }) => {
     const remote = resolveRemoteHostByPath(worktreePath)
-    const result = gitUtils.renameWorktree(worktreePath, newName, remote)
+    const result = await gitUtils.renameWorktree(worktreePath, newName, remote)
     if (result) {
       ptyManager.updateSessionsForWorktree(worktreePath, {
         worktreePath: result.newPath,
@@ -1377,14 +1445,19 @@ export function registerAllMethods(): void {
    * start while the panel is open.
    */
   function assertNoActiveSessions(paths: string[]): void {
-    for (const p of paths) {
-      const count = activeSessionIds(p).length
-      if (count > 0) {
-        throw new Error(
-          `${p} has ${count} active session${count > 1 ? 's' : ''} — close them first`
-        )
-      }
+    for (const p of paths) assertIdle(p)
+  }
+
+  /**
+   * Checked up front, and again by the action just before it deletes: the git
+   * in between lets a session start, or finish preparing, in the same path.
+   */
+  function assertIdle(p: string): void {
+    const count = activeSessionIds(p).length
+    if (count > 0) {
+      throw new Error(`${p} has ${count} active session${count > 1 ? 's' : ''} — close them first`)
     }
+    if (isWorkspaceHeld(p)) throw new Error(`${p} has a session starting — close it first`)
   }
 
   /** Resolve a project to its remote host, or undefined when it is local. */
@@ -1409,18 +1482,18 @@ export function registerAllMethods(): void {
   registerMethod('worktree:reclaimArtifacts', ({ paths }) => {
     assertNoActiveSessions(paths)
     const cfg = configManager.loadConfig()
-    return reclaimArtifacts(paths, artifactDirNames(), cfg.projects, remoteForProject)
+    return reclaimArtifacts(paths, artifactDirNames(), cfg.projects, remoteForProject, assertIdle)
   })
 
   registerMethod('worktree:removeMany', ({ items }) => {
     assertNoActiveSessions(items.map((i) => i.worktreePath))
     const cfg = configManager.loadConfig()
-    return removeWorktrees(items, cachedSizeOf, cfg.projects, remoteForProject)
+    return removeWorktrees(items, cachedSizeOf, cfg.projects, remoteForProject, assertIdle)
   })
 
   registerMethod('worktree:pruneOrphans', ({ paths }) => {
     assertNoActiveSessions(paths)
-    return pruneOrphanDirs(paths, cachedSizeOf, resolveRemoteHostByPath)
+    return pruneOrphanDirs(paths, cachedSizeOf, resolveRemoteHostByPath, assertIdle)
   })
 
   registerMethod('git:deleteBranches', ({ projectPath, branches, force }) => {
@@ -1467,8 +1540,8 @@ export function registerAllMethods(): void {
   )
 
   // Headless
-  registerMethod('headless:create', (payload) => {
-    const session = headlessManager.createHeadless(payload)
+  registerMethod('headless:create', async (payload) => {
+    const session = await headlessManager.createHeadless(payload)
     logSessionEvent(session.id, 'created', {
       agentType: payload.agentType,
       projectName: payload.projectName,
@@ -2117,7 +2190,7 @@ export function registerAllMethods(): void {
     return result
   })
 
-  registerMethod('connector:detectRepo', (projectPath) => {
+  registerMethod('connector:detectRepo', async (projectPath) => {
     return detectRepoSlug(projectPath)
   })
 

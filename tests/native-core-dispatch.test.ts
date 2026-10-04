@@ -11,6 +11,8 @@ import type { TerminalSession } from '@vornrun/shared/types'
  * machine with no Rust toolchain. The core's own behaviour is tested in Rust.
  */
 
+const switches = vi.hoisted(() => ({ analysis: true }))
+
 const { fakeCore, screens, analyzers } = vi.hoisted(() => {
   const screens: FakeScreen[] = []
   const analyzers: FakeAnalyzer[] = []
@@ -114,7 +116,7 @@ vi.mock('../packages/server/src/logger', () => ({
 vi.mock('../packages/server/src/native-core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../packages/server/src/native-core')>()),
   activeCore: () => ({ mode: 'native', native: fakeCore }),
-  coreFor: () => fakeCore
+  coreFor: (feature: string) => (feature === 'analysis' && !switches.analysis ? null : fakeCore)
 }))
 
 import {
@@ -132,6 +134,7 @@ interface Internals {
   sessions: Map<string, TerminalSession>
   appendOutput(id: string, data: string): void
   flushAnalysis(id: string): void
+  chooseAnalysis(id: string): void
   clearSessionTracking(id: string): void
 }
 const pm = ptyManager as unknown as Internals
@@ -315,6 +318,29 @@ describe('output analysis on the native core', () => {
     expect(analyzer.calls.every(([d]) => d.length <= MAX_FLUSH_UNITS)).toBe(true)
     pm.clearSessionTracking('big')
     pm.sessions.delete('big')
+  })
+
+  it('keeps the analysis a terminal opened with when the switch moves before its first output', () => {
+    const before = analyzers.length
+    addSession('off')
+    switches.analysis = false
+    pm.chooseAnalysis('off')
+    switches.analysis = true
+    pm.appendOutput('off', 'first\n')
+    expect(analyzers).toHaveLength(before)
+    expect(ptyManager.getOutput('off')).toEqual(['first'])
+
+    addSession('on')
+    pm.chooseAnalysis('on')
+    switches.analysis = false
+    pm.appendOutput('on', 'first\n')
+    switches.analysis = true
+    expect(analyzers).toHaveLength(before + 1)
+    expect(analyzers.at(-1)!.calls).toEqual([['first\n', true]])
+    for (const id of ['off', 'on']) {
+      pm.clearSessionTracking(id)
+      pm.sessions.delete(id)
+    }
   })
 
   it('reads all lines for getOutput(id, 0), as the JS path does', () => {

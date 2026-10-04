@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { HeadlessSession, RecentSession, TerminalSession } from '../packages/shared/src/types'
+import type { ProjectScope } from '../packages/server/src/agent-history'
 
 const getRecentSessionsFor = vi.fn()
 vi.mock('../packages/server/src/agent-history', async (importOriginal) => ({
@@ -33,6 +34,13 @@ function session(overrides: Partial<TerminalSession> = {}): TerminalSession {
   } as TerminalSession
 }
 
+// What transcriptScope() resolves for my-app before a resume; passed straight through.
+const SCOPE: ProjectScope = {
+  rawPaths: ['/home/user/my-app'],
+  normalizedPaths: new Set(['/home/user/my-app'])
+}
+const NONE_HELD: ReadonlySet<string> = new Set()
+
 function recent(overrides: Partial<RecentSession> = {}): RecentSession {
   return {
     sessionId: 'sess-1',
@@ -55,19 +63,25 @@ beforeEach(() => {
 
 describe('resolving which conversation a session continues', () => {
   it('takes the id the agent was launched with, without reading any history', () => {
-    expect(resolveTranscriptId(session({ agentSessionId: 'claude-abc' }))).toBe('claude-abc')
+    expect(resolveTranscriptId(session({ agentSessionId: 'claude-abc' }), NONE_HELD, SCOPE)).toBe(
+      'claude-abc'
+    )
     expect(getRecentSessionsFor).not.toHaveBeenCalled()
   })
 
   it('never uses hookSessionId, which the agent has never seen', () => {
-    expect(resolveTranscriptId(session({ hookSessionId: 'hook-abc' }))).toBeUndefined()
+    expect(
+      resolveTranscriptId(session({ hookSessionId: 'hook-abc' }), NONE_HELD, SCOPE)
+    ).toBeUndefined()
   })
 
   it('matches a conversation by the directory it ran in', () => {
     getRecentSessionsFor.mockReturnValue([
       recent({ sessionId: 'sess-match', projectPath: '/home/user/my-app' })
     ])
-    expect(resolveTranscriptId(session({ projectPath: '/home/user/my-app' }))).toBe('sess-match')
+    expect(
+      resolveTranscriptId(session({ projectPath: '/home/user/my-app' }), NONE_HELD, SCOPE)
+    ).toBe('sess-match')
   })
 
   it('prefers the worktree it was in over the project root', () => {
@@ -82,31 +96,37 @@ describe('resolving which conversation a session continues', () => {
       projectPath: '/home/user/my-app',
       worktreePath: '/home/user/.vorn-worktrees/my-app/feature-a'
     })
-    expect(resolveTranscriptId(resumed)).toBe('sess-worktree')
+    expect(resolveTranscriptId(resumed, NONE_HELD, SCOPE)).toBe('sess-worktree')
   })
 
   it('will not match on a basename, which would cross projects', () => {
-    getRecentSessionsFor.mockImplementation((_agent: string, projectPath?: string) =>
-      projectPath ? [] : [recent({ sessionId: 'sess-fuzzy', projectPath: '/private/var/my-app' })]
+    getRecentSessionsFor.mockImplementation((_agent: string, scope?: ProjectScope) =>
+      scope ? [] : [recent({ sessionId: 'sess-fuzzy', projectPath: '/private/var/my-app' })]
     )
-    expect(resolveTranscriptId(session({ projectPath: '/var/my-app' }))).toBeUndefined()
+    const varScope: ProjectScope = {
+      rawPaths: ['/var/my-app'],
+      normalizedPaths: new Set(['/var/my-app'])
+    }
+    expect(
+      resolveTranscriptId(session({ projectPath: '/var/my-app' }), NONE_HELD, varScope)
+    ).toBeUndefined()
   })
 
   it('asks the project first, then everywhere', () => {
     const resumed = session()
-    resolveTranscriptId(resumed)
+    resolveTranscriptId(resumed, NONE_HELD, SCOPE)
     expect(getRecentSessionsFor).toHaveBeenCalledTimes(2)
-    expect(getRecentSessionsFor).toHaveBeenNthCalledWith(1, 'claude', resumed.projectPath)
+    expect(getRecentSessionsFor).toHaveBeenNthCalledWith(1, 'claude', SCOPE)
     expect(getRecentSessionsFor).toHaveBeenNthCalledWith(2, 'claude')
   })
 
   it('asks for one agent, not the merged list of five', () => {
-    resolveTranscriptId(session({ agentType: 'codex' }))
-    expect(getRecentSessionsFor).toHaveBeenCalledWith('codex', '/home/user/my-app')
+    resolveTranscriptId(session({ agentType: 'codex' }), NONE_HELD, SCOPE)
+    expect(getRecentSessionsFor).toHaveBeenCalledWith('codex', SCOPE)
   })
 
   it('answers nothing for an agent that cannot resume an exact conversation', () => {
-    expect(resolveTranscriptId(session({ agentType: 'gemini' }))).toBeUndefined()
+    expect(resolveTranscriptId(session({ agentType: 'gemini' }), NONE_HELD, SCOPE)).toBeUndefined()
     expect(getRecentSessionsFor).not.toHaveBeenCalled()
   })
 
@@ -115,14 +135,14 @@ describe('resolving which conversation a session continues', () => {
       recent({ sessionId: 'sess-1' }),
       recent({ sessionId: 'sess-2' })
     ])
-    expect(resolveTranscriptId(session())).toBe('sess-1')
-    expect(resolveTranscriptId(session(), new Set(['sess-1']))).toBe('sess-2')
+    expect(resolveTranscriptId(session(), NONE_HELD, SCOPE)).toBe('sess-1')
+    expect(resolveTranscriptId(session(), new Set(['sess-1']), SCOPE)).toBe('sess-2')
   })
 
   it('leaves its own pinned conversation when that is the one being written', () => {
     getRecentSessionsFor.mockReturnValue([recent({ sessionId: 'sess-2' })])
     const resumed = session({ agentSessionId: 'sess-1' })
-    expect(resolveTranscriptId(resumed, new Set(['sess-1']))).toBe('sess-2')
+    expect(resolveTranscriptId(resumed, new Set(['sess-1']), SCOPE)).toBe('sess-2')
   })
 })
 
@@ -152,10 +172,10 @@ describe('two cold panes resumed one after the other', () => {
     const first = session({ id: 'one', agentType: 'codex' })
     const second = session({ id: 'two', agentType: 'codex' })
 
-    const firstTranscript = claimTranscriptFor(first, [], 'one')
+    const firstTranscript = claimTranscriptFor(first, [], 'one', [], SCOPE)
     // Started, but has not yet reported what it took.
     const live = [{ ...first, agentSessionId: undefined }]
-    const secondTranscript = claimTranscriptFor(second, live, 'two')
+    const secondTranscript = claimTranscriptFor(second, live, 'two', [], SCOPE)
 
     expect(firstTranscript).toBe('transcript-a')
     expect(secondTranscript).toBe('transcript-b')
@@ -167,13 +187,13 @@ describe('two cold panes resumed one after the other', () => {
       recent({ sessionId: 'transcript-b' })
     ])
     const live = [session({ id: 'one', agentSessionId: 'transcript-a' })]
-    expect(claimTranscriptFor(session({ id: 'two' }), live, 'two')).toBe('transcript-b')
+    expect(claimTranscriptFor(session({ id: 'two' }), live, 'two', [], SCOPE)).toBe('transcript-b')
   })
 
   it('leave the agent to choose when every conversation is taken', () => {
     getRecentSessionsFor.mockReturnValue([recent({ sessionId: 'transcript-a' })])
     const live = [session({ id: 'one', agentSessionId: 'transcript-a' })]
-    expect(claimTranscriptFor(session({ id: 'two' }), live, 'two')).toBeUndefined()
+    expect(claimTranscriptFor(session({ id: 'two' }), live, 'two', [], SCOPE)).toBeUndefined()
   })
 })
 
@@ -184,7 +204,7 @@ describe('a launch that names no conversation', () => {
 
     expect(transcriptHolder('', live)).toBeUndefined()
     // The resume beside it still resolves normally.
-    expect(claimTranscriptFor(session({ id: 'two' }), live, 'two')).toBeUndefined()
+    expect(claimTranscriptFor(session({ id: 'two' }), live, 'two', [], SCOPE)).toBeUndefined()
   })
 
   it('does not treat a session with no reported conversation as holding one', () => {
@@ -221,13 +241,13 @@ describe('a workflow step running beside the panes', () => {
     getRecentSessionsFor.mockReturnValue([recent({ sessionId: 'transcript-b' })])
     const resumed = session({ id: 'pane', agentSessionId: 'transcript-a' })
     const running = [headless({ agentSessionId: 'transcript-a' })]
-    expect(claimTranscriptFor(resumed, [], 'pane', running)).toBe('transcript-b')
+    expect(claimTranscriptFor(resumed, [], 'pane', running, SCOPE)).toBe('transcript-b')
   })
 
   it('leaves the agent to choose when its conversation is the only one', () => {
     getRecentSessionsFor.mockReturnValue([recent({ sessionId: 'transcript-a' })])
     const running = [headless({ agentSessionId: 'transcript-a' })]
-    expect(claimTranscriptFor(session({ id: 'pane' }), [], 'pane', running)).toBeUndefined()
+    expect(claimTranscriptFor(session({ id: 'pane' }), [], 'pane', running, SCOPE)).toBeUndefined()
   })
 })
 
@@ -267,12 +287,12 @@ describe('a spawn that fails', () => {
     ])
     const cold = session({ id: 'one', agentType: 'codex' })
 
-    const claimed = claimTranscriptFor(cold, [], 'one')
+    const claimed = claimTranscriptFor(cold, [], 'one', [], SCOPE)
     expect(claimed).toBe('transcript-a')
 
     releaseSpawningTranscript(claimed!, 'one')
 
-    expect(claimTranscriptFor(cold, [], 'one')).toBe('transcript-a')
+    expect(claimTranscriptFor(cold, [], 'one', [], SCOPE)).toBe('transcript-a')
   })
 
   it('leaves the conversation unreachable when the claim is released under another key', () => {
@@ -281,10 +301,10 @@ describe('a spawn that fails', () => {
       recent({ sessionId: 'transcript-b', agentType: 'codex' })
     ])
     const cold = session({ id: 'one', agentType: 'codex' })
-    claimTranscriptFor(cold, [], 'one')
+    claimTranscriptFor(cold, [], 'one', [], SCOPE)
 
     releaseSpawningTranscript('', 'one')
 
-    expect(claimTranscriptFor(cold, [], 'one')).toBe('transcript-b')
+    expect(claimTranscriptFor(cold, [], 'one', [], SCOPE)).toBe('transcript-b')
   })
 })

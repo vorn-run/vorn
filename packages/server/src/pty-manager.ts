@@ -4,6 +4,7 @@ import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
+import { holdWorkspace } from './workspace-holds'
 import { HeadRefresh } from './head-commit'
 import log from './logger'
 import {
@@ -94,6 +95,34 @@ const BRACKETED_PASTE_ON = /\x1b\[\?2004h/
 // eslint-disable-next-line no-control-regex
 const BRACKETED_PASTE_OFF = /\x1b\[\?2004l/
 
+/** What `prepareSession` worked out, for `spawnPty` to use without doing any of it again. */
+export type PreparedSession = { remoteHost: RemoteHost } | { local: PreparedLocal }
+
+interface PreparedLocal {
+  agentSessionId?: string
+  launchLine: string
+  /** Where the shell starts: the worktree when there is one, else the project. */
+  effectivePath: string
+  worktreePath?: string
+  worktreeName?: string
+  branch: string | null
+  headCommit: string | null
+  /** Lets go of the worktree held while preparing; `spawnPty` calls it. */
+  release?: () => void
+}
+
+/**
+ * Refused rather than created: a session started on an endpoint this process
+ * no longer holds is reachable through a name that now points elsewhere, so
+ * nobody would ever see it. Existing sessions are untouched -- their clients
+ * hold a descriptor, not a name.
+ */
+function refuseWhileClosing(): void {
+  if (isDraining()) throw new Error(DRAINING_MESSAGE)
+  // A pane created now would be in neither the manifest nor the replacement.
+  if (isHandingOver()) throw new Error(HANDOVER_MESSAGE)
+}
+
 type WorktreeSessionCounter = (
   worktreePath: string,
   excludeId?: string
@@ -133,10 +162,12 @@ class PtyManager extends EventEmitter {
   private outputPartials = new Map<string, string>()
   /**
    * Settings › Experimental › native output analysis: the Rust core's
-   * per-session analysis, replacing the three maps around it. Chosen on a
-   * session's first output and kept for its life.
+   * per-session analysis, replacing the three maps around it. Chosen when the
+   * terminal opens and kept for its life; created on its first output.
    */
   private analyzers = new Map<string, NativeAnalyzer>()
+  /** What each terminal chose when it opened: the core's analyzer, or null for JS. */
+  private analysisChoice = new Map<string, (new () => NativeAnalyzer) | null>()
   /** Sessions that asked and were given the JS path, so the switch is read once each. */
   private jsAnalysis = new Set<string>()
   /** Raw chunks since the last native analysis, joined (a rope, so O(1) per chunk). */
@@ -267,35 +298,73 @@ class PtyManager extends EventEmitter {
    * also means the new run's history supersedes the old run's under the same
    * name, which `startHistory` does on its own queue.
    */
-  createPty(payload: CreateTerminalPayload, reuseId?: string): TerminalSession {
-    // Refused rather than created: a session started on an endpoint this process
-    // no longer holds is reachable through a name that now points elsewhere, so
-    // nobody would ever see it. Existing sessions are untouched -- their clients
-    // hold a descriptor, not a name.
-    if (isDraining()) throw new Error(DRAINING_MESSAGE)
-    // A pane created now would be in neither the manifest nor the replacement.
-    if (isHandingOver()) throw new Error(HANDOVER_MESSAGE)
-    const id = reuseId ?? crypto.randomUUID()
-    const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
+  async createPty(payload: CreateTerminalPayload, reuseId?: string): Promise<TerminalSession> {
+    return this.spawnPty(payload, await this.prepareSession(payload), reuseId)
+  }
 
-    // Check if this is a remote session
+  /**
+   * Everything a session needs before its PTY exists: which host it runs on,
+   * and for a local one the agent's launch line and the worktree or branch it
+   * runs on. Async because that can mean git, and a worktree add takes seconds
+   * on a big repository; with native git it no longer holds the event loop.
+   *
+   * Split from `spawnPty` so a caller that checks and claims around a spawn
+   * (a resume claiming its transcript) can await this first and then do the
+   * check, the claim and the spawn in one synchronous step, with nothing able
+   * to run between them.
+   */
+  async prepareSession(payload: CreateTerminalPayload): Promise<PreparedSession> {
+    refuseWhileClosing()
     const remoteHost = payload.remoteHostId
       ? this.remoteHosts.find((h) => h.id === payload.remoteHostId)
       : undefined
-
-    const session = remoteHost
-      ? this.createRemotePty(id, shell, payload, remoteHost)
-      : this.createLocalPty(id, shell, payload)
-
-    this.emit('session-created', session, payload)
-    return session
+    if (remoteHost) return { remoteHost }
+    // Held from here until `spawnPty` makes it a session, so a worktree action
+    // in between sees it as in use: the worktree it names, and one it creates.
+    const releases: (() => void)[] = []
+    const hold = (dir: string): void => {
+      releases.push(holdWorkspace(dir))
+    }
+    const release = (): void => releases.forEach((r) => r())
+    if (payload.existingWorktreePath) hold(payload.existingWorktreePath)
+    try {
+      const local = await this.prepareLocal(payload, hold)
+      local.release = release
+      return { local }
+    } catch (err) {
+      release()
+      throw err
+    }
   }
 
-  private createLocalPty(
-    id: string,
-    shell: string,
-    payload: CreateTerminalPayload
+  /** @param prepared From `prepareSession` on this same payload. */
+  spawnPty(
+    payload: CreateTerminalPayload,
+    prepared: PreparedSession,
+    reuseId?: string
   ): TerminalSession {
+    try {
+      // Checked again: closing may have begun while the workspace was prepared.
+      refuseWhileClosing()
+      const id = reuseId ?? crypto.randomUUID()
+      const shell = getDefaultShell(configManager.loadConfig().defaults.shell)
+
+      const session =
+        'remoteHost' in prepared
+          ? this.createRemotePty(id, shell, payload, prepared.remoteHost)
+          : this.createLocalPty(id, shell, payload, prepared.local)
+
+      this.emit('session-created', session, payload)
+      return session
+    } finally {
+      if ('local' in prepared) prepared.local.release?.()
+    }
+  }
+
+  private async prepareLocal(
+    payload: CreateTerminalPayload,
+    hold: (dir: string) => void
+  ): Promise<PreparedLocal> {
     // Session ID pinning: agents that support it (supportsSessionIdPinning) get a
     // UUID assigned on fresh launch via --session-id, enabling exact --resume later.
     // Other agents rely on history-based fallback for resume.
@@ -328,13 +397,19 @@ class PtyManager extends EventEmitter {
         worktreeName = payload.worktreeName || extractWorktreeName(payload.existingWorktreePath)
       }
     } else if ((payload.useWorktree || payload.existingWorktreePath) && payload.branch) {
-      if (isGitRepo(payload.projectPath)) {
+      if (await isGitRepo(payload.projectPath)) {
         if (payload.existingWorktreePath) {
           log.warn(
             `[pty] worktree path no longer exists, creating new: ${payload.existingWorktreePath}`
           )
         }
-        const result = createWorktree(payload.projectPath, payload.branch, payload.worktreeName)
+        const result = await createWorktree(
+          payload.projectPath,
+          payload.branch,
+          payload.worktreeName,
+          undefined,
+          hold
+        )
         effectivePath = result.worktreePath
         worktreePath = result.worktreePath
         worktreeName = result.name
@@ -345,15 +420,43 @@ class PtyManager extends EventEmitter {
     }
     // Handle branch checkout (no worktree)
     else if (payload.branch) {
-      if (isGitRepo(payload.projectPath)) {
-        const currentBranch = getGitBranch(payload.projectPath)
+      if (await isGitRepo(payload.projectPath)) {
+        const currentBranch = await getGitBranch(payload.projectPath)
         if (currentBranch !== payload.branch) {
-          checkoutBranch(payload.projectPath, payload.branch)
+          await checkoutBranch(payload.projectPath, payload.branch)
         }
         effectiveBranch = payload.branch
       }
     }
 
+    const branch = effectiveBranch || (await getGitBranch(effectivePath))
+    const headCommit = await getGitHead(effectivePath)
+    return {
+      agentSessionId,
+      launchLine,
+      effectivePath,
+      worktreePath,
+      worktreeName,
+      branch,
+      headCommit
+    }
+  }
+
+  private createLocalPty(
+    id: string,
+    shell: string,
+    payload: CreateTerminalPayload,
+    prepared: PreparedLocal
+  ): TerminalSession {
+    const {
+      agentSessionId,
+      launchLine,
+      effectivePath,
+      worktreePath,
+      worktreeName,
+      branch,
+      headCommit
+    } = prepared
     const ptyProcess = pty.spawn(shell, getShellArgs(), {
       name: 'xterm-256color',
       cols: INITIAL_COLS,
@@ -377,8 +480,6 @@ class PtyManager extends EventEmitter {
     this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
     this.ptys.set(id, ptyProcess)
 
-    const branch = effectiveBranch || getGitBranch(effectivePath)
-    const headCommit = getGitHead(effectivePath)
     const session: TerminalSession = {
       id,
       agentType: payload.agentType,
@@ -963,6 +1064,7 @@ class PtyManager extends EventEmitter {
     this.analyzers.get(id)?.free()
     this.analyzers.delete(id)
     this.jsAnalysis.delete(id)
+    this.analysisChoice.delete(id)
     this.pendingAnalysis.delete(id)
     this.analysisSignalEnd.delete(id)
     this.analysisQueue.delete(id)
@@ -1010,12 +1112,21 @@ class PtyManager extends EventEmitter {
     }
   }
 
+  /**
+   * Read the switch for a terminal as it opens, as the screen model does, so
+   * one that stays quiet until after the switch moves keeps what it opened with.
+   */
+  private chooseAnalysis(id: string): void {
+    this.analysisChoice.set(id, coreFor('analysis')?.Analyzer ?? null)
+  }
+
   /** The session's native analyzer, created on its first output, or null for the JS path. */
   private analyzerFor(id: string): NativeAnalyzer | null {
     if (this.nativeAnalysisFailed || this.jsAnalysis.has(id)) return null
     const existing = this.analyzers.get(id)
     if (existing) return existing
-    const Analyzer = coreFor('analysis')?.Analyzer
+    if (!this.analysisChoice.has(id)) this.chooseAnalysis(id)
+    const Analyzer = this.analysisChoice.get(id)
     if (!Analyzer) {
       this.jsAnalysis.add(id)
       return null
@@ -1228,6 +1339,7 @@ class PtyManager extends EventEmitter {
     adopted = false
   ): void {
     if (!adopted || !hasScreen(id)) createScreen(id, cols, rows)
+    this.chooseAnalysis(id)
     // Replaces whatever was left under this id. A recovered session that is
     // being respawned has history describing a process that is gone.
     startHistory(id, this.openRecords(id))
@@ -1586,6 +1698,7 @@ class PtyManager extends EventEmitter {
     for (const analyzer of this.analyzers.values()) analyzer.free()
     this.analyzers.clear()
     this.jsAnalysis.clear()
+    this.analysisChoice.clear()
     this.pendingAnalysis.clear()
     this.analysisSignalEnd.clear()
     for (const timer of this.analysisTimers.values()) clearTimeout(timer)

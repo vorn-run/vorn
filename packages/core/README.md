@@ -31,6 +31,14 @@ cargo test --workspace --exclude vorn-core   # the logic, on any platform
 cargo bench -p vorn-analysis                 # Criterion, without napi
 ```
 
+Git is switched on its own, from Settings › Experimental › Native Git, or with
+`VORN_GIT=native|js`, which wins over the setting. On, every git command the
+server runs goes to `gitRun`, which runs it on a thread pool instead of on
+Node's event loop. The logic lives in `crates/vorn-git`, a plain crate: git as a
+child process with `execFileSync`'s limits and error messages, plus a
+[gix](https://crates.io/crates/gitoxide) fast path that answers the
+`rev-parse` queries in-process where it can match git byte for byte.
+
 ## Build
 
 Needs a Rust toolchain and [Zig 0.15.2](https://ziglang.org/download/), which

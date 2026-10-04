@@ -1,11 +1,15 @@
 /**
- * Hotspot 3: synchronous git on the server's event loop.
+ * Hotspot 3: git on the server's event loop.
  *
- * `gitExec` is `execFileSync`, so every call below is time in which no PTY
- * output is flushed, no RPC is answered and no client hears anything -- for
- * every session at once. Each number is a median wall-clock per call, which for
- * a synchronous call is exactly the stall it causes. WP5 moves these off the
- * loop; `event-loop.ts` measures what that stall does to a live burst.
+ * On the JS path `gitExec` is `execFileSync`, so every call is time in which no
+ * PTY output is flushed, no RPC is answered and no client hears anything -- for
+ * every session at once. `stall.*` is how long a call holds the loop before
+ * the loop can take its next turn: on the JS path the whole call, since each
+ * git it runs blocks and the awaits between them are microtasks; on the
+ * native path (`VORN_GIT=native`, WP5) only handing the first request to the
+ * core. `wall.*` is
+ * how long until the answer arrives, which the native path must not make worse.
+ * `event-loop.ts` measures what the stall does to a live burst.
  */
 import { execFileSync } from 'node:child_process'
 import {
@@ -17,15 +21,16 @@ import {
   isGitRepo,
   listWorktrees
 } from '../../packages/server/src/git-utils'
+import { gitRunner } from '../../packages/server/src/git-runner'
 import { makeRepo } from '../lib/git-fixture'
-import { repeat, round, time } from '../lib/stats'
+import { nowMs, repeatAsync, round, timeAsync } from '../lib/stats'
 import { emit, metric, QUICK, type Metric } from '../lib/suite'
 
 const REPS = QUICK ? 3 : 15
 const repo = makeRepo()
 const metrics: Record<string, Metric> = {}
 
-const calls: Array<[string, () => unknown]> = [
+const calls: Array<[string, () => Promise<unknown>]> = [
   ['isGitRepo', () => isGitRepo(repo.dir)],
   ['getGitBranch', () => getGitBranch(repo.dir)],
   ['getGitStatusPorcelain', () => getGitStatusPorcelain(repo.dir)],
@@ -35,22 +40,56 @@ const calls: Array<[string, () => unknown]> = [
   ['listWorktrees', () => listWorktrees(repo.dir)]
 ]
 
-for (const [name, call] of calls) {
-  const ms = repeat(REPS, () => time(() => void call()), { minSampleMs: 100, estimator: 'min' })
-  metrics[`stall.${name}`] = metric(
-    round(ms),
-    'ms',
-    `event-loop stall per ${name} call (execFileSync)`
-  )
+const mode = gitRunner().mode
+if (process.env.VORN_GIT === 'native' && mode !== 'native') {
+  // The runner falls back to JS quietly; here that would be JS numbers under a native label.
+  throw new Error('VORN_GIT=native but the core has no gitRun')
 }
 
-emit({
-  suite: 'git',
-  metrics,
-  info: {
-    diffBytes: repo.diffBytes,
-    git: execFileSync('git', ['--version'], { encoding: 'utf-8' }).trim()
+async function main(): Promise<void> {
+  for (const [name, call] of calls) {
+    const stall = await repeatAsync(
+      REPS,
+      async () => {
+        const started = nowMs()
+        const answer = call()
+        // A macrotask runs only once the loop is free again.
+        await new Promise((resolve) => setImmediate(resolve))
+        const ms = nowMs() - started
+        await answer
+        return ms
+      },
+      // A native stall is a few microseconds; a minimum sample length would
+      // repeat a 70 ms diff thousands of times to fill it.
+      { minSampleMs: 0, estimator: 'min' }
+    )
+    const wall = await repeatAsync(REPS, () => timeAsync(async () => void (await call())), {
+      minSampleMs: 100,
+      estimator: 'min'
+    })
+    metrics[`stall.${name}`] = metric(
+      round(stall),
+      'ms',
+      `event-loop stall per ${name} call (${mode} git)`
+    )
+    metrics[`wall.${name}`] = metric(
+      round(wall),
+      'ms',
+      `time to answer one ${name} call (${mode} git)`
+    )
   }
-})
-repo.cleanup()
-process.exit(0)
+
+  emit({
+    suite: 'git',
+    metrics,
+    info: {
+      mode,
+      diffBytes: repo.diffBytes,
+      git: execFileSync('git', ['--version'], { encoding: 'utf-8' }).trim()
+    }
+  })
+  repo.cleanup()
+  process.exit(0)
+}
+
+void main()
