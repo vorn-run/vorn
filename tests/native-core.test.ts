@@ -318,6 +318,29 @@ describe.runIf(fs.existsSync(builtCore))('vorn_core.node', () => {
     expect(core.info().version).toMatch(/^\d+\.\d+\.\d+/)
   })
 
+  it('analyzes JavaScript strings across the UTF-16 boundary', () => {
+    const core = loadNativeCore([builtCore])
+    const analyzer = new core.Analyzer!()
+    try {
+      analyzer.append('\x1b[32mplain ascii\x1b[0m\r\n', true)
+      analyzer.append('héllo wörld — 日本語 👩‍👩‍👧\n', true)
+      // Whole pairs only: node-pty decodes on character boundaries, and every
+      // batch and flush cut keeps a pair together.
+      analyzer.append('a line ', true)
+      analyzer.append('in 😀 two reads\n', true)
+      analyzer.append('partial', true)
+      expect(analyzer.output()).toEqual([
+        'plain ascii',
+        'héllo wörld — 日本語 👩‍👩‍👧',
+        'a line in 😀 two reads'
+      ])
+      expect(analyzer.partial()).toBe('partial')
+      expect(analyzer.append('\x1b[?2004h> ', true)).toBe(2)
+    } finally {
+      analyzer.free()
+    }
+  })
+
   it('parses with libghostty-vt exactly when it reports being built with it', () => {
     const core = loadNativeCore([builtCore])
     if (core.parseTitle) {

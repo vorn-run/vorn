@@ -162,10 +162,12 @@ class PtyManager extends EventEmitter {
   private outputPartials = new Map<string, string>()
   /**
    * Settings › Experimental › native output analysis: the Rust core's
-   * per-session analysis, replacing the three maps around it. Chosen on a
-   * session's first output and kept for its life.
+   * per-session analysis, replacing the three maps around it. Chosen when the
+   * terminal opens and kept for its life; created on its first output.
    */
   private analyzers = new Map<string, NativeAnalyzer>()
+  /** What each terminal chose when it opened: the core's analyzer, or null for JS. */
+  private analysisChoice = new Map<string, (new () => NativeAnalyzer) | null>()
   /** Sessions that asked and were given the JS path, so the switch is read once each. */
   private jsAnalysis = new Set<string>()
   /** Raw chunks since the last native analysis, joined (a rope, so O(1) per chunk). */
@@ -1062,6 +1064,7 @@ class PtyManager extends EventEmitter {
     this.analyzers.get(id)?.free()
     this.analyzers.delete(id)
     this.jsAnalysis.delete(id)
+    this.analysisChoice.delete(id)
     this.pendingAnalysis.delete(id)
     this.analysisSignalEnd.delete(id)
     this.analysisQueue.delete(id)
@@ -1109,12 +1112,21 @@ class PtyManager extends EventEmitter {
     }
   }
 
+  /**
+   * Read the switch for a terminal as it opens, as the screen model does, so
+   * one that stays quiet until after the switch moves keeps what it opened with.
+   */
+  private chooseAnalysis(id: string): void {
+    this.analysisChoice.set(id, coreFor('analysis')?.Analyzer ?? null)
+  }
+
   /** The session's native analyzer, created on its first output, or null for the JS path. */
   private analyzerFor(id: string): NativeAnalyzer | null {
     if (this.nativeAnalysisFailed || this.jsAnalysis.has(id)) return null
     const existing = this.analyzers.get(id)
     if (existing) return existing
-    const Analyzer = coreFor('analysis')?.Analyzer
+    if (!this.analysisChoice.has(id)) this.chooseAnalysis(id)
+    const Analyzer = this.analysisChoice.get(id)
     if (!Analyzer) {
       this.jsAnalysis.add(id)
       return null
@@ -1327,6 +1339,7 @@ class PtyManager extends EventEmitter {
     adopted = false
   ): void {
     if (!adopted || !hasScreen(id)) createScreen(id, cols, rows)
+    this.chooseAnalysis(id)
     // Replaces whatever was left under this id. A recovered session that is
     // being respawned has history describing a process that is gone.
     startHistory(id, this.openRecords(id))
@@ -1685,6 +1698,7 @@ class PtyManager extends EventEmitter {
     for (const analyzer of this.analyzers.values()) analyzer.free()
     this.analyzers.clear()
     this.jsAnalysis.clear()
+    this.analysisChoice.clear()
     this.pendingAnalysis.clear()
     this.analysisSignalEnd.clear()
     for (const timer of this.analysisTimers.values()) clearTimeout(timer)
