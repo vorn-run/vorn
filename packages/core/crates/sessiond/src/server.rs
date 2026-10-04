@@ -504,8 +504,11 @@ async fn pump(
 pub fn endpoint(home: &Path, instance: u128) -> String {
     #[cfg(unix)]
     {
+        // Folded to 64 bits: macOS caps a socket path at 104 bytes, and a
+        // temp-dir home is long already.
+        let short = (instance as u64) ^ ((instance >> 64) as u64);
         home.join("run")
-            .join(format!("sessiond-{PROTO}-{instance:x}.sock"))
+            .join(format!("sessiond-{PROTO}-{short:x}.sock"))
             .to_string_lossy()
             .into_owned()
     }
