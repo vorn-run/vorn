@@ -1,7 +1,7 @@
 //! Vorn's native core, as the Node server loads it (`vorn_core.node`).
 //!
 //! Only adapters live here. The logic is in plain crates under `crates/`
-//! (`vorn-screen`, `vorn-analysis`) with no napi in them, so the same code can
+//! (`vorn-screen`, `vorn-analysis`, `vorn-pipeline`) with no napi in them, so the same code can
 //! later serve a daemon or the native UI, and its tests and benchmarks link as
 //! ordinary Rust.
 
@@ -9,6 +9,8 @@ use napi_derive::napi;
 
 pub mod analysis;
 pub mod git;
+#[cfg(feature = "ghostty")]
+pub mod pipeline;
 #[cfg(feature = "ghostty")]
 pub mod screen;
 

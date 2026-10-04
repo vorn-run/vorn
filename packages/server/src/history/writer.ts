@@ -2,8 +2,11 @@ import fs from 'fs/promises'
 import path from 'path'
 import log from '../logger'
 import { serializeScreen } from '../terminal-screen'
+import { pipelineFor } from '../core-pipeline'
+import type { NativePipeline } from '../native-core'
 import { readScrollback } from '../terminal-scrollback'
-import { frameBatch, frameOutput, frameResize, writeHeader } from './log'
+import type { RecordCursor } from '@vornrun/shared/types'
+import { frameData, frameResize, writeHeader, type RecordHeader } from './log'
 import { historyDir, writeCheckpoint, LOG_FILE } from './checkpoint'
 
 /**
@@ -38,9 +41,11 @@ import { historyDir, writeCheckpoint, LOG_FILE } from './checkpoint'
  *
  * A checkpoint is the screen as of the moment it was taken, so every frame
  * before it is superseded. Rewriting the log rather than appending past it means
- * recovery is `checkpoint + every frame in the log`, with nothing to skip and no
- * seq arithmetic to get wrong — and it is where the on-disk size is bounded,
- * which is what stops `~/.vorn` growing for the life of a session.
+ * recovery is `checkpoint + every record in the log`, and it is where the
+ * on-disk size is bounded, which is what stops `~/.vorn` growing for the life of
+ * a session. The checkpoint's `resume` cursor and the new log's header name the
+ * same point, so a record on both sides of it would be skipped rather than
+ * replayed twice.
  *
  * The generation is what makes that safe. The checkpoint lands first; if the
  * process dies before the log is rewritten, the old log is still sitting there
@@ -108,8 +113,14 @@ interface Recorded {
   /** Joined once. It cannot change, and it was being rebuilt four times a second. */
   logPath: string
   generation: number
-  /** The last batch written to the log. A batch is one flush, not one write. */
-  seq: number
+  /**
+   * The cursor after the last record handed to this writer, written or not.
+   *
+   * What a checkpoint cut now includes, and the line below which a record is
+   * already held: the writer is idempotent by `rseq`, so a record offered twice
+   * is written once.
+   */
+  next: RecordCursor
   pending: Buffer[]
   pendingBytes: number
   logBytes: number
@@ -125,6 +136,8 @@ interface Recorded {
   broken: boolean
   lastRecordAt: number
   lastCheckpointAt: number
+  /** A checkpoint's cut is out on the session's core thread; see `checkpoint`. */
+  cutting: boolean
   /** The per-session queue. One operation at a time, in the order asked for. */
   tail: Promise<void>
   queued: number
@@ -173,7 +186,7 @@ export function configureHistory(dir: string, over: Partial<HistoryTiming> = {})
  * on this directory in one order, including any append still in flight from the
  * PTY that just went, and `reset` below removes what was there anyway.
  */
-export function startHistory(id: string): void {
+export function startHistory(id: string, start: RecordCursor): void {
   if (!dataDir || sealed) return
   const previous = recorded.get(id)
   recorded.delete(id)
@@ -183,7 +196,7 @@ export function startHistory(id: string): void {
     dir: historyDir(dataDir, id),
     logPath: path.join(historyDir(dataDir, id), LOG_FILE),
     generation: 1,
-    seq: 0,
+    next: { ...start },
     pending: [],
     pendingBytes: 0,
     logBytes: 0,
@@ -191,11 +204,14 @@ export function startHistory(id: string): void {
     broken: false,
     lastRecordAt: Date.now(),
     lastCheckpointAt: Date.now(),
+    cutting: false,
     tail: previous ? previous.tail.catch(() => undefined) : Promise.resolve(),
     queued: 0
   }
   recorded.set(id, held)
-  enqueue(held, () => reset(held))
+  // The cursor as it is now, not as it is when the reset runs: output recorded
+  // before then belongs in this log, after a header naming where it starts.
+  enqueue(held, () => reset(held, { ...start }))
 }
 
 /**
@@ -203,27 +219,140 @@ export function startHistory(id: string): void {
  *
  * Called from `flushBuffer` rather than from `onData` for the same reason
  * `feedScreen` is: node-pty emits a few bytes at a time while somebody types,
- * and this way a burst of keystrokes is one frame rather than thirty.
+ * and this way a burst of keystrokes is one record rather than thirty.
+ *
+ * `at` is the place the PTY reader gave this output. The writer does not number
+ * records itself: the reader is the one place that sees output and resizes in
+ * the order they happened, and a client attaching is told the same numbers.
  */
-export function recordOutput(id: string, data: string): void {
+export function recordOutput(id: string, at: RecordHeader, data: string): void {
   if (!data) return
   // Looked up before the frame is built, not after. Encoding the chunk and
   // running a checksum over it only to find that nothing is recording this
   // session is a full pass over every byte, thrown away -- and that is the
   // ordinary case in every process that never called `configureHistory`.
   const held = recorded.get(id)
-  if (held) push(held, frameOutput(data))
+  if (!held || !accepts(held, at)) return
+  const bytes = Buffer.from(data, 'utf-8')
+  held.next = {
+    epoch: held.next.epoch,
+    nextRseq: at.rseq + 1,
+    nextOffset: at.startOffset + bytes.length
+  }
+  push(held, frameData(at, bytes))
 }
 
 /** Record a resize, with the numbers node-pty was given. */
-export function recordResize(id: string, cols: number, rows: number): void {
+export function recordResize(id: string, at: RecordHeader, cols: number, rows: number): void {
   const held = recorded.get(id)
-  if (held) push(held, frameResize(cols, rows))
+  if (!held || !accepts(held, at)) return
+  held.next = { epoch: held.next.epoch, nextRseq: at.rseq + 1, nextOffset: at.startOffset }
+  push(held, frameResize(at, cols, rows))
+}
+
+/**
+ * Note output whose frame is built on the terminal's core thread.
+ *
+ * The same bookkeeping as `recordOutput` -- the cursor, the order check, the
+ * clock that decides when to checkpoint -- without the encoding and the
+ * checksum, which the thread does. Returns whether the thread should frame it:
+ * not when nothing is recording this session, and not when this writer already
+ * holds the record.
+ */
+export function noteOutput(id: string, at: RecordHeader, bytes: number): boolean {
+  if (!bytes) return false
+  const held = recorded.get(id)
+  if (!held || !accepts(held, at)) return false
+  held.next = {
+    epoch: held.next.epoch,
+    nextRseq: at.rseq + 1,
+    nextOffset: at.startOffset + bytes
+  }
+  mark(held)
+  return true
+}
+
+/**
+ * A terminal's core thread stopped while it was being recorded.
+ *
+ * Whatever it framed is kept; whatever it had not got to is gone, and the log
+ * cannot be whole past that, so it waits for the next checkpoint as it does
+ * after a failed append.
+ */
+export function pipelineLost(id: string): void {
+  const held = recorded.get(id)
+  if (!held) return
+  pull(held)
+  if (!held.broken) {
+    log.warn({ id }, '[history] a terminal thread stopped; this log waits for the next checkpoint')
+  }
+  held.broken = true
+}
+
+/** `recordResize` for a terminal on a core thread; see `noteOutput`. */
+export function noteResize(id: string, at: RecordHeader): boolean {
+  const held = recorded.get(id)
+  if (!held || !accepts(held, at)) return false
+  held.next = { epoch: held.next.epoch, nextRseq: at.rseq + 1, nextOffset: at.startOffset }
+  mark(held)
+  return true
+}
+
+/**
+ * Whether a record is new to this writer.
+ *
+ * One below what is held is already on its way to disk, and writing it again
+ * would replay its bytes twice: the contract's rule that the history writer
+ * skips records below its log's cursor. One above is a hole -- a record this
+ * writer was never given -- and the log cannot be whole past it, so it is
+ * treated like a failed append and waits for the next checkpoint.
+ */
+function accepts(held: Recorded, at: RecordHeader): boolean {
+  if (at.rseq < held.next.nextRseq) return false
+  if (at.rseq > held.next.nextRseq || at.startOffset !== held.next.nextOffset) {
+    if (!held.broken) {
+      log.warn(
+        { id: held.id, expected: held.next, got: at },
+        '[history] a record arrived out of order; this log waits for the next checkpoint'
+      )
+    }
+    held.broken = true
+  }
+  return true
 }
 
 function push(held: Recorded, frame: Buffer): void {
+  mark(held)
+  hold(held, frame)
+}
+
+/** Something was recorded: the clock that decides when to checkpoint starts again. */
+function mark(held: Recorded): void {
   held.lastRecordAt = Date.now()
   held.changed = true
+  ensureTicking()
+}
+
+/**
+ * Frames the session's core thread has built, moved into `pending` where every
+ * path below finds them. Does not wait for output still queued on the thread:
+ * what is not framed yet is taken next time.
+ */
+function pull(held: Recorded): void {
+  if (held.cutting) return
+  const pipeline = pipelineFor(held.id)
+  if (!pipeline) return
+  let frames: Buffer
+  try {
+    frames = pipeline.takeFrames()
+  } catch {
+    // The thread has stopped; the screen model's failure was reported there.
+    return
+  }
+  if (frames.length) hold(held, frames)
+}
+
+function hold(held: Recorded, frame: Buffer): void {
   // Still accumulated while broken, because the next checkpoint replaces the log
   // wholesale and these frames belong after it. Only the appending stops.
   held.pending.push(frame)
@@ -239,8 +368,6 @@ function push(held: Recorded, frame: Buffer): void {
     held.broken = true
     take(held)
   }
-
-  ensureTicking()
 }
 
 /**
@@ -350,6 +477,13 @@ export async function settleHistory(): Promise<void> {
     // Output the tick has not picked up yet is still unwritten. Waiting only on
     // the queue let a caller remove a directory a flush then recreated.
     for (const held of recorded.values()) {
+      // A round trip to a core thread first, so output it has queued is framed.
+      try {
+        pipelineFor(held.id)?.scrollback()
+      } catch {
+        // Stopped: nothing more will be framed.
+      }
+      pull(held)
       if (held.pending.length && held.queued === 0) {
         void enqueue(held, async () => {
           await flushPending(held)
@@ -402,28 +536,27 @@ function take(held: Recorded): Buffer[] {
 /**
  * Replace the log, opening a generation.
  *
- * Opening one is four things that are only correct together: write a header
- * carrying it, adopt it, restart `seq`, and trust the file again. Three call
- * sites used to do those by hand, in three slightly different orders.
+ * Opening one is three things that are only correct together: write a header
+ * carrying it and the cursor the log starts at, adopt it, and trust the file
+ * again. Three call sites used to do those by hand, in three slightly different
+ * orders.
  *
  * The body is assembled here rather than passed in because the layout -- a
- * header, then whole batches, and a fresh generation opening on batch one -- is
+ * header naming where the log starts, then whole records from that point -- is
  * the format's rule, and a caller building it from format primitives is a caller
  * that has to remember the rule.
  */
 async function openGeneration(
   held: Recorded,
   generation: number,
+  start: RecordCursor,
   carried: Buffer[]
 ): Promise<void> {
-  const body = carried.length
-    ? Buffer.concat([writeHeader(generation), frameBatch(1), ...carried])
-    : writeHeader(generation)
+  const body = Buffer.concat([writeHeader(generation, start), ...carried])
   try {
     await fs.writeFile(held.logPath, body, { mode: 0o600 })
     held.generation = generation
     held.logBytes = body.length
-    held.seq = carried.length ? 1 : 0
     held.broken = false
   } catch (err) {
     // Left untrusted rather than appended to over an unknown prefix: a partial
@@ -434,31 +567,30 @@ async function openGeneration(
   }
 }
 
-async function reset(held: Recorded): Promise<void> {
+async function reset(held: Recorded, start: RecordCursor): Promise<void> {
   await fs.rm(held.dir, { recursive: true, force: true })
   await fs.mkdir(held.dir, { recursive: true, mode: 0o700 })
-  await openGeneration(held, held.generation, [])
+  // A log found broken already -- output dropped, or a record out of order,
+  // while this waited its turn -- is still broken once it exists.
+  const broken = held.broken
+  await openGeneration(held, held.generation, start, [])
+  held.broken ||= broken
 }
 
 /**
- * Append what has accumulated, as one batch.
+ * Append what has accumulated, in one write.
  *
- * The batch marker goes in here rather than beside every write because a batch
- * is what reaches the disk together, and that is the unit a torn tail cuts.
+ * Each record is framed on its own, so a torn tail cuts at a record and replay
+ * stops at the last whole one.
  */
 async function flushPending(held: Recorded): Promise<void> {
+  pull(held)
   if (!held.pending.length || held.broken) return
 
-  held.seq += 1
-  const prefix = frameBatch(held.seq)
-  const frames = take(held)
-  // The total is passed rather than summed, and the marker is unshifted rather
-  // than spread. `pending` is bounded by bytes and not by count, so with small
-  // frames it holds a great many -- and a spread of that array is an argument
-  // list of that length.
-  const total = frames.reduce((n, f) => n + f.length, prefix.length)
-  frames.unshift(prefix)
-  const body = Buffer.concat(frames, total)
+  // The total is passed rather than summed by `concat`: `pending` is bounded by
+  // bytes and not by count, so with small frames it holds a great many.
+  const total = held.pendingBytes
+  const body = Buffer.concat(take(held), total)
 
   try {
     await fs.appendFile(held.logPath, body)
@@ -503,7 +635,7 @@ async function fold(held: Recorded): Promise<void> {
     '[history] could not checkpoint a log past its cap; dropping it'
   )
   take(held)
-  await openGeneration(held, held.generation + 1, []).catch(() => {
+  await openGeneration(held, held.generation + 1, held.next, []).catch(() => {
     /* already reported, and already marked untrusted */
   })
 }
@@ -512,38 +644,70 @@ async function fold(held: Recorded): Promise<void> {
  * Write the screen, then replace the log with whatever arrived while it was
  * being written.
  *
- * The first four statements are deliberately one synchronous block, and the
+ * The first five statements are deliberately one synchronous block, and the
  * order inside it is the correctness argument. `serializeScreen` queues an empty
  * write behind everything already given to xterm and resolves when the parser
  * reaches it, so the screen it returns is exactly the output recorded before
- * this line ran -- but only if nothing is recorded between taking `seq` and
- * placing that marker. Nothing can be: there is no await between them.
+ * this line ran -- but only if nothing is recorded between taking the cursor
+ * and placing that marker. Nothing can be: there is no await between them.
  */
 async function checkpoint(held: Recorded, closing = false): Promise<boolean> {
-  const cutSeq = held.seq
-  const scrollback = readScrollback(held.id)
-  const drained = serializeScreen(held.id)
-  const supersededBytes = held.pendingBytes
+  const resume = { ...held.next }
+  const generation = held.generation + 1
+  let land: () => Promise<boolean>
+  if (pipelineFor(held.id)) {
+    // The same cut, taken on the terminal's thread: its place in the stream is
+    // fixed here, after every flush sent before this line and before any sent
+    // after, so the screen, the scrollback and the frames all end exactly at
+    // `resume`. The thread answers when it gets there, and builds the file's
+    // body too, so this loop waits on neither the parse nor the JSON.
+    //
+    // Frames are not pulled while it is out: any the thread builds first are
+    // from before the cut and come back with it, beside `superseded`.
+    held.cutting = true
+    const cutting = cutPipeline(held.id, {
+      generation,
+      resume,
+      ...(closing && { closedCleanly: true })
+    })
+    land = async () => {
+      const cut = await cutting
+      held.cutting = false
+      if (cut?.frames.length) {
+        superseded.push(cut.frames)
+        supersededBytes += cut.frames.length
+      }
+      const body = cut?.body ?? null
+      return body !== null && (await writeCheckpoint(held.dir, body))
+    }
+  } else {
+    const scrollback = readScrollback(held.id)
+    const drained = serializeScreen(held.id)
+    land = async () => {
+      const snapshot = await drained
+      return (
+        snapshot !== null &&
+        (await writeCheckpoint(held.dir, {
+          screen: snapshot.screen,
+          scrollback,
+          cols: snapshot.cols,
+          rows: snapshot.rows,
+          title: snapshot.title,
+          cwd: snapshot.cwd,
+          generation,
+          resume,
+          // Only the flush on the way out. Everything else -- the clock, the
+          // size cap -- leaves this unset, which is what makes its absence
+          // mean "this run did not get to say goodbye".
+          ...(closing && { closedCleanly: true })
+        }))
+      )
+    }
+  }
+  let supersededBytes = held.pendingBytes
   const superseded = take(held)
 
-  const snapshot = await drained
-  const generation = held.generation + 1
-  const landed =
-    snapshot !== null &&
-    (await writeCheckpoint(held.dir, {
-      screen: snapshot.screen,
-      scrollback,
-      cols: snapshot.cols,
-      rows: snapshot.rows,
-      title: snapshot.title,
-      cwd: snapshot.cwd,
-      generation,
-      seq: cutSeq,
-      // Only the flush on the way out. Everything else -- the clock, the size
-      // cap -- leaves this unset, which is what makes its absence mean "this
-      // run did not get to say goodbye".
-      ...(closing && { closedCleanly: true })
-    }))
+  const landed = await land()
 
   if (!landed) {
     // Either there was no model to checkpoint from -- it faulted, or the session
@@ -559,7 +723,7 @@ async function checkpoint(held: Recorded, closing = false): Promise<boolean> {
   held.lastCheckpointAt = Date.now()
   const carried = take(held)
   held.changed = carried.length > 0
-  await openGeneration(held, generation, carried).catch(() => {
+  await openGeneration(held, generation, resume, carried).catch(() => {
     // The checkpoint is already durable, so the screen survives; what is lost is
     // the little that came after it. Reported and marked there.
   })
@@ -573,6 +737,18 @@ async function checkpoint(held: Recorded, closing = false): Promise<boolean> {
  * were taken, so walking the whole array to work it out again is a pass over
  * everything unwritten for a number already known.
  */
+async function cutPipeline(
+  id: string,
+  meta: Parameters<NativePipeline['cut']>[0]
+): Promise<Awaited<ReturnType<NativePipeline['cut']>> | null> {
+  try {
+    return (await pipelineFor(id)?.cut(meta)) ?? null
+  } catch (err) {
+    log.warn({ err, id }, '[history] could not cut a checkpoint from the core thread')
+    return null
+  }
+}
+
 function restore(held: Recorded, superseded: Buffer[], bytes: number): void {
   if (!superseded.length) return
   for (let i = superseded.length - 1; i >= 0; i--) held.pending.unshift(superseded[i]!)
@@ -605,6 +781,7 @@ function tick(): void {
   let working = false
 
   for (const held of recorded.values()) {
+    pull(held)
     // Anything unwritten keeps the timer alive, including a session that is
     // merely not quiet yet -- it is owed a checkpoint, and stopping here would
     // leave it owed one until its terminal next produced output.

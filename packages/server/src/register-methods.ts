@@ -1091,7 +1091,8 @@ export function registerAllMethods(): void {
   registerMethod('terminal:attach', ({ id }) => ({
     data: readScrollback(id),
     seq: ptyManager.lastFlushSeq(id),
-    live: ptyManager.hasLivePty(id)
+    live: ptyManager.hasLivePty(id),
+    cursor: ptyManager.recordCursor(id) ?? undefined
   }))
   registerMethod('terminal:readOutput', ({ id, lines }) => ptyManager.getOutput(id, lines))
   registerMethod('shell:create', (cwd) => {

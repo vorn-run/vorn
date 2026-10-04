@@ -1,3 +1,5 @@
+import { pipelineFor } from './core-pipeline'
+
 /**
  * The bytes a terminal emitted, kept as they were emitted.
  *
@@ -31,25 +33,6 @@
 const MAX_UNITS = 256 * 1024
 
 /**
- * Trim from the front, at a line boundary where there is one nearby.
- *
- * Cutting mid-sequence would hand the client half an escape sequence, and a
- * terminal emulator fed a truncated sequence will either swallow the text that
- * follows it or render it as literal characters. A newline is a safe cut: no
- * escape sequence spans one.
- *
- * When there is no newline in the trimmed region — a single enormous line, which
- * a progress bar redrawing without newlines produces — the cut is taken as-is.
- * Losing the head of one line is better than growing without bound.
- */
-function trim(data: string): string {
-  if (data.length <= MAX_UNITS) return data
-  const cut = data.length - MAX_UNITS
-  const boundary = data.indexOf('\n', cut)
-  return boundary === -1 ? data.slice(cut) : data.slice(boundary + 1)
-}
-
-/**
  * Chunks as they arrived, joined only when somebody reads.
  *
  * This used to be one string per terminal, re-formed on every append:
@@ -69,11 +52,11 @@ function trim(data: string): string {
  * incidental. The running total is kept so the bound can be enforced without
  * measuring the whole list.
  *
- * The trim itself is unchanged, including where it cuts. It runs against the
- * joined result rather than per chunk, because a boundary can only be found in
- * the text either side of it -- trimming chunk by chunk would cut at whatever
- * edge a PTY write happened to land on, which is precisely the mid-sequence cut
- * the boundary rule exists to avoid.
+ * Where the trim cuts is unchanged. It looks for its boundary across chunks
+ * rather than within one, because a boundary can only be found in the text
+ * either side of it -- trimming chunk by chunk would cut at whatever edge a PTY
+ * write happened to land on, which is precisely the mid-sequence cut the
+ * boundary rule exists to avoid.
  */
 interface Buffered {
   chunks: string[]
@@ -82,7 +65,19 @@ interface Buffered {
 
 const buffers = new Map<string, Buffered>()
 
+// A terminal on a core thread keeps its scrollback there, fed by the same
+// hand-off as its screen; the functions below answer from it when it does.
+
 export function appendScrollback(id: string, data: string): void {
+  const pipeline = pipelineFor(id)
+  if (pipeline) {
+    try {
+      pipeline.appendScrollback(data)
+      return
+    } catch {
+      // Kept here, and handed to the next pipeline for this id.
+    }
+  }
   let held = buffers.get(id)
   if (!held) {
     held = { chunks: [], units: 0 }
@@ -113,20 +108,74 @@ export function appendScrollback(id: string, data: string): void {
  */
 const COMPACT_SLACK = MAX_UNITS / 4
 
+/**
+ * Trim from the front, at a line boundary where there is one nearby.
+ *
+ * Cutting mid-sequence would hand the client half an escape sequence, and a
+ * terminal emulator fed a truncated sequence will either swallow the text that
+ * follows it or render it as literal characters. A newline is a safe cut: no
+ * escape sequence spans one.
+ *
+ * When there is no newline in the trimmed region — a single enormous line, which
+ * a progress bar redrawing without newlines produces — the cut is taken as-is.
+ * Losing the head of one line is better than growing without bound.
+ *
+ * The cut is the first newline at or after the point that leaves `MAX_UNITS`,
+ * or that point itself when no newline follows it -- the same cut, to the
+ * unit, as trimming the joined text would make. It is found by
+ * dropping the chunks wholly before the point and searching from there, so a
+ * compaction costs the chunk it lands in rather than a copy of the whole
+ * buffer. Joining here was a quarter-megabyte copy every 64 KB a busy terminal
+ * printed, on the event loop, in the middle of a burst.
+ */
 function compact(held: Buffered): void {
-  const trimmed = trim(held.chunks.join(''))
-  held.chunks = [trimmed]
-  held.units = trimmed.length
+  const cut = held.units - MAX_UNITS
+  if (cut <= 0) return
+  const { chunks } = held
+
+  let first = 0
+  let before = 0
+  while (before + chunks[first]!.length <= cut) before += chunks[first++]!.length
+
+  // Where the kept text starts: chunk and offset into it.
+  let at = first
+  let offset = cut - before
+  for (let i = first, from = offset; i < chunks.length; i++, from = 0) {
+    const newline = chunks[i]!.indexOf('\n', from)
+    if (newline === -1) continue
+    at = i
+    offset = newline + 1
+    break
+  }
+
+  const kept = chunks.slice(at)
+  kept[0] = kept[0]!.slice(offset)
+  if (!kept[0]) kept.shift()
+  let dropped = offset
+  for (let i = first; i < at; i++) dropped += chunks[i]!.length
+  held.units -= before + dropped
+  held.chunks = kept
 }
 
 export function readScrollback(id: string): string {
+  const pipeline = pipelineFor(id)
+  if (pipeline) {
+    try {
+      return pipeline.scrollback()
+    } catch {
+      // A thread that has stopped has nothing to give; the screen model's
+      // failure is reported where it is freed.
+      return ''
+    }
+  }
   const held = buffers.get(id)
   if (!held) return ''
-  // Compacted on the way out rather than joined and thrown away: a caller that
-  // reads twice should not pay twice, and the result is the same bytes either
-  // way. Already-compact is the common case for the second read and for the
-  // checkpoint that follows one, so it costs nothing at all.
-  if (held.chunks.length > 1 || held.units > MAX_UNITS) compact(held)
+  // Joined on the way out and kept joined: a caller that reads twice should
+  // not pay twice, and the result is the same bytes either way. Already joined
+  // is the common case for the second read and for the checkpoint that follows
+  // one, so it costs nothing at all.
+  compact(held)
+  if (held.chunks.length > 1) held.chunks = [held.chunks.join('')]
   return held.chunks[0] ?? ''
 }
 
@@ -139,6 +188,15 @@ export function readScrollback(id: string): string {
  * to seed a buffer past what this module promises to hold.
  */
 export function seedScrollback(id: string, data: string): void {
+  const pipeline = pipelineFor(id)
+  if (pipeline) {
+    try {
+      pipeline.seedScrollback(data)
+      return
+    } catch {
+      // Kept here instead, where the next pipeline for this id picks it up.
+    }
+  }
   const held: Buffered = { chunks: [data], units: data.length }
   buffers.set(id, held)
   compact(held)
@@ -146,6 +204,11 @@ export function seedScrollback(id: string, data: string): void {
 
 export function clearScrollback(id: string): void {
   buffers.delete(id)
+  try {
+    pipelineFor(id)?.seedScrollback('')
+  } catch {
+    // Stopped: nothing left in it to clear.
+  }
 }
 
 /**
@@ -155,7 +218,31 @@ export function clearScrollback(id: string): void {
  * on the way out, so a read is always within the cap no matter how much is being
  * held behind it. What a test needs to see is the memory, not the answer.
  */
+/**
+ * Take what is kept here for a terminal that is moving onto a core thread, so
+ * its pipeline can be seeded with it and nothing is kept twice.
+ */
+export function takeScrollback(id: string): string {
+  const held = buffers.get(id)
+  if (!held) return ''
+  buffers.delete(id)
+  compact(held)
+  return held.chunks.join('')
+}
+
+/**
+ * Keep a pipeline's scrollback here once its thread is going away. A session
+ * resumed under the same id keeps what it showed, as on the JavaScript path.
+ */
+export function handBackScrollback(id: string, data: string): void {
+  if (!data) return
+  const held: Buffered = { chunks: [data], units: data.length }
+  buffers.set(id, held)
+  compact(held)
+}
+
 export function scrollbackUnitsHeld(id: string): number {
+  if (pipelineFor(id)) return readScrollback(id).length
   return buffers.get(id)?.units ?? 0
 }
 

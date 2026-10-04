@@ -2,6 +2,7 @@ import fs from 'fs'
 import fsp from 'fs/promises'
 import path from 'path'
 import crypto from 'crypto'
+import type { RecordCursor } from '@vornrun/shared/types'
 import log from '../logger'
 
 /**
@@ -50,15 +51,16 @@ export interface Checkpoint {
   /** Ties the log beside it to this checkpoint. */
   generation: number
   /**
-   * The last batch on disk that this supersedes.
+   * The first record and byte this screen does not include.
    *
-   * Recovery does not read it, and that is not an oversight: a checkpoint
-   * replaces the log rather than being written past it, so there is never a
-   * prefix to skip. It is here because the generation says *which* log belongs
-   * to this checkpoint and this says *how much* of one it stood in for, which is
-   * the difference between a file somebody can diagnose and one they cannot.
+   * Replay starts here: a record below it is already in the screen and is
+   * skipped, and the log written beside this checkpoint starts at the same
+   * cursor. Absent in a checkpoint from before the record log, whose log was
+   * always exactly what came after it.
    */
-  seq: number
+  resume?: RecordCursor
+  /** The batch number a version 1 checkpoint stood in for. Read, never written. */
+  seq?: number
   /**
    * Whether this was written by a shutdown rather than by the clock.
    *
@@ -143,13 +145,16 @@ async function syncDir(dir: string): Promise<void> {
 }
 
 /** Written, renamed, and synced. Answers whether it landed. */
-export async function writeCheckpoint(dir: string, checkpoint: Checkpoint): Promise<boolean> {
-  const body = JSON.stringify(checkpoint)
-  if (Buffer.byteLength(body) > MAX_CHECKPOINT_BYTES) {
-    log.warn(
-      { dir, bytes: Buffer.byteLength(body) },
-      '[history] screen too large to checkpoint; skipping this one whole'
-    )
+export async function writeCheckpoint(
+  dir: string,
+  checkpoint: Checkpoint | Buffer
+): Promise<boolean> {
+  // Already a body when a terminal's core thread built it: the JSON of a
+  // quarter-megabyte scrollback is milliseconds this loop does not spend.
+  const body = Buffer.isBuffer(checkpoint) ? checkpoint : JSON.stringify(checkpoint)
+  const bytes = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(body)
+  if (bytes > MAX_CHECKPOINT_BYTES) {
+    log.warn({ dir, bytes }, '[history] screen too large to checkpoint; skipping this one whole')
     return false
   }
 
@@ -163,7 +168,7 @@ export async function writeCheckpoint(dir: string, checkpoint: Checkpoint): Prom
     await fsp.mkdir(dir, { recursive: true, mode: 0o700 })
     const handle = await fsp.open(scratch, 'w', 0o600)
     try {
-      await handle.writeFile(body, 'utf-8')
+      await handle.writeFile(body)
       // The file's own contents, before the rename makes them reachable.
       // Best-effort, like the directory below: a filesystem that refuses to sync
       // still gives an atomic rename against other readers, and a checkpoint
@@ -211,6 +216,16 @@ export async function readCheckpointAsync(dir: string): Promise<Checkpoint | nul
   }
 }
 
+export function isCursor(value: unknown): value is RecordCursor {
+  if (!value || typeof value !== 'object') return false
+  const c = value as Partial<RecordCursor>
+  return (
+    Number.isInteger(c.epoch) &&
+    Number.isSafeInteger(c.nextRseq) &&
+    Number.isSafeInteger(c.nextOffset)
+  )
+}
+
 function isCheckpoint(value: unknown): value is Checkpoint {
   if (!value || typeof value !== 'object') return false
   const v = value as Partial<Checkpoint>
@@ -222,7 +237,8 @@ function isCheckpoint(value: unknown): value is Checkpoint {
     typeof v.title === 'string' &&
     typeof v.cwd === 'string' &&
     Number.isInteger(v.generation) &&
-    Number.isInteger(v.seq) &&
+    (v.seq === undefined || Number.isInteger(v.seq)) &&
+    (v.resume === undefined || isCursor(v.resume)) &&
     (v.closedCleanly === undefined || typeof v.closedCleanly === 'boolean')
   )
 }

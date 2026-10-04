@@ -2,7 +2,15 @@ import * as headless from '@xterm/headless'
 import * as serializeAddon from '@xterm/addon-serialize'
 import log from './logger'
 import { OSC_PRIVATE } from './shell-integration/protocol'
-import { coreFor, screenOf, type NativeScreen } from './native-core'
+import {
+  coreFor,
+  screenOf,
+  type NativePipeline,
+  type NativeScreen,
+  type PipelineEvent
+} from './native-core'
+import { holdPipeline, pipelineFor, pipelineIds, releasePipeline } from './core-pipeline'
+import { handBackScrollback, takeScrollback } from './terminal-scrollback'
 
 /**
  * Settings › Experimental › native screen model, or `VORN_CORE=native`: the
@@ -284,6 +292,18 @@ const screens = new Map<string, Held>()
  * is not a bell. Null when it cannot, and the caller looks at the bytes.
  */
 export function feedScreen(id: string, data: string): boolean | null {
+  const pipeline = pipelineFor(id)
+  if (pipeline) {
+    try {
+      // Parsed later, on the terminal's thread: a bell or a cwd it finds
+      // arrives through the reporters below rather than as an answer here.
+      pipeline.feedScreen(data)
+      return false
+    } catch (err) {
+      drop(id, err)
+      return null
+    }
+  }
   const native = natives.get(id)
   if (native) {
     try {
@@ -347,6 +367,28 @@ export function createScreen(
   labels?: { title?: string; cwd?: string }
 ): void {
   clearScreen(id)
+  const Pipeline = coreFor('pipeline')?.TerminalPipeline
+  if (Pipeline) {
+    try {
+      const pipeline: NativePipeline = new Pipeline(cols, rows, (event) => {
+        // A bell rang in output that was live when it was fed, so it counts
+        // even from a pipeline that has gone since: an exit feeds the last
+        // flush and frees the pipeline in one turn, and its events reach this
+        // loop after. Anything else from a pipeline freed or replaced since
+        // describes a terminal that is no longer there.
+        if (event.kind === 'bell' || pipelineFor(id) === pipeline) pipelineEvent(id, event)
+      })
+      if (labels) pipeline.restoreLabels(labels.title, labels.cwd)
+      // What this terminal printed before it had a pipeline, so the scrollback
+      // carries on rather than starting over.
+      const before = takeScrollback(id)
+      if (before) pipeline.seedScrollback(before)
+      holdPipeline(id, pipeline)
+    } catch (err) {
+      drop(id, err)
+    }
+    return
+  }
   const Native = screenOf(coreFor('screen'))
   if (Native) {
     try {
@@ -381,6 +423,15 @@ export function createScreen(
  * and every line after the first divergence is wrong.
  */
 export async function resizeScreen(id: string, cols: number, rows: number): Promise<void> {
+  const pipeline = pipelineFor(id)
+  if (pipeline) {
+    try {
+      pipeline.resize(cols, rows)
+    } catch (err) {
+      drop(id, err)
+    }
+    return
+  }
   const native = natives.get(id)
   if (native) {
     try {
@@ -490,6 +541,17 @@ export async function drainScreen(id: string): Promise<void> {
 }
 
 export async function serializeScreen(id: string): Promise<ScreenSnapshot | null> {
+  const pipeline = pipelineFor(id)
+  if (pipeline) {
+    try {
+      return pipeline.serialize()
+    } catch (err) {
+      // Not dropped: the scrollback and the history live in the same
+      // pipeline and carry on without a screen.
+      log.warn({ err, id }, '[screen] could not serialize')
+      return null
+    }
+  }
   const native = natives.get(id)
   if (native) {
     try {
@@ -524,6 +586,21 @@ export async function serializeScreen(id: string): Promise<ScreenSnapshot | null
  * resident for the life of the server.
  */
 export function clearScreen(id: string): void {
+  const pipeline = releasePipeline(id)
+  if (pipeline) {
+    try {
+      // Kept for a session resumed under this id, as the JavaScript path keeps
+      // its own; a terminal that exited has already cleared it.
+      handBackScrollback(id, pipeline.scrollback())
+    } catch {
+      // A stopped thread: nothing to hand back.
+    }
+    try {
+      pipeline.free()
+    } catch (err) {
+      log.warn({ err, id }, '[screen] could not stop a terminal thread')
+    }
+  }
   const native = natives.get(id)
   if (native) {
     natives.delete(id)
@@ -557,17 +634,44 @@ export function setCwdReporter(fn: CwdReporter | null): void {
   reportCwd = fn
 }
 
+/**
+ * Told when a terminal on a core thread rings its bell.
+ *
+ * The thread parses after the flush has gone to the clients, so it cannot say
+ * so in the flush's answer the way the in-loop models do.
+ */
+type BellReporter = (id: string) => void
+let reportBell: BellReporter | null = null
+
+export function setBellReporter(fn: BellReporter | null): void {
+  reportBell = fn
+}
+
+function pipelineEvent(id: string, event: PipelineEvent): void {
+  switch (event.kind) {
+    case 'bell':
+      reportBell?.(id)
+      return
+    case 'cwd':
+      if (event.cwd) reportCwd?.(id, event.cwd)
+      return
+    case 'screen-failed':
+      log.warn({ id, error: event.error }, '[screen] the screen model failed; history carries on')
+      return
+  }
+}
+
 /** How many models are held. For the measurement that bounds this. */
 /** For the one caller that must not clear a screen recovery has just rebuilt. */
 export function hasScreen(id: string): boolean {
-  return screens.has(id) || natives.has(id)
+  return screens.has(id) || natives.has(id) || pipelineFor(id) !== undefined
 }
 
 export function screenCount(): number {
-  return screens.size + natives.size
+  return screens.size + natives.size + pipelineIds().length
 }
 
 /** Test-only, mirroring `resetScrollback`. */
 export function resetScreens(): void {
-  for (const id of [...screens.keys(), ...natives.keys()]) clearScreen(id)
+  for (const id of [...screens.keys(), ...natives.keys(), ...pipelineIds()]) clearScreen(id)
 }

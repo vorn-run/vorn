@@ -1,3 +1,4 @@
+import { MAX_FLUSH_UNITS } from '../packages/server/src/output-buffer'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { TerminalSession } from '@vornrun/shared/types'
 
@@ -265,6 +266,37 @@ describe('output analysis on the native core', () => {
     pm.sessions.delete('w')
   })
 
+  it('analyzes held output before a hook sets the status, so the hook has the last word', () => {
+    const session = addSession('k')
+    pm.appendOutput('k', 'one\n')
+    analyzers[0].next = 2 // waiting
+    pm.appendOutput('k', 'Allow? ')
+    expect(analyzers[0].calls).toHaveLength(1)
+    ptyManager.updateSessionStatus('k', 'running')
+    ptyManager.promoteToHookStatus('k')
+    expect(analyzers[0].calls).toEqual([
+      ['one\n', true],
+      ['Allow? ', true]
+    ])
+    pm.flushAnalysis('k')
+    expect(session.status).toBe('running')
+    pm.clearSessionTracking('k')
+    pm.sessions.delete('k')
+  })
+
+  it('analyzes held output before input decides the session is active', () => {
+    const session = addSession('i')
+    pm.appendOutput('i', 'one\n')
+    analyzers[0].next = 2 // waiting
+    pm.appendOutput('i', 'Continue? ')
+    ptyManager.writeToPty('i', 'y')
+    pm.flushAnalysis('i')
+    // The prompt was seen first, so the answer moves the session on.
+    expect(session.status).toBe('running')
+    pm.clearSessionTracking('i')
+    pm.sessions.delete('i')
+  })
+
   it('takes status from the reads after a bracketed-paste switch, as per-read analysis does', () => {
     const session = addSession('b')
     pm.appendOutput('b', 'start\n')
@@ -273,8 +305,10 @@ describe('output analysis on the native core', () => {
     pm.appendOutput('b', ' more')
     analyzers[0].next = 1 // running, from the patterns on the reads after the switch
     pm.flushAnalysis('b')
-    // The switch ends one part and the reads after it make another, so the
+    // The switch ends one batch and the reads after it make the next, so the
     // core cannot let the switch decide for the reads that followed it.
+    expect(analyzers[0].calls).toHaveLength(2)
+    pm.flushAnalysis('b')
     expect(analyzers[0].calls).toEqual([
       ['start\n', true],
       ['out\x1b[?2004h> ', true],
@@ -297,6 +331,24 @@ describe('output analysis on the native core', () => {
     ])
     pm.clearSessionTracking('c')
     pm.sessions.delete('c')
+  })
+
+  it('analyzes a burst in batches of at most 64 KB, one per turn, and all of it for getOutput', async () => {
+    addSession('big')
+    pm.appendOutput('big', 'a\n')
+    const burst = 'x'.repeat(3 * MAX_FLUSH_UNITS) + '\n'
+    pm.appendOutput('big', burst)
+    const analyzer = analyzers.at(-1)!
+    expect(analyzer.calls).toHaveLength(1)
+
+    await new Promise((r) => setImmediate(r))
+    expect(analyzer.calls).toHaveLength(2)
+    expect(analyzer.calls[1]![0]).toHaveLength(MAX_FLUSH_UNITS)
+
+    expect(ptyManager.getOutput('big')).toEqual(['a', 'x'.repeat(3 * MAX_FLUSH_UNITS)])
+    expect(analyzer.calls.every(([d]) => d.length <= MAX_FLUSH_UNITS)).toBe(true)
+    pm.clearSessionTracking('big')
+    pm.sessions.delete('big')
   })
 
   it('keeps the analysis a terminal opened with when the switch moves before its first output', () => {

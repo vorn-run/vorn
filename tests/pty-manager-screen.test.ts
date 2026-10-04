@@ -143,7 +143,8 @@ import {
   resetHistory
 } from '../packages/server/src/history/writer'
 import { historyDir, LOG_FILE } from '../packages/server/src/history/checkpoint'
-import { readFrames, type Frame } from '../packages/server/src/history/log'
+import { readFrames, readHeader, type LogRecord } from '../packages/server/src/history/log'
+import { MAX_FLUSH_UNITS } from '../packages/server/src/output-buffer'
 import { readScrollback, resetScrollback } from '../packages/server/src/terminal-scrollback'
 
 vi.mocked(isGitRepo).mockResolvedValue(false)
@@ -170,6 +171,10 @@ const ESC = '\x1b'
 
 // Past the 8 ms hold and its re-arm: a small first read goes out at once, everything else waits for this.
 const afterFlush = (): Promise<void> => new Promise((r) => setTimeout(r, 40))
+
+/** Whether a session's output is still inside its hold, so a new read joins it rather than going out at once. */
+const holding = (id: string): boolean =>
+  (ptyManager as unknown as { flushTimers: Map<string, unknown> }).flushTimers.has(id)
 
 beforeEach(() => {
   // Every session this file starts is torn down, so a count taken in one test
@@ -301,8 +306,9 @@ describe('the terminal is recorded where it is fed', () => {
     }
   }
 
-  function framesFor(id: string): Frame[] {
-    return readFrames(fs.readFileSync(path.join(historyDir(dir, id), LOG_FILE))).frames
+  function framesFor(id: string): LogRecord[] {
+    const buf = fs.readFileSync(path.join(historyDir(dir, id), LOG_FILE))
+    return readFrames(buf, readHeader(buf)!).records
   }
 
   it('does not let the byte buffer run ahead of the screen model', async () => {
@@ -394,13 +400,116 @@ describe('the terminal is recorded where it is fed', () => {
       expect(seen).toEqual(['a', 'b', 'c'])
     })
 
+    it('sends a burst in flushes of at most 64 KB, in order, starting on the next turn', async () => {
+      // A program printing a megabyte in one read must not hold the loop for a
+      // megabyte's worth of framing, parsing and recording in one flush.
+      const { session, fake } = await createAgent()
+      const seen = flushesOf(session.id)
+      const burst = Array.from({ length: 200 }, (_, i) => `line ${i} `.padEnd(1000, '.')).join('')
+
+      fake.emitData('x'.repeat(100))
+      fake.emitData(burst)
+      expect(seen).toEqual([])
+
+      await new Promise((r) => setImmediate(r))
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toHaveLength(MAX_FLUSH_UNITS)
+
+      await afterFlush()
+      await afterFlush()
+      expect(seen.every((f) => f.length <= MAX_FLUSH_UNITS)).toBe(true)
+      expect(seen.join('')).toBe('x'.repeat(100) + burst)
+    })
+
+    it('takes turns between sessions rather than draining one first', async () => {
+      const a = await createAgent()
+      const b = await createAgent()
+      const order: string[] = []
+      const listener = (channel: string, payload: unknown): void => {
+        const p = payload as { id: string }
+        if (channel !== 'terminal:data') return
+        if (p.id === a.session.id) order.push('a')
+        else if (p.id === b.session.id) order.push('b')
+      }
+      ptyManager.on('client-message', listener)
+      listeners.push(listener)
+
+      a.fake.emitData('a'.repeat(3 * MAX_FLUSH_UNITS))
+      b.fake.emitData('b'.repeat(3 * MAX_FLUSH_UNITS))
+      // Turns, not a count of them: with native analysis every other turn analyses.
+      for (let i = 0; i < 16 && order.length < 4; i++) await new Promise((r) => setImmediate(r))
+
+      expect(order.slice(0, 4)).toEqual(['a', 'b', 'a', 'b'])
+    })
+
+    it("keeps a drain turn within one flush's worth across sessions of mixed sizes", async () => {
+      const internals = ptyManager as unknown as { drainOne(): void }
+      const sizes = [3 * MAX_FLUSH_UNITS, 40_000, 70_000, 1_000, 2 * MAX_FLUSH_UNITS + 5]
+      const agents: Awaited<ReturnType<typeof createAgent>>[] = []
+      // One at a time: each takes the pty spawned for it.
+      for (let i = 0; i < sizes.length; i++) agents.push(await createAgent())
+      const sent = new Map<string, string[]>()
+      let inTurn = -1
+      let largestTurn = 0
+      const listener = (channel: string, payload: unknown): void => {
+        const p = payload as { id: string; data: string }
+        if (channel !== 'terminal:data') return
+        sent.set(p.id, [...(sent.get(p.id) ?? []), p.data])
+        if (inTurn >= 0) inTurn += p.data.length
+      }
+      ptyManager.on('client-message', listener)
+      listeners.push(listener)
+      const drainOne = internals.drainOne
+      internals.drainOne = function (this: unknown) {
+        inTurn = 0
+        drainOne.call(this)
+        largestTurn = Math.max(largestTurn, inTurn)
+        inTurn = -1
+      }
+      try {
+        agents.forEach(({ fake }, i) => {
+          fake.emitData('.')
+          fake.emitData(String.fromCharCode(97 + i).repeat(sizes[i]!))
+        })
+        const total = (id: string): number => (sent.get(id) ?? []).join('').length
+        await vi.waitFor(() =>
+          expect(agents.map(({ session }) => total(session.id))).toEqual(sizes.map((n) => n + 1))
+        )
+      } finally {
+        delete (internals as { drainOne?: unknown }).drainOne
+      }
+      expect(largestTurn).toBeGreaterThan(0)
+      expect(largestTurn).toBeLessThanOrEqual(MAX_FLUSH_UNITS)
+      agents.forEach(({ session }, i) => {
+        expect(sent.get(session.id)!.join('')).toBe(
+          '.' + String.fromCharCode(97 + i).repeat(sizes[i]!)
+        )
+      })
+    })
+
+    it('sends everything held when the session exits, still capped per flush', async () => {
+      const { session, fake } = await createAgent()
+      const seen = flushesOf(session.id)
+
+      fake.emitData('x'.repeat(100))
+      fake.emitData('y'.repeat(2 * MAX_FLUSH_UNITS))
+      fake.emitExit(0)
+
+      expect(seen.join('')).toBe('x'.repeat(100) + 'y'.repeat(2 * MAX_FLUSH_UNITS))
+      expect(seen.every((f) => f.length <= MAX_FLUSH_UNITS)).toBe(true)
+    })
+
     it('is quick again once the stream has gone quiet', async () => {
       const { session, fake } = await createAgent()
       const seen = flushesOf(session.id)
 
       fake.emitData('a')
       fake.emitData('b')
-      await afterFlush()
+      // Until 'b' has gone out and the hold after it has lapsed with nothing
+      // to send, rather than a fixed sleep: on a loaded runner the timer and
+      // the drain turn after it can take longer than any sleep chosen here.
+      await vi.waitFor(() => expect(seen).toEqual(['a', 'b']))
+      await vi.waitFor(() => expect(holding(session.id)).toBe(false))
       fake.emitData('c')
 
       expect(seen).toEqual(['a', 'b', 'c'])
@@ -421,12 +530,13 @@ describe('the terminal is recorded where it is fed', () => {
     ptyManager.resizePty(session.id, 132, 43)
     await settled()
 
-    expect(framesFor(session.id)).toEqual(
-      expect.arrayContaining<Frame>([
-        { kind: 'output', data: 'tests passed, 402 of them\r\n' },
-        { kind: 'resize', cols: 132, rows: 43 }
-      ])
-    )
+    expect(framesFor(session.id)).toEqual([
+      { kind: 'data', rseq: 0, startOffset: 0, stream: 0, data: 'tests passed, 402 of them\r\n' },
+      { kind: 'resize', rseq: 1, startOffset: 27, cols: 132, rows: 43, pxWidth: 0, pxHeight: 0 }
+    ])
+    // And an attach is told the same place: the record after the resize, the
+    // byte after the output.
+    expect(ptyManager.recordCursor(session.id)).toMatchObject({ nextRseq: 2, nextOffset: 27 })
   })
 
   it('records once per flush rather than once per chunk', async () => {
@@ -438,10 +548,10 @@ describe('the terminal is recorded where it is fed', () => {
     await afterFlush()
     await settled()
 
-    const output = framesFor(session.id).filter((f) => f.kind === 'output')
-    expect(output).toEqual([
-      { kind: 'output', data: 'x' },
-      { kind: 'output', data: 'x'.repeat(29) }
+    const output = framesFor(session.id).filter((f) => f.kind === 'data')
+    expect(output).toMatchObject([
+      { rseq: 0, startOffset: 0, data: 'x' },
+      { rseq: 1, startOffset: 1, data: 'x'.repeat(29) }
     ])
   })
 

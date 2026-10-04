@@ -10,15 +10,14 @@ import {
 } from '../../packages/server/src/terminal-screen'
 import {
   configureHistory,
-  startHistory,
-  recordOutput,
   flushHistory,
   settleHistory,
   resetHistory
 } from '../../packages/server/src/history/writer'
 import { recoverHistory } from '../../packages/server/src/history/recovery'
 import { historyDir } from '../../packages/server/src/history/checkpoint'
-import { frameOutput } from '../../packages/server/src/history/log'
+import { frameData } from '../../packages/server/src/history/log'
+import { recordText, startRecording } from './records'
 import { chunks, ms, msAsync, CHUNKS, COLS, ROWS } from './measure-output'
 
 /**
@@ -63,11 +62,11 @@ function fill(count: number, data: string[]): string[] {
     const id = `session-${i}`
     ids.push(id)
     createScreen(id, COLS, ROWS)
-    startHistory(id)
+    startRecording(id)
     for (const chunk of data) {
       appendScrollback(id, chunk)
       feedScreen(id, chunk)
-      recordOutput(id, chunk)
+      recordText(id, chunk)
     }
   }
   return ids
@@ -82,11 +81,11 @@ async function main(): Promise<void> {
     const warm = scratch()
     configureHistory(warm)
     createScreen('warm', COLS, ROWS)
-    startHistory('warm')
+    startRecording('warm')
     for (const c of data.slice(0, 500)) {
       appendScrollback('warm', c)
       feedScreen('warm', c)
-      recordOutput('warm', c)
+      recordText('warm', c)
     }
     await flushHistory()
     await recoverHistory(warm, [{ id: 'warm' }])
@@ -115,7 +114,7 @@ async function main(): Promise<void> {
   // is a batch of chunks rather than a chunk -- one encode and one checksum pass
   // over the same bytes instead of a hundred of each.
   const frameOnly = ms(() => {
-    for (const c of data) frameOutput(c)
+    for (const c of data) frameData({ rseq: 0, startOffset: 0 }, Buffer.from(c, 'utf-8'))
   })
 
   const flushes: string[] = []
@@ -123,7 +122,7 @@ async function main(): Promise<void> {
     flushes.push(data.slice(at, at + PER_FLUSH).join(''))
   }
   const frameCoalesced = ms(() => {
-    for (const f of flushes) frameOutput(f)
+    for (const f of flushes) frameData({ rseq: 0, startOffset: 0 }, Buffer.from(f, 'utf-8'))
   })
 
   let dir = scratch()
@@ -148,12 +147,12 @@ async function main(): Promise<void> {
   resetHistory()
   configureHistory(dir)
   createScreen('t', COLS, ROWS)
-  startHistory('t')
+  startRecording('t')
   let withHistory = ms(() => {
     for (const c of data) {
       appendScrollback('t', c)
       feedScreen('t', c)
-      recordOutput('t', c)
+      recordText('t', c)
     }
   })
   withHistory += await msAsync(async () => {

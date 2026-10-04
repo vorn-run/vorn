@@ -18,6 +18,7 @@ import type {
   HeadlessSession,
   AppConfig,
   CoreStatus,
+  RecordCursor,
   ResizePayload,
   FileEntry,
   FileStamp,
@@ -668,7 +669,8 @@ export interface RequestMethods {
    */
   'terminal:attach': {
     params: { id: string }
-    result: { data: string; seq: number; live: boolean }
+    /** `cursor` is where `data` ends in the session's record log; absent with no live process. */
+    result: { data: string; seq: number; live: boolean; cursor?: RecordCursor }
   }
   'shell:create': { params: string | undefined; result: TerminalSession }
   'config:load': { params: void; result: AppConfig }
@@ -1370,6 +1372,11 @@ export interface ServerNotifications {
    * session nobody has open still reaches whoever is meant to be interrupted.
    */
   'terminal:bell': { id: string }
+  /**
+   * Output for this terminal was withheld while the client was too far behind.
+   * Its screen is now stale: re-attach to get the present one.
+   */
+  'terminal:resync': { id: string }
   'terminal:exit': { id: string; exitCode: number }
   'session:created': TerminalSession
   'session:updated': TerminalSession
@@ -1459,8 +1466,11 @@ export interface ClientNotifications {
    * Prefer the `topics` query parameter on the socket URL for the initial set:
    * this message can only take effect after the socket is already receiving.
    */
-  /** A field left out stays as it was; `terminalBytes` asks for output as frames. */
-  'subscribe:set': { topics?: readonly string[]; terminalBytes?: boolean }
+  /**
+   * A field left out stays as it was; `terminalBytes` asks for output as frames,
+   * `resync` promises to re-attach on `terminal:resync`.
+   */
+  'subscribe:set': { topics?: readonly string[]; terminalBytes?: boolean; resync?: boolean }
   /** The answer to `extension:selectionRequest`, from the window that drew the terminal. */
   'extension:selectionResult': { requestId: number; text: string }
 }

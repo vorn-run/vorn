@@ -2316,6 +2316,7 @@ dependencies = [
  "tokio",
  "vorn-analysis",
  "vorn-git",
+ "vorn-pipeline",
  "vorn-screen",
 ]
 
@@ -2325,6 +2326,17 @@ version = "0.0.0"
 dependencies = [
  "gix",
  "tempfile",
+]
+
+[[package]]
+name = "vorn-pipeline"
+version = "0.7.5"
+dependencies = [
+ "crc32fast",
+ "memchr",
+ "serde_json",
+ "vorn-screen",
+ "vorn-term-proto",
 ]
 
 [[package]]
@@ -2349,6 +2361,13 @@ dependencies = [
  "tokio",
  "vorn-term-proto",
  "windows-sys",
+]
+
+[[package]]
+name = "vorn-term-mirror"
+version = "0.7.5"
+dependencies = [
+ "vorn-term-proto",
 ]
 
 [[package]]

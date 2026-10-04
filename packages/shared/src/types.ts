@@ -1837,6 +1837,12 @@ export interface ExperimentalConfig {
    */
   nativeGit?: boolean
   /**
+   * Each terminal's screen model, scrollback and history framing on a thread
+   * of its own instead of the server's event loop. Uses the native screen
+   * model whatever `nativeScreen` says.
+   */
+  nativePipeline?: boolean
+  /**
    * The desktop app talks to the server through vornd, the native daemon,
    * instead of directly. Read by the app rather than the server, when it starts.
    */
@@ -1847,6 +1853,22 @@ export interface ExperimentalConfig {
    * core switch: it works whether or not the Rust core loaded.
    */
   deviceVideo?: boolean
+}
+
+/**
+ * Where a state of a terminal ends, in its record log: the first record and the
+ * first byte that state does not include. The Session Recovery Contract's
+ * cursor, with the same meaning everywhere it appears -- a checkpoint's resume
+ * point, a log's starting point, what an attach reflects.
+ *
+ * `epoch` changes whenever the log starts again from nothing (a new process
+ * under the id), so a cursor from another epoch names nothing in this one.
+ * Offsets count UTF-8 bytes of output, not UTF-16 units.
+ */
+export interface RecordCursor {
+  epoch: number
+  nextRseq: number
+  nextOffset: number
 }
 
 /** Whether the desktop app is talking to its server through vornd. */
@@ -1909,6 +1931,7 @@ export const IPC = {
   TERMINAL_LIST_ACTIVE: 'terminal:listActive',
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_BELL: 'terminal:bell',
+  TERMINAL_RESYNC: 'terminal:resync',
   TERMINAL_EXIT: 'terminal:exit',
   SESSION_CREATED: 'session:created',
   SESSION_UPDATED: 'session:updated',

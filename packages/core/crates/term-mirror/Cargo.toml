@@ -1,0 +1,11 @@
+[package]
+name = "vorn-term-mirror"
+version = "0.7.5"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "A client's copy of a terminal's screen, kept from vornd's snapshots and deltas with no VT parser in it"
+
+[dependencies]
+vorn-term-proto = { path = "../term-proto" }

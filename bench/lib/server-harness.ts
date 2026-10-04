@@ -12,6 +12,7 @@
  * the methods the plan names as hotspots, and widening their visibility for a
  * benchmark would change the product for the sake of a measurement.
  */
+import type { HeldOutput } from '../../packages/server/src/output-buffer'
 import type { EventEmitter } from 'node:events'
 import type { WebSocket } from 'ws'
 import { ptyManager } from '../../packages/server/src/pty-manager'
@@ -33,7 +34,7 @@ interface PtyInternals extends Pick<EventEmitter, 'on' | 'off'> {
   clearBuffer(id: string): void
   clearSessionTracking(id: string): void
   setupPtyEvents(id: string, pty: ManagedPty, cols: number, rows: number): void
-  dataBuffers: Map<string, string>
+  dataBuffers: Map<string, HeldOutput>
   flushSeq: Map<string, number>
 }
 

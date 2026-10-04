@@ -347,6 +347,7 @@ function wireServerNotifications(bridge: ServerBridge): void {
       // Terminal data/exit → forward to renderer
       case IPC.TERMINAL_DATA:
       case IPC.TERMINAL_BELL:
+      case IPC.TERMINAL_RESYNC:
       case IPC.TERMINAL_EXIT:
       case IPC.HEADLESS_DATA:
       case IPC.HEADLESS_EXIT:

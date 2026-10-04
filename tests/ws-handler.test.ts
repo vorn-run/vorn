@@ -182,7 +182,8 @@ describe('handshake', () => {
     expect(sentFrames(ws)[0].params?.capabilities).toEqual({
       auth: 1,
       subscribe: 1,
-      terminalBytes: 1
+      terminalBytes: 1,
+      terminalResync: 1
     })
   })
 
@@ -615,7 +616,7 @@ describe('narrowing what a socket receives', () => {
 
     sendMessage(ws, { jsonrpc: '2.0', method: 'subscribe:set', params: { topics: ['session:*'] } })
 
-    expect(clientRegistry.setTopics).toHaveBeenCalledWith(ws, ['session:*'], undefined)
+    expect(clientRegistry.setTopics).toHaveBeenCalledWith(ws, ['session:*'], undefined, undefined)
   })
 
   it('passes on a request for terminal output as bytes', () => {
@@ -624,7 +625,16 @@ describe('narrowing what a socket receives', () => {
 
     sendMessage(ws, { jsonrpc: '2.0', method: 'subscribe:set', params: { terminalBytes: true } })
 
-    expect(clientRegistry.setTopics).toHaveBeenCalledWith(ws, undefined, true)
+    expect(clientRegistry.setTopics).toHaveBeenCalledWith(ws, undefined, true, undefined)
+  })
+
+  it('passes on a promise to re-attach on resync', () => {
+    const ws = createMockWs()
+    connectAuthed(ws)
+
+    sendMessage(ws, { jsonrpc: '2.0', method: 'subscribe:set', params: { resync: true } })
+
+    expect(clientRegistry.setTopics).toHaveBeenCalledWith(ws, undefined, undefined, true)
   })
 
   it('does not count asking for bytes as activity', () => {

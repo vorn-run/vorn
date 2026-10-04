@@ -10,6 +10,7 @@ import {
 } from './command-blocks'
 import { chooseAnchor, readScrollAnchor, resolveAnchor, writeScrollAnchor } from './scroll-anchor'
 import type { BufferMetrics } from './spine-layout'
+import { clearBlockLog } from './block-log'
 import { startOverlaySync, type OverlaySync } from './overlay-sync'
 import { TERMINAL_BACKGROUND } from '../../shared/surface'
 import type { TerminalData } from '@vornrun/shared/protocol'
@@ -134,17 +135,22 @@ function receive(id: string, chunk: Chunk): void {
 }
 
 let removeGlobalDataListener: (() => void) | null = null
+let removeResyncListener: (() => void) | null = null
 
 export function initGlobalDataListener(): void {
   if (removeGlobalDataListener) return
   removeGlobalDataListener = window.api.onTerminalData(({ id, data, seq }) =>
     receive(id, { data, seq })
   )
+  // Optional for a surface older than the notification, as attach is below.
+  removeResyncListener = window.api.onTerminalResync?.(({ id }) => void resyncTerminal(id)) ?? null
 }
 
 export function disposeGlobalDataListener(): void {
   removeGlobalDataListener?.()
   removeGlobalDataListener = null
+  removeResyncListener?.()
+  removeResyncListener = null
   hydrating.clear()
   seeding.clear()
 }
@@ -172,7 +178,10 @@ export function disposeGlobalDataListener(): void {
  * here, and one already in flight is joined rather than started again. A
  * terminal seeded twice has its scrollback twice.
  */
-export function hydrateTerminal(terminalId: string): Promise<void> {
+export function hydrateTerminal(
+  terminalId: string,
+  { replace = false }: { replace?: boolean } = {}
+): Promise<void> {
   const already = hydrating.get(terminalId)
   if (already) return already.done
 
@@ -220,6 +229,16 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
     try {
       const { data, seq, live } = await window.api.attachTerminal(terminalId)
       if (!stillOurs()) return
+      // A resync replaces the screen only with something. A terminal that
+      // ended while this window was behind comes back empty, and what is on
+      // screen here is then more than the server still has.
+      if (replace && data) {
+        entry.term.reset()
+        // The seed replays the shell's command marks, and the log would take
+        // every command in it a second time. It is rebuilt from the seed, as
+        // the log of a pane that did not create its terminal is.
+        clearBlockLog(terminalId)
+      }
       if (data) {
         // Cleared from the write callback, which xterm runs once these bytes
         // have been parsed -- so it covers every reply they provoke and nothing
@@ -261,6 +280,27 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
     }
   })()
   return state.done
+}
+
+/**
+ * Start a terminal again from the server's screen, after output was withheld.
+ *
+ * The server stops sending a window output it cannot keep up with, and says so
+ * once the window has caught up. What it skipped is gone from this side, so the
+ * screen here is wrong in a way no later output repairs: it is cleared and
+ * seeded again, exactly as a pane that did not create its terminal is.
+ *
+ * After any seed already in flight, rather than joining it: that one may have
+ * been asked for before the gap, and its answer would not cover it.
+ */
+export function resyncTerminal(terminalId: string): Promise<void> {
+  const inFlight = hydrating.get(terminalId)?.done ?? Promise.resolve()
+  return inFlight.then(() => {
+    const entry = registry.get(terminalId)
+    if (!entry) return
+    entry._hydrated = false
+    return hydrateTerminal(terminalId, { replace: true })
+  })
 }
 
 /**

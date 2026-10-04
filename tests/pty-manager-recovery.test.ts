@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { setTimeout as realSleep } from 'node:timers/promises'
 import { IPC } from '@vornrun/shared/types'
 import type { CreateTerminalPayload, RemoteHost, TerminalSession } from '@vornrun/shared/types'
 
@@ -724,16 +725,17 @@ describe('idle timeout', () => {
 })
 
 describe('the bell', () => {
+  // Awaited: a terminal on a core thread finds its bell after the flush.
   it('rings for output that is actually arriving', async () => {
     const { session, fake } = await createAgent()
 
     fake.emitData('done \x07')
     vi.advanceTimersByTime(50)
 
-    expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([{ id: session.id }])
+    await vi.waitFor(() => expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([{ id: session.id }]))
   })
 
-  it('rings for a plain shell too', () => {
+  it('rings for a plain shell too', async () => {
     // The status analysis above this returns early for a shell. A bell is not
     // status -- a shell that rings wants you just as much as an agent does.
     const session = ptyManager.createShellPty('/tmp/vorn-proj')
@@ -742,14 +744,18 @@ describe('the bell', () => {
     fake.emitData('\x07')
     vi.advanceTimersByTime(50)
 
-    expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([{ id: session.id }])
+    await vi.waitFor(() => expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([{ id: session.id }]))
   })
+
+  /** Long enough for a core thread's bell to have arrived, if it was going to. */
+  const bellsLanded = (): Promise<void> => realSleep(30)
 
   it('stays quiet for output with no bell in it', async () => {
     const { fake } = await createAgent()
 
     fake.emitData('perfectly ordinary output\n')
     vi.advanceTimersByTime(50)
+    await bellsLanded()
 
     expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([])
   })
@@ -762,11 +768,13 @@ describe('the bell', () => {
     const { session, fake } = await createAgent()
     fake.emitData('ding \x07 ding')
     vi.advanceTimersByTime(50)
+    await bellsLanded()
     messages.length = 0
 
     // Whatever a pane does with the scrollback afterwards, it is not output.
     ptyManager.getOutput(session.id, 100)
     vi.advanceTimersByTime(50)
+    await bellsLanded()
 
     expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([])
   })

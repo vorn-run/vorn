@@ -146,6 +146,9 @@ registerCapability('auth', 1)
 registerCapability('subscribe', 1)
 // Terminal output as frames of bytes, for a socket that asks; the number is the frame layout.
 registerCapability('terminalBytes', 1)
+// Terminal output withheld from a client that falls too far behind, and
+// `terminal:resync` once it catches up, for a socket that says it re-attaches.
+registerCapability('terminalResync', 1)
 
 /**
  * Register a method handler. Called during server startup to wire up
@@ -449,8 +452,10 @@ export function handleConnection(
     // `registerNotification` because it is the socket that is being configured,
     // and a registered handler is given only its params.
     if (method === 'subscribe:set') {
-      const options = params as { topics?: readonly string[]; terminalBytes?: boolean } | undefined
-      clientRegistry.setTopics(ws, options?.topics, options?.terminalBytes)
+      const options = params as
+        | { topics?: readonly string[]; terminalBytes?: boolean; resync?: boolean }
+        | undefined
+      clientRegistry.setTopics(ws, options?.topics, options?.terminalBytes, options?.resync)
       if (id !== undefined && id !== null) {
         ws.send(JSON.stringify(createResponse(id, { ok: true })))
       }

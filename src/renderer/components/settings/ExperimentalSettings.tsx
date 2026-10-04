@@ -39,6 +39,13 @@ const SWITCHES: {
     core: true
   },
   {
+    key: 'nativePipeline',
+    label: 'Terminal output on a core thread',
+    description:
+      "Parse each terminal's screen, keep its scrollback and frame its history on a thread of its own, so a flood of output does not slow the app. Uses the native screen model.",
+    core: true
+  },
+  {
     key: 'deviceVideo',
     label: 'Device video',
     description:

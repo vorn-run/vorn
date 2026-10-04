@@ -17,15 +17,19 @@ A Cargo workspace. The logic is in plain crates with no napi in them, so it can
 later serve a daemon or the native UI, and its tests and benchmarks are ordinary
 Rust binaries:
 
-| Crate                               | What                                                              |
-| ----------------------------------- | ----------------------------------------------------------------- |
-| `crates/screen` (`vorn-screen`)     | A terminal's screen on libghostty-vt: feed, title, cwd, serialize |
-| `crates/analysis` (`vorn-analysis`) | Stripped line ring, bracketed paste and status patterns           |
-| `crates/vornd` (`vornd`)            | A daemon in front of the server; forwards everything for now      |
-| `.` (`vorn-core`)                   | The napi adapters the server loads as `vorn_core.node`            |
+| Crate                                     | What                                                                               |
+| ----------------------------------------- | ---------------------------------------------------------------------------------- |
+| `crates/screen` (`vorn-screen`)           | A terminal's screen on libghostty-vt: feed, title, cwd, serialize                  |
+| `crates/analysis` (`vorn-analysis`)       | Stripped line ring, bracketed paste and status patterns                            |
+| `crates/pipeline` (`vorn-pipeline`)       | A terminal's thread: screen, scrollback ring, history frames and checkpoint bodies |
+| `crates/term-proto` (`vorn-term-proto`)   | Wire types: record headers and cursors, the screen mirror's rows, `row_fmt` 1      |
+| `crates/term-mirror` (`vorn-term-mirror`) | A client's copy of a screen, kept from snapshots and deltas with no parser         |
+| `crates/vornd` (`vornd`)                  | A daemon in front of the server; forwards everything for now                       |
+| `crates/sessiond` (`vorn-sessiond`)       | Holds terminal sessions and their output so the app can reconnect                  |
+| `.` (`vorn-core`)                         | The napi adapters the server loads as `vorn_core.node`                             |
 
 ```sh
-cargo test -p vorn-screen -p vorn-analysis   # the logic, on any platform
+cargo test --workspace --exclude vorn-core   # the logic, on any platform
 cargo bench -p vorn-analysis                 # Criterion, without napi
 ```
 

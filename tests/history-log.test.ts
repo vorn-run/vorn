@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import {
   crc32,
+  cursorAfter,
   writeHeader,
   readHeader,
   readFrames,
-  frameBatch,
-  frameOutput,
+  frameData,
   frameResize,
   FORMAT_VERSION,
-  type Frame
+  type LogRecord
 } from '../packages/server/src/history/log'
 
 /**
@@ -24,110 +24,205 @@ import {
  * bad files already exist.
  */
 
-const log = (...frames: Buffer[]): Buffer => Buffer.concat([writeHeader(1), ...frames])
+const START = { epoch: 9, nextRseq: 0, nextOffset: 0 }
+const HEADER = writeHeader(1, START)
+
+/** Records numbered from the start of the log, as the PTY reader numbers them. */
+function numbered(...items: Array<string | [number, number]>): Buffer[] {
+  let rseq = 0
+  let offset = 0
+  return items.map((item) => {
+    const at = { rseq: rseq++, startOffset: offset }
+    if (typeof item !== 'string') return frameResize(at, item[0], item[1])
+    const bytes = Buffer.from(item, 'utf-8')
+    offset += bytes.length
+    return frameData(at, bytes)
+  })
+}
+
+const log = (...frames: Buffer[]): Buffer => Buffer.concat([HEADER, ...frames])
+const read = (buf: Buffer): ReturnType<typeof readFrames> => readFrames(buf, readHeader(buf)!)
+const texts = (records: LogRecord[]): string[] =>
+  records.map((r) => (r.kind === 'data' ? r.data : `${r.cols}x${r.rows}`))
 
 /** Our magic, a version we do not speak. The shape a future writer leaves. */
 function versioned(version: number): Buffer {
-  const buf = Buffer.from(writeHeader(1))
+  const buf = Buffer.from(HEADER)
   buf.writeUInt8(version, 4)
   return buf
 }
 
 describe('the header', () => {
-  it('round-trips', () => {
-    expect(readHeader(writeHeader(7))).toEqual({ formatVersion: FORMAT_VERSION, generation: 7 })
+  it('round-trips, with the cursor the log starts at', () => {
+    const start = { epoch: 0xfffffffe, nextRseq: 2 ** 40, nextOffset: 2 ** 52 + 3 }
+    expect(readHeader(writeHeader(7, start))).toEqual({
+      formatVersion: FORMAT_VERSION,
+      generation: 7,
+      start,
+      bytes: writeHeader(7, start).length
+    })
   })
 
   it.each([
     ['an empty file', Buffer.alloc(0)],
     ['a file shorter than the header', Buffer.from('VRN')],
     ['a file that is not ours', Buffer.from('SQLite format 3\0')],
-    ['a file from a version this one does not know', versioned(FORMAT_VERSION + 1)]
+    ['a file from a version this one does not know', versioned(FORMAT_VERSION + 1)],
+    ['a version 2 header cut short', HEADER.subarray(0, HEADER.length - 1)]
   ])('refuses %s rather than guessing', (_label, buf) => {
-    // All three are ordinary things to find after a crash, and the answer to all
-    // three is the same: there is no history here, start again.
+    // All of these are ordinary things to find after a crash, and the answer to
+    // all of them is the same: there is no history here, start again.
     expect(readHeader(buf)).toBeNull()
   })
 })
 
-describe('frames', () => {
-  it('round-trips every kind, in order', () => {
-    const buf = log(frameBatch(1180), frameOutput('\x1b[31mred\x1b[0m'), frameResize(200, 50))
-
-    const { frames, reason } = readFrames(buf)
+describe('records', () => {
+  it('round-trips every kind, in order, with its place', () => {
+    const { records, reason } = read(log(...numbered('\x1b[31mred\x1b[0m', [200, 50], 'after')))
 
     expect(reason).toBe('end')
-    expect(frames).toEqual<Frame[]>([
-      { kind: 'batch', seq: 1180 },
-      { kind: 'output', data: '\x1b[31mred\x1b[0m' },
-      { kind: 'resize', cols: 200, rows: 50 }
+    expect(records).toEqual<LogRecord[]>([
+      { kind: 'data', rseq: 0, startOffset: 0, stream: 0, data: '\x1b[31mred\x1b[0m' },
+      { kind: 'resize', rseq: 1, startOffset: 12, cols: 200, rows: 50, pxWidth: 0, pxHeight: 0 },
+      { kind: 'data', rseq: 2, startOffset: 12, stream: 0, data: 'after' }
     ])
   })
 
-  it('carries bytes that are not ASCII', () => {
-    const buf = log(frameOutput('▁▂▃ 日本語 🙂'))
-    expect(readFrames(buf).frames).toEqual([{ kind: 'output', data: '▁▂▃ 日本語 🙂' }])
+  it('counts offsets in bytes, not in UTF-16 units', () => {
+    const { records } = read(log(...numbered('▁▂▃ 日本語 🙂', 'next')))
+    expect(records[0]).toMatchObject({ data: '▁▂▃ 日本語 🙂', startOffset: 0 })
+    expect(records[1]).toMatchObject({ startOffset: Buffer.byteLength('▁▂▃ 日本語 🙂') })
+  })
+
+  it('names the cursor after a record: the first record and byte it does not include', () => {
+    // The worked example from the Session Recovery Contract: record 7 starts at
+    // byte 100 and carries 20 bytes, so a state that includes it resumes at
+    // record 8, byte 120 -- never at 100, which would send bytes 100-119 twice.
+    const record: LogRecord = {
+      kind: 'data',
+      rseq: 7,
+      startOffset: 100,
+      stream: 0,
+      data: 'x'.repeat(20)
+    }
+    expect(cursorAfter(3, record)).toEqual({ epoch: 3, nextRseq: 8, nextOffset: 120 })
+    const resize: LogRecord = {
+      ...record,
+      kind: 'resize',
+      cols: 1,
+      rows: 1,
+      pxWidth: 0,
+      pxHeight: 0
+    }
+    expect(cursorAfter(3, resize)).toEqual({ epoch: 3, nextRseq: 8, nextOffset: 100 })
   })
 
   it('carries an empty write without losing its place', () => {
-    const buf = log(frameOutput(''), frameOutput('after'))
-    expect(readFrames(buf).frames).toEqual([
-      { kind: 'output', data: '' },
-      { kind: 'output', data: 'after' }
-    ])
+    expect(texts(read(log(...numbered('', 'after'))).records)).toEqual(['', 'after'])
+  })
+})
+
+describe('a version 1 log, written before records had places', () => {
+  /** The old layout, byte for byte, so an update can still restore what it finds. */
+  function legacy(...frames: Array<[number, Buffer]>): Buffer {
+    const header = Buffer.alloc(9)
+    header.write('VRNL', 0, 'ascii')
+    header.writeUInt8(1, 4)
+    header.writeUInt32LE(4, 5)
+    const body = frames.map(([kind, payload]) => {
+      const frame = Buffer.alloc(9 + payload.length)
+      frame.writeUInt8(kind, 0)
+      frame.writeUInt32LE(payload.length, 1)
+      frame.writeUInt32LE(crc32(payload), 5)
+      payload.copy(frame, 9)
+      return frame
+    })
+    return Buffer.concat([header, ...body])
+  }
+  const batch = (seq: number): [number, Buffer] => {
+    const b = Buffer.alloc(4)
+    b.writeUInt32LE(seq, 0)
+    return [0x01, b]
+  }
+  const output = (text: string): [number, Buffer] => [0x02, Buffer.from(text, 'utf-8')]
+  const resize = (cols: number, rows: number): [number, Buffer] => {
+    const b = Buffer.alloc(4)
+    b.writeUInt16LE(cols, 0)
+    b.writeUInt16LE(rows, 2)
+    return [0x03, b]
+  }
+
+  it('is still read, with batch markers dropped and records numbered in order', () => {
+    const buf = legacy(batch(1), output('héllo'), resize(100, 30), batch(2), output('!'))
+    const header = readHeader(buf)!
+    expect(header).toEqual({ formatVersion: 1, generation: 4, bytes: 9 })
+    expect(readFrames(buf, header)).toMatchObject({
+      reason: 'end',
+      records: [
+        { kind: 'data', rseq: 0, startOffset: 0, data: 'héllo' },
+        { kind: 'resize', rseq: 1, startOffset: 6, cols: 100, rows: 30 },
+        { kind: 'data', rseq: 2, startOffset: 6, data: '!' }
+      ]
+    })
+  })
+
+  it('reports one of its kinds with the wrong payload size as malformed', () => {
+    const buf = legacy(output('ok'), [0x03, Buffer.alloc(2)])
+    expect(read(buf)).toMatchObject({ reason: 'malformed', records: [{ data: 'ok' }] })
   })
 })
 
 describe('a file the crash was in the middle of', () => {
   it('replays its complete prefix and nothing else', () => {
-    const whole = log(frameOutput('first'), frameOutput('second'), frameOutput('third'))
+    const frames = numbered('first', 'second', 'third')
+    const whole = log(...frames)
 
     // Cut inside the last frame's payload, which is where a crash lands.
     const torn = whole.subarray(0, whole.length - 3)
-    const { frames, reason, consumed } = readFrames(torn)
+    const { records, reason, consumed } = read(torn)
 
-    expect(frames).toEqual([
-      { kind: 'output', data: 'first' },
-      { kind: 'output', data: 'second' }
-    ])
+    expect(texts(records)).toEqual(['first', 'second'])
     expect(reason).toBe('torn')
     // Consumed points at the start of the incomplete frame, so a caller can
     // truncate the file to exactly what was whole and append from there.
-    expect(consumed).toBe(whole.length - frameOutput('third').length)
+    expect(consumed).toBe(whole.length - frames[2]!.length)
   })
 
   it('survives a cut inside the frame header itself', () => {
-    const whole = log(frameOutput('first'), frameOutput('second'))
-    const torn = whole.subarray(0, whole.length - frameOutput('second').length + 3)
+    const frames = numbered('first', 'second')
+    const whole = log(...frames)
+    const torn = whole.subarray(0, whole.length - frames[1]!.length + 3)
 
-    expect(readFrames(torn)).toMatchObject({
-      frames: [{ kind: 'output', data: 'first' }],
-      reason: 'torn'
-    })
+    const { records, reason } = read(torn)
+    expect(texts(records)).toEqual(['first'])
+    expect(reason).toBe('torn')
   })
 
   it('refuses a length that runs past the end rather than trusting it', () => {
     // A torn length field can read as an enormous number. Slicing on it would
     // answer with a short buffer whose checksum then fails, reporting corruption
     // where the truth is a tear.
-    const buf = log(frameOutput('x'))
-    buf.writeUInt32LE(0xffffff, buf.length - frameOutput('x').length + 1)
+    const [frame] = numbered('x')
+    const buf = log(frame!)
+    buf.writeUInt32LE(0xffffff, buf.length - frame!.length + 1)
 
-    expect(readFrames(buf).reason).toBe('torn')
+    expect(read(buf).reason).toBe('torn')
   })
 })
 
 describe('a byte that changed', () => {
+  /** Flip a bit inside the middle record's text. */
+  function corrupted(): Buffer {
+    const frames = numbered('good', 'corrupted', 'after')
+    const flipped = Buffer.from(log(...frames))
+    // Past the frame prefix (9), the record header (16) and the stream byte.
+    flipped[HEADER.length + frames[0]!.length + 9 + 17 + 2] ^= 0x20
+    return flipped
+  }
+
   it('is caught, and ends the replay there', () => {
-    const whole = log(frameOutput('good'), frameOutput('corrupted'), frameOutput('after'))
-    const flipped = Buffer.from(whole)
-    // Somewhere inside the middle frame's payload.
-    const target = writeHeader(1).length + frameOutput('good').length + 9 + 2
-    flipped[target] ^= 0x20
-
-    const { frames, reason } = readFrames(flipped)
-
-    expect(frames).toEqual([{ kind: 'output', data: 'good' }])
+    const { records, reason } = read(corrupted())
+    expect(texts(records)).toEqual(['good'])
     expect(reason).toBe('checksum')
   })
 
@@ -135,44 +230,49 @@ describe('a byte that changed', () => {
     // The bytes after a frame nobody can vouch for have no established meaning.
     // A slightly stale screen is a small wrong; one assembled from unverified
     // bytes is an unbounded one.
-    const whole = log(frameOutput('good'), frameOutput('corrupted'), frameOutput('after'))
-    const flipped = Buffer.from(whole)
-    flipped[writeHeader(1).length + frameOutput('good').length + 9 + 2] ^= 0x20
+    expect(read(corrupted()).records).toHaveLength(1)
+  })
 
-    expect(readFrames(flipped).frames).toHaveLength(1)
+  it('catches a flip in a record number, which the checksum covers', () => {
+    const flipped = Buffer.from(log(...numbered('hello', 'world')))
+    flipped[HEADER.length + 9] ^= 0x01
+    expect(read(flipped)).toMatchObject({ reason: 'checksum', records: [] })
   })
 
   it('catches a flip in the length field too', () => {
-    const whole = log(frameOutput('hello'), frameOutput('world'))
-    const flipped = Buffer.from(whole)
-    flipped[writeHeader(1).length + 1] ^= 0x01
+    const flipped = Buffer.from(log(...numbered('hello', 'world')))
+    flipped[HEADER.length + 1] ^= 0x01
 
-    expect(readFrames(flipped).reason).not.toBe('end')
+    expect(read(flipped).reason).not.toBe('end')
   })
 })
 
 describe('a frame this version does not know', () => {
   it('stops rather than skipping into the middle of something', () => {
-    const buf = log(frameOutput('known'))
-    // A kind from a future version, with a valid length and checksum.
+    // A kind from a future version -- the contract's Gap or Exit, say -- with a
+    // valid length and checksum.
     const alien = Buffer.alloc(9)
     alien.writeUInt8(0x7f, 0)
     alien.writeUInt32LE(0, 1)
     alien.writeUInt32LE(crc32(Buffer.alloc(0)), 5)
 
-    const { frames, reason } = readFrames(Buffer.concat([buf, alien]))
+    const { records, reason } = read(Buffer.concat([log(...numbered('known')), alien]))
 
-    expect(frames).toEqual([{ kind: 'output', data: 'known' }])
+    expect(texts(records)).toEqual(['known'])
     expect(reason).toBe('unknown-kind')
   })
 
-  it('reports a known kind with the wrong payload size as malformed', () => {
-    const bad = Buffer.alloc(9 + 2)
-    bad.writeUInt8(0x03, 0) // resize, which needs four bytes
-    bad.writeUInt32LE(2, 1)
-    bad.writeUInt32LE(crc32(Buffer.alloc(2)), 5)
+  it.each([
+    ['a resize with the wrong body size', 0x11, 16 + 4],
+    ['a record too short to hold its place', 0x10, 8],
+    ['data without its stream byte', 0x10, 16]
+  ])('reports %s as malformed', (_label, kind, size) => {
+    const bad = Buffer.alloc(9 + size)
+    bad.writeUInt8(kind, 0)
+    bad.writeUInt32LE(size, 1)
+    bad.writeUInt32LE(crc32(Buffer.alloc(size)), 5)
 
-    expect(readFrames(Buffer.concat([writeHeader(1), bad])).reason).toBe('malformed')
+    expect(read(Buffer.concat([HEADER, bad])).reason).toBe('malformed')
   })
 })
 
