@@ -172,6 +172,10 @@ const ESC = '\x1b'
 // Past the 8 ms hold and its re-arm: a small first read goes out at once, everything else waits for this.
 const afterFlush = (): Promise<void> => new Promise((r) => setTimeout(r, 40))
 
+/** Whether a session's output is still inside its hold, so a new read joins it rather than going out at once. */
+const holding = (id: string): boolean =>
+  (ptyManager as unknown as { flushTimers: Map<string, unknown> }).flushTimers.has(id)
+
 beforeEach(() => {
   // Every session this file starts is torn down, so a count taken in one test
   // is not a count of what an earlier one left running.
@@ -456,7 +460,11 @@ describe('the terminal is recorded where it is fed', () => {
 
       fake.emitData('a')
       fake.emitData('b')
-      await afterFlush()
+      // Until 'b' has gone out and the hold after it has lapsed with nothing
+      // to send, rather than a fixed sleep: on a loaded runner the timer and
+      // the drain turn after it can take longer than any sleep chosen here.
+      await vi.waitFor(() => expect(seen).toEqual(['a', 'b']))
+      await vi.waitFor(() => expect(holding(session.id)).toBe(false))
       fake.emitData('c')
 
       expect(seen).toEqual(['a', 'b', 'c'])
