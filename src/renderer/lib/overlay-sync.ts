@@ -93,7 +93,9 @@ export function startOverlaySync(deps: OverlaySyncDeps): OverlaySync {
     else quiet++
     if (quiet < QUIET_FRAMES || slotAnimating()) {
       if (quiet >= QUIET_FRAMES) quiet = QUIET_FRAMES - 1
-      raf = win.requestAnimationFrame(frame)
+      // A sync can request the next frame itself (a wrapper resized and asked
+      // for a fit); one frame is enough.
+      if (!raf) raf = win.requestAnimationFrame(frame)
     }
   }
 

@@ -78,6 +78,17 @@ describe('the overlay sync', () => {
     expect(settle()).toBe(QUIET_FRAMES)
   })
 
+  it('queues one frame when a sync itself asks for the next one', () => {
+    settle()
+    syncCalls.mockImplementationOnce(() => {
+      sync!.request()
+      return true
+    })
+    sync!.request()
+    vsync()
+    expect(frames).toHaveLength(1)
+  })
+
   it('wakes for a change in the page outside the overlay', async () => {
     settle()
     slot.style.transform = 'translateX(10px)'

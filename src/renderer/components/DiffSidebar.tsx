@@ -271,6 +271,13 @@ export function DiffContent({
   )
 }
 
+/** A short identity for a diff's text, so a changed diff remounts its blocks. */
+function diffIdentity(diff: string): string {
+  let hash = 0
+  for (let i = 0; i < diff.length; i++) hash = (Math.imul(hash, 31) + diff.charCodeAt(i)) | 0
+  return `${diff.length}-${(hash >>> 0).toString(36)}`
+}
+
 function DiffFile({
   file,
   lineComments,
@@ -287,6 +294,7 @@ function DiffFile({
   const letter = STATUS_LETTER[file.status] ?? STATUS_LETTER.modified
   const fileName = file.filePath.split('/').pop() || file.filePath
   const rows = useMemo(() => parseDiffRows(file.diff), [file.diff])
+  const diffKey = useMemo(() => diffIdentity(file.diff), [file.diff])
   const blocks = useMemo(() => {
     const out: DiffRow[][] = []
     for (let i = 0; i < rows.length; i += DIFF_BLOCK_ROWS)
@@ -318,7 +326,9 @@ function DiffFile({
       <pre className="text-[12px] leading-[1.6] font-mono">
         {blocks.map((block, i) => (
           <DiffBlock
-            key={i}
+            // A new diff starts its blocks over: a kept placeholder height
+            // would be the old block's.
+            key={`${diffKey}:${i}`}
             rows={block}
             filePath={file.filePath}
             lineComments={lineComments}

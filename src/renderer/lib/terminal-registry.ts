@@ -49,8 +49,8 @@ const ANCHOR_SETTLE_MS = 250
  * Where a hidden wrapper waits: outside the viewport, at the size it last had.
  *
  * `visibility: hidden` alone leaves xterm drawing every frame of output into a
- * canvas nobody sees, because the IntersectionObserver xterm pauses its
- * renderer with still counts a hidden element as on screen. Out here it does
+ * canvas nobody sees, because the IntersectionObserver which xterm uses to pause
+ * its renderer still counts a hidden element as on screen. Out here it does
  * not, so a terminal in another tab or view parses its output but draws none of
  * it, and repaints once when it is shown again. Moving rather than `display:
  * none` keeps its size, so the cell xterm measured stays right.
