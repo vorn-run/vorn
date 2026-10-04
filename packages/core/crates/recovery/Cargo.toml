@@ -1,0 +1,19 @@
+[package]
+name = "vorn-recovery"
+version = "0.7.5"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Session recovery test harness: seeded VT, recorded transcripts, a kill driver and the terminal state comparator"
+
+[dependencies]
+libghostty-vt = { version = "0.2.2", default-features = false }
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+serde = { version = "1", features = ["derive"] }
+vorn-screen = { path = "../screen" }
+vorn-term-proto = { path = "../term-proto", features = ["serde"] }
+
+[[bin]]
+name = "recovery-subject"
+path = "src/bin/recovery-subject.rs"

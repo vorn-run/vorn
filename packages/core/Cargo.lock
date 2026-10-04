@@ -2340,6 +2340,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-recovery"
+version = "0.7.5"
+dependencies = [
+ "libghostty-vt",
+ "postcard",
+ "serde",
+ "vorn-screen",
+ "vorn-term-proto",
+]
+
+[[package]]
 name = "vorn-screen"
 version = "0.7.5"
 dependencies = [
