@@ -1,0 +1,17 @@
+[package]
+name = "vorn-sessiond"
+version = "0.7.5"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The session holder: owns terminals and piped agents, numbers what they print into a record log, and keeps it while vornd is away"
+
+[dependencies]
+crc32fast = "1"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+serde = { version = "1", features = ["derive"] }
+vorn-term-proto = { path = "../term-proto", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"
