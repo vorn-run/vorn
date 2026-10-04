@@ -123,6 +123,12 @@ jobs:
         if: runner.os == 'Linux'
         run: yarn test:conformance
 
+      # The session holder and the wire types it carries: no napi, no Ghostty,
+      # and the spool tests write to a temp dir on each platform.
+      - name: Session holder tests
+        working-directory: packages/core
+        run: cargo test --release --locked -p vorn-term-proto -p vorn-sessiond
+
       - name: Build vorn_core.node
         run: yarn build:core
 
