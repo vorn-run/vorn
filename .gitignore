@@ -25,3 +25,5 @@ bench/results/
 # Rust core build output
 packages/core/target/
 packages/core/vorn_core.node
+packages/core/vornd
+packages/core/vornd.exe

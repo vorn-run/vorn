@@ -1836,7 +1836,19 @@ export interface ExperimentalConfig {
    * to the next git command rather than the next terminal.
    */
   nativeGit?: boolean
+  /**
+   * The desktop app talks to the server through vornd, the native daemon,
+   * instead of directly. Read by the app rather than the server, when it starts.
+   */
+  vornd?: boolean
 }
+
+/** Whether the desktop app is talking to its server through vornd. */
+export type VorndStatus =
+  | { state: 'off' }
+  | { state: 'on'; port: number }
+  /** The switch is on but vornd could not be used, so the app went straight to the server. */
+  | { state: 'failed'; detail: string }
 
 /** What `core:status` reports: whether the Rust core can run, and what decides it. */
 export interface CoreStatus {
@@ -1924,6 +1936,7 @@ export const IPC = {
   WORKTREE_ACTIVE_SESSIONS: 'worktree:activeSessions',
   WORKTREE_INVENTORY: 'worktree:inventory',
   CORE_STATUS: 'core:status',
+  VORND_STATUS: 'vornd:status',
   WORKTREE_RECLAIM_ARTIFACTS: 'worktree:reclaimArtifacts',
   WORKTREE_REMOVE_MANY: 'worktree:removeMany',
   WORKTREE_PRUNE_ORPHANS: 'worktree:pruneOrphans',

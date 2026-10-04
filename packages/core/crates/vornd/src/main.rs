@@ -15,13 +15,16 @@ use tracing_subscriber::EnvFilter;
 use vornd::protocol::VORND_PROTOCOL;
 use vornd::{proxy, Daemon, Groups};
 
-const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--groups group=mode,...] [--log-file PATH]
+const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--groups group=mode,...] [--log-file PATH] [--exit-with-stdin]
 
   --upstream   the Node server to forward to
   --listen     where to listen; loopback only (default 127.0.0.1:0)
   --groups     per-group switches, forward | shadow | native (default: all forward;
                also read from VORND_GROUPS)
-  --log-file   append the log here instead of stderr; VORND_LOG sets the level";
+  --log-file   append the log here instead of stderr; VORND_LOG sets the level
+  --exit-with-stdin
+               stop when stdin closes, so vornd ends with whoever started it,
+               even if that process is killed";
 
 #[derive(Debug)]
 struct Args {
@@ -29,6 +32,7 @@ struct Args {
     listen: SocketAddr,
     groups: Groups,
     log_file: Option<String>,
+    exit_with_stdin: bool,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -36,6 +40,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut listen: SocketAddr = ([127, 0, 0, 1], 0).into();
     let mut groups = std::env::var("VORND_GROUPS").ok();
     let mut log_file = None;
+    let mut exit_with_stdin = false;
     while let Some(flag) = args.next() {
         let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
         match flag.as_str() {
@@ -53,6 +58,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             }
             "--groups" => groups = Some(value("--groups")?),
             "--log-file" => log_file = Some(value("--log-file")?),
+            "--exit-with-stdin" => exit_with_stdin = true,
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument `{other}`")),
         }
@@ -75,7 +81,22 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         listen,
         groups,
         log_file,
+        exit_with_stdin,
     })
+}
+
+/// Resolves once stdin reaches its end: the parent closed the pipe or died.
+/// Read on its own thread, because a blocking read is the one way to see the
+/// end of a pipe on every platform.
+async fn stdin_closed() {
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        let mut sink = [0u8; 256];
+        let mut stdin = std::io::stdin().lock();
+        while matches!(std::io::Read::read(&mut stdin, &mut sink), Ok(n) if n > 0) {}
+        let _ = tx.send(());
+    });
+    let _ = rx.await;
 }
 
 fn init_logging(log_file: Option<&str>) -> Result<(), String> {
@@ -157,7 +178,18 @@ fn main() -> ExitCode {
         let _ = writeln!(stdout, "{{\"port\":{port},\"protocol\":{VORND_PROTOCOL}}}");
         let _ = stdout.flush();
         drop(stdout);
-        proxy::serve(listener, daemon, shutdown_signal()).await;
+        let exit_with_stdin = args.exit_with_stdin;
+        let stop = async move {
+            if exit_with_stdin {
+                tokio::select! {
+                    () = shutdown_signal() => {}
+                    () = stdin_closed() => info!("stdin closed; stopping"),
+                }
+            } else {
+                shutdown_signal().await;
+            }
+        };
+        proxy::serve(listener, daemon, stop).await;
         info!("stopped");
         ExitCode::SUCCESS
     })
@@ -184,6 +216,20 @@ mod tests {
         let err = parse(&["--upstream", "127.0.0.1:1", "--listen", "0.0.0.0:9"]).unwrap_err();
         assert!(err.contains("loopback"), "{err}");
         assert!(parse(&["--upstream", "127.0.0.1:1", "--listen", "[::1]:9"]).is_ok());
+    }
+
+    #[test]
+    fn stays_up_without_stdin_unless_asked() {
+        assert!(
+            !parse(&["--upstream", "127.0.0.1:1"])
+                .unwrap()
+                .exit_with_stdin
+        );
+        assert!(
+            parse(&["--upstream", "127.0.0.1:1", "--exit-with-stdin"])
+                .unwrap()
+                .exit_with_stdin
+        );
     }
 
     #[test]

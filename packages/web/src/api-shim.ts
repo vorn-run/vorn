@@ -546,6 +546,8 @@ export function createApiShim(wsUrl: string) {
     getWorktreeInventory: (params?: { projectPaths?: string[]; refresh?: boolean }) =>
       rpc.invoke('worktree:inventory', params),
     getCoreStatus: () => rpc.invoke('core:status'),
+    // Desktop only: a browser never runs vornd, and null hides its switch.
+    getVorndStatus: async () => null,
     reclaimWorktreeArtifacts: (paths: string[]) =>
       rpc.invoke('worktree:reclaimArtifacts', { paths }),
     removeWorktrees: (
