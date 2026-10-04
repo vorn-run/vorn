@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { CoreStatus, ExperimentalConfig } from '@vornrun/shared/types'
+import type { CoreStatus, ExperimentalConfig, RecordCursor } from '@vornrun/shared/types'
 
 /**
  * Which implementation of the terminal pipeline this server runs.
@@ -24,6 +24,58 @@ export interface NativeCore {
   Screen?: new (cols: number, rows: number) => NativeScreen
   /** The shape `Screen.feed` answers in; absent on a binary from before it was an object. */
   SCREEN_API?: number
+  /** A terminal's screen, scrollback and history framing on a thread of its own. */
+  TerminalPipeline?: new (
+    cols: number,
+    rows: number,
+    onEvent: (event: PipelineEvent) => void
+  ) => NativePipeline
+}
+
+/** Where a record sits in a session's stream; the history log's `RecordHeader`. */
+export interface PipelineRecord {
+  rseq: number
+  startOffset: number
+}
+
+/** What a terminal's thread noticed, delivered on the event loop. */
+export interface PipelineEvent {
+  kind: 'bell' | 'cwd' | 'screen-failed'
+  cwd?: string | null
+  error?: string | null
+}
+
+type NativeSnapshot = ReturnType<NativeScreen['serialize']>
+
+/**
+ * One terminal's output, handled on its own thread in the order it was given.
+ * Writes return at once; a read waits for everything given before it.
+ */
+export interface NativePipeline {
+  /** One flush: parsed, kept as scrollback, and framed for the history when `at` is given. */
+  feed(data: string, at?: PipelineRecord | null): void
+  /** The screen alone, for a replay: not kept as scrollback, not framed. */
+  feedScreen(data: string): void
+  resize(cols: number, rows: number, at?: PipelineRecord | null): void
+  restoreLabels(title?: string | null, cwd?: string | null): void
+  seedScrollback(data: string): void
+  /** Scrollback alone, neither parsed nor recorded. */
+  appendScrollback(data: string): void
+  serialize(): NativeSnapshot
+  scrollback(): string
+  /**
+   * A checkpoint file's body (absent once the screen model has failed) and the
+   * history frames built before it, all at the point in the stream this is
+   * called at. Resolves when the thread gets there; rejects if it stops first.
+   */
+  cut(meta: { generation: number; resume: RecordCursor; closedCleanly?: boolean }): Promise<{
+    body?: Buffer | null
+    frames: Buffer
+  }>
+  /** History frames built so far, without waiting for output still queued. */
+  takeFrames(): Buffer
+  /** Stops the thread and releases the terminal now. */
+  free(): void
 }
 
 export interface NativeAnalyzer {
@@ -180,11 +232,12 @@ export function activeCore(): CoreSelection {
  * A piece of the terminal pipeline that can run on the core, each behind its
  * own switch in Settings › Experimental.
  */
-export type NativeFeature = 'screen' | 'analysis'
+export type NativeFeature = 'screen' | 'analysis' | 'pipeline'
 
 const FEATURE_FLAGS: Record<NativeFeature, keyof ExperimentalConfig> = {
   screen: 'nativeScreen',
-  analysis: 'nativeAnalysis'
+  analysis: 'nativeAnalysis',
+  pipeline: 'nativePipeline'
 }
 
 /**

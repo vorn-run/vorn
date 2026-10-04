@@ -432,7 +432,8 @@ describe('the terminal is recorded where it is fed', () => {
 
       a.fake.emitData('a'.repeat(3 * MAX_FLUSH_UNITS))
       b.fake.emitData('b'.repeat(3 * MAX_FLUSH_UNITS))
-      for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r))
+      // Turns, not a count of them: with native analysis every other turn analyses.
+      for (let i = 0; i < 16 && order.length < 4; i++) await new Promise((r) => setImmediate(r))
 
       expect(order.slice(0, 4)).toEqual(['a', 'b', 'a', 'b'])
     })

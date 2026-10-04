@@ -1831,6 +1831,12 @@ export interface ExperimentalConfig {
   nativeScreen?: boolean
   /** Agent status and the output lines MCP reads, analyzed in Rust once per flush. */
   nativeAnalysis?: boolean
+  /**
+   * Each terminal's screen model, scrollback and history framing on a thread
+   * of its own instead of the server's event loop. Uses the native screen
+   * model whatever `nativeScreen` says.
+   */
+  nativePipeline?: boolean
 }
 
 /**

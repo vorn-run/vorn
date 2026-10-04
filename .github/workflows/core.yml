@@ -97,7 +97,7 @@ jobs:
       # link on every platform. The adapter crate holds no tests of its own.
       - name: Rust tests
         working-directory: packages/core
-        run: cargo test --release --locked -p vorn-screen -p vorn-analysis
+        run: cargo test --release --locked -p vorn-screen -p vorn-analysis -p vorn-pipeline
 
       - name: Build vorn_core.node
         run: yarn build:core
@@ -111,7 +111,7 @@ jobs:
       # With the binary present these run the real call from Node, including a
       # parse through libghostty-vt.
       - name: Native call
-        run: yarn vitest run tests/native-core.test.ts tests/terminal-screen-parity.test.ts
+        run: yarn vitest run tests/native-core.test.ts tests/terminal-screen-parity.test.ts tests/core-pipeline.test.ts
 
       # The native screen model's memory ceiling and release, which the main
       # suite skips because it has no binary. One platform is enough for a

@@ -109,6 +109,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc32fast"
+version = "1.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01a7799fd6b852db0e61728dde9a204c423b44d689dbd432522543614b490e78"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -631,6 +640,17 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "vorn-analysis",
+ "vorn-pipeline",
+ "vorn-screen",
+]
+
+[[package]]
+name = "vorn-pipeline"
+version = "0.7.5"
+dependencies = [
+ "crc32fast",
+ "memchr",
+ "serde_json",
  "vorn-screen",
 ]
 

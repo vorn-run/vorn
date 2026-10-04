@@ -17,15 +17,16 @@ A Cargo workspace. The logic is in plain crates with no napi in them, so it can
 later serve a daemon or the native UI, and its tests and benchmarks are ordinary
 Rust binaries:
 
-| Crate                               | What                                                              |
-| ----------------------------------- | ----------------------------------------------------------------- |
-| `crates/screen` (`vorn-screen`)     | A terminal's screen on libghostty-vt: feed, title, cwd, serialize |
-| `crates/analysis` (`vorn-analysis`) | Stripped line ring, bracketed paste and status patterns           |
-| `.` (`vorn-core`)                   | The napi adapters the server loads as `vorn_core.node`            |
+| Crate                               | What                                                                               |
+| ----------------------------------- | ---------------------------------------------------------------------------------- |
+| `crates/screen` (`vorn-screen`)     | A terminal's screen on libghostty-vt: feed, title, cwd, serialize                  |
+| `crates/analysis` (`vorn-analysis`) | Stripped line ring, bracketed paste and status patterns                            |
+| `crates/pipeline` (`vorn-pipeline`) | A terminal's thread: screen, scrollback ring, history frames and checkpoint bodies |
+| `.` (`vorn-core`)                   | The napi adapters the server loads as `vorn_core.node`                             |
 
 ```sh
-cargo test -p vorn-screen -p vorn-analysis   # the logic, on any platform
-cargo bench -p vorn-analysis                 # Criterion, without napi
+cargo test -p vorn-screen -p vorn-analysis -p vorn-pipeline   # the logic, on any platform
+cargo bench -p vorn-analysis                                  # Criterion, without napi
 ```
 
 ## Build

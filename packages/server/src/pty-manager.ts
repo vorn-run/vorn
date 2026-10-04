@@ -50,12 +50,22 @@ import {
   feedScreen,
   resizeScreen,
   clearScreen,
-  setCwdReporter
+  setCwdReporter,
+  setBellReporter
 } from './terminal-screen'
 import type { ManagedPty } from './handoff/adopted-pty'
 import type { AdoptedPane } from './handoff/heir'
 import type { DonorPane } from './handoff/donor'
-import { startHistory, recordOutput, recordResize, stopHistory } from './history/writer'
+import {
+  startHistory,
+  recordOutput,
+  recordResize,
+  noteOutput,
+  noteResize,
+  pipelineLost,
+  stopHistory
+} from './history/writer'
+import { pipelineFor } from './core-pipeline'
 import type { RecordHeader } from './history/log'
 import { analyzeOutput, createStatusContext, StatusContext } from './status-parser'
 import { isDraining, DRAINING_MESSAGE } from './draining'
@@ -169,6 +179,8 @@ class PtyManager extends EventEmitter {
     // directory is actually known -- a flush ends before the bytes it delivered
     // have been parsed, so anything reading there reads the previous value.
     setCwdReporter((id, cwd) => this.noteShellCwd(id, cwd))
+    // A terminal on a core thread finds its bells after the flush has gone.
+    setBellReporter((id) => this.emit('client-message', IPC.TERMINAL_BELL, { id }))
   }
 
   /**
@@ -726,6 +738,8 @@ class PtyManager extends EventEmitter {
   /** The same, for native analysis that a burst left more than 64 KB of. */
   private analysisQueue = new Set<string>()
   private drainScheduled = false
+  /** Whether the next drain turn is analysis, when both are waiting. */
+  private analyseNext = false
 
   private queueDrain(id: string): void {
     this.drainQueue.add(id)
@@ -751,20 +765,23 @@ class PtyManager extends EventEmitter {
    */
   private drainOne(): void {
     this.drainScheduled = false
+    // Flushing and analysing take turns rather than sharing one: each is up to
+    // a budget's worth of work, and the two together in one turn were the
+    // longest the loop went without answering anything else.
+    const analyse = this.analysisQueue.size > 0 && (this.analyseNext || !this.drainQueue.size)
+    this.analyseNext = !analyse
     let budget = MAX_FLUSH_UNITS
     while (budget > 0) {
-      const id = first(this.drainQueue)
+      const id = first(analyse ? this.analysisQueue : this.drainQueue)
       if (id === undefined) break
-      this.drainQueue.delete(id)
-      // Flushing re-queues it at the back if a full flush's worth is still held.
-      budget -= this.flushBuffer(id)
-    }
-    budget = MAX_FLUSH_UNITS
-    while (budget > 0) {
-      const id = first(this.analysisQueue)
-      if (id === undefined) break
-      this.analysisQueue.delete(id)
-      budget -= this.flushAnalysis(id)
+      if (analyse) {
+        this.analysisQueue.delete(id)
+        budget -= this.flushAnalysis(id)
+      } else {
+        this.drainQueue.delete(id)
+        // Flushing re-queues it at the back if a full flush's worth is still held.
+        budget -= this.flushBuffer(id)
+      }
     }
     if (this.drainQueue.size || this.analysisQueue.size) this.scheduleDrain()
   }
@@ -874,9 +891,25 @@ class PtyManager extends EventEmitter {
       // could hold bytes in its scrollback that its screen had not seen; those
       // bytes then arrived again as log frames after it, and a restore counted
       // them twice. Fed from one point they cannot disagree.
+      const bytes = Buffer.byteLength(data, 'utf-8')
+      const at = this.nextRecord(id, bytes)
+      const pipeline = pipelineFor(id)
+      if (pipeline) {
+        // All three in one hand-off to the terminal's thread, which parses,
+        // keeps and frames them there, in this order with every other flush.
+        // Its bell, if it rings one, comes through the reporter.
+        try {
+          pipeline.feed(data, noteOutput(id, at, bytes) ? at : null)
+        } catch (err) {
+          log.warn({ err, id }, '[core] a terminal thread stopped; dropping it')
+          pipelineLost(id)
+          clearScreen(id)
+        }
+        return data.length
+      }
       appendScrollback(id, data)
       const rang = feedScreen(id, data)
-      recordOutput(id, this.nextRecord(id, Buffer.byteLength(data, 'utf-8')), data)
+      recordOutput(id, at, data)
 
       // The bell, said out loud rather than left for whoever happens to be
       // attached. A client only sees bytes for terminals it has opened, so a
@@ -1296,8 +1329,20 @@ class PtyManager extends EventEmitter {
     // The same numbers, so the model wraps where the program does. Not awaited:
     // this is reached from a fire-and-forget notification, and the model drains
     // its own queue before applying the size.
+    const at = this.nextRecord(id, 0)
+    const pipeline = pipelineFor(id)
+    if (pipeline) {
+      try {
+        pipeline.resize(cols, rows, noteResize(id, at) ? at : null)
+      } catch (err) {
+        log.warn({ err, id }, '[core] a terminal thread stopped; dropping it')
+        pipelineLost(id)
+        clearScreen(id)
+      }
+      return
+    }
     void resizeScreen(id, cols, rows)
-    recordResize(id, this.nextRecord(id, 0), cols, rows)
+    recordResize(id, at, cols, rows)
   }
 
   /**

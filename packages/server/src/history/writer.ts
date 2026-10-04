@@ -2,6 +2,8 @@ import fs from 'fs/promises'
 import path from 'path'
 import log from '../logger'
 import { serializeScreen } from '../terminal-screen'
+import { pipelineFor } from '../core-pipeline'
+import type { NativePipeline } from '../native-core'
 import { readScrollback } from '../terminal-scrollback'
 import type { RecordCursor } from '@vornrun/shared/types'
 import { frameData, frameResize, writeHeader, type RecordHeader } from './log'
@@ -134,6 +136,8 @@ interface Recorded {
   broken: boolean
   lastRecordAt: number
   lastCheckpointAt: number
+  /** A checkpoint's cut is out on the session's core thread; see `checkpoint`. */
+  cutting: boolean
   /** The per-session queue. One operation at a time, in the order asked for. */
   tail: Promise<void>
   queued: number
@@ -200,6 +204,7 @@ export function startHistory(id: string, start: RecordCursor): void {
     broken: false,
     lastRecordAt: Date.now(),
     lastCheckpointAt: Date.now(),
+    cutting: false,
     tail: previous ? previous.tail.catch(() => undefined) : Promise.resolve(),
     queued: 0
   }
@@ -246,6 +251,54 @@ export function recordResize(id: string, at: RecordHeader, cols: number, rows: n
 }
 
 /**
+ * Note output whose frame is built on the terminal's core thread.
+ *
+ * The same bookkeeping as `recordOutput` -- the cursor, the order check, the
+ * clock that decides when to checkpoint -- without the encoding and the
+ * checksum, which the thread does. Returns whether the thread should frame it:
+ * not when nothing is recording this session, and not when this writer already
+ * holds the record.
+ */
+export function noteOutput(id: string, at: RecordHeader, bytes: number): boolean {
+  if (!bytes) return false
+  const held = recorded.get(id)
+  if (!held || !accepts(held, at)) return false
+  held.next = {
+    epoch: held.next.epoch,
+    nextRseq: at.rseq + 1,
+    nextOffset: at.startOffset + bytes
+  }
+  mark(held)
+  return true
+}
+
+/**
+ * A terminal's core thread stopped while it was being recorded.
+ *
+ * Whatever it framed is kept; whatever it had not got to is gone, and the log
+ * cannot be whole past that, so it waits for the next checkpoint as it does
+ * after a failed append.
+ */
+export function pipelineLost(id: string): void {
+  const held = recorded.get(id)
+  if (!held) return
+  pull(held)
+  if (!held.broken) {
+    log.warn({ id }, '[history] a terminal thread stopped; this log waits for the next checkpoint')
+  }
+  held.broken = true
+}
+
+/** `recordResize` for a terminal on a core thread; see `noteOutput`. */
+export function noteResize(id: string, at: RecordHeader): boolean {
+  const held = recorded.get(id)
+  if (!held || !accepts(held, at)) return false
+  held.next = { epoch: held.next.epoch, nextRseq: at.rseq + 1, nextOffset: at.startOffset }
+  mark(held)
+  return true
+}
+
+/**
  * Whether a record is new to this writer.
  *
  * One below what is held is already on its way to disk, and writing it again
@@ -269,8 +322,37 @@ function accepts(held: Recorded, at: RecordHeader): boolean {
 }
 
 function push(held: Recorded, frame: Buffer): void {
+  mark(held)
+  hold(held, frame)
+}
+
+/** Something was recorded: the clock that decides when to checkpoint starts again. */
+function mark(held: Recorded): void {
   held.lastRecordAt = Date.now()
   held.changed = true
+  ensureTicking()
+}
+
+/**
+ * Frames the session's core thread has built, moved into `pending` where every
+ * path below finds them. Does not wait for output still queued on the thread:
+ * what is not framed yet is taken next time.
+ */
+function pull(held: Recorded): void {
+  if (held.cutting) return
+  const pipeline = pipelineFor(held.id)
+  if (!pipeline) return
+  let frames: Buffer
+  try {
+    frames = pipeline.takeFrames()
+  } catch {
+    // The thread has stopped; the screen model's failure was reported there.
+    return
+  }
+  if (frames.length) hold(held, frames)
+}
+
+function hold(held: Recorded, frame: Buffer): void {
   // Still accumulated while broken, because the next checkpoint replaces the log
   // wholesale and these frames belong after it. Only the appending stops.
   held.pending.push(frame)
@@ -286,8 +368,6 @@ function push(held: Recorded, frame: Buffer): void {
     held.broken = true
     take(held)
   }
-
-  ensureTicking()
 }
 
 /**
@@ -397,6 +477,13 @@ export async function settleHistory(): Promise<void> {
     // Output the tick has not picked up yet is still unwritten. Waiting only on
     // the queue let a caller remove a directory a flush then recreated.
     for (const held of recorded.values()) {
+      // A round trip to a core thread first, so output it has queued is framed.
+      try {
+        pipelineFor(held.id)?.scrollback()
+      } catch {
+        // Stopped: nothing more will be framed.
+      }
+      pull(held)
       if (held.pending.length && held.queued === 0) {
         void enqueue(held, async () => {
           await flushPending(held)
@@ -497,6 +584,7 @@ async function reset(held: Recorded, start: RecordCursor): Promise<void> {
  * stops at the last whole one.
  */
 async function flushPending(held: Recorded): Promise<void> {
+  pull(held)
   if (!held.pending.length || held.broken) return
 
   // The total is passed rather than summed by `concat`: `pending` is bounded by
@@ -565,29 +653,61 @@ async function fold(held: Recorded): Promise<void> {
  */
 async function checkpoint(held: Recorded, closing = false): Promise<boolean> {
   const resume = { ...held.next }
-  const scrollback = readScrollback(held.id)
-  const drained = serializeScreen(held.id)
-  const supersededBytes = held.pendingBytes
-  const superseded = take(held)
-
-  const snapshot = await drained
   const generation = held.generation + 1
-  const landed =
-    snapshot !== null &&
-    (await writeCheckpoint(held.dir, {
-      screen: snapshot.screen,
-      scrollback,
-      cols: snapshot.cols,
-      rows: snapshot.rows,
-      title: snapshot.title,
-      cwd: snapshot.cwd,
+  let land: () => Promise<boolean>
+  if (pipelineFor(held.id)) {
+    // The same cut, taken on the terminal's thread: its place in the stream is
+    // fixed here, after every flush sent before this line and before any sent
+    // after, so the screen, the scrollback and the frames all end exactly at
+    // `resume`. The thread answers when it gets there, and builds the file's
+    // body too, so this loop waits on neither the parse nor the JSON.
+    //
+    // Frames are not pulled while it is out: any the thread builds first are
+    // from before the cut and come back with it, beside `superseded`.
+    held.cutting = true
+    const cutting = cutPipeline(held.id, {
       generation,
       resume,
-      // Only the flush on the way out. Everything else -- the clock, the size
-      // cap -- leaves this unset, which is what makes its absence mean "this
-      // run did not get to say goodbye".
       ...(closing && { closedCleanly: true })
-    }))
+    })
+    land = async () => {
+      const cut = await cutting
+      held.cutting = false
+      if (cut?.frames.length) {
+        superseded.push(cut.frames)
+        supersededBytes += cut.frames.length
+      }
+      const body = cut?.body ?? null
+      return body !== null && (await writeCheckpoint(held.dir, body))
+    }
+  } else {
+    const scrollback = readScrollback(held.id)
+    const drained = serializeScreen(held.id)
+    land = async () => {
+      const snapshot = await drained
+      return (
+        snapshot !== null &&
+        (await writeCheckpoint(held.dir, {
+          screen: snapshot.screen,
+          scrollback,
+          cols: snapshot.cols,
+          rows: snapshot.rows,
+          title: snapshot.title,
+          cwd: snapshot.cwd,
+          generation,
+          resume,
+          // Only the flush on the way out. Everything else -- the clock, the
+          // size cap -- leaves this unset, which is what makes its absence
+          // mean "this run did not get to say goodbye".
+          ...(closing && { closedCleanly: true })
+        }))
+      )
+    }
+  }
+  let supersededBytes = held.pendingBytes
+  const superseded = take(held)
+
+  const landed = await land()
 
   if (!landed) {
     // Either there was no model to checkpoint from -- it faulted, or the session
@@ -617,6 +737,18 @@ async function checkpoint(held: Recorded, closing = false): Promise<boolean> {
  * were taken, so walking the whole array to work it out again is a pass over
  * everything unwritten for a number already known.
  */
+async function cutPipeline(
+  id: string,
+  meta: Parameters<NativePipeline['cut']>[0]
+): Promise<Awaited<ReturnType<NativePipeline['cut']>> | null> {
+  try {
+    return (await pipelineFor(id)?.cut(meta)) ?? null
+  } catch (err) {
+    log.warn({ err, id }, '[history] could not cut a checkpoint from the core thread')
+    return null
+  }
+}
+
 function restore(held: Recorded, superseded: Buffer[], bytes: number): void {
   if (!superseded.length) return
   for (let i = superseded.length - 1; i >= 0; i--) held.pending.unshift(superseded[i]!)
@@ -649,6 +781,7 @@ function tick(): void {
   let working = false
 
   for (const held of recorded.values()) {
+    pull(held)
     // Anything unwritten keeps the timer alive, including a session that is
     // merely not quiet yet -- it is owed a checkpoint, and stopping here would
     // leave it owed one until its terminal next produced output.

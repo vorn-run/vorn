@@ -158,3 +158,73 @@ describe('the very first thing a terminal says', () => {
     expect(readScrollback('t').length).toBeLessThanOrEqual(256 * 1024)
   })
 })
+
+/**
+ * The trim, without joining the buffer to find where to cut.
+ *
+ * It used to join every chunk on each compaction -- a quarter-megabyte copy
+ * every 64 KB a busy terminal printed, on the event loop, mid-burst. It now
+ * finds the same cut across the chunk list. "The same" is the whole claim, so
+ * it is checked against the joined version on shapes that put the cut and the
+ * newline in different chunks.
+ */
+describe('compacting without a join', () => {
+  const MAX = 256 * 1024
+  /** The trim as it was: join, then cut at the first newline past the point. */
+  function trim(data: string): string {
+    if (data.length <= MAX) return data
+    const cut = data.length - MAX
+    const boundary = data.indexOf('\n', cut)
+    return boundary === -1 ? data.slice(cut) : data.slice(boundary + 1)
+  }
+  /** The buffer as it was: compacted by joining whenever it ran a quarter past the cap. */
+  function reference(chunks: string[]): string {
+    let held = ''
+    for (const chunk of chunks) {
+      held += chunk
+      if (held.length > MAX + MAX / 4) held = trim(held)
+    }
+    return trim(held)
+  }
+
+  function seeded(seed: number): () => number {
+    let x = seed
+    return () => {
+      x = (x * 1103515245 + 12345) & 0x7fffffff
+      return x
+    }
+  }
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8])(
+    'cuts where joining would, for random chunks (seed %i)',
+    (seed) => {
+      const rand = seeded(seed)
+      const chunks: string[] = []
+      for (let i = 0; i < 200; i++) {
+        const size = rand() % 9000
+        const sparse = rand() % 3 === 0
+        let text = ''
+        while (text.length < size) {
+          text += sparse ? 'x'.repeat((rand() % 4000) + 1) : `line ${rand() % 1000}\n`
+        }
+        chunks.push(text.slice(0, size))
+      }
+      for (const chunk of chunks) appendScrollback('a', chunk)
+
+      expect(readScrollback('a')).toBe(reference(chunks))
+      expect(scrollbackUnitsHeld('a')).toBe(readScrollback('a').length)
+    }
+  )
+
+  it('cuts at a newline in a later chunk than the cut point', () => {
+    const chunks = ['a'.repeat(MAX), 'b'.repeat(100_000), 'c'.repeat(10), '\nkept']
+    for (const chunk of chunks) appendScrollback('a', chunk)
+    expect(readScrollback('a')).toBe(reference(chunks))
+  })
+
+  it('cuts mid-chunk when no newline follows', () => {
+    const chunks = ['x\n'.repeat(1000), 'y'.repeat(MAX), 'z'.repeat(70_000)]
+    for (const chunk of chunks) appendScrollback('a', chunk)
+    expect(readScrollback('a')).toBe(reference(chunks))
+  })
+})

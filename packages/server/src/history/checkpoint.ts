@@ -145,13 +145,16 @@ async function syncDir(dir: string): Promise<void> {
 }
 
 /** Written, renamed, and synced. Answers whether it landed. */
-export async function writeCheckpoint(dir: string, checkpoint: Checkpoint): Promise<boolean> {
-  const body = JSON.stringify(checkpoint)
-  if (Buffer.byteLength(body) > MAX_CHECKPOINT_BYTES) {
-    log.warn(
-      { dir, bytes: Buffer.byteLength(body) },
-      '[history] screen too large to checkpoint; skipping this one whole'
-    )
+export async function writeCheckpoint(
+  dir: string,
+  checkpoint: Checkpoint | Buffer
+): Promise<boolean> {
+  // Already a body when a terminal's core thread built it: the JSON of a
+  // quarter-megabyte scrollback is milliseconds this loop does not spend.
+  const body = Buffer.isBuffer(checkpoint) ? checkpoint : JSON.stringify(checkpoint)
+  const bytes = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(body)
+  if (bytes > MAX_CHECKPOINT_BYTES) {
+    log.warn({ dir, bytes }, '[history] screen too large to checkpoint; skipping this one whole')
     return false
   }
 
@@ -165,7 +168,7 @@ export async function writeCheckpoint(dir: string, checkpoint: Checkpoint): Prom
     await fsp.mkdir(dir, { recursive: true, mode: 0o700 })
     const handle = await fsp.open(scratch, 'w', 0o600)
     try {
-      await handle.writeFile(body, 'utf-8')
+      await handle.writeFile(body)
       // The file's own contents, before the rename makes them reachable.
       // Best-effort, like the directory below: a filesystem that refuses to sync
       // still gives an atomic rename against other readers, and a checkpoint

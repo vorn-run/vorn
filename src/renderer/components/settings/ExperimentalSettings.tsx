@@ -22,6 +22,12 @@ const SWITCHES: { key: keyof ExperimentalConfig; label: string; description: str
     label: 'Native output analysis',
     description:
       'Work out agent status and the output agents read back in Rust, once per flush instead of on every read'
+  },
+  {
+    key: 'nativePipeline',
+    label: 'Terminal output on a core thread',
+    description:
+      "Parse each terminal's screen, keep its scrollback and frame its history on a thread of its own, so a flood of output does not slow the app. Uses the native screen model."
   }
 ]
 

@@ -97,14 +97,17 @@ describe('what a terminal that survives a crash costs', () => {
     expect(fifty, `${ten}ms for ten sessions, ${fifty}ms for ${r.sessions}`).toBeLessThan(ten * 10)
   })
 
-  it('reads every terminal back for less than it cost to write them', () => {
+  it('reads every terminal back in a few milliseconds each', () => {
     // Recovery runs before the port file and the credential are published, so
     // its cost is not a window where history is missing -- it is a delay before
     // anything can find the server at all. Measured at 62ms for fifty sessions,
-    // against 480ms to write them.
+    // against 480ms to write them. That used to be the assertion, restore under
+    // write, until the core thread took the checkpoint's JSON off this loop and
+    // writing fifty fell to about 100ms; restoring them is ~140ms on either
+    // path. A ceiling per session instead, an order of magnitude above that.
     expect(
       r.recoverMs,
       `${r.recoverMs}ms to restore ${r.sessions}, ${r.checkpointMs[String(r.sessions)]}ms to write them`
-    ).toBeLessThan(r.checkpointMs[String(r.sessions)] ?? 0)
+    ).toBeLessThan(r.sessions * 30)
   })
 }, 300_000)
