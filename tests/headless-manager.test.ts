@@ -253,3 +253,32 @@ describe('headlessManager.createHeadless', () => {
     )
   })
 })
+
+describe('a worktree made for a headless run', () => {
+  it('is held while the run is prepared, and let go once it is a session', async () => {
+    const git = await import('../packages/server/src/git-utils')
+    const { isWorkspaceHeld } = await import('../packages/server/src/workspace-holds')
+    const made = '/p-worktrees/run-0000cccc'
+    const heldDuring: boolean[] = []
+    vi.mocked(git.isGitRepo).mockResolvedValueOnce(true)
+    vi.mocked(git.createWorktree).mockImplementationOnce(
+      async (_project, branch, _name, _remote, onPath) => {
+        onPath?.(made)
+        heldDuring.push(isWorkspaceHeld(made))
+        return { worktreePath: made, branch, name: 'run' }
+      }
+    )
+    const session = await headlessManager.createHeadless({
+      agentType: 'claude',
+      projectName: 'p',
+      projectPath: '/p',
+      useWorktree: true,
+      branch: 'feature/x',
+      initialPrompt: 'go'
+    })
+    expect(heldDuring).toEqual([true])
+    expect(isWorkspaceHeld(made)).toBe(false)
+    expect(headlessManager.getActiveSessionsForWorktree(made)).toMatchObject({ count: 1 })
+    headlessManager.killHeadless(session.id)
+  })
+})

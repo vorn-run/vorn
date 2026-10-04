@@ -279,13 +279,17 @@ export async function checkoutBranch(
   branch: string,
   remote?: RemoteHost
 ): Promise<{ ok: boolean; error?: string }> {
-  try {
-    await gitExec(['checkout', branch], projectPath, { timeout: 10000, remote })
-    return { ok: true }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return { ok: false, error: msg }
-  }
+  // Takes the repository's turn: a checkout landing between another change's
+  // add and commit would put that commit on the wrong branch.
+  return serialized(repoKey(projectPath, remote), async () => {
+    try {
+      await gitExec(['checkout', branch], projectPath, { timeout: 10000, remote })
+      return { ok: true }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: msg }
+    }
+  })
 }
 
 export function extractWorktreeName(worktreePath: string): string {
@@ -372,7 +376,13 @@ export async function createWorktree(
   projectPath: string,
   branch: string,
   worktreeName?: string,
-  remote?: RemoteHost
+  remote?: RemoteHost,
+  /**
+   * Told the new worktree's path before anything is made there, so a caller
+   * can hold it: a cleanup that runs while git adds it must not take the
+   * half-made directory for an orphan, nor the finished one for an idle worktree.
+   */
+  onPath?: (worktreePath: string) => void
 ): Promise<{ worktreePath: string; branch: string; name: string }> {
   return serialized(repoKey(projectPath, remote), async () => {
     // Use posix path separators for remote (always Linux)
@@ -386,6 +396,7 @@ export async function createWorktree(
       : path.dirname(projectPath)
     const baseDir = `${parentDir}${sep}.vorn-worktrees${sep}${projectName}`
     const worktreeDir = `${baseDir}${sep}${name}-${shortId}`
+    onPath?.(worktreeDir)
 
     if (remote) {
       await gitRunner().remote(remote, `mkdir -p ${shellEscape(baseDir, 'posix')}`, {
@@ -555,9 +566,16 @@ export async function removeWorktree(
   worktreePath: string,
   force = false,
   remote?: RemoteHost,
-  deleteBranch = false
+  deleteBranch = false,
+  /**
+   * Run once this removal has the repository's turn, right before it deletes
+   * anything; throwing stops it. A session may have started in the worktree
+   * while the removal waited for the turn.
+   */
+  assertIdle?: () => void
 ): Promise<boolean> {
   return serialized(repoKey(projectPath, remote), async () => {
+    assertIdle?.()
     // Read the branch before removal — afterwards git no longer associates it
     // with a path, and we would have nothing left to delete.
     const branch = deleteBranch ? await getGitBranch(worktreePath, remote) : null
@@ -572,7 +590,7 @@ export async function removeWorktree(
     // changes", which is not permission to drop unmerged commits. A branch git
     // refuses to delete is left alone rather than failing a removal that
     // already succeeded.
-    if (branch) await deleteBranches(projectPath, [branch], false, remote)
+    if (branch) await deleteBranchesNow(projectPath, [branch], false, remote)
     return true
   })
 }
@@ -738,6 +756,18 @@ export async function deleteBranches(
   projectPath: string,
   branches: string[],
   force = false,
+  remote?: RemoteHost
+): Promise<{ deleted: string[]; failed: { branch: string; error: string }[] }> {
+  return serialized(repoKey(projectPath, remote), () =>
+    deleteBranchesNow(projectPath, branches, force, remote)
+  )
+}
+
+/** `deleteBranches` for a caller that already has the repository's turn. */
+async function deleteBranchesNow(
+  projectPath: string,
+  branches: string[],
+  force: boolean,
   remote?: RemoteHost
 ): Promise<{ deleted: string[]; failed: { branch: string; error: string }[] }> {
   const deleted: string[] = []

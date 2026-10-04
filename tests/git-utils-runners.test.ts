@@ -191,6 +191,28 @@ describe('changes to one repository', () => {
     expect(log.indexOf('/elsewhere commit')).toBeLessThan(log.indexOf('/repo commit'))
   })
 
+  it('includes a checkout, so a commit stays on the branch it started on', async () => {
+    const log: string[] = []
+    const runner: GitRunner = {
+      mode: 'native',
+      local: async (args, cwd) => {
+        log.push(`${cwd} ${args[0]}`)
+        await new Promise((r) => setTimeout(r, 5))
+        return ''
+      },
+      remote: async () => ''
+    }
+    process.env.VORN_GIT = 'native'
+    resetGitRunner(runner)
+
+    await Promise.all([
+      git.gitCommit('/repo', 'one', true),
+      git.checkoutBranch('/repo', 'side'),
+      git.deleteBranches('/repo', ['old'])
+    ])
+    expect(log).toEqual(['/repo add', '/repo commit', '/repo checkout', '/repo branch'])
+  })
+
   it('carries on after a change that failed', async () => {
     let calls = 0
     const runner: GitRunner = {
@@ -243,6 +265,52 @@ describe('turns are per repository, not per path', () => {
     // The commit's add and commit run back to back; the removal comes after.
     expect(log.slice(0, 2)).toEqual(['add -A', 'commit -m'])
     expect(log.slice(2).some((c) => c.startsWith('worktree remove'))).toBe(true)
+  })
+})
+
+describe('a worktree being made or removed', () => {
+  it('names its path before git makes anything there', async () => {
+    const seen: string[] = []
+    const runner: GitRunner = {
+      mode: 'native',
+      local: async (args) => {
+        seen.push(args.slice(0, 2).join(' '))
+        return args[0] === 'branch' ? '  main\n' : ''
+      },
+      remote: async () => ''
+    }
+    process.env.VORN_GIT = 'native'
+    resetGitRunner(runner)
+    const made = await git.createWorktree(repo, 'main', 'held', undefined, (p) =>
+      seen.push(`path ${p}`)
+    )
+    expect(seen[0]).toBe(`path ${made.worktreePath}`)
+    expect(seen.some((c) => c.startsWith('worktree add'))).toBe(true)
+  })
+
+  it('checks once it has the turn, so a session started while it waited is spared', async () => {
+    const log: string[] = []
+    // A session opens in the worktree while the commit ahead of the removal runs.
+    let busy = false
+    const runner: GitRunner = {
+      mode: 'native',
+      local: async (args) => {
+        log.push(args.slice(0, 2).join(' '))
+        await new Promise((r) => setTimeout(r, 5))
+        if (args[0] === 'commit') busy = true
+        return ''
+      },
+      remote: async () => ''
+    }
+    process.env.VORN_GIT = 'native'
+    resetGitRunner(runner)
+    const commit = git.gitCommit('/repo', 'work', false)
+    const removal = git.removeWorktree('/repo', '/wt', false, undefined, false, () => {
+      if (busy) throw new Error('has a session — close it first')
+    })
+    await commit
+    await expect(removal).rejects.toThrow(/has a session/)
+    expect(log.some((c) => c.startsWith('worktree remove'))).toBe(false)
   })
 })
 

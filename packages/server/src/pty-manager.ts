@@ -286,16 +286,19 @@ class PtyManager extends EventEmitter {
       : undefined
     if (remoteHost) return { remoteHost }
     // Held from here until `spawnPty` makes it a session, so a worktree action
-    // in between sees it as in use.
-    const release = payload.existingWorktreePath
-      ? holdWorkspace(payload.existingWorktreePath)
-      : undefined
+    // in between sees it as in use: the worktree it names, and one it creates.
+    const releases: (() => void)[] = []
+    const hold = (dir: string): void => {
+      releases.push(holdWorkspace(dir))
+    }
+    const release = (): void => releases.forEach((r) => r())
+    if (payload.existingWorktreePath) hold(payload.existingWorktreePath)
     try {
-      const local = await this.prepareLocal(payload)
-      if (release) local.release = release
+      const local = await this.prepareLocal(payload, hold)
+      local.release = release
       return { local }
     } catch (err) {
-      release?.()
+      release()
       throw err
     }
   }
@@ -324,7 +327,10 @@ class PtyManager extends EventEmitter {
     }
   }
 
-  private async prepareLocal(payload: CreateTerminalPayload): Promise<PreparedLocal> {
+  private async prepareLocal(
+    payload: CreateTerminalPayload,
+    hold: (dir: string) => void
+  ): Promise<PreparedLocal> {
     // Session ID pinning: agents that support it (supportsSessionIdPinning) get a
     // UUID assigned on fresh launch via --session-id, enabling exact --resume later.
     // Other agents rely on history-based fallback for resume.
@@ -366,7 +372,9 @@ class PtyManager extends EventEmitter {
         const result = await createWorktree(
           payload.projectPath,
           payload.branch,
-          payload.worktreeName
+          payload.worktreeName,
+          undefined,
+          hold
         )
         effectivePath = result.worktreePath
         worktreePath = result.worktreePath

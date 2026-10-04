@@ -34,6 +34,7 @@ import {
 } from './agent-transcript'
 import {
   claimSpawningTranscript,
+  holdClaimsWhilePreparing,
   releaseSpawningTranscript,
   releaseSpawningTranscriptsFor
 } from './transcript-claims'
@@ -747,13 +748,16 @@ export function registerAllMethods(): void {
           throw new Error('This conversation is already starting in another pane')
         }
       }
+      const prepared = holdClaimsWhilePreparing(id)
       try {
         const session = ptyManager.spawnPty(payload, await ptyManager.prepareSession(payload), id)
+        prepared()
         // An agent that was told the id names the conversation itself; one that
         // cannot be keeps the claim until it reports, seconds later.
         if (session.agentSessionId) releaseSpawningTranscript(named, id)
         return session
       } catch (err) {
+        prepared()
         releaseSpawningTranscript(named, id)
         throw err
       }
@@ -1163,6 +1167,7 @@ export function registerAllMethods(): void {
     const live = ptyManager.getLiveSessions()
     let transcriptId: string | undefined
     let settleResume: ((session: TerminalSession | undefined) => void) | undefined
+    let claimsPrepared: (() => void) | undefined
     const pinned = previous.agentSessionId
     const holder = pinned ? transcriptHolder(pinned, live) : undefined
     if (holder) {
@@ -1243,6 +1248,8 @@ export function registerAllMethods(): void {
       // Read before the claim, so the claim and what it is checked against are
       // one synchronous step: with native git this await lets other calls run.
       const scope = await transcriptScope(grounded)
+      // Not lapsing while the workspace below is prepared, however long git takes.
+      claimsPrepared = holdClaimsWhilePreparing(id)
       transcriptId = claimTranscriptFor(
         grounded,
         ptyManager.getLiveSessions(),
@@ -1263,6 +1270,7 @@ export function registerAllMethods(): void {
       // the session while its workspace is prepared, as it does for any spawn.
       const payload = buildRestorePayload(grounded, transcriptId)
       const session = ptyManager.spawnPty(payload, await ptyManager.prepareSession(payload), id)
+      claimsPrepared()
       settleResume?.(session)
       // Carried on the server rather than through the payload, so membership is
       // never something a client can set on a spawn.
@@ -1281,6 +1289,7 @@ export function registerAllMethods(): void {
       // one that ended during this run goes back to the pty manager it came from.
       if (restored) restoreHeld(restored)
       else if (dead) ptyManager.restoreReleased(dead)
+      claimsPrepared?.()
       if (transcriptId) releaseSpawningTranscript(transcriptId, id)
       settleResume?.(undefined)
       return {

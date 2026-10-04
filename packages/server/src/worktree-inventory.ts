@@ -916,7 +916,9 @@ export async function removeWorktrees(
         item.worktreePath,
         item.force ?? false,
         remote,
-        item.deleteBranch ?? false
+        item.deleteBranch ?? false,
+        // And once more when the removal has the repository's turn.
+        () => assertIdle(item.worktreePath)
       )
       if (!ok) throw new Error('git worktree remove failed')
 

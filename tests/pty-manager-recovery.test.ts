@@ -121,6 +121,7 @@ vi.mock('../packages/server/src/process-utils', async () => {
 import { ptyManager } from '../packages/server/src/pty-manager'
 import { createWorktree, isGitRepo } from '../packages/server/src/git-utils'
 import { buildAgentLaunchLine } from '../packages/server/src/agent-launch'
+import { isWorkspaceHeld } from '../packages/server/src/workspace-holds'
 
 const createWorktreeMock = vi.mocked(createWorktree)
 const isGitRepoMock = vi.mocked(isGitRepo)
@@ -266,6 +267,42 @@ describe('pty spawn failures', () => {
     )
     expect(spawnMock).not.toHaveBeenCalled()
     expect(ptyManager.getActiveSessions()).toHaveLength(0)
+  })
+})
+
+describe('a worktree made for a new session', () => {
+  it('is held from the moment git names it until the session exists', async () => {
+    isGitRepoMock.mockResolvedValue(true)
+    const made = '/tmp/.vorn-worktrees/vorn-proj/held-0000aaaa'
+    const heldDuring: boolean[] = []
+    createWorktreeMock.mockImplementation(async (_project, branch, _name, _remote, onPath) => {
+      onPath?.(made)
+      heldDuring.push(isWorkspaceHeld(made))
+      return { worktreePath: made, branch, name: 'held' }
+    })
+    const payload = {
+      agentType: 'claude',
+      projectName: 'proj',
+      projectPath: '/tmp/vorn-proj',
+      useWorktree: true,
+      branch: 'feature/x'
+    } as CreateTerminalPayload
+    const prepared = await ptyManager.prepareSession(payload)
+    expect(heldDuring).toEqual([true])
+    expect(isWorkspaceHeld(made)).toBe(true)
+    ptyManager.spawnPty(payload, prepared)
+    expect(isWorkspaceHeld(made)).toBe(false)
+  })
+
+  it('is let go when preparing fails after git made it', async () => {
+    isGitRepoMock.mockResolvedValue(true)
+    const made = '/tmp/.vorn-worktrees/vorn-proj/failed-0000bbbb'
+    createWorktreeMock.mockImplementation(async (_project, _branch, _name, _remote, onPath) => {
+      onPath?.(made)
+      throw new Error('fatal: could not create worktree')
+    })
+    await expect(createAgent({ useWorktree: true, branch: 'feature/x' })).rejects.toThrow()
+    expect(isWorkspaceHeld(made)).toBe(false)
   })
 })
 

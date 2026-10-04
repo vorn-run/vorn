@@ -79,10 +79,13 @@ class HeadlessManager extends EventEmitter {
     let effectiveBranch: string | undefined
     let worktreeName: string | undefined
     let branch: string | undefined
-    // Held while the git below runs, so a worktree action in between sees it in use.
-    const release = payload.existingWorktreePath
-      ? holdWorkspace(payload.existingWorktreePath)
-      : undefined
+    // Held while the git below runs, so a worktree action in between sees it in
+    // use: the worktree it names, and one it creates.
+    const releases: (() => void)[] = []
+    const hold = (dir: string): void => {
+      releases.push(holdWorkspace(dir))
+    }
+    if (payload.existingWorktreePath) hold(payload.existingWorktreePath)
     try {
       if (payload.existingWorktreePath && fs.existsSync(payload.existingWorktreePath)) {
         effectivePath = payload.existingWorktreePath
@@ -95,7 +98,9 @@ class HeadlessManager extends EventEmitter {
           const result = await createWorktree(
             payload.projectPath,
             payload.branch,
-            payload.worktreeName
+            payload.worktreeName,
+            undefined,
+            hold
           )
           effectivePath = result.worktreePath
           worktreeName = result.name
@@ -119,7 +124,7 @@ class HeadlessManager extends EventEmitter {
       branch = effectiveBranch || (await getGitBranch(effectivePath)) || undefined
     } finally {
       // From here to the session being registered is synchronous.
-      release?.()
+      releases.forEach((release) => release())
     }
     // Again, after the git above, which with native git lets the loop run.
     if (isDraining()) throw new Error(DRAINING_MESSAGE)
