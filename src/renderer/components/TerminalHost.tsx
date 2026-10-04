@@ -1,11 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  setHostRoot,
-  syncTerminalOverlay,
-  getRegisteredTerminalIds,
-  onRegistryChange,
-  TERMINAL_ID_ATTR
-} from '../lib/terminal-registry'
+import { setHostRoot, startTerminalOverlaySync, TERMINAL_ID_ATTR } from '../lib/terminal-registry'
 import { useAppStore } from '../stores'
 import { TerminalContextMenu } from './TerminalContextMenu'
 
@@ -16,9 +10,9 @@ interface CtxMenuState {
 }
 
 /**
- * Per-frame rAF is used (not ResizeObserver) because Framer Motion springs
- * animate `transform`, which does not trigger RO. The loop is cheap:
- * syncTerminalOverlay early-returns when the slot rect is unchanged.
+ * The root every terminal wrapper is drawn in. The wrappers follow their slots
+ * through `startTerminalOverlaySync`, which only reads layout while something
+ * may be moving: see `overlay-sync.ts`.
  */
 export function TerminalHost() {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -53,21 +47,12 @@ export function TerminalHost() {
     }
     el.addEventListener('pointerdown', handlePointerDown)
 
-    let rafId = requestAnimationFrame(function tick(): void {
-      const ids = getRegisteredTerminalIds()
-      for (const id of ids) syncTerminalOverlay(id)
-      rafId = requestAnimationFrame(tick)
-    })
-
-    const unsubscribe = onRegistryChange(() => {
-      for (const id of getRegisteredTerminalIds()) syncTerminalOverlay(id)
-    })
+    const stopSync = startTerminalOverlaySync(el)
 
     return () => {
       el.removeEventListener('contextmenu', handleContextMenu)
       el.removeEventListener('pointerdown', handlePointerDown)
-      cancelAnimationFrame(rafId)
-      unsubscribe()
+      stopSync()
       setHostRoot(null)
     }
   }, [])

@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { GitFileDiff } from '../../shared/types'
 import { X, MessageSquare } from 'lucide-react'
 import { FileTypeIcon } from './file-icons'
@@ -138,6 +138,77 @@ function CommentBadge({ comment, onRemove }: { comment: DiffComment; onRemove: (
   )
 }
 
+/** One line of a file's diff as it is drawn; `index` is its line in the raw diff, which comments are keyed by. */
+export interface DiffRow {
+  kind: 'meta' | 'hunk' | 'add' | 'del' | 'ctx'
+  index: number
+  text: string
+  oldLine?: number
+  newLine?: number
+}
+
+/** The rows a diff draws: header lines dropped, hunks numbered, blank metadata skipped. */
+export function parseDiffRows(diff: string): DiffRow[] {
+  const rows: DiffRow[] = []
+  let oldLine = 0
+  let newLine = 0
+  let inHunk = false
+  diff.split('\n').forEach((line, index) => {
+    if (
+      line.startsWith('diff --git') ||
+      line.startsWith('index ') ||
+      line.startsWith('--- ') ||
+      line.startsWith('+++ ')
+    ) {
+      return
+    }
+    const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/)
+    if (hunk) {
+      oldLine = parseInt(hunk[1], 10)
+      newLine = parseInt(hunk[2], 10)
+      inHunk = true
+      rows.push({ kind: 'hunk', index, text: line })
+      return
+    }
+    if (!inHunk) {
+      // Binary diff or other metadata
+      if (line.trim()) rows.push({ kind: 'meta', index, text: line })
+      return
+    }
+    if (line.startsWith('+')) rows.push({ kind: 'add', index, text: line, newLine: newLine++ })
+    else if (line.startsWith('-')) rows.push({ kind: 'del', index, text: line, oldLine: oldLine++ })
+    else if (line.startsWith(' '))
+      rows.push({ kind: 'ctx', index, text: line, oldLine: oldLine++, newLine: newLine++ })
+  })
+  return rows
+}
+
+/**
+ * Rows drawn or skipped together. A diff of a few thousand lines is tens of
+ * thousands of elements, and React building all of them is the cost of opening
+ * the panel; so only blocks near the visible part of the list are drawn, and
+ * the rest stand in as empty boxes of the same height.
+ */
+export const DIFF_BLOCK_ROWS = 100
+/** How far beyond the visible part blocks are drawn, so scrolling never meets an empty box. */
+const DIFF_DRAW_MARGIN_PX = 1200
+/** A row is one line of 12px text at 1.6 leading; a hunk header adds 2px of padding above and below. */
+const DIFF_ROW_PX = 19.2
+const DIFF_HUNK_EXTRA_PX = 4
+
+/** Marks the scrolling element blocks measure themselves against. */
+const SCROLL_ROOT_ATTR = 'data-diff-scroll'
+
+/** What one line's comments are, by their index in the full list, so a removal names the right one. */
+type LineComments = Map<number, { comment: DiffComment; globalIdx: number }[]>
+
+interface RowHandlers {
+  onClickLine: (filePath: string, lineIndex: number, lineContent: string) => void
+  onAddComment: (text: string) => void
+  onCancelComment: () => void
+  onRemoveComment: (index: number) => void
+}
+
 export function DiffContent({
   files,
   selectedFile,
@@ -166,213 +237,289 @@ export function DiffContent({
     }
   }, [selectedFile])
 
+  const byFile = useMemo(() => {
+    const out = new Map<string, LineComments>()
+    comments.forEach((comment, globalIdx) => {
+      let lines = out.get(comment.filePath)
+      if (!lines) out.set(comment.filePath, (lines = new Map()))
+      const at = lines.get(comment.lineIndex) ?? []
+      at.push({ comment, globalIdx })
+      lines.set(comment.lineIndex, at)
+    })
+    return out
+  }, [comments])
+
+  const handlers: RowHandlers = { onClickLine, onAddComment, onCancelComment, onRemoveComment }
+
   return (
-    <div className="flex-1 overflow-y-auto">
-      {files.map((file) => {
-        const letter = STATUS_LETTER[file.status] ?? STATUS_LETTER.modified
-        const fileName = file.filePath.split('/').pop() || file.filePath
-        const lines = parseDiffLines(
-          file.diff,
-          file.filePath,
-          comments,
-          commentingLine,
-          onClickLine,
-          onAddComment,
-          onCancelComment,
-          onRemoveComment
-        )
-        const fileCommentCount = comments.filter((c) => c.filePath === file.filePath).length
-
-        return (
-          <div
-            key={file.filePath}
-            ref={(el) => {
-              if (el) fileRefs.current.set(file.filePath, el)
-            }}
-          >
-            {/* File header */}
-            <div
-              className="sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 text-[12px] font-mono
-                            border-b border-white/[0.06]"
-              style={{ background: 'var(--color-surface-overlay)' }}
-            >
-              <FileTypeIcon name={fileName} size={14} />
-              <span className="text-gray-300 flex-1 min-w-0 truncate">{file.filePath}</span>
-              <span className={`${STATUS_LETTER_CLASS} text-[10px] font-bold shrink-0`}>
-                {letter}
-              </span>
-              {fileCommentCount > 0 && (
-                <span className="text-[10px] text-ink-secondary bg-white/[0.06] px-1.5 py-0.5 rounded-full ml-auto">
-                  {fileCommentCount} comment{fileCommentCount !== 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-
-            {/* Diff lines */}
-            <pre className="text-[12px] leading-[1.6] font-mono">{lines}</pre>
-          </div>
-        )
-      })}
+    <div {...{ [SCROLL_ROOT_ATTR]: '' }} className="flex-1 overflow-y-auto">
+      {files.map((file) => (
+        <DiffFile
+          key={file.filePath}
+          file={file}
+          lineComments={byFile.get(file.filePath)}
+          commentingIndex={
+            commentingLine?.filePath === file.filePath ? commentingLine.lineIndex : null
+          }
+          handlers={handlers}
+          fileRef={(el) => {
+            if (el) fileRefs.current.set(file.filePath, el)
+          }}
+        />
+      ))}
     </div>
   )
 }
 
-function parseDiffLines(
-  diff: string,
-  filePath: string,
-  allComments: DiffComment[],
-  commentingLine: { filePath: string; lineIndex: number } | null,
-  onClickLine: (filePath: string, lineIndex: number, lineContent: string) => void,
-  onAddComment: (text: string) => void,
-  onCancelComment: () => void,
-  onRemoveComment: (index: number) => void
-): React.ReactNode[] {
-  const lines = diff.split('\n')
-  const nodes: React.ReactNode[] = []
-  let lineIndex = 0
-  let oldLine = 0
-  let newLine = 0
-  let inHunk = false
+/** A short identity for a diff's text, so a changed diff remounts its blocks. */
+function diffIdentity(diff: string): string {
+  let hash = 0
+  for (let i = 0; i < diff.length; i++) hash = (Math.imul(hash, 31) + diff.charCodeAt(i)) | 0
+  return `${diff.length}-${(hash >>> 0).toString(36)}`
+}
 
-  for (const line of lines) {
-    // Skip diff --git, index, ---, +++ header lines
+function DiffFile({
+  file,
+  lineComments,
+  commentingIndex,
+  handlers,
+  fileRef
+}: {
+  file: GitFileDiff
+  lineComments: LineComments | undefined
+  commentingIndex: number | null
+  handlers: RowHandlers
+  fileRef: (el: HTMLDivElement | null) => void
+}) {
+  const letter = STATUS_LETTER[file.status] ?? STATUS_LETTER.modified
+  const fileName = file.filePath.split('/').pop() || file.filePath
+  const rows = useMemo(() => parseDiffRows(file.diff), [file.diff])
+  const diffKey = useMemo(() => diffIdentity(file.diff), [file.diff])
+  const blocks = useMemo(() => {
+    const out: DiffRow[][] = []
+    for (let i = 0; i < rows.length; i += DIFF_BLOCK_ROWS)
+      out.push(rows.slice(i, i + DIFF_BLOCK_ROWS))
+    return out
+  }, [rows])
+  let fileCommentCount = 0
+  lineComments?.forEach((at) => (fileCommentCount += at.length))
+
+  return (
+    <div ref={fileRef}>
+      {/* File header */}
+      <div
+        className="sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 text-[12px] font-mono
+                            border-b border-white/[0.06]"
+        style={{ background: 'var(--color-surface-overlay)' }}
+      >
+        <FileTypeIcon name={fileName} size={14} />
+        <span className="text-gray-300 flex-1 min-w-0 truncate">{file.filePath}</span>
+        <span className={`${STATUS_LETTER_CLASS} text-[10px] font-bold shrink-0`}>{letter}</span>
+        {fileCommentCount > 0 && (
+          <span className="text-[10px] text-ink-secondary bg-white/[0.06] px-1.5 py-0.5 rounded-full ml-auto">
+            {fileCommentCount} comment{fileCommentCount !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
+
+      {/* Diff lines */}
+      <pre className="text-[12px] leading-[1.6] font-mono">
+        {blocks.map((block, i) => (
+          <DiffBlock
+            // A new diff starts its blocks over: a kept placeholder height
+            // would be the old block's.
+            key={`${diffKey}:${i}`}
+            rows={block}
+            filePath={file.filePath}
+            lineComments={lineComments}
+            commentingIndex={commentingIndex}
+            handlers={handlers}
+          />
+        ))}
+      </pre>
+    </div>
+  )
+}
+
+/** The height a block takes before it has been drawn: rows have one height, hunk headers a little more. */
+export function estimateBlockHeight(rows: readonly DiffRow[]): number {
+  let px = rows.length * DIFF_ROW_PX
+  for (const row of rows) if (row.kind === 'hunk') px += DIFF_HUNK_EXTRA_PX
+  return px
+}
+
+function DiffBlock({
+  rows,
+  filePath,
+  lineComments,
+  commentingIndex,
+  handlers
+}: {
+  rows: DiffRow[]
+  filePath: string
+  lineComments: LineComments | undefined
+  commentingIndex: number | null
+  handlers: RowHandlers
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  // Drawn from the start where nothing can say what is visible, as in tests.
+  const [near, setNear] = useState(() => typeof IntersectionObserver !== 'function')
+  // Kept as it was last drawn, so the empty box that stands in for it is exactly as tall.
+  const [drawnHeight, setDrawnHeight] = useState<number | null>(null)
+  // A block holding a comment or the comment being written is always drawn, so
+  // what someone is typing into is never unmounted under them.
+  const pinned =
+    commentingIndex !== null && rows.some((row) => row.index === commentingIndex)
+      ? true
+      : !!lineComments && rows.some((row) => lineComments.has(row.index))
+  // A height measured while pinned includes the comment UI that has just gone,
+  // so a block let go off-screen falls back to the estimate.
+  const [wasPinned, setWasPinned] = useState(pinned)
+  if (wasPinned !== pinned) {
+    setWasPinned(pinned)
+    if (!pinned) setDrawnHeight(null)
+  }
+
+  // Before the first paint, so a block on screen is drawn in the first frame
+  // rather than one frame after an empty box.
+  useLayoutEffect(() => {
+    const el = ref.current
+    const root = el?.closest(`[${SCROLL_ROOT_ATTR}]`)
+    if (!el || !root || typeof IntersectionObserver !== 'function') return
+    const box = el.getBoundingClientRect()
+    const view = root.getBoundingClientRect()
     if (
-      line.startsWith('diff --git') ||
-      line.startsWith('index ') ||
-      line.startsWith('--- ') ||
-      line.startsWith('+++ ')
+      box.bottom >= view.top - DIFF_DRAW_MARGIN_PX &&
+      box.top <= view.bottom + DIFF_DRAW_MARGIN_PX
     ) {
-      lineIndex++
-      continue
+      setNear(true)
     }
+  }, [])
 
-    // Hunk header
-    const hunkMatch = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/)
-    if (hunkMatch) {
-      oldLine = parseInt(hunkMatch[1], 10)
-      newLine = parseInt(hunkMatch[2], 10)
-      inHunk = true
-      nodes.push(
-        <div key={lineIndex} className="bg-white/[0.05] text-ink-secondary px-3 py-0.5 select-text">
-          {line}
-        </div>
-      )
-      lineIndex++
-      continue
-    }
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof IntersectionObserver !== 'function') return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1]
+        if (!entry.isIntersecting && ref.current) {
+          const drawn = ref.current.getBoundingClientRect().height
+          if (drawn > 0) setDrawnHeight(drawn)
+        }
+        setNear(entry.isIntersecting)
+      },
+      { root: el.closest(`[${SCROLL_ROOT_ATTR}]`), rootMargin: `${DIFF_DRAW_MARGIN_PX}px 0px` }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
-    if (!inHunk) {
-      // Binary diff or other metadata
-      if (line.trim()) {
-        nodes.push(
-          <div key={lineIndex} className="text-gray-500 px-3 select-text">
-            {line}
-          </div>
-        )
-      }
-      lineIndex++
-      continue
-    }
+  if (!near && !pinned) {
+    return <div ref={ref} style={{ height: drawnHeight ?? estimateBlockHeight(rows) }} />
+  }
+  return (
+    <div ref={ref}>
+      {rows.map((row) => (
+        <DiffRowView
+          key={row.index}
+          row={row}
+          filePath={filePath}
+          comments={lineComments?.get(row.index)}
+          commenting={commentingIndex === row.index}
+          handlers={handlers}
+        />
+      ))}
+    </div>
+  )
+}
 
-    const currentLineIndex = lineIndex
-    const isCommentable = line.startsWith('+') || line.startsWith('-')
-    const isCommenting =
-      commentingLine?.filePath === filePath && commentingLine?.lineIndex === currentLineIndex
-
-    // Find comments for this line (using global indices into allComments)
-    const lineComments: { comment: DiffComment; globalIdx: number }[] = []
-    allComments.forEach((c, globalIdx) => {
-      if (c.filePath === filePath && c.lineIndex === currentLineIndex) {
-        lineComments.push({ comment: c, globalIdx })
-      }
-    })
-
-    if (line.startsWith('+')) {
-      nodes.push(
-        <div
-          key={lineIndex}
-          className={`bg-green-500/10 flex select-text group/line ${isCommentable ? 'cursor-pointer hover:bg-green-500/15' : ''}`}
-          onClick={() => isCommentable && onClickLine(filePath, currentLineIndex, line)}
-        >
-          <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-gray-600 select-none">
-            {' '}
-          </span>
-          <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-green-600 select-none">
-            {newLine}
-          </span>
-          <span className="text-green-300 px-1 flex-1">{line.slice(1) || ' '}</span>
-          {isCommentable && (
-            <span className="opacity-0 group-hover/line:opacity-100 pr-2 text-ink-secondary transition-opacity shrink-0">
-              <MessageSquare size={11} strokeWidth={2} />
-            </span>
-          )}
-        </div>
-      )
-      newLine++
-    } else if (line.startsWith('-')) {
-      nodes.push(
-        <div
-          key={lineIndex}
-          className={`bg-red-500/10 flex select-text group/line ${isCommentable ? 'cursor-pointer hover:bg-red-500/15' : ''}`}
-          onClick={() => isCommentable && onClickLine(filePath, currentLineIndex, line)}
-        >
-          <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-red-600 select-none">
-            {oldLine}
-          </span>
-          <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-gray-600 select-none">
-            {' '}
-          </span>
-          <span className="text-red-300 px-1 flex-1">{line.slice(1) || ' '}</span>
-          {isCommentable && (
-            <span className="opacity-0 group-hover/line:opacity-100 pr-2 text-ink-secondary transition-opacity shrink-0">
-              <MessageSquare size={11} strokeWidth={2} />
-            </span>
-          )}
-        </div>
-      )
-      oldLine++
-    } else if (line.startsWith(' ')) {
-      nodes.push(
-        <div key={lineIndex} className="flex select-text">
-          <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-gray-600 select-none">
-            {oldLine}
-          </span>
-          <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-gray-600 select-none">
-            {newLine}
-          </span>
-          <span className="text-gray-400 px-1 flex-1">{line.slice(1) || ' '}</span>
-        </div>
-      )
-      oldLine++
-      newLine++
-    }
-
-    // Render existing comments for this line
-    for (const { comment, globalIdx } of lineComments) {
-      nodes.push(
+function DiffRowView({
+  row,
+  filePath,
+  comments,
+  commenting,
+  handlers
+}: {
+  row: DiffRow
+  filePath: string
+  comments: { comment: DiffComment; globalIdx: number }[] | undefined
+  commenting: boolean
+  handlers: RowHandlers
+}) {
+  const { onClickLine, onAddComment, onCancelComment, onRemoveComment } = handlers
+  if (row.kind === 'hunk') {
+    return (
+      <div className="bg-white/[0.05] text-ink-secondary px-3 py-0.5 select-text">{row.text}</div>
+    )
+  }
+  if (row.kind === 'meta') {
+    return <div className="text-gray-500 px-3 select-text">{row.text}</div>
+  }
+  const commentIcon = (
+    <span className="opacity-0 group-hover/line:opacity-100 pr-2 text-ink-secondary transition-opacity shrink-0">
+      <MessageSquare size={11} strokeWidth={2} />
+    </span>
+  )
+  let line: React.ReactNode
+  if (row.kind === 'add') {
+    line = (
+      <div
+        className="bg-green-500/10 flex select-text group/line cursor-pointer hover:bg-green-500/15"
+        onClick={() => onClickLine(filePath, row.index, row.text)}
+      >
+        <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-gray-600 select-none">
+          {' '}
+        </span>
+        <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-green-600 select-none">
+          {row.newLine}
+        </span>
+        <span className="text-green-300 px-1 flex-1">{row.text.slice(1) || ' '}</span>
+        {commentIcon}
+      </div>
+    )
+  } else if (row.kind === 'del') {
+    line = (
+      <div
+        className="bg-red-500/10 flex select-text group/line cursor-pointer hover:bg-red-500/15"
+        onClick={() => onClickLine(filePath, row.index, row.text)}
+      >
+        <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-red-600 select-none">
+          {row.oldLine}
+        </span>
+        <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-gray-600 select-none">
+          {' '}
+        </span>
+        <span className="text-red-300 px-1 flex-1">{row.text.slice(1) || ' '}</span>
+        {commentIcon}
+      </div>
+    )
+  } else {
+    line = (
+      <div className="flex select-text">
+        <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-gray-600 select-none">
+          {row.oldLine}
+        </span>
+        <span className="w-[35px] shrink-0 text-right pr-2 text-[11px] text-gray-600 select-none">
+          {row.newLine}
+        </span>
+        <span className="text-gray-400 px-1 flex-1">{row.text.slice(1) || ' '}</span>
+      </div>
+    )
+  }
+  if (!comments?.length && !commenting) return line
+  return (
+    <>
+      {line}
+      {comments?.map(({ comment, globalIdx }) => (
         <CommentBadge
-          key={`comment-${currentLineIndex}-${globalIdx}`}
+          key={`comment-${row.index}-${globalIdx}`}
           comment={comment}
           onRemove={() => onRemoveComment(globalIdx)}
         />
-      )
-    }
-
-    // Render inline comment input if this is the active line
-    if (isCommenting) {
-      nodes.push(
-        <InlineCommentInput
-          key={`input-${currentLineIndex}`}
-          onSubmit={onAddComment}
-          onCancel={onCancelComment}
-        />
-      )
-    }
-
-    lineIndex++
-  }
-
-  return nodes
+      ))}
+      {commenting && <InlineCommentInput onSubmit={onAddComment} onCancel={onCancelComment} />}
+    </>
+  )
 }
 
 export function formatReviewFeedback(comments: DiffComment[]): string {

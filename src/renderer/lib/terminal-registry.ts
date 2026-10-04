@@ -10,6 +10,7 @@ import {
 } from './command-blocks'
 import { chooseAnchor, readScrollAnchor, resolveAnchor, writeScrollAnchor } from './scroll-anchor'
 import type { BufferMetrics } from './spine-layout'
+import { startOverlaySync, type OverlaySync } from './overlay-sync'
 import { TERMINAL_BACKGROUND } from '../../shared/surface'
 import type { TerminalData } from '@vornrun/shared/protocol'
 
@@ -43,6 +44,18 @@ export const TERMINAL_ID_ATTR = 'data-terminal-id'
 
 /** How long the scroll has to stand still before an anchor is worth a write. */
 const ANCHOR_SETTLE_MS = 250
+
+/**
+ * Where a hidden wrapper waits: outside the viewport, at the size it last had.
+ *
+ * `visibility: hidden` alone leaves xterm drawing every frame of output into a
+ * canvas nobody sees, because the IntersectionObserver which xterm uses to pause
+ * its renderer still counts a hidden element as on screen. Out here it does
+ * not, so a terminal in another tab or view parses its output but draws none of
+ * it, and repaints once when it is shown again. Moving rather than `display:
+ * none` keeps its size, so the cell xterm measured stays right.
+ */
+const PARKED_LEFT = '-100000px'
 
 const registry = new Map<string, TerminalEntry>()
 
@@ -113,7 +126,11 @@ function receive(id: string, chunk: Chunk): void {
     return
   }
   const entry = registry.get(id)
-  if (entry) entry.term.write(chunk.data)
+  if (!entry) return
+  entry.term.write(chunk.data)
+  // While a shrinking box waits out its hold, its window shows the rows around
+  // the cursor, which output moves without moving any layout.
+  if (entry.resizeTimer) overlaySync?.request()
 }
 
 let removeGlobalDataListener: (() => void) | null = null
@@ -494,6 +511,8 @@ let cachedTerminalIds: string[] | null = null
 
 function notifyRegistryChange(): void {
   cachedTerminalIds = null
+  overlaySync?.slotsChanged()
+  overlaySync?.request()
   for (const cb of registryChangeListeners) {
     try {
       cb()
@@ -509,7 +528,7 @@ function ensurePersistentWrapper(entry: TerminalEntry, terminalId: string): HTML
   wrapper.setAttribute(TERMINAL_ID_ATTR, terminalId)
   wrapper.style.position = 'fixed'
   wrapper.style.top = '0'
-  wrapper.style.left = '0'
+  wrapper.style.left = PARKED_LEFT
   wrapper.style.width = '0'
   wrapper.style.height = '0'
   wrapper.style.visibility = 'hidden'
@@ -557,6 +576,43 @@ export function setHostRoot(root: HTMLElement | null): void {
   }
 }
 
+let overlaySync: OverlaySync | null = null
+
+/** Every element a wrapper follows: each terminal's slot, and the box its grid is fitted to. */
+function followedElements(): Element[] {
+  const out: Element[] = []
+  for (const entry of registry.values()) {
+    if (entry.activeSlot) out.push(entry.activeSlot)
+    if (entry.fitElement) out.push(entry.fitElement)
+  }
+  return out
+}
+
+/**
+ * Keep every wrapper on its slot from now until the returned stop is called;
+ * see `overlay-sync.ts` for when it looks. One at a time: starting again stops
+ * the previous one.
+ */
+export function startTerminalOverlaySync(root: HTMLElement): () => void {
+  overlaySync?.stop()
+  const sync = startOverlaySync({
+    root,
+    ids: getRegisteredTerminalIds,
+    sync: syncTerminalOverlay,
+    slots: followedElements
+  })
+  overlaySync = sync
+  return () => {
+    sync.stop()
+    if (overlaySync === sync) overlaySync = null
+  }
+}
+
+/** Ask the overlay to look again: something moved that it cannot see for itself. */
+export function requestOverlaySync(): void {
+  overlaySync?.request()
+}
+
 /**
  * Register a slot element for a terminal. The wrapper is created (lazily)
  * and will track this slot's bounding rect via syncTerminalOverlay.
@@ -570,6 +626,8 @@ export function registerSlot(terminalId: string, slotEl: HTMLElement, fitEl?: HT
   ensurePersistentWrapper(entry, terminalId)
   openIntoPersistentWrapper(entry, terminalId)
   syncTerminalOverlay(terminalId)
+  overlaySync?.slotsChanged()
+  overlaySync?.request()
 }
 
 /**
@@ -582,20 +640,25 @@ export function unregisterSlot(terminalId: string, slotEl: HTMLElement): void {
   entry.activeSlot = null
   entry.fitElement = null
   syncTerminalOverlay(terminalId)
+  overlaySync?.slotsChanged()
 }
 
 export function getPersistentWrapper(terminalId: string): HTMLDivElement | null {
   return registry.get(terminalId)?.persistentWrapper ?? null
 }
 
-function hideWrapper(wrapper: HTMLDivElement, entry: TerminalEntry): void {
-  if (wrapper.style.visibility !== 'hidden') {
+/** True when the wrapper was showing until now. */
+function hideWrapper(wrapper: HTMLDivElement, entry: TerminalEntry): boolean {
+  const wasShown = wrapper.style.visibility !== 'hidden'
+  if (wasShown) {
     wrapper.style.visibility = 'hidden'
     wrapper.style.pointerEvents = 'none'
   }
+  wrapper.style.left = PARKED_LEFT
   wrapper.style.clipPath = ''
   entry.lastAppliedRect = null
   entry.lastWindow = null
+  return wasShown
 }
 
 /** The cell as xterm laid it out: its screen element over its grid. */
@@ -613,7 +676,7 @@ function applyWindow(
   wrapper: HTMLDivElement,
   box: { top: number; height: number },
   win: { top: number; height: number }
-): void {
+): boolean {
   const cell = entry.cell
   const rows = entry.term.rows || 0
   let next: NonNullable<TerminalEntry['lastWindow']>
@@ -635,7 +698,7 @@ function applyWindow(
     last.shown === next.shown &&
     last.boxHeight === next.boxHeight
   ) {
-    return
+    return false
   }
   wrapper.style.top = `${next.top}px`
   // clip-path clips hit-testing too, so hidden rows take no clicks.
@@ -643,6 +706,7 @@ function applyWindow(
     ? `inset(${next.offset}px 0 ${Math.max(0, box.height - next.offset - next.shown)}px 0)`
     : ''
   entry.lastWindow = next
+  return true
 }
 
 /** The window for the rects as they are now. */
@@ -697,26 +761,26 @@ function fitWhenSettled(entry: TerminalEntry, terminalId: string): void {
   }
   if (entry.resizeTimer) clearTimeout(entry.resizeTimer)
   entry.resizeTimer = setTimeout(() => fitNow(entry, terminalId), RESIZE_SETTLE_MS)
+  // While the hold runs, the window follows the cursor; see `receive`.
+  overlaySync?.request()
   entry.resizeDeadline ??= setTimeout(() => fitNow(entry, terminalId), RESIZE_MAX_WAIT_MS)
 }
 
-/** Per frame from TerminalHost: the box follows the slot at once, the grid takes its size once it settles, and the pty hears only a changed size. */
-export function syncTerminalOverlay(terminalId: string): void {
+/**
+ * Whenever the overlay sync asks: the box follows the slot at once, the grid takes its size once it settles, and the pty hears only a changed size.
+ *
+ * True when the wrapper moved, was shown or hidden, or its window changed, which is how the sync knows things are still moving.
+ */
+export function syncTerminalOverlay(terminalId: string): boolean {
   const entry = registry.get(terminalId)
   const wrapper = entry?.persistentWrapper
-  if (!entry || !wrapper) return
+  if (!entry || !wrapper) return false
   const slot = entry.activeSlot
-  if (!slot) {
-    hideWrapper(wrapper, entry)
-    return
-  }
+  if (!slot) return hideWrapper(wrapper, entry)
   // The grid's box is what it is fitted to; with a fit element the slot is only the window onto it.
   const raw = (entry.fitElement ?? slot).getBoundingClientRect()
   const winRaw = entry.fitElement ? slot.getBoundingClientRect() : raw
-  if (raw.width <= 0 || raw.height <= 0 || winRaw.height <= 0) {
-    hideWrapper(wrapper, entry)
-    return
-  }
+  if (raw.width <= 0 || raw.height <= 0 || winRaw.height <= 0) return hideWrapper(wrapper, entry)
   const rect = {
     top: Math.round(raw.top),
     left: Math.round(raw.left),
@@ -743,9 +807,9 @@ export function syncTerminalOverlay(terminalId: string): void {
     entry.lastAppliedRect = rect
     applyWindow(entry, wrapper, rect, win)
     if (sizeChanged && entry.term.element) fitWhenSettled(entry, terminalId)
-    return
+    return true
   }
-  applyWindow(entry, wrapper, rect, win)
+  return applyWindow(entry, wrapper, rect, win)
 }
 
 export function onRegistryChange(cb: () => void): () => void {

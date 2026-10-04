@@ -47,6 +47,9 @@ export default defineConfig({
       }
     })
   ],
+  // Module workers, so the Shiki worker keeps its grammars as lazy chunks
+  // instead of inlining every language into one file.
+  worker: { format: 'es' },
   base: '/app/',
   resolve: {
     alias: {
