@@ -443,10 +443,10 @@ impl SessionLog {
         Ok(out)
     }
 
-    /// The records after `from`, at most about `max_bytes` of them but always
-    /// at least one: what a live connection sends next. Reads the ring
-    /// directly; only a reader that fell behind into the spool pays for
-    /// reading it.
+    /// The records after `from`, at most about `max_bytes` of output but
+    /// always at least one: what a live connection sends next. Reads the
+    /// ring directly; a reader that fell behind into the spool reads only
+    /// this batch from it, so a frame never grows with the spool.
     pub fn read_batch(
         &mut self,
         from: Cursor,
@@ -456,29 +456,52 @@ impl SessionLog {
         if from == self.head {
             return Ok(Vec::new());
         }
-        let Some(first) = self.ring.front().map(|e| e.hdr.rseq) else {
-            return self.entries_from(from);
-        };
-        if from.epoch != self.epoch
-            || from.next_rseq < first
-            || from.next_rseq > self.head.next_rseq
-        {
-            return self.entries_from(from);
+        if from.epoch != self.epoch {
+            return Err(AttachRefusal::WrongEpoch);
         }
-        let skip = (from.next_rseq - first) as usize;
+        if from.next_rseq < self.oldest().next_rseq || from.next_rseq > self.head.next_rseq {
+            return Err(AttachRefusal::NotRetained);
+        }
+        let ring_first = self
+            .ring
+            .front()
+            .map_or(self.head.next_rseq, |e| e.hdr.rseq);
         let mut out = Vec::new();
-        let mut bytes = 0;
-        for e in self.ring.iter().skip(skip) {
-            if !out.is_empty() && bytes + e.rec.len() > max_bytes {
-                break;
+        if from.next_rseq < ring_first {
+            out = self
+                .spool
+                .read_from(from.next_rseq, max_bytes)
+                .map_err(|_| AttachRefusal::NotRetained)?;
+        }
+        let mut taken: u64 = out.iter().map(|e| e.rec.len()).sum();
+        // The ring carries on only where the spool's part ran up to it: one
+        // that stopped short hit the budget, or a damaged frame.
+        let reached_ring = out.last().map_or(from.next_rseq >= ring_first, |e| {
+            e.hdr.rseq + 1 == ring_first
+        });
+        if reached_ring {
+            let skip = from.next_rseq.saturating_sub(ring_first) as usize;
+            for e in self.ring.iter().skip(skip) {
+                let n = e.rec.len();
+                if !out.is_empty() && taken + n > max_bytes {
+                    break;
+                }
+                taken += n;
+                out.push(e.clone());
             }
-            bytes += e.rec.len();
-            out.push(e.clone());
         }
-        match out.first() {
-            Some(e) if from.is_followed_by(&e.hdr) => Ok(out),
-            _ => Err(AttachRefusal::NotRetained),
+        // One contiguous run starting exactly at `from`, or nothing usable.
+        let mut at = from;
+        for e in &out {
+            if !at.is_followed_by(&e.hdr) {
+                return Err(AttachRefusal::NotRetained);
+            }
+            at = e.after();
         }
+        if out.is_empty() {
+            return Err(AttachRefusal::NotRetained);
+        }
+        Ok(out)
     }
 
     /// Records up to `c` were written to vornd's socket.
@@ -1086,10 +1109,27 @@ mod tests {
         );
         // A single record larger than the batch still comes.
         assert_eq!(l.read_batch(after(24, 100), 1).unwrap().len(), 1);
-        // Behind the ring: everything from the spool on.
+        // Behind the ring: a batch from the spool, held to the same budget,
+        // however much the spool holds.
         let b = l.read_batch(after(2, 100), 250).unwrap();
-        assert_eq!(b.first().unwrap().hdr.rseq, 3);
-        assert_eq!(b.len(), 27);
+        assert_eq!(b.iter().map(|e| e.hdr.rseq).collect::<Vec<_>>(), vec![3, 4]);
+        assert_eq!(l.read_batch(after(2, 100), 0).unwrap().len(), 1);
+        // A batch runs on from the spool's last record into the ring.
+        let b = l.read_batch(after(17, 100), 350).unwrap();
+        assert_eq!(
+            b.iter().map(|e| e.hdr.rseq).collect::<Vec<_>>(),
+            vec![18, 19, 20]
+        );
+        // Read batch by batch from the start, the whole log comes back once.
+        let mut at = Cursor::start(1);
+        let mut seen = Vec::new();
+        while at != l.head() {
+            let b = l.read_batch(at, 450).unwrap();
+            assert!(b.iter().map(|e| e.rec.len()).sum::<u64>() <= 450);
+            at = b.last().unwrap().after();
+            seen.extend(b);
+        }
+        assert_eq!(seen, l.attach(AttachFrom::SessionStart).unwrap().1);
         assert_eq!(l.read_batch(l.head(), 250).unwrap(), vec![]);
         let wrong = Cursor {
             next_offset: 1,
