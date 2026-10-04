@@ -11,6 +11,7 @@ members = [
   "crates/sessiond",
   "crates/sessiond-wire",
   "crates/recovery",
+  "crates/engine",
 ]
 
 [package]

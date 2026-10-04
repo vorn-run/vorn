@@ -8,8 +8,11 @@
 //! [`proxy::HEALTH_PATH`] and a protocol version ([`protocol::VORND_PROTOCOL`])
 //! that clients see in the `Vornd-Protocol` header when their WebSocket opens.
 //! Given a sessiond binary, it also keeps a session holder running
-//! ([`holder`]).
+//! ([`holder`]) and, with the `engine` feature, runs every session it holds
+//! through the session engine ([`engine`]).
 
+#[cfg(feature = "engine")]
+pub mod engine;
 pub mod groups;
 pub mod holder;
 pub mod protocol;

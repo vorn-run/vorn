@@ -2321,6 +2321,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-engine"
+version = "0.7.5"
+dependencies = [
+ "crc32fast",
+ "libghostty-vt",
+ "postcard",
+ "tempfile",
+ "vorn-analysis",
+ "vorn-pipeline",
+ "vorn-recovery",
+ "vorn-screen",
+ "vorn-sessiond",
+ "vorn-sessiond-wire",
+ "vorn-term-proto",
+]
+
+[[package]]
 name = "vorn-git"
 version = "0.0.0"
 dependencies = [
@@ -2416,8 +2433,11 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+ "vorn-engine",
+ "vorn-pipeline",
  "vorn-sessiond",
  "vorn-sessiond-wire",
+ "vorn-term-proto",
 ]
 
 [[package]]

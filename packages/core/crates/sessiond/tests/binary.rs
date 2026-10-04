@@ -218,3 +218,54 @@ async fn on_linux_it_gets_its_own_scope() {
     assert!(cgroup.contains("vorn-sessiond-"), "{cgroup}");
     launch::kill(i.pid).unwrap();
 }
+
+/// sessiond's resident memory, in bytes.
+#[cfg(target_os = "linux")]
+fn rss(pid: u32) -> u64 {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+    let kb: u64 = status
+        .lines()
+        .find_map(|l| l.strip_prefix("VmRSS:"))
+        .and_then(|v| v.trim().trim_end_matches("kB").trim().parse().ok())
+        .expect("VmRSS");
+    kb * 1024
+}
+
+/// An idle session, attached and with a few screens of output, costs
+/// sessiond less than 8 MiB of memory.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn an_idle_session_costs_under_8_mib() {
+    const N: usize = 32;
+    let home = tempfile::tempdir().unwrap();
+    let i = start(home.path());
+    let mut v = V::hello(&i).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let before = rss(i.pid);
+    let mut spawned = Vec::new();
+    for _ in 0..N {
+        let argv = ["sh", "-c", "seq 1 2000; sleep 100"];
+        let ToVornd::Spawned(s) = v.spawn(&argv, Io::Pty { cols: 80, rows: 24 }).await else {
+            panic!("spawn failed");
+        };
+        v.send(ToSessiond::Attach(Attach {
+            session: s.session.clone(),
+            from: AttachFrom::SessionStart,
+        }))
+        .await;
+        spawned.push(s);
+    }
+    // Let every session print and go quiet, reading what it sends.
+    let quiet = Instant::now();
+    while quiet.elapsed() < Duration::from_secs(1) {
+        let _ = tokio::time::timeout(Duration::from_millis(100), v.recv()).await;
+    }
+    let after = rss(i.pid);
+    let each = after.saturating_sub(before) / N as u64;
+    eprintln!("sessiond: {before} B before, {after} B with {N} idle sessions, {each} B each");
+    assert!(each < 8 << 20, "{each} bytes per idle session");
+    for s in spawned {
+        assert!(launch::alive(s.pid));
+    }
+    launch::kill(i.pid).unwrap();
+}

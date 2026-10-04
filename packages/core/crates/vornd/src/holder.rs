@@ -6,6 +6,10 @@
 //! takes no new sessions and exits after its last one ends. One that speaks a
 //! protocol this vornd cannot is left alone, still holding its sessions, and
 //! reported so the app can ask before ending them.
+//!
+//! With the session engine built in, the connection to the current sessiond
+//! is also where every session it holds is attached and parsed (see
+//! [`crate::engine`]).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -62,12 +66,40 @@ struct State {
 #[derive(Debug, Default)]
 pub struct Holder {
     state: Mutex<State>,
+    #[cfg(feature = "engine")]
+    engine: Option<std::sync::Arc<crate::engine::Engine>>,
 }
 
 impl Holder {
     /// A holder that has seen no sessiond yet.
     pub fn new() -> Holder {
         Holder::default()
+    }
+
+    /// A holder that runs every session of the current sessiond through
+    /// `engine`.
+    #[cfg(feature = "engine")]
+    pub fn with_engine(engine: std::sync::Arc<crate::engine::Engine>) -> Holder {
+        Holder {
+            engine: Some(engine),
+            ..Holder::default()
+        }
+    }
+
+    #[cfg(feature = "engine")]
+    pub fn engine(&self) -> Option<&std::sync::Arc<crate::engine::Engine>> {
+        self.engine.as_ref()
+    }
+
+    /// Stays on `conn` until it ends, running its sessions when there is an
+    /// engine; answers why it ended.
+    async fn hold(&self, conn: &mut Conn, welcome: Welcome) -> String {
+        #[cfg(feature = "engine")]
+        if let Some(engine) = &self.engine {
+            return engine.run(conn, welcome).await;
+        }
+        let _ = welcome;
+        conn.hold().await
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
@@ -118,9 +150,9 @@ pub async fn keep(cfg: HolderConfig, holder: std::sync::Arc<Holder>) {
     };
     loop {
         match up(&cfg, &version, &holder).await {
-            Ok(mut conn) => {
+            Ok((mut conn, welcome)) => {
                 holder.state().error = None;
-                let why = conn.hold().await;
+                let why = holder.hold(&mut conn, welcome).await;
                 warn!(%why, "session holder went away; starting another");
                 let mut s = holder.state();
                 s.current = None;
@@ -135,8 +167,17 @@ pub async fn keep(cfg: HolderConfig, holder: std::sync::Arc<Holder>) {
     }
 }
 
+/// Connects to the sessiond at `endpoint` as its vornd and stays until the
+/// connection ends, as [`keep`] does with the one it finds or starts.
+/// Answers why it ended. Dropping the future drops the connection, which
+/// is what a vornd killed looks like to sessiond.
+pub async fn connect(endpoint: &str, holder: &Holder) -> io::Result<String> {
+    let (mut conn, welcome) = Conn::open(endpoint).await?;
+    Ok(holder.hold(&mut conn, welcome).await)
+}
+
 /// Find or start this build's sessiond, drain the rest, and connect.
-async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<Conn> {
+async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<(Conn, Welcome)> {
     let home = cfg.home.clone();
     let bundled = cfg.bundled.clone();
     let version_owned = version.to_owned();
@@ -173,7 +214,7 @@ async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<Co
             i
         }
     };
-    let (conn, welcome) = Conn::open(&instance).await?;
+    let (conn, welcome) = Conn::open(&instance.endpoint).await?;
     holder.state().current = Some(HolderInstance {
         pid: instance.pid,
         instance: instance.instance,
@@ -182,7 +223,7 @@ async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<Co
         sessions: Some(live(&welcome)),
         compatible: true,
     });
-    Ok(conn)
+    Ok((conn, welcome))
 }
 
 /// Tell an older sessiond to take no new sessions and exit after its last
@@ -204,7 +245,7 @@ async fn drain(i: &Instance) -> HolderInstance {
         );
         return seen;
     }
-    match Conn::open(i).await {
+    match Conn::open(&i.endpoint).await {
         Ok((mut conn, welcome)) => {
             seen.sessions = Some(live(&welcome));
             if conn.send(&ToSessiond::Drain(Drain)).await.is_ok() {
@@ -241,7 +282,7 @@ trait Duplex: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Duplex for T {}
 
 /// A connection to one sessiond.
-struct Conn {
+pub(crate) struct Conn {
     s: Box<dyn Duplex>,
     frames: FrameReader,
     /// Kept across reads: `hold` starts a new read on every ping.
@@ -249,8 +290,8 @@ struct Conn {
 }
 
 impl Conn {
-    async fn open(i: &Instance) -> io::Result<(Conn, Welcome)> {
-        let s = os::connect(&i.endpoint).await?;
+    async fn open(endpoint: &str) -> io::Result<(Conn, Welcome)> {
+        let s = os::connect(endpoint).await?;
         let mut conn = Conn {
             s: Box::new(s),
             frames: FrameReader::default(),
@@ -271,11 +312,11 @@ impl Conn {
         }
     }
 
-    async fn send(&mut self, m: &ToSessiond) -> io::Result<()> {
+    pub(crate) async fn send(&mut self, m: &ToSessiond) -> io::Result<()> {
         self.s.write_all(&m.encode()).await
     }
 
-    async fn recv(&mut self) -> io::Result<ToVornd> {
+    pub(crate) async fn recv(&mut self) -> io::Result<ToVornd> {
         loop {
             match self.frames.read::<ToVornd>() {
                 Ok(Some(m)) => return Ok(m),

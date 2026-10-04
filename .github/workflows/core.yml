@@ -107,7 +107,7 @@ jobs:
       # link on every platform. The adapter crate holds no tests of its own.
       - name: Rust tests
         working-directory: packages/core
-        run: cargo test --release --locked -p vorn-screen -p vorn-analysis -p vorn-pipeline -p vorn-term-mirror -p vorn-recovery
+        run: cargo test --release --locked -p vorn-screen -p vorn-analysis -p vorn-pipeline -p vorn-term-mirror -p vorn-recovery -p vorn-engine
 
       # The git crate links nothing from napi, so it runs everywhere, and its
       # parity tests compare against the git each runner has.
@@ -133,7 +133,7 @@ jobs:
       # and the spool tests write to a temp dir on each platform.
       - name: Session holder tests
         working-directory: packages/core
-        run: cargo test --release --locked -p vorn-term-proto -p vorn-sessiond
+        run: cargo test --release --locked -p vorn-term-proto -p vorn-sessiond-wire -p vorn-sessiond
 
       - name: Build vorn_core.node
         run: yarn build:core
