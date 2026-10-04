@@ -2,9 +2,12 @@
 //! user-only local socket, serving sessions to it as records.
 //!
 //! A second Hello replaces the first connection, which covers a vornd that
-//! hung rather than died. Each attached session has a pump that sends new
-//! records as they are appended, up to 4 MiB past what vornd acked; past
-//! that the session keeps reading into its log and the pump waits.
+//! hung rather than died. The replaced connection closes at once, its pumps
+//! with it, without waiting for the hung peer to send anything.
+//!
+//! Each attached session has a pump that sends new records as they are
+//! appended, up to 4 MiB past what vornd acked; past that the session keeps
+//! reading into its log and the pump waits.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, watch, Notify};
 use tokio::task::JoinHandle;
 use vorn_term_proto::{Cursor, Entry, Record};
 
@@ -41,8 +44,10 @@ pub struct Sessiond {
     pool: SpoolPool,
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     next_id: AtomicU64,
-    /// Raised by every Hello; a connection whose generation is not current closes.
-    generation: AtomicU64,
+    /// Raised by every Hello; a connection whose generation is not current
+    /// closes. A watch, so a replaced connection hears of it while it waits
+    /// on a peer that never sends or never reads.
+    generation: watch::Sender<u64>,
     /// The current connection's outbox, for replies that come from session threads.
     outbox: Mutex<Option<mpsc::Sender<ToVornd>>>,
     idle_since: Mutex<Option<Instant>>,
@@ -57,7 +62,7 @@ impl Sessiond {
             pool,
             sessions: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
-            generation: AtomicU64::new(0),
+            generation: watch::Sender::new(0),
             outbox: Mutex::new(None),
             idle_since: Mutex::new(Some(Instant::now())),
             stop: Notify::new(),
@@ -142,16 +147,25 @@ impl Sessiond {
         };
         let mut frames = FrameReader::default();
         let mut buf = vec![0u8; 64 << 10];
+        let mut generation = self.generation.subscribe();
         'read: loop {
             let n = tokio::select! {
                 r = rd.read(&mut buf) => match r { Ok(0) | Err(_) => break, Ok(n) => n },
                 _ = self.stop.notified() => break,
+                _ = replaced(&mut generation, conn.generation) => break,
             };
             frames.push(&buf[..n]);
             loop {
                 match frames.read::<ToSessiond>() {
                     Ok(Some(msg)) => {
-                        if !conn.handle(msg).await {
+                        // Handling may wait on a peer that stopped reading;
+                        // a newer Hello ends that wait too.
+                        let mine = conn.generation;
+                        let open = tokio::select! {
+                            open = conn.handle(msg) => open,
+                            _ = replaced(&mut generation, mine) => false,
+                        };
+                        if !open {
                             break 'read;
                         }
                     }
@@ -212,7 +226,7 @@ struct Conn {
 impl Conn {
     fn replaced(&self) -> bool {
         self.generation
-            .is_some_and(|g| g != self.d.generation.load(Ordering::SeqCst))
+            .is_some_and(|g| g != *self.d.generation.borrow())
     }
 
     fn close(&mut self) {
@@ -234,7 +248,11 @@ impl Conn {
             if h.proto_min > PROTO || h.proto_max < PROTO {
                 return false;
             }
-            let g = self.d.generation.fetch_add(1, Ordering::SeqCst) + 1;
+            let mut g = 0;
+            self.d.generation.send_modify(|n| {
+                *n += 1;
+                g = *n;
+            });
             self.generation = Some(g);
             *self.d.outbox.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.tx.clone());
             let welcome = Welcome {
@@ -389,11 +407,14 @@ impl Conn {
         let mut next = from;
         for batch in batches(entries) {
             next = batch.last().expect("non-empty").after();
-            if !self.send(entries_msg(&s.id, batch)).await {
+            if !self.send(entries_msg(&s.id, batch)).await || self.replaced() {
                 return false;
             }
             s.with_log(|l| l.mark_sent(next));
         }
+        let Some(mine) = self.generation else {
+            return false;
+        };
         let acked = Arc::new(AtomicU64::new(from.next_offset));
         let acked_note = Arc::new(Notify::new());
         let task = tokio::spawn(pump(
@@ -402,6 +423,7 @@ impl Conn {
             Arc::clone(&acked),
             Arc::clone(&acked_note),
             self.tx.clone(),
+            (self.d.generation.subscribe(), mine),
         ));
         self.pumps.insert(
             a.session,
@@ -437,13 +459,27 @@ fn batches(entries: Vec<Entry>) -> Vec<Vec<Entry>> {
     out
 }
 
-/// Send a session's new records as they arrive, within the window.
+/// Resolves once a newer Hello replaced the connection that said Hello as
+/// `mine`; never for a connection that has not said Hello yet.
+async fn replaced(generation: &mut watch::Receiver<u64>, mine: Option<u64>) {
+    match mine {
+        // The sender lives as long as sessiond, so this ends only on a change.
+        Some(g) => {
+            let _ = generation.wait_for(|&now| now != g).await;
+        }
+        None => std::future::pending().await,
+    }
+}
+
+/// Send a session's new records as they arrive, within the window, until
+/// the connection that owns this pump is replaced.
 async fn pump(
     s: Arc<Session>,
     mut next: Cursor,
     acked: Arc<AtomicU64>,
     acked_note: Arc<Notify>,
     tx: mpsc::Sender<ToVornd>,
+    (mut generation, mine): (watch::Receiver<u64>, u64),
 ) {
     loop {
         let changed = s.changed.notified();
@@ -471,12 +507,20 @@ async fn pump(
                 _ = &mut ack => {}
                 // A missed wakeup costs at most this.
                 _ = tokio::time::sleep(Duration::from_millis(250)) => {}
+                _ = replaced(&mut generation, Some(mine)) => return,
             }
             continue;
         }
         let exit = matches!(batch.last().map(|e| &e.rec), Some(Record::Exit { .. }));
         next = batch.last().expect("non-empty").after();
-        if tx.send(entries_msg(&s.id, batch)).await.is_err() {
+        // A peer that stopped reading backs the outbox up; a newer Hello
+        // must still end this pump, and nothing it queues after that counts
+        // as sent.
+        tokio::select! {
+            sent = tx.send(entries_msg(&s.id, batch)) => if sent.is_err() { return },
+            _ = replaced(&mut generation, Some(mine)) => return,
+        }
+        if *generation.borrow() != mine {
             return;
         }
         s.with_log(|l| l.mark_sent(next));
