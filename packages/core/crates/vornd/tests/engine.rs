@@ -8,10 +8,11 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use tokio::sync::broadcast;
 use vorn_engine::{Base, Config, Fidelity, State, Summary};
 use vorn_sessiond::server::{self, Sessiond};
 use vorn_sessiond_wire::{Io, SpawnSpec, Stdin};
-use vornd::engine::Engine;
+use vornd::engine::{Engine, Event};
 use vornd::holder::{self, Holder};
 
 const PATIENCE: Duration = Duration::from_secs(20);
@@ -20,6 +21,14 @@ struct Rig {
     d: Arc<Sessiond>,
     home: tempfile::TempDir,
     _serving: tokio::task::JoinHandle<std::io::Result<()>>,
+}
+
+/// A vornd with the engine: the engine, what happens to its sessions from
+/// the start, and its task. Aborting the task kills it.
+struct Vornd {
+    engine: Arc<Engine>,
+    events: broadcast::Receiver<Event>,
+    task: tokio::task::JoinHandle<()>,
 }
 
 impl Rig {
@@ -45,20 +54,54 @@ impl Rig {
         self.home.path().join("history")
     }
 
-    /// A vornd with the engine, connected to this sessiond. Aborting the
-    /// task kills it.
-    fn vornd(&self) -> (Arc<Engine>, tokio::task::JoinHandle<()>) {
+    /// A vornd with the engine, connected to this sessiond.
+    fn vornd(&self) -> Vornd {
         let engine = Engine::new(Config {
             history: Some(self.history()),
             build: "test".into(),
             ..Config::default()
         });
+        let events = engine.subscribe();
         let holder = Holder::with_engine(Arc::clone(&engine));
         let endpoint = self.d.endpoint();
         let task = tokio::spawn(async move {
             let _ = holder::connect(&endpoint, &holder).await;
         });
-        (engine, task)
+        Vornd {
+            engine,
+            events,
+            task,
+        }
+    }
+
+    /// Waits until sessiond has let session `id` go.
+    async fn released(&self, id: &str) {
+        let t = Instant::now();
+        while self.d.holds(id) {
+            assert!(t.elapsed() < PATIENCE, "{id} never released");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+}
+
+impl Vornd {
+    async fn kill(self) {
+        self.task.abort();
+        let _ = self.task.await;
+    }
+
+    /// How session `id` stood when it left the engine.
+    async fn closed(&mut self, id: &str) -> Arc<Summary> {
+        let t = Instant::now();
+        loop {
+            let left = PATIENCE.saturating_sub(t.elapsed());
+            match tokio::time::timeout(left, self.events.recv()).await {
+                Ok(Ok(Event::Closed(s))) if s.brief.session == id => return s,
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => panic!("events: {e}"),
+                Err(_) => panic!("{id} never left the engine"),
+            }
+        }
     }
 }
 
@@ -92,7 +135,7 @@ async fn wait(engine: &Engine, id: &str, what: &str, ok: impl Fn(&Summary) -> bo
             .sessions()
             .await
             .into_iter()
-            .find(|s| s.session == id);
+            .find(|s| s.brief.session == id);
         if let Some(s) = &found {
             if ok(s) {
                 return s.clone();
@@ -123,16 +166,27 @@ fn assert_once_each(rseqs: &[u64]) {
     );
 }
 
+/// No file of session `id`'s history is left.
+fn no_history(dir: &Path, id: &str) {
+    let left: Vec<_> = std::fs::read_dir(dir)
+        .map(|d| d.flatten().map(|e| e.file_name()).collect())
+        .unwrap_or_default();
+    assert!(
+        left.iter().all(|n| !n.to_string_lossy().starts_with(id)),
+        "{left:?}"
+    );
+}
+
 /// RC-T9 through vornd: a program prints a lot and exits 7 while vornd is
-/// dead. The next vornd recovers the session exactly: every line, then the
-/// exit with its code, and nothing written to the program while it
-/// replayed.
+/// dead. The next vornd recovers the session exactly, through the last
+/// line and the exit with its code, writing nothing to the program while
+/// it replays; then releases it in sessiond and deletes its history.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn output_then_exit_while_vornd_is_dead() {
     let rig = Rig::start().await;
-    let (engine, vornd) = rig.vornd();
+    let first = rig.vornd();
     let id = spawn(
-        &engine,
+        &first.engine,
         &[
             "sh",
             "-c",
@@ -141,50 +195,41 @@ async fn output_then_exit_while_vornd_is_dead() {
         Io::Pty { cols: 80, rows: 24 },
     )
     .await;
-    wait(&engine, &id, "some output", |s| {
-        s.cursor.is_some_and(|c| c.next_offset > 0)
+    wait(&first.engine, &id, "some output", |s| {
+        s.brief.cursor.is_some_and(|c| c.next_offset > 0)
     })
     .await;
-    vornd.abort();
-    let _ = vornd.await;
+    first.kill().await;
 
     // The program finishes while no vornd is there.
     tokio::time::sleep(Duration::from_millis(1500)).await;
-    let (engine, _vornd) = rig.vornd();
-    let s = wait(&engine, &id, "recovered and exited", |s| {
-        s.state == State::Live && s.exited.is_some()
-    })
-    .await;
-    assert_eq!(s.exited, Some((Some(7), None)));
-    assert_eq!(s.fidelity, Fidelity::Exact, "{s:#?}");
+    let mut second = rig.vornd();
+    let s = second.closed(&id).await;
+    assert_eq!(s.brief.state, State::Ended, "{s:#?}");
+    assert_eq!(s.brief.exited, Some((Some(7), None)));
+    assert_eq!(s.brief.fidelity, Fidelity::Exact, "{s:#?}");
     assert_eq!(
-        s.base,
+        s.brief.base,
         Some(Base::Newest),
         "the checkpoint cut at spawn, or a later one"
     );
     assert!(s.screen.contains("line2999"), "{}", s.screen);
-    let (rseqs, bytes) = history(&rig.history(), &id);
-    assert_once_each(&rseqs);
-    let text = String::from_utf8_lossy(&bytes);
-    let mut from = 0;
-    for i in 0..3000 {
-        let needle = format!("line{i}\r\n");
-        let at = text[from..]
-            .find(&needle)
-            .unwrap_or_else(|| panic!("line{i} in order"));
-        from += at + needle.len();
-    }
+    rig.released(&id).await;
+    no_history(&rig.history(), &id);
+    let report = second.engine.report();
+    assert_eq!(report["closed"][0]["session"], id.as_str(), "{report}");
+    assert_eq!(report["closed"][0]["state"], "ended", "{report}");
 }
 
 /// RC-T13 through vornd: a piped agent's stdout and stderr, input before
 /// vornd dies, stdin closed by the next vornd, and the exit code: all
-/// intact.
+/// intact. The disk history holds each record once across the two vornds.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_piped_agent_survives_vornd() {
     let rig = Rig::start().await;
-    let (engine, vornd) = rig.vornd();
+    let first = rig.vornd();
     let id = spawn(
-        &engine,
+        &first.engine,
         &[
             "sh",
             "-c",
@@ -193,30 +238,35 @@ async fn a_piped_agent_survives_vornd() {
         Io::Piped { stdin: Stdin::Pipe },
     )
     .await;
-    wait(&engine, &id, "both streams", |s| {
+    wait(&first.engine, &id, "both streams", |s| {
         s.screen.contains("outerr") || s.screen.contains("errout")
     })
     .await;
-    engine.write(&id, b"hi\n".to_vec()).unwrap();
-    wait(&engine, &id, "the input echoed", |s| {
+    first.engine.write(&id, b"hi\n".to_vec()).unwrap();
+    wait(&first.engine, &id, "the input echoed", |s| {
         s.screen.contains("got-hi")
     })
     .await;
-    vornd.abort();
-    let _ = vornd.await;
+    first.kill().await;
 
-    let (engine, _vornd) = rig.vornd();
-    wait(&engine, &id, "recovered", |s| s.state == State::Live).await;
-    engine.close_stdin(&id).unwrap();
-    let s = wait(&engine, &id, "exited", |s| s.exited.is_some()).await;
-    assert_eq!(s.exited, Some((Some(7), None)));
-    assert_eq!(s.fidelity, Fidelity::Exact, "{s:#?}");
-    assert!(s.screen.contains("got-hibye"), "{}", s.screen);
+    let mut second = rig.vornd();
+    wait(&second.engine, &id, "recovered", |s| {
+        s.brief.state == State::Live
+    })
+    .await;
     let (rseqs, bytes) = history(&rig.history(), &id);
     assert_once_each(&rseqs);
     let text = String::from_utf8_lossy(&bytes);
-    assert!(text.ends_with("got-hibye"), "{text:?}");
-    assert_eq!(text.len(), "outerrgot-hibye".len(), "{text:?}");
+    assert_eq!(text.len(), "outerrgot-hi".len(), "{text:?}");
+    assert!(text.ends_with("got-hi"), "{text:?}");
+
+    second.engine.close_stdin(&id).unwrap();
+    let s = second.closed(&id).await;
+    assert_eq!(s.brief.exited, Some((Some(7), None)));
+    assert_eq!(s.brief.fidelity, Fidelity::Exact, "{s:#?}");
+    assert!(s.screen.contains("got-hibye"), "{}", s.screen);
+    rig.released(&id).await;
+    no_history(&rig.history(), &id);
 }
 
 /// The debug report says how each session was recovered, and never what
@@ -224,19 +274,24 @@ async fn a_piped_agent_survives_vornd() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_report_says_how_and_not_what() {
     let rig = Rig::start().await;
-    let (engine, vornd) = rig.vornd();
+    let first = rig.vornd();
     let id = spawn(
-        &engine,
+        &first.engine,
         &["sh", "-c", "echo secret-text; sleep 30"],
         Io::Pty { cols: 80, rows: 24 },
     )
     .await;
-    wait(&engine, &id, "output", |s| s.screen.contains("secret-text")).await;
-    vornd.abort();
-    let _ = vornd.await;
-    let (engine, _vornd) = rig.vornd();
-    wait(&engine, &id, "recovered", |s| s.state == State::Live).await;
-    let report = engine.report().await;
+    wait(&first.engine, &id, "output", |s| {
+        s.screen.contains("secret-text")
+    })
+    .await;
+    first.kill().await;
+    let second = rig.vornd();
+    wait(&second.engine, &id, "recovered", |s| {
+        s.brief.state == State::Live
+    })
+    .await;
+    let report = second.engine.report();
     let text = report.to_string();
     assert!(!text.contains("secret-text"), "{text}");
     let s = &report["sessions"][0];

@@ -7,16 +7,23 @@
 //! nearly all the time. Messages for one session go through one channel in
 //! order, so its records are applied in the order sessiond sent them.
 //!
-//! What sessions want done goes to one sink, called on the worker thread.
+//! What sessions want done goes to one sink, called on the worker thread. A
+//! session whose program has ended, or that is lost, is closed by its
+//! worker, which says so with [`Out::Closed`].
+//!
+//! Each worker keeps a [`Brief`] of its sessions in a map the pool shares,
+//! so the debug report reads it without waiting behind a worker's queue.
 
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::session::{Config, Input, Open, Out, Session, Summary};
+use crate::session::{Brief, Config, Input, Open, Out, Session, State, Summary};
+use crate::term::Fidelity;
 
 /// How often a worker looks for sessions gone quiet.
 const TICK: Duration = Duration::from_millis(500);
@@ -49,36 +56,76 @@ enum Job {
     },
 }
 
+/// What the pool and its workers share.
+#[derive(Default)]
+struct Shared {
+    /// Which worker each session is on.
+    placed: Mutex<HashMap<String, usize>>,
+    briefs: Mutex<HashMap<String, Brief>>,
+    /// Set when the pool is dropped: workers stop before their next job
+    /// rather than working through their queues.
+    stop: AtomicBool,
+}
+
+impl Shared {
+    fn placed(&self) -> MutexGuard<'_, HashMap<String, usize>> {
+        self.placed.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn briefs(&self) -> MutexGuard<'_, HashMap<String, Brief>> {
+        self.briefs.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn forget(&self, id: &str) {
+        self.placed().remove(id);
+        self.briefs().remove(id);
+    }
+}
+
 pub struct Pool {
     workers: Vec<(Sender<Job>, Option<JoinHandle<()>>)>,
-    placed: Mutex<HashMap<String, usize>>,
+    shared: Arc<Shared>,
+}
+
+impl std::fmt::Debug for Pool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pool")
+            .field("workers", &self.workers.len())
+            .field("sessions", &self.shared.placed().len())
+            .finish()
+    }
 }
 
 impl Pool {
     /// Starts `threads` workers (at least one) for sessions sharing `cfg`.
     pub fn new(threads: usize, cfg: Config, sink: Sink) -> std::io::Result<Pool> {
         let cfg = Arc::new(cfg);
+        let shared = Arc::new(Shared::default());
         let mut workers = Vec::new();
         for n in 0..threads.max(1) {
             let (tx, rx) = mpsc::channel();
-            let (cfg, sink) = (Arc::clone(&cfg), Arc::clone(&sink));
+            let (cfg, sink, shared) = (Arc::clone(&cfg), Arc::clone(&sink), Arc::clone(&shared));
+            // Built on its thread: the sessions it will hold are not Send.
             let handle = std::thread::Builder::new()
                 .name(format!("vorn-engine-{n}"))
-                .spawn(move || work(rx, cfg, sink))?;
+                .spawn(move || {
+                    let w = Worker {
+                        n,
+                        cfg,
+                        sink,
+                        shared,
+                        sessions: HashMap::new(),
+                        out: Vec::new(),
+                    };
+                    w.run(rx)
+                })?;
             workers.push((tx, Some(handle)));
         }
-        Ok(Pool {
-            workers,
-            placed: Mutex::new(HashMap::new()),
-        })
-    }
-
-    fn placed(&self) -> std::sync::MutexGuard<'_, HashMap<String, usize>> {
-        self.placed.lock().unwrap_or_else(|e| e.into_inner())
+        Ok(Pool { workers, shared })
     }
 
     fn send(&self, id: &str, job: Job) {
-        let Some(&w) = self.placed().get(id) else {
+        let Some(&w) = self.shared.placed().get(id) else {
             return;
         };
         // A worker only goes away when the pool does.
@@ -89,7 +136,7 @@ impl Pool {
     /// is already open starts it over.
     pub fn open(&self, id: &str, open: Open) {
         let w = {
-            let mut placed = self.placed();
+            let mut placed = self.shared.placed();
             if let Some(&w) = placed.get(id) {
                 w
             } else {
@@ -121,11 +168,11 @@ impl Pool {
     /// Drops a session without a last checkpoint.
     pub fn close(&self, id: &str) {
         self.send(id, Job::Close { id: id.to_owned() });
-        self.placed().remove(id);
+        self.shared.forget(id);
     }
 
-    /// Every session as it stands, after everything sent to it before.
-    /// Blocks until each worker answers.
+    /// Every session as it stands, contents included, after everything
+    /// sent to it before. Blocks until each worker answers.
     pub fn sessions(&self) -> Vec<Summary> {
         let mut answers = Vec::new();
         for (tx, _) in &self.workers {
@@ -138,6 +185,13 @@ impl Pool {
             .into_iter()
             .flat_map(|rx| rx.recv().unwrap_or_default())
             .collect();
+        all.sort_by(|a, b| a.brief.session.cmp(&b.brief.session));
+        all
+    }
+
+    /// Every session as its worker last left it, without waiting for any.
+    pub fn briefs(&self) -> Vec<Brief> {
+        let mut all: Vec<Brief> = self.shared.briefs().values().cloned().collect();
         all.sort_by(|a, b| a.session.cmp(&b.session));
         all
     }
@@ -157,8 +211,9 @@ impl Pool {
         }
     }
 
-    /// Stops every worker, each session cutting a last checkpoint first
-    /// when `checkpoint` is set, and waits for them.
+    /// Stops every worker once it has done what was sent to it, each
+    /// session cutting a last checkpoint first when `checkpoint` is set,
+    /// and waits for them.
     pub fn shutdown(mut self, checkpoint: bool) {
         self.stop(checkpoint);
     }
@@ -176,97 +231,209 @@ impl Pool {
 }
 
 impl Drop for Pool {
-    /// Like a crash as far as sessiond can tell: no last checkpoint.
+    /// Like a crash as far as sessiond can tell: no last checkpoint, and
+    /// jobs still queued are dropped. Waits for each worker to finish the
+    /// job in hand, so an async caller drops a pool off its runtime's
+    /// threads.
     fn drop(&mut self) {
+        self.shared.stop.store(true, Ordering::SeqCst);
         self.stop(false);
     }
 }
 
-fn work(rx: Receiver<Job>, cfg: Arc<Config>, sink: Sink) {
-    let mut sessions: HashMap<String, Session> = HashMap::new();
-    let mut out = Vec::new();
-    let mut last_tick = Instant::now();
-    loop {
-        let job = match rx.recv_timeout(TICK) {
-            Ok(job) => Some(job),
-            Err(RecvTimeoutError::Timeout) => None,
-            Err(RecvTimeoutError::Disconnected) => return,
-        };
-        let now = Instant::now();
-        match job {
-            Some(Job::Open { id, open }) => {
-                let cfg = Arc::clone(&cfg);
-                let opened = guarded(&id, &sink, &mut out, |out| {
-                    Session::open(&id, cfg, open, now, out)
-                });
-                if let Some(s) = opened {
-                    sessions.insert(id, s);
-                }
+/// One worker thread and the sessions on it.
+struct Worker {
+    n: usize,
+    cfg: Arc<Config>,
+    sink: Sink,
+    shared: Arc<Shared>,
+    sessions: HashMap<String, Session>,
+    /// Reused for every call's outputs.
+    out: Vec<Out>,
+}
+
+impl Worker {
+    fn run(mut self, rx: Receiver<Job>) {
+        let mut last_tick = Instant::now();
+        loop {
+            let job = match rx.recv_timeout(TICK) {
+                Ok(job) => Some(job),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => return,
+            };
+            if self.shared.stop.load(Ordering::SeqCst) {
+                return;
             }
-            Some(Job::Input { id, input }) => {
-                if let Some(s) = sessions.get_mut(&id) {
-                    if guarded(&id, &sink, &mut out, |out| s.input(input, now, out)).is_none() {
-                        sessions.remove(&id);
+            let now = Instant::now();
+            match job {
+                Some(Job::Open { id, open }) => {
+                    let cfg = Arc::clone(&self.cfg);
+                    let opened = self.guarded(&id, |out| Session::open(&id, cfg, open, now, out));
+                    match opened {
+                        Some(s) => {
+                            self.sessions.insert(id.clone(), s);
+                            self.settle(&id);
+                        }
+                        None => self.lost(&id),
+                    }
+                }
+                Some(Job::Input { id, input }) => {
+                    if let Some(mut s) = self.sessions.remove(&id) {
+                        if self.guarded(&id, |out| s.input(input, now, out)).is_some() {
+                            self.sessions.insert(id.clone(), s);
+                            self.settle(&id);
+                        } else {
+                            self.lost(&id);
+                        }
+                    }
+                }
+                Some(Job::Close { id }) => {
+                    self.sessions.remove(&id);
+                }
+                Some(Job::Inspect { reply }) => {
+                    let _ = reply.send(self.inspect());
+                }
+                Some(Job::Flush { reply }) => {
+                    self.flush();
+                    let _ = reply.send(());
+                }
+                Some(Job::Stop { checkpoint }) => {
+                    if checkpoint {
+                        self.flush();
+                    }
+                    return;
+                }
+                None => {}
+            }
+            if now.duration_since(last_tick) >= TICK {
+                last_tick = now;
+                let ids: Vec<String> = self.sessions.keys().cloned().collect();
+                for id in ids {
+                    if let Some(mut s) = self.sessions.remove(&id) {
+                        if self.guarded(&id, |out| s.tick(now, out)).is_some() {
+                            self.sessions.insert(id.clone(), s);
+                            self.settle(&id);
+                        } else {
+                            self.lost(&id);
+                        }
                     }
                 }
             }
-            Some(Job::Close { id }) => {
-                sessions.remove(&id);
-            }
-            Some(Job::Inspect { reply }) => {
-                let _ = reply.send(sessions.values().map(Session::summary).collect());
-            }
-            Some(Job::Flush { reply }) => {
-                flush(&mut sessions, &sink, &mut out);
-                let _ = reply.send(());
-            }
-            Some(Job::Stop { checkpoint }) => {
-                if checkpoint {
-                    flush(&mut sessions, &sink, &mut out);
-                }
-                return;
-            }
-            None => {}
-        }
-        if now.duration_since(last_tick) >= TICK {
-            last_tick = now;
-            let mut failed = Vec::new();
-            for (id, s) in &mut sessions {
-                if guarded(id, &sink, &mut out, |out| s.tick(now, out)).is_none() {
-                    failed.push(id.clone());
-                }
-            }
-            for id in failed {
-                sessions.remove(&id);
-            }
         }
     }
-}
 
-fn flush(sessions: &mut HashMap<String, Session>, sink: &Sink, out: &mut Vec<Out>) {
-    for (id, s) in sessions.iter_mut() {
-        guarded(id, sink, out, |out| s.shutdown(out));
+    /// Every session with its contents. A session that panics while being
+    /// read is lost, not the worker or the answer.
+    fn inspect(&mut self) -> Vec<Summary> {
+        let ids: Vec<String> = self.sessions.keys().cloned().collect();
+        let mut all = Vec::with_capacity(ids.len());
+        for id in ids {
+            let Some(s) = self.sessions.remove(&id) else {
+                continue;
+            };
+            match self.guarded(&id, |_| s.summary()) {
+                Some(summary) => {
+                    all.push(summary);
+                    self.sessions.insert(id, s);
+                }
+                None => self.lost(&id),
+            }
+        }
+        all
     }
-}
 
-/// Runs `f` for session `id` and hands what it wants done to the sink. A
-/// panic in it (a bug, or Ghostty's) loses that session, not the worker and
-/// the other sessions on it: `None`, after an [`Out::Lost`].
-fn guarded<T>(
-    id: &str,
-    sink: &Sink,
-    out: &mut Vec<Out>,
-    f: impl FnOnce(&mut Vec<Out>) -> T,
-) -> Option<T> {
-    let r = catch_unwind(AssertUnwindSafe(|| f(out)));
-    for o in out.drain(..) {
-        sink(id, o);
+    fn flush(&mut self) {
+        let ids: Vec<String> = self.sessions.keys().cloned().collect();
+        for id in ids {
+            if let Some(mut s) = self.sessions.remove(&id) {
+                if self.guarded(&id, |out| s.shutdown(out)).is_some() {
+                    self.sessions.insert(id.clone(), s);
+                    self.settle(&id);
+                } else {
+                    self.lost(&id);
+                }
+            }
+        }
     }
-    match r {
-        Ok(v) => Some(v),
-        Err(_) => {
-            sink(id, Out::Lost);
-            None
+
+    /// After a call into session `id`: closes it when it is done with, and
+    /// otherwise keeps its brief current.
+    fn settle(&mut self, id: &str) {
+        let Some(s) = self.sessions.get(id) else {
+            return;
+        };
+        if !s.closed() {
+            let brief = s.brief();
+            self.shared.briefs().insert(id.to_owned(), brief);
+            return;
+        }
+        let Some(mut s) = self.sessions.remove(id) else {
+            return;
+        };
+        let summary = self.guarded(id, |_| {
+            let summary = s.summary();
+            // A program that ended takes its history with it, as the
+            // server's own logs go when a PTY exits.
+            if summary.brief.state == State::Ended {
+                let _ = s.remove_history();
+            }
+            summary
+        });
+        self.close(id, summary);
+    }
+
+    /// Session `id` panicked: it is gone, with what can be said about it.
+    fn lost(&mut self, id: &str) {
+        self.sessions.remove(id);
+        self.close(id, None);
+    }
+
+    fn close(&mut self, id: &str, summary: Option<Summary>) {
+        let summary = summary.unwrap_or_else(|| Summary {
+            brief: Brief {
+                session: id.to_owned(),
+                state: State::Lost,
+                base: None,
+                fidelity: Fidelity::Approximate,
+                reason: Some("the session engine failed on it"),
+                rejected: Vec::new(),
+                cursor: None,
+                cols: 0,
+                rows: 0,
+                checkpoints: 0,
+                uncut: None,
+                exited: None,
+            },
+            title: String::new(),
+            cwd: String::new(),
+            screen: String::new(),
+            lines: Vec::new(),
+        });
+        {
+            let mut placed = self.shared.placed();
+            // Unless it has been opened again elsewhere since.
+            if placed.get(id) == Some(&self.n) {
+                placed.remove(id);
+            }
+        }
+        self.shared.briefs().remove(id);
+        (self.sink)(id, Out::Closed(Box::new(summary)));
+    }
+
+    /// Runs `f` for session `id` and hands what it wants done to the sink.
+    /// A panic in it (a bug, or Ghostty's) loses that session, not the
+    /// worker and the other sessions on it: `None`, after an [`Out::Lost`].
+    fn guarded<T>(&mut self, id: &str, f: impl FnOnce(&mut Vec<Out>) -> T) -> Option<T> {
+        let r = catch_unwind(AssertUnwindSafe(|| f(&mut self.out)));
+        for o in self.out.drain(..) {
+            (self.sink)(id, o);
+        }
+        match r {
+            Ok(v) => Some(v),
+            Err(_) => {
+                (self.sink)(id, Out::Lost);
+                None
+            }
         }
     }
 }

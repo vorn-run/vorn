@@ -213,7 +213,7 @@ async fn sessions(daemon: &Daemon) -> Response<Body> {
     let Some(engine) = daemon.holder.as_ref().and_then(|h| h.engine()) else {
         return plain(StatusCode::NOT_FOUND, "no session engine");
     };
-    let mut res = Response::new(full(engine.report().await.to_string()));
+    let mut res = Response::new(full(engine.report().to_string()));
     res.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),

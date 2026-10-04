@@ -22,6 +22,7 @@ mod term;
 
 pub use pool::{Pool, Sink};
 pub use session::{
-    Base, Cadence, Config, Effect, EffectId, Input, Open, Out, Session, State, Summary, PIPED_SIZE,
+    Base, Brief, Cadence, Config, Effect, EffectId, Input, Open, Out, Session, State, Summary,
+    PIPED_SIZE,
 };
 pub use term::{Fidelity, Rejected, FORMAT};

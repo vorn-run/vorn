@@ -68,6 +68,8 @@ pub struct Config {
     pub analyze: bool,
     /// Where each session's disk history log goes, as `<session>.log`.
     pub history: Option<std::path::PathBuf>,
+    /// The cap on one history log segment; a session keeps two at most.
+    pub history_cap: u64,
     /// This build, stamped on checkpoints for diagnostics.
     pub build: String,
 }
@@ -79,6 +81,7 @@ impl Default for Config {
             cadence: Cadence::default(),
             analyze: true,
             history: None,
+            history_cap: vorn_pipeline::history::DEFAULT_CAP,
             build: String::new(),
         }
     }
@@ -225,7 +228,9 @@ pub enum Out {
     Attach(AttachFrom),
     /// Every record up to here is in the terminal.
     Ack(Cursor),
-    /// For sessiond to keep (PutCheckpoint).
+    /// For sessiond to keep (PutCheckpoint). Recovery from it does not
+    /// repeat the effects of the records it covers, so the host stores it
+    /// only after delivering every [`Out::Effect`] that came before it.
     Checkpoint(Checkpoint),
     /// Bytes for the program: replies to queries parsed live.
     Write(Vec<u8>),
@@ -240,6 +245,10 @@ pub enum Out {
     Ready(Fidelity),
     /// The session cannot go on; the reason is in its summary.
     Lost,
+    /// The session has left the engine: its program ended and every record
+    /// is applied, or it was lost. How it stood last. Nothing more comes
+    /// for it.
+    Closed(Box<Summary>),
 }
 
 /// Where a session is, for the debug report.
@@ -248,6 +257,8 @@ pub enum State {
     Attaching,
     Replaying,
     Live,
+    /// The program ended and every record is applied.
+    Ended,
     Lost,
 }
 
@@ -257,14 +268,16 @@ impl State {
             State::Attaching => "attaching",
             State::Replaying => "replaying",
             State::Live => "live",
+            State::Ended => "ended",
             State::Lost => "lost",
         }
     }
 }
 
-/// A session as the debug report shows it.
+/// Where a session is and how it was recovered, never what is on its
+/// screen: what the debug report shows. Cheap to take, with no formatting.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Summary {
+pub struct Brief {
     pub session: String,
     pub state: State,
     pub base: Option<Base>,
@@ -279,13 +292,19 @@ pub struct Summary {
     pub checkpoints: u64,
     /// Why the last checkpoint due was not cut.
     pub uncut: Option<&'static str>,
+    pub exited: Option<(Option<i32>, Option<i32>)>,
+}
+
+/// A session with its contents, for tests and in-process callers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Summary {
+    pub brief: Brief,
     pub title: String,
     pub cwd: String,
     /// The screen as plain text.
     pub screen: String,
     /// The analyzer's last completed lines.
     pub lines: Vec<String>,
-    pub exited: Option<(Option<i32>, Option<i32>)>,
 }
 
 /// A restore base being asked for.
@@ -460,10 +479,13 @@ impl Session {
                 // Refusals answer the attach that chose the base.
                 Phase::Running(r) if !r.started => {
                     self.rejected.push(format!("{}: {why:?}", r.base.as_str()));
-                    if r.base == Base::SessionStart {
-                        self.next_step(now, out);
-                    } else {
-                        self.lose("no record to carry on from", out);
+                    match r.base {
+                        Base::SessionStart => self.next_step(now, out),
+                        // The best checkpoint's records are gone: the oldest
+                        // record is all there is. `best` is spent, so this
+                        // asks for it.
+                        Base::Best => self.approximate(now, out),
+                        _ => self.lose("no record to carry on from", out),
                     }
                 }
                 _ => {}
@@ -478,6 +500,7 @@ impl Session {
             // An answer to an attach that was turned down.
             return;
         };
+        let first = out.len();
         let mut applied = false;
         for e in entries {
             if run.cursor.includes(&e.hdr) {
@@ -508,10 +531,34 @@ impl Session {
                 self.exited = Some((code, signal));
             }
             run.reach(self.open.head, self.open.pty, out);
+            // After the record's effects, never before: a checkpoint covers
+            // its record, and recovery from it does not emit them again.
             run.cut_due(&ctx, false, &mut self.checkpoints, &mut self.uncut, out);
         }
         if applied {
             out.push(Out::Ack(run.cursor));
+        }
+        debug_assert!(effects_precede_checkpoints(&out[first..]), "{out:?}");
+    }
+
+    /// Whether the session is done with: its program ended and every
+    /// record is applied, or it was lost. Its host closes it.
+    pub fn closed(&self) -> bool {
+        match &self.phase {
+            Phase::Lost => true,
+            Phase::Running(r) => r.live && self.exited.is_some(),
+            Phase::Attaching(_) => false,
+        }
+    }
+
+    /// Deletes the session's disk history, as when it is released.
+    pub fn remove_history(&mut self) -> std::io::Result<()> {
+        if let Phase::Running(r) = &mut self.phase {
+            r.history = None;
+        }
+        match &self.cfg.history {
+            Some(dir) => History::remove(&history_path(dir, &self.id)),
+            None => Ok(()),
         }
     }
 
@@ -532,22 +579,42 @@ impl Session {
         }
     }
 
-    /// Cuts a last checkpoint, as a clean shutdown does.
+    /// Cuts a last checkpoint, as a clean shutdown does: whenever a record
+    /// (output, a resize, the exit) has been applied past the newest one,
+    /// so the next vornd replays nothing.
     pub fn shutdown(&mut self, out: &mut Vec<Out>) {
         if let Phase::Running(run) = &mut self.phase {
-            if run.since_cut > 0 {
-                let ctx = Ctx {
-                    id: &self.id,
-                    cfg: &self.cfg,
-                    sent: self.open.sent,
-                };
-                run.cut_due(&ctx, true, &mut self.checkpoints, &mut self.uncut, out);
-            }
+            let ctx = Ctx {
+                id: &self.id,
+                cfg: &self.cfg,
+                sent: self.open.sent,
+            };
+            run.cut_due(&ctx, true, &mut self.checkpoints, &mut self.uncut, out);
         }
     }
 
+    /// The session with its contents: the screen as text, the title, the
+    /// cwd and the analyzer's lines. Formats the screen, so it costs.
     pub fn summary(&self) -> Summary {
         let mut s = Summary {
+            brief: self.brief(),
+            title: String::new(),
+            cwd: String::new(),
+            screen: String::new(),
+            lines: Vec::new(),
+        };
+        if let Phase::Running(r) = &self.phase {
+            s.title = r.term.em.title().to_owned();
+            s.cwd = r.term.em.cwd().to_owned();
+            s.screen = plain(&r.term.em);
+            s.lines = r.term.lines(20);
+        }
+        s
+    }
+
+    /// Where the session is and how it was recovered.
+    pub fn brief(&self) -> Brief {
+        let mut s = Brief {
             session: self.id.clone(),
             state: State::Lost,
             base: None,
@@ -559,29 +626,21 @@ impl Session {
             rows: self.open.size.1,
             checkpoints: self.checkpoints,
             uncut: self.uncut,
-            title: String::new(),
-            cwd: String::new(),
-            screen: String::new(),
-            lines: Vec::new(),
             exited: self.exited,
         };
         match &self.phase {
             Phase::Attaching(_) => s.state = State::Attaching,
             Phase::Lost => {}
             Phase::Running(r) => {
-                s.state = if r.live {
-                    State::Live
-                } else {
-                    State::Replaying
+                s.state = match (r.live, self.exited) {
+                    (false, _) => State::Replaying,
+                    (true, None) => State::Live,
+                    (true, Some(_)) => State::Ended,
                 };
                 s.base = Some(r.base);
                 s.cursor = Some(r.cursor);
                 s.cols = r.term.em.cols();
                 s.rows = r.term.em.rows();
-                s.title = r.term.em.title().to_owned();
-                s.cwd = r.term.em.cwd().to_owned();
-                s.screen = plain(&r.term.em);
-                s.lines = r.term.lines(20);
             }
         }
         s
@@ -692,7 +751,8 @@ impl Session {
     ) {
         let history = self.cfg.history.as_ref().and_then(|dir| {
             std::fs::create_dir_all(dir).ok()?;
-            History::open(&dir.join(format!("{}.log", self.id)), at.epoch, at).ok()
+            let h = History::open(&history_path(dir, &self.id), at.epoch, at).ok()?;
+            Some(h.with_cap(self.cfg.history_cap))
         });
         if self.cfg.history.is_some() && history.is_none() {
             self.reason.get_or_insert("history log unwritable");
@@ -897,6 +957,31 @@ impl Run {
         }
         self.since_cut = 0;
     }
+}
+
+fn history_path(dir: &std::path::Path, id: &str) -> std::path::PathBuf {
+    dir.join(format!("{id}.log"))
+}
+
+/// Whether no effect comes after a checkpoint that covers its record: the
+/// order a host relies on to store a checkpoint only once what it covers
+/// has been delivered.
+fn effects_precede_checkpoints(out: &[Out]) -> bool {
+    let mut covered: Option<Cursor> = None;
+    out.iter().all(|o| match o {
+        Out::Checkpoint(cp) => {
+            covered = Some(cp.resume);
+            true
+        }
+        Out::Effect(id, _) => !covered.is_some_and(|c| {
+            c.includes(&RecordHeader {
+                epoch: id.epoch,
+                rseq: id.rseq,
+                start_offset: 0,
+            })
+        }),
+        _ => true,
+    })
 }
 
 /// The restore check, in the order the cheap tests come.

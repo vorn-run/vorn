@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tracing::{info, warn};
 use vorn_sessiond::launch::{self, Instance};
 use vorn_sessiond::os;
@@ -93,7 +93,7 @@ impl Holder {
 
     /// Stays on `conn` until it ends, running its sessions when there is an
     /// engine; answers why it ended.
-    async fn hold(&self, conn: &mut Conn, welcome: Welcome) -> String {
+    async fn hold(&self, mut conn: Conn, welcome: Welcome) -> String {
         #[cfg(feature = "engine")]
         if let Some(engine) = &self.engine {
             return engine.run(conn, welcome).await;
@@ -150,9 +150,9 @@ pub async fn keep(cfg: HolderConfig, holder: std::sync::Arc<Holder>) {
     };
     loop {
         match up(&cfg, &version, &holder).await {
-            Ok((mut conn, welcome)) => {
+            Ok((conn, welcome)) => {
                 holder.state().error = None;
-                let why = holder.hold(&mut conn, welcome).await;
+                let why = holder.hold(conn, welcome).await;
                 warn!(%why, "session holder went away; starting another");
                 let mut s = holder.state();
                 s.current = None;
@@ -172,8 +172,8 @@ pub async fn keep(cfg: HolderConfig, holder: std::sync::Arc<Holder>) {
 /// Answers why it ended. Dropping the future drops the connection, which
 /// is what a vornd killed looks like to sessiond.
 pub async fn connect(endpoint: &str, holder: &Holder) -> io::Result<String> {
-    let (mut conn, welcome) = Conn::open(endpoint).await?;
-    Ok(holder.hold(&mut conn, welcome).await)
+    let (conn, welcome) = Conn::open(endpoint).await?;
+    Ok(holder.hold(conn, welcome).await)
 }
 
 /// Find or start this build's sessiond, drain the rest, and connect.
@@ -283,19 +283,57 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> Duplex for T {}
 
 /// A connection to one sessiond.
 pub(crate) struct Conn {
-    s: Box<dyn Duplex>,
+    rd: Reader,
+    wr: Writer,
+}
+
+/// The half of a connection sessiond's messages come in on.
+pub(crate) struct Reader {
+    r: ReadHalf<Box<dyn Duplex>>,
     frames: FrameReader,
     /// Kept across reads: `hold` starts a new read on every ping.
     buf: Vec<u8>,
 }
 
+/// The half of a connection messages to sessiond go out on.
+pub(crate) struct Writer {
+    w: WriteHalf<Box<dyn Duplex>>,
+}
+
+impl Reader {
+    pub(crate) async fn recv(&mut self) -> io::Result<ToVornd> {
+        loop {
+            match self.frames.read::<ToVornd>() {
+                Ok(Some(m)) => return Ok(m),
+                Ok(None) => {}
+                Err(e) => return Err(io::Error::other(format!("{e:?}"))),
+            }
+            let n = self.r.read(&mut self.buf).await?;
+            if n == 0 {
+                return Err(io::ErrorKind::UnexpectedEof.into());
+            }
+            self.frames.push(&self.buf[..n]);
+        }
+    }
+}
+
+impl Writer {
+    pub(crate) async fn send(&mut self, m: &ToSessiond) -> io::Result<()> {
+        self.w.write_all(&m.encode()).await
+    }
+}
+
 impl Conn {
     async fn open(endpoint: &str) -> io::Result<(Conn, Welcome)> {
-        let s = os::connect(endpoint).await?;
+        let s: Box<dyn Duplex> = Box::new(os::connect(endpoint).await?);
+        let (r, w) = tokio::io::split(s);
         let mut conn = Conn {
-            s: Box::new(s),
-            frames: FrameReader::default(),
-            buf: vec![0u8; 16 << 10],
+            rd: Reader {
+                r,
+                frames: FrameReader::default(),
+                buf: vec![0u8; 16 << 10],
+            },
+            wr: Writer { w },
         };
         conn.send(&ToSessiond::Hello(Hello {
             proto_min: *SESSIOND_PROTOS.start(),
@@ -312,23 +350,19 @@ impl Conn {
         }
     }
 
-    pub(crate) async fn send(&mut self, m: &ToSessiond) -> io::Result<()> {
-        self.s.write_all(&m.encode()).await
+    async fn send(&mut self, m: &ToSessiond) -> io::Result<()> {
+        self.wr.send(m).await
     }
 
-    pub(crate) async fn recv(&mut self) -> io::Result<ToVornd> {
-        loop {
-            match self.frames.read::<ToVornd>() {
-                Ok(Some(m)) => return Ok(m),
-                Ok(None) => {}
-                Err(e) => return Err(io::Error::other(format!("{e:?}"))),
-            }
-            let n = self.s.read(&mut self.buf).await?;
-            if n == 0 {
-                return Err(io::ErrorKind::UnexpectedEof.into());
-            }
-            self.frames.push(&self.buf[..n]);
-        }
+    async fn recv(&mut self) -> io::Result<ToVornd> {
+        self.rd.recv().await
+    }
+
+    /// The two halves, for a reader and a writer that never wait on each
+    /// other.
+    #[cfg(feature = "engine")]
+    pub(crate) fn split(self) -> (Reader, Writer) {
+        (self.rd, self.wr)
     }
 
     /// Stay connected, pinging, until the connection ends; answers why.

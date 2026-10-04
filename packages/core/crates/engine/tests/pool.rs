@@ -8,10 +8,10 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use common::{config, Sessiond};
-use vorn_engine::{Config, Fidelity, Open, Out, Pool, Session, State};
+use vorn_engine::{Config, Effect, Fidelity, Input, Open, Out, Pool, Session, State};
 use vorn_recovery::gen::{Generator, Profile};
 use vorn_recovery::Size;
-use vorn_term_proto::Cursor;
+use vorn_term_proto::{Cursor, Record};
 
 const SIZE: (u16, u16) = (100, 30);
 
@@ -99,14 +99,19 @@ fn thirty_two_sessions_recover_from_their_checkpoints() {
     eprintln!("32 sessions recovered in {took:?}");
     assert_eq!(report.len(), 32);
     for s in &report {
-        let i: usize = s.session.parse().unwrap();
-        assert_eq!(s.state, State::Live);
-        assert_eq!(s.base, Some(vorn_engine::Base::Newest), "{}", s.session);
+        let i: usize = s.brief.session.parse().unwrap();
+        assert_eq!(s.brief.state, State::Live);
+        assert_eq!(
+            s.brief.base,
+            Some(vorn_engine::Base::Newest),
+            "{}",
+            s.brief.session
+        );
         assert_eq!(s.screen, screens[i], "session {i}");
     }
 }
 
-/// The recovery time the design asks for. Timing on a shared CI machine
+/// Thirty-two sessions recover in under 200 ms. Timing on a shared CI machine
 /// says little, so this runs on demand.
 #[test]
 #[ignore = "timing; run with --ignored on an idle machine"]
@@ -166,4 +171,147 @@ fn a_clean_shutdown_cuts_a_last_checkpoint() {
         })
         .collect();
     assert_eq!(last, [d.log.head()]);
+}
+
+/// A pool whose outputs arrive on a channel.
+fn pool_on_channel(cfg: Config) -> (Pool, mpsc::Receiver<(String, Out)>) {
+    let (tx, rx) = mpsc::channel::<(String, Out)>();
+    let tx = std::sync::Mutex::new(tx);
+    let pool = Pool::new(
+        2,
+        cfg,
+        Arc::new(move |id: &str, out: Out| {
+            let _ = tx.lock().unwrap().send((id.to_owned(), out));
+        }),
+    )
+    .unwrap();
+    (pool, rx)
+}
+
+/// Plays sessiond for the pool's sessions until one leaves the pool;
+/// answers what it asked for before, and how it stood last. Every attach is
+/// refused when `refuse` is set.
+fn until_closed(
+    pool: &Pool,
+    rx: &mpsc::Receiver<(String, Out)>,
+    d: &mut Sessiond,
+    refuse: bool,
+) -> (Vec<Out>, vorn_engine::Summary) {
+    let mut seen = Vec::new();
+    loop {
+        let (id, out) = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        match out {
+            Out::Attach(_) if refuse => {
+                let why = vorn_sessiond::AttachRefusal::NotRetained;
+                pool.input(&id, Input::Refused(why));
+            }
+            Out::Attach(from) => {
+                for input in d.attach(from) {
+                    pool.input(&id, input);
+                }
+            }
+            Out::Closed(summary) => return (seen, *summary),
+            o => seen.push(o),
+        }
+    }
+}
+
+/// A session whose program ended leaves the pool once every record is
+/// applied, saying how it ended, and takes its disk history with it.
+#[test]
+fn an_ended_session_leaves_the_pool() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = Config {
+        history: Some(dir.path().to_path_buf()),
+        ..(*config(1 << 20)).clone()
+    };
+    let (pool, rx) = pool_on_channel(cfg);
+    let mut d = Sessiond::new(0, SIZE);
+    let mut b = vorn_recovery::LogBuilder::new(Size::new(SIZE.0, SIZE.1));
+    b.data("last words\r\n").push(Record::Exit {
+        code: Some(4),
+        signal: None,
+    });
+    d.append(&b.build().entries);
+    pool.open("a", Open::spawned(Cursor::start(0), Some(SIZE)));
+    let (seen, last) = until_closed(&pool, &rx, &mut d, false);
+    assert!(seen
+        .iter()
+        .any(|o| matches!(o, Out::Effect(_, Effect::Exit { code: Some(4), .. }))));
+    assert_eq!(last.brief.state, State::Ended);
+    assert_eq!(last.brief.exited, Some((Some(4), None)));
+    assert!(last.screen.starts_with("last words"), "{:?}", last.screen);
+    assert!(pool.briefs().is_empty());
+    assert!(pool.sessions().is_empty());
+    let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+/// A session with nothing to carry on from is lost and leaves the pool,
+/// saying why.
+#[test]
+fn a_lost_session_leaves_the_pool() {
+    let (pool, rx) = pool_on_channel((*config(1 << 20)).clone());
+    let mut d = Sessiond::new(0, SIZE);
+    let mut open = Open::spawned(Cursor::start(0), Some(SIZE));
+    open.newest_cp = Some(Cursor::start(0));
+    pool.open("a", open);
+    let (seen, last) = until_closed(&pool, &rx, &mut d, true);
+    assert!(seen.contains(&Out::Lost));
+    assert_eq!(last.brief.state, State::Lost);
+    assert_eq!(last.brief.reason, Some("no record to carry on from"));
+    assert_eq!(last.brief.rejected.len(), 4, "{:?}", last.brief.rejected);
+    assert!(pool.briefs().is_empty());
+}
+
+/// The pool's briefs follow its sessions without asking the workers.
+#[test]
+fn briefs_follow_the_sessions() {
+    let (pool, rx) = pool_on_channel((*config(1 << 20)).clone());
+    let mut d = Sessiond::new(0, SIZE);
+    let mut b = vorn_recovery::LogBuilder::new(Size::new(SIZE.0, SIZE.1));
+    b.data("hello\r\n");
+    d.append(&b.build().entries);
+    pool.open("a", Open::spawned(Cursor::start(0), Some(SIZE)));
+    loop {
+        let (_, out) = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        match out {
+            Out::Attach(from) => {
+                for input in d.attach(from) {
+                    pool.input("a", input);
+                }
+            }
+            Out::Ack(c) if c == d.log.head() => break,
+            _ => {}
+        }
+    }
+    let briefs = pool.briefs();
+    assert_eq!(briefs.len(), 1);
+    assert_eq!(briefs[0].state, State::Live);
+    assert_eq!(briefs[0].cursor, Some(d.log.head()));
+}
+
+/// Dropping a pool stops its workers at the job in hand, not after
+/// everything queued.
+#[test]
+fn a_dropped_pool_leaves_queued_work() {
+    const RECORDS: usize = 400;
+    let (pool, rx) = pool_on_channel((*config(1 << 30)).clone());
+    let mut b = vorn_recovery::LogBuilder::new(Size::new(SIZE.0, SIZE.1));
+    let line = "x".repeat(99) + "\r\n";
+    for _ in 0..RECORDS {
+        b.data(line.repeat(640));
+    }
+    let entries = b.build().entries;
+    let records = entries.len();
+    pool.open("a", Open::spawned(Cursor::start(0), Some(SIZE)));
+    for e in entries {
+        pool.input("a", Input::Entries(vec![e]));
+    }
+    drop(pool);
+    let acks = rx
+        .try_iter()
+        .filter(|(_, o)| matches!(o, Out::Ack(_)))
+        .count();
+    assert!(acks < records, "{acks} of {records} applied after the drop");
 }

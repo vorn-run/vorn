@@ -119,7 +119,7 @@ fn killed_at_any_record_recovers_exactly() {
             let open = d.open();
             d.recover(Arc::clone(&cfg), open)
         };
-        let summary = s.summary();
+        let summary = s.brief();
         *bases.entry(summary.base.unwrap()).or_insert(0) += 1;
         assert_eq!(
             writes_in_replay(&after),
@@ -200,7 +200,7 @@ fn no_replayed_query_replies() {
         let open = d.open();
         d.recover(Arc::clone(&cfg), open)
     };
-    assert_eq!(s.summary().base, Some(Base::Newest));
+    assert_eq!(s.brief().base, Some(Base::Newest));
     assert!(
         after.iter().all(|o| !matches!(o, Out::Write(_))),
         "{after:?}"
@@ -210,7 +210,7 @@ fn no_replayed_query_replies() {
     b.data("\x1b[6n");
     d.append(&b.build().entries);
     let mut live = Vec::new();
-    let next = d.log.entries_from(s.summary().cursor.unwrap()).unwrap();
+    let next = d.log.entries_from(s.brief().cursor.unwrap()).unwrap();
     s.input(Input::Entries(next), Instant::now(), &mut live);
     assert!(
         live.iter()
@@ -293,7 +293,7 @@ fn a_corrupt_newest_falls_back() {
         let open = d.open();
         d.recover(Arc::clone(&cfg), open)
     };
-    let summary = s.summary();
+    let summary = s.brief();
     assert_eq!(summary.base, Some(Base::Fallback), "{summary:?}");
     assert_eq!(summary.rejected.len(), 1, "{summary:?}");
     assert!(after.contains(&Out::Attach(vorn_sessiond::AttachFrom::FallbackCheckpoint)));
@@ -382,7 +382,7 @@ fn invalid_restore_bases() {
     );
     s.input(Input::Checkpoint(bad_crc.clone()), Instant::now(), &mut out);
     s.input(Input::Entries(entries.clone()), Instant::now(), &mut out);
-    let sum = s.summary();
+    let sum = s.brief();
     assert_eq!(sum.base, Some(Base::SessionStart));
     assert_eq!(sum.rejected.len(), 2, "{sum:?}");
     assert_eq!(s.fidelity(), Fidelity::Exact);
@@ -401,7 +401,7 @@ fn invalid_restore_bases() {
         &mut out,
     );
     s.input(Input::Checkpoint(good.clone()), Instant::now(), &mut out);
-    assert_eq!(s.summary().base, Some(Base::Fallback));
+    assert_eq!(s.brief().base, Some(Base::Fallback));
     assert_eq!(s.fidelity(), Fidelity::Exact);
     assert!(out.contains(&Out::Ready(Fidelity::Exact)));
 
@@ -423,7 +423,7 @@ fn invalid_restore_bases() {
         Instant::now(),
         &mut out,
     );
-    let sum = s.summary();
+    let sum = s.brief();
     assert_eq!(sum.base, Some(Base::Best), "{sum:?}");
     assert_eq!(sum.rejected.len(), 3, "{sum:?}");
     assert_eq!(s.fidelity(), Fidelity::Approximate);
@@ -431,10 +431,59 @@ fn invalid_restore_bases() {
         wrong_screen.resume
     ))));
     assert!(out.contains(&Out::Ready(Fidelity::Approximate)));
+
+    // And with the records after that checkpoint gone too, the oldest
+    // record into a blank terminal.
+    out.clear();
+    s.input(
+        Input::Refused(AttachRefusal::NotRetained),
+        Instant::now(),
+        &mut out,
+    );
+    let sum = s.brief();
+    assert_eq!(sum.base, Some(Base::Oldest), "{sum:?}");
+    assert_eq!(s.fidelity(), Fidelity::Approximate);
+    assert!(!out.contains(&Out::Lost), "{out:?}");
+    assert!(
+        out.iter()
+            .any(|o| matches!(o, Out::Attach(vorn_sessiond::AttachFrom::Cursor(_)))),
+        "{out:?}"
+    );
 }
 
-/// TP-T28: exact only when earned. Approximate from an unreadable
-/// checkpoint with nothing else to go on, across a gap, and from the
+/// A clean stop cuts past every record applied: a resize or the exit as
+/// much as output, so the next vornd has nothing to replay.
+#[test]
+fn a_clean_stop_covers_records_without_output() {
+    let mut b = LogBuilder::new(Size::new(SIZE.0, SIZE.1));
+    b.data("one\r\n")
+        .resize(Size::new(SIZE.0 + 2, SIZE.1))
+        .push(Record::Exit {
+            code: Some(0),
+            signal: None,
+        });
+    let entries = b.build().entries;
+    let mut s = Session::fresh("s", config(1 << 20), SIZE, Cursor::start(0)).unwrap();
+    let now = Instant::now();
+    let mut out = Vec::new();
+    for e in &entries {
+        out.clear();
+        s.apply_all(std::slice::from_ref(e), now, &mut out);
+        s.shutdown(&mut out);
+        let cut = out.iter().find_map(|o| match o {
+            Out::Checkpoint(cp) => Some(cp.resume),
+            _ => None,
+        });
+        assert_eq!(cut, Some(e.after()), "after {:?}", e.rec);
+        // And nothing more until another record is applied.
+        out.clear();
+        s.shutdown(&mut out);
+        assert!(out.is_empty(), "{out:?}");
+    }
+}
+
+/// A session is marked exact only when it was rebuilt exactly. Approximate
+/// from an unreadable checkpoint with nothing else to go on, across a gap, and from the
 /// session start of a session resized before vornd knew its spawn size.
 /// Exact from a good checkpoint and by replay from rseq 0.
 #[test]
@@ -461,7 +510,7 @@ fn exact_only_when_earned() {
         Instant::now(),
         &mut out,
     );
-    assert_eq!(s.summary().base, Some(Base::Oldest));
+    assert_eq!(s.brief().base, Some(Base::Oldest));
     assert_eq!(s.fidelity(), Fidelity::Approximate);
 
     let (mut s, mut out) = by_hand(open_with_checkpoints(&entries));
@@ -476,7 +525,7 @@ fn exact_only_when_earned() {
     let mut open = d.open();
     open.spawn_size = Some(SIZE);
     let (s, out) = d.recover(config(1 << 20), open);
-    assert_eq!(s.summary().base, Some(Base::SessionStart));
+    assert_eq!(s.brief().base, Some(Base::SessionStart));
     assert!(out.contains(&Out::Ready(Fidelity::Exact)));
 
     // The same with a resize in the log and no spawn size: approximate.
@@ -488,7 +537,7 @@ fn exact_only_when_earned() {
         let open = d.open();
         d.recover(config(1 << 20), open)
     };
-    assert_eq!(s.summary().reason, Some("spawn size unknown"));
+    assert_eq!(s.brief().reason, Some("spawn size unknown"));
     assert!(out.contains(&Out::Ready(Fidelity::Approximate)));
 
     // Across a gap: approximate, and a nudge to redraw once live, not
@@ -511,7 +560,7 @@ fn exact_only_when_earned() {
     open.spawn_size = Some(SIZE);
     let (s, out) = d.recover(config(1 << 20), open);
     assert_eq!(s.fidelity(), Fidelity::Approximate);
-    assert_eq!(s.summary().reason, Some("output lost"));
+    assert_eq!(s.brief().reason, Some("output lost"));
     let ready = out.iter().position(|o| matches!(o, Out::Ready(_))).unwrap();
     let nudge = out
         .iter()
@@ -541,9 +590,9 @@ fn a_spawned_session_keeps_its_spawn_size() {
         let open = d.open();
         d.recover(Arc::clone(&cfg), open)
     };
-    assert_eq!(s.summary().base, Some(Base::Newest));
+    assert_eq!(s.brief().base, Some(Base::Newest));
     assert!(out.contains(&Out::Ready(Fidelity::Exact)));
-    assert_eq!(s.summary().state, State::Live);
+    assert_eq!(s.brief().state, State::Live);
     compare(&reference(cfg, SIZE, &entries), &state(s)).unwrap();
 }
 
@@ -583,7 +632,7 @@ fn an_exit_inside_the_newest_checkpoint_is_still_known() {
     };
     assert!(after.contains(&Out::Ready(Fidelity::Exact)));
     let summary = s.summary();
-    assert_eq!(summary.base, Some(Base::Newest));
-    assert_eq!(summary.exited, Some((Some(3), None)));
+    assert_eq!(summary.brief.base, Some(Base::Newest));
+    assert_eq!(summary.brief.exited, Some((Some(3), None)));
     assert!(summary.screen.starts_with("bye"), "{:?}", summary.screen);
 }
