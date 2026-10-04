@@ -14,4 +14,5 @@ vorn-screen = { path = "../screen" }
 vorn-term-proto = { path = "../term-proto" }
 
 [dev-dependencies]
+tempfile = "3"
 serde_json = "1"

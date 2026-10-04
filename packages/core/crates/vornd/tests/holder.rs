@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use vorn_sessiond::launch::{self, Instance};
 use vorn_sessiond::server::{self, Config, Sessiond};
-use vorn_sessiond::wire::PROTO;
+use vorn_sessiond_wire::PROTO;
 
 const VORND: &str = env!("CARGO_BIN_EXE_vornd");
 

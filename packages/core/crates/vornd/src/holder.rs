@@ -17,7 +17,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{info, warn};
 use vorn_sessiond::launch::{self, Instance};
 use vorn_sessiond::os;
-use vorn_sessiond::wire::{
+use vorn_sessiond_wire::{
     Drain, FrameReader, Hello, Message, Nonce, ToSessiond, ToVornd, Welcome, PROTO,
 };
 

@@ -9,6 +9,7 @@ members = [
   "crates/vorn-git",
   "crates/vornd",
   "crates/sessiond",
+  "crates/sessiond-wire",
   "crates/recovery",
 ]
 

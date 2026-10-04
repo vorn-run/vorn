@@ -2335,6 +2335,7 @@ dependencies = [
  "crc32fast",
  "memchr",
  "serde_json",
+ "tempfile",
  "vorn-screen",
  "vorn-term-proto",
 ]
@@ -2371,8 +2372,19 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
+ "vorn-sessiond-wire",
  "vorn-term-proto",
  "windows-sys",
+]
+
+[[package]]
+name = "vorn-sessiond-wire"
+version = "0.7.5"
+dependencies = [
+ "crc32fast",
+ "postcard",
+ "serde",
+ "vorn-term-proto",
 ]
 
 [[package]]
@@ -2405,6 +2417,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vorn-sessiond",
+ "vorn-sessiond-wire",
 ]
 
 [[package]]

@@ -10,10 +10,13 @@ pub const PREFIX_BYTES: usize = 1 + 4 + 4;
 /// `rseq` and `startOffset`, both u64.
 pub const RECORD_HEADER_BYTES: usize = 16;
 
-const KIND_DATA: u8 = 0x10;
-const KIND_RESIZE: u8 = 0x11;
+pub(crate) const KIND_DATA: u8 = 0x10;
+pub(crate) const KIND_RESIZE: u8 = 0x11;
 /// Output from the PTY, as opposed to anything Vorn writes into the stream.
 pub const STREAM_PTY: u8 = 0;
+/// A piped agent's two outputs, which share one offset space.
+pub const STREAM_STDOUT: u8 = 1;
+pub const STREAM_STDERR: u8 = 2;
 
 /// Where a record sits in the session's stream: the Session Recovery
 /// Contract's `RecordHeader`.
@@ -25,9 +28,14 @@ pub struct Record {
 
 /// Append one output record to `out`.
 pub fn data(out: &mut Vec<u8>, at: Record, bytes: &[u8]) {
+    data_from(out, at, STREAM_PTY, bytes);
+}
+
+/// Append one output record from `stream` (one of the `STREAM_*` bytes).
+pub fn data_from(out: &mut Vec<u8>, at: Record, stream: u8, bytes: &[u8]) {
     let len = RECORD_HEADER_BYTES + 1 + bytes.len();
     let start = begin(out, KIND_DATA, len, at);
-    out.push(STREAM_PTY);
+    out.push(stream);
     out.extend_from_slice(bytes);
     finish(out, start);
 }

@@ -17,6 +17,7 @@
 //!   2000-character window: a line, or the part of one, further back than that
 //!   is not matched even when it is among the last five.
 
+mod saved;
 pub mod utf16;
 
 use std::collections::VecDeque;

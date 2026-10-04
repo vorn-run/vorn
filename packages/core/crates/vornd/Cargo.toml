@@ -23,6 +23,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync",
 tokio-tungstenite = "0.28"
 tracing = "0.1"
 vorn-sessiond = { path = "../sessiond" }
+vorn-sessiond-wire = { path = "../sessiond-wire" }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
 
 [dev-dependencies]
