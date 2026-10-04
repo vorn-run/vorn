@@ -10,6 +10,7 @@ import {
 } from './command-blocks'
 import { chooseAnchor, readScrollAnchor, resolveAnchor, writeScrollAnchor } from './scroll-anchor'
 import type { BufferMetrics } from './spine-layout'
+import { clearBlockLog } from './block-log'
 import { TERMINAL_BACKGROUND } from '../../shared/surface'
 import type { TerminalData } from '@vornrun/shared/protocol'
 
@@ -160,7 +161,10 @@ export function disposeGlobalDataListener(): void {
  * here, and one already in flight is joined rather than started again. A
  * terminal seeded twice has its scrollback twice.
  */
-export function hydrateTerminal(terminalId: string): Promise<void> {
+export function hydrateTerminal(
+  terminalId: string,
+  { replace = false }: { replace?: boolean } = {}
+): Promise<void> {
   const already = hydrating.get(terminalId)
   if (already) return already.done
 
@@ -208,6 +212,16 @@ export function hydrateTerminal(terminalId: string): Promise<void> {
     try {
       const { data, seq, live } = await window.api.attachTerminal(terminalId)
       if (!stillOurs()) return
+      // A resync replaces the screen only with something. A terminal that
+      // ended while this window was behind comes back empty, and what is on
+      // screen here is then more than the server still has.
+      if (replace && data) {
+        entry.term.reset()
+        // The seed replays the shell's command marks, and the log would take
+        // every command in it a second time. It is rebuilt from the seed, as
+        // the log of a pane that did not create its terminal is.
+        clearBlockLog(terminalId)
+      }
       if (data) {
         // Cleared from the write callback, which xterm runs once these bytes
         // have been parsed -- so it covers every reply they provoke and nothing
@@ -267,9 +281,8 @@ export function resyncTerminal(terminalId: string): Promise<void> {
   return inFlight.then(() => {
     const entry = registry.get(terminalId)
     if (!entry) return
-    entry.term.reset()
     entry._hydrated = false
-    return hydrateTerminal(terminalId)
+    return hydrateTerminal(terminalId, { replace: true })
   })
 }
 

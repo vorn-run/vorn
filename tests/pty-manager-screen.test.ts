@@ -442,6 +442,49 @@ describe('the terminal is recorded where it is fed', () => {
       expect(order.slice(0, 4)).toEqual(['a', 'b', 'a', 'b'])
     })
 
+    it("keeps a drain turn within one flush's worth across sessions of mixed sizes", async () => {
+      const internals = ptyManager as unknown as { drainOne(): void }
+      const sizes = [3 * MAX_FLUSH_UNITS, 40_000, 70_000, 1_000, 2 * MAX_FLUSH_UNITS + 5]
+      const agents = sizes.map(() => createAgent())
+      const sent = new Map<string, string[]>()
+      let inTurn = -1
+      let largestTurn = 0
+      const listener = (channel: string, payload: unknown): void => {
+        const p = payload as { id: string; data: string }
+        if (channel !== 'terminal:data') return
+        sent.set(p.id, [...(sent.get(p.id) ?? []), p.data])
+        if (inTurn >= 0) inTurn += p.data.length
+      }
+      ptyManager.on('client-message', listener)
+      listeners.push(listener)
+      const drainOne = internals.drainOne
+      internals.drainOne = function (this: unknown) {
+        inTurn = 0
+        drainOne.call(this)
+        largestTurn = Math.max(largestTurn, inTurn)
+        inTurn = -1
+      }
+      try {
+        agents.forEach(({ fake }, i) => {
+          fake.emitData('.')
+          fake.emitData(String.fromCharCode(97 + i).repeat(sizes[i]!))
+        })
+        const total = (id: string): number => (sent.get(id) ?? []).join('').length
+        await vi.waitFor(() =>
+          expect(agents.map(({ session }) => total(session.id))).toEqual(sizes.map((n) => n + 1))
+        )
+      } finally {
+        delete (internals as { drainOne?: unknown }).drainOne
+      }
+      expect(largestTurn).toBeGreaterThan(0)
+      expect(largestTurn).toBeLessThanOrEqual(MAX_FLUSH_UNITS)
+      agents.forEach(({ session }, i) => {
+        expect(sent.get(session.id)!.join('')).toBe(
+          '.' + String.fromCharCode(97 + i).repeat(sizes[i]!)
+        )
+      })
+    })
+
     it('sends everything held when the session exits, still capped per flush', () => {
       const { session, fake } = createAgent()
       const seen = flushesOf(session.id)

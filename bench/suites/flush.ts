@@ -51,7 +51,7 @@ async function main(): Promise<void> {
           addSession(id)
           const ms = time(() => {
             for (const f of flushes) {
-              pm.dataBuffers.set(id, { chunks: [f], units: f.length })
+              pm.dataBuffers.set(id, { chunks: [f], head: 0, units: f.length })
               pm.flushBuffer(id)
             }
           })

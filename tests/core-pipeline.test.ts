@@ -184,11 +184,37 @@ describe.runIf(core?.TerminalPipeline !== undefined)('the server, with the switc
     setBellReporter((id) => rang.push(id))
     createScreen(ID, 80, 24)
 
-    expect(feedScreen(ID, 'ding\x07')).toBe(false)
+    pipelineFor(ID)!.feed('ding\x07', null)
     await serializeScreen(ID)
     await settled()
 
     expect(rang).toEqual([ID])
+  })
+
+  it('reports a bell fed just before the terminal went', async () => {
+    on()
+    const rang: string[] = []
+    setBellReporter((id) => rang.push(id))
+    createScreen(ID, 80, 24)
+
+    pipelineFor(ID)!.feed('done\x07', null)
+    clearScreen(ID)
+    await settled()
+
+    expect(rang).toEqual([ID])
+  })
+
+  it('rings no bell for a replay, which rang when it was live', async () => {
+    on()
+    const rang: string[] = []
+    setBellReporter((id) => rang.push(id))
+    createScreen(ID, 80, 24)
+
+    expect(feedScreen(ID, 'ding\x07')).toBe(false)
+    await serializeScreen(ID)
+    await settled()
+
+    expect(rang).toEqual([])
   })
 
   it('parses a replay into the screen without keeping it as scrollback', async () => {

@@ -9,8 +9,10 @@
  * what a burst is.
  */
 export interface HeldOutput {
+  /** Held from `head` on; the ones before it are taken and wait to be dropped. */
   chunks: string[]
-  /** UTF-16 units across `chunks`: what `String.length` counts. */
+  head: number
+  /** UTF-16 units held: what `String.length` counts. */
   units: number
 }
 
@@ -28,7 +30,7 @@ export interface HeldOutput {
 export const MAX_FLUSH_UNITS = 64 * 1024
 
 export function holdOutput(held: HeldOutput | undefined, data: string): HeldOutput {
-  if (!held) return { chunks: [data], units: data.length }
+  if (!held) return { chunks: [data], head: 0, units: data.length }
   held.chunks.push(data)
   held.units += data.length
   return held
@@ -43,24 +45,28 @@ export function holdOutput(held: HeldOutput | undefined, data: string): HeldOutp
  * pair anyway, one unit over, so a caller always makes progress.
  */
 export function takeOutput(held: HeldOutput, cap: number): string {
+  const { chunks } = held
   if (held.units <= cap) {
-    const all = held.chunks.length === 1 ? held.chunks[0]! : held.chunks.join('')
+    const all =
+      chunks.length - held.head === 1 ? chunks[held.head]! : chunks.slice(held.head).join('')
     held.chunks = []
+    held.head = 0
     held.units = 0
     return all
   }
 
+  // Taken chunks are passed by moving `head`, not by slicing the array: a
+  // backlog of thousands of reads taken a flush at a time would otherwise
+  // copy what is left behind on every take.
   const taken: string[] = []
   let units = 0
-  let used = 0
-  while (used < held.chunks.length && units + held.chunks[used]!.length <= cap) {
-    units += held.chunks[used]!.length
-    taken.push(held.chunks[used]!)
-    used += 1
+  while (held.head < chunks.length && units + chunks[held.head]!.length <= cap) {
+    units += chunks[held.head]!.length
+    taken.push(chunks[held.head]!)
+    held.head += 1
   }
 
-  let rest = held.chunks.slice(used)
-  const first = rest[0]
+  const first = chunks[held.head]
   if (first !== undefined) {
     let cut = cap - units
     if (cut > 0 && isHighSurrogate(first.charCodeAt(cut - 1))) cut -= 1
@@ -70,13 +76,18 @@ export function takeOutput(held: HeldOutput, cap: number): string {
     if (cut > 0) {
       taken.push(first.slice(0, cut))
       units += cut
-      const tail = first.slice(cut)
-      rest = tail ? [tail, ...rest.slice(1)] : rest.slice(1)
+      if (cut < first.length) chunks[held.head] = first.slice(cut)
+      else held.head += 1
     }
   }
 
-  held.chunks = rest
   held.units -= units
+  // Dropped once they are most of the array, so each chunk is copied a
+  // bounded number of times however the backlog is taken.
+  if (held.head > 1024 && held.head * 2 > chunks.length) {
+    held.chunks = chunks.slice(held.head)
+    held.head = 0
+  }
   return taken.join('')
 }
 

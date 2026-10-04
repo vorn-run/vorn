@@ -776,11 +776,12 @@ class PtyManager extends EventEmitter {
       if (id === undefined) break
       if (analyse) {
         this.analysisQueue.delete(id)
-        budget -= this.flushAnalysis(id)
+        budget -= this.flushAnalysis(id, budget)
       } else {
         this.drainQueue.delete(id)
-        // Flushing re-queues it at the back if a full flush's worth is still held.
-        budget -= this.flushBuffer(id)
+        // Flushing re-queues it at the back if a full flush's worth is still
+        // held, or if the budget cut it short.
+        budget -= this.flushBuffer(id, budget)
       }
     }
     if (this.drainQueue.size || this.analysisQueue.size) this.scheduleDrain()
@@ -861,13 +862,18 @@ class PtyManager extends EventEmitter {
     return header
   }
 
-  /** Send up to one flush's worth of what is held, and say how much that was. */
-  private flushBuffer(id: string): number {
+  /**
+   * Send up to one flush's worth of what is held, or `cap` when a drain turn
+   * has less than that left, and say how much that was.
+   */
+  private flushBuffer(id: string, cap = MAX_FLUSH_UNITS): number {
     const held = this.dataBuffers.get(id)
     if (!held) return 0
-    const data = takeOutput(held, MAX_FLUSH_UNITS)
+    const data = takeOutput(held, Math.min(cap, MAX_FLUSH_UNITS))
     if (held.units === 0) this.dataBuffers.delete(id)
-    else if (held.units >= MAX_FLUSH_UNITS) this.queueDrain(id)
+    // Cut short by the turn's budget, it goes on in the next turn rather than
+    // waiting out the timer.
+    else if (held.units >= MAX_FLUSH_UNITS || cap < MAX_FLUSH_UNITS) this.queueDrain(id)
     if (data) {
       const seq = this.lastFlushSeq(id) + 1
       this.flushSeq.set(id, seq)
@@ -1075,10 +1081,10 @@ class PtyManager extends EventEmitter {
    * The rest is analyzed on the turns that follow, like a capped flush, so a
    * burst never holds the loop for more than 64 KB of analysis at once.
    */
-  private flushAnalysis(id: string): number {
+  private flushAnalysis(id: string, cap = MAX_FLUSH_UNITS): number {
     const held = this.pendingAnalysis.get(id)
     if (held === undefined) return 0
-    const data = this.takeAnalysis(id, held, MAX_FLUSH_UNITS)
+    const data = this.takeAnalysis(id, held, Math.min(cap, MAX_FLUSH_UNITS))
     if (held.units === 0) this.pendingAnalysis.delete(id)
     else this.queueAnalysis(id)
     const session = this.sessions.get(id)

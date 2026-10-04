@@ -143,6 +143,19 @@ mod tests {
         }
     }
 
+    /// The one place the two buffers differ, kept on purpose: the cap is
+    /// bytes, so three-byte text keeps a third of the characters the
+    /// JavaScript buffer's 256 K units would. Same memory, less history; the
+    /// cap that matters on a machine with a hundred terminals is the memory.
+    #[test]
+    fn caps_bytes_not_characters() {
+        let mut ring = Scrollback::default();
+        ring.seed("語".repeat(MAX_BYTES).as_bytes());
+        let read = ring.read();
+        assert_eq!(read.len(), MAX_BYTES - MAX_BYTES % 3);
+        assert_eq!(read.chars().count(), MAX_BYTES / 3);
+    }
+
     #[test]
     fn reads_empty_when_nothing_was_written() {
         assert_eq!(Scrollback::default().read(), "");

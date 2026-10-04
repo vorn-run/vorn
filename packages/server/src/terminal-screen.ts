@@ -370,10 +370,14 @@ export function createScreen(
   const Pipeline = coreFor('pipeline')?.TerminalPipeline
   if (Pipeline) {
     try {
-      const pipeline: NativePipeline = new Pipeline(cols, rows, (event) =>
-        // A pipeline freed or replaced since has nothing left to say.
-        pipelineFor(id) === pipeline ? pipelineEvent(id, event) : undefined
-      )
+      const pipeline: NativePipeline = new Pipeline(cols, rows, (event) => {
+        // A bell rang in output that was live when it was fed, so it counts
+        // even from a pipeline that has gone since: an exit feeds the last
+        // flush and frees the pipeline in one turn, and its events reach this
+        // loop after. Anything else from a pipeline freed or replaced since
+        // describes a terminal that is no longer there.
+        if (event.kind === 'bell' || pipelineFor(id) === pipeline) pipelineEvent(id, event)
+      })
       if (labels) pipeline.restoreLabels(labels.title, labels.cwd)
       // What this terminal printed before it had a pipeline, so the scrollback
       // carries on rather than starting over.

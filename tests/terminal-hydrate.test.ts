@@ -99,6 +99,7 @@ import {
   initGlobalDataListener,
   disposeGlobalDataListener
 } from '../src/renderer/lib/terminal-registry'
+import { captureBlock, getBlockLog } from '../src/renderer/lib/block-log'
 
 /**
  * Seeding a pane with a terminal it did not create.
@@ -376,6 +377,41 @@ describe('a resync', () => {
 
     expect(attachTerminal).toHaveBeenCalledTimes(2)
     expect(writes()).toEqual(['BEFORE THE GAP', 'AFTER THE GAP'])
+  })
+
+  it('keeps the screen of a terminal that ended while this window was behind', async () => {
+    attachTerminal.mockResolvedValueOnce({ data: 'FIRST SEED', seq: 3, live: true })
+    await open()
+    // The server has nothing left for a terminal that exited: the screen here
+    // is all there is, and wiping it would leave the pane blank.
+    attachTerminal.mockResolvedValueOnce({ data: '', seq: 0, live: false })
+    await resyncTerminal(ID)
+
+    expect(created.at(-1)!.reset).not.toHaveBeenCalled()
+    expect(writes()).toEqual(['FIRST SEED'])
+  })
+
+  it('rebuilds the command log from the new seed rather than adding to it', async () => {
+    attachTerminal.mockResolvedValueOnce({ data: 'FIRST SEED', seq: 3, live: true })
+    await open()
+    captureBlock({
+      terminalId: ID,
+      buffer: { getLine: () => undefined },
+      startLine: 0,
+      endLine: 0,
+      command: 'make',
+      exitCode: 0,
+      durationMs: 1,
+      cwd: null
+    })
+    expect(getBlockLog(ID)).toHaveLength(1)
+
+    attachTerminal.mockResolvedValueOnce({ data: 'SECOND SEED', seq: 9, live: true })
+    await resyncTerminal(ID)
+
+    // The seed replays the same command marks; they make the log again.
+    expect(getBlockLog(ID)).toEqual([])
+    expect(writes()).toEqual(['FIRST SEED', 'SECOND SEED'])
   })
 
   it('does nothing for a terminal this window does not show', async () => {

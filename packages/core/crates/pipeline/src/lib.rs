@@ -296,7 +296,9 @@ impl Worker {
         }
         if let Some(screen) = self.screen.as_mut() {
             let fed = screen.feed(bytes);
-            if fed.bells > 0 {
+            // A replay rang its bells when the output was live: ringing them
+            // again would notify for every BEL in a restored session.
+            if keep && fed.bells > 0 {
                 (self.on_event)(Event::Bell);
             }
             if let Some(cwd) = fed.cwd {
@@ -423,6 +425,20 @@ mod tests {
         p.feed("ding\x07".into(), None).unwrap();
         p.serialize().unwrap();
         assert_eq!(events.try_iter().collect::<Vec<_>>(), vec![Event::Bell]);
+    }
+
+    #[test]
+    fn a_replay_rings_no_bell_and_still_moves_the_cwd() {
+        let (p, events) = pipeline();
+        p.feed_screen("ding\x07\x1b]5522;cwd;/srv\x07".into())
+            .unwrap();
+        p.serialize().unwrap();
+        let got: Vec<_> = events.try_iter().collect();
+        assert!(!got.contains(&Event::Bell), "a replay rang: {got:?}");
+        assert!(
+            got.iter().any(|e| matches!(e, Event::Cwd(_))),
+            "no cwd event in {got:?}"
+        );
     }
 
     #[test]
