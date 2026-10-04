@@ -8,6 +8,7 @@ publish = false
 description = "A terminal's screen on libghostty-vt: feed bytes, read title and cwd, serialize for a checkpoint"
 
 [dependencies]
+crc32fast = "1"
 libghostty-vt = { version = "0.2.2", default-features = false }
 memchr = "2"
 

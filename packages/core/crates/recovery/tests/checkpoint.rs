@@ -1,19 +1,21 @@
-//! Recovery from checkpoints: the differential with the reference engine
-//! restoring from its newest checkpoint, which is only as exact as the
-//! formatter's round trip (`Screen::serialize`, then feeding that into a
-//! fresh terminal).
+//! Recovery from checkpoints.
 //!
-//! The differential runs over [`Profile::round_trip`], the generator
-//! features that survive. Everything found not to survive is a named case
-//! below, each pinned to the check it fails, so the day one restores
-//! exactly its test says so and the profile can grow.
+//! The reference engine restores from its newest checkpoint, which is only
+//! as exact as the formatter's round trip (`Screen::serialize`, then feeding
+//! that into a fresh terminal): its differential runs over
+//! [`Profile::round_trip`], the generator features that survive, and the
+//! seeds at the end pin what does not.
+//!
+//! The session engine's checkpoints ([`Emulator::checkpoint`]) restore the
+//! state the formatter loses. The named cases below are each such state,
+//! round-tripped through them and compared by every check.
 
 use vorn_recovery::gen::{Generator, Mix, Profile};
 use vorn_recovery::{
     compare, differential, transcript, Check, Error, InProcess, KillPlan, Mismatch,
     ReferenceConfig, ReferenceEngine, Restore, TermState,
 };
-use vorn_screen::Screen;
+use vorn_screen::{Checkpoint, Emulator};
 
 fn engine(config: ReferenceConfig) -> impl FnMut() -> Result<InProcess<ReferenceEngine>, Error> {
     move || Ok(InProcess::new(config, Restore::Checkpoint))
@@ -43,7 +45,7 @@ fn differential_from_checkpoints() {
 /// The transcripts recover exactly except for one thing: a checkpoint cut
 /// after a program left the alternate screen (htop, vim) does not carry
 /// what it left there, so the inactive screen differs
-/// (`alternate_screen_loses_the_primary` from the other side).
+/// (the formatter writes the active screen only).
 #[test]
 fn differential_from_checkpoints_over_transcripts() {
     for (name, log) in transcript::all().unwrap() {
@@ -62,21 +64,24 @@ fn differential_from_checkpoints_over_transcripts() {
     }
 }
 
-/// The terminal fed `before`, checkpointed and restored, then both fed
-/// `after`: what a recovery from a checkpoint cut after `before` shows.
+/// The terminal fed `before`, checkpointed the way the session engine does
+/// it ([`Emulator::checkpoint`]) and rebuilt, then both fed `after`: what a
+/// recovery from a checkpoint cut after `before` shows. The terminal that
+/// was checkpointed is compared as it was, not as it carries on from its
+/// rebuild, so nothing the rebuild drops can hide.
 fn round_trip(
     cols: u32,
     rows: u32,
     scrollback: usize,
     before: &[u8],
-    after: impl Fn(&mut Screen),
+    after: impl Fn(&mut Emulator),
 ) -> Result<(), Mismatch> {
-    let mut live = Screen::with_scrollback(cols, rows, scrollback).unwrap();
-    live.feed(before);
-    let snap = live.serialize().unwrap();
-    let mut back = Screen::with_scrollback(snap.cols, snap.rows, scrollback).unwrap();
-    back.feed(snap.screen.as_bytes());
-    back.restore_labels(Some(&snap.title), Some(&snap.cwd));
+    let mut live = Emulator::with_scrollback(cols, rows, scrollback).unwrap();
+    live.feed(before, &mut Vec::new());
+    let (cp, _) = live
+        .cut()
+        .unwrap_or_else(|why| panic!("no checkpoint: {why}"));
+    let mut back = Emulator::restore(&Checkpoint::decode(&cp.encode()).unwrap()).unwrap();
     after(&mut live);
     after(&mut back);
     compare(
@@ -85,122 +90,119 @@ fn round_trip(
     )
 }
 
-fn lost(check: Check, result: Result<(), Mismatch>) {
-    let m = result.expect_err("restores exactly now: move it out of the exceptions");
-    assert!(m.checks().contains(&check), "{m}");
+fn feed(bytes: &'static [u8]) -> impl Fn(&mut Emulator) {
+    move |e| e.feed(bytes, &mut Vec::new())
 }
 
-fn feed(bytes: &'static [u8]) -> impl Fn(&mut Screen) {
-    move |s| {
-        s.feed(bytes);
-    }
-}
+fn nothing(_: &mut Emulator) {}
 
-fn nothing(_: &mut Screen) {}
-
-/// The cursor at the last column waiting to wrap comes back as a plain CUP
-/// there, so the next character overwrites instead of wrapping. The
-/// reference engine does not cut a checkpoint in this state.
+/// The cursor at the last column waiting to wrap: the next character wraps.
 #[test]
-fn pending_wrap_is_lost() {
-    lost(Check::Cursor, round_trip(10, 3, 0, b"0123456789", nothing));
-    lost(
-        Check::Screen,
-        round_trip(10, 3, 0, b"0123456789", feed(b"x")),
-    );
+fn pending_wrap_is_restored() {
+    round_trip(10, 3, 0, b"0123456789", nothing).unwrap();
+    round_trip(10, 3, 0, b"0123456789", feed(b"x")).unwrap();
 }
 
 #[test]
-fn saved_cursor_is_lost() {
-    lost(
-        Check::SavedScreen,
-        round_trip(20, 5, 0, b"\x1b[3;3H\x1b7\x1b[H", nothing),
-    );
+fn saved_cursor_is_restored() {
+    round_trip(20, 5, 0, b"\x1b[3;3H\x1b7\x1b[H", nothing).unwrap();
+    round_trip(
+        20,
+        5,
+        0,
+        b"\x1b[3;3H\x1b[1;31m\x1b7\x1b[H\x1b[0m",
+        feed(b"\x1b8x"),
+    )
+    .unwrap();
 }
 
-/// The formatter writes the active screen only.
+/// The screen that is not showing, and its saved cursor.
 #[test]
-fn alternate_screen_loses_the_primary() {
-    lost(
-        Check::SavedScreen,
-        round_trip(20, 5, 0, b"primary\x1b[?1049halt", nothing),
-    );
-}
-
-#[test]
-fn kitty_keyboard_flags_are_lost() {
-    lost(
-        Check::KittyKeyboard,
-        round_trip(20, 5, 0, b"\x1b[>1u", nothing),
-    );
+fn alternate_screen_keeps_the_primary() {
+    round_trip(20, 5, 0, b"primary\x1b[?1049halt", nothing).unwrap();
+    round_trip(20, 5, 0, b"primary\x1b[?1049halt", feed(b"\x1b[?1049lmore")).unwrap();
 }
 
 #[test]
-fn cursor_shape_is_lost() {
-    lost(Check::Cursor, round_trip(20, 5, 0, b"\x1b[4 q", nothing));
+fn kitty_keyboard_flags_are_restored() {
+    round_trip(20, 5, 0, b"\x1b[>1u", nothing).unwrap();
+    round_trip(20, 5, 0, b"\x1b[>1u\x1b[>5u\x1b[?1049h\x1b[>3u", nothing).unwrap();
+}
+
+#[test]
+fn cursor_shape_is_restored() {
+    round_trip(20, 5, 0, b"\x1b[4 q", nothing).unwrap();
 }
 
 /// DECSCA, which cut-off sequences produce now and then.
 #[test]
-fn character_protection_is_lost() {
-    lost(Check::Cursor, round_trip(20, 5, 0, b"\x1b[1\"q", nothing));
-}
-
-/// DECSLRM homes the cursor, and the formatter writes it after the CUP:
-/// the same order `Screen::serialize` already fixes for DECSTBM.
-#[test]
-fn left_right_margins_home_the_cursor() {
-    lost(
-        Check::Cursor,
-        round_trip(40, 8, 0, b"\x1b[?69h\x1b[3;30s\x1b[5;10H", nothing),
-    );
+fn character_protection_is_restored() {
+    round_trip(20, 5, 0, b"\x1b[1\"q", nothing).unwrap();
+    round_trip(
+        20,
+        5,
+        0,
+        b"\x1b[1\"qab\x1b[0\"q",
+        feed(b"\x1b[1;1H\x1b[?2K"),
+    )
+    .unwrap();
 }
 
 #[test]
-fn origin_mode_moves_the_cursor() {
-    lost(
-        Check::Cursor,
-        round_trip(30, 6, 0, b"\x1b[?6h\x1b[2;5r\x1b[2;3Hx", nothing),
-    );
+fn left_right_margins_keep_the_cursor() {
+    round_trip(40, 8, 0, b"\x1b[?69h\x1b[3;30s\x1b[5;10H", nothing).unwrap();
 }
 
-/// Rows erased with a background colour and left blank at the bottom of the
-/// screen are trimmed as blank rows. Invisible to the comparator at the cut
-/// (it uses the same formatter), visible once something prints there.
 #[test]
-fn background_rows_at_the_bottom_are_lost() {
+fn origin_mode_keeps_the_cursor() {
+    round_trip(30, 6, 0, b"\x1b[?6h\x1b[2;5r\x1b[2;3Hx", nothing).unwrap();
+}
+
+/// Rows erased with a background colour and left blank at the bottom.
+#[test]
+fn background_rows_at_the_bottom_are_restored() {
     round_trip(20, 5, 0, b"ab\x1b[44m\x1b[J\x1b[0m", nothing).unwrap();
-    lost(
-        Check::Screen,
-        round_trip(20, 5, 0, b"ab\x1b[44m\x1b[J\x1b[0m", feed(b"\x1b[3;1Hx")),
-    );
+    round_trip(20, 5, 0, b"ab\x1b[44m\x1b[J\x1b[0m", feed(b"\x1b[3;1Hx")).unwrap();
 }
 
-/// A soft wrap comes back as a hard line break, so a resize reflows the
-/// line differently.
+/// A soft wrap stays a soft wrap, so a resize reflows the line the same.
 #[test]
-fn soft_wraps_come_back_as_hard_breaks() {
-    let resize = |s: &mut Screen| s.resize(20, 4).unwrap();
-    lost(
-        Check::Screen,
-        round_trip(10, 4, 0, b"abcdefghijKLM", resize),
-    );
+fn soft_wraps_stay_soft() {
+    let resize = |e: &mut Emulator| e.resize(20, 4, &mut Vec::new()).unwrap();
+    round_trip(10, 4, 0, b"abcdefghijKLM", resize).unwrap();
 }
 
-/// The formatter drops trailing blank rows; with history above, replaying
-/// it into a fresh terminal pushes the screen up by that many rows.
+/// History above a screen that ends in blank rows stays where it was.
 #[test]
-fn history_shifts_when_the_screen_ends_in_blank_rows() {
-    lost(
-        Check::Screen,
-        round_trip(
-            10,
-            4,
-            64 << 10,
-            b"0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n\x1b[H",
-            nothing,
-        ),
-    );
+fn history_stays_put_when_the_screen_ends_in_blank_rows() {
+    round_trip(
+        10,
+        4,
+        64 << 10,
+        b"0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n\x1b[H",
+        nothing,
+    )
+    .unwrap();
+}
+
+/// A combining mark stays on its base character.
+#[test]
+fn combining_marks_stay_on_their_cell() {
+    round_trip(10, 3, 0, b"oke\xcc\x81", nothing).unwrap();
+    round_trip(10, 3, 0, b"oke\xcc\x81", feed(b"\x1b[1;2H\x1b[P")).unwrap();
+}
+
+/// Blank cells a redraw left styled.
+#[test]
+fn styled_blanks_are_restored() {
+    round_trip(
+        10,
+        3,
+        0,
+        b"\x1b[44mab\x1b[2X\x1b[0m",
+        feed(b"\x1b[1;1H\x1b[4@"),
+    )
+    .unwrap();
 }
 
 /// A combining mark that comes back attached to the cell before its base

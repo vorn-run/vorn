@@ -11,6 +11,13 @@
 //! `@xterm/addon-serialize`. Each accepted difference has a named fixture in
 //! `tests/terminal-screen-parity.test.ts`.
 
+pub mod checkpoint;
+pub mod emulator;
+mod vtparse;
+
+pub use checkpoint::{Checkpoint, Step, Uncut};
+pub use emulator::{ClipboardTarget, Effect, Emulator};
+
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
