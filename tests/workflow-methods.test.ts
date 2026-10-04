@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import WebSocket from 'ws'
 import type { RpcResponse } from '@vornrun/shared/protocol'
+import { frontDoor } from './helpers/front-door'
 
 /**
  * Listing workflows, and switching one on.
@@ -217,8 +218,10 @@ describe('workflow read and enable methods', () => {
     process.stdout.write = (() => true) as typeof process.stdout.write
     try {
       const started = await startServer({ port: 0 })
-      serverPort = started.port
+      const door = await frontDoor(started.port)
+      serverPort = door.port
       serverClose = async () => {
+        await door.close()
         await started.app.close()
       }
     } finally {

@@ -21,6 +21,7 @@ Rust binaries:
 | ----------------------------------- | ----------------------------------------------------------------- |
 | `crates/screen` (`vorn-screen`)     | A terminal's screen on libghostty-vt: feed, title, cwd, serialize |
 | `crates/analysis` (`vorn-analysis`) | Stripped line ring, bracketed paste and status patterns           |
+| `crates/vornd` (`vornd`)            | A daemon in front of the server; forwards everything for now      |
 | `.` (`vorn-core`)                   | The napi adapters the server loads as `vorn_core.node`            |
 
 ```sh
@@ -35,6 +36,25 @@ Node's event loop. The logic lives in `crates/vorn-git`, a plain crate: git as a
 child process with `execFileSync`'s limits and error messages, plus a
 [gix](https://crates.io/crates/gitoxide) fast path that answers the
 `rev-parse` queries in-process where it can match git byte for byte.
+
+## vornd
+
+`vornd` is a separate binary that answers the server's WebSocket and HTTP
+endpoint and forwards everything to the Node server, unchanged. It runs only
+when started by hand; nothing in the app starts it yet.
+
+```sh
+cargo run -p vornd -- --upstream 127.0.0.1:50091   # prints {"port":N,"protocol":1}
+curl http://127.0.0.1:N/vornd/health                # server reachable, calls per group
+yarn test:conformance                               # the RPC test files, through vornd
+```
+
+It listens on loopback only. `--groups git=shadow` (or `VORND_GROUPS`) sets a
+group's mode: `forward`, `shadow`, or `native` once a group has a native
+implementation. A group is the method name before its first colon. `--log-file`
+and `VORND_LOG` control the log. Clients see the version in the
+`Vornd-Protocol` header on the WebSocket upgrade, and vornd closes a connection
+whose server speaks a protocol version it does not know.
 
 ## Build
 
