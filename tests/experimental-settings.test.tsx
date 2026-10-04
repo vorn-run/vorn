@@ -84,9 +84,9 @@ describe('ExperimentalSettings', () => {
         forced: 'js',
         error: 'VORN_CORE=rust is not recognized'
       }),
-      /VORN_CORE=rust is not recognized by the server, so every switch is off/
+      /VORN_CORE=rust is not recognized by the server, so every native core switch is off/
     ],
-    ['VORN_CORE=native', core({ forced: 'native' }), /every switch is on/],
+    ['VORN_CORE=native', core({ forced: 'native' }), /every native core switch is on/],
     [
       'a binary that will not load',
       core({ loaded: false, version: null, error: 'vorn_core.node not found' }),
@@ -95,7 +95,7 @@ describe('ExperimentalSettings', () => {
     [
       'a binary that will not load under VORN_CORE=native',
       core({ loaded: false, version: null, error: null, forced: 'native' }),
-      /not available in this build, so these stay on JavaScript\.$/
+      /not available in this build, so the native core switches stay on JavaScript\.$/
     ]
   ])('locks the switches and says why for %s', async (_, next, note) => {
     status = next
@@ -104,6 +104,8 @@ describe('ExperimentalSettings', () => {
     expect(screenSwitch()).toBeDisabled()
     fireEvent.click(screenSwitch())
     expect(saveConfig).not.toHaveBeenCalled()
+    // Device video does not run on the core, so nothing about it locks it.
+    expect(screen.getByRole('switch', { name: 'Device video' })).not.toBeDisabled()
   })
 
   it('disables only the switches the binary was built without', async () => {
@@ -131,7 +133,15 @@ describe('ExperimentalSettings', () => {
     expect(
       await screen.findByText(/does not include Native screen model.*even with VORN_CORE=native/)
     ).toBeInTheDocument()
-    expect(screen.queryByText(/every switch is on/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/every native core switch is on/)).not.toBeInTheDocument()
+  })
+
+  it('turns device video on without the core', async () => {
+    status = core({ loaded: false, version: null, error: 'vorn_core.node not found' })
+    render(<ExperimentalSettings />)
+    await screen.findByText(/not available in this build/)
+    fireEvent.click(screen.getByRole('switch', { name: 'Device video' }))
+    expect(saveConfig).toHaveBeenCalledWith(config({ deviceVideo: true }))
   })
 
   it('keeps the switches locked until the status arrives', async () => {

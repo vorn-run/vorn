@@ -32,6 +32,9 @@ const deviceList = vi.fn()
 const deviceClaim = vi.fn()
 const deviceRelease = vi.fn()
 const saveTextFile = vi.fn()
+const deviceScreenInfo = vi.fn()
+const deviceVideoStart = vi.fn()
+const stopVideo = vi.fn()
 
 /** The picker the switcher opens observes its own size to place itself. */
 const resizeCallbacks: Array<() => void> = []
@@ -70,6 +73,8 @@ Object.defineProperty(window, 'api', {
     deviceClaim,
     deviceRelease,
     saveTextFile,
+    deviceScreenInfo,
+    deviceVideoStart,
     notifyWidgetStatus: vi.fn()
   },
   writable: true,
@@ -109,6 +114,11 @@ beforeEach(() => {
     .mockResolvedValue({ ok: true, udid: 'udid-2', name: 'iPad Pro', booted: true })
   deviceRelease.mockReset().mockResolvedValue({ released: true })
   saveTextFile.mockReset().mockResolvedValue('/tmp/shot.png')
+  deviceScreenInfo
+    .mockReset()
+    .mockResolvedValue({ screen: { width: 402, height: 874 }, orientation: 'portrait' })
+  stopVideo.mockReset()
+  deviceVideoStart.mockReset().mockReturnValue(stopVideo)
   toastError.mockReset()
   toastSuccess.mockReset()
   resizeCallbacks.length = 0
@@ -697,5 +707,162 @@ describe('a device the pane has turned', () => {
     show()
     const img = await screen.findByTestId('device-frame-t1')
     await waitFor(() => expect(img.style.transform).toContain('rotate(-90deg)'))
+  })
+})
+
+describe('video', () => {
+  /** Stands in for WebCodecs: every chunk comes straight back as a frame. */
+  class FakeDecoder {
+    state = 'unconfigured'
+    decodeQueueSize = 0
+    constructor(private init: { output: (f: unknown) => void }) {}
+    static isConfigSupported = async (): Promise<{ supported: boolean }> => ({ supported: true })
+    configure(): void {
+      this.state = 'configured'
+    }
+    decode(): void {
+      this.init.output({ displayWidth: 402, displayHeight: 874, close: vi.fn() })
+    }
+    close(): void {
+      this.state = 'closed'
+    }
+  }
+  const key = new Uint8Array([
+    0, 0, 0, 1, 0x67, 0x64, 0, 0x1f, 0, 0, 0, 1, 0x68, 0xee, 0, 0, 0, 1, 0x65, 0x88
+  ])
+
+  beforeEach(() => {
+    vi.stubGlobal('VideoDecoder', FakeDecoder)
+    vi.stubGlobal(
+      'EncodedVideoChunk',
+      class {
+        constructor(init: object) {
+          Object.assign(this, init)
+        }
+      }
+    )
+    Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+      value: () => ({ drawImage: vi.fn() }),
+      configurable: true
+    })
+    act(() => {
+      useAppStore.setState({
+        config: { defaults: { experimental: { deviceVideo: true } } } as never
+      })
+    })
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.stubGlobal('IntersectionObserver', IO)
+    vi.stubGlobal('ResizeObserver', RO)
+    act(() => useAppStore.setState({ config: null as never }))
+  })
+
+  /** The pane's callbacks for the stream it started. */
+  const stream = (): { data: (b: Uint8Array) => void; end: (e: string | null) => void } => {
+    const args = deviceVideoStart.mock.calls.at(-1)!
+    return { data: args[2], end: args[3] }
+  }
+
+  it('keeps showing stills until a picture decodes, then draws the video instead', async () => {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+    await waitFor(() => expect(deviceVideoStart).toHaveBeenCalled())
+    expect(deviceVideoStart.mock.calls[0]![0]).toBe('t1')
+    // Asked for at the size the pane draws, never the device's full size.
+    expect(deviceVideoStart.mock.calls[0]![1]).toEqual(expect.any(Number))
+
+    await act(async () => {
+      stream().data(key)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(await screen.findByTestId('device-video-t1')).toBeInTheDocument()
+    expect(screen.queryByTestId('device-frame-t1')).not.toBeInTheDocument()
+
+    // The picture now comes from the stream: no more stills, only the size.
+    const stills = deviceScreenshot.mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    expect(deviceScreenshot.mock.calls.length).toBe(stills)
+    expect(deviceScreenInfo).toHaveBeenCalledWith('t1')
+  })
+
+  it('taps in device points on the video, exactly as on the still', async () => {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+    await waitFor(() => expect(deviceVideoStart).toHaveBeenCalled())
+    await act(async () => {
+      stream().data(key)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    fireEvent.click(await screen.findByTestId('device-video-t1'), { clientX: 100, clientY: 300 })
+    await waitFor(() =>
+      expect(deviceInteract).toHaveBeenCalledWith({
+        sessionId: 't1',
+        action: 'tap',
+        target: { x: 50, y: 150 }
+      })
+    )
+  })
+
+  it('goes back to stills when the stream fails', async () => {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+    await waitFor(() => expect(deviceVideoStart).toHaveBeenCalled())
+    await act(async () => {
+      stream().data(key)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await screen.findByTestId('device-video-t1')
+    const stills = deviceScreenshot.mock.calls.length
+    await act(async () => {
+      stream().end('encoder died')
+      await vi.advanceTimersByTimeAsync(1200)
+    })
+    expect(await screen.findByTestId('device-frame-t1')).toBeInTheDocument()
+    expect(deviceScreenshot.mock.calls.length).toBeGreaterThan(stills)
+  })
+
+  it('opens a fresh stream, without waiting, when the decoder loses its place', async () => {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+    await waitFor(() => expect(deviceVideoStart).toHaveBeenCalled())
+    await act(async () => {
+      stream().data(key)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await screen.findByTestId('device-video-t1')
+    const calls = deviceVideoStart.mock.calls.length
+    await act(async () => {
+      // A payload that starts in the middle of a unit.
+      stream().data(new Uint8Array([0x88, 0x84, 0x21]))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(stopVideo).toHaveBeenCalled()
+    await waitFor(() => expect(deviceVideoStart.mock.calls.length).toBe(calls + 1))
+  })
+
+  it('stops the stream when the pane is hidden', async () => {
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await waitFor(() => expect(deviceVideoStart).toHaveBeenCalled())
+    hide()
+    expect(stopVideo).toHaveBeenCalled()
+  })
+
+  it('never starts with the switch off', async () => {
+    act(() => useAppStore.setState({ config: { defaults: { experimental: {} } } as never }))
+    render(<DeviceCard sessionId="t1" />)
+    show()
+    await screen.findByTestId('device-frame-t1')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200)
+    })
+    expect(deviceVideoStart).not.toHaveBeenCalled()
   })
 })

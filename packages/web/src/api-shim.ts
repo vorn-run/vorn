@@ -999,6 +999,17 @@ export function createApiShim(wsUrl: string) {
     deviceClaim: unsupportedInWeb('Claiming a device'),
     deviceRelease: async () => ({ released: false }),
     deviceScreenshot: unsupportedInWeb('Taking a device screenshot'),
+    deviceScreenInfo: unsupportedInWeb('Reading a device screen'),
+    // Ends at once, so a pane in the browser goes straight back to stills.
+    deviceVideoStart: (
+      _sessionId: string,
+      _maxEdge: number | undefined,
+      _onData: (bytes: Uint8Array) => void,
+      onEnd: (error: string | null) => void
+    ) => {
+      queueMicrotask(() => onEnd('Device video is only available in the Vorn app.'))
+      return () => {}
+    },
     // Null rather than a refusal: the faceplate is Apple artwork read from a
     // local Xcode, which a browser has no way to reach, and a pane without one
     // simply draws its own frame.

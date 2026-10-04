@@ -837,6 +837,46 @@ const api = {
     screen: { width: number; height: number }
     orientation: DeviceOrientation
   }> => ipcRenderer.invoke(IPC.DEVICE_SCREENSHOT, { sessionId, maxEdge }),
+  /** The screen's size and orientation without a capture, beside the video picture. */
+  deviceScreenInfo: (
+    sessionId: string
+  ): Promise<{
+    screen: { width: number; height: number } | null
+    orientation: DeviceOrientation
+  }> => ipcRenderer.invoke(IPC.DEVICE_SCREEN_INFO, { sessionId }),
+  /**
+   * Stream the screen as H.264. `onData` gets each payload as the companion
+   * sent it; `onEnd` is called once, with the error when the stream failed.
+   * Returns the stop function.
+   */
+  deviceVideoStart: (
+    sessionId: string,
+    maxEdge: number | undefined,
+    onData: (bytes: Uint8Array) => void,
+    onEnd: (error: string | null) => void
+  ): (() => void) => {
+    const { port1, port2 } = new MessageChannel()
+    let ended = false
+    port1.onmessage = (e) => {
+      const msg = e.data as
+        | { type: 'data'; bytes: Uint8Array }
+        | { type: 'end'; error: string | null }
+      if (msg.type === 'data') {
+        if (!ended) onData(msg.bytes)
+      } else if (!ended) {
+        ended = true
+        port1.close()
+        onEnd(msg.error)
+      }
+    }
+    ipcRenderer.postMessage(IPC.DEVICE_VIDEO_START, { sessionId, maxEdge }, [port2])
+    return () => {
+      if (ended) return
+      ended = true
+      port1.close()
+      ipcRenderer.send(IPC.DEVICE_VIDEO_STOP, sessionId)
+    }
+  },
   deviceInteract: (params: {
     sessionId: string
     action: 'tap' | 'swipe' | 'type' | 'button' | 'press' | 'rotate'

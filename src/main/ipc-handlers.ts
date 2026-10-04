@@ -18,6 +18,7 @@ import { setFileRoot, allowsFileUrl } from './browser-file-scope'
 import { watchArtifact, stopWatching } from './artifact-watcher'
 import * as deviceRegistry from './device-registry'
 import * as deviceChrome from './device-chrome'
+import * as deviceVideo from './device-video'
 import { registerCredentialHandlers, enrichPayloadWithCredentials } from './credential-handlers'
 import log from './logger'
 
@@ -669,6 +670,22 @@ export function registerIpcHandlers(): void {
   // refs exactly as the agent's own tap would.
   safeHandle(IPC.DEVICE_SCREENSHOT, (_, params) => deviceRegistry.screenshot(params))
   safeHandle(IPC.DEVICE_INTERACT, (_, params) => deviceRegistry.interact(params))
+  safeHandle(IPC.DEVICE_SCREEN_INFO, (_, params) => deviceRegistry.screenInfo(params))
+  // The picture as video: the pane hands over one end of a MessageChannel and
+  // main relays the companion's H.264 into it, undecoded. A failure to start
+  // goes down the port too, so the pane has one place to learn it should go
+  // back to stills.
+  ipcMain.on(IPC.DEVICE_VIDEO_START, (event, params: { sessionId: string; maxEdge?: number }) => {
+    const port = event.ports[0]
+    if (!port) return
+    try {
+      deviceVideo.startVideo(params, port)
+    } catch (err) {
+      port.postMessage({ type: 'end', error: err instanceof Error ? err.message : String(err) })
+      port.close()
+    }
+  })
+  ipcMain.on(IPC.DEVICE_VIDEO_STOP, (_, sessionId: string) => deviceVideo.stopVideo(sessionId))
   safeHandle(IPC.DEVICE_LIST, () => deviceRegistry.listDevices())
   // The pane's faceplate. Answers null rather than throwing wherever the
   // machine has no artwork for this device, because a frame is cosmetic and a

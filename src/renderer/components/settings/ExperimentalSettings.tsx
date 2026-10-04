@@ -10,24 +10,40 @@ import { ToggleSwitch } from './ToggleSwitch'
  * core. A row is added here when its work package lands, and removed when the
  * native path becomes the only one.
  */
-const SWITCHES: { key: keyof ExperimentalConfig; label: string; description: string }[] = [
+const SWITCHES: {
+  key: keyof ExperimentalConfig
+  label: string
+  description: string
+  /** Runs on the Rust core, so it is locked whenever the core is. */
+  core: boolean
+}[] = [
   {
     key: 'nativeScreen',
     label: 'Native screen model',
     description:
-      "Keep each terminal's screen in Ghostty's engine instead of a second xterm, for history and restore"
+      "Keep each terminal's screen in Ghostty's engine instead of a second xterm, for history and restore",
+    core: true
   },
   {
     key: 'nativeAnalysis',
     label: 'Native output analysis',
     description:
-      'Work out agent status and the output agents read back in Rust, once per flush instead of on every read'
+      'Work out agent status and the output agents read back in Rust, once per flush instead of on every read',
+    core: true
   },
   {
     key: 'nativeGit',
     label: 'Native git',
     description:
-      'Run git on the native core, off the main thread, so terminals keep flowing while git works. Applies from the next git command'
+      'Run git on the native core, off the main thread, so terminals keep flowing while git works. Applies from the next git command',
+    core: true
+  },
+  {
+    key: 'deviceVideo',
+    label: 'Device video',
+    description:
+      "Stream a simulator's screen to its pane as video instead of polling for pictures. Falls back to pictures when video can't play",
+    core: false
   }
 ]
 
@@ -55,15 +71,15 @@ function vorndNote(on: boolean, status: VorndStatus | null): string | null {
 function coreNote(status: CoreStatus | 'unavailable' | null): string | null {
   if (!status) return null
   if (status === 'unavailable')
-    return "This server can't report on the native core, so these stay on JavaScript."
+    return "This server can't report on the native core, so the native core switches stay on JavaScript."
   if (status.forced === 'js')
     return status.error
-      ? `${status.error} by the server, so every switch is off.`
-      : 'VORN_CORE=js is set for the server, so every switch is off.'
+      ? `${status.error} by the server, so every native core switch is off.`
+      : 'VORN_CORE=js is set for the server, so every native core switch is off.'
   // Before the forced-native note: a binary that will not load leaves every
   // terminal on JavaScript whatever VORN_CORE asks for.
   if (status.loaded === false) {
-    return `The native core is not available in this build, so these stay on JavaScript${
+    return `The native core is not available in this build, so the native core switches stay on JavaScript${
       status.error ? `: ${status.error}` : '.'
     }`
   }
@@ -76,7 +92,7 @@ function coreNote(status: CoreStatus | 'unavailable' | null): string | null {
     } on JavaScript${status.forced === 'native' ? ', even with VORN_CORE=native set' : ''}.`
   }
   if (status.forced === 'native')
-    return 'VORN_CORE=native is set for the server, so every switch is on.'
+    return 'VORN_CORE=native is set for the server, so every native core switch is on.'
   return null
 }
 
@@ -138,7 +154,7 @@ export function ExperimentalSettings() {
     <div>
       <SettingsPageHeader
         title="Experimental"
-        description="Work in progress you can try before it is the default. Each switch applies to terminals opened after you change it."
+        description="Work in progress you can try before it is the default. Terminal switches apply to terminals opened after you change them."
       />
       {note && (
         <div className="mb-4 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
@@ -147,7 +163,7 @@ export function ExperimentalSettings() {
       )}
       <div className="space-y-1">
         {SWITCHES.map((s) => {
-          const off = locked || known?.missing?.includes(s.key) === true
+          const off = s.core && (locked || known?.missing?.includes(s.key) === true)
           return (
             <SettingRow key={s.key} label={s.label} description={s.description} disabled={off}>
               <ToggleSwitch
