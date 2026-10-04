@@ -41,11 +41,11 @@ fn random_kills_recovering_from_checkpoints() {
     };
     for seed in 1..=3 {
         let log = Generator::log(seed, Profile::round_trip().bytes(128 << 10));
-        let report = differential(
-            &log,
-            &KillPlan::random(seed, 6),
-            subject(config, Restore::Checkpoint),
-        )
+        // Exact kills: without them a slow process start (Windows) can see
+        // every kill land before the child applied anything.
+        let report = differential(&log, &KillPlan::random(seed, 6), || {
+            Ok(ChildProcess::new(SUBJECT, config, Restore::Checkpoint).exact())
+        })
         .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         // Checkpoints the subject wrote before it died were kept and used.
         assert!(

@@ -8,14 +8,18 @@
 //!
 //! - driver → child: [`ToSubject::Start`] (size, config, and the checkpoint to
 //!   restore, if any), then [`ToSubject::Entry`] per record, then
-//!   [`ToSubject::Finish`].
+//!   [`ToSubject::Finish`]; [`ToSubject::Sync`] asks for
+//!   [`FromSubject::Synced`] once every record before it is applied.
 //! - child → driver: [`FromSubject::Started`] once the engine is up, a
 //!   [`FromSubject::Checkpoint`] whenever it cuts one, and
 //!   [`FromSubject::State`] after Finish. [`FromSubject::Failed`] instead of
 //!   Started when the checkpoint would not restore.
 //!
-//! The driver does not wait for records to be applied: the pipe buffers
-//! them, so a kill lands wherever the child had got to. Checkpoints the child
+//! By default the driver does not wait for records to be applied: the pipe
+//! buffers them, so a kill lands wherever the child had got to, which may be
+//! no record at all when the OS is slow to start it. [`ChildProcess::exact`]
+//! syncs before each kill instead, so the kill lands right after the record
+//! the plan names. Checkpoints the child
 //! wrote before it died are kept (a reader thread drains the pipe to its
 //! end); a frame cut off by the kill is dropped, as sessiond drops a
 //! checkpoint it did not receive whole.
@@ -49,6 +53,8 @@ pub enum ToSubject<'a> {
         from: Option<Checkpoint>,
     },
     Entry(Cow<'a, Entry>),
+    /// Answered with [`FromSubject::Synced`] after every earlier record.
+    Sync,
     Finish,
 }
 
@@ -57,6 +63,7 @@ pub enum FromSubject {
     Started,
     Failed(String),
     Checkpoint(Checkpoint),
+    Synced,
     State(Box<TermState>),
 }
 
@@ -124,6 +131,10 @@ pub fn serve(input: impl Read, output: impl Write) -> Result<(), Error> {
                     out.flush()?;
                 }
             }
+            Some(ToSubject::Sync) => {
+                write_frame(&mut out, &FromSubject::Synced)?;
+                out.flush()?;
+            }
             Some(ToSubject::Finish) => {
                 write_frame(&mut out, &FromSubject::State(Box::new(engine.finish()?)))?;
                 out.flush()?;
@@ -148,6 +159,7 @@ pub struct ChildProcess {
     program: PathBuf,
     config: ReferenceConfig,
     restore: Restore,
+    exact: bool,
     size: Option<Size>,
     running: Option<Running>,
     store: Store,
@@ -159,6 +171,7 @@ impl std::fmt::Debug for ChildProcess {
             .field("program", &self.program)
             .field("config", &self.config)
             .field("restore", &self.restore)
+            .field("exact", &self.exact)
             .field("running", &self.running.as_ref().map(|r| r.child.id()))
             .finish_non_exhaustive()
     }
@@ -172,10 +185,19 @@ impl ChildProcess {
             program: program.into(),
             config,
             restore,
+            exact: false,
             size: None,
             running: None,
             store: Store::new(),
         }
+    }
+
+    /// Kills only once the child has applied every record delivered so far,
+    /// so each kill lands exactly after the record the plan names rather
+    /// than wherever the child had got to.
+    pub fn exact(mut self) -> Self {
+        self.exact = true;
+        self
     }
 
     pub fn store(&self) -> &Store {
@@ -289,6 +311,20 @@ impl Target for ChildProcess {
         // crashed, and a kill must not hide that.
         if let Some(status) = r.child.try_wait()? {
             return Err(Error::Subject(format!("exited on its own: {status}")));
+        }
+        if self.exact {
+            write_frame(&mut r.stdin, &ToSubject::Sync)?;
+            r.stdin.flush()?;
+            loop {
+                match r.frames.recv() {
+                    Ok(FromSubject::Synced) => break,
+                    Ok(FromSubject::Checkpoint(cp)) => self.store.put(cp),
+                    Ok(other) => {
+                        return Err(Error::Subject(format!("expected Synced, got {other:?}")))
+                    }
+                    Err(_) => return Err(Error::Subject("exited before Synced".into())),
+                }
+            }
         }
         // It can still exit between the check and the kill; the kill then
         // fails, and the wait below reaps it either way.
