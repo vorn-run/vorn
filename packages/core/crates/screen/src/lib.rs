@@ -88,11 +88,21 @@ pub struct Screen {
 
 impl Screen {
     pub fn new(cols: u32, rows: u32) -> Result<Self> {
+        // Same as the xterm model: the screen, not history.
+        Self::with_scrollback(cols, rows, 0)
+    }
+
+    /// A screen that keeps history above it. `max_scrollback` is Ghostty's
+    /// limit, which it counts in bytes of page memory (whatever its C header
+    /// says) and rounds up to whole pages, so it bounds memory rather than a
+    /// number of lines. The recovery harness compares retained scrollback, so
+    /// its terminals keep some; the server's model keeps none and uses
+    /// [`Screen::new`].
+    pub fn with_scrollback(cols: u32, rows: u32, max_scrollback: usize) -> Result<Self> {
         let mut term = Terminal::new(Options {
             cols: dimension(cols)?,
             rows: dimension(rows)?,
-            // Same as the xterm model: the screen, not history.
-            max_scrollback: 0,
+            max_scrollback,
         })?;
         let bells = Arc::new(AtomicU32::new(0));
         let rung = Arc::clone(&bells);
@@ -198,6 +208,13 @@ impl Screen {
     /// The last cwd from OSC 7 or OSC 5522, whichever came last.
     pub fn cwd(&self) -> &str {
         &self.cwd
+    }
+
+    /// The terminal itself, read only: what a state comparison needs that
+    /// [`Screen::serialize`] does not report (modes, cursor, kitty keyboard
+    /// flags, the active screen, the formatter with other options).
+    pub fn terminal(&self) -> &Terminal<'static, 'static> {
+        &self.term
     }
 
     /// Ghostty's own title, for parity checks against the stream scanner.
