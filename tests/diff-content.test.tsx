@@ -183,6 +183,34 @@ describe('a long diff', () => {
     vi.restoreAllMocks()
   })
 
+  it('forgets the height a block had with a comment once the comment is gone', () => {
+    FakeObserver.all = []
+    vi.stubGlobal('IntersectionObserver', FakeObserver)
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element
+    ) {
+      return (
+        this.hasAttribute('data-diff-scroll')
+          ? { top: 0, bottom: 600, height: 600 }
+          : { top: 50_000, bottom: 52_000, height: 2000 }
+      ) as DOMRect
+    })
+    const diff = longDiff(DIFF_BLOCK_ROWS * 2)
+    const comments: DiffComment[] = [
+      { filePath: 'a.ts', lineIndex: 151, lineContent: '+line 150', comment: 'hm' }
+    ]
+    const p = props({ files: [file(diff)], comments })
+    const { container, rerender } = render(<DiffContent {...p} />)
+    // Off-screen while pinned: measured with its comment.
+    act(() => FakeObserver.all[1].show(false))
+    rerender(<DiffContent {...p} comments={[]} />)
+    const secondRows = parseDiffRows(diff).slice(DIFF_BLOCK_ROWS, DIFF_BLOCK_ROWS * 2)
+    expect((container.querySelectorAll('pre > div')[1] as HTMLElement).style.height).toBe(
+      `${estimateBlockHeight(secondRows)}px`
+    )
+    vi.restoreAllMocks()
+  })
+
   it('always draws a block with a comment in it, so nothing being read or typed is taken away', () => {
     FakeObserver.all = []
     vi.stubGlobal('IntersectionObserver', FakeObserver)

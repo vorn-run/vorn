@@ -372,6 +372,13 @@ function DiffBlock({
     commentingIndex !== null && rows.some((row) => row.index === commentingIndex)
       ? true
       : !!lineComments && rows.some((row) => lineComments.has(row.index))
+  // A height measured while pinned includes the comment UI that has just gone,
+  // so a block let go off-screen falls back to the estimate.
+  const [wasPinned, setWasPinned] = useState(pinned)
+  if (wasPinned !== pinned) {
+    setWasPinned(pinned)
+    if (!pinned) setDrawnHeight(null)
+  }
 
   // Before the first paint, so a block on screen is drawn in the first frame
   // rather than one frame after an empty box.

@@ -105,11 +105,12 @@ describe('the overlay sync', () => {
     expect(frames).toHaveLength(0)
   })
 
-  it('wakes for a scroll anywhere, a resize, a transition and hover', () => {
+  it('wakes for a scroll anywhere, a resize, a transition (and its delayed start) and hover', () => {
     for (const fire of [
       () => slot.dispatchEvent(new Event('scroll')),
       () => window.dispatchEvent(new Event('resize')),
       () => slot.dispatchEvent(new Event('transitionrun', { bubbles: true })),
+      () => slot.dispatchEvent(new Event('transitionstart', { bubbles: true })),
       () => slot.dispatchEvent(new Event('pointerover', { bubbles: true }))
     ]) {
       settle()

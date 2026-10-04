@@ -17,8 +17,9 @@
  *   - any DOM change outside the overlay (React commits, Framer Motion writing
  *     `style` each frame, a class toggled), through one MutationObserver;
  *   - scrolling anywhere, the window resizing, fonts loading;
- *   - CSS transitions and animations starting, and hover and focus, which can
- *     change styles without touching the DOM;
+ *   - CSS transitions and animations starting, including a delayed transition
+ *     once it starts to move, and hover and focus, which can change styles
+ *     without touching the DOM;
  *   - a slot resizing, through a ResizeObserver, for the case none of the above
  *     covers (a container query, a flex sibling's intrinsic size);
  *   - the registry itself, through `request`, when a terminal's own state
@@ -138,6 +139,8 @@ export function startOverlaySync(deps: OverlaySyncDeps): OverlaySync {
     [win, 'resize'],
     [doc, 'scroll'],
     [doc, 'transitionrun'],
+    // A delayed transition starts moving after its delay, well after `transitionrun`.
+    [doc, 'transitionstart'],
     [doc, 'transitionend'],
     [doc, 'animationstart'],
     [doc, 'animationend'],
