@@ -12,11 +12,10 @@
 //!   that vornd lists to find it.
 
 use std::fs;
-use std::io::{self, BufRead, BufReader};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// A running sessiond, as its announcement says.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,17 +141,19 @@ pub fn install(bundled: &Path, home: &Path, version: &str) -> io::Result<PathBuf
     }
 }
 
-/// Start `binary` detached from the caller and wait for it to announce its
-/// endpoint.
+/// Start `binary` detached from the caller and wait for it to announce
+/// itself. Readiness is the announcement, not its stdout: a scope wrapper may
+/// not hand the pipe through.
 pub fn start(binary: &Path, home: &Path, timeout: Duration) -> io::Result<Instance> {
     fs::create_dir_all(home.join("log"))?;
+    let log_path = home.join("log").join("sessiond.log");
     let log = fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(home.join("log").join("sessiond.log"))?;
+        .open(&log_path)?;
     let mut cmd = detached(binary, home);
     cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::from(log));
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -161,36 +162,46 @@ pub fn start(binary: &Path, home: &Path, timeout: Duration) -> io::Result<Instan
         Err(e) if e.raw_os_error() == Some(5) => {
             let mut cmd = detached_flags(binary, home, false);
             cmd.stdin(Stdio::null())
-                .stdout(Stdio::piped())
+                .stdout(Stdio::null())
                 .stderr(Stdio::null());
             cmd.spawn()?
         }
         Err(e) => return Err(e),
     };
-    let out = child.stdout.take().expect("piped");
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut line = String::new();
-        let _ = BufReader::new(out).read_line(&mut line);
-        let _ = tx.send(line);
-    });
-    let line = rx
-        .recv_timeout(timeout)
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "sessiond did not start"))?;
+    // The scope wrapper and setsid both exec in place, so the child's pid is
+    // sessiond's.
+    let pid = child.id();
+    let t = Instant::now();
+    let found = loop {
+        if let Some(i) = running(home).into_iter().find(|i| i.pid == pid) {
+            break Ok(i);
+        }
+        if let Some(status) = child.try_wait()? {
+            break Err(io::Error::other(format!(
+                "sessiond exited ({status}) before it started: {}",
+                log_tail(&log_path)
+            )));
+        }
+        if t.elapsed() >= timeout {
+            break Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("sessiond did not start: {}", log_tail(&log_path)),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
     // It lives on its own; a thread only reaps it if it exits while the
     // launcher still runs, so it never lingers as a zombie.
     std::thread::spawn(move || {
         let _ = child.wait();
     });
-    let endpoint = line
-        .trim_end()
-        .strip_prefix("listening ")
-        .ok_or_else(|| io::Error::other(format!("unexpected sessiond output: {line:?}")))?
-        .to_owned();
-    running(home)
-        .into_iter()
-        .find(|i| i.endpoint == endpoint)
-        .ok_or_else(|| io::Error::other("sessiond did not announce itself"))
+    found
+}
+
+fn log_tail(path: &Path) -> String {
+    let text = fs::read_to_string(path).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().rev().take(5).collect();
+    lines.into_iter().rev().collect::<Vec<_>>().join(" | ")
 }
 
 #[cfg(target_os = "linux")]
@@ -199,13 +210,29 @@ fn detached(binary: &Path, home: &Path) -> Command {
     if systemd_scope_available() {
         let mut cmd = Command::new("systemd-run");
         cmd.args(["--user", "--scope", "--quiet", "--collect"])
-            .arg(format!("--unit=vorn-sessiond-{}", std::process::id()))
+            .arg(format!("--unit={}", unit_name()))
             .arg(binary)
             .arg("--home")
             .arg(home);
         return cmd;
     }
     setsid(binary, home)
+}
+
+/// A scope name no other start shares, even two from one process.
+#[cfg(target_os = "linux")]
+fn unit_name() -> String {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    format!(
+        "vorn-sessiond-{}-{}-{nanos:x}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 #[cfg(target_os = "linux")]

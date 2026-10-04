@@ -1,8 +1,8 @@
 //! `vorn-sessiond [--home DIR] [--idle-exit SECS]`
 //!
 //! Binds a user-only endpoint under `DIR` (default `$VORN_HOME`, else
-//! `~/.vorn`), prints `listening <endpoint>` on stdout so the launcher knows
-//! where to connect, and serves until it has held no sessions and had no
+//! `~/.vorn`), announces it in `run/`, prints `listening <endpoint>` on
+//! stdout for whoever runs it by hand, and serves until it has held no sessions and had no
 //! vornd for `SECS` (default 60).
 
 use std::io::Write;
