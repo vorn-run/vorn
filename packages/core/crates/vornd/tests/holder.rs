@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use vorn_sessiond::launch::{self, Instance};
 use vorn_sessiond::server::{self, Config, Sessiond};
-use vorn_sessiond::wire::PROTO;
+use vorn_sessiond_wire::PROTO;
 
 const VORND: &str = env!("CARGO_BIN_EXE_vornd");
 
@@ -119,14 +119,19 @@ impl Vornd {
     /// The health check's body. The status is 503 here, as the upstream is
     /// down; the body is what matters.
     fn health(&self) -> Value {
+        self.get("/vornd/health")
+    }
+
+    /// The JSON body vornd answers a GET of `path` with.
+    fn get(&self, path: &str) -> Value {
         let mut s = TcpStream::connect(("127.0.0.1", self.port)).expect("connect to vornd");
         s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-        s.write_all(b"GET /vornd/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-            .expect("send");
+        let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        s.write_all(req.as_bytes()).expect("send");
         let mut res = String::new();
-        s.read_to_string(&mut res).expect("read the health check");
+        s.read_to_string(&mut res).expect("read the answer");
         let (_, body) = res.split_once("\r\n\r\n").expect("a body");
-        serde_json::from_str(body).unwrap_or_else(|e| panic!("health body {body:?}: {e}"))
+        serde_json::from_str(body).unwrap_or_else(|e| panic!("{path} body {body:?}: {e}"))
     }
 
     /// Poll the health check until its `sessiond` part satisfies `ok`.
@@ -360,5 +365,28 @@ fn a_killed_sessiond_is_replaced() {
     let holder = v.wait_for("no error", |s| s["error"].is_null());
     assert_eq!(holder["current"]["pid"], second["pid"]);
     assert_eq!(launch::running(home.path()).len(), 1);
+    v.stop();
+}
+
+/// The session engine's report, once vornd is connected to its sessiond:
+/// no sessions yet, and the connection up.
+#[cfg(feature = "engine")]
+#[test]
+fn the_session_report_is_served() {
+    let home = tempfile::tempdir().unwrap();
+    let mut reap = Reap::default();
+
+    let v = Vornd::start(home.path(), &[]);
+    reap.add(pid(&v.current()));
+    let t = Instant::now();
+    let report = loop {
+        let r = v.get("/vornd/sessions");
+        if r["connected"] == true {
+            break r;
+        }
+        assert!(t.elapsed() < PATIENCE, "not connected: {r}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(report["sessions"], serde_json::json!([]));
     v.stop();
 }

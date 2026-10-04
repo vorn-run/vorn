@@ -54,10 +54,12 @@ function copyOut(name, as) {
 
 copyOut(library, 'vorn_core.node')
 
-// Their own build: the daemons have no ghostty feature for --no-ghostty to
-// turn off. vornd starts the vorn-sessiond shipped beside it.
+// Their own build. vornd's session engine parses with libghostty-vt, so
+// --no-ghostty builds vornd without it; vorn-sessiond never links Ghostty.
+// vornd starts the vorn-sessiond shipped beside it.
 const exe = process.platform === 'win32' ? '.exe' : ''
 const daemonArgs = ['build', '--locked', '-p', 'vornd', '-p', 'vorn-sessiond']
 if (profile === 'release') daemonArgs.push('--release')
+if (args.has('--no-ghostty')) daemonArgs.push('--no-default-features')
 cargo(daemonArgs)
 for (const daemon of ['vornd', 'vorn-sessiond']) copyOut(daemon + exe, daemon + exe)

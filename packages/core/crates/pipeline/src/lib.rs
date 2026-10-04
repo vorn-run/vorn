@@ -22,6 +22,7 @@ use std::thread::JoinHandle;
 
 pub mod checkpoint;
 pub mod frame;
+pub mod history;
 pub mod ring;
 
 pub use checkpoint::{Cursor, Meta};

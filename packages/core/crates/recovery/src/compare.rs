@@ -12,7 +12,8 @@
 //! `==` and travels between processes (serde). Some of it Ghostty only gives
 //! up by being driven (the kitty stack is read by popping it, the inactive
 //! screen by switching to it, a saved cursor by restoring it), so capture
-//! consumes the [`Screen`] it reads.
+//! consumes the terminal it reads. It reads a [`Subject`]: vorn-screen's
+//! [`Screen`], or the [`Emulator`] a session engine checkpoints.
 //!
 //! Each difference is meant to show under one check only: the screen content
 //! is formatted without modes, cursor or region, so a missed mode is a
@@ -24,12 +25,53 @@ use std::fmt;
 use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
 use libghostty_vt::render::RenderState;
 use libghostty_vt::screen::Screen as Which;
-use libghostty_vt::terminal::{Mode, ModeKind};
+use libghostty_vt::terminal::{Mode, ModeKind, Terminal};
 use serde::{Deserialize, Serialize};
-use vorn_screen::Screen;
+use vorn_screen::{Emulator, Screen};
 
 use crate::log::Size;
 use crate::Error;
+
+/// A terminal the comparator can read and drive.
+pub trait Subject {
+    fn terminal(&self) -> &Terminal<'static, 'static>;
+    /// The title as the session record keeps it.
+    fn title(&self) -> &str;
+    /// The working directory as the session record keeps it.
+    fn cwd(&self) -> &str;
+    fn feed(&mut self, bytes: &[u8]);
+}
+
+impl Subject for Screen {
+    fn terminal(&self) -> &Terminal<'static, 'static> {
+        Screen::terminal(self)
+    }
+    fn title(&self) -> &str {
+        Screen::title(self)
+    }
+    fn cwd(&self) -> &str {
+        Screen::cwd(self)
+    }
+    fn feed(&mut self, bytes: &[u8]) {
+        Screen::feed(self, bytes);
+    }
+}
+
+impl Subject for Emulator {
+    fn terminal(&self) -> &Terminal<'static, 'static> {
+        Emulator::terminal(self)
+    }
+    fn title(&self) -> &str {
+        Emulator::title(self)
+    }
+    fn cwd(&self) -> &str {
+        Emulator::cwd(self)
+    }
+    /// The probes' replies and other effects go nowhere.
+    fn feed(&mut self, bytes: &[u8]) {
+        Emulator::feed(self, bytes, &mut Vec::new());
+    }
+}
 
 /// One part of the equivalence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -191,14 +233,18 @@ fn mode_name(m: Mode) -> String {
 }
 
 /// The formatter's VT output with only the given extras.
-fn format(screen: &Screen, opts: FormatterOptions<'_, '_>) -> Result<String, Error> {
+fn format(screen: &impl Subject, opts: FormatterOptions<'_, '_>) -> Result<String, Error> {
     let mut f = Formatter::new(screen.terminal(), opts.with_format(Format::Vt))?;
     let bytes = f.format_alloc(None)?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// What `opts` adds after the bare content: the extras' own sequences.
-fn extras(screen: &Screen, content: &str, opts: FormatterOptions<'_, '_>) -> Result<String, Error> {
+fn extras(
+    screen: &impl Subject,
+    content: &str,
+    opts: FormatterOptions<'_, '_>,
+) -> Result<String, Error> {
     let all = format(screen, opts)?;
     Ok(match all.strip_prefix(content) {
         Some(rest) => rest.to_owned(),
@@ -208,14 +254,14 @@ fn extras(screen: &Screen, content: &str, opts: FormatterOptions<'_, '_>) -> Res
     })
 }
 
-fn content(screen: &Screen) -> Result<Content, Error> {
+fn content(screen: &impl Subject) -> Result<Content, Error> {
     Ok(Content {
         vt: format(screen, FormatterOptions::new())?,
         scrollback_rows: screen.terminal().scrollback_rows()?,
     })
 }
 
-fn pen(screen: &Screen, content: &str) -> Result<String, Error> {
+fn pen(screen: &impl Subject, content: &str) -> Result<String, Error> {
     extras(
         screen,
         content,
@@ -228,7 +274,7 @@ fn pen(screen: &Screen, content: &str) -> Result<String, Error> {
 }
 
 /// Reads the whole ring by popping it: the top, then each level below.
-fn kitty_stack(screen: &mut Screen) -> Result<Vec<u8>, Error> {
+fn kitty_stack(screen: &mut impl Subject) -> Result<Vec<u8>, Error> {
     let mut stack = Vec::with_capacity(KITTY_DEPTH);
     for _ in 0..KITTY_DEPTH {
         stack.push(screen.terminal().kitty_keyboard_flags()?.bits());
@@ -238,7 +284,7 @@ fn kitty_stack(screen: &mut Screen) -> Result<Vec<u8>, Error> {
 }
 
 /// DECRC, then reads what it restored.
-fn saved_cursor(screen: &mut Screen) -> Result<SavedCursor, Error> {
+fn saved_cursor(screen: &mut impl Subject) -> Result<SavedCursor, Error> {
     screen.feed(b"\x1b8");
     let t = screen.terminal();
     let (x, y, pending_wrap) = (t.cursor_x()?, t.cursor_y()?, t.is_cursor_pending_wrap()?);
@@ -256,7 +302,7 @@ impl TermState {
     /// reading the kitty stacks, the inactive screen and the saved cursors
     /// drives the terminal (pops, a screen switch, DECRC), and what is left
     /// afterwards is not the state that was captured.
-    pub fn capture(mut screen: Screen) -> Result<TermState, Error> {
+    pub fn capture(mut screen: impl Subject) -> Result<TermState, Error> {
         let t = screen.terminal();
         let size = Size::new(t.cols()?, t.rows()?);
         let mut modes = BTreeMap::new();

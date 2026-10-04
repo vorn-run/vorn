@@ -12,6 +12,12 @@ description = "Vorn's daemon: one endpoint in front of the Node server, forwardi
 name = "vornd"
 path = "src/main.rs"
 
+[features]
+default = ["engine"]
+# The session engine parses every session's output with libghostty-vt, which
+# Zig 0.15.2 builds from source. Without it vornd only keeps the holder.
+engine = ["dep:vorn-engine"]
+
 [dependencies]
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
@@ -23,8 +29,12 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync",
 tokio-tungstenite = "0.28"
 tracing = "0.1"
 vorn-sessiond = { path = "../sessiond" }
+vorn-sessiond-wire = { path = "../sessiond-wire" }
+vorn-engine = { path = "../engine", optional = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
 
 [dev-dependencies]
 tempfile = "3"
+vorn-pipeline = { path = "../pipeline" }
+vorn-term-proto = { path = "../term-proto" }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "io-util"] }

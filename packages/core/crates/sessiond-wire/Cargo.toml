@@ -1,0 +1,14 @@
+[package]
+name = "vorn-sessiond-wire"
+version = "0.7.5"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The socket protocol between vornd and vorn-sessiond: messages, their type bytes and the frame reader both sides use"
+
+[dependencies]
+crc32fast = "1"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+serde = { version = "1", features = ["derive"] }
+vorn-term-proto = { path = "../term-proto", features = ["serde"] }

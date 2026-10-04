@@ -89,6 +89,11 @@ impl Sessiond {
         self.sessions().get(id).cloned()
     }
 
+    /// Whether session `id` is still held: until it is released.
+    pub fn holds(&self, id: &str) -> bool {
+        self.sessions().contains_key(id)
+    }
+
     fn send_async(&self, msg: ToVornd) {
         if let Some(tx) = self
             .outbox

@@ -14,7 +14,8 @@ pub mod os;
 pub mod server;
 pub mod session;
 pub mod spool;
-pub mod wire;
+/// The socket protocol, from the crate vornd shares.
+pub use vorn_sessiond_wire as wire;
 
 pub use log::{AppendError, Budget, Overflow, SessionLog, SpoolPool};
 pub use wire::{AttachFrom, AttachRefusal, Checkpoint};

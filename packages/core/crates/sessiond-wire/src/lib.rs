@@ -1,4 +1,5 @@
-//! The socket protocol between vornd and sessiond (RC §5).
+//! vorn-sessiond-wire: the socket protocol between vornd and sessiond,
+//! in a crate of its own so both binaries build it from one source.
 //!
 //! A frame is a 4-byte little-endian length, then a 1-byte message type, then
 //! a postcard-encoded body; the length counts the type byte and the body.

@@ -150,6 +150,20 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
+#[cfg(feature = "engine")]
+fn new_holder(cfg: &HolderConfig) -> Holder {
+    Holder::with_engine(vornd::engine::Engine::new(vorn_engine::Config {
+        history: Some(cfg.home.join("vornd").join("history")),
+        build: env!("CARGO_PKG_VERSION").into(),
+        ..vorn_engine::Config::default()
+    }))
+}
+
+#[cfg(not(feature = "engine"))]
+fn new_holder(_: &HolderConfig) -> Holder {
+    Holder::new()
+}
+
 fn main() -> ExitCode {
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(args) => args,
@@ -187,10 +201,12 @@ fn main() -> ExitCode {
         for (group, mode) in args.groups.modes() {
             info!(group, %mode, "group switch");
         }
+        let mut kept = None;
         let daemon = match args.holder {
             Some(cfg) => {
-                let holder = Arc::new(Holder::new());
+                let holder = Arc::new(new_holder(&cfg));
                 tokio::spawn(holder::keep(cfg, holder.clone()));
+                kept = Some(holder.clone());
                 Daemon::with_holder(args.upstream, args.groups, holder)
             }
             None => Daemon::new(args.upstream, args.groups),
@@ -213,6 +229,13 @@ fn main() -> ExitCode {
             }
         };
         proxy::serve(listener, daemon, stop).await;
+        // A clean stop leaves a checkpoint at the end of every session, so
+        // the next vornd has nothing to replay.
+        #[cfg(feature = "engine")]
+        if let Some(engine) = kept.as_ref().and_then(|h| h.engine()) {
+            engine.flush().await;
+        }
+        drop(kept);
         info!("stopped");
         ExitCode::SUCCESS
     })

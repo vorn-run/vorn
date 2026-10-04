@@ -2321,6 +2321,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-engine"
+version = "0.7.5"
+dependencies = [
+ "crc32fast",
+ "libghostty-vt",
+ "postcard",
+ "tempfile",
+ "vorn-analysis",
+ "vorn-pipeline",
+ "vorn-recovery",
+ "vorn-screen",
+ "vorn-sessiond",
+ "vorn-sessiond-wire",
+ "vorn-term-proto",
+]
+
+[[package]]
 name = "vorn-git"
 version = "0.0.0"
 dependencies = [
@@ -2335,6 +2352,7 @@ dependencies = [
  "crc32fast",
  "memchr",
  "serde_json",
+ "tempfile",
  "vorn-screen",
  "vorn-term-proto",
 ]
@@ -2354,6 +2372,7 @@ dependencies = [
 name = "vorn-screen"
 version = "0.7.5"
 dependencies = [
+ "crc32fast",
  "criterion",
  "libghostty-vt",
  "memchr",
@@ -2370,8 +2389,19 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
+ "vorn-sessiond-wire",
  "vorn-term-proto",
  "windows-sys",
+]
+
+[[package]]
+name = "vorn-sessiond-wire"
+version = "0.7.5"
+dependencies = [
+ "crc32fast",
+ "postcard",
+ "serde",
+ "vorn-term-proto",
 ]
 
 [[package]]
@@ -2403,7 +2433,11 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+ "vorn-engine",
+ "vorn-pipeline",
  "vorn-sessiond",
+ "vorn-sessiond-wire",
+ "vorn-term-proto",
 ]
 
 [[package]]

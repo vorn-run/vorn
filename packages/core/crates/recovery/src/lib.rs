@@ -43,7 +43,7 @@ pub mod scan;
 pub mod transcript;
 
 pub use child::ChildProcess;
-pub use compare::{compare, Check, Mismatch, TermState};
+pub use compare::{compare, Check, Mismatch, Subject, TermState};
 pub use driver::{differential, reference, run, Chaos, InProcess, KillPlan, Report, Target};
 pub use engine::{Checkpoint, Engine, ReferenceConfig, ReferenceEngine, Restore, Resume, Store};
 pub use error::Error;
