@@ -9,6 +9,9 @@
 //! the contract makes.
 
 pub mod log;
+pub mod os;
+pub mod server;
+pub mod session;
 pub mod spool;
 pub mod wire;
 

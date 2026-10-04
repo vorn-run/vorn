@@ -442,6 +442,44 @@ impl SessionLog {
         Ok(out)
     }
 
+    /// The records after `from`, at most about `max_bytes` of them but always
+    /// at least one: what a live connection sends next. Reads the ring
+    /// directly; only a reader that fell behind into the spool pays for
+    /// reading it.
+    pub fn read_batch(
+        &mut self,
+        from: Cursor,
+        max_bytes: u64,
+    ) -> Result<Vec<Entry>, AttachRefusal> {
+        self.settle_gap();
+        if from == self.head {
+            return Ok(Vec::new());
+        }
+        let Some(first) = self.ring.front().map(|e| e.hdr.rseq) else {
+            return self.entries_from(from);
+        };
+        if from.epoch != self.epoch
+            || from.next_rseq < first
+            || from.next_rseq > self.head.next_rseq
+        {
+            return self.entries_from(from);
+        }
+        let skip = (from.next_rseq - first) as usize;
+        let mut out = Vec::new();
+        let mut bytes = 0;
+        for e in self.ring.iter().skip(skip) {
+            if !out.is_empty() && bytes + e.rec.len() > max_bytes {
+                break;
+            }
+            bytes += e.rec.len();
+            out.push(e.clone());
+        }
+        match out.first() {
+            Some(e) if from.is_followed_by(&e.hdr) => Ok(out),
+            _ => Err(AttachRefusal::NotRetained),
+        }
+    }
+
     /// Records up to `c` were written to vornd's socket.
     pub fn mark_sent(&mut self, c: Cursor) {
         if c.epoch == self.epoch && c.next_rseq > self.sent.next_rseq {
@@ -964,6 +1002,36 @@ mod tests {
         // A released session's spool goes back to the pool.
         assert!(!dir.path().join("a").exists());
         assert_eq!(pool.used(), b_bytes);
+    }
+
+    #[test]
+    fn a_batch_reads_from_the_ring_and_falls_back_to_the_spool() {
+        let budget = Budget {
+            ring_bytes: 10 * (100 + ENTRY_OVERHEAD),
+            spool_bytes: 1 << 20,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let mut l = log(&dir, budget, Overflow::Drop, SpoolPool::default());
+        for i in 0..30 {
+            l.append(data(100, i)).unwrap();
+        }
+        let b = l.read_batch(after(24, 100), 250).unwrap();
+        assert_eq!(
+            b.iter().map(|e| e.hdr.rseq).collect::<Vec<_>>(),
+            vec![25, 26]
+        );
+        // A single record larger than the batch still comes.
+        assert_eq!(l.read_batch(after(24, 100), 1).unwrap().len(), 1);
+        // Behind the ring: everything from the spool on.
+        let b = l.read_batch(after(2, 100), 250).unwrap();
+        assert_eq!(b.first().unwrap().hdr.rseq, 3);
+        assert_eq!(b.len(), 27);
+        assert_eq!(l.read_batch(l.head(), 250).unwrap(), vec![]);
+        let wrong = Cursor {
+            next_offset: 1,
+            ..after(24, 100)
+        };
+        assert_eq!(l.read_batch(wrong, 250), Err(AttachRefusal::NotRetained));
     }
 
     #[test]
