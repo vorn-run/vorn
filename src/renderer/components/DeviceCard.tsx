@@ -12,8 +12,10 @@ import { ICON_BUTTON } from '../lib/icon-button'
 import { devicePaneId } from '../lib/pane-id'
 import { flattenPageText } from '../lib/browser-url'
 import { useDeviceFrame } from '../hooks/useDeviceFrame'
+import { useDeviceVideo } from '../hooks/useDeviceVideo'
 import {
   bezelFor,
+  maxEdgeFor,
   screenPointFor,
   steppedZoom,
   PANE_MAX_EDGE,
@@ -80,10 +82,11 @@ export const DeviceCard = memo(
       }))
     )
 
-    const imgRef = useRef<HTMLImageElement | null>(null)
+    const imgRef = useRef<HTMLElement | null>(null)
     const [zoom, setZoom] = useState<number | 'fit'>('fit')
     // Read by the poll, which must not restart every time the zoom changes.
     const scaleRef = useRef(1)
+    const [videoLive, setVideoLive] = useState(false)
 
     const {
       containerRef,
@@ -94,8 +97,22 @@ export const DeviceCard = memo(
       error,
       dismissed,
       dismiss,
-      reportError
-    } = useDeviceFrame({ sessionId, udid: pane?.udid ?? null, scaleRef })
+      reportError,
+      onScreen
+    } = useDeviceFrame({ sessionId, udid: pane?.udid ?? null, scaleRef, stillsPaused: videoLive })
+
+    // Settings › Experimental: the picture as decoded video, stills as the fallback.
+    const videoEnabled = useAppStore((s) => s.config?.defaults.experimental?.deviceVideo === true)
+    const video = useDeviceVideo({
+      sessionId,
+      udid: pane?.udid ?? null,
+      enabled: videoEnabled,
+      onScreen,
+      maxEdge: () =>
+        screen ? maxEdgeFor(screen, scaleRef.current, window.devicePixelRatio || 1) : undefined
+    })
+    // A render behind the video, which is soon enough to stop fetching stills.
+    useEffect(() => setVideoLive(video.live), [video.live])
 
     // The device's own body, borrowed from the machine's Xcode. Null on a
     // machine without it, and then the pane draws a plain frame — asked for
@@ -164,7 +181,7 @@ export const DeviceCard = memo(
      * very screen it was describing.
      */
     const onClickFrame = useCallback(
-      async (e: React.MouseEvent<HTMLImageElement>): Promise<void> => {
+      async (e: React.MouseEvent<HTMLElement>): Promise<void> => {
         const point = toPoints(e.clientX, e.clientY)
         if (!point) return
         try {
@@ -570,6 +587,7 @@ export const DeviceCard = memo(
           sessionId={sessionId}
           name={pane.name}
           frame={frame}
+          video={video}
           bezel={bezel}
           stale={Boolean(error)}
           picking={picking}
