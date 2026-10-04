@@ -285,7 +285,18 @@ fn briefs_follow_the_sessions() {
             _ => {}
         }
     }
-    let briefs = pool.briefs();
+    // A worker publishes its brief after the job whose outputs were just
+    // read, so the cached copy can trail them for a moment.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let briefs = loop {
+        let briefs = pool.briefs();
+        if briefs.first().and_then(|b| b.cursor) == Some(d.log.head())
+            || std::time::Instant::now() > deadline
+        {
+            break briefs;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    };
     assert_eq!(briefs.len(), 1);
     assert_eq!(briefs[0].state, State::Live);
     assert_eq!(briefs[0].cursor, Some(d.log.head()));
