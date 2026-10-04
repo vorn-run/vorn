@@ -50,7 +50,8 @@ jobs:
 
   build-macos:
     needs: create-release
-    runs-on: macos-latest
+    # macos-15, not latest: Zig 0.15.2 cannot link against the newer macOS SDK.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
 
@@ -67,6 +68,28 @@ jobs:
 
       - name: Enable Corepack
         run: corepack enable
+
+      # The native core (vorn_core.node) and vornd ship in every build, so the
+      # Experimental switches that use them work in a release. libghostty-vt is
+      # built from source with Zig, and its pinned Ghostty commit takes only
+      # Zig 0.15.2.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      # The version comes from packages/core/rust-toolchain.toml.
+      - name: Rust toolchain
+        working-directory: packages/core
+        run: rustup toolchain install
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/core/target
+          key: core-${{ runner.os }}-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
+          restore-keys: core-${{ runner.os }}-
 
       - name: Import code signing certificate
         env:
@@ -92,6 +115,9 @@ jobs:
             echo "Set version to $VERSION"
           fi
 
+      - name: Build native core
+        run: yarn build:core
+
       - name: Build
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -100,6 +126,20 @@ jobs:
         run: |
           yarn build
           yarn dist --publish never
+
+      # A release without the core would leave every native switch falling
+      # back, so a missing binary fails the build rather than shipping.
+      - name: Packaged core present
+        shell: bash
+        run: |
+          for name in core/vorn_core.node vornd/vornd; do
+            file=$(find dist -ipath "*/resources/$name*" -type f -print -quit)
+            if [ -z "$file" ]; then
+              echo "ERROR: $name is not in the packaged resources"
+              exit 1
+            fi
+            echo "found $file"
+          done
 
       - name: Upload to release
         env:
@@ -154,6 +194,28 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
+      # The native core (vorn_core.node) and vornd ship in every build, so the
+      # Experimental switches that use them work in a release. libghostty-vt is
+      # built from source with Zig, and its pinned Ghostty commit takes only
+      # Zig 0.15.2.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      # The version comes from packages/core/rust-toolchain.toml.
+      - name: Rust toolchain
+        working-directory: packages/core
+        run: rustup toolchain install
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/core/target
+          key: core-${{ runner.os }}-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
+          restore-keys: core-${{ runner.os }}-
+
       - name: Install dependencies
         run: yarn install
 
@@ -165,10 +227,27 @@ jobs:
             Write-Output "Set version to $version"
           }
 
+      - name: Build native core
+        run: yarn build:core
+
       - name: Build
         run: |
           yarn build
           yarn dist --publish never
+
+      # A release without the core would leave every native switch falling
+      # back, so a missing binary fails the build rather than shipping.
+      - name: Packaged core present
+        shell: bash
+        run: |
+          for name in core/vorn_core.node vornd/vornd; do
+            file=$(find dist -ipath "*/resources/$name*" -type f -print -quit)
+            if [ -z "$file" ]; then
+              echo "ERROR: $name is not in the packaged resources"
+              exit 1
+            fi
+            echo "found $file"
+          done
 
       - name: Upload to release
         env:
@@ -215,6 +294,28 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
+      # The native core (vorn_core.node) and vornd ship in every build, so the
+      # Experimental switches that use them work in a release. libghostty-vt is
+      # built from source with Zig, and its pinned Ghostty commit takes only
+      # Zig 0.15.2.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      # The version comes from packages/core/rust-toolchain.toml.
+      - name: Rust toolchain
+        working-directory: packages/core
+        run: rustup toolchain install
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/core/target
+          key: core-${{ runner.os }}-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
+          restore-keys: core-${{ runner.os }}-
+
       - name: Install dependencies
         run: yarn install
 
@@ -226,10 +327,27 @@ jobs:
             echo "Set version to $VERSION"
           fi
 
+      - name: Build native core
+        run: yarn build:core
+
       - name: Build
         run: |
           yarn build
           yarn dist --publish never
+
+      # A release without the core would leave every native switch falling
+      # back, so a missing binary fails the build rather than shipping.
+      - name: Packaged core present
+        shell: bash
+        run: |
+          for name in core/vorn_core.node vornd/vornd; do
+            file=$(find dist -ipath "*/resources/$name*" -type f -print -quit)
+            if [ -z "$file" ]; then
+              echo "ERROR: $name is not in the packaged resources"
+              exit 1
+            fi
+            echo "found $file"
+          done
 
       - name: Upload to release
         env:
