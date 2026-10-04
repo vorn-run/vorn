@@ -1230,6 +1230,26 @@ export async function screenshot(params: { sessionId: string; maxEdge?: number }
   }
 }
 
+/**
+ * The screen's size and which way up it is held, without a capture.
+ *
+ * What the pane needs beside a video picture: the bezel and every tap are laid
+ * out in points, and the video says neither. The tree is read only while the
+ * size is unknown, so polling this costs nothing once it is.
+ */
+export async function screenInfo(params: { sessionId: string }): Promise<{
+  screen: { width: number; height: number } | null
+  orientation: DeviceOrientation
+}> {
+  const entry = deviceFor(params.sessionId)
+  if (!entry.screenPoints) await fetchTree(entry)
+  const screen =
+    entry.screenPoints && entry.screenPoints.width > 0 && entry.screenPoints.height > 0
+      ? entry.screenPoints
+      : null
+  return { screen, orientation: entry.orientation }
+}
+
 // ---------------------------------------------------------------------------
 // Apps
 // ---------------------------------------------------------------------------

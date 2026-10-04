@@ -8,6 +8,11 @@ interface Props {
   name: string
   /** Base64 PNG, or null before the first frame. */
   frame: string | null
+  /**
+   * The picture as decoded video. While `live`, a canvas is drawn in place of
+   * the still, at exactly the same size and turn.
+   */
+  video?: { live: boolean; canvasRef: (el: HTMLCanvasElement | null) => void }
   /** How to draw it, or null until the screen size is known. */
   bezel: Bezel | null
   /** The poll is failing: the picture on screen is stale. */
@@ -18,10 +23,11 @@ interface Props {
   typing: boolean
   annotating: boolean
   containerRef: MutableRefObject<HTMLDivElement | null>
-  imgRef: MutableRefObject<HTMLImageElement | null>
+  /** The drawn screen, image or canvas: taps are mapped off its box. */
+  imgRef: MutableRefObject<HTMLElement | null>
   inkRef: MutableRefObject<HTMLCanvasElement | null>
   emptyLabel: string
-  onClickScreen: (e: MouseEvent<HTMLImageElement>) => void
+  onClickScreen: (e: MouseEvent<HTMLElement>) => void
   onInkDown: (e: ReactPointerEvent<HTMLCanvasElement>) => void
   onInkMove: (e: ReactPointerEvent<HTMLCanvasElement>) => void
   onInkUp: () => void
@@ -164,6 +170,7 @@ export function DeviceFrame({
   sessionId,
   name,
   frame,
+  video,
   bezel,
   stale,
   picking,
@@ -181,6 +188,31 @@ export function DeviceFrame({
   onStagePointerDown,
   onStageBlur
 }: Props): React.ReactElement {
+  const live = video?.live === true
+  // Sized exactly, never letterboxed: `toPoints` reads this box back and
+  // divides by the same scale, so a tap at any zoom lands where it was aimed.
+  // Turned, when the device is sideways and the app inside it is not — the
+  // picture is then drawn at its own portrait size and rotated about its
+  // centre, which leaves the element's bounding box equal to the turned screen.
+  const screenStyle: React.CSSProperties | undefined = !bezel
+    ? undefined
+    : bezel.turn
+      ? {
+          position: 'absolute',
+          width: bezel.points.width * bezel.scale,
+          height: bezel.points.height * bezel.scale,
+          left: '50%',
+          top: '50%',
+          transform: `translate(-50%, -50%) rotate(${bezel.turn}deg)`
+        }
+      : { width: bezel.width, height: bezel.height }
+  // Dimmed once a poll fails: the frame is the last one that arrived, and
+  // rendering a dead screen at full strength makes a frozen device look live.
+  // The person taps it, every tap throws, and nothing on screen ever said the
+  // picture had stopped.
+  const screenClass = `select-none transition-opacity ${stale ? 'opacity-40' : ''} ${
+    picking ? 'cursor-crosshair' : 'cursor-pointer'
+  }`
   return (
     <div
       ref={containerRef}
@@ -198,7 +230,7 @@ export function DeviceFrame({
           does not. Plain `items-center` on the scrolling box would push the top
           of a zoomed-in device out of reach above the scroll origin. */}
       <div className="min-w-full min-h-full w-max h-max flex items-center justify-center p-2">
-        {frame && bezel ? (
+        {(frame || live) && bezel ? (
           <div
             className="relative shrink-0"
             style={{
@@ -227,39 +259,33 @@ export function DeviceFrame({
                 zIndex: 1
               }}
             >
-              <img
-                ref={imgRef}
-                src={`data:image/png;base64,${frame}`}
-                alt={`Screen of ${name}`}
-                data-testid={`device-frame-${sessionId}`}
-                onClick={onClickScreen}
-                // Sized exactly, never letterboxed: `toPoints` reads this box
-                // back and divides by the same scale, so a tap at any zoom
-                // lands where it was aimed. Turned, when the device is sideways
-                // and the app inside it is not — the picture is then drawn at
-                // its own portrait size and rotated about its centre, which
-                // leaves the element's bounding box equal to the turned screen.
-                style={
-                  bezel.turn
-                    ? {
-                        position: 'absolute',
-                        width: bezel.points.width * bezel.scale,
-                        height: bezel.points.height * bezel.scale,
-                        left: '50%',
-                        top: '50%',
-                        transform: `translate(-50%, -50%) rotate(${bezel.turn}deg)`
-                      }
-                    : { width: bezel.width, height: bezel.height }
-                }
-                // Dimmed once a poll fails: the frame is the last one that
-                // arrived, and rendering a dead screen at full strength makes a
-                // frozen device look live. The person taps it, every tap throws,
-                // and nothing on screen ever said the picture had stopped.
-                className={`select-none transition-opacity ${stale ? 'opacity-40' : ''} ${
-                  picking ? 'cursor-crosshair' : 'cursor-pointer'
-                }`}
-                draggable={false}
-              />
+              {live ? (
+                <canvas
+                  ref={(el) => {
+                    imgRef.current = el
+                    video?.canvasRef(el)
+                  }}
+                  role="img"
+                  aria-label={`Screen of ${name}`}
+                  data-testid={`device-video-${sessionId}`}
+                  onClick={onClickScreen}
+                  style={screenStyle}
+                  className={screenClass}
+                />
+              ) : (
+                <img
+                  ref={(el) => {
+                    imgRef.current = el
+                  }}
+                  src={`data:image/png;base64,${frame}`}
+                  alt={`Screen of ${name}`}
+                  data-testid={`device-frame-${sessionId}`}
+                  onClick={onClickScreen}
+                  style={screenStyle}
+                  className={screenClass}
+                  draggable={false}
+                />
+              )}
               {/* Mounted only while armed: a permanent overlay would swallow
                   every tap meant for the device. Inside the screen, not the
                   stage, so ink cannot be drawn onto the frame. */}
