@@ -103,14 +103,11 @@ pub enum AppendError {
     Exited,
     /// A blocking session is full. The record comes back so the reader can
     /// hold it and stop reading until there is room.
+    ///
+    /// A spool that cannot be written counts as full: an interactive session
+    /// drops the record and a Gap stands for it, a blocking one gets it back
+    /// to retry once there is room, so the loss is never silent.
     Full(Record),
-    Io(io::Error),
-}
-
-impl From<io::Error> for AppendError {
-    fn from(e: io::Error) -> Self {
-        AppendError::Io(e)
-    }
 }
 
 /// Why sessiond would not store a checkpoint.
@@ -209,7 +206,8 @@ impl SessionLog {
         }
         if let Record::Data { .. } = rec {
             let extra = if self.lost > 0 { ENTRY_OVERHEAD } else { 0 };
-            if !self.make_room(ring_cost(&rec) + extra)? {
+            // A spool write that failed made no room; see `AppendError::Full`.
+            if !self.make_room(ring_cost(&rec) + extra).unwrap_or(false) {
                 return match self.overflow {
                     Overflow::Drop => {
                         self.lost += rec.len();
@@ -219,8 +217,9 @@ impl SessionLog {
                 };
             }
         } else {
-            // Control records are never refused; they cost almost nothing.
-            self.make_room(ring_cost(&rec))?;
+            // Control records are never refused, not even when the spool
+            // cannot be written: they cost almost nothing, and Exit must land.
+            let _ = self.make_room(ring_cost(&rec));
         }
         self.settle_gap();
         if let Record::Exit { code, signal } = rec {
@@ -317,8 +316,8 @@ impl SessionLog {
         }
         let before = self.spool.bytes();
         let res = self.spool.trim_before(self.retain_from.next_rseq);
-        // A rewrite never grows the file.
-        self.pool.give(before - self.spool.bytes());
+        // A rewrite never grows the file, and a failed one leaves it as it was.
+        self.pool.give(before.saturating_sub(self.spool.bytes()));
         res
     }
 
@@ -344,7 +343,9 @@ impl SessionLog {
             self.retain_from = prev.resume;
             self.fallback = Some(prev);
         }
-        // A trim failure leaves extra records on disk, which is safe.
+        // A failed trim leaves the spool whole, holding records from before
+        // `retain_from` that the next trim drops: the run stays contiguous
+        // and nothing vornd may ask for is gone.
         let _ = self.trim();
         Ok(())
     }
@@ -364,7 +365,7 @@ impl SessionLog {
             Some(e) => Some(e.hdr),
             None => self
                 .spool
-                .read_from(c.next_rseq)
+                .read_from(c.next_rseq, 0)
                 .ok()
                 .and_then(|v| v.first().map(|e| e.hdr)),
         };
@@ -418,7 +419,7 @@ impl SessionLog {
         if ring_first.is_none_or(|f| c.next_rseq < f) {
             out = self
                 .spool
-                .read_from(c.next_rseq)
+                .read_from(c.next_rseq, u64::MAX)
                 .map_err(|_| AttachRefusal::NotRetained)?;
         }
         out.extend(
@@ -1002,6 +1003,69 @@ mod tests {
         // A released session's spool goes back to the pool.
         assert!(!dir.path().join("a").exists());
         assert_eq!(pool.used(), b_bytes);
+    }
+
+    /// A spool that cannot be written is full, never a silent loss: an
+    /// interactive session records a Gap for what it dropped, a blocking one
+    /// hands the record back, and Exit still lands.
+    #[test]
+    fn a_spool_write_failure_is_a_gap_or_backpressure() {
+        let budget = Budget {
+            ring_bytes: 4 * (100 + ENTRY_OVERHEAD),
+            spool_bytes: 1 << 20,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let unwritable = dir.path().join("missing").join("s.log");
+
+        let mut l = SessionLog::new(
+            1,
+            budget,
+            Overflow::Drop,
+            &unwritable,
+            SpoolPool::default(),
+            (80, 24),
+        );
+        let mut kept = 0;
+        for i in 0..10 {
+            if l.append(data(100, i)).unwrap() {
+                kept += 1;
+            }
+        }
+        assert_eq!(kept, 4);
+        assert_eq!(l.lost(), 600);
+        l.append(Record::Exit {
+            code: Some(0),
+            signal: None,
+        })
+        .unwrap();
+        assert_eq!(l.head().next_offset, 1000);
+        let (_, all) = l.attach(AttachFrom::Cursor(after(3, 100))).unwrap();
+        assert!(matches!(
+            all[0].rec,
+            Record::Gap {
+                lost_bytes: 600,
+                ..
+            }
+        ));
+        assert!(matches!(all[1].rec, Record::Exit { .. }));
+        assert_eq!(l.spooled_bytes(), 0);
+
+        let mut l = SessionLog::new(
+            1,
+            budget,
+            Overflow::Block,
+            &unwritable,
+            SpoolPool::default(),
+            (80, 24),
+        );
+        for i in 0..4 {
+            assert!(l.append(data(100, i)).unwrap());
+        }
+        match l.append(data(100, 4)) {
+            Err(AppendError::Full(rec)) => assert_eq!(rec, data(100, 4)),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(l.lost(), 0);
     }
 
     #[test]

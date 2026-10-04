@@ -261,7 +261,6 @@ impl Session {
                                     .0;
                             }
                             Err(AppendError::Exited) => return,
-                            Err(AppendError::Io(_)) => break,
                         }
                     }
                     drop(st);
