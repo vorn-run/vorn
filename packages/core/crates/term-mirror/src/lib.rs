@@ -18,7 +18,7 @@
 
 use vorn_term_proto::row::{self, DecodeError, Run, ROW_FMT};
 use vorn_term_proto::screen::{
-    Delta, LinkDef, Row, Screen, Snapshot, StyleDef, TermDelta, TermState,
+    ColorsDelta, Delta, LinkDef, Row, Screen, Snapshot, StyleDef, TermDelta, TermState,
 };
 use vorn_term_proto::Cursor;
 
@@ -105,21 +105,32 @@ impl Mirror {
                 base: delta.base_rev,
             });
         }
-        let mut next = self.clone_state();
-        next.extend_tables(delta.styles, delta.links)?;
-        if let Some(t) = delta.term {
-            next.update_term(t);
-        }
+        // Check the whole frame against the state it will produce before
+        // touching anything, so a refusal leaves the mirror as it was.
+        let style_mark = next_mark(self.style_mark(), delta.styles.iter().map(|s| s.id))?;
+        let link_mark = next_mark(self.link_mark(), delta.links.iter().map(|l| l.id))?;
+        let height = match delta.term.as_ref().and_then(|t| t.size) {
+            Some((_, rows)) => rows,
+            None => self.term.rows,
+        };
         for r in &delta.rows {
-            next.check_row(r)?;
+            check_row(r, style_mark, link_mark)?;
+            if r.y >= height {
+                return Err(Refused::RowOutOfRange(r.y));
+            }
         }
-        next.scroll(delta.scrolled);
+
+        self.extend_tables(delta.styles, delta.links)?;
+        let mut new_epoch = false;
+        if let Some(t) = delta.term {
+            new_epoch = self.update_term(t);
+        }
+        self.scroll(delta.scrolled, !new_epoch);
         for r in delta.rows {
-            next.place(r)?;
+            self.place(r)?;
         }
-        next.rev = delta.rev;
-        next.resume = delta.resume;
-        *self = next;
+        self.rev = delta.rev;
+        self.resume = delta.resume;
         Ok(())
     }
 
@@ -170,20 +181,6 @@ impl Mirror {
         self.rows.iter().map(row_text).collect()
     }
 
-    fn clone_state(&self) -> Mirror {
-        Mirror {
-            state_gen: self.state_gen,
-            rev: self.rev,
-            table_gen: self.table_gen,
-            resume: self.resume,
-            term: self.term.clone(),
-            styles: self.styles.clone(),
-            links: self.links.clone(),
-            rows: self.rows.clone(),
-            history: self.history.clone(),
-        }
-    }
-
     fn extend_tables(&mut self, styles: Vec<StyleDef>, links: Vec<LinkDef>) -> Result<(), Refused> {
         for s in styles {
             let mark = self.style_mark();
@@ -211,19 +208,11 @@ impl Mirror {
     }
 
     fn check_row(&self, r: &Row) -> Result<(), Refused> {
-        for run in row::decode(&r.cells).map_err(Refused::BadRow)? {
-            if run.style >= self.style_mark() {
-                return Err(Refused::UnknownStyle(run.style));
-            }
-            // Link 0 is "no link".
-            if run.link != 0 && run.link >= self.link_mark() {
-                return Err(Refused::UnknownLink(run.link));
-            }
-        }
-        Ok(())
+        check_row(r, self.style_mark(), self.link_mark())
     }
 
-    fn update_term(&mut self, t: TermDelta) {
+    /// Apply a term delta. True when the scrollback epoch changed.
+    fn update_term(&mut self, t: TermDelta) -> bool {
         let term = &mut self.term;
         if let Some((cols, rows)) = t.size {
             term.cols = cols;
@@ -241,7 +230,7 @@ impl Mirror {
             term.cursor = v;
         }
         if let Some(v) = t.colors {
-            term.colors = v;
+            merge_colors(&mut term.colors, v);
         }
         if let Some(v) = t.mouse {
             term.mouse = v;
@@ -255,10 +244,12 @@ impl Mirror {
         if let Some(v) = t.cwd {
             term.cwd = v;
         }
+        let mut new_epoch = false;
         if let Some(v) = t.sb_epoch {
             if v != term.sb_epoch {
                 // Line numbers changed meaning; the cache is no longer valid.
                 self.history.clear();
+                new_epoch = true;
             }
             term.sb_epoch = v;
         }
@@ -268,17 +259,25 @@ impl Mirror {
         if let Some(v) = t.top_line {
             term.top_line = v;
         }
+        new_epoch
     }
 
     /// Lines pushed into history since the base revision: the top rows move
     /// into the history cache and the rest move up. Rows vornd did not resend
     /// are still right, because a row is resent only when its line changed.
-    fn scroll(&mut self, scrolled: u32) {
+    /// When the same frame starts a new scrollback epoch the rows that left
+    /// are dropped: their line numbers belong to the old epoch.
+    fn scroll(&mut self, scrolled: u32, keep: bool) {
         if scrolled == 0 || self.term.screen == Screen::Alternate {
             return;
         }
         let n = (scrolled as usize).min(self.rows.len());
-        self.history.extend(self.rows.drain(..n));
+        let gone = self.rows.drain(..n);
+        if keep {
+            self.history.extend(gone);
+        } else {
+            drop(gone);
+        }
         self.rows.extend(blank_rows(n as u16));
         for (y, r) in self.rows.iter_mut().enumerate() {
             r.y = y as u16;
@@ -292,6 +291,54 @@ impl Mirror {
             .ok_or(Refused::RowOutOfRange(r.y))?;
         *slot = r;
         Ok(())
+    }
+}
+
+/// The table mark after a frame's definitions, or the gap that refuses it.
+/// Mirrors `extend_tables`: resent ids below the mark are skipped.
+fn next_mark(mut mark: u32, ids: impl Iterator<Item = u32>) -> Result<u32, Refused> {
+    for id in ids {
+        if id < mark {
+            continue;
+        }
+        if id != mark {
+            return Err(Refused::TableGap { mark, got: id });
+        }
+        mark += 1;
+    }
+    Ok(mark)
+}
+
+fn check_row(r: &Row, style_mark: u32, link_mark: u32) -> Result<(), Refused> {
+    for run in row::decode(&r.cells).map_err(Refused::BadRow)? {
+        if run.style >= style_mark {
+            return Err(Refused::UnknownStyle(run.style));
+        }
+        // Link 0 is "no link".
+        if run.link != 0 && run.link >= link_mark {
+            return Err(Refused::UnknownLink(run.link));
+        }
+    }
+    Ok(())
+}
+
+/// A colors delta carries only what changed: absent defaults stay, and
+/// palette entries replace the same index.
+fn merge_colors(colors: &mut ColorsDelta, d: ColorsDelta) {
+    if d.fg.is_some() {
+        colors.fg = d.fg;
+    }
+    if d.bg.is_some() {
+        colors.bg = d.bg;
+    }
+    if d.cursor.is_some() {
+        colors.cursor = d.cursor;
+    }
+    for (i, rgb) in d.palette {
+        match colors.palette.iter_mut().find(|(j, _)| *j == i) {
+            Some(entry) => entry.1 = rgb,
+            None => colors.palette.push((i, rgb)),
+        }
     }
 }
 
@@ -478,6 +525,66 @@ mod tests {
         });
         m.apply(reflow).unwrap();
         assert!(m.history().is_empty());
+    }
+
+    #[test]
+    fn rows_that_scroll_into_a_new_epoch_are_not_cached() {
+        let mut m = Mirror::from_snapshot(snapshot()).unwrap();
+        let mut d = delta(1, 2);
+        d.scrolled = 1;
+        m.apply(d).unwrap();
+        assert_eq!(m.history().len(), 1);
+        let mut reflow = delta(2, 3);
+        reflow.scrolled = 1;
+        reflow.term = Some(TermDelta {
+            sb_epoch: Some(1),
+            ..TermDelta::default()
+        });
+        m.apply(reflow).unwrap();
+        assert!(m.history().is_empty());
+        assert_eq!(m.text(), vec!["", "", ""]);
+    }
+
+    #[test]
+    fn a_colors_delta_changes_only_what_it_carries() {
+        let mut m = Mirror::from_snapshot(snapshot()).unwrap();
+        let mut d = delta(1, 2);
+        d.term = Some(TermDelta {
+            colors: Some(ColorsDelta {
+                fg: Some((1, 2, 3)),
+                bg: Some((4, 5, 6)),
+                cursor: None,
+                palette: vec![(1, (10, 0, 0)), (2, (20, 0, 0))],
+            }),
+            ..TermDelta::default()
+        });
+        m.apply(d).unwrap();
+        let mut d = delta(2, 3);
+        d.term = Some(TermDelta {
+            colors: Some(ColorsDelta {
+                bg: Some((7, 8, 9)),
+                palette: vec![(2, (30, 0, 0))],
+                ..ColorsDelta::default()
+            }),
+            ..TermDelta::default()
+        });
+        m.apply(d).unwrap();
+        let c = &m.term().colors;
+        assert_eq!((c.fg, c.bg), (Some((1, 2, 3)), Some((7, 8, 9))));
+        assert_eq!(c.palette, vec![(1, (10, 0, 0)), (2, (30, 0, 0))]);
+    }
+
+    #[test]
+    fn a_refused_delta_after_a_resize_leaves_the_size() {
+        let mut m = Mirror::from_snapshot(snapshot()).unwrap();
+        let mut d = delta(1, 2);
+        d.term = Some(TermDelta {
+            size: Some((10, 5)),
+            ..TermDelta::default()
+        });
+        d.rows = vec![line(4, 0, "ok"), line(0, 9, "bad")];
+        assert_eq!(m.apply(d), Err(Refused::UnknownStyle(9)));
+        assert_eq!((m.term().rows, m.rows().len()), (3, 3));
     }
 
     #[test]

@@ -175,6 +175,10 @@ pub fn decode(mut bytes: &[u8]) -> Result<Vec<Run>, DecodeError> {
                         .map_err(|_| DecodeError::TooLong)?,
                     short => short as usize,
                 };
+                // The encoder never sends a longer cluster.
+                if len > MAX_CLUSTER_BYTES {
+                    return Err(DecodeError::TooLong);
+                }
                 if len > bytes.len() {
                     return Err(DecodeError::Truncated);
                 }
@@ -344,6 +348,12 @@ mod tests {
         assert_eq!(decode(&[0, 0, 3, 2, 0xff, 0xfe]), Err(DecodeError::NotUtf8));
         assert_eq!(decode(&[0x80; 11]), Err(DecodeError::Overlong));
         assert_eq!(decode(&[0, 0]), Err(DecodeError::Truncated));
+        // A cluster longer than any the encoder writes, even when the bytes
+        // are there.
+        let mut big = vec![0, 0, 3, LEN_ESCAPE];
+        varint(&mut big, MAX_CLUSTER_BYTES as u64 + 1);
+        big.extend(std::iter::repeat_n(b'a', MAX_CLUSTER_BYTES + 1));
+        assert_eq!(decode(&big), Err(DecodeError::TooLong));
     }
 
     struct Rng(u64);
