@@ -288,7 +288,11 @@ impl Session {
                 // which flushes conhost's last frame first. Closing it waits
                 // for the reader to drain the pipe, and the reader needs this
                 // lock to append, so it is closed after the lock is released.
-                let master = if cfg!(windows) { st.master.take() } else { None };
+                let master = if cfg!(windows) {
+                    st.master.take()
+                } else {
+                    None
+                };
                 s.finish(&mut st);
                 drop(st);
                 drop(master);
