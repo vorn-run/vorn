@@ -2,7 +2,7 @@ import * as headless from '@xterm/headless'
 import * as serializeAddon from '@xterm/addon-serialize'
 import log from './logger'
 import { OSC_PRIVATE } from './shell-integration/protocol'
-import { coreFor, type NativeScreen } from './native-core'
+import { coreFor, screenOf, type NativeScreen } from './native-core'
 
 /**
  * Settings › Experimental › native screen model, or `VORN_CORE=native`: the
@@ -347,7 +347,7 @@ export function createScreen(
   labels?: { title?: string; cwd?: string }
 ): void {
   clearScreen(id)
-  const Native = coreFor('screen')?.Screen
+  const Native = screenOf(coreFor('screen'))
   if (Native) {
     try {
       const native = new Native(cols, rows)

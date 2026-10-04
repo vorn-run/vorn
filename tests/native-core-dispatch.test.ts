@@ -100,6 +100,7 @@ const { fakeCore, screens, analyzers } = vi.hoisted(() => {
     info: () => ({ version: 'test', ghostty: null }),
     hello: () => 'hello',
     Screen: FakeScreen,
+    SCREEN_API: 2,
     Analyzer: FakeAnalyzer
   }
   return { fakeCore, screens, analyzers }

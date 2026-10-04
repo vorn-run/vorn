@@ -28,6 +28,13 @@ fn feed_result(fed: vorn_screen::Fed) -> Option<FeedResult> {
     })
 }
 
+/// Which shape `Screen.feed` answers in: 2 is `{ cwd, bell }` or null. A
+/// binary without it answers in the cwd string of before, which the server
+/// would read as no bell ever ringing, so it treats that binary as having no
+/// screen model rather than guess.
+#[napi]
+pub const SCREEN_API: u32 = 2;
+
 #[napi]
 pub struct Screen {
     /// `None` once freed: the Ghostty terminal's memory is invisible to V8, so

@@ -22,6 +22,8 @@ export interface NativeCore {
   Analyzer?: new () => NativeAnalyzer
   /** The screen model, on libghostty-vt. Only present when built with it. */
   Screen?: new (cols: number, rows: number) => NativeScreen
+  /** The shape `Screen.feed` answers in; absent on a binary from before it was an object. */
+  SCREEN_API?: number
 }
 
 export interface NativeAnalyzer {
@@ -185,9 +187,18 @@ const FEATURE_FLAGS: Record<NativeFeature, keyof ExperimentalConfig> = {
   analysis: 'nativeAnalysis'
 }
 
+/**
+ * The binary's screen model, when it answers `feed` in the shape this server
+ * reads. An older binary answers with a cwd string, which would read as a model
+ * that never hears a bell, so it counts as having no model rather than guess.
+ */
+export function screenOf(core: NativeCore | null | undefined): NativeCore['Screen'] {
+  return core?.SCREEN_API === 2 ? core.Screen : undefined
+}
+
 /** Whether a loaded binary carries a feature; a build without libghostty-vt has no `Screen`. */
 const FEATURE_EXPORTS: Record<NativeFeature, (core: NativeCore) => boolean> = {
-  screen: (core) => typeof core.Screen === 'function',
+  screen: (core) => screenOf(core) !== undefined,
   analysis: (core) => typeof core.Analyzer === 'function'
 }
 
