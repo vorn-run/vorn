@@ -4,8 +4,8 @@
  * transcript.
  *
  * Measured as growth over a baseline taken after start-up, with the GC forced on
- * both sides. RSS is the number that matters for the native core, whose memory
- * is off the V8 heap; the heap is reported beside it so the JS path's share is
+ * both sides. RSS is the number that matters, since the core's memory is off
+ * the V8 heap; the heap is reported beside it so the JavaScript share is
  * visible.
  */
 import {

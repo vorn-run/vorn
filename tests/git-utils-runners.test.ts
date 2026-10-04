@@ -14,7 +14,12 @@ import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ProjectConfig, RemoteHost } from '../packages/shared/src/types'
 import * as git from '../packages/server/src/git-utils'
-import { nativeRunner, resetGitRunner, type GitRunner } from '../packages/server/src/git-runner'
+import {
+  nativeRunner,
+  processRunner,
+  resetGitRunner,
+  type GitRunner
+} from '../packages/server/src/git-runner'
 import type { NativeGitRequest } from '../packages/server/src/native-core'
 import {
   pruneOrphanDirs,
@@ -66,7 +71,6 @@ beforeAll(() => {
 })
 
 afterEach(() => {
-  delete process.env.VORN_GIT
   resetGitRunner()
 })
 
@@ -75,14 +79,8 @@ afterAll(() => {
 })
 
 describe.each([
-  ['js', () => (process.env.VORN_GIT = 'js')],
-  [
-    'native',
-    () => {
-      process.env.VORN_GIT = 'native'
-      resetGitRunner(nativeRunner(stubGitRun))
-    }
-  ]
+  ['process', () => resetGitRunner(processRunner)],
+  ['native', () => resetGitRunner(nativeRunner(stubGitRun))]
 ])('git-utils on the %s runner', (_mode, use) => {
   it('reads HEAD, branches and the remote', async () => {
     use()
@@ -144,7 +142,6 @@ describe('git-utils on a remote host', () => {
         return command.includes('branch --list') ? '  main\n' : ''
       })
     }
-    process.env.VORN_GIT = 'native'
     resetGitRunner(runner)
 
     await git.getGitStatusPorcelain('/srv/my app', host)
@@ -171,7 +168,6 @@ describe('changes to one repository', () => {
       },
       remote: async () => ''
     }
-    process.env.VORN_GIT = 'native'
     resetGitRunner(runner)
 
     const results = await Promise.all([
@@ -202,7 +198,6 @@ describe('changes to one repository', () => {
       },
       remote: async () => ''
     }
-    process.env.VORN_GIT = 'native'
     resetGitRunner(runner)
 
     await Promise.all([
@@ -223,7 +218,6 @@ describe('changes to one repository', () => {
       },
       remote: async () => ''
     }
-    process.env.VORN_GIT = 'native'
     resetGitRunner(runner)
     const [first, second] = await Promise.all([
       git.gitCommit('/repo', 'one', false),
@@ -255,7 +249,6 @@ describe('turns are per repository, not per path', () => {
       },
       remote: async () => ''
     }
-    process.env.VORN_GIT = 'native'
     resetGitRunner(runner)
 
     await Promise.all([
@@ -279,7 +272,6 @@ describe('a worktree being made or removed', () => {
       },
       remote: async () => ''
     }
-    process.env.VORN_GIT = 'native'
     resetGitRunner(runner)
     const made = await git.createWorktree(repo, 'main', 'held', undefined, (p) =>
       seen.push(`path ${p}`)
@@ -302,7 +294,6 @@ describe('a worktree being made or removed', () => {
       },
       remote: async () => ''
     }
-    process.env.VORN_GIT = 'native'
     resetGitRunner(runner)
     const commit = git.gitCommit('/repo', 'work', false)
     const removal = git.removeWorktree('/repo', '/wt', false, undefined, false, () => {

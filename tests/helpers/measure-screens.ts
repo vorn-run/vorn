@@ -25,7 +25,7 @@ const ROWS = 50
 /**
  * Output shaped like a working agent's, not `'x'.repeat(n)`.
  *
- * A screen of identical ASCII is the best case for xterm's cell storage, so
+ * A screen of identical ASCII is the best case for a terminal's cell storage, so
  * measuring against one would report a cost nobody actually pays. This has
  * colour changes, cursor movement and varied text — the things that make cells
  * differ from each other.
@@ -61,20 +61,18 @@ async function settle(): Promise<void> {
 async function cycle(
   round: number,
   rssBase: number
-): Promise<{ held: number; after: number; modelled: number; heldRss: number; afterRss: number }> {
+): Promise<{ modelled: number; heldRss: number; afterRss: number }> {
   await settle()
-  const before = process.memoryUsage().heapUsed
 
   for (let i = 0; i < SESSIONS; i++) {
     createScreen(`r${round}s${i}`, COLS, ROWS)
     feedScreen(`r${round}s${i}`, realisticPaint(i))
   }
-  // Serialized too, so the addon has done its work and nothing is lazily
-  // unbuilt at the moment of measuring.
+  // Serialized too, which also waits for each thread to parse what it was fed,
+  // so nothing is still queued at the moment of measuring.
   for (let i = 0; i < SESSIONS; i++) await serializeScreen(`r${round}s${i}`)
 
   await settle()
-  const held = process.memoryUsage().heapUsed
   const heldRss = process.memoryUsage().rss
   const modelled = screenCount()
 
@@ -82,11 +80,9 @@ async function cycle(
   await settle()
 
   return {
-    held: held - before,
-    after: process.memoryUsage().heapUsed - before,
     modelled,
-    // RSS from before the first cycle: the native model's memory is outside
-    // V8's heap, and only RSS sees it.
+    // RSS from before the first cycle: the model's memory is outside V8's
+    // heap, and only RSS sees it.
     heldRss: heldRss - rssBase,
     afterRss: process.memoryUsage().rss - rssBase
   }
@@ -108,9 +104,6 @@ async function main(): Promise<void> {
       rows: ROWS,
       modelled: first.modelled,
       remaining: screenCount(),
-      heldBytes: first.held,
-      residualFirst: first.after,
-      residualSecond: second.after,
       heldRss: first.heldRss,
       rssAfterFirst: first.afterRss,
       rssAfterSecond: second.afterRss

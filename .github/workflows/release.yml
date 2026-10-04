@@ -69,9 +69,9 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      # The native core (vorn_core.node) and vornd ship in every build, so the
-      # Experimental switches that use them work in a release. libghostty-vt is
-      # built from source with Zig, and its pinned Ghostty commit takes only
+      # The native core (vorn_core.node) and vornd ship in every build: the
+      # server's terminals run on the core, and vornd sits behind its switch.
+      # libghostty-vt is built from source with Zig, and its pinned Ghostty commit takes only
       # Zig 0.15.2.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
@@ -194,9 +194,9 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      # The native core (vorn_core.node) and vornd ship in every build, so the
-      # Experimental switches that use them work in a release. libghostty-vt is
-      # built from source with Zig, and its pinned Ghostty commit takes only
+      # The native core (vorn_core.node) and vornd ship in every build: the
+      # server's terminals run on the core, and vornd sits behind its switch.
+      # libghostty-vt is built from source with Zig, and its pinned Ghostty commit takes only
       # Zig 0.15.2.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
@@ -294,9 +294,9 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      # The native core (vorn_core.node) and vornd ship in every build, so the
-      # Experimental switches that use them work in a release. libghostty-vt is
-      # built from source with Zig, and its pinned Ghostty commit takes only
+      # The native core (vorn_core.node) and vornd ship in every build: the
+      # server's terminals run on the core, and vornd sits behind its switch.
+      # libghostty-vt is built from source with Zig, and its pinned Ghostty commit takes only
       # Zig 0.15.2.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:

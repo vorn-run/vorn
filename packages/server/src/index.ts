@@ -81,7 +81,7 @@ import {
   setLaunchDataDir
 } from './process-utils'
 import log from './logger'
-import { activeCore, preloadFlaggedCore, setExperimentalSource } from './native-core'
+import { activeCore, coreStatus } from './native-core'
 import { appFrameAncestors } from './extensions/frame-ancestors'
 
 /**
@@ -182,27 +182,18 @@ export async function startServer(
   // server that loses the endpoint claim exits without ever having one.
   configureHistory(dataDir)
 
-  // VORN_CORE=native opts into the Rust core for the screen model and output
-  // analysis. This is the selection they dispatch on, made once here so the log
-  // line names the core actually in use.
+  // The Rust core runs each terminal's screen model, its output analysis and
+  // git. Loaded here, before any terminal, so a missing or broken binary is in
+  // the log at startup rather than when the first terminal opens.
   const core = activeCore()
   if (core.native) {
     log.info({ core: core.info }, `[core] native ${core.info?.version}`)
-  } else if (core.fallback) {
-    log.warn(`[core] staying on js: ${core.fallback}`)
-  }
-  // Settings › Experimental: each switch moves one piece onto the core for the
-  // terminals opened after it is turned on. Read from the cached config, so
-  // asking per terminal costs a field read.
-  setExperimentalSource(() => configManager.loadConfig().defaults.experimental)
-  const flagged = preloadFlaggedCore()
-  if (flagged?.native) {
-    log.info(
-      { core: flagged.info },
-      `[core] native ${flagged.info?.version} for experimental switches`
+    const { missing } = coreStatus()
+    if (missing.length) log.warn(`[core] this build of the core has no ${missing.join(', ')}`)
+  } else {
+    log.error(
+      `[core] the vorn core did not load, so terminals have no screen model, agent status or terminal output for agents: ${core.error}`
     )
-  } else if (flagged?.fallback) {
-    log.warn(`[core] experimental switches stay on js: ${flagged.fallback}`)
   }
 
   // Who this server is, so a desktop can decide whether to adopt it instead of

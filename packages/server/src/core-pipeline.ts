@@ -1,8 +1,7 @@
 import type { NativePipeline } from './native-core'
 
 /**
- * Terminals whose output runs on a core thread (Settings › Experimental ›
- * core thread), by session id.
+ * Terminals whose output runs on a core thread, by session id.
  *
  * A module of its own because two others answer from it: the screen model,
  * which creates and frees a pipeline, and the scrollback, which lives inside

@@ -29,7 +29,11 @@ import {
 
 const mockFs = vi.mocked(fs)
 
+import { resetGitRunner } from '../packages/server/src/git-runner'
+import { syncGitRunner } from './helpers/sync-git-runner'
+
 beforeEach(() => {
+  resetGitRunner(syncGitRunner)
   vi.clearAllMocks()
   mockFs.realpathSync.mockImplementation(((p: string) => p) as never)
 })

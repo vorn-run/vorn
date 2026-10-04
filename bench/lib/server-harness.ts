@@ -4,9 +4,9 @@
  * Everything below goes through `PtyManager`'s own handlers: a fake pty is wired
  * with the same `setupPtyEvents` a spawned one gets, so its `onData` is the real
  * one -- `bufferData` plus `appendOutput` per raw chunk, then `flushBuffer`
- * feeding the client, the scrollback, the headless xterm and history. Copying
- * that logic here would measure the copy, and WP2-4 replace exactly that code,
- * so the bench has to call it rather than resemble it.
+ * feeding the client, the scrollback, the screen model and history. Copying
+ * that logic here would measure the copy, and the core changed exactly that
+ * code, so the bench has to call it rather than resemble it.
  *
  * The private members are reached through a cast. That is deliberate: these are
  * the methods the plan names as hotspots, and widening their visibility for a

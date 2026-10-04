@@ -745,17 +745,11 @@ describe('video', () => {
       value: () => ({ drawImage: vi.fn() }),
       configurable: true
     })
-    act(() => {
-      useAppStore.setState({
-        config: { defaults: { experimental: { deviceVideo: true } } } as never
-      })
-    })
   })
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.stubGlobal('IntersectionObserver', IO)
     vi.stubGlobal('ResizeObserver', RO)
-    act(() => useAppStore.setState({ config: null as never }))
   })
 
   /** The pane's callbacks for the stream it started. */
@@ -853,16 +847,5 @@ describe('video', () => {
     await waitFor(() => expect(deviceVideoStart).toHaveBeenCalled())
     hide()
     expect(stopVideo).toHaveBeenCalled()
-  })
-
-  it('never starts with the switch off', async () => {
-    act(() => useAppStore.setState({ config: { defaults: { experimental: {} } } as never }))
-    render(<DeviceCard sessionId="t1" />)
-    show()
-    await screen.findByTestId('device-frame-t1')
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1200)
-    })
-    expect(deviceVideoStart).not.toHaveBeenCalled()
   })
 })

@@ -101,12 +101,10 @@ export const DeviceCard = memo(
       onScreen
     } = useDeviceFrame({ sessionId, udid: pane?.udid ?? null, scaleRef, stillsPaused: videoLive })
 
-    // Settings › Experimental: the picture as decoded video, stills as the fallback.
-    const videoEnabled = useAppStore((s) => s.config?.defaults.experimental?.deviceVideo === true)
+    // The picture as decoded video, stills as the fallback.
     const video = useDeviceVideo({
       sessionId,
       udid: pane?.udid ?? null,
-      enabled: videoEnabled,
       onScreen,
       sized: screen !== null,
       maxEdge: () =>

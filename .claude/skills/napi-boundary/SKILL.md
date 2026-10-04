@@ -41,7 +41,7 @@ belongs in the crate.
    callers exist (`feed` and `feed_bytes` in `src/screen.rs`).
 5. **Errors become messages.** Map each crate error with a `to_napi` helper to
    `napi::Error::from_reason(err.to_string())`. When parity matters, the
-   message matches what the JS path threw.
+   message matches what the TypeScript it replaces threw.
 6. **Free native memory explicitly.** V8 cannot see native allocations, so
    stateful objects hold `Option<Inner>` and expose a `free()` the server calls
    when the session ends; every method treats `None` as freed.
@@ -55,13 +55,16 @@ belongs in the crate.
 
 ## The server side
 
-- `native-core.ts` loads the binary once. A switch that is on with a binary
-  that is missing or fails to load stays on the JS path, logs the reason, and
-  reports it on Settings › Experimental.
-- One switch per feature; `VORN_CORE=native|js` overrides all of them.
-  Feature-specific overrides (like `VORN_GIT`) win over the setting.
-- The JS path is not deleted in the same change. It goes only after the native
-  path has been the default for a release.
+- `native-core.ts` loads the binary once and never throws. A server whose
+  binary is missing or fails to load keeps running without what the core
+  provides, logs the reason, and reports it on Settings › Experimental.
+- New native work sits behind one Experimental switch for the whole batch
+  being tried, not one per feature. With the switch on and the binary missing,
+  the server stays on the TypeScript, logs why, and says so on the settings
+  page.
+- When the batch becomes the default, its switch and the TypeScript it
+  replaced go in the same change, after the TypeScript's outputs are recorded
+  as fixtures the native path is tested against.
 - Tests that need the binary check for `packages/core/vorn_core.node` and skip
   with a reason when it is absent.
 

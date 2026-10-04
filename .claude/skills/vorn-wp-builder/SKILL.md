@@ -54,10 +54,12 @@ in code.
 - Thin napi adapter in `packages/core/src/<name>.rs`, following the
   `napi-boundary` skill.
 - The server side (`packages/server/src/native-core.ts` and the module being
-  replaced) chooses the path per switch. A switch that is on with a missing or
-  failing binary falls back to JS, logs why, and says so on the settings page.
-- One switch per feature in Settings › Experimental; `VORN_CORE=native|js`
-  overrides all of them.
+  replaced) chooses the path by the switch. A switch that is on with a missing
+  or failing binary falls back to the TypeScript, logs why, and says so on the
+  settings page.
+- One switch in Settings › Experimental for the whole batch of native work
+  being tried, never one per feature. Add to the batch's switch if it has
+  one.
 
 ## 5. Parity
 
@@ -66,7 +68,10 @@ in code.
   named normalizer in a `tests/helpers/*-parity.ts` file, never an inline
   tweak.
 - Tests that need the binary skip cleanly when `packages/core/vorn_core.node`
-  is absent, as `tests/terminal-screen-parity.test.ts` does.
+  is absent, as `tests/js-reference.test.ts` does.
+- When a batch becomes the default, record the TypeScript path's outputs as
+  fixtures first (`tests/fixtures/js-reference/`), then remove its switch and
+  the TypeScript in the same change.
 
 ## 6. Validate locally (before every push)
 
@@ -78,20 +83,18 @@ cargo clippy --release --locked --workspace --all-targets -- -D warnings
 # only Node provides and may not link. The adapter is covered from vitest.
 cargo test --release --locked --workspace --exclude vorn-core
 cd ../..
-# The full build. --no-ghostty leaves out Screen, so screen work would fall
-# back to JS or skip its parity tests; use it only for work that needs no Ghostty.
+# The full build. --no-ghostty leaves out TerminalPipeline, so terminals get no
+# screen model and their tests skip; use it only for work that needs no Ghostty.
 yarn build:core
 yarn lint && yarn format:check && yarn typecheck
 
-# Acceptance runs twice. Without VORN_CORE or a switch the server takes the JS
-# path even when the binary is built, so the native run must ask for it.
-yarn vitest run tests/<the files the spec names>
-VORN_CORE=native yarn vitest run tests/<the files the spec names> tests/native-core*.test.ts
+# Acceptance runs with the switch off and on: the tests that cover a switched
+# path turn it on themselves, as the server would read it from the settings.
+yarn vitest run tests/<the files the spec names> tests/native-core*.test.ts
 
-# When the spec has a number. Each core keeps its own baseline file, so measure
-# native explicitly and compare it with the JS baseline on purpose.
-VORN_CORE=native yarn bench
-VORN_CORE=native yarn bench --baseline=bench/baselines/<platform>-<arch>.json
+# When the spec has a number.
+yarn bench
+yarn bench --baseline=bench/baselines/<platform>-<arch>.json
 ```
 
 The toolchain is pinned in `packages/core/rust-toolchain.toml`; a new stable

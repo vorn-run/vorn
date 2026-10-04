@@ -1,26 +1,24 @@
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import type { RemoteHost } from '@vornrun/shared/types'
 import log from './logger'
-import { coreFor, flaggedCore, type NativeCore } from './native-core'
-import { getSafeEnv, sshExec, sshExecSync } from './process-utils'
+import { nativeCore, type NativeCore } from './native-core'
+import { getSafeEnv, sshExec } from './process-utils'
 import { resolveExecutable } from './resolve-executable'
 
 /**
  * How a git command runs. Every function in `git-utils` goes through one of
- * these, so the switch between them is a single place.
+ * these, so the choice between them is a single place.
  *
- * `js` is what shipped before: `execFileSync`, which holds the event loop for
- * as long as git takes, and every terminal, RPC and client with it. `native`
- * hands the command to the Rust core, which answers it on a thread of its own
- * and resolves the promise when it is done. It is opt-in through Settings ›
- * Experimental (`nativeGit`) or `VORN_CORE=native`, and `VORN_GIT=native|js`
- * wins over both so a benchmark or a test can pin either.
+ * `native` hands the command to the Rust core, which answers it on a thread of
+ * its own (in-process through gix where it can) and resolves the promise when
+ * it is done. `process` is for a server without the core: git as a child
+ * process, which keeps the event loop free too, one process per command.
  */
-export type GitMode = 'js' | 'native'
+export type GitMode = 'native' | 'process'
 
 export interface GitRunOptions {
   timeout: number
-  /** Stdout past this is an error, as for `execFileSync`; its default when absent. */
+  /** Stdout past this is an error; `DEFAULT_MAX_BUFFER` when absent. */
   maxBuffer?: number
 }
 
@@ -32,7 +30,7 @@ export interface GitRunner {
   remote(host: RemoteHost, command: string, opts: { timeout: number }): Promise<string>
 }
 
-/** `execFileSync`'s own default, kept so the native path fails on the same diffs. */
+/** Stdout past this is an error unless a caller asks for more: 1 MiB, as `execFileSync`'s default was. */
 export const DEFAULT_MAX_BUFFER = 1024 * 1024
 
 // Resolve `git` from the login-shell PATH so packaged Electron finds the
@@ -43,40 +41,29 @@ export function gitBin(): string {
   return resolveExecutable('git') ?? 'git'
 }
 
-const EXEC_OPTS = {
-  encoding: 'utf-8' as const,
-  stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe']
-}
-
 /**
- * The blocking path, unchanged. Wrapped in a promise so callers are the same
- * for both modes, but the work is done before the promise is returned, so the
- * loop is held exactly as long as it was.
+ * Git as a child process, for a server without the core. Rejects with the
+ * exit status and stderr on the error.
  */
-export const jsRunner: GitRunner = {
-  mode: 'js',
+export const processRunner: GitRunner = {
+  mode: 'process',
   local(args, cwd, opts) {
-    try {
-      return Promise.resolve(
-        execFileSync(gitBin(), args, {
+    return new Promise((resolve, reject) => {
+      execFile(
+        gitBin(),
+        args,
+        {
           cwd,
-          ...EXEC_OPTS,
+          encoding: 'utf-8',
           env: getSafeEnv(),
           timeout: opts.timeout,
-          maxBuffer: opts.maxBuffer
-        })
+          maxBuffer: opts.maxBuffer ?? DEFAULT_MAX_BUFFER
+        },
+        (err, stdout, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve(stdout))
       )
-    } catch (err) {
-      return Promise.reject(err)
-    }
+    })
   },
-  remote(host, command, opts) {
-    try {
-      return Promise.resolve(sshExecSync(host, command, opts))
-    } catch (err) {
-      return Promise.reject(err)
-    }
-  }
+  remote: (host, command, opts) => sshExec(host, command, opts)
 }
 
 type GitRun = NonNullable<NativeCore['gitRun']>
@@ -99,39 +86,21 @@ export function nativeRunner(gitRun: GitRun): GitRunner {
   }
 }
 
-/**
- * `VORN_GIT`, when it pins a path: it wins over `VORN_CORE` and the switch, so
- * a benchmark or a test can compare the two on one server. Anything else is no
- * pin, and the switch decides.
- */
-export function pinnedGitMode(env: NodeJS.ProcessEnv = process.env): GitMode | null {
-  const pinned = env.VORN_GIT?.trim().toLowerCase()
-  return pinned === 'native' || pinned === 'js' ? pinned : null
-}
-
 let override: GitRunner | null = null
 let built: { core: NativeCore; runner: GitRunner } | null = null
 let warned = false
 
 /**
- * The runner for this call. Read per call, so turning the switch takes effect on
- * the next git command without a restart. A native path that cannot load keeps
- * git on the JS path and says so once: the switch is an experiment, and a
- * missing or stale binary must not cost anyone their diff panel.
+ * The runner for this call: the core's, or a child process when the core did
+ * not load or was built without git, which is said once in the log.
  */
 export function gitRunner(): GitRunner {
-  const pinned = pinnedGitMode()
-  if (pinned === 'js') return jsRunner
   if (override) return override
-  const core = pinned === 'native' ? flaggedCore().native : coreFor('git')
-  if (!core) {
-    if (pinned === 'native') warnOnce(flaggedCore().fallback ?? 'the vorn core did not load')
-    return jsRunner
-  }
-  const gitRun = core.gitRun
-  if (typeof gitRun !== 'function') {
-    warnOnce('the loaded vorn core has no gitRun(); rebuild it with `yarn build:core`')
-    return jsRunner
+  const core = nativeCore()
+  const gitRun = core?.gitRun
+  if (!core || typeof gitRun !== 'function') {
+    warnOnce(core ? 'the loaded vorn core has no gitRun()' : 'the vorn core is not loaded')
+    return processRunner
   }
   if (built?.core !== core) built = { core, runner: nativeRunner(gitRun.bind(core)) }
   return built.runner
@@ -140,10 +109,10 @@ export function gitRunner(): GitRunner {
 function warnOnce(reason: string): void {
   if (warned) return
   warned = true
-  log.warn(`[git] staying on js: ${reason}`)
+  log.warn(`[git] running git as a child process: ${reason}`)
 }
 
-/** For tests: use `next` whenever git is not pinned to JS, or go back to resolving. */
+/** For tests: use `next` for every git command, or go back to resolving. */
 export function resetGitRunner(next?: GitRunner | null): void {
   override = next ?? null
   built = null

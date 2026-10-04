@@ -1,15 +1,10 @@
 /**
  * Hotspot 3: git on the server's event loop.
  *
- * On the JS path `gitExec` is `execFileSync`, so every call is time in which no
- * PTY output is flushed, no RPC is answered and no client hears anything -- for
- * every session at once. `stall.*` is how long a call holds the loop before
- * the loop can take its next turn: on the JS path the whole call, since each
- * git it runs blocks and the awaits between them are microtasks; on the
- * native path (`VORN_GIT=native`, WP5) only handing the first request to the
- * core. `wall.*` is
- * how long until the answer arrives, which the native path must not make worse.
- * `event-loop.ts` measures what the stall does to a live burst.
+ * Git runs on the core, off the loop. `stall.*` is how long a call holds the
+ * loop before the loop can take its next turn: only handing the first request
+ * to the core. `wall.*` is how long until the answer arrives. `event-loop.ts`
+ * measures what a stall does to a live burst.
  */
 import { execFileSync } from 'node:child_process'
 import {
@@ -41,9 +36,9 @@ const calls: Array<[string, () => Promise<unknown>]> = [
 ]
 
 const mode = gitRunner().mode
-if (process.env.VORN_GIT === 'native' && mode !== 'native') {
-  // The runner falls back to JS quietly; here that would be JS numbers under a native label.
-  throw new Error('VORN_GIT=native but the core has no gitRun')
+if (mode !== 'native') {
+  // The runner falls back to a child process quietly; that would time the wrong thing.
+  throw new Error('the vorn core did not load, or has no gitRun')
 }
 
 async function main(): Promise<void> {

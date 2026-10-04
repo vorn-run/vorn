@@ -266,7 +266,7 @@ async function restore(dir: string, session: RecoverableSession): Promise<Recove
   if (checkpoint?.screen) feedScreen(session.id, checkpoint.screen)
 
   for (const record of records) {
-    await apply(session.id, record)
+    apply(session.id, record)
     if (record.kind === 'data') scrollback += record.data
   }
 
@@ -345,13 +345,13 @@ function follow(
   return { records: kept, stopped: read }
 }
 
-async function apply(id: string, record: LogRecord): Promise<void> {
+function apply(id: string, record: LogRecord): void {
   switch (record.kind) {
     case 'data':
       feedScreen(id, record.data)
       return
     case 'resize':
-      await resizeScreen(id, record.cols, record.rows)
+      resizeScreen(id, record.cols, record.rows)
       return
   }
 }
