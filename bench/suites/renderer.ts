@@ -26,7 +26,18 @@ import { transcript } from '../lib/transcripts'
 import type { RendererRun } from '../renderer/page'
 
 const ROOT = path.resolve(__dirname, '..', '..')
-const TERMINALS = [1, 8, 32]
+/** Terminals streaming, and how many of them are on screen. */
+const CASES: { terminals: number; shown: number; key: string; label: string }[] = [
+  { terminals: 1, shown: 1, key: '1t', label: '1 terminal(s) streaming' },
+  { terminals: 8, shown: 8, key: '8t', label: '8 terminal(s) streaming' },
+  { terminals: 32, shown: 32, key: '32t', label: '32 terminal(s) streaming' },
+  {
+    terminals: 32,
+    shown: 4,
+    key: '32t4s',
+    label: '32 terminals streaming, 4 on screen and 28 in hidden views'
+  }
+]
 const DURATION_MS = QUICK ? 1500 : 3000
 const ROUNDS = QUICK ? 1 : 4
 const BYTES_PER_SECOND_EACH = 32 * 1024
@@ -125,7 +136,7 @@ async function main(): Promise<void> {
   const metrics: Record<string, Metric> = {}
   let gpu = ''
   let webgl = 0
-  for (const n of TERMINALS) {
+  for (const c of CASES) {
     const runs: RendererRun[] = []
     for (let r = 0; r < ROUNDS; r++) {
       const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
@@ -135,7 +146,13 @@ async function main(): Promise<void> {
       )
       const result = await page.evaluate(
         (o) => (window as unknown as { __bench: (o: unknown) => Promise<RendererRun> }).__bench(o),
-        { terminals: n, chunks, bytesPerSecondEach: BYTES_PER_SECOND_EACH, durationMs: DURATION_MS }
+        {
+          terminals: c.terminals,
+          shown: c.shown,
+          chunks,
+          bytesPerSecondEach: BYTES_PER_SECOND_EACH,
+          durationMs: DURATION_MS
+        }
       )
       runs.push(result)
       gpu = result.gpu
@@ -149,15 +166,15 @@ async function main(): Promise<void> {
     const frames = runs.reduce((a, x) => a + x.frames, 0)
     const meanFrame = runs.reduce((a, x) => a + x.frameMeanMs * x.frames, 0) / frames
     const longTask = runs.reduce((a, x) => a + x.longTaskMs, 0) / runs.length
-    metrics[`frame.mean.${n}t`] = metric(
+    metrics[`frame.mean.${c.key}`] = metric(
       round(meanFrame),
       'ms',
-      `mean frame interval, ${n} terminal(s) streaming`
+      `mean frame interval, ${c.label}`
     )
-    metrics[`longtask.${n}t`] = metric(
+    metrics[`longtask.${c.key}`] = metric(
       round(longTask / (DURATION_MS / 1000)),
       'ms/s',
-      `main-thread long-task time per second, ${n} terminal(s) streaming`
+      `main-thread long-task time per second, ${c.label}`
     )
   }
 

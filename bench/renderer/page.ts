@@ -2,19 +2,19 @@
  * The renderer's terminal path, in a page of its own.
  *
  * This is the real `terminal-registry.ts` -- the same xterm options, the same
- * WebGL addon, the same `syncTerminalOverlay` -- driven by the same three-line
- * rAF loop `TerminalHost.tsx` runs, with `window.api` stubbed to a feed. The rest
+ * WebGL addon, the same `syncTerminalOverlay` -- kept on its slots by the same
+ * `startTerminalOverlaySync` `TerminalHost.tsx` starts, with `window.api`
+ * stubbed to a feed. The rest
  * of the app (React, the stores, the panes) is left out on purpose: none of the
  * renderer hotspots in the plan are in it except Shiki, and this is the number
  * WP7 is judged on at 1, 8 and 32 terminals.
  */
 import type { TerminalData } from '@vornrun/shared/protocol'
 import {
-  getRegisteredTerminalIds,
   initGlobalDataListener,
   registerSlot,
   setHostRoot,
-  syncTerminalOverlay
+  startTerminalOverlaySync
 } from '../../src/renderer/lib/terminal-registry'
 
 type Listener = (d: { id: string; data: string; seq: number }) => void
@@ -32,6 +32,8 @@ let listener: Listener | null = null
 
 export interface RendererRun {
   terminals: number
+  /** How many of them are on screen; the rest stream into a view that is not shown, as in another tab. */
+  shown: number
   frames: number
   frameMeanMs: number
   frameP95Ms: number
@@ -62,32 +64,34 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 async function run(opts: {
   terminals: number
+  /** Defaults to all of them. */
+  shown?: number
   chunks: string[]
   bytesPerSecondEach: number
   durationMs: number
 }): Promise<RendererRun> {
   const grid = document.getElementById('grid')!
   const host = document.getElementById('host')!
-  const cols = Math.ceil(Math.sqrt(opts.terminals))
+  const shown = Math.min(opts.shown ?? opts.terminals, opts.terminals)
+  const cols = Math.ceil(Math.sqrt(shown))
   grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
-  grid.style.gridTemplateRows = `repeat(${Math.ceil(opts.terminals / cols)}, 1fr)`
+  grid.style.gridTemplateRows = `repeat(${Math.ceil(shown / cols)}, 1fr)`
 
   setHostRoot(host)
   initGlobalDataListener()
   const ids: string[] = []
   for (let i = 0; i < opts.terminals; i++) {
     const slot = document.createElement('div')
+    // A slot that is not shown has no box, as a pane in a hidden view does.
+    if (i >= shown) slot.style.display = 'none'
     grid.appendChild(slot)
     const id = `t${i}`
     ids.push(id)
     registerSlot(id, slot)
   }
 
-  // TerminalHost.tsx: every registered terminal synced on every frame.
-  let hostRaf = requestAnimationFrame(function tick(): void {
-    for (const id of getRegisteredTerminalIds()) syncTerminalOverlay(id)
-    hostRaf = requestAnimationFrame(tick)
-  })
+  // As TerminalHost.tsx does.
+  const stopSync = startTerminalOverlaySync(host)
 
   // The WebGL addon loads through a dynamic import; let it attach before measuring.
   await sleep(1000)
@@ -133,11 +137,12 @@ async function run(opts: {
   })
   clearInterval(feed)
   observer.disconnect()
-  cancelAnimationFrame(hostRaf)
+  stopSync()
 
   const vsync = percentile(intervals, 10)
   return {
     terminals: opts.terminals,
+    shown,
     frames: intervals.length,
     frameMeanMs: intervals.reduce((a, b) => a + b, 0) / intervals.length,
     frameP95Ms: percentile(intervals, 95),

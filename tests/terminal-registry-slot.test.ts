@@ -141,7 +141,8 @@ import {
   getRegisteredTerminalIds,
   destroyTerminal,
   fitTerminal,
-  setAllTerminalsFontSize
+  setAllTerminalsFontSize,
+  startTerminalOverlaySync
 } from '../src/renderer/lib/terminal-registry'
 
 /** Read lazily, so a test can move the rect it passed. */
@@ -219,6 +220,46 @@ describe('terminal-registry: slot / persistent-host API', () => {
     unregisterSlot('term-4', slot)
     expect(wrapper.style.visibility).toBe('hidden')
     expect(wrapper.style.pointerEvents).toBe('none')
+  })
+
+  it('parks a hidden wrapper outside the viewport, so xterm stops drawing it, and brings it back', () => {
+    const slot = makeSlot({ top: 10, left: 20, width: 100, height: 100 })
+    registerSlot('term-parked', slot)
+    const wrapper = getPersistentWrapper('term-parked')!
+    unregisterSlot('term-parked', slot)
+    expect(wrapper.style.left).toBe('-100000px')
+    // Its size stays, so the cell xterm measured is still right when it returns.
+    expect(wrapper.style.width).toBe('100px')
+    registerSlot('term-parked', slot)
+    expect(wrapper.style.left).toBe('20px')
+    expect(wrapper.style.visibility).toBe('visible')
+  })
+
+  it('says whether a sync moved anything, which is how the overlay knows to keep looking', () => {
+    const rect = { top: 10, left: 20, width: 100, height: 100 }
+    const slot = makeSlot(rect)
+    registerSlot('term-moved', slot)
+    expect(syncTerminalOverlay('term-moved')).toBe(false)
+    rect.left = 30
+    expect(syncTerminalOverlay('term-moved')).toBe(true)
+    expect(syncTerminalOverlay('term-moved')).toBe(false)
+    unregisterSlot('term-moved', slot)
+    expect(syncTerminalOverlay('term-moved')).toBe(false)
+  })
+
+  it('looks again when a slot is registered, through the running overlay sync', () => {
+    const frames: Array<() => void> = []
+    vi.stubGlobal('requestAnimationFrame', (cb: () => void) => frames.push(cb))
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    const stop = startTerminalOverlaySync(host)
+    try {
+      while (frames.length) frames.shift()!()
+      registerSlot('term-synced', makeSlot({ width: 100, height: 100 }))
+      expect(frames.length).toBeGreaterThan(0)
+    } finally {
+      stop()
+      vi.unstubAllGlobals()
+    }
   })
 
   it('unregisterSlot no-ops when the passed slot is not the active one', () => {
