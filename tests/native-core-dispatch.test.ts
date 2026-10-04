@@ -261,6 +261,40 @@ describe('output analysis on the native core', () => {
     pm.sessions.delete('w')
   })
 
+  it('takes status from the reads after a bracketed-paste switch, as per-read analysis does', () => {
+    const session = addSession('b')
+    pm.appendOutput('b', 'start\n')
+    pm.appendOutput('b', 'out\x1b[?2004h> ')
+    pm.appendOutput('b', 'thinking')
+    pm.appendOutput('b', ' more')
+    analyzers[0].next = 1 // running, from the patterns on the reads after the switch
+    pm.flushAnalysis('b')
+    // The switch ends one part and the reads after it make another, so the
+    // core cannot let the switch decide for the reads that followed it.
+    expect(analyzers[0].calls).toEqual([
+      ['start\n', true],
+      ['out\x1b[?2004h> ', true],
+      ['thinking more', true]
+    ])
+    expect(session.status).toBe('running')
+    pm.clearSessionTracking('b')
+    pm.sessions.delete('b')
+  })
+
+  it('analyzes a batch that ends with the switch in one call', () => {
+    addSession('c')
+    pm.appendOutput('c', 'start\n')
+    pm.appendOutput('c', 'out ')
+    pm.appendOutput('c', '\x1b[?2004h> ')
+    pm.flushAnalysis('c')
+    expect(analyzers[0].calls).toEqual([
+      ['start\n', true],
+      ['out \x1b[?2004h> ', true]
+    ])
+    pm.clearSessionTracking('c')
+    pm.sessions.delete('c')
+  })
+
   it('reads all lines for getOutput(id, 0), as the JS path does', () => {
     addSession('z')
     pm.appendOutput('z', 'one\n')

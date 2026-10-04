@@ -156,6 +156,10 @@ export function transcript(name: string): Transcript {
   return found
 }
 
+/** What one flush carries at most in the bench: this many reads, or this many bytes. */
+export const FLUSH_READS = 100
+export const FLUSH_BYTES = 64 * 1024
+
 /**
  * The same bytes as the flushes `PtyManager` would make of them.
  *
@@ -164,10 +168,6 @@ export function transcript(name: string): Transcript {
  * `tests/helpers/measure-history.ts` already makes -- a hundred reads -- and caps
  * a flush at 64 KB, the cap WP4 introduces, so before and after are fed alike.
  */
-/** What one flush carries at most in the bench: this many reads, or this many bytes. */
-export const FLUSH_READS = 100
-export const FLUSH_BYTES = 64 * 1024
-
 export function asFlushes(t: Transcript, perFlush = FLUSH_READS, maxBytes = FLUSH_BYTES): string[] {
   const out: string[] = []
   let cur = ''

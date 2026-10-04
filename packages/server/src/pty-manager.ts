@@ -128,6 +128,14 @@ class PtyManager extends EventEmitter {
   private jsAnalysis = new Set<string>()
   /** Raw chunks since the last native analysis, joined (a rope, so O(1) per chunk). */
   private pendingAnalysis = new Map<string, string>()
+  /**
+   * Where in a pending batch the last read that switched bracketed paste ends.
+   * The JS path takes status per read: a read with the switch sets it, and the
+   * reads after it fall back to the patterns. A batch analyzed whole would let
+   * the switch win over every read that followed it, so it is analyzed in two
+   * parts, split here.
+   */
+  private analysisSignalEnd = new Map<string, number>()
   private analysisTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private nativeAnalysisFailed = false
   private statusContexts = new Map<string, StatusContext>()
@@ -803,6 +811,7 @@ class PtyManager extends EventEmitter {
     this.analyzers.delete(id)
     this.jsAnalysis.delete(id)
     this.pendingAnalysis.delete(id)
+    this.analysisSignalEnd.delete(id)
     const analysisTimer = this.analysisTimers.get(id)
     if (analysisTimer) clearTimeout(analysisTimer)
     this.analysisTimers.delete(id)
@@ -840,7 +849,8 @@ class PtyManager extends EventEmitter {
     this.pendingAnalysis.clear()
     for (const [id, data] of pending) {
       const session = this.sessions.get(id)
-      if (session) this.analyzeJs(id, session, data, true)
+      const parts = this.splitAtSignal(id, data)
+      if (session) for (const part of parts) this.analyzeJs(id, session, part, true)
     }
   }
 
@@ -885,7 +895,9 @@ class PtyManager extends EventEmitter {
 
     if (this.analyzerFor(id)) {
       const pending = this.pendingAnalysis.get(id)
-      this.pendingAnalysis.set(id, pending === undefined ? data : pending + data)
+      const batch = pending === undefined ? data : pending + data
+      this.pendingAnalysis.set(id, batch)
+      if (data.includes('\x1b[?2004')) this.analysisSignalEnd.set(id, batch.length)
       if (this.analysisTimers.has(id)) return
       this.flushAnalysis(id)
       this.armAnalysis(id)
@@ -912,12 +924,17 @@ class PtyManager extends EventEmitter {
     const data = this.pendingAnalysis.get(id)
     if (data === undefined) return
     this.pendingAnalysis.delete(id)
+    const parts = this.splitAtSignal(id, data)
     const session = this.sessions.get(id)
     const analyzer = this.analyzers.get(id)
     if (!session || !analyzer) return
+    let done = 0
     try {
-      const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
-      if (newStatus && newStatus !== session.status) this.updateSessionStatus(id, newStatus)
+      for (const part of parts) {
+        const newStatus = NATIVE_STATUS[analyzer.append(part, session.statusSource !== 'hooks')]
+        done += 1
+        if (newStatus && newStatus !== session.status) this.updateSessionStatus(id, newStatus)
+      }
     } catch (err) {
       // This can run from a timer, where a throw has nothing behind it. Every
       // session goes back to the JS path from here on.
@@ -927,12 +944,21 @@ class PtyManager extends EventEmitter {
       // The core may have taken some or all of this batch before it threw, and
       // that is in the history just handed over: adding it again would
       // duplicate it. At worst the unread tail of one batch is lost.
-      this.analyzeJs(id, session, data, false)
+      this.analyzeJs(id, session, parts[done]!, false)
+      // A second part the core never saw is new to the history.
+      for (const part of parts.slice(done + 1)) this.analyzeJs(id, session, part, true)
       return
     }
     // Re-armed per batch rather than per read, which is most of what the JS
     // path spends on a spinner.
     this.armIdle(id, session)
+  }
+
+  /** A batch as the parts its status is taken from: see `analysisSignalEnd`. */
+  private splitAtSignal(id: string, data: string): string[] {
+    const end = this.analysisSignalEnd.get(id)
+    this.analysisSignalEnd.delete(id)
+    return end !== undefined && end < data.length ? [data.slice(0, end), data.slice(end)] : [data]
   }
 
   private analyzeJs(
@@ -1364,6 +1390,7 @@ class PtyManager extends EventEmitter {
     this.analyzers.clear()
     this.jsAnalysis.clear()
     this.pendingAnalysis.clear()
+    this.analysisSignalEnd.clear()
     for (const timer of this.analysisTimers.values()) clearTimeout(timer)
     this.analysisTimers.clear()
     this.nativeAnalysisFailed = false
