@@ -26,6 +26,9 @@ export default defineConfig({
     }
   },
   renderer: {
+    // Module workers, so the Shiki worker keeps its grammars as lazy chunks
+    // instead of inlining every language into one file.
+    worker: { format: 'es' },
     build: {
       rollupOptions: {
         input: {
