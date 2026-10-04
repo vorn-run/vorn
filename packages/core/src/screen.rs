@@ -12,6 +12,29 @@ pub struct ScreenSnapshot {
     pub cwd: String,
 }
 
+/// What a feed changed, when it changed anything.
+#[napi(object)]
+pub struct FeedResult {
+    /// The cwd an OSC 5522 moved to.
+    pub cwd: Option<String>,
+    /// Whether a BEL rang (not one that ends an OSC).
+    pub bell: bool,
+}
+
+fn feed_result(fed: vorn_screen::Fed) -> Option<FeedResult> {
+    (fed.cwd.is_some() || fed.bells > 0).then_some(FeedResult {
+        cwd: fed.cwd,
+        bell: fed.bells > 0,
+    })
+}
+
+/// Which shape `Screen.feed` answers in: 2 is `{ cwd, bell }` or null. A
+/// binary without it answers in the cwd string of before, which the server
+/// would read as no bell ever ringing, so it treats that binary as having no
+/// screen model rather than guess.
+#[napi]
+pub const SCREEN_API: u32 = 2;
+
 #[napi]
 pub struct Screen {
     /// `None` once freed: the Ghostty terminal's memory is invisible to V8, so
@@ -32,17 +55,17 @@ impl Screen {
         })
     }
 
-    /// One flush of output, as the string node-pty produced. Returns the cwd an
-    /// OSC 5522 in it moved to, for the server to record.
+    /// One flush of output, as the string node-pty produced. Null when it
+    /// moved no cwd and rang no bell, which is nearly always.
     #[napi(catch_unwind)]
-    pub fn feed(&mut self, data: String) -> Option<String> {
-        self.inner.as_mut()?.feed(data.as_bytes())
+    pub fn feed(&mut self, data: String) -> Option<FeedResult> {
+        feed_result(self.inner.as_mut()?.feed(data.as_bytes()))
     }
 
     /// The same, from bytes, for a caller that never decoded them.
     #[napi(catch_unwind)]
-    pub fn feed_bytes(&mut self, data: Buffer) -> Option<String> {
-        self.inner.as_mut()?.feed(&data)
+    pub fn feed_bytes(&mut self, data: Buffer) -> Option<FeedResult> {
+        feed_result(self.inner.as_mut()?.feed(&data))
     }
 
     #[napi(catch_unwind)]

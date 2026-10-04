@@ -275,12 +275,24 @@ describe('experimental switches', () => {
   it('names the switches a binary was built without', () => {
     vi.stubEnv('VORN_CORE', '')
     resetCoreSelection(() => fakeCore)
-    expect(coreStatus()).toMatchObject({ loaded: true, missing: ['nativeScreen', 'nativeGit'] })
+    expect(coreStatus()).toMatchObject({
+      loaded: true,
+      missing: ['nativeScreen', 'nativeAnalysis', 'nativeGit']
+    })
     class Screen {}
+    // A binary whose `feed` still answers with a cwd string has no usable model.
     resetCoreSelection(() => ({ ...fakeCore, Screen }) as unknown as NativeCore)
-    expect(coreStatus()).toMatchObject({ loaded: true, missing: ['nativeGit'] })
+    expect(coreStatus()).toMatchObject({
+      loaded: true,
+      missing: ['nativeScreen', 'nativeAnalysis', 'nativeGit']
+    })
+    resetCoreSelection(() => ({ ...fakeCore, Screen, SCREEN_API: 2 }) as unknown as NativeCore)
+    expect(coreStatus()).toMatchObject({ loaded: true, missing: ['nativeAnalysis', 'nativeGit'] })
+    class Analyzer {}
     const gitRun = async (): Promise<string> => ''
-    resetCoreSelection(() => ({ ...fakeCore, Screen, gitRun }) as unknown as NativeCore)
+    resetCoreSelection(
+      () => ({ ...fakeCore, Screen, SCREEN_API: 2, Analyzer, gitRun }) as unknown as NativeCore
+    )
     expect(coreStatus()).toMatchObject({ loaded: true, missing: [] })
   })
 })
@@ -292,6 +304,29 @@ describe.runIf(fs.existsSync(builtCore))('vorn_core.node', () => {
     const core = loadNativeCore([builtCore])
     expect(core.hello('test')).toMatch(/^hello test from vorn-core \d+\.\d+\.\d+/)
     expect(core.info().version).toMatch(/^\d+\.\d+\.\d+/)
+  })
+
+  it('analyzes JavaScript strings across the UTF-16 boundary', () => {
+    const core = loadNativeCore([builtCore])
+    const analyzer = new core.Analyzer!()
+    try {
+      analyzer.append('\x1b[32mplain ascii\x1b[0m\r\n', true)
+      analyzer.append('héllo wörld — 日本語 👩‍👩‍👧\n', true)
+      // Whole pairs only: node-pty decodes on character boundaries, and every
+      // batch and flush cut keeps a pair together.
+      analyzer.append('a line ', true)
+      analyzer.append('in 😀 two reads\n', true)
+      analyzer.append('partial', true)
+      expect(analyzer.output()).toEqual([
+        'plain ascii',
+        'héllo wörld — 日本語 👩‍👩‍👧',
+        'a line in 😀 two reads'
+      ])
+      expect(analyzer.partial()).toBe('partial')
+      expect(analyzer.append('\x1b[?2004h> ', true)).toBe(2)
+    } finally {
+      analyzer.free()
+    }
   })
 
   it('parses with libghostty-vt exactly when it reports being built with it', () => {

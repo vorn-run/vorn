@@ -22,6 +22,8 @@ export interface NativeCore {
   Analyzer?: new () => NativeAnalyzer
   /** The screen model, on libghostty-vt. Only present when built with it. */
   Screen?: new (cols: number, rows: number) => NativeScreen
+  /** The shape `Screen.feed` answers in; absent on a binary from before it was an object. */
+  SCREEN_API?: number
   /**
    * Runs one git command off the event loop: answered in-process by gix when it
    * can be answered byte-for-byte as git would, otherwise by `git` on a core
@@ -51,8 +53,12 @@ export interface NativeAnalyzer {
 }
 
 export interface NativeScreen {
-  /** Returns the cwd an OSC 5522 in `data` moved to, for the session record. */
-  feed(data: string): string | null
+  /**
+   * Null when the flush moved no cwd and rang no bell. `cwd` is where an OSC
+   * 5522 moved to, for the session record; `bell` is a real BEL, not one that
+   * ends an OSC.
+   */
+  feed(data: string): { cwd: string | null; bell: boolean } | null
   restoreLabels(title?: string | null, cwd?: string | null): void
   /** Releases the terminal, whose memory V8 does not see, now rather than at GC. */
   free(): void
@@ -191,16 +197,27 @@ export function activeCore(): CoreSelection {
  * A piece of the terminal pipeline that can run on the core, each behind its
  * own switch in Settings › Experimental.
  */
-export type NativeFeature = 'screen' | 'git'
+export type NativeFeature = 'screen' | 'analysis' | 'git'
 
 const FEATURE_FLAGS: Record<NativeFeature, keyof ExperimentalConfig> = {
   screen: 'nativeScreen',
+  analysis: 'nativeAnalysis',
   git: 'nativeGit'
+}
+
+/**
+ * The binary's screen model, when it answers `feed` in the shape this server
+ * reads. An older binary answers with a cwd string, which would read as a model
+ * that never hears a bell, so it counts as having no model rather than guess.
+ */
+export function screenOf(core: NativeCore | null | undefined): NativeCore['Screen'] {
+  return core?.SCREEN_API === 2 ? core.Screen : undefined
 }
 
 /** Whether a loaded binary carries a feature; a build without libghostty-vt has no `Screen`. */
 const FEATURE_EXPORTS: Record<NativeFeature, (core: NativeCore) => boolean> = {
-  screen: (core) => typeof core.Screen === 'function',
+  screen: (core) => screenOf(core) !== undefined,
+  analysis: (core) => typeof core.Analyzer === 'function',
   git: (core) => typeof core.gitRun === 'function'
 }
 

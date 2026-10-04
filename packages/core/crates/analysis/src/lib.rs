@@ -17,6 +17,8 @@
 //!   2000-character window: a line, or the part of one, further back than that
 //!   is not matched even when it is among the last five.
 
+pub mod utf16;
+
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 
@@ -175,7 +177,17 @@ impl Analyzer {
                     continue;
                 }
                 match bytes[i] {
-                    0x1b => self.state = State::Esc,
+                    0x1b => {
+                        // Most escapes are a whole CSI inside the chunk: take it
+                        // in one tight loop. Anything unusual (a control or a
+                        // non-ASCII byte inside it, or the chunk ending first)
+                        // goes the byte-at-a-time way below, which handles it.
+                        if let Some(next) = self.whole_csi(bytes, i) {
+                            i = next;
+                            continue;
+                        }
+                        self.state = State::Esc;
+                    }
                     b'\r' => self.carriage_return(),
                     _ => self.line_feed(),
                 }
@@ -219,6 +231,33 @@ impl Analyzer {
             i += 1;
             self.escape_byte(b);
         }
+    }
+
+    /// `ESC [ params final` starting at `at`, when it is complete in `bytes`
+    /// and made only of printable ASCII: applied, and the index after it
+    /// returned. The same as feeding it byte by byte, without the per-byte
+    /// state dispatch.
+    fn whole_csi(&mut self, bytes: &[u8], at: usize) -> Option<usize> {
+        if bytes.get(at + 1) != Some(&b'[') {
+            return None;
+        }
+        let mut param: u32 = 0;
+        let mut private = false;
+        for (j, &b) in bytes.iter().enumerate().skip(at + 2) {
+            match b {
+                b'0'..=b'9' => param = param.saturating_mul(10).saturating_add(u32::from(b - b'0')),
+                b'?' | b'<' | b'=' | b'>' => private = true,
+                0x20..=0x3f => {}
+                0x40..=0x7e => {
+                    if b == b'K' && !private {
+                        self.erase_in_line(param);
+                    }
+                    return Some(j + 1);
+                }
+                _ => return None,
+            }
+        }
+        None
     }
 
     fn escape_byte(&mut self, b: u8) {
@@ -294,11 +333,8 @@ impl Analyzer {
 
     fn text_run(&mut self, run: &str) {
         self.resolve_cr();
-        let n = if run.is_ascii() {
-            run.len()
-        } else {
-            run.chars().count()
-        };
+        // Characters, counted as the bytes that start one: no decoding.
+        let n = run.bytes().filter(|&b| (b as i8) >= -0x40).count();
         if self.col == self.line_chars {
             self.line.push_str(run);
             self.line_chars += n;
@@ -514,6 +550,50 @@ mod tests {
         }
         let mut a = Analyzer::new();
         a.feed("\x1b[99999999999999K");
+    }
+
+    #[test]
+    fn split_anywhere_reads_the_same() {
+        // The whole-CSI fast path only runs when a sequence is inside one
+        // chunk; fed a byte at a time, everything takes the slow path. Both
+        // must agree, for every mix the fuzz above uses plus real frames.
+        let pieces = [
+            "\x1b[2K",
+            "\x1b[38;5;174m",
+            "\x1b[?25l",
+            "\r",
+            "\n",
+            "é",
+            "😀",
+            "abc",
+            "\x1b[1K",
+            "\x1b[K",
+            "\x1b]0;t\x07",
+            "\x1b[",
+            "5",
+            "K",
+            "\x18",
+            "\x1b",
+        ];
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..500 {
+            let mut text = String::new();
+            for _ in 0..40 {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                text.push_str(pieces[(seed % pieces.len() as u64) as usize]);
+            }
+            let mut whole = Analyzer::new();
+            whole.feed(&text);
+            let mut split = Analyzer::new();
+            let mut buf = [0u8; 4];
+            for ch in text.chars() {
+                split.feed(ch.encode_utf8(&mut buf));
+            }
+            assert_eq!(whole.output(None), split.output(None), "{text:?}");
+            assert_eq!(whole.partial(), split.partial(), "{text:?}");
+        }
     }
 
     #[test]

@@ -1829,6 +1829,8 @@ export interface BranchDeleteResult {
 export interface ExperimentalConfig {
   /** The screen model on libghostty-vt instead of a headless xterm. */
   nativeScreen?: boolean
+  /** Agent status and the output lines MCP reads, analyzed in Rust once per flush. */
+  nativeAnalysis?: boolean
   /**
    * Git on the core, off the server's event loop. Unlike the screen, it applies
    * to the next git command rather than the next terminal.

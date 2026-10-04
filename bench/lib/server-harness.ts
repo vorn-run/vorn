@@ -26,6 +26,7 @@ interface PtyInternals extends Pick<EventEmitter, 'on' | 'off'> {
   sessions: Map<string, TerminalSession>
   ptys: Map<string, ManagedPty>
   appendOutput(id: string, data: string): void
+  flushAnalysis(id: string): void
   bufferData(id: string, data: string): void
   flushBuffer(id: string): void
   drainBuffer(id: string): void
