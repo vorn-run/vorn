@@ -173,3 +173,21 @@ jobs:
             process.dlopen(m, process.argv[1]);
             console.log(m.exports.hello('ci'), m.exports.info());
           " "$file"
+
+      # Started the way the app starts it. Stdin is already closed, so it says
+      # where it listens and then stops at once.
+      - name: Packaged vornd runs
+        shell: bash
+        run: |
+          file=$(find dist -ipath '*/resources/vornd/vornd*' -type f -print -quit)
+          if [ -z "$file" ]; then
+            echo "ERROR: vornd is not in the packaged resources"
+            exit 1
+          fi
+          echo "found $file"
+          out=$("$file" --upstream 127.0.0.1:9 --exit-with-stdin < /dev/null)
+          echo "$out"
+          case "$out" in
+            '{"port":'*) ;;
+            *) echo "ERROR: vornd did not say where it listens"; exit 1 ;;
+          esac

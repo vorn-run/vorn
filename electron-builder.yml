@@ -79,6 +79,13 @@ extraResources:
   # not built the entry is skipped and VORN_CORE=native falls back to js.
   - from: 'packages/core/vorn_core.node'
     to: 'core/vorn_core.node'
+  # vornd, from the same `yarn build:core`. Only one of the two exists on any
+  # platform; the app runs it only when its Experimental switch is on, and goes
+  # straight to the server when the file is not there.
+  - from: 'packages/core/vornd'
+    to: 'vornd/vornd'
+  - from: 'packages/core/vornd.exe'
+    to: 'vornd/vornd.exe'
   # Data, not a native module, so extraResources rather than asarUnpack.
   # idb_companion serves no reflection, so the client cannot discover the
   # schema at runtime — the proto has to ship.

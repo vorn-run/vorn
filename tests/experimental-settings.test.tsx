@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
-import type { AppConfig, CoreStatus } from '../src/shared/types'
+import type { AppConfig, CoreStatus, VorndStatus } from '../src/shared/types'
 
 const mockStore = {
   config: null as AppConfig | null,
@@ -16,15 +16,14 @@ vi.mock('../src/renderer/stores', () => ({
 
 const saveConfig = vi.fn()
 let status: CoreStatus | Error | undefined
+let daemon: VorndStatus | null
 
-Object.defineProperty(window, 'api', {
-  value: {
-    saveConfig: (...a: unknown[]) => saveConfig(...a),
-    getCoreStatus: () =>
-      status instanceof Error ? Promise.reject(status) : Promise.resolve(status)
-  },
-  writable: true
-})
+const api: Record<string, unknown> = {
+  saveConfig: (...a: unknown[]) => saveConfig(...a),
+  getCoreStatus: () => (status instanceof Error ? Promise.reject(status) : Promise.resolve(status)),
+  getVorndStatus: () => Promise.resolve(daemon)
+}
+Object.defineProperty(window, 'api', { value: api, writable: true })
 
 const { ExperimentalSettings } =
   await import('../src/renderer/components/settings/ExperimentalSettings')
@@ -43,6 +42,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockStore.config = config()
   status = core()
+  daemon = { state: 'off' }
+  api.getVorndStatus = () => Promise.resolve(daemon)
 })
 
 describe('ExperimentalSettings', () => {
@@ -162,5 +163,64 @@ describe('ExperimentalSettings', () => {
     expect(await screen.findByText(/can't report on the native core/)).toBeInTheDocument()
     expect(screenSwitch()).toBeDisabled()
     expect(screen.queryByText(/Native core/)).not.toBeInTheDocument()
+  })
+
+  describe('the native daemon switch', () => {
+    const daemonSwitch = (): HTMLElement => screen.getByRole('switch', { name: 'Native daemon' })
+
+    const findDaemonSwitch = (): Promise<HTMLElement> =>
+      screen.findByRole('switch', { name: 'Native daemon' })
+
+    it('is off by default and saves under defaults.experimental', async () => {
+      render(<ExperimentalSettings />)
+      await findDaemonSwitch()
+      await screen.findByText('Native core 0.2.0')
+      expect(daemonSwitch()).toHaveAttribute('aria-checked', 'false')
+      fireEvent.click(daemonSwitch())
+      expect(saveConfig).toHaveBeenCalledWith(config({ vornd: true }))
+    })
+
+    it('stays usable whatever the native core says', async () => {
+      status = core({ loaded: false, version: null, error: 'vorn_core.node not found' })
+      render(<ExperimentalSettings />)
+      await screen.findByText(/not available in this build/)
+      await findDaemonSwitch()
+      expect(screenSwitch()).toBeDisabled()
+      expect(daemonSwitch()).not.toBeDisabled()
+    })
+
+    it('says the switch applies from the next start', async () => {
+      mockStore.config = config({ vornd: true })
+      render(<ExperimentalSettings />)
+      expect(
+        await screen.findByText('Vorn connects through vornd the next time it starts.')
+      ).toBeInTheDocument()
+    })
+
+    it('says nothing more while vornd is in use as asked', async () => {
+      mockStore.config = config({ vornd: true })
+      daemon = { state: 'on', port: 47001 }
+      render(<ExperimentalSettings />)
+      await screen.findByText('Native core 0.2.0')
+      expect(screen.queryByText(/next time it starts/)).not.toBeInTheDocument()
+    })
+
+    it('says why the app went to the server directly', async () => {
+      mockStore.config = config({ vornd: true })
+      daemon = { state: 'failed', detail: 'vornd is not in this build' }
+      render(<ExperimentalSettings />)
+      expect(
+        await screen.findByText(
+          'Vorn is connected to the server directly: vornd is not in this build.'
+        )
+      ).toBeInTheDocument()
+    })
+
+    it('is not shown where the app cannot run vornd', async () => {
+      daemon = null
+      render(<ExperimentalSettings />)
+      await screen.findByText('Native core 0.2.0')
+      expect(screen.queryByRole('switch', { name: 'Native daemon' })).not.toBeInTheDocument()
+    })
   })
 })

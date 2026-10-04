@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../../stores'
-import type { CoreStatus, ExperimentalConfig } from '../../../shared/types'
+import type { CoreStatus, ExperimentalConfig, VorndStatus } from '../../../shared/types'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
@@ -47,6 +47,26 @@ const SWITCHES: {
   }
 ]
 
+/**
+ * The daemon's switch, apart from the rest: the desktop app reads it when it
+ * starts, not the server, so nothing about the core's state locks it.
+ */
+const VORND_SWITCH = {
+  label: 'Native daemon',
+  description:
+    'Connect to the server through vornd, the native daemon, instead of directly. Applies after restarting Vorn'
+}
+
+/** What vornd is doing, when it differs from what the switch says, or null. */
+function vorndNote(on: boolean, status: VorndStatus | null): string | null {
+  if (!status) return null
+  if (status.state === 'failed')
+    return `Vorn is connected to the server directly: ${status.detail}.`
+  if (on && status.state === 'off') return 'Vorn connects through vornd the next time it starts.'
+  if (!on && status.state === 'on') return 'Vorn stops using vornd the next time it starts.'
+  return null
+}
+
 /** What the core's state means for the switches, or null when they work as labelled. */
 function coreNote(status: CoreStatus | 'unavailable' | null): string | null {
   if (!status) return null
@@ -82,6 +102,9 @@ export function ExperimentalSettings() {
   // 'unavailable' for a server older than the method: it never reads the
   // switches either, so they are locked rather than left to look as if they work.
   const [status, setStatus] = useState<CoreStatus | 'unavailable' | null>(null)
+  // Null until it arrives, and for good where vornd cannot run (the browser):
+  // the daemon's row is shown only once there is a status to show it with.
+  const [daemon, setDaemon] = useState<VorndStatus | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -96,6 +119,12 @@ export function ExperimentalSettings() {
           if (!cancelled) setStatus(next ?? 'unavailable')
         })
         .catch(unavailable)
+    void window.api
+      .getVorndStatus?.()
+      .then((next) => {
+        if (!cancelled) setDaemon(next ?? null)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
@@ -105,6 +134,7 @@ export function ExperimentalSettings() {
 
   const flags = config.defaults.experimental ?? {}
   const note = coreNote(status)
+  const daemonNote = vorndNote(flags.vornd === true, daemon)
   const known = status === 'unavailable' ? null : status
   // Locked until the status arrives too: until then the page cannot know
   // whether VORN_CORE overrides a switch or the binary lacks it.
@@ -145,7 +175,21 @@ export function ExperimentalSettings() {
             </SettingRow>
           )
         })}
+        {daemon && (
+          <SettingRow label={VORND_SWITCH.label} description={VORND_SWITCH.description}>
+            <ToggleSwitch
+              checked={flags.vornd === true}
+              onChange={(value) => setFlag('vornd', value)}
+              label={VORND_SWITCH.label}
+            />
+          </SettingRow>
+        )}
       </div>
+      {daemonNote && (
+        <div className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
+          {daemonNote}
+        </div>
+      )}
       {known?.version && (
         <div className="mt-4 text-xs text-gray-500">Native core {known.version}</div>
       )}

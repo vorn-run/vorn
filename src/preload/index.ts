@@ -54,6 +54,7 @@ import {
   InstalledShell,
   WorktreeInventory,
   CoreStatus,
+  VorndStatus,
   WorktreeActionResult,
   BranchDeleteResult,
   ArtifactManifest,
@@ -310,6 +311,9 @@ const api = {
   }): Promise<WorktreeInventory> => ipcRenderer.invoke(IPC.WORKTREE_INVENTORY, params),
 
   getCoreStatus: (): Promise<CoreStatus> => ipcRenderer.invoke(IPC.CORE_STATUS),
+
+  /** Whether the app reaches its server through vornd; null where vornd cannot run. */
+  getVorndStatus: (): Promise<VorndStatus | null> => ipcRenderer.invoke(IPC.VORND_STATUS),
 
   reclaimWorktreeArtifacts: (paths: string[]): Promise<WorktreeActionResult> =>
     ipcRenderer.invoke(IPC.WORKTREE_RECLAIM_ARTIFACTS, { paths }),
