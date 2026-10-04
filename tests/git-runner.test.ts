@@ -1,15 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-
-const binary = vi.hoisted(() => ({
-  loaded: { native: null, error: 'vorn_core.node not found' } as {
-    native: unknown
-    error?: string
-  }
-}))
-
-vi.mock('../packages/server/src/native-core', () => ({
-  nativeBinary: () => binary.loaded
-}))
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const ssh = vi.hoisted(() => ({
   sync: vi.fn((): string => 'sync out'),
@@ -26,60 +15,106 @@ import {
   DEFAULT_MAX_BUFFER,
   gitRunner,
   jsRunner,
-  requestedGitMode,
+  pinnedGitMode,
   resetGitRunner
 } from '../packages/server/src/git-runner'
-import { setExperimentalFlags } from '../packages/server/src/experimental'
-import type { NativeGitRequest } from '../packages/server/src/native-core'
-import type { RemoteHost } from '../packages/shared/src/types'
+import {
+  resetCoreSelection,
+  setExperimentalSource,
+  type NativeCore,
+  type NativeGitRequest
+} from '../packages/server/src/native-core'
+import type { ExperimentalConfig, RemoteHost } from '../packages/shared/src/types'
 
 const host = { id: 'h', hostname: 'box', user: 'dev', port: 22 } as RemoteHost
 
+let flags: ExperimentalConfig = {}
+const setFlags = (next: ExperimentalConfig): void => {
+  flags = next
+}
+
+/** Loads `exports` as the binary would, or fails as a missing build does. */
+function useBinary(exports: Partial<NativeCore> | null): void {
+  resetCoreSelection(() => {
+    if (!exports) throw new Error('vorn_core.node not found')
+    return { info: () => ({ version: '0.0.0-test' }), hello: () => 'hi', ...exports } as NativeCore
+  })
+}
+
+beforeEach(() => {
+  delete process.env.VORN_CORE
+  setExperimentalSource(() => flags)
+  useBinary(null)
+})
+
 afterEach(() => {
   delete process.env.VORN_GIT
-  setExperimentalFlags({})
+  delete process.env.VORN_CORE
+  flags = {}
+  setExperimentalSource(null)
+  resetCoreSelection()
   resetGitRunner()
-  binary.loaded = { native: null, error: 'vorn_core.node not found' }
 })
 
 describe('which path git takes', () => {
   it('is the JS path until the switch is turned on', () => {
-    expect(requestedGitMode({})).toBe('js')
-    setExperimentalFlags({ nativeGit: true })
-    expect(requestedGitMode({})).toBe('native')
-    setExperimentalFlags({ nativeGit: false })
-    expect(requestedGitMode({})).toBe('js')
+    useBinary({ gitRun: vi.fn() })
+    expect(gitRunner()).toBe(jsRunner)
+    setFlags({ nativeGit: true })
+    expect(gitRunner().mode).toBe('native')
+    // Another feature's switch leaves git where it was.
+    setFlags({ nativeScreen: true })
+    expect(gitRunner()).toBe(jsRunner)
   })
 
   it('lets VORN_GIT pin either path over the setting, for a benchmark or a test', () => {
-    setExperimentalFlags({ nativeGit: true })
-    expect(requestedGitMode({ VORN_GIT: 'js' })).toBe('js')
-    setExperimentalFlags({})
-    expect(requestedGitMode({ VORN_GIT: ' Native ' })).toBe('native')
+    expect(pinnedGitMode({ VORN_GIT: ' Native ' })).toBe('native')
+    expect(pinnedGitMode({ VORN_GIT: 'js' })).toBe('js')
     // Anything else is no pin at all, and the setting decides.
-    expect(requestedGitMode({ VORN_GIT: 'rust' })).toBe('js')
+    expect(pinnedGitMode({ VORN_GIT: 'rust' })).toBeNull()
+    expect(pinnedGitMode({})).toBeNull()
+
+    useBinary({ gitRun: vi.fn() })
+    setFlags({ nativeGit: true })
+    process.env.VORN_GIT = 'js'
+    expect(gitRunner()).toBe(jsRunner)
+    setFlags({})
+    process.env.VORN_GIT = 'native'
+    expect(gitRunner().mode).toBe('native')
+  })
+
+  it('follows VORN_CORE when it forces every feature', () => {
+    useBinary({ gitRun: vi.fn() })
+    process.env.VORN_CORE = 'native'
+    expect(gitRunner().mode).toBe('native')
+    process.env.VORN_CORE = 'js'
+    setFlags({ nativeGit: true })
+    expect(gitRunner()).toBe(jsRunner)
   })
 
   it('stays on the JS path when the switch is on but the core cannot load', () => {
-    setExperimentalFlags({ nativeGit: true })
+    setFlags({ nativeGit: true })
+    expect(gitRunner()).toBe(jsRunner)
+    process.env.VORN_GIT = 'native'
     expect(gitRunner()).toBe(jsRunner)
   })
 
   it('stays on the JS path when the loaded core predates gitRun', () => {
-    binary.loaded = { native: { info: () => ({ version: '0.7.4' }) } }
-    setExperimentalFlags({ nativeGit: true })
+    useBinary({})
+    setFlags({ nativeGit: true })
     expect(gitRunner()).toBe(jsRunner)
   })
 
   it('takes effect on the next call, without a restart', async () => {
     const gitRun = vi.fn(async () => 'from rust\n')
-    binary.loaded = { native: { gitRun } }
+    useBinary({ gitRun })
     expect(gitRunner().mode).toBe('js')
-    setExperimentalFlags({ nativeGit: true })
+    setFlags({ nativeGit: true })
     const runner = gitRunner()
     expect(runner.mode).toBe('native')
+    expect(gitRunner()).toBe(runner)
     await expect(runner.local(['status'], '/repo', { timeout: 5000 })).resolves.toBe('from rust\n')
-    setExperimentalFlags({ nativeGit: false })
+    setFlags({ nativeGit: false })
     expect(gitRunner()).toBe(jsRunner)
   })
 })
@@ -87,14 +122,12 @@ describe('which path git takes', () => {
 describe('the native path', () => {
   it('hands the core what execFileSync would have been given', async () => {
     let seen: NativeGitRequest | undefined
-    binary.loaded = {
-      native: {
-        gitRun: async (request: NativeGitRequest) => {
-          seen = request
-          return ''
-        }
+    useBinary({
+      gitRun: async (request: NativeGitRequest) => {
+        seen = request
+        return ''
       }
-    }
+    })
     process.env.VORN_GIT = 'native'
     await gitRunner().local(['diff', '-U3'], '/repo', { timeout: 15000, maxBuffer: 1000 })
     expect(seen).toMatchObject({
@@ -109,27 +142,23 @@ describe('the native path', () => {
 
   it("defaults the output limit to execFileSync's own", async () => {
     let limit: number | undefined
-    binary.loaded = {
-      native: {
-        gitRun: async (request: NativeGitRequest) => {
-          limit = request.maxBuffer
-          return ''
-        }
+    useBinary({
+      gitRun: async (request: NativeGitRequest) => {
+        limit = request.maxBuffer
+        return ''
       }
-    }
+    })
     process.env.VORN_GIT = 'native'
     await gitRunner().local(['status'], '/repo', { timeout: 5000 })
     expect(limit).toBe(DEFAULT_MAX_BUFFER)
   })
 
   it('passes a git failure through as the rejection', async () => {
-    binary.loaded = {
-      native: {
-        gitRun: async () => {
-          throw new Error('Command failed: git checkout nope\nerror: pathspec')
-        }
+    useBinary({
+      gitRun: async () => {
+        throw new Error('Command failed: git checkout nope\nerror: pathspec')
       }
-    }
+    })
     process.env.VORN_GIT = 'native'
     await expect(
       gitRunner().local(['checkout', 'nope'], '/repo', { timeout: 5000 })
@@ -150,7 +179,7 @@ describe('a remote host', () => {
   })
 
   it('goes over async ssh on the native path, since it is a wait rather than work', async () => {
-    binary.loaded = { native: { gitRun: vi.fn() } }
+    useBinary({ gitRun: vi.fn() })
     process.env.VORN_GIT = 'native'
     await expect(gitRunner().remote(host, 'git status', { timeout: 1000 })).resolves.toBe(
       'async out'

@@ -1,8 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import type { RemoteHost } from '@vornrun/shared/types'
-import { experimentalFlag } from './experimental'
 import log from './logger'
-import { nativeBinary, type NativeCore } from './native-core'
+import { coreFor, flaggedCore, type NativeCore } from './native-core'
 import { getSafeEnv, sshExec, sshExecSync } from './process-utils'
 import { resolveExecutable } from './resolve-executable'
 
@@ -14,8 +13,8 @@ import { resolveExecutable } from './resolve-executable'
  * as long as git takes, and every terminal, RPC and client with it. `native`
  * hands the command to the Rust core, which answers it on a thread of its own
  * and resolves the promise when it is done. It is opt-in through Settings ›
- * Experimental (`nativeGit`), or `VORN_GIT=native|js`, which wins over the
- * setting so a benchmark or a test can pin either.
+ * Experimental (`nativeGit`) or `VORN_CORE=native`, and `VORN_GIT=native|js`
+ * wins over both so a benchmark or a test can pin either.
  */
 export type GitMode = 'js' | 'native'
 
@@ -100,13 +99,18 @@ export function nativeRunner(gitRun: GitRun): GitRunner {
   }
 }
 
-export function requestedGitMode(env: NodeJS.ProcessEnv = process.env): GitMode {
+/**
+ * `VORN_GIT`, when it pins a path: it wins over `VORN_CORE` and the switch, so
+ * a benchmark or a test can compare the two on one server. Anything else is no
+ * pin, and the switch decides.
+ */
+export function pinnedGitMode(env: NodeJS.ProcessEnv = process.env): GitMode | null {
   const pinned = env.VORN_GIT?.trim().toLowerCase()
-  if (pinned === 'native' || pinned === 'js') return pinned
-  return experimentalFlag('nativeGit') ? 'native' : 'js'
+  return pinned === 'native' || pinned === 'js' ? pinned : null
 }
 
-let native: GitRunner | null | undefined
+let override: GitRunner | null = null
+let built: { core: NativeCore; runner: GitRunner } | null = null
 let warned = false
 
 /**
@@ -116,23 +120,32 @@ let warned = false
  * missing or stale binary must not cost anyone their diff panel.
  */
 export function gitRunner(): GitRunner {
-  if (requestedGitMode() === 'js') return jsRunner
-  if (native === undefined) {
-    const loaded = nativeBinary()
-    const gitRun = loaded.native?.gitRun
-    native = typeof gitRun === 'function' ? nativeRunner(gitRun.bind(loaded.native)) : null
-    if (!native && !warned) {
-      warned = true
-      log.warn(
-        `[git] staying on js: ${loaded.error ?? 'the loaded vorn core has no gitRun(); rebuild it with `yarn build:core`'}`
-      )
-    }
+  const pinned = pinnedGitMode()
+  if (pinned === 'js') return jsRunner
+  if (override) return override
+  const core = pinned === 'native' ? flaggedCore().native : coreFor('git')
+  if (!core) {
+    if (pinned === 'native') warnOnce(flaggedCore().fallback ?? 'the vorn core did not load')
+    return jsRunner
   }
-  return native ?? jsRunner
+  const gitRun = core.gitRun
+  if (typeof gitRun !== 'function') {
+    warnOnce('the loaded vorn core has no gitRun(); rebuild it with `yarn build:core`')
+    return jsRunner
+  }
+  if (built?.core !== core) built = { core, runner: nativeRunner(gitRun.bind(core)) }
+  return built.runner
 }
 
-/** For tests: forget the loaded runner so the next call resolves it again. */
+function warnOnce(reason: string): void {
+  if (warned) return
+  warned = true
+  log.warn(`[git] staying on js: ${reason}`)
+}
+
+/** For tests: use `next` whenever git is not pinned to JS, or go back to resolving. */
 export function resetGitRunner(next?: GitRunner | null): void {
-  native = next === null ? null : (next ?? undefined)
+  override = next ?? null
+  built = null
   warned = false
 }

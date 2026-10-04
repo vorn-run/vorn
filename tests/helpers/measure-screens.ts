@@ -58,7 +58,10 @@ async function settle(): Promise<void> {
 }
 
 /** Build fifty, measure, release, measure. */
-async function cycle(round: number): Promise<{ held: number; after: number; modelled: number }> {
+async function cycle(
+  round: number,
+  rssBase: number
+): Promise<{ held: number; after: number; modelled: number; heldRss: number; afterRss: number }> {
   await settle()
   const before = process.memoryUsage().heapUsed
 
@@ -72,20 +75,31 @@ async function cycle(round: number): Promise<{ held: number; after: number; mode
 
   await settle()
   const held = process.memoryUsage().heapUsed
+  const heldRss = process.memoryUsage().rss
   const modelled = screenCount()
 
   for (let i = 0; i < SESSIONS; i++) clearScreen(`r${round}s${i}`)
   await settle()
 
-  return { held: held - before, after: process.memoryUsage().heapUsed - before, modelled }
+  return {
+    held: held - before,
+    after: process.memoryUsage().heapUsed - before,
+    modelled,
+    // RSS from before the first cycle: the native model's memory is outside
+    // V8's heap, and only RSS sees it.
+    heldRss: heldRss - rssBase,
+    afterRss: process.memoryUsage().rss - rssBase
+  }
 }
 
 async function main(): Promise<void> {
   // Twice, because one round cannot tell a leak from the heap simply not
   // returning to exactly where it started. A per-session leak accumulates; noise
   // does not.
-  const first = await cycle(1)
-  const second = await cycle(2)
+  await settle()
+  const rssBase = process.memoryUsage().rss
+  const first = await cycle(1, rssBase)
+  const second = await cycle(2, rssBase)
 
   process.stdout.write(
     JSON.stringify({
@@ -96,7 +110,10 @@ async function main(): Promise<void> {
       remaining: screenCount(),
       heldBytes: first.held,
       residualFirst: first.after,
-      residualSecond: second.after
+      residualSecond: second.after,
+      heldRss: first.heldRss,
+      rssAfterFirst: first.afterRss,
+      rssAfterSecond: second.afterRss
     }) + '\n'
   )
 }

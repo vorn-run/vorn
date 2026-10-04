@@ -218,6 +218,7 @@ import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/s
 import log from './logger'
 import { onePerKey } from './one-per-key'
 import { isWorkspaceHeld } from './workspace-holds'
+import { coreStatus } from './native-core'
 
 const copilotInstallations = new Map<string, CopilotHookInstallation>()
 
@@ -1104,6 +1105,7 @@ export function registerAllMethods(): void {
 
   // Config
   registerMethod('config:load', () => configManager.loadConfig())
+  registerMethod('core:status', () => coreStatus())
   registerMethod('config:save', (config) => {
     clearAgentDetectionCache()
     // Read before the write, so a task that changed status can be seen to have.

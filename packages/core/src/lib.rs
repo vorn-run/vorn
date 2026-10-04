@@ -1,9 +1,9 @@
-//! Vorn's native core.
+//! Vorn's native core, as the Node server loads it (`vorn_core.node`).
 //!
-//! The server loads this as `vorn_core.node` when `VORN_CORE=native`. For now it
-//! only proves the boundary: Node can call into Rust, and Rust can drive
-//! libghostty-vt. The screen model, output analysis and flush pipeline land
-//! here in later work packages.
+//! Only adapters live here. The logic is in plain crates under `crates/`
+//! (`vorn-screen`, `vorn-analysis`) with no napi in them, so the same code can
+//! later serve a daemon or the native UI, and its tests and benchmarks link as
+//! ordinary Rust.
 
 use napi_derive::napi;
 
@@ -57,7 +57,7 @@ pub fn parse_title(bytes: napi::bindgen_prelude::Buffer) -> napi::Result<String>
 }
 
 #[cfg(feature = "ghostty")]
-pub(crate) fn to_napi(err: libghostty_vt::Error) -> napi::Error {
+fn to_napi(err: libghostty_vt::Error) -> napi::Error {
     napi::Error::from_reason(format!("libghostty-vt: {err:?}"))
 }
 

@@ -102,17 +102,6 @@ describe('the experimental switches', () => {
     saveConfig(configWith({}))
     expect(loadConfig().defaults.experimental).toBeUndefined()
   })
-
-  it('keep only known switches, and only as booleans', () => {
-    // An older or newer build may have written something this one cannot read;
-    // a string "true" must not turn a native path on.
-    const odd = {
-      nativeGit: 'true',
-      retired: true
-    } as unknown as AppConfig['defaults']['experimental']
-    saveConfig(configWith({ experimental: odd }))
-    expect(loadConfig().defaults.experimental).toEqual({})
-  })
 })
 
 describe('the four keys that were declared but never listed', () => {
@@ -127,6 +116,20 @@ describe('the four keys that were declared but never listed', () => {
     saveConfig(configWith({ [key]: value } as Partial<AppConfig['defaults']>))
 
     expect(loadConfig().defaults[key as keyof AppConfig['defaults']]).toBe(value)
+  })
+
+  it('experimental, which picks the code path for each new terminal', () => {
+    saveConfig(configWith({ experimental: { nativeScreen: true } }))
+    expect(loadConfig().defaults.experimental).toEqual({ nativeScreen: true })
+  })
+
+  it('experimental, keeping only switches that are true or false', () => {
+    const edited = {
+      nativeScreen: 'yes',
+      other: false
+    } as unknown as AppConfig['defaults']['experimental']
+    saveConfig(configWith({ experimental: edited }))
+    expect(loadConfig().defaults.experimental).toEqual({ other: false })
   })
 
   it('worktreeRetention, which the server reads', () => {

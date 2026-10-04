@@ -1456,16 +1456,6 @@ export type ServerUpgradeOutcome =
   | { kind: 'failed'; why: string }
   | { kind: 'working' }
 
-/**
- * Switches in Settings › Experimental. Each one moves a piece of the server onto
- * the Rust core while the code it replaces stays the default; once a switch has
- * been on without trouble it becomes the default and is removed with the old path.
- */
-export interface ExperimentalFlags {
-  /** Run git through the Rust core, off the server's event loop. */
-  nativeGit?: boolean
-}
-
 export interface AppConfig {
   version: number
   /**
@@ -1576,8 +1566,8 @@ export interface AppConfig {
     hasSeededDevServerWorkflow?: boolean
     /** Which worktrees the manager treats as stale, and what counts as build output. */
     worktreeRetention?: WorktreeRetentionConfig
-    /** Native replacements being tried out, each off until turned on in Settings › Experimental. */
-    experimental?: ExperimentalFlags
+    /** Settings › Experimental. Each switch is off until someone turns it on. */
+    experimental?: ExperimentalConfig
   }
   projects: ProjectConfig[]
   agentCommands?: Partial<Record<AiAgentType, AgentCommandConfig>>
@@ -1827,6 +1817,41 @@ export interface BranchDeleteResult {
   failed: { branch: string; error: string }[]
 }
 
+/**
+ * Work in progress that can be tried before it is the default.
+ *
+ * Each switch moves one piece of the terminal pipeline onto the Rust core in
+ * `packages/core`, with the JS path kept beside it. A switch applies to
+ * terminals opened after it changes; ones already open keep what they started
+ * with. `VORN_CORE=native` or `VORN_CORE=js` in the server's environment
+ * overrides all of them.
+ */
+export interface ExperimentalConfig {
+  /** The screen model on libghostty-vt instead of a headless xterm. */
+  nativeScreen?: boolean
+  /**
+   * Git on the core, off the server's event loop. Unlike the screen, it applies
+   * to the next git command rather than the next terminal.
+   */
+  nativeGit?: boolean
+}
+
+/** What `core:status` reports: whether the Rust core can run, and what decides it. */
+export interface CoreStatus {
+  /** Whether `vorn_core.node` loaded. Null when `VORN_CORE=js` keeps it from being tried. */
+  loaded: boolean | null
+  version: string | null
+  /**
+   * Why the core is not in use when it was asked for, or, with `forced: 'js'`,
+   * the `VORN_CORE` value that was not recognized.
+   */
+  error: string | null
+  /** Set when `VORN_CORE` in the server's environment overrides the switches. */
+  forced: 'js' | 'native' | null
+  /** Switches the loaded binary was built without, which stay on JavaScript. */
+  missing: (keyof ExperimentalConfig)[]
+}
+
 /** Retention preferences for the worktree manager. */
 export interface WorktreeRetentionConfig {
   /**
@@ -1896,6 +1921,7 @@ export const IPC = {
   WORKTREE_CONFIRM_CLEANUP: 'worktree:confirmCleanup',
   WORKTREE_ACTIVE_SESSIONS: 'worktree:activeSessions',
   WORKTREE_INVENTORY: 'worktree:inventory',
+  CORE_STATUS: 'core:status',
   WORKTREE_RECLAIM_ARTIFACTS: 'worktree:reclaimArtifacts',
   WORKTREE_REMOVE_MANY: 'worktree:removeMany',
   WORKTREE_PRUNE_ORPHANS: 'worktree:pruneOrphans',

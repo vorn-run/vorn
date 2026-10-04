@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { paletteForeground } from './helpers/screen-parity'
 import { recoverHistory } from '../packages/server/src/history/recovery'
 import {
   historyDir,
@@ -394,7 +395,8 @@ describe('the whole round trip', () => {
     expect(await screenText()).toContain('402 of them')
     expect(await screenText()).toContain('and then some more output')
     // The colour survives, which is the reason none of this stores stripped text.
-    expect((await serializeScreen(ID))?.screen).toContain(`${ESC}[32m`)
+    // Either form of palette green: see PALETTE_AS_256.
+    expect((await serializeScreen(ID))?.screen).toMatch(paletteForeground(2))
     expect(await serializeScreen(ID)).toMatchObject({ cols: 132, rows: 43 })
   })
 

@@ -79,6 +79,24 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
         )
       },
       {
+        key: 'experimental',
+        label: 'Experimental',
+        icon: (
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <path d="M9 3h6" />
+            <path d="M10 3v6L4.5 18.5A1.7 1.7 0 006 21h12a1.7 1.7 0 001.5-2.5L14 9V3" />
+            <path d="M7 15h10" />
+          </svg>
+        )
+      },
+      {
         key: 'notifications',
         label: 'Notifications',
         icon: (
