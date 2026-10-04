@@ -25,8 +25,8 @@ vi.mock('../packages/server/src/extensions/hosts', () => ({ hostByToken: () => u
 vi.mock('../packages/server/src/extensions/selection', () => ({ requestSelection: async () => '' }))
 vi.mock('../packages/server/src/extensions/usage', () => ({ usageFor: () => ({}) }))
 vi.mock('../packages/server/src/git-utils', () => ({
-  getGitDiffText: () => '',
-  getGitStatusPorcelain: () => ''
+  getGitDiffText: async () => '',
+  getGitStatusPorcelain: async () => ''
 }))
 vi.mock('../packages/server/src/pty-manager', () => ({ ptyManager: { getLiveSessions: () => [] } }))
 

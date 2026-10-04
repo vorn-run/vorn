@@ -8,6 +8,7 @@ import type {
   TerminalSession
 } from '@vornrun/shared/types'
 import { remoteHostOf } from '../git-utils'
+import { installedExtensions } from './hosts'
 
 /**
  * Where an extension shows, decided per session.
@@ -24,7 +25,7 @@ export interface ActivationSubject {
   worktreePath: string
   agent: ExtensionAgent
   platform: NodeJS.Platform
-  /** Read lazily: an extension naming no host must not cost a git call. */
+  /** Null when no installed extension names a host, or git could not tell. */
   remoteHost: () => string | null
 }
 
@@ -39,23 +40,35 @@ export interface Activation {
 
 const INACTIVE: Activation = { active: false, panes: [], footers: [], linkHandlers: [] }
 
-/** A session as the rules read it, with the git remote deferred until asked for. */
-export function subjectOf(session: TerminalSession): ActivationSubject {
+/**
+ * A session as the rules read it. Async because a rule may name a git remote,
+ * which takes a git call; that call is made only when one of `packs` has such a
+ * rule, so extensions naming no host still cost none.
+ */
+export async function subjectOf(
+  session: TerminalSession,
+  packs: InstalledConnectorPack[] = installedExtensions()
+): Promise<ActivationSubject> {
   const worktreePath = session.worktreePath ?? session.projectPath
-  let looked = false
-  let host: string | null = null
+  const host = packs.some(namesRemoteHost) ? await remoteHostOf(worktreePath) : null
   return {
     worktreePath,
     agent: session.agentType as ExtensionAgent,
     platform: process.platform,
-    remoteHost: () => {
-      if (!looked) {
-        looked = true
-        host = remoteHostOf(worktreePath)
-      }
-      return host
-    }
+    remoteHost: () => host
   }
+}
+
+function namesRemoteHost(pack: InstalledConnectorPack): boolean {
+  const contributes = pack.contributes
+  return [
+    pack.activates,
+    ...[
+      ...(contributes?.panes ?? []),
+      ...(contributes?.footers ?? []),
+      ...(contributes?.linkHandlers ?? [])
+    ].map((one) => one.when)
+  ].some((predicate) => !!predicate?.remoteHost?.length)
 }
 
 /** A listed path exists under the worktree; `..` and absolutes were refused when the manifest was read. */

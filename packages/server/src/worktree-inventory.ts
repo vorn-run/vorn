@@ -179,19 +179,20 @@ export function assertInsideWorktree(
  * The main worktree is deliberately never returned: it is the project itself,
  * and neither removal nor a build-output sweep belongs there.
  */
-export function findOwningWorktree(
+export async function findOwningWorktree(
   target: string,
   projects: ProjectConfig[],
   resolveRemote: (project: ProjectConfig) => RemoteHost | undefined,
   cache = new Map<string, { path: string; isMain: boolean }[]>()
-): { projectPath: string; worktreePath: string; remote?: RemoteHost } | null {
+): Promise<{ projectPath: string; worktreePath: string; remote?: RemoteHost } | null> {
   for (const project of projects) {
     const remote = resolveRemote(project)
     let listed = cache.get(project.path)
     if (!listed) {
-      listed = gitUtils
-        .listWorktrees(project.path, remote)
-        .map((wt) => ({ path: wt.path, isMain: wt.isMain }))
+      listed = (await gitUtils.listWorktrees(project.path, remote)).map((wt) => ({
+        path: wt.path,
+        isMain: wt.isMain
+      }))
       cache.set(project.path, listed)
     }
     const wanted = canonical(target, remote)
@@ -362,9 +363,9 @@ export function measureWorktree(
  * index is rewritten by any git operation an agent performs, and unlike a file
  * walk it doesn't get reset to "now" by an unrelated `yarn install`.
  */
-function readIndexMtime(worktreePath: string, remote?: RemoteHost): string | null {
+async function readIndexMtime(worktreePath: string, remote?: RemoteHost): Promise<string | null> {
   try {
-    const gitDir = gitUtils.getAbsoluteGitDir(worktreePath, remote)
+    const gitDir = await gitUtils.getAbsoluteGitDir(worktreePath, remote)
     if (!gitDir) return null
     const indexPath = joinPath(gitDir, 'index', remote)
     if (remote) {
@@ -499,13 +500,13 @@ export interface ScanOptions {
 }
 
 /** Branch metadata for a whole repo in one `for-each-ref` call. */
-function readBranchInfo(
+async function readBranchInfo(
   projectPath: string,
   remote?: RemoteHost
-): Map<string, { upstream: string | null; committerDate: string | null }> {
+): Promise<Map<string, { upstream: string | null; committerDate: string | null }>> {
   const info = new Map<string, { upstream: string | null; committerDate: string | null }>()
   try {
-    const out = gitUtils.gitForEachRef(projectPath, remote)
+    const out = await gitUtils.gitForEachRef(projectPath, remote)
     for (const line of out) {
       const [name, upstream, date] = line.split('\t')
       if (!name) continue
@@ -517,13 +518,13 @@ function readBranchInfo(
   return info
 }
 
-function scanProject(
+async function scanProject(
   project: ProjectConfig,
   opts: ScanOptions,
   artifactDirs: string[],
   idleDaysThreshold: number,
   pinned: Set<string>
-): WorktreeProjectInventory {
+): Promise<WorktreeProjectInventory> {
   const remote = opts.resolveRemote(project)
   const remoteHostId = remote ? remote.id : null
   const base: WorktreeProjectInventory = {
@@ -535,19 +536,19 @@ function scanProject(
     staleBranches: []
   }
 
-  if (!remote && !gitUtils.isGitRepo(project.path)) {
+  if (!remote && !(await gitUtils.isGitRepo(project.path))) {
     return { ...base, error: 'not a git repository' }
   }
 
-  const worktrees = gitUtils.listWorktrees(project.path, remote)
+  const worktrees = await gitUtils.listWorktrees(project.path, remote)
   if (worktrees.length === 0) {
     return { ...base, error: 'could not read worktrees' }
   }
 
-  const defaultBranch = gitUtils.getDefaultBranch(project.path, remote)
-  const branchInfo = readBranchInfo(project.path, remote)
+  const defaultBranch = await gitUtils.getDefaultBranch(project.path, remote)
+  const branchInfo = await readBranchInfo(project.path, remote)
   const mergedBranches = defaultBranch
-    ? new Set(gitUtils.listMergedBranches(project.path, defaultBranch, remote))
+    ? new Set(await gitUtils.listMergedBranches(project.path, defaultBranch, remote))
     : new Set<string>()
 
   const entries: WorktreeInventoryEntry[] = []
@@ -601,10 +602,11 @@ function scanProject(
     const size = measureWorktree(wt.path, artifactDirs, remote, opts.refresh)
     const branch = wt.branch && wt.branch !== 'detached' ? wt.branch : null
     const info = branch ? branchInfo.get(branch) : undefined
-    const lastCommitAt = info?.committerDate ?? gitUtils.getLastCommitDate(wt.path, 'HEAD', remote)
-    const lastTouchedAt = readIndexMtime(wt.path, remote)
+    const lastCommitAt =
+      info?.committerDate ?? (await gitUtils.getLastCommitDate(wt.path, 'HEAD', remote))
+    const lastTouchedAt = await readIndexMtime(wt.path, remote)
     const activeSessionIds = opts.getActiveSessions(wt.path)
-    const isDirty = gitUtils.isWorktreeDirty(wt.path, remote)
+    const isDirty = await gitUtils.isWorktreeDirty(wt.path, remote)
     const isMerged = branch ? mergedBranches.has(branch) : false
     const hasUpstream = !!info?.upstream
     const idleDays = daysSince(newest(lastCommitAt, lastTouchedAt))
@@ -768,7 +770,7 @@ export function collectStaleBranches(
   return stale.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export function scanWorktreeInventory(opts: ScanOptions): WorktreeInventory {
+export async function scanWorktreeInventory(opts: ScanOptions): Promise<WorktreeInventory> {
   const artifactDirs = opts.retention?.artifactDirs?.length
     ? opts.retention.artifactDirs
     : DEFAULT_ARTIFACT_DIRS
@@ -787,7 +789,7 @@ export function scanWorktreeInventory(opts: ScanOptions): WorktreeInventory {
     if (seen.has(key)) continue
     seen.add(key)
     try {
-      results.push(scanProject(project, opts, artifactDirs, idleDaysThreshold, pinned))
+      results.push(await scanProject(project, opts, artifactDirs, idleDaysThreshold, pinned))
     } catch (err) {
       log.error({ err, project: project.name }, '[worktree-inventory] project scan failed')
       results.push({
@@ -818,12 +820,13 @@ const EMPTY_RESULT = (): WorktreeActionResult => ({
  * Delete build output inside worktrees without touching git state. The highest
  * value action in the manager and the only one that cannot lose work.
  */
-export function reclaimArtifacts(
+export async function reclaimArtifacts(
   paths: string[],
   artifactDirs: string[],
   projects: ProjectConfig[],
-  resolveRemote: (project: ProjectConfig) => RemoteHost | undefined
-): WorktreeActionResult {
+  resolveRemote: (project: ProjectConfig) => RemoteHost | undefined,
+  assertIdle: (path: string) => void = () => {}
+): Promise<WorktreeActionResult> {
   const result = EMPTY_RESULT()
   const listCache = new Map<string, { path: string; isMain: boolean }[]>()
 
@@ -831,7 +834,7 @@ export function reclaimArtifacts(
     try {
       // Git decides what counts as a worktree — including ones created by hand
       // outside `.vorn-worktrees/`, which hold build output like any other.
-      const owner = findOwningWorktree(worktreePath, projects, resolveRemote, listCache)
+      const owner = await findOwningWorktree(worktreePath, projects, resolveRemote, listCache)
       if (!owner) {
         throw new Error('not a worktree of any known project')
       }
@@ -845,6 +848,9 @@ export function reclaimArtifacts(
         ? duBytes(dirs, remote, DU_TIMEOUT_MS)
         : dirs.reduce((sum, d) => sum + walkBytes(d, new Set()), 0)
 
+      // Again, after the git above: a session can have started here meanwhile.
+      // From this check to the last directory gone nothing else runs.
+      assertIdle(worktreePath)
       for (const dir of dirs) {
         // Each artifact directory is re-checked on its own: `find` follows the
         // worktree's real layout, and a symlinked build dir must not become a
@@ -880,32 +886,39 @@ export interface RemoveItem {
  * unless forced, so a worktree created by hand outside `.vorn-worktrees/` is
  * as safe to remove as one vorn made.
  */
-export function removeWorktrees(
+export async function removeWorktrees(
   items: RemoveItem[],
   sizeOf: (worktreePath: string) => number,
   projects: ProjectConfig[],
-  resolveRemote: (project: ProjectConfig) => RemoteHost | undefined
-): WorktreeActionResult {
+  resolveRemote: (project: ProjectConfig) => RemoteHost | undefined,
+  assertIdle: (path: string) => void = () => {}
+): Promise<WorktreeActionResult> {
   const result = EMPTY_RESULT()
   const listCache = new Map<string, { path: string; isMain: boolean }[]>()
 
   for (const item of items) {
     try {
-      const owner = findOwningWorktree(item.worktreePath, projects, resolveRemote, listCache)
+      const owner = await findOwningWorktree(item.worktreePath, projects, resolveRemote, listCache)
       if (!owner) {
         throw new Error('not a worktree of any known project')
       }
       const remote = owner.remote
       const bytes = sizeOf(item.worktreePath)
-      const branch = item.deleteBranch ? gitUtils.getGitBranch(item.worktreePath, remote) : null
+      const branch = item.deleteBranch
+        ? await gitUtils.getGitBranch(item.worktreePath, remote)
+        : null
 
+      // Again, after the git above, which let other requests run.
+      assertIdle(item.worktreePath)
       // Use the project git resolved, not the one the client claimed.
-      const ok = gitUtils.removeWorktree(
+      const ok = await gitUtils.removeWorktree(
         owner.projectPath,
         item.worktreePath,
         item.force ?? false,
         remote,
-        item.deleteBranch ?? false
+        item.deleteBranch ?? false,
+        // And once more when the removal has the repository's turn.
+        () => assertIdle(item.worktreePath)
       )
       if (!ok) throw new Error('git worktree remove failed')
 
@@ -914,7 +927,7 @@ export function removeWorktrees(
       result.succeeded.push(item.worktreePath)
       // removeWorktree deletes the branch best-effort; report only what is
       // actually gone so the summary can't overstate what happened.
-      if (branch && !gitUtils.listBranches(owner.projectPath, remote).includes(branch)) {
+      if (branch && !(await gitUtils.listBranches(owner.projectPath, remote)).includes(branch)) {
         result.deletedBranches.push(branch)
       }
     } catch (err) {
@@ -928,11 +941,12 @@ export function removeWorktrees(
 }
 
 /** Delete directories git has forgotten. `git worktree remove` can't reach these. */
-export function pruneOrphanDirs(
+export async function pruneOrphanDirs(
   paths: string[],
   sizeOf: (p: string) => number,
-  resolveRemoteByPath: (p: string) => RemoteHost | undefined
-): WorktreeActionResult {
+  resolveRemoteByPath: (p: string) => RemoteHost | undefined,
+  assertIdle: (path: string) => void = () => {}
+): Promise<WorktreeActionResult> {
   const result = EMPTY_RESULT()
 
   for (const target of paths) {
@@ -941,10 +955,12 @@ export function pruneOrphanDirs(
       assertRemovablePath(target, remote)
       // Last line of defence: if git still claims this path, it is a real
       // worktree and must go through `git worktree remove` instead.
-      if (isRegisteredWorktree(target, remote)) {
+      if (await isRegisteredWorktree(target, remote)) {
         throw new Error('still registered with git — remove it as a worktree instead')
       }
       const bytes = sizeOf(target)
+      // Again, after the git above, and nothing runs between this and the delete.
+      assertIdle(target)
       removeDir(target, remote)
       invalidateSizeCache(target)
       result.freedBytes += bytes
@@ -956,9 +972,9 @@ export function pruneOrphanDirs(
   return result
 }
 
-function isRegisteredWorktree(target: string, remote?: RemoteHost): boolean {
+async function isRegisteredWorktree(target: string, remote?: RemoteHost): Promise<boolean> {
   try {
-    return gitUtils.getAbsoluteGitDir(target, remote) !== null
+    return (await gitUtils.getAbsoluteGitDir(target, remote)) !== null
   } catch {
     return false
   }
@@ -969,6 +985,6 @@ export function deleteStaleBranches(
   branches: string[],
   force: boolean,
   remote?: RemoteHost
-): BranchDeleteResult {
+): Promise<BranchDeleteResult> {
   return gitUtils.deleteBranches(projectPath, branches, force, remote)
 }

@@ -46,8 +46,8 @@ vi.mock('../packages/server/src/extensions/usage', () => ({
 }))
 
 vi.mock('../packages/server/src/git-utils', () => ({
-  getGitDiffText: () => 'diff --git a/x b/x\n',
-  getGitStatusPorcelain: () => ' M src/index.ts\n'
+  getGitDiffText: async () => 'diff --git a/x b/x\n',
+  getGitStatusPorcelain: async () => ' M src/index.ts\n'
 }))
 
 vi.mock('../packages/server/src/pty-manager', () => ({

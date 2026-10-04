@@ -277,20 +277,21 @@ describe('experimental switches', () => {
     resetCoreSelection(() => fakeCore)
     expect(coreStatus()).toMatchObject({
       loaded: true,
-      missing: ['nativeScreen', 'nativeAnalysis']
+      missing: ['nativeScreen', 'nativeAnalysis', 'nativeGit']
     })
     class Screen {}
     // A binary whose `feed` still answers with a cwd string has no usable model.
     resetCoreSelection(() => ({ ...fakeCore, Screen }) as unknown as NativeCore)
     expect(coreStatus()).toMatchObject({
       loaded: true,
-      missing: ['nativeScreen', 'nativeAnalysis']
+      missing: ['nativeScreen', 'nativeAnalysis', 'nativeGit']
     })
     resetCoreSelection(() => ({ ...fakeCore, Screen, SCREEN_API: 2 }) as unknown as NativeCore)
-    expect(coreStatus()).toMatchObject({ loaded: true, missing: ['nativeAnalysis'] })
+    expect(coreStatus()).toMatchObject({ loaded: true, missing: ['nativeAnalysis', 'nativeGit'] })
     class Analyzer {}
+    const gitRun = async (): Promise<string> => ''
     resetCoreSelection(
-      () => ({ ...fakeCore, Screen, SCREEN_API: 2, Analyzer }) as unknown as NativeCore
+      () => ({ ...fakeCore, Screen, SCREEN_API: 2, Analyzer, gitRun }) as unknown as NativeCore
     )
     expect(coreStatus()).toMatchObject({ loaded: true, missing: [] })
   })

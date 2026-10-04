@@ -15,7 +15,7 @@ interface AgentHistoryProvider {
   getRecentSessions(scope?: ProjectScope, limit?: number): RecentSession[]
 }
 
-interface ProjectScope {
+export interface ProjectScope {
   rawPaths: string[]
   normalizedPaths: Set<string>
 }
@@ -58,9 +58,17 @@ function buildPathWhereClause(column: string, scope: ProjectScope): string {
   return clauses.length === 1 ? clauses[0] : `(${clauses.join(' OR ')})`
 }
 
-function createProjectScope(projectPath?: string): ProjectScope | undefined {
+/**
+ * A project and its worktrees, the paths an agent may have recorded a session
+ * under. Async for the worktree list; a caller that must not be interleaved
+ * (a resume claiming a transcript) resolves it first and passes it in.
+ */
+export async function projectScope(projectPath?: string): Promise<ProjectScope | undefined> {
   if (!projectPath) return undefined
+  return createProjectScope(projectPath, await listWorktrees(projectPath))
+}
 
+function createProjectScope(projectPath: string, worktrees: { path: string }[]): ProjectScope {
   const normalizedPaths = new Set<string>()
   const rawPaths: string[] = []
   const addPath = (candidatePath: string): void => {
@@ -71,7 +79,7 @@ function createProjectScope(projectPath?: string): ProjectScope | undefined {
   }
 
   addPath(projectPath)
-  for (const worktree of listWorktrees(projectPath)) {
+  for (const worktree of worktrees) {
     addPath(worktree.path)
   }
 
@@ -486,9 +494,12 @@ const providerByAgent: Record<AiAgentType, AgentHistoryProvider> = {
 
 const providers = Object.values(providerByAgent)
 
-export function getRecentSessions(projectPath?: string, limit = 20): RecentSession[] {
+export async function getRecentSessions(
+  projectPath?: string,
+  limit = 20
+): Promise<RecentSession[]> {
   const allSessions: RecentSession[] = []
-  const scope = createProjectScope(projectPath)
+  const scope = await projectScope(projectPath)
 
   for (const provider of providers) {
     allSessions.push(...provider.getRecentSessions(scope, limit))
@@ -500,12 +511,10 @@ export function getRecentSessions(projectPath?: string, limit = 20): RecentSessi
 /** One agent's sessions, unmerged, so a busy agent cannot crowd out a quiet one. */
 export function getRecentSessionsFor(
   agentType: AiAgentType,
-  projectPath?: string,
+  scope?: ProjectScope,
   limit = 20
 ): RecentSession[] {
   const provider = providerByAgent[agentType]
   if (!provider) return []
-  return provider
-    .getRecentSessions(createProjectScope(projectPath), limit)
-    .sort((a, b) => b.timestamp - a.timestamp)
+  return provider.getRecentSessions(scope, limit).sort((a, b) => b.timestamp - a.timestamp)
 }

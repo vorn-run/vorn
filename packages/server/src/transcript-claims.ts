@@ -12,9 +12,42 @@ interface Spawning {
 
 const spawning = new Map<string, Spawning>()
 
+/**
+ * Sessions whose workspace is still being prepared. Preparing waits on git (a
+ * repository's turn, a worktree add of up to 30 s each try), which has no upper
+ * bound the lapse window could cover, and is not the dead spawn the window is
+ * for, so their claims do not lapse until it ends.
+ */
+const preparing = new Map<string, number>()
+
 function evictLapsed(now: number): void {
   for (const [transcriptId, held] of spawning) {
+    if (preparing.has(held.sessionId)) continue
     if (now - held.claimedAt >= SPAWN_WINDOW_MS) spawning.delete(transcriptId)
+  }
+}
+
+/**
+ * Keeps `sessionId`'s claims from lapsing until the returned function is
+ * called, which restarts their window: from then on they wait on the agent's
+ * report, as any claim does. Calling it twice is harmless.
+ */
+export function holdClaimsWhilePreparing(sessionId: string): () => void {
+  preparing.set(sessionId, (preparing.get(sessionId) ?? 0) + 1)
+  let done = false
+  return () => {
+    if (done) return
+    done = true
+    const left = (preparing.get(sessionId) ?? 1) - 1
+    if (left > 0) {
+      preparing.set(sessionId, left)
+      return
+    }
+    preparing.delete(sessionId)
+    const now = Date.now()
+    for (const held of spawning.values()) {
+      if (held.sessionId === sessionId) held.claimedAt = now
+    }
   }
 }
 
@@ -49,4 +82,5 @@ export function spawningTranscripts(): Set<string> {
 
 export function resetTranscriptClaims(): void {
   spawning.clear()
+  preparing.clear()
 }

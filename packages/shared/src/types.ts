@@ -1831,6 +1831,11 @@ export interface ExperimentalConfig {
   nativeScreen?: boolean
   /** Agent status and the output lines MCP reads, analyzed in Rust once per flush. */
   nativeAnalysis?: boolean
+  /**
+   * Git on the core, off the server's event loop. Unlike the screen, it applies
+   * to the next git command rather than the next terminal.
+   */
+  nativeGit?: boolean
 }
 
 /** What `core:status` reports: whether the Rust core can run, and what decides it. */

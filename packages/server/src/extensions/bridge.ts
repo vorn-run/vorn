@@ -107,9 +107,9 @@ async function answer(
   const worktreePath = session.worktreePath ?? session.projectPath
   switch (method) {
     case 'diff':
-      return { result: getGitDiffText(worktreePath) }
+      return { result: await getGitDiffText(worktreePath) }
     case 'status':
-      return { result: getGitStatusPorcelain(worktreePath) }
+      return { result: await getGitStatusPorcelain(worktreePath) }
     case 'output': {
       const asked = typeof body.lines === 'number' ? body.lines : DEFAULT_OUTPUT_LINES
       const lines = Math.min(Math.max(Math.trunc(asked), 1), MAX_OUTPUT_LINES)

@@ -22,6 +22,12 @@ const SWITCHES: { key: keyof ExperimentalConfig; label: string; description: str
     label: 'Native output analysis',
     description:
       'Work out agent status and the output agents read back in Rust, once per flush instead of on every read'
+  },
+  {
+    key: 'nativeGit',
+    label: 'Native git',
+    description:
+      'Run git on the native core, off the main thread, so terminals keep flowing while git works. Applies from the next git command'
   }
 ]
 

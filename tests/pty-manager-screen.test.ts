@@ -103,12 +103,12 @@ vi.mock('../packages/server/src/config-manager', () => ({
 }))
 
 vi.mock('../packages/server/src/git-utils', () => ({
-  getGitBranch: vi.fn(() => 'main'),
-  getGitHead: vi.fn(() => 'cafe0000'),
-  checkoutBranch: vi.fn(),
+  getGitBranch: vi.fn(async () => 'main'),
+  getGitHead: vi.fn(async () => 'cafe0000'),
+  checkoutBranch: vi.fn(async () => {}),
   createWorktree: vi.fn(),
   extractWorktreeName: vi.fn((p: string) => path.basename(p)),
-  isGitRepo: vi.fn(() => false)
+  isGitRepo: vi.fn(async () => false)
 }))
 
 vi.mock('../packages/server/src/shell-integration', () => ({
@@ -146,18 +146,18 @@ import { historyDir, LOG_FILE } from '../packages/server/src/history/checkpoint'
 import { readFrames, type Frame } from '../packages/server/src/history/log'
 import { readScrollback, resetScrollback } from '../packages/server/src/terminal-scrollback'
 
-vi.mocked(isGitRepo).mockReturnValue(false)
+vi.mocked(isGitRepo).mockResolvedValue(false)
 
 function lastPty(): FakePtyInstance {
   const results = spawnMock.mock.results
   return results[results.length - 1].value as FakePtyInstance
 }
 
-function createAgent(overrides: Partial<CreateTerminalPayload> = {}): {
+async function createAgent(overrides: Partial<CreateTerminalPayload> = {}): Promise<{
   session: TerminalSession
   fake: FakePtyInstance
-} {
-  const session = ptyManager.createPty({
+}> {
+  const session = await ptyManager.createPty({
     agentType: 'claude',
     projectName: 'proj',
     projectPath: '/tmp/vorn-proj',
@@ -184,7 +184,7 @@ afterEach(() => {
 
 describe('feeding the screen model never writes to the PTY', () => {
   it('stays silent when a program asks the terminal who it is', async () => {
-    const { fake } = createAgent()
+    const { fake } = await createAgent()
     const before = fake.written.length
 
     // A device-attributes query, a cursor-position report and a mode query --
@@ -196,7 +196,7 @@ describe('feeding the screen model never writes to the PTY', () => {
   })
 
   it('stays silent across a resize, which also makes a terminal talkative', async () => {
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
     fake.emitData('some output')
     await afterFlush()
     const before = fake.written.length
@@ -208,10 +208,10 @@ describe('feeding the screen model never writes to the PTY', () => {
     expect(fake.written.slice(before)).toEqual([])
   })
 
-  it('still delivers what the user actually types', () => {
+  it('still delivers what the user actually types', async () => {
     // The counterpart: silence would be worthless if it meant the PTY heard
     // nothing at all.
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
 
     ptyManager.writeToPty(session.id, 'ls -la\r')
 
@@ -220,8 +220,8 @@ describe('feeding the screen model never writes to the PTY', () => {
 })
 
 describe('the model follows the session it belongs to', () => {
-  it('records the geometry a resize asked for', () => {
-    const { session } = createAgent()
+  it('records the geometry a resize asked for', async () => {
+    const { session } = await createAgent()
 
     ptyManager.resizePty(session.id, 132, 43)
 
@@ -230,22 +230,22 @@ describe('the model follows the session it belongs to', () => {
     expect(live?.rows).toBe(43)
   })
 
-  it('ignores a resize larger than a frame can record', () => {
+  it('ignores a resize larger than a frame can record', async () => {
     // A resize frame stores its dimensions in sixteen bits, so seventy thousand
     // columns would be written to disk as four thousand -- a durable
     // disagreement between what the program rendered against and what a replay
     // lays it out at, re-applied on every start. Refused at the source, where
     // the PTY and the model and the frame all still agree.
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
     ptyManager.resizePty(session.id, 70_000, 40)
 
     expect(fake.resize).not.toHaveBeenCalled()
     expect(ptyManager.getActiveSessions().find((s) => s.id === session.id)?.cols).toBe(80)
   })
 
-  it('ignores a resize that would throw inside node-pty', () => {
+  it('ignores a resize that would throw inside node-pty', async () => {
     // Arrives as a fire-and-forget notification, so a throw here has no caller.
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
 
     expect(() => ptyManager.resizePty(session.id, 0, 0)).not.toThrow()
 
@@ -259,7 +259,7 @@ describe('the model follows the session it belongs to', () => {
     // dispose and every session ever closed stays resident. Counted as a delta
     // rather than an absolute, because other sessions in this file are alive.
     const { screenCount, serializeScreen } = await import('../packages/server/src/terminal-screen')
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
     fake.emitData('output')
     await afterFlush()
     const held = screenCount()
@@ -312,7 +312,7 @@ describe('the terminal is recorded where it is fed', () => {
     // same instant. Those bytes went into its scrollback, arrived again as log
     // frames written after it, and a restore counted them twice.
     resetScrollback()
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
     // The first read after a quiet spell goes out at once; the second is held for the flush.
     fake.emitData('went out at once')
     fake.emitData('printed but not yet flushed')
@@ -343,8 +343,8 @@ describe('the terminal is recorded where it is fed', () => {
       listeners.length = 0
     })
 
-    it('sends a small first read after a quiet spell at once', () => {
-      const { session, fake } = createAgent()
+    it('sends a small first read after a quiet spell at once', async () => {
+      const { session, fake } = await createAgent()
       const seen = flushesOf(session.id)
 
       fake.emitData('k')
@@ -355,7 +355,7 @@ describe('the terminal is recorded where it is fed', () => {
     it('holds a large first read: a repaint is not an echo', async () => {
       // A TUI clears and redraws in reads far bigger than a keystroke; sent alone, the clear
       // would paint a blank frame before the body arrived.
-      const { session, fake } = createAgent()
+      const { session, fake } = await createAgent()
       const seen = flushesOf(session.id)
       const clear = `${ESC}[2J${ESC}[H` + 'x'.repeat(200)
 
@@ -368,7 +368,7 @@ describe('the terminal is recorded where it is fed', () => {
     })
 
     it('holds what follows within the hold, and sends it as one flush', async () => {
-      const { session, fake } = createAgent()
+      const { session, fake } = await createAgent()
       const seen = flushesOf(session.id)
 
       fake.emitData('line 1\n')
@@ -383,7 +383,7 @@ describe('the terminal is recorded where it is fed', () => {
     it('is quick again after a resume drained what was held', async () => {
       // `releaseForResume` drains mid-stream; the timer must go with the drain, or the next
       // read would wait for a flush nothing is going to schedule.
-      const { session, fake } = createAgent()
+      const { session, fake } = await createAgent()
       const seen = flushesOf(session.id)
 
       fake.emitData('a')
@@ -395,7 +395,7 @@ describe('the terminal is recorded where it is fed', () => {
     })
 
     it('is quick again once the stream has gone quiet', async () => {
-      const { session, fake } = createAgent()
+      const { session, fake } = await createAgent()
       const seen = flushesOf(session.id)
 
       fake.emitData('a')
@@ -408,14 +408,14 @@ describe('the terminal is recorded where it is fed', () => {
   })
 
   it('opens a log when a terminal is spawned', async () => {
-    const { session } = createAgent()
+    const { session } = await createAgent()
     await settled()
 
     expect(fs.existsSync(path.join(historyDir(dir, session.id), LOG_FILE))).toBe(true)
   })
 
   it('records what the terminal printed, and the size it printed at', async () => {
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
     fake.emitData('tests passed, 402 of them\r\n')
     await afterFlush()
     ptyManager.resizePty(session.id, 132, 43)
@@ -433,7 +433,7 @@ describe('the terminal is recorded where it is fed', () => {
     // The reason the call sits in `flushBuffer` and not in `onData`: a small first read goes out
     // alone, and the twenty-nine that follow are one frame, not twenty-nine -- one flush more per
     // burst than before, taken so that a keystroke's echo never waits.
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
     for (let i = 0; i < 30; i++) fake.emitData('x')
     await afterFlush()
     await settled()
@@ -446,7 +446,7 @@ describe('the terminal is recorded where it is fed', () => {
   })
 
   it('takes the history with the terminal when it is killed', async () => {
-    const { session } = createAgent()
+    const { session } = await createAgent()
     await settled()
     expect(fs.existsSync(historyDir(dir, session.id))).toBe(true)
 
@@ -467,7 +467,7 @@ describe('the seam between a session and the one resuming it', () => {
     // written when it finally does, by which time the new run is already
     // streaming. Ordering these is the server's job because the server is what
     // orders them.
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
     fake.emitData('what the last run left')
     await afterFlush()
 
@@ -482,7 +482,7 @@ describe('the seam between a session and the one resuming it', () => {
   })
 
   it('never answers it back down the pty, as any injected escape must not', async () => {
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
     const before = fake.written.length
 
     ptyManager.injectOutput(session.id, `${ESC}[!p${ESC}[?1049l`)
@@ -493,7 +493,7 @@ describe('the seam between a session and the one resuming it', () => {
 })
 
 describe('letting go of a session that is about to come back', () => {
-  it('announces nothing, where killing one announces an exit', () => {
+  it('announces nothing, where killing one announces an exit', async () => {
     // Resume used to route through `killPty`, which emits `session-exit` for a
     // session that is returning under the same id and -- when it was the last
     // one in a worktree -- broadcasts WORKTREE_CONFIRM_CLEANUP. That reaches the
@@ -506,12 +506,12 @@ describe('letting go of a session that is about to come back', () => {
     ptyManager.on('client-message', onMessage)
 
     try {
-      const coming_back = createAgent()
+      const coming_back = await createAgent()
       ptyManager.releaseForResume(coming_back.session.id)
       expect(said).toEqual([])
 
       // The contrast, so this cannot pass by nothing being emitted at all.
-      const going = createAgent()
+      const going = await createAgent()
       ptyManager.killPty(going.session.id)
       expect(said).toContain('session-exit')
     } finally {
@@ -520,11 +520,11 @@ describe('letting go of a session that is about to come back', () => {
     }
   })
 
-  it('leaves the history alone, because the run replacing it resets that', () => {
+  it('leaves the history alone, because the run replacing it resets that', async () => {
     // `killPty` calls `stopHistory`, which queues a recursive remove of the very
     // directory `startHistory` resets a few lines later -- two queues over one
     // directory, which the writer is built to never have.
-    const { session } = createAgent()
+    const { session } = await createAgent()
     ptyManager.releaseForResume(session.id)
 
     expect(ptyManager.hasLivePty(session.id)).toBe(false)
@@ -533,13 +533,13 @@ describe('letting go of a session that is about to come back', () => {
 })
 
 describe('a release whose spawn then fails', () => {
-  it('can be put back, because otherwise the session is gone for good', () => {
+  it('can be put back, because otherwise the session is gone for good', async () => {
     // Releasing is destructive on purpose -- it is what lets the replacement
     // take the same id -- but a spawn that throws must not end the session. The
     // carried-over kind is handed back to `restored-sessions`; this is the other
     // kind, whose record lives in the pty manager, and it was released and never
     // put anywhere. The pane's next attempt was told the session was gone.
-    const { session } = createAgent()
+    const { session } = await createAgent()
     ptyManager.releaseForResume(session.id)
     expect(ptyManager.getActiveSessions().some((s) => s.id === session.id)).toBe(false)
 
@@ -550,8 +550,8 @@ describe('a release whose spawn then fails', () => {
     expect(ptyManager.hasLivePty(session.id)).toBe(false)
   })
 
-  it('does not put the id in the order twice', () => {
-    const { session } = createAgent()
+  it('does not put the id in the order twice', async () => {
+    const { session } = await createAgent()
     ptyManager.releaseForResume(session.id)
     ptyManager.restoreReleased(session)
     ptyManager.restoreReleased(session)
