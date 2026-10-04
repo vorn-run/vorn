@@ -11,6 +11,9 @@ import {
   settleHistory,
   historyState,
   resetHistory,
+  noteOutput,
+  noteResize,
+  pipelineLost,
   MAX_LOG_BYTES
 } from '../packages/server/src/history/writer'
 import { recoverHistory } from '../packages/server/src/history/recovery'
@@ -21,7 +24,15 @@ import {
   LOG_FILE
 } from '../packages/server/src/history/checkpoint'
 import type { RecordCursor } from '../packages/shared/src/types'
-import { readHeader, readFrames, type LogRecord } from '../packages/server/src/history/log'
+import {
+  frameData,
+  frameResize,
+  readHeader,
+  readFrames,
+  type LogRecord
+} from '../packages/server/src/history/log'
+import { holdPipeline, releasePipeline } from '../packages/server/src/core-pipeline'
+import type { NativePipeline } from '../packages/server/src/native-core'
 import {
   EPOCH,
   recordSize,
@@ -605,5 +616,65 @@ describe('one session against another', () => {
 
     release?.()
     await settle()
+  })
+})
+
+describe('a terminal on a core thread', () => {
+  /** A stand-in for the thread: it hands over whatever frames it was given. */
+  function thread(take: () => Buffer = () => Buffer.alloc(0)): NativePipeline {
+    const pipeline = {
+      takeFrames: take,
+      cut: async () => ({ frames: Buffer.alloc(0), body: null })
+    } as unknown as NativePipeline
+    holdPipeline(ID, pipeline)
+    return pipeline
+  }
+
+  afterEach(() => {
+    releasePipeline(ID)
+  })
+
+  it('keeps the bookkeeping while the thread frames the records', async () => {
+    begin()
+    const framed: Buffer[] = []
+    thread(() => {
+      const out = Buffer.concat(framed)
+      framed.length = 0
+      return out
+    })
+
+    const first = { rseq: 0, startOffset: 0 }
+    expect(noteOutput(ID, first, 5)).toBe(true)
+    framed.push(frameData(first, Buffer.from('hello')))
+    // Already held, nothing to say, or no one recording: none for the thread.
+    expect(noteOutput(ID, first, 5)).toBe(false)
+    expect(noteOutput(ID, { rseq: 1, startOffset: 5 }, 0)).toBe(false)
+    expect(noteOutput('nobody', first, 5)).toBe(false)
+
+    const resize = { rseq: 1, startOffset: 5 }
+    expect(noteResize(ID, resize)).toBe(true)
+    expect(noteResize(ID, resize)).toBe(false)
+    expect(noteResize('nobody', resize)).toBe(false)
+    framed.push(frameResize(resize, 100, 30))
+    await settle()
+
+    expect(logOf().frames).toEqual<LogRecord[]>([
+      { kind: 'data', rseq: 0, startOffset: 0, stream: 0, data: 'hello' },
+      { kind: 'resize', rseq: 1, startOffset: 5, cols: 100, rows: 30, pxWidth: 0, pxHeight: 0 }
+    ])
+  })
+
+  it('waits for the next checkpoint once the thread is gone', async () => {
+    begin()
+    thread(() => {
+      throw new Error('the thread has stopped')
+    })
+    expect(noteOutput(ID, { rseq: 0, startOffset: 0 }, 3)).toBe(true)
+
+    pipelineLost(ID)
+    pipelineLost(ID)
+    pipelineLost('nobody')
+
+    expect(historyState(ID)?.broken).toBe(true)
   })
 })
