@@ -213,7 +213,8 @@ describe('server integration', () => {
       expect(JSON.parse(first).params.capabilities).toEqual({
         auth: 1,
         subscribe: 1,
-        terminalBytes: 1
+        terminalBytes: 1,
+        terminalResync: 1
       })
       ws.close()
     })
