@@ -20,9 +20,14 @@ const SWITCHES: { key: keyof ExperimentalConfig; label: string; description: str
 ]
 
 /** What the core's state means for the switches, or null when they work as labelled. */
-function coreNote(status: CoreStatus | null): string | null {
+function coreNote(status: CoreStatus | 'unavailable' | null): string | null {
   if (!status) return null
-  if (status.forced === 'js') return 'VORN_CORE=js is set for the server, so every switch is off.'
+  if (status === 'unavailable')
+    return "This server can't report on the native core, so these stay on JavaScript."
+  if (status.forced === 'js')
+    return status.error
+      ? `${status.error} by the server, so every switch is off.`
+      : 'VORN_CORE=js is set for the server, so every switch is off.'
   // Before the forced-native note: a binary that will not load leaves every
   // terminal on JavaScript whatever VORN_CORE asks for.
   if (status.loaded === false) {
@@ -46,17 +51,23 @@ function coreNote(status: CoreStatus | null): string | null {
 export function ExperimentalSettings() {
   const config = useAppStore((s) => s.config)
   const setConfig = useAppStore((s) => s.setConfig)
-  const [status, setStatus] = useState<CoreStatus | null>(null)
+  // 'unavailable' for a server older than the method: it never reads the
+  // switches either, so they are locked rather than left to look as if they work.
+  const [status, setStatus] = useState<CoreStatus | 'unavailable' | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    // Optional for a server older than the method; a rejection leaves no note.
-    void window.api
-      .getCoreStatus?.()
-      .then((next) => {
-        if (!cancelled) setStatus(next)
-      })
-      .catch(() => undefined)
+    const unavailable = (): void => {
+      if (!cancelled) setStatus('unavailable')
+    }
+    if (!window.api.getCoreStatus) unavailable()
+    else
+      void window.api
+        .getCoreStatus()
+        .then((next) => {
+          if (!cancelled) setStatus(next ?? 'unavailable')
+        })
+        .catch(unavailable)
     return () => {
       cancelled = true
     }
@@ -66,7 +77,8 @@ export function ExperimentalSettings() {
 
   const flags = config.defaults.experimental ?? {}
   const note = coreNote(status)
-  const locked = status?.forced != null || status?.loaded === false
+  const known = status === 'unavailable' ? null : status
+  const locked = status === 'unavailable' || known?.forced != null || known?.loaded === false
 
   const setFlag = (key: keyof ExperimentalConfig, value: boolean): void => {
     const updated = {
@@ -90,7 +102,7 @@ export function ExperimentalSettings() {
       )}
       <div className="space-y-1">
         {SWITCHES.map((s) => {
-          const off = locked || status?.missing?.includes(s.key) === true
+          const off = locked || known?.missing?.includes(s.key) === true
           return (
             <SettingRow key={s.key} label={s.label} description={s.description} disabled={off}>
               <ToggleSwitch
@@ -103,8 +115,8 @@ export function ExperimentalSettings() {
           )
         })}
       </div>
-      {status?.version && (
-        <div className="mt-4 text-xs text-gray-500">Native core {status.version}</div>
+      {known?.version && (
+        <div className="mt-4 text-xs text-gray-500">Native core {known.version}</div>
       )}
     </div>
   )

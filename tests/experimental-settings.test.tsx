@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import type { AppConfig, CoreStatus } from '../src/shared/types'
 
@@ -74,7 +74,17 @@ describe('ExperimentalSettings', () => {
   })
 
   it.each([
-    ['VORN_CORE=js', core({ loaded: null, version: null, forced: 'js' }), /every switch is off/],
+    ['VORN_CORE=js', core({ loaded: null, version: null, forced: 'js' }), /VORN_CORE=js is set/],
+    [
+      'an unrecognized VORN_CORE',
+      core({
+        loaded: null,
+        version: null,
+        forced: 'js',
+        error: 'VORN_CORE=rust is not recognized'
+      }),
+      /VORN_CORE=rust is not recognized by the server, so every switch is off/
+    ],
     ['VORN_CORE=native', core({ forced: 'native' }), /every switch is on/],
     [
       'a binary that will not load',
@@ -118,10 +128,11 @@ describe('ExperimentalSettings', () => {
     expect(screen.getByRole('switch', { name: 'Native screen model' })).toBeInTheDocument()
   })
 
-  it('carries on without a note when the status cannot be read', async () => {
+  it('locks the switches when the server cannot report on the core', async () => {
     status = new Error('older server')
     render(<ExperimentalSettings />)
-    await waitFor(() => expect(screenSwitch()).not.toBeDisabled())
+    expect(await screen.findByText(/can't report on the native core/)).toBeInTheDocument()
+    expect(screenSwitch()).toBeDisabled()
     expect(screen.queryByText(/Native core/)).not.toBeInTheDocument()
   })
 })

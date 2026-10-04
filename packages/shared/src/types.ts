@@ -1836,7 +1836,10 @@ export interface CoreStatus {
   /** Whether `vorn_core.node` loaded. Null when `VORN_CORE=js` keeps it from being tried. */
   loaded: boolean | null
   version: string | null
-  /** Why the core is not in use when it was asked for. */
+  /**
+   * Why the core is not in use when it was asked for, or, with `forced: 'js'`,
+   * the `VORN_CORE` value that was not recognized.
+   */
   error: string | null
   /** Set when `VORN_CORE` in the server's environment overrides the switches. */
   forced: 'js' | 'native' | null

@@ -244,7 +244,12 @@ function flagsNow(): ExperimentalConfig | undefined {
  */
 export function coreStatus(): CoreStatus {
   const forced = forcedCoreMode(process.env.VORN_CORE)
-  if (forced === 'js') return { loaded: null, version: null, error: null, forced, missing: [] }
+  if (forced === 'js') {
+    const raw = process.env.VORN_CORE?.trim()
+    // Forced to JS all the same, but the page should name the typo, not claim `js`.
+    const error = requestedCoreMode(raw) === null ? `VORN_CORE=${raw} is not recognized` : null
+    return { loaded: null, version: null, error, forced, missing: [] }
+  }
   const selection = forced === 'native' ? activeCore() : flaggedCore()
   const core = selection.native
   const missing = core

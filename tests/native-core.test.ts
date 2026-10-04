@@ -235,6 +235,12 @@ describe('experimental switches', () => {
       forced: 'js',
       missing: []
     })
+    vi.stubEnv('VORN_CORE', 'rust')
+    expect(coreFor('screen')).toBeNull()
+    expect(coreStatus()).toMatchObject({
+      forced: 'js',
+      error: 'VORN_CORE=rust is not recognized'
+    })
     vi.stubEnv('VORN_CORE', 'native')
     setExperimentalSource(() => ({ nativeScreen: false }))
     expect(coreFor('screen')).toBe(fakeCore)
