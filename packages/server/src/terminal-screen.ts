@@ -68,8 +68,10 @@ export function createScreen(
   clearScreen(id)
   const Pipeline = nativeCore()?.TerminalPipeline
   if (!Pipeline) return
+  let pipeline: NativePipeline | undefined
+  let before = ''
   try {
-    const pipeline: NativePipeline = new Pipeline(cols, rows, (event) => {
+    pipeline = new Pipeline(cols, rows, (event) => {
       // A bell rang in output that was live when it was fed, so it counts
       // even from a pipeline that has gone since: an exit feeds the last
       // flush and frees the pipeline in one turn, and its events reach this
@@ -82,10 +84,20 @@ export function createScreen(
     if (labels) pipeline.restoreLabels(labels.title, labels.cwd)
     // What this terminal printed before it had a pipeline, so the scrollback
     // carries on rather than starting over.
-    const before = takeScrollback(id)
+    before = takeScrollback(id)
     if (before) pipeline.seedScrollback(before)
     holdPipeline(id, pipeline)
   } catch (err) {
+    // Not held yet, so dropping it by id would find nothing: stop its thread
+    // here and give the scrollback back to the terminal.
+    if (pipeline && pipelineFor(id) !== pipeline) {
+      if (before) handBackScrollback(id, before)
+      try {
+        pipeline.free()
+      } catch {
+        // Already stopped.
+      }
+    }
     drop(id, err)
   }
 }

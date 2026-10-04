@@ -81,7 +81,7 @@ import {
   setLaunchDataDir
 } from './process-utils'
 import log from './logger'
-import { activeCore } from './native-core'
+import { activeCore, coreStatus } from './native-core'
 import { appFrameAncestors } from './extensions/frame-ancestors'
 
 /**
@@ -188,9 +188,11 @@ export async function startServer(
   const core = activeCore()
   if (core.native) {
     log.info({ core: core.info }, `[core] native ${core.info?.version}`)
+    const { missing } = coreStatus()
+    if (missing.length) log.warn(`[core] this build of the core has no ${missing.join(', ')}`)
   } else {
     log.error(
-      `[core] the vorn core did not load, so terminals have no screen model or agent status: ${core.error}`
+      `[core] the vorn core did not load, so terminals have no screen model, agent status or terminal output for agents: ${core.error}`
     )
   }
 

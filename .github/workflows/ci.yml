@@ -48,16 +48,19 @@ jobs:
         working-directory: packages/core
         run: rustup toolchain install
 
-      # The same cache the Core workflow fills: target/ holds the Ghostty
-      # checkout and Zig's caches as well as cargo's.
+      # Its own key, so this build-only cache never takes the Core workflow's
+      # slot, but it starts from that one when it has none. target/ holds the
+      # Ghostty checkout and Zig's caches as well as cargo's.
       - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             packages/core/target
-          key: core-${{ runner.os }}-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
-          restore-keys: core-${{ runner.os }}-
+          key: core-ci-${{ runner.os }}-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
+          restore-keys: |
+            core-ci-${{ runner.os }}-
+            core-${{ runner.os }}-
 
       - name: Build the native core
         run: yarn build:core

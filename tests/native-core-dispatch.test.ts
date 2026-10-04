@@ -12,7 +12,7 @@ import type { TerminalSession } from '@vornrun/shared/types'
  * tested in Rust, and against the real binary in `core-pipeline.test.ts`.
  */
 
-const switches = vi.hoisted(() => ({ core: true }))
+const switches = vi.hoisted(() => ({ core: true, failSeed: false }))
 
 const { fakeCore, screens, analyzers } = vi.hoisted(() => {
   const screens: FakePipeline[] = []
@@ -52,6 +52,7 @@ const { fakeCore, screens, analyzers } = vi.hoisted(() => {
       if (cwd) this.cwd = cwd
     }
     seedScrollback(data: string): void {
+      if (switches.failSeed) throw new Error('core fault')
       this.scrollbackSeed = data
     }
     scrollback(): string {
@@ -141,6 +142,11 @@ import {
   setCwdReporter
 } from '../packages/server/src/terminal-screen'
 import { ptyManager } from '../packages/server/src/pty-manager'
+import {
+  appendScrollback,
+  readScrollback,
+  resetScrollback
+} from '../packages/server/src/terminal-scrollback'
 
 interface Internals {
   sessions: Map<string, TerminalSession>
@@ -155,6 +161,8 @@ beforeEach(() => {
   screens.length = 0
   analyzers.length = 0
   switches.core = true
+  switches.failSeed = false
+  resetScrollback()
   setCwdReporter(null)
   setBellReporter(null)
 })
@@ -205,6 +213,15 @@ describe('the screen model on the native core', () => {
     createScreen('f', 80, 24)
     resetScreens()
     expect(screens[0].freed).toBe(true)
+  })
+
+  it('stops a pipeline that fails as it starts, and keeps the scrollback', () => {
+    appendScrollback('seed', 'before')
+    switches.failSeed = true
+    createScreen('seed', 80, 24)
+    expect(hasScreen('seed')).toBe(false)
+    expect(screens[0].freed).toBe(true)
+    expect(readScrollback('seed')).toBe('before')
   })
 
   it('drops the model, not the session, when the core throws', async () => {

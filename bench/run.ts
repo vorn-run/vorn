@@ -11,8 +11,8 @@
  *
  * Runs are interleaved (suite A, B, C, then A, B, C again) rather than batched,
  * so a machine that slows down halfway spreads its drift across every suite
- * instead of landing on one. The acceptance bar for WP0 is every metric within
- * 10% across three runs, read as every run within 10% of the median of the
+ * instead of landing on one. A stable bench has every metric within 10%
+ * across three runs, read as every run within 10% of the median of the
  * runs; `--strict` turns a miss into a failing exit code.
  */
 import { spawnSync, execFileSync } from 'node:child_process'
@@ -339,7 +339,7 @@ function currentCommit(): string {
   return git('status', '--porcelain', '--untracked-files=no') ? `${head}-dirty` : head
 }
 
-/** Keep the numbers in the roadmap doc in step with the committed baseline. */
+/** Keep the numbers in the benchmarks doc in step with the committed baseline. */
 function writeDocTable(record: Baseline, key = platformKey): string | null {
   const doc = path.join(ROOT, 'docs', 'native-core', 'benchmarks.md')
   if (!fs.existsSync(doc)) return null

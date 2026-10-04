@@ -166,7 +166,11 @@ describe('the active core', () => {
       loaded: true,
       version: '0.0.0',
       error: null,
-      missing: ['the screen model', 'agent status', 'git off the main thread']
+      missing: [
+        'the screen model',
+        'agent status and the terminal output agents read',
+        'git off the main thread'
+      ]
     })
     class Analyzer {}
     class TerminalPipeline {}

@@ -68,7 +68,7 @@ describe('ExperimentalSettings', () => {
     render(<ExperimentalSettings />)
     expect(
       await screen.findByText(
-        'The native core did not load, so terminals have no screen model or agent status: vorn_core.node not found'
+        'The native core did not load, so terminals have no screen model, agent status or terminal output for agents: vorn_core.node not found'
       )
     ).toBeInTheDocument()
     expect(screen.queryByText(/Native core \d/)).not.toBeInTheDocument()

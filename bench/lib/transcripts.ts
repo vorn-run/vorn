@@ -1,7 +1,7 @@
 /**
  * The terminal output every suite is timed against.
  *
- * Deterministic: a seeded generator, so a run today and a run after WP3 feed the
+ * Deterministic: a seeded generator, so a run before and after a change feed the
  * same bytes in the same chunks and the comparison means something. Chunk sizes
  * matter as much as content -- `appendOutput` runs once per raw chunk, so the
  * same megabyte costs very different amounts as sixty-byte keystroke echoes or
@@ -52,8 +52,7 @@ const FILES = [
  * place many times a second, with tool calls and their results in between.
  *
  * This is the shape `stripAnsi`'s carriage-return pass and the status regexes
- * were not written for -- most bytes are repaints of one line -- and the one
- * WP3's "at least 20x faster" is judged on.
+ * were not written for -- most bytes are repaints of one line.
  */
 function spinnerFrames(targetBytes: number, seed: number): string[] {
   const rand = rng(seed)
@@ -166,7 +165,7 @@ export const FLUSH_BYTES = 64 * 1024
  * The screen model, the scrollback and history are fed per flush, not per read.
  * How many reads a flush gathers depends on timing; this takes the assumption
  * `tests/helpers/measure-history.ts` already makes -- a hundred reads -- and caps
- * a flush at 64 KB, the cap WP4 introduces, so before and after are fed alike.
+ * a flush at 64 KB, the server's flush cap.
  */
 export function asFlushes(t: Transcript, perFlush = FLUSH_READS, maxBytes = FLUSH_BYTES): string[] {
   const out: string[] = []

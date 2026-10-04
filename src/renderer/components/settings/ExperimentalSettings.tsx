@@ -49,7 +49,7 @@ function olderNote(h: SessionHolder): string {
 function coreNote(status: CoreStatus | null): string | null {
   if (!status) return null
   if (!status.loaded) {
-    return `The native core did not load, so terminals have no screen model or agent status${
+    return `The native core did not load, so terminals have no screen model, agent status or terminal output for agents${
       status.error ? `: ${status.error}` : '.'
     }`
   }

@@ -47,8 +47,6 @@ import { holdOutput, takeOutput, MAX_FLUSH_UNITS, type HeldOutput } from './outp
 import {
   createScreen,
   hasScreen,
-  feedScreen,
-  resizeScreen,
   clearScreen,
   setCwdReporter,
   setBellReporter
@@ -997,8 +995,9 @@ class PtyManager extends EventEmitter {
         }
         return data.length
       }
+      // No pipeline: no core, or its thread stopped. The scrollback and the
+      // history are kept here instead, with no screen model.
       appendScrollback(id, data)
-      const rang = feedScreen(id, data)
       recordOutput(id, at, data)
 
       // The bell, said out loud rather than left for whoever happens to be
@@ -1011,10 +1010,9 @@ class PtyManager extends EventEmitter {
       // exists to remove. Here rather than in `appendOutput`, which returns
       // early for a plain shell -- a shell rings too.
       //
-      // The native screen model says whether a BEL actually rang, which tells
-      // a bell from the BEL that ends every OSC title an agent sets; without
-      // it, any 0x07 counts.
-      if (rang ?? data.includes('\x07')) {
+      // With a pipeline, its screen model tells a bell from the BEL that ends
+      // every OSC title an agent sets; without one, any 0x07 counts.
+      if (data.includes('\x07')) {
         this.emit('client-message', IPC.TERMINAL_BELL, { id })
       }
     }
@@ -1334,7 +1332,6 @@ class PtyManager extends EventEmitter {
       }
       return
     }
-    resizeScreen(id, cols, rows)
     recordResize(id, at, cols, rows)
   }
 

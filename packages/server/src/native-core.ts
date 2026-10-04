@@ -84,7 +84,7 @@ export interface NativePipeline {
 }
 
 export interface NativeGitRequest {
-  /** The git executable, resolved as the child process path resolves it. */
+  /** The git executable, resolved by `gitBin`. */
   bin: string
   args: string[]
   cwd: string
@@ -220,10 +220,14 @@ export function nativeCore(): NativeCore | null {
   return activeCore().native
 }
 
-/** The exports a build without libghostty-vt leaves out, and what is missing without them. */
+/**
+ * The exports the server uses beyond `info` and `hello`, and what is missing
+ * without them. A build without libghostty-vt has no `TerminalPipeline`; the
+ * others are absent only from a binary older than the server.
+ */
 const OPTIONAL_EXPORTS: Array<[keyof NativeCore, string]> = [
   ['TerminalPipeline', 'the screen model'],
-  ['Analyzer', 'agent status'],
+  ['Analyzer', 'agent status and the terminal output agents read'],
   ['gitRun', 'git off the main thread']
 ]
 
