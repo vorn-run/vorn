@@ -252,7 +252,8 @@ export function screenOf(core: NativeCore | null | undefined): NativeCore['Scree
 /** Whether a loaded binary carries a feature; a build without libghostty-vt has no `Screen`. */
 const FEATURE_EXPORTS: Record<NativeFeature, (core: NativeCore) => boolean> = {
   screen: (core) => screenOf(core) !== undefined,
-  analysis: (core) => typeof core.Analyzer === 'function'
+  analysis: (core) => typeof core.Analyzer === 'function',
+  pipeline: (core) => typeof core.TerminalPipeline === 'function'
 }
 
 type FlagSource = () => ExperimentalConfig | undefined

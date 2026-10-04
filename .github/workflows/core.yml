@@ -16,6 +16,8 @@ on:
       - 'tests/terminal-screen-memory.process.test.ts'
       - 'tests/helpers/measure-screens.ts'
       - 'tests/helpers/screen-parity.ts'
+      - 'packages/server/src/core-pipeline.ts'
+      - 'tests/core-pipeline.test.ts'
       - 'electron-builder.yml'
       - 'package.json'
       - 'yarn.lock'
