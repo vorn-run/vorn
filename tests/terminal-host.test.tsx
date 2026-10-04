@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, cleanup, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 
-const hoisted = vi.hoisted(() => ({
-  setHostRoot: vi.fn(),
-  syncTerminalOverlay: vi.fn(),
-  getRegisteredTerminalIds: vi.fn().mockReturnValue([]),
-  onRegistryChange: vi.fn().mockReturnValue(() => {}),
-  TERMINAL_ID_ATTR: 'data-terminal-id'
-}))
+const hoisted = vi.hoisted(() => {
+  const stopSync = vi.fn()
+  return {
+    setHostRoot: vi.fn(),
+    stopSync,
+    startTerminalOverlaySync: vi.fn(() => stopSync),
+    TERMINAL_ID_ATTR: 'data-terminal-id'
+  }
+})
 
 vi.mock('../src/renderer/lib/terminal-registry', () => hoisted)
 
@@ -22,29 +24,9 @@ vi.mock('../src/renderer/components/TerminalContextMenu', () => ({
 import { TerminalHost } from '../src/renderer/components/TerminalHost'
 
 describe('TerminalHost', () => {
-  let rafCallbacks: Array<(time: number) => void> = []
-  let nextRafId = 1
-
-  beforeEach(() => {
-    rafCallbacks = []
-    nextRafId = 1
-    vi.stubGlobal(
-      'requestAnimationFrame',
-      vi.fn((cb: (time: number) => void) => {
-        rafCallbacks.push(cb)
-        return nextRafId++
-      })
-    )
-    vi.stubGlobal(
-      'cancelAnimationFrame',
-      vi.fn(() => {})
-    )
-  })
-
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
-    vi.unstubAllGlobals()
   })
 
   it('sets the host root on mount and clears it on unmount', () => {
@@ -62,28 +44,13 @@ describe('TerminalHost', () => {
     expect(root.className).toContain('pointer-events-none')
   })
 
-  it('subscribes to registry changes and re-syncs all terminals on fire', () => {
-    hoisted.getRegisteredTerminalIds.mockReturnValue(['t1', 't2'])
-    let captured: (() => void) | null = null
-    hoisted.onRegistryChange.mockImplementation((cb: () => void) => {
-      captured = cb
-      return () => {}
-    })
-    render(<TerminalHost />)
-    expect(captured).not.toBeNull()
-    hoisted.syncTerminalOverlay.mockClear()
-    captured!()
-    expect(hoisted.syncTerminalOverlay).toHaveBeenCalledWith('t1')
-    expect(hoisted.syncTerminalOverlay).toHaveBeenCalledWith('t2')
-  })
-
-  it('starts a rAF loop that calls syncTerminalOverlay for each registered id', () => {
-    hoisted.getRegisteredTerminalIds.mockReturnValue(['alpha'])
-    render(<TerminalHost />)
-    expect(rafCallbacks.length).toBeGreaterThan(0)
-    hoisted.syncTerminalOverlay.mockClear()
-    rafCallbacks[0](0)
-    expect(hoisted.syncTerminalOverlay).toHaveBeenCalledWith('alpha')
+  it('keeps the wrappers on their slots from mount to unmount', () => {
+    const { unmount } = render(<TerminalHost />)
+    const root = hoisted.setHostRoot.mock.calls[0][0]
+    expect(hoisted.startTerminalOverlaySync).toHaveBeenCalledWith(root)
+    expect(hoisted.stopSync).not.toHaveBeenCalled()
+    unmount()
+    expect(hoisted.stopSync).toHaveBeenCalledTimes(1)
   })
 
   it('opens the context menu on right-click and closes it via onClose', () => {
