@@ -36,6 +36,32 @@ jobs:
       - name: Install dependencies
         run: yarn install
 
+      # The server runs its terminals on the Rust core, so the tests need
+      # vorn_core.node. libghostty-vt-sys builds Ghostty's VT library with Zig,
+      # and the Ghostty commit it pins refuses any Zig but 0.15.2.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+
+      # The version comes from packages/core/rust-toolchain.toml.
+      - name: Rust toolchain
+        working-directory: packages/core
+        run: rustup toolchain install
+
+      # The same cache the Core workflow fills: target/ holds the Ghostty
+      # checkout and Zig's caches as well as cargo's.
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/core/target
+          key: core-${{ runner.os }}-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
+          restore-keys: core-${{ runner.os }}-
+
+      - name: Build the native core
+        run: yarn build:core
+
       - name: Typecheck
         run: yarn typecheck
 

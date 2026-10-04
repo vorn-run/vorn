@@ -492,7 +492,7 @@ describe('the whole round trip', () => {
     }
     // Both halves, the way `resizePty` does it: the model follows the program
     // and the record says that it did.
-    await resizeScreen(ID, 132, 43)
+    resizeScreen(ID, 132, 43)
     recordSize(ID, 132, 43)
     await flushHistory()
 

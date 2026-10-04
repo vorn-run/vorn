@@ -27,7 +27,11 @@ function callArgs(): string[][] {
   return mockExecFileSync.mock.calls.map((c) => c[1] as string[])
 }
 
+import { resetGitRunner } from '../packages/server/src/git-runner'
+import { syncGitRunner } from './helpers/sync-git-runner'
+
 beforeEach(() => {
+  resetGitRunner(syncGitRunner)
   vi.clearAllMocks()
   mockExecFileSync.mockReturnValue('' as never)
 })

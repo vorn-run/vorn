@@ -1,18 +1,14 @@
 /**
- * Hotspot 2: the second VT parse, in the headless xterm behind every PTY.
+ * Hotspot 2: the server's VT parse, in the screen model behind every PTY.
  *
- * Every flush is written into an `@xterm/headless` terminal whose only consumer
- * is the history checkpoint (`terminal-screen.ts`). The client parses the same
- * bytes again to draw them. WP2 replaces this with libghostty-vt in the core.
+ * Every flush is parsed by libghostty-vt on the terminal's own thread
+ * (`terminal-screen.ts`). The client parses the same bytes again to draw them.
  *
- * Timed to the drain: xterm parses on a macrotask, so the clock stops when the
- * parse has actually happened, not when the writes were queued. Each sample is at
- * least 200 ms of parsing, so the 1 ms timer gaps xterm yields with between
- * slices are a small, steady share of it.
+ * Timed to the drain: the thread parses after the write returns, so the clock
+ * stops when a serialize, which waits for everything fed before it, comes back.
  */
 import {
   createScreen,
-  drainScreen,
   feedScreen,
   hasScreen,
   serializeScreen,
@@ -41,8 +37,8 @@ async function main(): Promise<void> {
         createScreen(id, COLS, ROWS)
         const elapsed = await timeAsync(async () => {
           for (const f of flushes) feedScreen(id, f)
-          // Drain only: serialization is measured on its own below.
-          await drainScreen(id)
+          // Waits for the parse; one serialize is small beside a megabyte of it.
+          await serializeScreen(id)
         })
         // A core fault drops the model, which would time as a fast no-op.
         if (!hasScreen(id)) throw new Error(`screen model for ${t.name} was dropped mid-run`)
@@ -54,7 +50,7 @@ async function main(): Promise<void> {
     metrics[`parse.${t.name}`] = metric(
       round(parse / mb),
       'ms/MB',
-      `headless xterm parse to drain, ${t.name}, fed per flush`
+      `screen model parse to drain, ${t.name}, fed per flush`
     )
   }
 

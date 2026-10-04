@@ -106,7 +106,11 @@ function route(bin: string, args: string[]): string {
 
 let currentCwd = ''
 
+import { resetGitRunner } from '../packages/server/src/git-runner'
+import { syncGitRunner } from './helpers/sync-git-runner'
+
 beforeEach(() => {
+  resetGitRunner(syncGitRunner)
   vi.clearAllMocks()
   invalidateSizeCache()
   shellCalls = []

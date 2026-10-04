@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest'
 import {
   selectCore,
   resetCoreSelection,
-  setExperimentalSource,
   type NativeCore,
   type PipelineEvent
 } from '../packages/server/src/native-core'
@@ -34,7 +33,7 @@ import {
 } from '../packages/server/src/terminal-scrollback'
 
 /**
- * Settings › Experimental › terminal output on a core thread.
+ * Terminal output on a core thread.
  *
  * The thread's own behaviour -- ordering, the ring, the frame layout -- is
  * tested in Rust (`crates/pipeline`). What only a test from this side can say
@@ -47,14 +46,13 @@ import {
  * building one.
  */
 
-const core: NativeCore | null = selectCore({ env: { VORN_CORE: 'native' } }).native
+const core: NativeCore | null = selectCore().native
 
 const ID = 'piped'
 const EPOCH = 7
 
 afterEach(() => {
   setBellReporter(null)
-  setExperimentalSource(null)
   resetCoreSelection()
   resetScreens()
   resetScrollback()
@@ -152,14 +150,8 @@ describe.runIf(core?.TerminalPipeline !== undefined)('a terminal on a core threa
   })
 })
 
-describe.runIf(core?.TerminalPipeline !== undefined)('the server, with the switch on', () => {
-  function on(): void {
-    resetCoreSelection()
-    setExperimentalSource(() => ({ nativePipeline: true }))
-  }
-
+describe.runIf(core?.TerminalPipeline !== undefined)('the server', () => {
   it('gives a new terminal a pipeline, and carries on its scrollback', () => {
-    on()
     appendScrollback(ID, 'printed before it had one\r\n')
     createScreen(ID, 80, 24)
 
@@ -169,7 +161,6 @@ describe.runIf(core?.TerminalPipeline !== undefined)('the server, with the switc
   })
 
   it('keeps the scrollback when the pipeline goes, for a session resumed under the id', () => {
-    on()
     createScreen(ID, 80, 24)
     seedScrollback(ID, 'what it showed')
     clearScreen(ID)
@@ -179,7 +170,6 @@ describe.runIf(core?.TerminalPipeline !== undefined)('the server, with the switc
   })
 
   it('reports a bell through the reporter, after the flush', async () => {
-    on()
     const rang: string[] = []
     setBellReporter((id) => rang.push(id))
     createScreen(ID, 80, 24)
@@ -192,7 +182,6 @@ describe.runIf(core?.TerminalPipeline !== undefined)('the server, with the switc
   })
 
   it('reports a bell fed just before the terminal went', async () => {
-    on()
     const rang: string[] = []
     setBellReporter((id) => rang.push(id))
     createScreen(ID, 80, 24)
@@ -205,7 +194,6 @@ describe.runIf(core?.TerminalPipeline !== undefined)('the server, with the switc
   })
 
   it('rings no bell for a replay, which rang when it was live', async () => {
-    on()
     const rang: string[] = []
     setBellReporter((id) => rang.push(id))
     createScreen(ID, 80, 24)
@@ -218,7 +206,6 @@ describe.runIf(core?.TerminalPipeline !== undefined)('the server, with the switc
   })
 
   it('parses a replay into the screen without keeping it as scrollback', async () => {
-    on()
     createScreen(ID, 80, 24)
     feedScreen(ID, 'replayed screen')
 

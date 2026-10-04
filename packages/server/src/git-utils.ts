@@ -2,17 +2,15 @@ import path from 'node:path'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
 import type { RemoteHost, GitFileDiff } from '@vornrun/shared/types'
-import { promisify } from 'node:util'
-import { execFile } from 'node:child_process'
-import { getSafeEnv, shellEscape } from './process-utils'
-import { gitBin, gitRunner } from './git-runner'
+import { shellEscape } from './process-utils'
+import { gitRunner } from './git-runner'
 
 /**
  * Run a git command locally or via SSH depending on whether a remote host is provided.
  * For remote: `cd <cwd> && git <args>`
  *
- * Which runner does it is `gitRunner()`'s choice: the JS path blocks the event
- * loop as it always did, the native one does not. Either way the answer is trimmed.
+ * Which runner does it is `gitRunner()`'s choice; neither blocks the event
+ * loop. Either way the answer is trimmed.
  */
 async function gitExec(
   args: string[],
@@ -32,10 +30,10 @@ async function gitExec(
 }
 
 /**
- * One mutation at a time per repository. On the JS path every git call blocked,
- * so a commit's `add` and `commit` could never have another request's git
- * between them; on the native path they can, so the commands that change a
- * repository take turns here. Reads do not: they see one state or the next.
+ * One mutation at a time per repository. Git runs off the event loop, so a
+ * commit's `add` and `commit` could have another request's git between them;
+ * the commands that change a repository take turns here. Reads do not: they
+ * see one state or the next.
  */
 const turns = new Map<string, Promise<unknown>>()
 
@@ -128,23 +126,10 @@ function branchOrNull(raw: string | null): string | null {
   return raw && raw !== 'HEAD' ? raw : null
 }
 
-/**
- * `git rev-parse` without blocking the event loop on either path; null when git
- * says no. The JS path's runner blocks, so it keeps the async child process
- * these two always had.
- */
+/** `git rev-parse`; null when git says no. */
 async function gitRevParse(args: string[], cwd: string): Promise<string | null> {
   try {
-    if (gitRunner().mode === 'native') {
-      return (await gitExec(['rev-parse', ...args], cwd, { timeout: 3000 })) || null
-    }
-    const { stdout } = await promisify(execFile)(gitBin(), ['rev-parse', ...args], {
-      cwd,
-      encoding: 'utf-8',
-      env: getSafeEnv(),
-      timeout: 3000
-    })
-    return String(stdout).trim() || null
+    return (await gitExec(['rev-parse', ...args], cwd, { timeout: 3000 })) || null
   } catch {
     return null
   }

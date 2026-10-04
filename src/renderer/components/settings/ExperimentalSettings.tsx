@@ -12,57 +12,8 @@ import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
 
 /**
- * One switch per piece of the terminal pipeline that has moved onto the Rust
- * core. A row is added here when its work package lands, and removed when the
- * native path becomes the only one.
- */
-const SWITCHES: {
-  key: keyof ExperimentalConfig
-  label: string
-  description: string
-  /** Runs on the Rust core, so it is locked whenever the core is. */
-  core: boolean
-}[] = [
-  {
-    key: 'nativeScreen',
-    label: 'Native screen model',
-    description:
-      "Keep each terminal's screen in Ghostty's engine instead of a second xterm, for history and restore",
-    core: true
-  },
-  {
-    key: 'nativeAnalysis',
-    label: 'Native output analysis',
-    description:
-      'Work out agent status and the output agents read back in Rust, once per flush instead of on every read',
-    core: true
-  },
-  {
-    key: 'nativeGit',
-    label: 'Native git',
-    description:
-      'Run git on the native core, off the main thread, so terminals keep flowing while git works. Applies from the next git command',
-    core: true
-  },
-  {
-    key: 'nativePipeline',
-    label: 'Terminal output on a core thread',
-    description:
-      "Parse each terminal's screen, keep its scrollback and frame its history on a thread of its own, so a flood of output does not slow the app. Uses the native screen model.",
-    core: true
-  },
-  {
-    key: 'deviceVideo',
-    label: 'Device video',
-    description:
-      "Stream a simulator's screen to its pane as video instead of polling for pictures. Falls back to pictures when video can't play",
-    core: false
-  }
-]
-
-/**
- * The daemon's switch, apart from the rest: the desktop app reads it when it
- * starts, not the server, so nothing about the core's state locks it.
+ * The daemon's switch. The desktop app reads it when it starts, not the
+ * server, so it is shown only where vornd can run.
  */
 const VORND_SWITCH = {
   label: 'Native daemon',
@@ -94,41 +45,25 @@ function olderNote(h: SessionHolder): string {
     : `${held} ${verb} on a session holder (${h.build}) this version cannot talk to. They keep running until you end them.`
 }
 
-/** What the core's state means for the switches, or null when they work as labelled. */
-function coreNote(status: CoreStatus | 'unavailable' | null): string | null {
+/** What is missing when the server runs without all of the native core, or null. */
+function coreNote(status: CoreStatus | null): string | null {
   if (!status) return null
-  if (status === 'unavailable')
-    return "This server can't report on the native core, so the native core switches stay on JavaScript."
-  if (status.forced === 'js')
-    return status.error
-      ? `${status.error} by the server, so every native core switch is off.`
-      : 'VORN_CORE=js is set for the server, so every native core switch is off.'
-  // Before the forced-native note: a binary that will not load leaves every
-  // terminal on JavaScript whatever VORN_CORE asks for.
-  if (status.loaded === false) {
-    return `The native core is not available in this build, so the native core switches stay on JavaScript${
+  if (!status.loaded) {
+    return `The native core did not load, so terminals have no screen model or agent status${
       status.error ? `: ${status.error}` : '.'
     }`
   }
-  // Before the forced-native note too: VORN_CORE=native cannot turn on what the
-  // binary was built without.
-  if (status.missing?.length) {
-    const names = SWITCHES.filter((s) => status.missing.includes(s.key)).map((s) => s.label)
-    return `This build of the native core does not include ${names.join(', ')}, so ${
-      names.length === 1 ? 'that stays' : 'those stay'
-    } on JavaScript${status.forced === 'native' ? ', even with VORN_CORE=native set' : ''}.`
+  if (status.missing.length) {
+    return `This build of the native core was made without ${status.missing.join(', ')}.`
   }
-  if (status.forced === 'native')
-    return 'VORN_CORE=native is set for the server, so every native core switch is on.'
   return null
 }
 
 export function ExperimentalSettings() {
   const config = useAppStore((s) => s.config)
   const setConfig = useAppStore((s) => s.setConfig)
-  // 'unavailable' for a server older than the method: it never reads the
-  // switches either, so they are locked rather than left to look as if they work.
-  const [status, setStatus] = useState<CoreStatus | 'unavailable' | null>(null)
+  // Null until it arrives, and for a server older than the method.
+  const [status, setStatus] = useState<CoreStatus | null>(null)
   // Null until it arrives, and for good where vornd cannot run (the browser):
   // the daemon's row is shown only once there is a status to show it with.
   const [daemon, setDaemon] = useState<VorndStatus | null>(null)
@@ -146,17 +81,12 @@ export function ExperimentalSettings() {
 
   useEffect(() => {
     let cancelled = false
-    const unavailable = (): void => {
-      if (!cancelled) setStatus('unavailable')
-    }
-    if (!window.api.getCoreStatus) unavailable()
-    else
-      void window.api
-        .getCoreStatus()
-        .then((next) => {
-          if (!cancelled) setStatus(next ?? 'unavailable')
-        })
-        .catch(unavailable)
+    void window.api
+      .getCoreStatus?.()
+      .then((next) => {
+        if (!cancelled) setStatus(next ?? null)
+      })
+      .catch(() => {})
     void window.api
       .getVorndStatus?.()
       .then((next) => {
@@ -175,11 +105,6 @@ export function ExperimentalSettings() {
   const flags = config.defaults.experimental ?? {}
   const note = coreNote(status)
   const daemonNote = vorndNote(flags.vornd === true, daemon)
-  const known = status === 'unavailable' ? null : status
-  // Locked until the status arrives too: until then the page cannot know
-  // whether VORN_CORE overrides a switch or the binary lacks it.
-  const locked =
-    status === null || status === 'unavailable' || known?.forced != null || known?.loaded === false
 
   const endHolder = (h: SessionHolder): void => {
     const count = h.sessions === null ? 'the sessions' : plural(h.sessions, 'session', 'sessions')
@@ -206,7 +131,7 @@ export function ExperimentalSettings() {
     <div>
       <SettingsPageHeader
         title="Experimental"
-        description="Work in progress you can try before it is the default. Terminal switches apply to terminals opened after you change them."
+        description="Work in progress you can try before it is the default."
       />
       {note && (
         <div className="mb-4 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
@@ -214,19 +139,6 @@ export function ExperimentalSettings() {
         </div>
       )}
       <div className="space-y-1">
-        {SWITCHES.map((s) => {
-          const off = s.core && (locked || known?.missing?.includes(s.key) === true)
-          return (
-            <SettingRow key={s.key} label={s.label} description={s.description} disabled={off}>
-              <ToggleSwitch
-                checked={flags[s.key] === true}
-                onChange={(value) => setFlag(s.key, value)}
-                disabled={off}
-                label={s.label}
-              />
-            </SettingRow>
-          )
-        })}
         {daemon && (
           <SettingRow label={VORND_SWITCH.label} description={VORND_SWITCH.description}>
             <ToggleSwitch
@@ -265,8 +177,8 @@ export function ExperimentalSettings() {
           </div>
         ))}
       {endFailure && <div className="mt-2 text-xs text-red-400">{endFailure}</div>}
-      {known?.version && (
-        <div className="mt-4 text-xs text-gray-500">Native core {known.version}</div>
+      {status?.version && (
+        <div className="mt-4 text-xs text-gray-500">Native core {status.version}</div>
       )}
     </div>
   )

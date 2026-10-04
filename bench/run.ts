@@ -7,7 +7,6 @@
  *   yarn bench --runs=5             more runs
  *   yarn bench --quick              one short run, a smoke check rather than a number
  *   yarn bench --save               write the baseline for this platform and the doc table
- *                                   (with VORN_CORE=native, its own baseline and no table)
  *   yarn bench --max-regression=10  fail when a metric is more than 10% worse than the baseline
  *
  * Runs are interleaved (suite A, B, C, then A, B, C again) rather than batched,
@@ -35,7 +34,7 @@ const SUITES = [
 ]
 /**
  * Processes per run, for suites whose numbers move between processes more than
- * within one: the regex-heavy analysis and the xterm parse land up to 15% apart
+ * within one: the output analysis and the screen parse land up to 15% apart
  * from one process to the next on the same machine, and event-loop percentiles
  * depend on how the OS schedules that one process. One run of these is the
  * median of three processes.
@@ -71,12 +70,11 @@ if (maxRegression !== null && !(maxRegression >= 0)) {
 }
 const suites = only ? SUITES.filter((s) => only.includes(s)) : SUITES
 const platformKey = `${process.platform}-${process.arch}`
-const core = process.env.VORN_CORE === 'native' ? 'native' : 'js'
-// Each core keeps its own baseline, so a native run never overwrites or is
-// judged against the JS numbers. The JS one keeps the original name.
+// Baselines say which terminal path they were measured on. The ones recorded
+// before the JavaScript path was removed say `js`, and are not a gate for this one.
+const core = 'native'
 const baselinePath =
-  args.get('baseline') ??
-  path.join(ROOT, 'bench', 'baselines', `${platformKey}${core === 'native' ? '-native' : ''}.json`)
+  args.get('baseline') ?? path.join(ROOT, 'bench', 'baselines', `${platformKey}.json`)
 
 export interface Summary {
   value: number
@@ -224,7 +222,7 @@ function main(): void {
   if (baseline) {
     const baseCore = (baseline.machine.core as string | undefined) ?? 'js'
     if (baseCore !== core) {
-      const msg = `the baseline at ${path.relative(ROOT, baselinePath)} was recorded with VORN_CORE=${baseCore}, this run is ${core}`
+      const msg = `the baseline at ${path.relative(ROOT, baselinePath)} was recorded on the ${baseCore} terminal path, this run is ${core}`
       // A gate across cores would pass or fail on the core, not the change.
       if (maxRegression !== null) throw new Error(`${msg}; --max-regression needs the same core`)
       console.warn(`warning: ${msg}; compare with care`)
@@ -307,8 +305,7 @@ function main(): void {
     fs.mkdirSync(path.dirname(baselinePath), { recursive: true })
     fs.writeFileSync(baselinePath, JSON.stringify(record, null, 2) + '\n')
     console.log(`baseline written to ${path.relative(ROOT, baselinePath)}`)
-    // The doc tables are the JS numbers; a native baseline has no markers there.
-    const doc = core === 'native' ? null : writeDocTable(record)
+    const doc = writeDocTable(record)
     // Formatted as the repo formats them, so committing a baseline is not also a style diff.
     execFileSync(
       process.execPath,

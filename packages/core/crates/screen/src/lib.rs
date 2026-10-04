@@ -8,8 +8,9 @@
 //! Differences from the headless xterm it replaces that callers see: the parse
 //! is synchronous, so there is no queue to bound and no drain to wait for, and
 //! the serialized screen comes from Ghostty's own VT formatter rather than
-//! `@xterm/addon-serialize`. Each accepted difference has a named fixture in
-//! `tests/terminal-screen-parity.test.ts`.
+//! `@xterm/addon-serialize`. Each accepted difference is named in
+//! `tests/helpers/screen-parity.ts` and checked against the recorded JS
+//! reference in `tests/js-reference.test.ts`.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};

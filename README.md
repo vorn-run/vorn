@@ -184,11 +184,14 @@ Any CLI tool that runs in a terminal works with Vorn. These are the agents with 
 
 ## Development
 
-**Prerequisites:** Node.js 20+, Yarn
+**Prerequisites:** Node.js 20+, Yarn, a Rust toolchain and [Zig 0.15.2](https://ziglang.org/download/) for the native core
 
 ```bash
 # Install dependencies
 yarn install
+
+# Build the native core the server's terminals run on
+yarn build:core
 
 # Start in development mode
 yarn dev

@@ -17,7 +17,11 @@ import { parseGitHubRemote, detectRepoSlug } from '../packages/server/src/git-ut
 
 const exec = vi.mocked(execFileSync)
 
+import { resetGitRunner } from '../packages/server/src/git-runner'
+import { syncGitRunner } from './helpers/sync-git-runner'
+
 beforeEach(() => {
+  resetGitRunner(syncGitRunner)
   exec.mockReset()
 })
 

@@ -30,9 +30,12 @@ write it down in the PR, and keep going.
    and its tests and benchmarks are ordinary Rust. The
    `vorn-core` crate (`packages/core/src`) only converts types, bounds
    concurrency and maps errors. See the `napi-boundary` skill.
-2. **Behind a switch.** Every native path sits behind its own toggle in
-   Settings › Experimental (and `VORN_CORE=native|js`). The JS path stays
-   until the native one is declared stable; nothing is deleted early.
+2. **Behind a switch.** New native work sits behind one toggle in
+   Settings › Experimental, shared by everything in the batch being tried,
+   never a toggle per feature. The TypeScript it replaces stays until that
+   batch is made the default; then the toggle and the TypeScript go in one
+   change, with the TypeScript's outputs recorded as fixtures first
+   (`tests/fixtures/js-reference/` is the model).
 3. **Dual implementation, one test suite.** A native path is accepted when the
    existing TypeScript tests pass with its switch on and a parity test runs the
    same input through the JS and Rust paths. Parity is per feature, not byte

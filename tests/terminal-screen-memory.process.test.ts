@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { runMeasurement } from './helpers/run-measurement'
 import { spawnsRealServers } from './helpers/one-at-a-time'
@@ -5,7 +7,7 @@ import { spawnsRealServers } from './helpers/one-at-a-time'
 /**
  * What fifty screen models cost, and whether they are given back.
  *
- * Every PTY now carries a headless emulator, so the question "what does this
+ * Every PTY carries a screen model, so the question "what does this
  * cost at scale" has an answer that has to be measured rather than reasoned
  * about — the whole reason the model runs with no scrollback is a claim about
  * memory, and a claim about memory is worth what its measurement is worth.
@@ -32,76 +34,48 @@ interface Measurement {
   rows: number
   modelled: number
   remaining: number
-  heldBytes: number
-  residualFirst: number
-  residualSecond: number
   heldRss: number
   rssAfterFirst: number
   rssAfterSecond: number
 }
 
 /**
- * With `VORN_CORE=native` the model lives in libghostty-vt, outside V8's heap,
- * so the same budget is checked against RSS, and a leak shows as RSS that keeps
- * growing on the second cycle instead of being reused from the first.
+ * The model lives in libghostty-vt, outside V8's heap, so the budget is checked
+ * against RSS, and a leak shows as RSS that keeps growing on the second cycle
+ * instead of being reused from the first. Runs where `yarn build:core` has
+ * produced the binary.
  */
-const native = process.env.VORN_CORE?.trim().toLowerCase() === 'native'
+const builtCore = fs.existsSync(path.resolve(__dirname, '../packages/core/vorn_core.node'))
 
-describe('fifty sessions', () => {
-  const result = runMeasurement<Measurement>('measure-screens.ts', {
-    env: { NODE_OPTIONS: '--expose-gc' },
-    timeoutMs: 180_000
-  })
-  const mb = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MB`
+describe.runIf(builtCore)(
+  'fifty sessions',
+  () => {
+    const result = runMeasurement<Measurement>('measure-screens.ts', {
+      env: { NODE_OPTIONS: '--expose-gc' },
+      timeoutMs: 180_000
+    })
+    const mb = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
-  it('models every one of them', () => {
-    expect(result.modelled).toBe(result.sessions)
-    expect(result.remaining).toBe(0)
-  })
+    it('models every one of them', () => {
+      expect(result.modelled).toBe(result.sessions)
+      expect(result.remaining).toBe(0)
+    })
 
-  it.runIf(native)('costs an amount worth paying, natively', () => {
-    expect(result.heldRss, `held ${mb(result.heldRss)} RSS for ${result.sessions}`).toBeLessThan(
-      32 * 1024 * 1024
-    )
-  })
+    it('costs an amount worth paying', () => {
+      // What would matter is a change that made this an order of magnitude
+      // worse, such as giving the model the client's two thousand lines of
+      // scrollback.
+      expect(result.heldRss, `held ${mb(result.heldRss)} RSS for ${result.sessions}`).toBeLessThan(
+        32 * 1024 * 1024
+      )
+    })
 
-  it.runIf(native)('reuses what it gave back, natively', () => {
-    // An allocator keeps freed pages, so RSS after release says little. What a
-    // leak does is make the second identical cycle need fresh pages again.
-    const growth = result.rssAfterSecond - result.rssAfterFirst
-    expect(growth, `grew ${mb(growth)} on the second cycle`).toBeLessThan(result.heldRss / 8)
-  })
-
-  it.skipIf(native)('costs an amount worth paying', () => {
-    // Roughly 8 MB when this was written, at 200x50 with realistic coloured
-    // output. The ceiling is generous on purpose: what would matter is a change
-    // that made this an order of magnitude worse -- giving the model the
-    // client's two thousand lines of scrollback, say, which computes to around
-    // a quarter of a gigabyte here.
-    expect(result.heldBytes, `held ${mb(result.heldBytes)} for ${result.sessions}`).toBeLessThan(
-      32 * 1024 * 1024
-    )
-  })
-
-  it.skipIf(native)('gives it back when the terminals go', () => {
-    // What this catches is a retained *reference* -- a `clearScreen` that stopped
-    // removing the entry from the map would keep every session ever closed
-    // resident, and this reports 3.9 MB against 51 KB when that happens.
-    //
-    // What it does not catch, checked rather than assumed: a missing
-    // `term.dispose()`. Dropping the map entry leaves the terminal unreachable
-    // and V8 collects it either way, so dispose earns its place by releasing
-    // xterm's internal listeners rather than by returning heap. Worth saying,
-    // because the obvious reading of this test is the wrong one.
-    //
-    // Measured on the second cycle rather than the first. The first leaves
-    // several hundred kilobytes behind whatever happens -- module init, lazy V8
-    // structures, xterm's own one-time setup -- and a leak is a thing that
-    // accumulates, so a second identical cycle is what tells them apart. It came
-    // back to about 50 KB against 8 MB held.
-    expect(
-      result.residualSecond,
-      `held ${mb(result.heldBytes)}, kept ${mb(result.residualSecond)} after release`
-    ).toBeLessThan(result.heldBytes / 8)
-  })
-}, 180_000)
+    it('reuses what it gave back', () => {
+      // An allocator keeps freed pages, so RSS after release says little. What a
+      // leak does is make the second identical cycle need fresh pages again.
+      const growth = result.rssAfterSecond - result.rssAfterFirst
+      expect(growth, `grew ${mb(growth)} on the second cycle`).toBeLessThan(result.heldRss / 8)
+    })
+  },
+  180_000
+)

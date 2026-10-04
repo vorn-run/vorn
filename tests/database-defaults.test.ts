@@ -92,10 +92,10 @@ describe('defaults survive a save/load round trip', () => {
 
 describe('the experimental switches', () => {
   it('round-trip, so a switch turned on stays on after a restart', () => {
-    saveConfig(configWith({ experimental: { nativeGit: true } }))
-    expect(loadConfig().defaults.experimental).toEqual({ nativeGit: true })
-    saveConfig(configWith({ experimental: { nativeGit: false } }))
-    expect(loadConfig().defaults.experimental).toEqual({ nativeGit: false })
+    saveConfig(configWith({ experimental: { vornd: true } }))
+    expect(loadConfig().defaults.experimental).toEqual({ vornd: true })
+    saveConfig(configWith({ experimental: { vornd: false } }))
+    expect(loadConfig().defaults.experimental).toEqual({ vornd: false })
   })
 
   it('are absent until one has been touched', () => {
@@ -118,14 +118,14 @@ describe('the four keys that were declared but never listed', () => {
     expect(loadConfig().defaults[key as keyof AppConfig['defaults']]).toBe(value)
   })
 
-  it('experimental, which picks the code path for each new terminal', () => {
-    saveConfig(configWith({ experimental: { nativeScreen: true } }))
-    expect(loadConfig().defaults.experimental).toEqual({ nativeScreen: true })
+  it('experimental, which the app reads when it starts', () => {
+    saveConfig(configWith({ experimental: { vornd: true } }))
+    expect(loadConfig().defaults.experimental).toEqual({ vornd: true })
   })
 
   it('experimental, keeping only switches that are true or false', () => {
     const edited = {
-      nativeScreen: 'yes',
+      vornd: 'yes',
       other: false
     } as unknown as AppConfig['defaults']['experimental']
     saveConfig(configWith({ experimental: edited }))
