@@ -19,6 +19,7 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "bench": "node --import tsx bench/run.ts",
+    "test:conformance": "node scripts/conformance.mjs",
     "bench:compare": "node --import tsx bench/compare.ts",
     "lint": "eslint .",
     "lint:lockfile": "node scripts/check-lockfile.mjs",

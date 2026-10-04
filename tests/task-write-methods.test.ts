@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vites
 import WebSocket from 'ws'
 import type { RpcResponse } from '@vornrun/shared/protocol'
 import type { TaskConfig } from '@vornrun/shared/types'
+import { frontDoor } from './helpers/front-door'
 
 /**
  * Writing a task over the socket.
@@ -235,8 +236,10 @@ describe('task write methods', () => {
     process.stdout.write = (() => true) as typeof process.stdout.write
     try {
       const started = await startServer({ port: 0 })
-      serverPort = started.port
+      const door = await frontDoor(started.port)
+      serverPort = door.port
       serverClose = async () => {
+        await door.close()
         await started.app.close()
       }
     } finally {

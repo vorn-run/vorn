@@ -1,0 +1,194 @@
+//! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--groups git=shadow] [--log-file PATH]`
+//!
+//! Prints one line of JSON, `{"port":N,"protocol":P}`, once it is listening, so
+//! whoever started it knows where to connect.
+
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::net::SocketAddr;
+use std::process::ExitCode;
+use std::sync::Mutex;
+
+use tokio::net::TcpListener;
+use tracing::{error, info};
+use tracing_subscriber::EnvFilter;
+use vornd::protocol::VORND_PROTOCOL;
+use vornd::{proxy, Daemon, Groups};
+
+const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--groups group=mode,...] [--log-file PATH]
+
+  --upstream   the Node server to forward to
+  --listen     where to listen; loopback only (default 127.0.0.1:0)
+  --groups     per-group switches, forward | shadow | native (default: all forward;
+               also read from VORND_GROUPS)
+  --log-file   append the log here instead of stderr; VORND_LOG sets the level";
+
+#[derive(Debug)]
+struct Args {
+    upstream: SocketAddr,
+    listen: SocketAddr,
+    groups: Groups,
+    log_file: Option<String>,
+}
+
+fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
+    let mut upstream = None;
+    let mut listen: SocketAddr = ([127, 0, 0, 1], 0).into();
+    let mut groups = std::env::var("VORND_GROUPS").ok();
+    let mut log_file = None;
+    while let Some(flag) = args.next() {
+        let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
+        match flag.as_str() {
+            "--upstream" => {
+                upstream = Some(
+                    value("--upstream")?
+                        .parse()
+                        .map_err(|e| format!("--upstream: {e}"))?,
+                )
+            }
+            "--listen" => {
+                listen = value("--listen")?
+                    .parse()
+                    .map_err(|e| format!("--listen: {e}"))?
+            }
+            "--groups" => groups = Some(value("--groups")?),
+            "--log-file" => log_file = Some(value("--log-file")?),
+            "-h" | "--help" => return Err(String::new()),
+            other => return Err(format!("unknown argument `{other}`")),
+        }
+    }
+    let upstream = upstream.ok_or("--upstream is required")?;
+    // Everything behind vornd trusts that its peers are on this machine, which
+    // only stays true while vornd itself is reachable from nowhere else.
+    if !listen.ip().is_loopback() {
+        return Err(format!(
+            "--listen must be a loopback address, not {}",
+            listen.ip()
+        ));
+    }
+    let groups = match groups {
+        Some(spec) => Groups::parse(&spec).map_err(|e| format!("--groups: {e}"))?,
+        None => Groups::all_forward(),
+    };
+    Ok(Args {
+        upstream,
+        listen,
+        groups,
+        log_file,
+    })
+}
+
+fn init_logging(log_file: Option<&str>) -> Result<(), String> {
+    let filter = EnvFilter::try_from_env("VORND_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
+    let builder = tracing_subscriber::fmt().with_env_filter(filter);
+    match log_file {
+        Some(path) => {
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .map_err(|e| format!("--log-file {path}: {e}"))?;
+            builder
+                .with_ansi(false)
+                .with_writer(Mutex::new(file))
+                .init();
+        }
+        None => builder.with_writer(std::io::stderr).init(),
+    }
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
+}
+
+fn main() -> ExitCode {
+    let args = match parse_args(std::env::args().skip(1)) {
+        Ok(args) => args,
+        Err(message) => {
+            if !message.is_empty() {
+                eprintln!("vornd: {message}");
+            }
+            eprintln!("{USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+    if let Err(message) = init_logging(args.log_file.as_deref()) {
+        eprintln!("vornd: {message}");
+        return ExitCode::from(2);
+    }
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(err) => {
+            eprintln!("vornd: could not start: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(async move {
+        let listener = match TcpListener::bind(args.listen).await {
+            Ok(l) => l,
+            Err(err) => {
+                error!(listen = %args.listen, %err, "could not listen");
+                return ExitCode::FAILURE;
+            }
+        };
+        let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
+        for (group, mode) in args.groups.modes() {
+            info!(group, %mode, "group switch");
+        }
+        let daemon = Daemon::new(args.upstream, args.groups);
+        proxy::log_upstream(&daemon).await;
+        info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
+        let mut stdout = std::io::stdout().lock();
+        let _ = writeln!(stdout, "{{\"port\":{port},\"protocol\":{VORND_PROTOCOL}}}");
+        let _ = stdout.flush();
+        drop(stdout);
+        proxy::serve(listener, daemon, shutdown_signal()).await;
+        info!("stopped");
+        ExitCode::SUCCESS
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(list: &[&str]) -> Result<Args, String> {
+        parse_args(list.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn needs_an_upstream_and_listens_on_loopback_by_default() {
+        assert!(parse(&[]).is_err());
+        let args = parse(&["--upstream", "127.0.0.1:50091"]).unwrap();
+        assert!(args.listen.ip().is_loopback());
+        assert_eq!(args.listen.port(), 0);
+    }
+
+    #[test]
+    fn refuses_to_listen_beyond_this_machine() {
+        let err = parse(&["--upstream", "127.0.0.1:1", "--listen", "0.0.0.0:9"]).unwrap_err();
+        assert!(err.contains("loopback"), "{err}");
+        assert!(parse(&["--upstream", "127.0.0.1:1", "--listen", "[::1]:9"]).is_ok());
+    }
+
+    #[test]
+    fn passes_group_errors_on() {
+        let err = parse(&["--upstream", "127.0.0.1:1", "--groups", "git=native"]).unwrap_err();
+        assert!(err.starts_with("--groups"), "{err}");
+    }
+}
