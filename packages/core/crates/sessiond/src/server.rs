@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -46,6 +46,8 @@ pub struct Sessiond {
     /// The current connection's outbox, for replies that come from session threads.
     outbox: Mutex<Option<mpsc::Sender<ToVornd>>>,
     idle_since: Mutex<Option<Instant>>,
+    /// Set by Drain: no new sessions, and exit once the last one is released.
+    draining: AtomicBool,
     pub stop: Notify,
 }
 
@@ -60,6 +62,7 @@ impl Sessiond {
             generation: AtomicU64::new(0),
             outbox: Mutex::new(None),
             idle_since: Mutex::new(Some(Instant::now())),
+            draining: AtomicBool::new(false),
             stop: Notify::new(),
         })
     }
@@ -183,8 +186,11 @@ impl Sessiond {
     /// Whether sessiond has nothing to hold and nobody to serve, for long
     /// enough to exit.
     pub fn idle_for(&self, d: Duration) -> bool {
-        self.sessions().is_empty()
-            && self
+        if !self.sessions().is_empty() {
+            return false;
+        }
+        self.draining.load(Ordering::SeqCst)
+            || self
                 .idle_since
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -251,6 +257,14 @@ impl Conn {
         match msg {
             ToSessiond::Hello(_) => return false,
             ToSessiond::Attach(a) => return self.attach(a).await,
+            ToSessiond::Spawn(sp) if self.d.draining.load(Ordering::SeqCst) => {
+                let reply = ToVornd::Failed(Failed {
+                    req: sp.req,
+                    error: "draining: start new sessions on the newer sessiond".into(),
+                });
+                return self.send(reply).await;
+            }
+            ToSessiond::Drain(_) => self.d.draining.store(true, Ordering::SeqCst),
             ToSessiond::Spawn(sp) => {
                 let reply = self.spawn(sp);
                 return self.send(reply).await;
@@ -505,9 +519,21 @@ pub fn endpoint(home: &Path, instance: u128) -> String {
     }
 }
 
-/// Bind the endpoint. Connections wait until [`serve`] runs.
+/// Bind the endpoint and announce it in `run/`. Connections wait until
+/// [`serve`] runs.
 pub fn bind(d: &Sessiond) -> std::io::Result<crate::os::Listener> {
-    crate::os::Listener::bind(&d.cfg.home, &d.endpoint())
+    let listener = crate::os::Listener::bind(&d.cfg.home, &d.endpoint())?;
+    crate::launch::announce(
+        &d.cfg.home,
+        &crate::launch::Instance {
+            endpoint: d.endpoint(),
+            pid: std::process::id(),
+            proto: PROTO,
+            build: d.cfg.build.clone(),
+            instance: d.cfg.instance,
+        },
+    )?;
+    Ok(listener)
 }
 
 /// Serve connections until `stop` is notified or sessiond has been idle for
@@ -529,5 +555,8 @@ pub async fn serve(d: Arc<Sessiond>, mut listener: crate::os::Listener) -> std::
         }
     }
     listener.close();
+    crate::launch::withdraw(&d.cfg.home, d.cfg.instance);
+    // Connections still open end with the endpoint.
+    d.stop.notify_waiters();
     Ok(())
 }

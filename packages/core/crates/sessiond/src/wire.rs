@@ -150,6 +150,11 @@ pub struct Nonce {
     pub nonce: u64,
 }
 
+/// A newer sessiond takes new sessions from here on: refuse Spawn, and exit
+/// once the last session held here is released (RC §6 flow C).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Drain;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Kind {
     Pty,
@@ -288,6 +293,7 @@ messages! {
         PutCheckpoint(Checkpoint) = 0x09,
         Release(SessionRef) = 0x0a,
         Ping(Nonce) = 0x0b,
+        Drain(Drain) = 0x0c,
     }
 }
 
