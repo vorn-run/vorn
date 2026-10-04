@@ -55,6 +55,7 @@ impl Vornd {
         let mut buf = vec![0u8; 64 << 10];
         loop {
             if let Some(m) = self.frames.read::<ToVornd>().expect("well-formed") {
+                self.answer_queries(&m).await;
                 return Some(m);
             }
             let n = tokio::time::timeout(Duration::from_secs(20), self.rd.read(&mut buf))
@@ -65,6 +66,21 @@ impl Vornd {
                 return None;
             }
             self.frames.push(&buf[..n]);
+        }
+    }
+
+    /// Answer cursor-position queries, as only vornd may. ConPTY asks one at
+    /// start and waits for the answer before the program runs.
+    async fn answer_queries(&mut self, m: &ToVornd) {
+        if let ToVornd::Entries(e) = m {
+            if bytes(&e.entries, None).windows(4).any(|w| w == b"\x1b[6n") {
+                self.send(ToSessiond::Write(Write {
+                    session: e.session.clone(),
+                    input_seq: 0,
+                    bytes: b"\x1b[1;1R".to_vec(),
+                }))
+                .await;
+            }
         }
     }
 
