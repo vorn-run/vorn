@@ -2387,10 +2387,12 @@ dependencies = [
  "hyper",
  "hyper-util",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+ "vorn-sessiond",
 ]
 
 [[package]]

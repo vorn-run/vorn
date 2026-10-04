@@ -36,7 +36,8 @@ import {
 } from './handoff-request'
 import { askForHandoff } from './handoff-direct'
 import { findVornd, startVornd, upstreamPort, type Vornd } from './vornd'
-import type { AppConfig, VorndStatus } from '@vornrun/shared/types'
+import type { AppConfig, SessionHolders, VorndStatus } from '@vornrun/shared/types'
+import { endOlderHolder, findSessiond, readSessionHolders } from './session-holder'
 
 /**
  * Thrown when a server is running that this app may not use.
@@ -954,6 +955,7 @@ export async function launchServer(): Promise<ServerBridge> {
  */
 async function connectedLocally(connected: ServerBridge, dataDir: string): Promise<ServerBridge> {
   bridge = connected
+  vorndHome = dataDir
   const config = (await connected.request('config:load').catch(() => null)) as AppConfig | null
   vorndWanted = config?.defaults?.experimental?.vornd === true
   if (vorndWanted) {
@@ -964,6 +966,8 @@ async function connectedLocally(connected: ServerBridge, dataDir: string): Promi
 
 /** Read from the config when the app starts. */
 let vorndWanted = false
+/** The data directory vornd keeps its session holder in. */
+let vorndHome: string | null = null
 let vornd: Vornd | null = null
 let vorndStatus: VorndStatus = { state: 'off' }
 
@@ -973,6 +977,28 @@ const VORND_CONNECT_TIMEOUT_MS = 5_000
 /** Whether the app is talking to its server through vornd, for Settings › Experimental. */
 export function getVorndStatus(): VorndStatus {
   return vorndStatus
+}
+
+/** What vornd reports about its session holders, or null when it is not in use. */
+export async function getSessionHolders(): Promise<SessionHolders | null> {
+  const running = vornd
+  return running ? readSessionHolders(running.port) : null
+}
+
+/**
+ * End a session holder an older build left behind, with the sessions it holds,
+ * once the person has said to.
+ */
+export async function endOlderSessionHolder(
+  instance: string
+): Promise<{ ok: true } | { ok: false; detail: string }> {
+  const home = vorndHome
+  const reported = await getSessionHolders()
+  if (!home || !reported) return { ok: false, detail: 'vornd is not in use' }
+  const outcome = endOlderHolder(home, reported, instance)
+  if (outcome.ok) log.info(`[launcher] ended the older session holder ${instance}`)
+  else log.warn(`[launcher] could not end the older session holder ${instance}: ${outcome.detail}`)
+  return outcome
 }
 
 function stopVornd(): void {
@@ -1005,19 +1031,25 @@ async function routeThroughVornd(upstream: number | null): Promise<void> {
     fallBack('the server has no port for vornd to forward to')
     return
   }
-  const binary = findVornd({
+  const where = {
     packaged: buildChannel() === 'packaged',
     resourcesPath: process.resourcesPath,
     repoRoot: devRepoRoot(__dirname)
-  })
+  }
+  const binary = findVornd(where)
   if (!binary) {
     fallBack('vornd is not in this build')
     return
   }
+  // Without a holder vornd still forwards; Settings says why there is none.
+  const sessiond = findSessiond(where)
+  if (!sessiond) log.warn('[launcher] vorn-sessiond is not in this build')
 
   let started: Vornd
   try {
-    started = await startVornd(binary, upstream)
+    started = await startVornd(binary, upstream, {
+      sessiond: sessiond && vorndHome ? { binary: sessiond, home: vorndHome } : undefined
+    })
   } catch (err) {
     fallBack((err as Error).message)
     return

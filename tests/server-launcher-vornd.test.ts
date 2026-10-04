@@ -16,7 +16,10 @@ const daemon = {
   binary: '/app/Resources/vornd/vornd' as string | null,
   failure: null as string | null,
   /** Whether the bridge connects through vornd once pointed at it. */
-  reachable: true
+  reachable: true,
+  /** What vornd was told about its session holder. */
+  sessiond: null as { binary: string; home: string } | null,
+  holderBinary: '/app/Resources/vornd/vorn-sessiond' as string | null
 }
 
 const bridges: FakeBridge[] = []
@@ -82,7 +85,12 @@ vi.mock('../src/main/server/vornd', async (importOriginal) => {
   return {
     ...actual,
     findVornd: () => daemon.binary,
-    startVornd: async (_binary: string, upstream: number) => {
+    startVornd: async (
+      _binary: string,
+      upstream: number,
+      options: { sessiond?: { binary: string; home: string } } = {}
+    ) => {
+      daemon.sessiond = options.sessiond ?? null
       if (daemon.failure) throw new Error(daemon.failure)
       let listener: ((detail: string) => void) | null = null
       const vornd: FakeVornd = {
@@ -97,6 +105,10 @@ vi.mock('../src/main/server/vornd', async (importOriginal) => {
       return vornd
     }
   }
+})
+vi.mock('../src/main/server/session-holder', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/main/server/session-holder')>()
+  return { ...actual, findSessiond: () => daemon.holderBinary }
 })
 vi.mock('../src/main/server/host-store', () => ({
   readHostSettings: () => ({ mode: 'local', url: '', token: undefined })
@@ -135,6 +147,8 @@ beforeEach(() => {
   daemon.binary = '/app/Resources/vornd/vornd'
   daemon.failure = null
   daemon.reachable = true
+  daemon.sessiond = null
+  daemon.holderBinary = '/app/Resources/vornd/vorn-sessiond'
 })
 
 async function launch() {
@@ -158,6 +172,32 @@ describe('vornd in front of the server', () => {
     expect(bridge.url).toBe('ws://127.0.0.1:47001/ws')
     expect(bridge.isConnected).toBe(true)
     expect(getVorndStatus()).toEqual({ state: 'on', port: 47001 })
+  })
+
+  it('has vornd keep the session holder in the data directory', async () => {
+    settings.vornd = true
+    await launch()
+    expect(daemon.sessiond).toEqual({
+      binary: '/app/Resources/vornd/vorn-sessiond',
+      home: '/Users/x/.vorn'
+    })
+  })
+
+  it('still forwards through vornd when this build has no session holder', async () => {
+    settings.vornd = true
+    daemon.holderBinary = null
+    const { bridge } = await launch()
+    expect(daemon.sessiond).toBeNull()
+    expect(bridge.url).toBe('ws://127.0.0.1:47001/ws')
+  })
+
+  it('reports no session holders, and ends none, while vornd is not in use', async () => {
+    const { getSessionHolders, endOlderSessionHolder } = await launch()
+    expect(await getSessionHolders()).toBeNull()
+    expect(await endOlderSessionHolder('1a2b')).toEqual({
+      ok: false,
+      detail: 'vornd is not in use'
+    })
   })
 
   it('goes to the server directly when this build has no vornd', async () => {

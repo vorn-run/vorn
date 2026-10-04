@@ -86,6 +86,12 @@ extraResources:
     to: 'vornd/vornd'
   - from: 'packages/core/vornd.exe'
     to: 'vornd/vornd.exe'
+  # vorn-sessiond, beside vornd, which installs it under $VORN_HOME/bin and
+  # starts it from there.
+  - from: 'packages/core/vorn-sessiond'
+    to: 'vornd/vorn-sessiond'
+  - from: 'packages/core/vorn-sessiond.exe'
+    to: 'vornd/vorn-sessiond.exe'
   # Data, not a native module, so extraResources rather than asarUnpack.
   # idb_companion serves no reflection, so the client cannot discover the
   # schema at runtime — the proto has to ship.

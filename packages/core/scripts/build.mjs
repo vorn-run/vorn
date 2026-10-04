@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Builds the crate and copies the cdylib to ./vorn_core.node, the one name the
 // server and electron-builder look for on every platform. Then builds vornd and
-// copies it to ./vornd (./vornd.exe on Windows), where the app looks for it.
+// vorn-sessiond and copies them to ./vornd and ./vorn-sessiond (with .exe on
+// Windows), where the app looks for them.
 //
 //   --debug        unoptimized build
 //   --no-ghostty   skip libghostty-vt, for a machine without Zig 0.15.2
@@ -53,9 +54,10 @@ function copyOut(name, as) {
 
 copyOut(library, 'vorn_core.node')
 
-// Its own build: vornd has no ghostty feature for --no-ghostty to turn off.
-const daemon = process.platform === 'win32' ? 'vornd.exe' : 'vornd'
-const daemonArgs = ['build', '--locked', '-p', 'vornd']
+// Their own build: the daemons have no ghostty feature for --no-ghostty to
+// turn off. vornd starts the vorn-sessiond shipped beside it.
+const exe = process.platform === 'win32' ? '.exe' : ''
+const daemonArgs = ['build', '--locked', '-p', 'vornd', '-p', 'vorn-sessiond']
 if (profile === 'release') daemonArgs.push('--release')
 cargo(daemonArgs)
-copyOut(daemon, daemon)
+for (const daemon of ['vornd', 'vorn-sessiond']) copyOut(daemon + exe, daemon + exe)

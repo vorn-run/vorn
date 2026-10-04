@@ -81,19 +81,29 @@ export interface Vornd {
  * It is started with `--exit-with-stdin` and its stdin is a pipe only this
  * process holds, so it ends with the app however the app ends, even killed. It
  * never outlives the window the way the server does: it holds nothing worth
- * keeping.
+ * keeping. The session holder it keeps running does outlive it, and exits on
+ * its own once it holds no sessions and no vornd comes back for it.
  */
 export function startVornd(
   binary: string,
   upstream: number,
-  options: { timeoutMs?: number; spawnImpl?: typeof spawn } = {}
+  options: {
+    timeoutMs?: number
+    spawnImpl?: typeof spawn
+    /** The session holder for vornd to keep running, and the data directory it lives in. */
+    sessiond?: { binary: string; home: string }
+  } = {}
 ): Promise<Vornd> {
   const run = options.spawnImpl ?? spawn
   const timeoutMs = options.timeoutMs ?? VORND_START_TIMEOUT_MS
   return new Promise((resolve, reject) => {
     let child: ChildProcess
     try {
-      child = run(binary, ['--upstream', `127.0.0.1:${upstream}`, '--exit-with-stdin'], {
+      const args = ['--upstream', `127.0.0.1:${upstream}`, '--exit-with-stdin']
+      if (options.sessiond) {
+        args.push('--sessiond', options.sessiond.binary, '--home', options.sessiond.home)
+      }
+      child = run(binary, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true
       })

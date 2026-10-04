@@ -19,10 +19,12 @@ http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "client-legacy", "http1"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "signal", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "signal", "io-util", "process"] }
 tokio-tungstenite = "0.28"
 tracing = "0.1"
+vorn-sessiond = { path = "../sessiond" }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
 
 [dev-dependencies]
+tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "io-util"] }

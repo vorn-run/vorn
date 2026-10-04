@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../../stores'
-import type { CoreStatus, ExperimentalConfig, VorndStatus } from '../../../shared/types'
+import type {
+  CoreStatus,
+  ExperimentalConfig,
+  SessionHolder,
+  SessionHolders,
+  VorndStatus
+} from '../../../shared/types'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
@@ -74,6 +80,20 @@ function vorndNote(on: boolean, status: VorndStatus | null): string | null {
   return null
 }
 
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
+
+/** What an older session holder means for the sessions on it. */
+function olderNote(h: SessionHolder): string {
+  const held =
+    h.sessions === null
+      ? 'Sessions started before Vorn was updated'
+      : `${plural(h.sessions, 'session', 'sessions')} started before Vorn was updated`
+  const verb = h.sessions === 1 ? 'is' : 'are'
+  return h.compatible
+    ? `${held} ${verb} still on the older session holder (${h.build}). It exits after the last one ends.`
+    : `${held} ${verb} on a session holder (${h.build}) this version cannot talk to. They keep running until you end them.`
+}
+
 /** What the core's state means for the switches, or null when they work as labelled. */
 function coreNote(status: CoreStatus | 'unavailable' | null): string | null {
   if (!status) return null
@@ -112,6 +132,17 @@ export function ExperimentalSettings() {
   // Null until it arrives, and for good where vornd cannot run (the browser):
   // the daemon's row is shown only once there is a status to show it with.
   const [daemon, setDaemon] = useState<VorndStatus | null>(null)
+  const [holders, setHolders] = useState<SessionHolders | null>(null)
+  const [endFailure, setEndFailure] = useState<string | null>(null)
+
+  const loadHolders = (isCancelled: () => boolean = () => false): void => {
+    void window.api
+      .getSessionHolders?.()
+      .then((next) => {
+        if (!isCancelled()) setHolders(next ?? null)
+      })
+      .catch(() => {})
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -129,7 +160,9 @@ export function ExperimentalSettings() {
     void window.api
       .getVorndStatus?.()
       .then((next) => {
-        if (!cancelled) setDaemon(next ?? null)
+        if (cancelled) return
+        setDaemon(next ?? null)
+        if (next?.state === 'on') loadHolders(() => cancelled)
       })
       .catch(() => {})
     return () => {
@@ -147,6 +180,18 @@ export function ExperimentalSettings() {
   // whether VORN_CORE overrides a switch or the binary lacks it.
   const locked =
     status === null || status === 'unavailable' || known?.forced != null || known?.loaded === false
+
+  const endHolder = (h: SessionHolder): void => {
+    const count = h.sessions === null ? 'the sessions' : plural(h.sessions, 'session', 'sessions')
+    if (!window.confirm(`End ${count} on the older session holder? Their processes stop.`)) return
+    void window.api
+      .endSessionHolder?.(h.instance)
+      .then((outcome) => {
+        setEndFailure(outcome.ok ? null : `Could not end them: ${outcome.detail}.`)
+        loadHolders()
+      })
+      .catch((err: Error) => setEndFailure(`Could not end them: ${err.message}.`))
+  }
 
   const setFlag = (key: keyof ExperimentalConfig, value: boolean): void => {
     const updated = {
@@ -197,6 +242,29 @@ export function ExperimentalSettings() {
           {daemonNote}
         </div>
       )}
+      {holders?.error && !holders.current && (
+        <div className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
+          The session holder is not running: {holders.error}.
+        </div>
+      )}
+      {holders?.older
+        .filter((h) => h.sessions !== 0)
+        .map((h) => (
+          <div
+            key={h.instance}
+            className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400 flex items-center gap-3"
+          >
+            <span className="flex-1">{olderNote(h)}</span>
+            <button
+              type="button"
+              className="px-2 py-1 rounded border border-white/[0.12] text-gray-300 hover:bg-white/[0.06]"
+              onClick={() => endHolder(h)}
+            >
+              End them
+            </button>
+          </div>
+        ))}
+      {endFailure && <div className="mt-2 text-xs text-red-400">{endFailure}</div>}
       {known?.version && (
         <div className="mt-4 text-xs text-gray-500">Native core {known.version}</div>
       )}

@@ -3,7 +3,7 @@
 //! Binds a user-only endpoint under `DIR` (default `$VORN_HOME`, else
 //! `~/.vorn`), announces it in `run/`, prints `listening <endpoint>` on
 //! stdout for whoever runs it by hand, and serves until it has held no sessions and had no
-//! vornd for `SECS` (default 60).
+//! vornd for `SECS` (default 60, or `VORN_SESSIOND_IDLE_EXIT`).
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -13,7 +13,10 @@ use vorn_sessiond::server::{self, Config, Sessiond};
 
 fn main() {
     let mut home = std::env::var_os("VORN_HOME").map(PathBuf::from);
-    let mut idle = 60u64;
+    let mut idle = std::env::var("VORN_SESSIOND_IDLE_EXIT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60u64);
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {

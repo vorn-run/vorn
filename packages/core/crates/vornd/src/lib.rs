@@ -7,8 +7,11 @@
 //! long-running service needs: a log, a health check at
 //! [`proxy::HEALTH_PATH`] and a protocol version ([`protocol::VORND_PROTOCOL`])
 //! that clients see in the `Vornd-Protocol` header when their WebSocket opens.
+//! Given a sessiond binary, it also keeps a session holder running
+//! ([`holder`]).
 
 pub mod groups;
+pub mod holder;
 pub mod protocol;
 pub mod proxy;
 

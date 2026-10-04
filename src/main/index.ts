@@ -34,7 +34,9 @@ import {
   AdoptionRefusedError,
   probeSessions,
   onServerReplaced,
-  getVorndStatus
+  getVorndStatus,
+  getSessionHolders,
+  endOlderSessionHolder
 } from './server/server-launcher'
 import { readHostSettings } from './server/host-store'
 import { registerConnectHandlers, showConnectWindow } from './server/connect-window'
@@ -684,6 +686,12 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle(IPC.VORND_STATUS, () => getVorndStatus())
+  ipcMain.handle(IPC.VORND_SESSION_HOLDERS, () => getSessionHolders())
+  ipcMain.handle(IPC.VORND_END_SESSION_HOLDER, (_event, instance: unknown) =>
+    typeof instance === 'string'
+      ? endOlderSessionHolder(instance)
+      : { ok: false, detail: 'no session holder named' }
+  )
 
   ipcMain.handle(IPC.SERVER_UPGRADE, async () => {
     lastUpgrade = { kind: 'working' }

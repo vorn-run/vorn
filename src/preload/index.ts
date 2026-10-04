@@ -55,6 +55,7 @@ import {
   WorktreeInventory,
   CoreStatus,
   VorndStatus,
+  SessionHolders,
   WorktreeActionResult,
   BranchDeleteResult,
   ArtifactManifest,
@@ -323,6 +324,14 @@ const api = {
 
   /** Whether the app reaches its server through vornd; null where vornd cannot run. */
   getVorndStatus: (): Promise<VorndStatus | null> => ipcRenderer.invoke(IPC.VORND_STATUS),
+
+  /** The session holders vornd keeps; null while vornd is not in use. */
+  getSessionHolders: (): Promise<SessionHolders | null> =>
+    ipcRenderer.invoke(IPC.VORND_SESSION_HOLDERS),
+
+  /** End a session holder an older build left, with the sessions it still holds. */
+  endSessionHolder: (instance: string): Promise<{ ok: true } | { ok: false; detail: string }> =>
+    ipcRenderer.invoke(IPC.VORND_END_SESSION_HOLDER, instance),
 
   reclaimWorktreeArtifacts: (paths: string[]): Promise<WorktreeActionResult> =>
     ipcRenderer.invoke(IPC.WORKTREE_RECLAIM_ARTIFACTS, { paths }),
