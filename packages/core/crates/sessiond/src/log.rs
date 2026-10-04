@@ -103,14 +103,11 @@ pub enum AppendError {
     Exited,
     /// A blocking session is full. The record comes back so the reader can
     /// hold it and stop reading until there is room.
+    ///
+    /// A spool that cannot be written counts as full: an interactive session
+    /// drops the record and a Gap stands for it, a blocking one gets it back
+    /// to retry once there is room, so the loss is never silent.
     Full(Record),
-    Io(io::Error),
-}
-
-impl From<io::Error> for AppendError {
-    fn from(e: io::Error) -> Self {
-        AppendError::Io(e)
-    }
 }
 
 /// Why sessiond would not store a checkpoint.
@@ -209,7 +206,8 @@ impl SessionLog {
         }
         if let Record::Data { .. } = rec {
             let extra = if self.lost > 0 { ENTRY_OVERHEAD } else { 0 };
-            if !self.make_room(ring_cost(&rec) + extra)? {
+            // A spool write that failed made no room; see `AppendError::Full`.
+            if !self.make_room(ring_cost(&rec) + extra).unwrap_or(false) {
                 return match self.overflow {
                     Overflow::Drop => {
                         self.lost += rec.len();
@@ -219,8 +217,9 @@ impl SessionLog {
                 };
             }
         } else {
-            // Control records are never refused; they cost almost nothing.
-            self.make_room(ring_cost(&rec))?;
+            // Control records are never refused, not even when the spool
+            // cannot be written: they cost almost nothing, and Exit must land.
+            let _ = self.make_room(ring_cost(&rec));
         }
         self.settle_gap();
         if let Record::Exit { code, signal } = rec {
@@ -317,8 +316,8 @@ impl SessionLog {
         }
         let before = self.spool.bytes();
         let res = self.spool.trim_before(self.retain_from.next_rseq);
-        // A rewrite never grows the file.
-        self.pool.give(before - self.spool.bytes());
+        // A rewrite never grows the file, and a failed one leaves it as it was.
+        self.pool.give(before.saturating_sub(self.spool.bytes()));
         res
     }
 
@@ -344,7 +343,9 @@ impl SessionLog {
             self.retain_from = prev.resume;
             self.fallback = Some(prev);
         }
-        // A trim failure leaves extra records on disk, which is safe.
+        // A failed trim leaves the spool whole, holding records from before
+        // `retain_from` that the next trim drops: the run stays contiguous
+        // and nothing vornd may ask for is gone.
         let _ = self.trim();
         Ok(())
     }
@@ -364,7 +365,7 @@ impl SessionLog {
             Some(e) => Some(e.hdr),
             None => self
                 .spool
-                .read_from(c.next_rseq)
+                .read_from(c.next_rseq, 0)
                 .ok()
                 .and_then(|v| v.first().map(|e| e.hdr)),
         };
@@ -418,7 +419,7 @@ impl SessionLog {
         if ring_first.is_none_or(|f| c.next_rseq < f) {
             out = self
                 .spool
-                .read_from(c.next_rseq)
+                .read_from(c.next_rseq, u64::MAX)
                 .map_err(|_| AttachRefusal::NotRetained)?;
         }
         out.extend(
@@ -442,10 +443,10 @@ impl SessionLog {
         Ok(out)
     }
 
-    /// The records after `from`, at most about `max_bytes` of them but always
-    /// at least one: what a live connection sends next. Reads the ring
-    /// directly; only a reader that fell behind into the spool pays for
-    /// reading it.
+    /// The records after `from`, at most about `max_bytes` of output but
+    /// always at least one: what a live connection sends next. Reads the
+    /// ring directly; a reader that fell behind into the spool reads only
+    /// this batch from it, so a frame never grows with the spool.
     pub fn read_batch(
         &mut self,
         from: Cursor,
@@ -455,29 +456,52 @@ impl SessionLog {
         if from == self.head {
             return Ok(Vec::new());
         }
-        let Some(first) = self.ring.front().map(|e| e.hdr.rseq) else {
-            return self.entries_from(from);
-        };
-        if from.epoch != self.epoch
-            || from.next_rseq < first
-            || from.next_rseq > self.head.next_rseq
-        {
-            return self.entries_from(from);
+        if from.epoch != self.epoch {
+            return Err(AttachRefusal::WrongEpoch);
         }
-        let skip = (from.next_rseq - first) as usize;
+        if from.next_rseq < self.oldest().next_rseq || from.next_rseq > self.head.next_rseq {
+            return Err(AttachRefusal::NotRetained);
+        }
+        let ring_first = self
+            .ring
+            .front()
+            .map_or(self.head.next_rseq, |e| e.hdr.rseq);
         let mut out = Vec::new();
-        let mut bytes = 0;
-        for e in self.ring.iter().skip(skip) {
-            if !out.is_empty() && bytes + e.rec.len() > max_bytes {
-                break;
+        if from.next_rseq < ring_first {
+            out = self
+                .spool
+                .read_from(from.next_rseq, max_bytes)
+                .map_err(|_| AttachRefusal::NotRetained)?;
+        }
+        let mut taken: u64 = out.iter().map(|e| e.rec.len()).sum();
+        // The ring carries on only where the spool's part ran up to it: one
+        // that stopped short hit the budget, or a damaged frame.
+        let reached_ring = out.last().map_or(from.next_rseq >= ring_first, |e| {
+            e.hdr.rseq + 1 == ring_first
+        });
+        if reached_ring {
+            let skip = from.next_rseq.saturating_sub(ring_first) as usize;
+            for e in self.ring.iter().skip(skip) {
+                let n = e.rec.len();
+                if !out.is_empty() && taken + n > max_bytes {
+                    break;
+                }
+                taken += n;
+                out.push(e.clone());
             }
-            bytes += e.rec.len();
-            out.push(e.clone());
         }
-        match out.first() {
-            Some(e) if from.is_followed_by(&e.hdr) => Ok(out),
-            _ => Err(AttachRefusal::NotRetained),
+        // One contiguous run starting exactly at `from`, or nothing usable.
+        let mut at = from;
+        for e in &out {
+            if !at.is_followed_by(&e.hdr) {
+                return Err(AttachRefusal::NotRetained);
+            }
+            at = e.after();
         }
+        if out.is_empty() {
+            return Err(AttachRefusal::NotRetained);
+        }
+        Ok(out)
     }
 
     /// Records up to `c` were written to vornd's socket.
@@ -1004,6 +1028,69 @@ mod tests {
         assert_eq!(pool.used(), b_bytes);
     }
 
+    /// A spool that cannot be written is full, never a silent loss: an
+    /// interactive session records a Gap for what it dropped, a blocking one
+    /// hands the record back, and Exit still lands.
+    #[test]
+    fn a_spool_write_failure_is_a_gap_or_backpressure() {
+        let budget = Budget {
+            ring_bytes: 4 * (100 + ENTRY_OVERHEAD),
+            spool_bytes: 1 << 20,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let unwritable = dir.path().join("missing").join("s.log");
+
+        let mut l = SessionLog::new(
+            1,
+            budget,
+            Overflow::Drop,
+            &unwritable,
+            SpoolPool::default(),
+            (80, 24),
+        );
+        let mut kept = 0;
+        for i in 0..10 {
+            if l.append(data(100, i)).unwrap() {
+                kept += 1;
+            }
+        }
+        assert_eq!(kept, 4);
+        assert_eq!(l.lost(), 600);
+        l.append(Record::Exit {
+            code: Some(0),
+            signal: None,
+        })
+        .unwrap();
+        assert_eq!(l.head().next_offset, 1000);
+        let (_, all) = l.attach(AttachFrom::Cursor(after(3, 100))).unwrap();
+        assert!(matches!(
+            all[0].rec,
+            Record::Gap {
+                lost_bytes: 600,
+                ..
+            }
+        ));
+        assert!(matches!(all[1].rec, Record::Exit { .. }));
+        assert_eq!(l.spooled_bytes(), 0);
+
+        let mut l = SessionLog::new(
+            1,
+            budget,
+            Overflow::Block,
+            &unwritable,
+            SpoolPool::default(),
+            (80, 24),
+        );
+        for i in 0..4 {
+            assert!(l.append(data(100, i)).unwrap());
+        }
+        match l.append(data(100, 4)) {
+            Err(AppendError::Full(rec)) => assert_eq!(rec, data(100, 4)),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(l.lost(), 0);
+    }
+
     #[test]
     fn a_batch_reads_from_the_ring_and_falls_back_to_the_spool() {
         let budget = Budget {
@@ -1022,10 +1109,27 @@ mod tests {
         );
         // A single record larger than the batch still comes.
         assert_eq!(l.read_batch(after(24, 100), 1).unwrap().len(), 1);
-        // Behind the ring: everything from the spool on.
+        // Behind the ring: a batch from the spool, held to the same budget,
+        // however much the spool holds.
         let b = l.read_batch(after(2, 100), 250).unwrap();
-        assert_eq!(b.first().unwrap().hdr.rseq, 3);
-        assert_eq!(b.len(), 27);
+        assert_eq!(b.iter().map(|e| e.hdr.rseq).collect::<Vec<_>>(), vec![3, 4]);
+        assert_eq!(l.read_batch(after(2, 100), 0).unwrap().len(), 1);
+        // A batch runs on from the spool's last record into the ring.
+        let b = l.read_batch(after(17, 100), 350).unwrap();
+        assert_eq!(
+            b.iter().map(|e| e.hdr.rseq).collect::<Vec<_>>(),
+            vec![18, 19, 20]
+        );
+        // Read batch by batch from the start, the whole log comes back once.
+        let mut at = Cursor::start(1);
+        let mut seen = Vec::new();
+        while at != l.head() {
+            let b = l.read_batch(at, 450).unwrap();
+            assert!(b.iter().map(|e| e.rec.len()).sum::<u64>() <= 450);
+            at = b.last().unwrap().after();
+            seen.extend(b);
+        }
+        assert_eq!(seen, l.attach(AttachFrom::SessionStart).unwrap().1);
         assert_eq!(l.read_batch(l.head(), 250).unwrap(), vec![]);
         let wrong = Cursor {
             next_offset: 1,

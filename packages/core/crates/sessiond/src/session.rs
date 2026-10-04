@@ -25,7 +25,9 @@ use crate::wire::{ExitInfo, Io, Kind, Sig, SpawnSpec, Stdin};
 const READ_BYTES: usize = 64 << 10;
 /// How long the exit waits for output to end after the child was reaped. A
 /// background job that kept the terminal open would otherwise hold the Exit
-/// record back forever; past this, what it prints is refused.
+/// record back forever; past this, what it prints is refused. The wait does
+/// not run out while sessiond itself holds a reader back (a blocking session
+/// whose log is full): that output is the program's, and is kept.
 const DRAIN_AFTER_EXIT: Duration = Duration::from_secs(2);
 
 /// What a session's writer thread does next.
@@ -59,6 +61,11 @@ struct State {
     killer: Box<dyn ChildKiller + Send + Sync>,
     /// Output streams still open.
     open_streams: u8,
+    /// Readers holding a record a full blocking log refused, waiting for room.
+    held: u8,
+    /// Whether any reader was held since the reaper last looked: one that was
+    /// only just let go may still have the rest of the pipe to read.
+    was_held: bool,
     reaped: Option<ExitInfo>,
 }
 
@@ -131,6 +138,8 @@ impl Session {
                 master: Some(pair.master),
                 killer: child.clone_killer(),
                 open_streams: 1,
+                held: 0,
+                was_held: false,
                 reaped: None,
             }),
             changed: Notify::new(),
@@ -184,6 +193,8 @@ impl Session {
                 master: None,
                 killer: child.clone_killer(),
                 open_streams: 2,
+                held: 0,
+                was_held: false,
                 reaped: None,
             }),
             changed: Notify::new(),
@@ -246,23 +257,35 @@ impl Session {
                         bytes: buf[..n].to_vec(),
                     };
                     let mut st = s.lock();
-                    loop {
+                    let mut holding = false;
+                    let exited = loop {
                         match st.log.append(rec) {
-                            Ok(_) => break,
+                            // Kept, or dropped with a Gap to say so.
+                            Ok(_) => break false,
                             // Full and blocking: stop reading until a
                             // checkpoint makes room. The program blocks on
                             // its next write; nothing is lost.
                             Err(AppendError::Full(back)) => {
                                 rec = back;
+                                if !holding {
+                                    holding = true;
+                                    st.held += 1;
+                                }
+                                st.was_held = true;
                                 st = s
                                     .room
                                     .wait_timeout(st, Duration::from_millis(500))
                                     .unwrap_or_else(|e| e.into_inner())
                                     .0;
                             }
-                            Err(AppendError::Exited) => return,
-                            Err(AppendError::Io(_)) => break,
+                            Err(AppendError::Exited) => break true,
                         }
+                    };
+                    if holding {
+                        st.held -= 1;
+                    }
+                    if exited {
+                        return;
                     }
                     drop(st);
                     s.changed.notify_waiters();
@@ -298,15 +321,24 @@ impl Session {
                 drop(master);
                 s.changed.notify_waiters();
                 // A background job holding the terminal open must not hold
-                // the exit back for good.
-                thread::sleep(DRAIN_AFTER_EXIT);
-                let mut st = s.lock();
-                if st.log.exited().is_none() {
+                // the exit back for good. A reader sessiond holds back is not
+                // that: the cutoff waits until no reader has been held for a
+                // whole DRAIN_AFTER_EXIT, so a blocking session loses nothing.
+                loop {
+                    thread::sleep(DRAIN_AFTER_EXIT);
+                    let mut st = s.lock();
+                    if st.log.exited().is_some() {
+                        break;
+                    }
+                    if st.held > 0 || std::mem::take(&mut st.was_held) {
+                        continue;
+                    }
                     st.open_streams = 0;
                     s.finish(&mut st);
+                    drop(st);
+                    s.changed.notify_waiters();
+                    break;
                 }
-                drop(st);
-                s.changed.notify_waiters();
             })
             .expect("spawn reaper thread");
     }
@@ -494,5 +526,86 @@ fn detach(cmd: &mut Command) {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::wire::{AttachFrom, Checkpoint};
+    use std::time::Instant;
+    use vorn_term_proto::Cursor;
+
+    fn checkpoint(at: Cursor) -> Checkpoint {
+        let blob = b"screen".to_vec();
+        Checkpoint {
+            session: "s".into(),
+            resume: at,
+            cols: 0,
+            rows: 0,
+            format: 1,
+            vornd_build: "test".into(),
+            blob_crc32: crc32fast::hash(&blob),
+            blob,
+        }
+    }
+
+    /// A blocking session whose log is full when the program exits keeps
+    /// the record its reader holds and the rest of the pipe, however long
+    /// vornd takes to make room: the drain cutoff is for a background job
+    /// holding the output open, not for sessiond's own backpressure.
+    #[test]
+    fn a_held_reader_outlasts_the_drain_cutoff() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = SpawnSpec {
+            argv: [
+                "sh",
+                "-c",
+                "printf A; sleep 0.2; printf B; sleep 0.2; printf C; exit 3",
+            ]
+            .map(String::from)
+            .to_vec(),
+            cwd: dir.path().to_string_lossy().into_owned(),
+            env: Vec::new(),
+            io: Io::Piped { stdin: Stdin::Null },
+            // Room for one small record and no spool at all: the second
+            // record is refused and its reader held.
+            ring_bytes: Some(64),
+        };
+        let s =
+            Session::spawn("s".into(), &spec, dir.path(), SpoolPool::new(0), |_, _| {}).unwrap();
+        thread::sleep(DRAIN_AFTER_EXIT + Duration::from_secs(1));
+        assert!(
+            s.with_log(|l| l.exited()).is_none(),
+            "no Exit while a reader is held"
+        );
+
+        // vornd reads what is there and stores two checkpoints at the head;
+        // the older one lets the log drop what is behind it, and the held
+        // reader goes on.
+        let mut seen = s.with_log(|l| l.head());
+        let mut out: Vec<u8> = Vec::new();
+        let mut exit = None;
+        let t = Instant::now();
+        while exit.is_none() {
+            assert!(t.elapsed() < Duration::from_secs(10), "exits once drained");
+            s.with_log(|l| {
+                let (_, new) = l.attach(AttachFrom::Cursor(seen)).unwrap();
+                for e in &new {
+                    match &e.rec {
+                        Record::Data { bytes, .. } => out.extend(bytes),
+                        Record::Exit { code, .. } => exit = Some(*code),
+                        other => panic!("unexpected {other:?}"),
+                    }
+                }
+                seen = l.head();
+                l.put_checkpoint(checkpoint(seen)).unwrap();
+                l.put_checkpoint(checkpoint(seen)).unwrap();
+            });
+            s.room_made();
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(exit, Some(Some(3)));
+        assert_eq!(out, b"BC");
     }
 }

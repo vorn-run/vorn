@@ -415,10 +415,60 @@ async fn a_second_hello_replaces_the_first_connection() {
     let (d, _home, _t) = start(Duration::from_secs(60)).await;
     let (mut a, _) = Vornd::hello(&d).await;
     let (mut b, _) = Vornd::hello(&d).await;
-    a.send(ToSessiond::Ping(Nonce { nonce: 1 })).await;
-    assert_eq!(a.recv().await, None);
+    // A hung vornd sends nothing more; it is closed all the same.
+    let closed = tokio::time::timeout(Duration::from_secs(5), a.recv()).await;
+    assert_eq!(closed.expect("closed as soon as it is replaced"), None);
     b.send(ToSessiond::Ping(Nonce { nonce: 2 })).await;
     assert_eq!(b.recv().await, Some(ToVornd::Pong(Nonce { nonce: 2 })));
+}
+
+/// A replaced vornd that stopped reading mid-output is closed too, and its
+/// pump stops: what it reads afterwards ends, instead of running on to the
+/// window.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_replaced_connection_that_stopped_reading_closes_with_its_pumps() {
+    let (d, _home, _t) = start(Duration::from_secs(60)).await;
+    let (mut a, _) = Vornd::hello(&d).await;
+    let id = a
+        .spawn(
+            &["sh", "-c", "yes vorn | head -c 16000000"],
+            Io::Piped { stdin: Stdin::Null },
+        )
+        .await;
+    a.attach(&id, AttachFrom::SessionStart).await;
+    // Let the pump fill the socket while `a` reads nothing.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let (mut b, w) = Vornd::hello(&d).await;
+    let sent_at_hello = w
+        .sessions
+        .iter()
+        .find(|s| s.session == id)
+        .expect("session")
+        .sent;
+    let drained = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut got = 0u64;
+        while let Some(m) = a.recv().await {
+            if let ToVornd::Entries(e) = m {
+                got += e.entries.iter().map(|x| x.rec.len()).sum::<u64>();
+            }
+        }
+        got
+    })
+    .await
+    .expect("the replaced connection ends");
+    assert!(drained < server::WINDOW_BYTES + (1 << 20), "{drained}");
+    // Nothing the replaced connection queued counts as sent after the Hello.
+    b.send(ToSessiond::Ping(Nonce { nonce: 5 })).await;
+    while b.recv().await != Some(ToVornd::Pong(Nonce { nonce: 5 })) {}
+    let (_, w) = Vornd::hello(&d).await;
+    let sent_now = w
+        .sessions
+        .iter()
+        .find(|s| s.session == id)
+        .expect("session")
+        .sent;
+    assert_eq!(sent_now, sent_at_hello);
 }
 
 #[tokio::test]
