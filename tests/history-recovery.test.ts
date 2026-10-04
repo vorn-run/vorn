@@ -212,6 +212,41 @@ describe('records and the cursor they follow on from', () => {
   })
 })
 
+describe('the cursor boundary (RC-T17)', () => {
+  // Record rseq 7 starts at offset 100; a checkpoint cut after it resumes at
+  // rseq 8 and offset 100 + its length. Recovery must show its bytes once.
+  const sizes = [0, 1, 20, 64 * 1024]
+  const nexts: Array<['data', string] | ['resize', [number, number]]> = [
+    ['data', ' next'],
+    ['resize', [90, 20]]
+  ]
+  for (const len of sizes) {
+    for (const [kind, item] of nexts) {
+      it(`replays from the record after a ${len}-byte one, before a ${kind}`, async () => {
+        const included = 'i'.repeat(len)
+        const resume = { epoch: 7, nextRseq: 8, nextOffset: 100 + len }
+        const frames = framesFrom(
+          { epoch: 7, nextRseq: 7, nextOffset: 100 },
+          included,
+          item,
+          ' end'
+        )
+        await put(
+          sample({ resume, scrollback: `checkpoint:${included}`, screen: 'checkpoint' }),
+          4,
+          ...frames
+        )
+
+        const report = await recoverHistory(dir, only)
+
+        expect(report.recovered[0]).toMatchObject({ replayed: 2, stopped: 'end' })
+        const tail = kind === 'data' ? ' next end' : ' end'
+        expect(readScrollback(ID)).toBe(`checkpoint:${included}${tail}`)
+      })
+    }
+  }
+})
+
 describe('history written by the build before records had places', () => {
   it('is still restored, so an update does not lose the terminals it finds', async () => {
     const at = historyDir(dir, ID)

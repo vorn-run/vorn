@@ -1,0 +1,10 @@
+[package]
+name = "vorn-term-proto"
+version = "0.7.5"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Terminal wire types shared by vorn-sessiond, vornd and their clients: record positions, the screen mirror's rows and the row cell encoding"
+
+[dependencies]
