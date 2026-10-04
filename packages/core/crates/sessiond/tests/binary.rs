@@ -45,6 +45,21 @@ impl V {
         let mut buf = vec![0u8; 64 << 10];
         loop {
             if let Some(m) = self.frames.read::<ToVornd>().expect("well-formed") {
+                // Answer ConPTY's start-up cursor query, as vornd would.
+                if let ToVornd::Entries(e) = &m {
+                    let asks = e.entries.iter().any(|x| {
+                        matches!(&x.rec, vorn_term_proto::Record::Data { bytes, .. }
+                            if bytes.windows(4).any(|w| w == b"\x1b[6n"))
+                    });
+                    if asks {
+                        self.send(ToSessiond::Write(Write {
+                            session: e.session.clone(),
+                            input_seq: 0,
+                            bytes: b"\x1b[1;1R".to_vec(),
+                        }))
+                        .await;
+                    }
+                }
                 return Some(m);
             }
             let n = tokio::time::timeout(Duration::from_secs(20), self.s.read(&mut buf))
