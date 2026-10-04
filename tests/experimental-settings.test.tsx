@@ -123,6 +123,13 @@ describe('ExperimentalSettings', () => {
     expect(screen.queryByText(/every switch is on/)).not.toBeInTheDocument()
   })
 
+  it('keeps the switches locked until the status arrives', async () => {
+    render(<ExperimentalSettings />)
+    expect(screenSwitch()).toBeDisabled()
+    await screen.findByText('Native core 0.2.0')
+    expect(screenSwitch()).not.toBeDisabled()
+  })
+
   it('names each switch for a screen reader', () => {
     render(<ExperimentalSettings />)
     expect(screen.getByRole('switch', { name: 'Native screen model' })).toBeInTheDocument()

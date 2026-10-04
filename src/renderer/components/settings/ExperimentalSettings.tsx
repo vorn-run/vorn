@@ -78,7 +78,10 @@ export function ExperimentalSettings() {
   const flags = config.defaults.experimental ?? {}
   const note = coreNote(status)
   const known = status === 'unavailable' ? null : status
-  const locked = status === 'unavailable' || known?.forced != null || known?.loaded === false
+  // Locked until the status arrives too: until then the page cannot know
+  // whether VORN_CORE overrides a switch or the binary lacks it.
+  const locked =
+    status === null || status === 'unavailable' || known?.forced != null || known?.loaded === false
 
   const setFlag = (key: keyof ExperimentalConfig, value: boolean): void => {
     const updated = {

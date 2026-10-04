@@ -11,10 +11,11 @@
 //! - a carriage return moves a cursor that also outlives the chunk, and erase in
 //!   line (`CSI K`) erases, so a status line redrawn in place stays one line
 //!   instead of growing by every frame until the next newline;
-//! - the status patterns run on the last five lines, not on the last five lines
-//!   of a 2000-character window. Every pattern matches within one line, so a
-//!   completed line is checked at most once, and only the line in progress is
-//!   checked on every chunk.
+//! - the status patterns run line by line on the last five lines, so a
+//!   completed line is checked at most once and only the line in progress is
+//!   checked on every chunk. They still only see what falls in the JS path's
+//!   2000-character window: a line, or the part of one, further back than that
+//!   is not matched even when it is among the last five.
 
 use std::collections::VecDeque;
 use std::sync::OnceLock;

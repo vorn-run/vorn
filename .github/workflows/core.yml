@@ -102,6 +102,12 @@ jobs:
       - name: Build vorn_core.node
         run: yarn build:core
 
+      # The native tests skip themselves when the binary lacks an export, so a
+      # default build that lost Ghostty would turn them into silent skips.
+      - name: Default build exports Screen
+        shell: bash
+        run: node -e "const c = require('./packages/core/vorn_core.node'); if (typeof c.Screen !== 'function') { console.error('vorn_core.node has no Screen'); process.exit(1) }"
+
       # With the binary present these run the real call from Node, including a
       # parse through libghostty-vt.
       - name: Native call
