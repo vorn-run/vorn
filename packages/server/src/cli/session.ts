@@ -67,7 +67,9 @@ async function resolveProject(
   }
 
   const cwd = process.cwd()
-  const projectPath = ctx.args.path ? path.resolve(ctx.args.path) : (getRepoRoot(cwd) ?? cwd)
+  const projectPath = ctx.args.path
+    ? path.resolve(ctx.args.path)
+    : ((await getRepoRoot(cwd)) ?? cwd)
   const known = projects.find((p) => normalizePath(p.path) === normalizePath(projectPath))
   if (known) return { projectName: known.name, projectPath }
 

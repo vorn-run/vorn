@@ -34,11 +34,11 @@ vi.mock('../packages/server/node_modules/node-pty', () => ({
   spawn
 }))
 vi.mock('../packages/server/src/git-utils', () => ({
-  getGitBranch: vi.fn(() => 'main'),
-  getGitHead: vi.fn(() => 'cafe0000'),
-  checkoutBranch: vi.fn(),
+  getGitBranch: vi.fn(async () => 'main'),
+  getGitHead: vi.fn(async () => 'cafe0000'),
+  checkoutBranch: vi.fn(async () => {}),
   createWorktree: vi.fn(),
-  isGitRepo: vi.fn(() => false)
+  isGitRepo: vi.fn(async () => false)
 }))
 
 /** The env of the nth `pty.spawn` call. */
@@ -55,7 +55,7 @@ describe('VORN_SESSION_ID injection', () => {
 
   it('gives an agent session its own id in the environment', async () => {
     const { ptyManager } = await import('../packages/server/src/pty-manager')
-    const session = ptyManager.createPty({
+    const session = await ptyManager.createPty({
       agentType: 'claude',
       projectName: 'p',
       projectPath: '/tmp'
@@ -66,12 +66,12 @@ describe('VORN_SESSION_ID injection', () => {
 
   it('gives two sessions different ids', async () => {
     const { ptyManager } = await import('../packages/server/src/pty-manager')
-    const a = ptyManager.createPty({
+    const a = await ptyManager.createPty({
       agentType: 'claude',
       projectName: 'p',
       projectPath: '/tmp'
     } as never)
-    const b = ptyManager.createPty({
+    const b = await ptyManager.createPty({
       agentType: 'claude',
       projectName: 'p',
       projectPath: '/tmp'
@@ -94,7 +94,7 @@ describe('VORN_SESSION_ID injection', () => {
 
   it('does not leak the id into the ambient process environment', async () => {
     const { ptyManager } = await import('../packages/server/src/pty-manager')
-    ptyManager.createPty({
+    await ptyManager.createPty({
       agentType: 'claude',
       projectName: 'p',
       projectPath: '/tmp'

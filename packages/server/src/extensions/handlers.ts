@@ -16,13 +16,17 @@ import log from '../logger'
 /** Longer than any link worth clicking, short enough that a bad pattern cannot chew on it. */
 const MAX_CLICKED_TEXT = 2048
 
-export function matchLinks(session: TerminalSession, text: string): ExtensionLinkMatch[] {
+export async function matchLinks(
+  session: TerminalSession,
+  text: string
+): Promise<ExtensionLinkMatch[]> {
   const clicked = text.slice(0, MAX_CLICKED_TEXT)
   if (clicked === '') return []
-  const subject = subjectOf(session)
+  const packs = installedExtensions()
+  const subject = await subjectOf(session, packs)
   const matches: ExtensionLinkMatch[] = []
 
-  for (const pack of installedExtensions()) {
+  for (const pack of packs) {
     const activation = activationFor(pack, subject)
     if (!activation.active) continue
     for (const handler of pack.contributes?.linkHandlers ?? []) {

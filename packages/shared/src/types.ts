@@ -1829,6 +1829,11 @@ export interface BranchDeleteResult {
 export interface ExperimentalConfig {
   /** The screen model on libghostty-vt instead of a headless xterm. */
   nativeScreen?: boolean
+  /**
+   * Git on the core, off the server's event loop. Unlike the screen, it applies
+   * to the next git command rather than the next terminal.
+   */
+  nativeGit?: boolean
 }
 
 /** What `core:status` reports: whether the Rust core can run, and what decides it. */

@@ -29,7 +29,7 @@ vi.mock('../packages/server/src/pty-manager', () => ({
 
 vi.mock('../packages/server/src/extensions/footers', () => ({
   stopFooters: (id: string) => stoppedFooters.push(id),
-  syncFooters: vi.fn(),
+  syncFooters: vi.fn(async () => {}),
   footerReadings: () => []
 }))
 

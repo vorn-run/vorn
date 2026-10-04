@@ -80,11 +80,11 @@ describe('parseGitHubRemote', () => {
 })
 
 describe('detectRepoSlug', () => {
-  it('asks git for the origin url and parses it', () => {
+  it('asks git for the origin url and parses it', async () => {
     // getSafeEnv() shells out for a login-shell PATH first, so the git call is
     // found by its arguments rather than by being first.
     exec.mockReturnValue('git@github.com:vorn-run/vorn.git\n' as unknown as string)
-    expect(detectRepoSlug('/repo')).toEqual({ owner: 'vorn-run', repo: 'vorn' })
+    expect(await detectRepoSlug('/repo')).toEqual({ owner: 'vorn-run', repo: 'vorn' })
     const gitCall = exec.mock.calls.find(
       (call) => Array.isArray(call[1]) && call[1][0] === 'remote'
     )
@@ -93,15 +93,15 @@ describe('detectRepoSlug', () => {
 
   // No repo, no origin, or no git at all. All mean "cannot tell", which the
   // caller turns into a manual owner/repo entry rather than an error.
-  it('reports null when git fails rather than throwing at the caller', () => {
+  it('reports null when git fails rather than throwing at the caller', async () => {
     exec.mockImplementation(() => {
       throw new Error('not a git repository')
     })
-    expect(detectRepoSlug('/nowhere')).toBeNull()
+    expect(await detectRepoSlug('/nowhere')).toBeNull()
   })
 
-  it('reports null when origin points somewhere that is not GitHub', () => {
+  it('reports null when origin points somewhere that is not GitHub', async () => {
     exec.mockReturnValue('git@gitlab.com:a/b.git\n' as unknown as string)
-    expect(detectRepoSlug('/repo')).toBeNull()
+    expect(await detectRepoSlug('/repo')).toBeNull()
   })
 })

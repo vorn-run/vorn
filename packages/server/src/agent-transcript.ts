@@ -6,7 +6,12 @@ import type {
   TerminalSession
 } from '@vornrun/shared/types'
 import { supportsExactSessionResume } from '@vornrun/shared/types'
-import { comparablePath, getRecentSessionsFor } from './agent-history'
+import {
+  comparablePath,
+  getRecentSessionsFor,
+  projectScope,
+  type ProjectScope
+} from './agent-history'
 import { claimSpawningTranscript, spawningTranscripts } from './transcript-claims'
 
 function preferredPaths(session: TerminalSession): string[] {
@@ -15,10 +20,21 @@ function preferredPaths(session: TerminalSession): string[] {
     .map(comparablePath)
 }
 
-/** Which agent conversation a session continues, or undefined to let the agent choose. */
+/** The scope `resolveTranscriptId` searches, read before anything is claimed. */
+export function transcriptScope(session: TerminalSession): Promise<ProjectScope | undefined> {
+  return projectScope(session.projectPath)
+}
+
+/**
+ * Which agent conversation a session continues, or undefined to let the agent choose.
+ *
+ * @param scope `transcriptScope(session)`, awaited by the caller, so this and
+ * the claim after it run with nothing in between.
+ */
 export function resolveTranscriptId(
   session: TerminalSession,
-  held: ReadonlySet<string> = new Set()
+  held: ReadonlySet<string>,
+  scope: ProjectScope | undefined
 ): string | undefined {
   if (!supportsExactSessionResume(session.agentType)) return undefined
 
@@ -41,7 +57,7 @@ export function resolveTranscriptId(
     return undefined
   }
 
-  const scoped = getRecentSessionsFor(agentType, session.projectPath)
+  const scoped = getRecentSessionsFor(agentType, scope)
   const scopedMatch = atPreferredPath(scoped) ?? scoped.find(available)
   if (scopedMatch) return scopedMatch.sessionId
 
@@ -101,10 +117,11 @@ export function claimTranscriptFor(
   session: TerminalSession,
   live: TerminalSession[],
   sessionId: string,
-  headless: HeadlessSession[] = []
+  headless: HeadlessSession[],
+  scope: ProjectScope | undefined
 ): string | undefined {
   const held = new Set([...heldTranscripts(live, headless), ...spawningTranscripts()])
-  const transcriptId = resolveTranscriptId(session, held)
+  const transcriptId = resolveTranscriptId(session, held, scope)
   if (!transcriptId) return undefined
   // Taken between resolving and claiming: let the agent choose rather than double up.
   const taken = claimSpawningTranscript(transcriptId, sessionId)

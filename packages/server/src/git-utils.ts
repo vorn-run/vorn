@@ -1,59 +1,113 @@
-import { promisify } from 'node:util'
-import { execFile, execFileSync } from 'node:child_process'
 import path from 'node:path'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
 import type { RemoteHost, GitFileDiff } from '@vornrun/shared/types'
-import { sshExecSync, shellEscape, getSafeEnv } from './process-utils'
-import { resolveExecutable } from './resolve-executable'
-
-// Resolve `git` from the login-shell PATH so packaged Electron finds the
-// same binary the user would from their terminal (e.g. a newer Homebrew git
-// rather than the Xcode stub). Falls back to the bare name so callers still
-// work if resolution fails.
-function gitBin(): string {
-  return resolveExecutable('git') ?? 'git'
-}
+import { promisify } from 'node:util'
+import { execFile } from 'node:child_process'
+import { getSafeEnv, shellEscape } from './process-utils'
+import { gitBin, gitRunner } from './git-runner'
 
 /**
  * Run a git command locally or via SSH depending on whether a remote host is provided.
  * For remote: `cd <cwd> && git <args>`
+ *
+ * Which runner does it is `gitRunner()`'s choice: the JS path blocks the event
+ * loop as it always did, the native one does not. Either way the answer is trimmed.
  */
-function gitExec(
+async function gitExec(
   args: string[],
   cwd: string,
   opts?: { timeout?: number; maxBuffer?: number; remote?: RemoteHost }
-): string {
+): Promise<string> {
+  const runner = gitRunner()
   if (opts?.remote) {
     const cmd = `cd ${shellEscape(cwd, 'posix')} && git ${args.map((a) => shellEscape(a, 'posix')).join(' ')}`
-    return sshExecSync(opts.remote, cmd, { timeout: opts?.timeout ?? 10000 })
+    return runner.remote(opts.remote, cmd, { timeout: opts?.timeout ?? 10000 })
   }
-  return execFileSync(gitBin(), args, {
-    cwd,
-    ...EXEC_OPTS,
-    env: getSafeEnv(),
+  const out = await runner.local(args, cwd, {
     timeout: opts?.timeout ?? 10000,
     maxBuffer: opts?.maxBuffer
-  }).trim()
+  })
+  return out.trim()
+}
+
+/**
+ * One mutation at a time per repository. On the JS path every git call blocked,
+ * so a commit's `add` and `commit` could never have another request's git
+ * between them; on the native path they can, so the commands that change a
+ * repository take turns here. Reads do not: they see one state or the next.
+ */
+const turns = new Map<string, Promise<unknown>>()
+
+/**
+ * The repository `cwd` belongs to, shared by its main checkout and every linked
+ * worktree, so a commit in a worktree and that worktree's removal from the
+ * project take turns. Read from disk rather than asked of git, which would be
+ * one more command per change.
+ */
+function repoKey(cwd: string, remote?: RemoteHost): string {
+  if (remote) return `${remote.id}:${vornWorktreeProject(cwd, '/') ?? cwd}`
+  const dir = path.resolve(cwd)
+  return commonGitDir(dir) ?? vornWorktreeProject(dir, path.sep) ?? dir
+}
+
+/** `<parent>/<project>` for a worktree vorn made at `<parent>/.vorn-worktrees/<project>/<name>`. */
+function vornWorktreeProject(dir: string, sep: string): string | null {
+  const parts = dir.split(sep)
+  const at = parts.lastIndexOf('.vorn-worktrees')
+  if (at < 0 || at + 1 >= parts.length) return null
+  return [...parts.slice(0, at), parts[at + 1]].join(sep)
+}
+
+/** The git dir every worktree of `dir`'s repository shares, from `.git` as git reads it. */
+function commonGitDir(dir: string): string | null {
+  try {
+    for (let at = dir; ; at = path.dirname(at)) {
+      const dotGit = path.join(at, '.git')
+      const stat = fs.statSync(dotGit, { throwIfNoEntry: false })
+      if (stat?.isDirectory()) return dotGit
+      if (stat?.isFile()) {
+        // A linked worktree: `gitdir: <common>/worktrees/<name>`, whose
+        // `commondir` names the shared dir relative to it.
+        const gitDir = path.resolve(
+          at,
+          fs
+            .readFileSync(dotGit, 'utf-8')
+            .replace(/^gitdir:\s*/, '')
+            .trim()
+        )
+        const common = fs.readFileSync(path.join(gitDir, 'commondir'), 'utf-8').trim()
+        return path.resolve(gitDir, common)
+      }
+      if (path.dirname(at) === at) return null
+    }
+  } catch {
+    return null
+  }
+}
+
+function serialized<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const previous = turns.get(key) ?? Promise.resolve()
+  const mine = previous.then(run, run)
+  const settled = mine.then(
+    () => undefined,
+    () => undefined
+  )
+  turns.set(key, settled)
+  void settled.then(() => {
+    if (turns.get(key) === settled) turns.delete(key)
+  })
+  return mine
 }
 
 /** As much diff as a reader can use; past this it is a file to open, not a thing to read. */
 const MAX_DIFF_TEXT_BYTES = 500 * 1024
 
-const EXEC_OPTS = {
-  encoding: 'utf-8' as const,
-  stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe']
-}
-
-export function isGitRepo(projectPath: string): boolean {
+export async function isGitRepo(projectPath: string): Promise<boolean> {
   try {
     return (
-      execFileSync(gitBin(), ['rev-parse', '--is-inside-work-tree'], {
-        cwd: projectPath,
-        ...EXEC_OPTS,
-        env: getSafeEnv(),
-        timeout: 3000
-      }).trim() === 'true'
+      (await gitExec(['rev-parse', '--is-inside-work-tree'], projectPath, { timeout: 3000 })) ===
+      'true'
     )
   } catch {
     return false
@@ -61,9 +115,9 @@ export function isGitRepo(projectPath: string): boolean {
 }
 
 /** The repository a path sits in, or null when it sits in none. */
-export function getRepoRoot(cwd: string): string | null {
+export async function getRepoRoot(cwd: string): Promise<string | null> {
   try {
-    return gitExec(['rev-parse', '--show-toplevel'], cwd, { timeout: 3000 }) || null
+    return (await gitExec(['rev-parse', '--show-toplevel'], cwd, { timeout: 3000 })) || null
   } catch {
     return null
   }
@@ -74,12 +128,19 @@ function branchOrNull(raw: string | null): string | null {
   return raw && raw !== 'HEAD' ? raw : null
 }
 
-/** `git rev-parse` without blocking the event loop; null when git says no. */
+/**
+ * `git rev-parse` without blocking the event loop on either path; null when git
+ * says no. The JS path's runner blocks, so it keeps the async child process
+ * these two always had.
+ */
 async function gitRevParse(args: string[], cwd: string): Promise<string | null> {
   try {
+    if (gitRunner().mode === 'native') {
+      return (await gitExec(['rev-parse', ...args], cwd, { timeout: 3000 })) || null
+    }
     const { stdout } = await promisify(execFile)(gitBin(), ['rev-parse', ...args], {
       cwd,
-      ...EXEC_OPTS,
+      encoding: 'utf-8',
       env: getSafeEnv(),
       timeout: 3000
     })
@@ -97,19 +158,26 @@ export function getGitHeadAsync(projectPath: string): Promise<string | null> {
   return gitRevParse(['HEAD'], projectPath)
 }
 
-export function getGitBranch(projectPath: string, remote?: RemoteHost): string | null {
+export async function getGitBranch(
+  projectPath: string,
+  remote?: RemoteHost
+): Promise<string | null> {
   try {
     return branchOrNull(
-      gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath, { timeout: 3000, remote }).trim()
+      (
+        await gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath, { timeout: 3000, remote })
+      ).trim()
     )
   } catch {
     return null
   }
 }
 
-export function getGitHead(projectPath: string, remote?: RemoteHost): string | null {
+export async function getGitHead(projectPath: string, remote?: RemoteHost): Promise<string | null> {
   try {
-    return gitExec(['rev-parse', 'HEAD'], projectPath, { timeout: 3000, remote }).trim() || null
+    return (
+      (await gitExec(['rev-parse', 'HEAD'], projectPath, { timeout: 3000, remote })).trim() || null
+    )
   } catch {
     return null
   }
@@ -150,10 +218,12 @@ export function parseGitHubRemote(url: string): { owner: string; repo: string } 
  * not the GitHub CLI is installed — the connector that needs `gh` is packaged
  * and separate, and this is the one place Vorn itself wanted to know.
  */
-export function detectRepoSlug(projectPath: string): { owner: string; repo: string } | null {
+export async function detectRepoSlug(
+  projectPath: string
+): Promise<{ owner: string; repo: string } | null> {
   try {
     return parseGitHubRemote(
-      gitExec(['remote', 'get-url', 'origin'], projectPath, { timeout: 3000 })
+      await gitExec(['remote', 'get-url', 'origin'], projectPath, { timeout: 3000 })
     )
   } catch {
     // No repo, no origin, or no git. All of them mean "cannot tell", which is
@@ -162,12 +232,14 @@ export function detectRepoSlug(projectPath: string): { owner: string; repo: stri
   }
 }
 
-export function listBranches(projectPath: string, remote?: RemoteHost): string[] {
+export async function listBranches(projectPath: string, remote?: RemoteHost): Promise<string[]> {
   try {
-    const output = gitExec(['branch', '--format=%(refname:short)'], projectPath, {
-      timeout: 5000,
-      remote
-    }).trim()
+    const output = (
+      await gitExec(['branch', '--format=%(refname:short)'], projectPath, {
+        timeout: 5000,
+        remote
+      })
+    ).trim()
     return output
       ? output
           .split('\n')
@@ -179,13 +251,18 @@ export function listBranches(projectPath: string, remote?: RemoteHost): string[]
   }
 }
 
-export function listRemoteBranches(projectPath: string, remote?: RemoteHost): string[] {
+export async function listRemoteBranches(
+  projectPath: string,
+  remote?: RemoteHost
+): Promise<string[]> {
   try {
-    gitExec(['fetch', '--prune'], projectPath, { timeout: 15000, remote })
-    const output = gitExec(['branch', '-r', '--format=%(refname:short)'], projectPath, {
-      timeout: 5000,
-      remote
-    }).trim()
+    await gitExec(['fetch', '--prune'], projectPath, { timeout: 15000, remote })
+    const output = (
+      await gitExec(['branch', '-r', '--format=%(refname:short)'], projectPath, {
+        timeout: 5000,
+        remote
+      })
+    ).trim()
     return output
       ? output
           .split('\n')
@@ -197,18 +274,22 @@ export function listRemoteBranches(projectPath: string, remote?: RemoteHost): st
   }
 }
 
-export function checkoutBranch(
+export async function checkoutBranch(
   projectPath: string,
   branch: string,
   remote?: RemoteHost
-): { ok: boolean; error?: string } {
-  try {
-    gitExec(['checkout', branch], projectPath, { timeout: 10000, remote })
-    return { ok: true }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return { ok: false, error: msg }
-  }
+): Promise<{ ok: boolean; error?: string }> {
+  // Takes the repository's turn: a checkout landing between another change's
+  // add and commit would put that commit on the wrong branch.
+  return serialized(repoKey(projectPath, remote), async () => {
+    try {
+      await gitExec(['checkout', branch], projectPath, { timeout: 10000, remote })
+      return { ok: true }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: msg }
+    }
+  })
 }
 
 export function extractWorktreeName(worktreePath: string): string {
@@ -291,54 +372,65 @@ export function isGeneratedWorktreeBranch(branch: string): boolean {
   return ADJECTIVES.includes(match[1]) && NOUNS.includes(match[2])
 }
 
-export function createWorktree(
+export async function createWorktree(
   projectPath: string,
   branch: string,
   worktreeName?: string,
-  remote?: RemoteHost
-): { worktreePath: string; branch: string; name: string } {
-  // Use posix path separators for remote (always Linux)
-  const sep = remote ? '/' : path.sep
-  const projectName = remote ? projectPath.split('/').pop()! : path.basename(projectPath)
-  const shortId = crypto.randomUUID().slice(0, 8)
-  const rawName = worktreeName || generateName()
-  const name = rawName.replace(/[^a-zA-Z0-9-]/g, '-')
-  const parentDir = remote
-    ? projectPath.split('/').slice(0, -1).join('/')
-    : path.dirname(projectPath)
-  const baseDir = `${parentDir}${sep}.vorn-worktrees${sep}${projectName}`
-  const worktreeDir = `${baseDir}${sep}${name}-${shortId}`
+  remote?: RemoteHost,
+  /**
+   * Told the new worktree's path before anything is made there, so a caller
+   * can hold it: a cleanup that runs while git adds it must not take the
+   * half-made directory for an orphan, nor the finished one for an idle worktree.
+   */
+  onPath?: (worktreePath: string) => void
+): Promise<{ worktreePath: string; branch: string; name: string }> {
+  return serialized(repoKey(projectPath, remote), async () => {
+    // Use posix path separators for remote (always Linux)
+    const sep = remote ? '/' : path.sep
+    const projectName = remote ? projectPath.split('/').pop()! : path.basename(projectPath)
+    const shortId = crypto.randomUUID().slice(0, 8)
+    const rawName = worktreeName || generateName()
+    const name = rawName.replace(/[^a-zA-Z0-9-]/g, '-')
+    const parentDir = remote
+      ? projectPath.split('/').slice(0, -1).join('/')
+      : path.dirname(projectPath)
+    const baseDir = `${parentDir}${sep}.vorn-worktrees${sep}${projectName}`
+    const worktreeDir = `${baseDir}${sep}${name}-${shortId}`
+    onPath?.(worktreeDir)
 
-  if (remote) {
-    sshExecSync(remote, `mkdir -p ${shellEscape(baseDir, 'posix')}`, { timeout: 5000 })
-  } else {
-    fs.mkdirSync(baseDir, { recursive: true })
-  }
-
-  const localBranches = listBranches(projectPath, remote)
-
-  if (localBranches.includes(branch)) {
-    try {
-      gitExec(['worktree', 'add', worktreeDir, branch], projectPath, {
-        timeout: 30000,
-        remote
+    if (remote) {
+      await gitRunner().remote(remote, `mkdir -p ${shellEscape(baseDir, 'posix')}`, {
+        timeout: 5000
       })
-    } catch {
-      const newBranch = localBranches.includes(name) ? `${name}-${shortId}` : name
-      gitExec(['worktree', 'add', '-b', newBranch, worktreeDir, branch], projectPath, {
-        timeout: 30000,
-        remote
-      })
-      return { worktreePath: worktreeDir, branch: newBranch, name }
+    } else {
+      fs.mkdirSync(baseDir, { recursive: true })
     }
-  } else {
-    gitExec(['worktree', 'add', '-b', branch, worktreeDir], projectPath, {
-      timeout: 30000,
-      remote
-    })
-  }
 
-  return { worktreePath: worktreeDir, branch, name }
+    const localBranches = await listBranches(projectPath, remote)
+
+    if (localBranches.includes(branch)) {
+      try {
+        await gitExec(['worktree', 'add', worktreeDir, branch], projectPath, {
+          timeout: 30000,
+          remote
+        })
+      } catch {
+        const newBranch = localBranches.includes(name) ? `${name}-${shortId}` : name
+        await gitExec(['worktree', 'add', '-b', newBranch, worktreeDir, branch], projectPath, {
+          timeout: 30000,
+          remote
+        })
+        return { worktreePath: worktreeDir, branch: newBranch, name }
+      }
+    } else {
+      await gitExec(['worktree', 'add', '-b', branch, worktreeDir], projectPath, {
+        timeout: 30000,
+        remote
+      })
+    }
+
+    return { worktreePath: worktreeDir, branch, name }
+  })
 }
 
 /**
@@ -348,10 +440,10 @@ export function createWorktree(
  * an owner and a repo. An activation rule needs neither, and refusing every
  * other host would hide an extension on the repositories it was written for.
  */
-export function remoteHostOf(projectPath: string): string | null {
+export async function remoteHostOf(projectPath: string): Promise<string | null> {
   let url: string
   try {
-    url = gitExec(['remote', 'get-url', 'origin'], projectPath, { timeout: 3000 })
+    url = await gitExec(['remote', 'get-url', 'origin'], projectPath, { timeout: 3000 })
   } catch {
     // No repo, no origin, or no git; all of them mean the rule has nothing to match.
     return null
@@ -368,13 +460,13 @@ export function remoteHostOf(projectPath: string): string | null {
 }
 
 /** What `git status` says, in the form a machine reads. */
-export function getGitStatusPorcelain(worktreePath: string, remote?: RemoteHost): string {
+export function getGitStatusPorcelain(worktreePath: string, remote?: RemoteHost): Promise<string> {
   return gitExec(['status', '--porcelain'], worktreePath, { timeout: 5000, remote })
 }
 
 /** The working tree's diff as git prints it, for a reader that wants the text rather than the shape. */
-export function getGitDiffText(worktreePath: string, remote?: RemoteHost): string {
-  const raw = gitExec(['diff', '-U3'], worktreePath, {
+export async function getGitDiffText(worktreePath: string, remote?: RemoteHost): Promise<string> {
+  const raw = await gitExec(['diff', '-U3'], worktreePath, {
     timeout: 15000,
     maxBuffer: MAX_DIFF_TEXT_BYTES * 2,
     remote
@@ -384,123 +476,145 @@ export function getGitDiffText(worktreePath: string, remote?: RemoteHost): strin
     : raw
 }
 
-export function isWorktreeDirty(worktreePath: string, remote?: RemoteHost): boolean {
+export async function isWorktreeDirty(worktreePath: string, remote?: RemoteHost): Promise<boolean> {
   try {
-    const output = gitExec(['status', '--porcelain'], worktreePath, {
-      timeout: 5000,
-      remote
-    }).trim()
+    const output = (
+      await gitExec(['status', '--porcelain'], worktreePath, {
+        timeout: 5000,
+        remote
+      })
+    ).trim()
     return output.length > 0
   } catch {
     return true
   }
 }
 
-export function renameWorktreeBranch(
+export async function renameWorktreeBranch(
   worktreePath: string,
   newBranch: string,
   remote?: RemoteHost
-): boolean {
-  const trimmed = newBranch.trim()
-  if (!trimmed || trimmed.startsWith('-')) return false
+): Promise<boolean> {
+  return serialized(repoKey(worktreePath, remote), async () => {
+    const trimmed = newBranch.trim()
+    if (!trimmed || trimmed.startsWith('-')) return false
 
-  try {
-    const currentBranch = getGitBranch(worktreePath, remote)
-    if (!currentBranch) {
-      gitExec(['switch', '-c', trimmed], worktreePath, { timeout: 10000, remote })
-    } else {
-      gitExec(['branch', '-m', trimmed], worktreePath, { timeout: 10000, remote })
+    try {
+      const currentBranch = await getGitBranch(worktreePath, remote)
+      if (!currentBranch) {
+        await gitExec(['switch', '-c', trimmed], worktreePath, { timeout: 10000, remote })
+      } else {
+        await gitExec(['branch', '-m', trimmed], worktreePath, { timeout: 10000, remote })
+      }
+      return true
+    } catch {
+      return false
     }
-    return true
-  } catch {
-    return false
-  }
+  })
 }
 
-export function renameWorktree(
+export async function renameWorktree(
   worktreePath: string,
   newName: string,
   remote?: RemoteHost
-): { newPath: string; name: string } | null {
-  const trimmed = newName
-    .trim()
-    .replace(/[^a-zA-Z0-9-]/g, '-')
-    .replace(/-{2,}/g, '-')
-    .replace(/^-|-$/g, '')
-  if (!trimmed) return null
+): Promise<{ newPath: string; name: string } | null> {
+  return serialized(repoKey(worktreePath, remote), async () => {
+    const trimmed = newName
+      .trim()
+      .replace(/[^a-zA-Z0-9-]/g, '-')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-|-$/g, '')
+    if (!trimmed) return null
 
-  const sep = remote ? '/' : path.sep
-  const dir = remote ? worktreePath.split('/').slice(0, -1).join('/') : path.dirname(worktreePath)
-  const basename = remote ? worktreePath.split('/').pop()! : path.basename(worktreePath)
-  const idMatch = basename.match(/-([0-9a-f]{8})$/)
-  if (!idMatch) return null
-  const shortId = idMatch[1]
-  const newDir = `${dir}${sep}${trimmed}-${shortId}`
+    const sep = remote ? '/' : path.sep
+    const dir = remote ? worktreePath.split('/').slice(0, -1).join('/') : path.dirname(worktreePath)
+    const basename = remote ? worktreePath.split('/').pop()! : path.basename(worktreePath)
+    const idMatch = basename.match(/-([0-9a-f]{8})$/)
+    if (!idMatch) return null
+    const shortId = idMatch[1]
+    const newDir = `${dir}${sep}${trimmed}-${shortId}`
 
-  if (newDir === worktreePath) return null
+    if (newDir === worktreePath) return null
 
-  if (remote) {
-    const check = sshExecSync(
-      remote,
-      `test -d ${shellEscape(newDir, 'posix')} && echo EXISTS || echo MISSING`,
-      { timeout: 5000 }
-    ).trim()
-    if (check === 'EXISTS') return null
-  } else {
-    if (fs.existsSync(newDir)) return null
-  }
+    if (remote) {
+      const check = (
+        await gitRunner().remote(
+          remote,
+          `test -d ${shellEscape(newDir, 'posix')} && echo EXISTS || echo MISSING`,
+          { timeout: 5000 }
+        )
+      ).trim()
+      if (check === 'EXISTS') return null
+    } else {
+      if (fs.existsSync(newDir)) return null
+    }
 
-  try {
-    gitExec(['worktree', 'move', worktreePath, newDir], worktreePath, {
-      timeout: 10000,
-      remote
-    })
-    return { newPath: newDir, name: trimmed }
-  } catch {
-    return null
-  }
+    try {
+      await gitExec(['worktree', 'move', worktreePath, newDir], worktreePath, {
+        timeout: 10000,
+        remote
+      })
+      return { newPath: newDir, name: trimmed }
+    } catch {
+      return null
+    }
+  })
 }
 
-export function removeWorktree(
+export async function removeWorktree(
   projectPath: string,
   worktreePath: string,
   force = false,
   remote?: RemoteHost,
-  deleteBranch = false
-): boolean {
-  // Read the branch before removal — afterwards git no longer associates it
-  // with a path, and we would have nothing left to delete.
-  const branch = deleteBranch ? getGitBranch(worktreePath, remote) : null
-  try {
-    const args = ['worktree', 'remove', worktreePath]
-    if (force) args.push('--force')
-    gitExec(args, projectPath, { timeout: 10000, remote })
-  } catch {
-    return false
-  }
-  // Best-effort, and never forced: `force` here means "discard uncommitted
-  // changes", which is not permission to drop unmerged commits. A branch git
-  // refuses to delete is left alone rather than failing a removal that
-  // already succeeded.
-  if (branch) deleteBranches(projectPath, [branch], false, remote)
-  return true
+  deleteBranch = false,
+  /**
+   * Run once this removal has the repository's turn, right before it deletes
+   * anything; throwing stops it. A session may have started in the worktree
+   * while the removal waited for the turn.
+   */
+  assertIdle?: () => void
+): Promise<boolean> {
+  return serialized(repoKey(projectPath, remote), async () => {
+    assertIdle?.()
+    // Read the branch before removal — afterwards git no longer associates it
+    // with a path, and we would have nothing left to delete.
+    const branch = deleteBranch ? await getGitBranch(worktreePath, remote) : null
+    try {
+      const args = ['worktree', 'remove', worktreePath]
+      if (force) args.push('--force')
+      await gitExec(args, projectPath, { timeout: 10000, remote })
+    } catch {
+      return false
+    }
+    // Best-effort, and never forced: `force` here means "discard uncommitted
+    // changes", which is not permission to drop unmerged commits. A branch git
+    // refuses to delete is left alone rather than failing a removal that
+    // already succeeded.
+    if (branch) await deleteBranchesNow(projectPath, [branch], false, remote)
+    return true
+  })
 }
 
 /**
  * The branch a project's work is measured against. Prefers the remote HEAD
  * symref, then the usual local names, then whatever HEAD points at.
  */
-export function getDefaultBranch(projectPath: string, remote?: RemoteHost): string | null {
+export async function getDefaultBranch(
+  projectPath: string,
+  remote?: RemoteHost
+): Promise<string | null> {
   try {
-    const symref = gitExec(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], projectPath, {
-      timeout: 5000,
-      remote
-    }).trim()
+    const symref = (
+      await gitExec(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], projectPath, {
+        timeout: 5000,
+        remote
+      })
+    ).trim()
     if (symref) return symref.replace(/^origin\//, '')
   } catch {
     // No origin/HEAD — fall through to local names.
   }
-  const locals = listBranches(projectPath, remote)
+  const locals = await listBranches(projectPath, remote)
   for (const candidate of ['main', 'master', 'trunk', 'develop']) {
     if (locals.includes(candidate)) return candidate
   }
@@ -508,15 +622,18 @@ export function getDefaultBranch(projectPath: string, remote?: RemoteHost): stri
 }
 
 /** True when `branch` is already contained in `base` — nothing would be lost. */
-export function isBranchMerged(
+export async function isBranchMerged(
   projectPath: string,
   branch: string,
   base: string,
   remote?: RemoteHost
-): boolean {
+): Promise<boolean> {
   if (branch === base) return true
   try {
-    gitExec(['merge-base', '--is-ancestor', branch, base], projectPath, { timeout: 5000, remote })
+    await gitExec(['merge-base', '--is-ancestor', branch, base], projectPath, {
+      timeout: 5000,
+      remote
+    })
     return true
   } catch {
     return false
@@ -524,16 +641,18 @@ export function isBranchMerged(
 }
 
 /** The upstream ref for a branch, or null when it was never pushed. */
-export function getBranchUpstream(
+export async function getBranchUpstream(
   projectPath: string,
   branch: string,
   remote?: RemoteHost
-): string | null {
+): Promise<string | null> {
   try {
-    const upstream = gitExec(
-      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${branch}@{upstream}`],
-      projectPath,
-      { timeout: 5000, remote }
+    const upstream = (
+      await gitExec(
+        ['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${branch}@{upstream}`],
+        projectPath,
+        { timeout: 5000, remote }
+      )
     ).trim()
     return upstream || null
   } catch {
@@ -542,9 +661,15 @@ export function getBranchUpstream(
 }
 
 /** ISO timestamp of a ref's last commit, or null if the ref is unreadable. */
-export function getLastCommitDate(cwd: string, ref = 'HEAD', remote?: RemoteHost): string | null {
+export async function getLastCommitDate(
+  cwd: string,
+  ref = 'HEAD',
+  remote?: RemoteHost
+): Promise<string | null> {
   try {
-    const raw = gitExec(['log', '-1', '--format=%cI', ref], cwd, { timeout: 5000, remote }).trim()
+    const raw = (
+      await gitExec(['log', '-1', '--format=%cI', ref], cwd, { timeout: 5000, remote })
+    ).trim()
     return raw || null
   } catch {
     return null
@@ -555,16 +680,18 @@ export function getLastCommitDate(cwd: string, ref = 'HEAD', remote?: RemoteHost
  * Branches already contained in `base` — one call instead of a `merge-base`
  * per branch, which matters when a repo has dozens of them.
  */
-export function listMergedBranches(
+export async function listMergedBranches(
   projectPath: string,
   base: string,
   remote?: RemoteHost
-): string[] {
+): Promise<string[]> {
   try {
-    const output = gitExec(['branch', '--merged', base, '--format=%(refname:short)'], projectPath, {
-      timeout: 10000,
-      remote
-    }).trim()
+    const output = (
+      await gitExec(['branch', '--merged', base, '--format=%(refname:short)'], projectPath, {
+        timeout: 10000,
+        remote
+      })
+    ).trim()
     return output
       ? output
           .split('\n')
@@ -580,16 +707,18 @@ export function listMergedBranches(
  * Every local branch with its upstream and last commit date, tab-separated —
  * enough to classify a whole repo's branches in a single git invocation.
  */
-export function gitForEachRef(projectPath: string, remote?: RemoteHost): string[] {
+export async function gitForEachRef(projectPath: string, remote?: RemoteHost): Promise<string[]> {
   try {
-    const output = gitExec(
-      [
-        'for-each-ref',
-        '--format=%(refname:short)%09%(upstream:short)%09%(committerdate:iso-strict)',
-        'refs/heads'
-      ],
-      projectPath,
-      { timeout: 10000, remote }
+    const output = (
+      await gitExec(
+        [
+          'for-each-ref',
+          '--format=%(refname:short)%09%(upstream:short)%09%(committerdate:iso-strict)',
+          'refs/heads'
+        ],
+        projectPath,
+        { timeout: 10000, remote }
+      )
     ).trim()
     return output ? output.split('\n').filter(Boolean) : []
   } catch {
@@ -602,12 +731,17 @@ export function gitForEachRef(projectPath: string, remote?: RemoteHost): string[
  * `<repo>/.git/worktrees/<name>`, whose `index` mtime tracks activity in that
  * worktree alone. Returns null when the path isn't inside a repository.
  */
-export function getAbsoluteGitDir(anyPath: string, remote?: RemoteHost): string | null {
+export async function getAbsoluteGitDir(
+  anyPath: string,
+  remote?: RemoteHost
+): Promise<string | null> {
   try {
-    const dir = gitExec(['rev-parse', '--absolute-git-dir'], anyPath, {
-      timeout: 5000,
-      remote
-    }).trim()
+    const dir = (
+      await gitExec(['rev-parse', '--absolute-git-dir'], anyPath, {
+        timeout: 5000,
+        remote
+      })
+    ).trim()
     return dir || null
   } catch {
     return null
@@ -618,17 +752,32 @@ export function getAbsoluteGitDir(anyPath: string, remote?: RemoteHost): string 
  * Delete local branches. Uses `-d` so git refuses anything unmerged; `force`
  * escalates to `-D` and must be an explicit choice by the user.
  */
-export function deleteBranches(
+export async function deleteBranches(
   projectPath: string,
   branches: string[],
   force = false,
   remote?: RemoteHost
-): { deleted: string[]; failed: { branch: string; error: string }[] } {
+): Promise<{ deleted: string[]; failed: { branch: string; error: string }[] }> {
+  return serialized(repoKey(projectPath, remote), () =>
+    deleteBranchesNow(projectPath, branches, force, remote)
+  )
+}
+
+/** `deleteBranches` for a caller that already has the repository's turn. */
+async function deleteBranchesNow(
+  projectPath: string,
+  branches: string[],
+  force: boolean,
+  remote?: RemoteHost
+): Promise<{ deleted: string[]; failed: { branch: string; error: string }[] }> {
   const deleted: string[] = []
   const failed: { branch: string; error: string }[] = []
   for (const branch of branches) {
     try {
-      gitExec(['branch', force ? '-D' : '-d', branch], projectPath, { timeout: 10000, remote })
+      await gitExec(['branch', force ? '-D' : '-d', branch], projectPath, {
+        timeout: 10000,
+        remote
+      })
       deleted.push(branch)
     } catch (err) {
       failed.push({ branch, error: err instanceof Error ? err.message : String(err) })
@@ -644,16 +793,18 @@ export interface WorktreeEntry {
   name: string
 }
 
-export function getGitDiffStat(
+export async function getGitDiffStat(
   cwd: string,
   remote?: RemoteHost,
   range?: { from: string; to: string }
-): { filesChanged: number; insertions: number; deletions: number } | null {
+): Promise<{ filesChanged: number; insertions: number; deletions: number } | null> {
   try {
-    const output = gitExec(['diff', ...diffTarget(range), '--numstat'], cwd, {
-      timeout: 10000,
-      remote
-    }).trim()
+    const output = (
+      await gitExec(['diff', ...diffTarget(range), '--numstat'], cwd, {
+        timeout: 10000,
+        remote
+      })
+    ).trim()
 
     if (!output) return { filesChanged: 0, insertions: 0, deletions: 0 }
 
@@ -677,20 +828,20 @@ export function getGitDiffStat(
   }
 }
 
-export function getGitDiffFull(
+export async function getGitDiffFull(
   cwd: string,
   remote?: RemoteHost,
   range?: { from: string; to: string }
-): {
+): Promise<{
   stat: { filesChanged: number; insertions: number; deletions: number }
   files: GitFileDiff[]
-} | null {
+} | null> {
   try {
-    const stat = getGitDiffStat(cwd, remote, range)
+    const stat = await getGitDiffStat(cwd, remote, range)
     if (!stat) return null
 
     const MAX_DIFF_SIZE = 500 * 1024 // 500KB
-    let rawDiff = gitExec(['diff', ...diffTarget(range), '-U3'], cwd, {
+    let rawDiff = await gitExec(['diff', ...diffTarget(range), '-U3'], cwd, {
       timeout: 15000,
       maxBuffer: MAX_DIFF_SIZE * 2,
       remote
@@ -700,10 +851,12 @@ export function getGitDiffFull(
       rawDiff = rawDiff.slice(0, MAX_DIFF_SIZE) + '\n\n... diff truncated (too large) ...\n'
     }
 
-    const numstatOutput = gitExec(['diff', ...diffTarget(range), '--numstat'], cwd, {
-      timeout: 10000,
-      remote
-    }).trim()
+    const numstatOutput = (
+      await gitExec(['diff', ...diffTarget(range), '--numstat'], cwd, {
+        timeout: 10000,
+        remote
+      })
+    ).trim()
 
     const fileStats = new Map<string, { insertions: number; deletions: number }>()
     if (numstatOutput) {
@@ -755,17 +908,32 @@ export function getGitDiffFull(
   }
 }
 
-export function gitCommit(
+export async function gitCommit(
   cwd: string,
   message: string,
   includeUnstaged: boolean,
   remote?: RemoteHost
-): { success: boolean; error?: string } {
-  try {
-    if (includeUnstaged) {
-      gitExec(['add', '-A'], cwd, { timeout: 10000, remote })
+): Promise<{ success: boolean; error?: string }> {
+  return serialized(repoKey(cwd, remote), async () => {
+    try {
+      if (includeUnstaged) {
+        await gitExec(['add', '-A'], cwd, { timeout: 10000, remote })
+      }
+      await gitExec(['commit', '-m', message], cwd, { timeout: 15000, remote })
+      return { success: true }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { success: false, error: msg }
     }
-    gitExec(['commit', '-m', message], cwd, { timeout: 15000, remote })
+  })
+}
+
+export async function gitPush(
+  cwd: string,
+  remote?: RemoteHost
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await gitExec(['push'], cwd, { timeout: 30000, remote })
     return { success: true }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -773,22 +941,17 @@ export function gitCommit(
   }
 }
 
-export function gitPush(cwd: string, remote?: RemoteHost): { success: boolean; error?: string } {
+export async function listWorktrees(
+  projectPath: string,
+  remote?: RemoteHost
+): Promise<WorktreeEntry[]> {
   try {
-    gitExec(['push'], cwd, { timeout: 30000, remote })
-    return { success: true }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return { success: false, error: msg }
-  }
-}
-
-export function listWorktrees(projectPath: string, remote?: RemoteHost): WorktreeEntry[] {
-  try {
-    const output = gitExec(['worktree', 'list', '--porcelain'], projectPath, {
-      timeout: 5000,
-      remote
-    }).trim()
+    const output = (
+      await gitExec(['worktree', 'list', '--porcelain'], projectPath, {
+        timeout: 5000,
+        remote
+      })
+    ).trim()
 
     if (!output) return []
 

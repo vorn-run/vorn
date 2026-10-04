@@ -16,6 +16,12 @@ const SWITCHES: { key: keyof ExperimentalConfig; label: string; description: str
     label: 'Native screen model',
     description:
       "Keep each terminal's screen in Ghostty's engine instead of a second xterm, for history and restore"
+  },
+  {
+    key: 'nativeGit',
+    label: 'Native git',
+    description:
+      'Run git on the native core, off the main thread, so terminals keep flowing while git works. Applies from the next git command'
   }
 ]
 

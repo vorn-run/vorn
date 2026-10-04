@@ -3,6 +3,7 @@ import {
   claimSpawningTranscript,
   releaseSpawningTranscript,
   releaseSpawningTranscriptsFor,
+  holdClaimsWhilePreparing,
   spawningTranscripts,
   resetTranscriptClaims
 } from '../packages/server/src/transcript-claims'
@@ -74,5 +75,31 @@ describe('a transcript being started', () => {
     claimSpawningTranscript('transcript-b', 'term-1')
     releaseSpawningTranscript('transcript-a', 'term-1')
     expect(spawningTranscripts()).toEqual(new Set(['transcript-b']))
+  })
+})
+
+describe('a transcript whose workspace is still being prepared', () => {
+  it('does not lapse while git takes its time, then lapses as any claim does', () => {
+    vi.useFakeTimers()
+    const prepared = holdClaimsWhilePreparing('term-1')
+    claimSpawningTranscript('transcript-a', 'term-1')
+    vi.advanceTimersByTime(5 * 60_000)
+    expect(claimSpawningTranscript('transcript-a', 'term-2')).toBe('term-1')
+    // The window starts again when the spawn is made, not when the claim was.
+    prepared()
+    prepared()
+    vi.advanceTimersByTime(59_000)
+    expect(spawningTranscripts()).toEqual(new Set(['transcript-a']))
+    vi.advanceTimersByTime(1_001)
+    expect(claimSpawningTranscript('transcript-a', 'term-2')).toBeUndefined()
+  })
+
+  it("leaves other sessions' claims to lapse", () => {
+    vi.useFakeTimers()
+    const prepared = holdClaimsWhilePreparing('term-1')
+    claimSpawningTranscript('transcript-b', 'term-2')
+    vi.advanceTimersByTime(60_001)
+    expect(spawningTranscripts()).toEqual(new Set())
+    prepared()
   })
 })

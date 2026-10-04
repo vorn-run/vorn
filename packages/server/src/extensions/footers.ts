@@ -160,12 +160,26 @@ function restart(
   pollers.set(key, { timer, everyMs, failing, declared: existing.declared })
 }
 
+/**
+ * The newest sync asked for each session. Reading the subject can wait on git,
+ * so two syncs for one session can finish out of order, and one can finish
+ * after the session's footers were stopped; only the newest may act.
+ */
+const latestSync = new Map<string, number>()
+let syncs = 0
+
 /** Start what this session's activation says shows, and stop what no longer does. */
-export function syncFooters(session: TerminalSession): void {
-  const subject = subjectOf(session)
+export async function syncFooters(
+  session: TerminalSession,
+  packs: InstalledConnectorPack[] = installedExtensions()
+): Promise<void> {
+  const turn = ++syncs
+  latestSync.set(session.id, turn)
+  const subject = await subjectOf(session, packs)
+  if (latestSync.get(session.id) !== turn) return
   const wanted = new Set<string>()
 
-  for (const pack of installedExtensions()) {
+  for (const pack of packs) {
     const activation = activationFor(pack, subject)
     if (!activation.active) continue
     for (const footer of pack.contributes?.footers ?? []) {
@@ -208,6 +222,7 @@ export function syncFooters(session: TerminalSession): void {
 }
 
 export function stopFooters(sessionId: string): void {
+  latestSync.delete(sessionId)
   for (const [key, poller] of [...pollers]) {
     if (!key.startsWith(`${sessionId} `)) continue
     clearInterval(poller.timer)
@@ -217,6 +232,7 @@ export function stopFooters(sessionId: string): void {
 }
 
 export function stopAllFooters(): void {
+  latestSync.clear()
   for (const poller of pollers.values()) clearInterval(poller.timer)
   pollers.clear()
   readings.clear()

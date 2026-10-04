@@ -22,6 +22,23 @@ export interface NativeCore {
   Analyzer?: new () => NativeAnalyzer
   /** The screen model, on libghostty-vt. Only present when built with it. */
   Screen?: new (cols: number, rows: number) => NativeScreen
+  /**
+   * Runs one git command off the event loop: answered in-process by gix when it
+   * can be answered byte-for-byte as git would, otherwise by `git` on a core
+   * thread. Resolves with stdout; rejects as `execFileSync` throws.
+   */
+  gitRun?(request: NativeGitRequest): Promise<string>
+}
+
+export interface NativeGitRequest {
+  /** The git executable, resolved as the JS path resolves it. */
+  bin: string
+  args: string[]
+  cwd: string
+  env: Record<string, string>
+  timeoutMs: number
+  /** Stdout past this many bytes is an error, as `maxBuffer` is for `execFileSync`. */
+  maxBuffer: number
 }
 
 export interface NativeAnalyzer {
@@ -174,15 +191,17 @@ export function activeCore(): CoreSelection {
  * A piece of the terminal pipeline that can run on the core, each behind its
  * own switch in Settings › Experimental.
  */
-export type NativeFeature = 'screen'
+export type NativeFeature = 'screen' | 'git'
 
 const FEATURE_FLAGS: Record<NativeFeature, keyof ExperimentalConfig> = {
-  screen: 'nativeScreen'
+  screen: 'nativeScreen',
+  git: 'nativeGit'
 }
 
 /** Whether a loaded binary carries a feature; a build without libghostty-vt has no `Screen`. */
 const FEATURE_EXPORTS: Record<NativeFeature, (core: NativeCore) => boolean> = {
-  screen: (core) => typeof core.Screen === 'function'
+  screen: (core) => typeof core.Screen === 'function',
+  git: (core) => typeof core.gitRun === 'function'
 }
 
 type FlagSource = () => ExperimentalConfig | undefined
@@ -208,8 +227,11 @@ export function forcedCoreMode(value: string | undefined): CoreMode | null {
 
 let flagged: CoreSelection | null = null
 
-/** The binary, loaded the first time a switch asks for it, and only tried once. */
-function flaggedCore(): CoreSelection {
+/**
+ * The binary, loaded the first time a switch asks for it, and only tried once.
+ * Exported for `VORN_GIT=native`, which asks for it without the switch.
+ */
+export function flaggedCore(): CoreSelection {
   flagged ??= selectCore({ env: { ...process.env, VORN_CORE: 'native' }, load: loadOverride })
   return flagged
 }
