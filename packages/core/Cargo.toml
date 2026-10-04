@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/screen", "crates/analysis", "crates/pipeline"]
+members = [".", "crates/screen", "crates/analysis", "crates/pipeline", "crates/vorn-git"]
 
 [package]
 name = "vorn-core"
@@ -20,12 +20,14 @@ default = ["ghostty"]
 ghostty = ["dep:libghostty-vt", "dep:vorn-screen", "dep:vorn-pipeline"]
 
 [dependencies]
-napi = { version = "3", default-features = false, features = ["napi6"] }
+napi = { version = "3", default-features = false, features = ["napi6", "async", "tokio_rt"] }
 napi-derive = "3"
 libghostty-vt = { version = "0.2.2", default-features = false, optional = true }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "sync"] }
 vorn-analysis = { path = "crates/analysis" }
 vorn-screen = { path = "crates/screen", optional = true }
 vorn-pipeline = { path = "crates/pipeline", optional = true }
+vorn-git = { path = "crates/vorn-git" }
 
 [build-dependencies]
 napi-build = "2"

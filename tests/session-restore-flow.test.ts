@@ -14,7 +14,7 @@ vi.mock('../packages/server/src/agent-history', async (importOriginal) => ({
   getRecentSessionsFor: (...args: unknown[]) => mockGetRecentSessions(...args)
 }))
 
-import { resolveTranscriptId } from '../packages/server/src/agent-transcript'
+import { resolveTranscriptId, transcriptScope } from '../packages/server/src/agent-transcript'
 import { buildRestorePayload, coldSessions } from '../src/renderer/lib/session-utils'
 
 const env = { PATH: '/usr/bin' }
@@ -31,6 +31,11 @@ function makeSession(overrides: Partial<TerminalSession> = {}): TerminalSession 
     pid: 1234,
     ...overrides
   }
+}
+
+// What a restore does: read the project's scope first, then resolve with nothing held.
+async function resolveOnRestore(session: TerminalSession): Promise<string | undefined> {
+  return resolveTranscriptId(session, new Set(), await transcriptScope(session))
 }
 
 function makePayload(overrides: Partial<CreateTerminalPayload> = {}): CreateTerminalPayload {
@@ -50,7 +55,7 @@ beforeEach(() => {
 describe('session restore flow: Claude with agentSessionId', () => {
   it('agentSessionId is used as resumeSessionId without scanning history', async () => {
     const session = makeSession({ agentSessionId: 'exact-uuid-123' })
-    const resumeId = resolveTranscriptId(session)
+    const resumeId = await resolveOnRestore(session)
     expect(resumeId).toBe('exact-uuid-123')
     // Should NOT have called getRecentSessions — agentSessionId was sufficient
     expect(mockGetRecentSessions).not.toHaveBeenCalled()
@@ -58,7 +63,7 @@ describe('session restore flow: Claude with agentSessionId', () => {
 
   it('hookSessionId alone is NOT used for resume (VibeGrid-internal UUID)', async () => {
     const session = makeSession({ hookSessionId: 'hook-only-uuid' })
-    const resumeId = resolveTranscriptId(session)
+    const resumeId = await resolveOnRestore(session)
     // hookSessionId is a VibeGrid routing UUID, not a real agent session ID
     expect(resumeId).toBeUndefined()
   })
@@ -88,7 +93,7 @@ describe('session restore flow: Claude with agentSessionId', () => {
     const session = makeSession({ agentSessionId: 'chain-uuid' })
 
     // Step 1: resolve
-    const resumeId = resolveTranscriptId(session)
+    const resumeId = await resolveOnRestore(session)
     expect(resumeId).toBe('chain-uuid')
 
     // Step 2: build payload
@@ -104,7 +109,7 @@ describe('session restore flow: Claude with agentSessionId', () => {
 describe('session restore flow: Gemini (no resume support)', () => {
   it('resolveTranscriptId returns undefined for gemini', async () => {
     const session = makeSession({ agentType: 'gemini' })
-    const resumeId = resolveTranscriptId(session)
+    const resumeId = await resolveOnRestore(session)
     expect(resumeId).toBeUndefined()
   })
 
@@ -128,7 +133,7 @@ describe('session restore flow: Codex fallback to history', () => {
       }
     ])
     const session = makeSession({ agentType: 'codex' })
-    const resumeId = resolveTranscriptId(session)
+    const resumeId = await resolveOnRestore(session)
     expect(resumeId).toBe('codex-sess-1')
     expect(mockGetRecentSessions).toHaveBeenCalled()
   })

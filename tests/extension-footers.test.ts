@@ -90,7 +90,7 @@ afterEach(() => {
 
 describe('a footer band', () => {
   it('computes once as soon as it shows, rather than after its first interval', async () => {
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     expect(calls).toHaveLength(1)
     expect(calls[0]).toMatchObject({
@@ -107,7 +107,7 @@ describe('a footer band', () => {
   })
 
   it('tells the windows drawing the card, scoped to it', async () => {
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     const pushed = broadcasts.filter((one) => one.method === IPC.EXTENSION_FOOTER_ITEMS)
     expect(pushed).toHaveLength(1)
@@ -115,33 +115,33 @@ describe('a footer band', () => {
   })
 
   it('says nothing when the reading has not moved', async () => {
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     broadcasts.length = 0
     footers.stopFooters('s1')
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     // Recomputed from scratch after a stop, so the first reading is new again.
     expect(broadcasts).toHaveLength(1)
     broadcasts.length = 0
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     expect(broadcasts).toHaveLength(0)
   })
 
   it('keeps the last good reading beside the error when a run fails', async () => {
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     answer = () => {
       throw new Error('git is not on the path')
     }
     footers.stopFooters('s1')
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     answer = () => {
       throw new Error('git is not on the path')
     }
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     const reading = footers.footerReadings('s1')[0]
     expect(reading.error).toContain('git is not on the path')
@@ -149,21 +149,21 @@ describe('a footer band', () => {
 
   it('refuses items a band cannot draw', async () => {
     answer = () => ({ items: [{ label: 'tests' }] })
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     expect(footers.footerReadings('s1')[0].error).toContain('label and a value')
   })
 
   it('refuses an item linking somewhere a click should not go', async () => {
     answer = () => ({ items: [{ label: 'ci', value: 'green', href: 'javascript:alert(1)' }] })
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     expect(footers.footerReadings('s1')[0].error).toMatch(/http or https/)
   })
 
   it('names the rule when an item links to something that is not a URL', async () => {
     answer = () => ({ items: [{ label: 'ci', value: 'green', href: 'not a url' }] })
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     expect(footers.footerReadings('s1')[0].error).toMatch(/http or https/)
   })
@@ -176,23 +176,23 @@ describe('a footer band', () => {
         ]
       }
     })
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     expect(calls).toHaveLength(0)
     expect(footers.footerReadings('s1')).toEqual([])
   })
 
   it('stops what a session no longer shows, and what it leaves behind', async () => {
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     expect(footers.footerReadings('s1')).toHaveLength(1)
     packs.length = 0
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     expect(footers.footerReadings('s1')).toEqual([])
   })
 
   it('holds everything for a session until it ends', async () => {
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     footers.stopFooters('s1')
     expect(footers.footerReadings('s1')).toEqual([])
@@ -205,7 +205,7 @@ describe('a footer band', () => {
       new Promise((resolve) => {
         release = () => resolve({ items: [{ label: 'tests', value: 'passing' }] })
       })
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     footers.stopFooters('s1')
     broadcasts.length = 0
@@ -218,12 +218,12 @@ describe('a footer band', () => {
 
   // An upgraded pack is a different footer; leaving the old timer would keep the old interval.
   it('starts again when the pack it came from changed', async () => {
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     expect(calls).toHaveLength(1)
 
     // Same footer, same interval, so nothing should be restarted.
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     expect(calls).toHaveLength(1)
 
@@ -231,7 +231,7 @@ describe('a footer band', () => {
       version: '0.2.0',
       contributes: { footers: [{ id: 'checks', title: 'Checks', every: 30 }] }
     })
-    footers.syncFooters(session())
+    await footers.syncFooters(session())
     await settle()
     expect(calls).toHaveLength(2)
   })

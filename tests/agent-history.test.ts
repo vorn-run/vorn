@@ -28,7 +28,7 @@ vi.mock('libsql', () => {
 })
 
 vi.mock('../packages/server/src/git-utils', () => ({
-  listWorktrees: vi.fn(() => [])
+  listWorktrees: vi.fn(async () => [])
 }))
 
 import fs from 'node:fs'
@@ -42,13 +42,13 @@ beforeEach(() => {
 })
 
 describe('getRecentSessions', () => {
-  it('returns empty when no history files exist', () => {
-    expect(getRecentSessions()).toEqual([])
+  it('returns empty when no history files exist', async () => {
+    expect(await getRecentSessions()).toEqual([])
   })
 })
 
 describe('Claude provider', () => {
-  it('parses history.jsonl and returns sessions', () => {
+  it('parses history.jsonl and returns sessions', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => {
       return String(p).includes('.claude/history.jsonl')
     })
@@ -65,7 +65,7 @@ describe('Claude provider', () => {
       ].join('\n')
     )
 
-    const sessions = getRecentSessions()
+    const sessions = await getRecentSessions()
     const claude = sessions.filter((s) => s.agentType === 'claude')
 
     expect(claude).toHaveLength(2)
@@ -79,7 +79,7 @@ describe('Claude provider', () => {
     expect(claude[1].sessionId).toBe('s2')
   })
 
-  it('filters by projectPath', () => {
+  it('filters by projectPath', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => {
       return String(p).includes('.claude/history.jsonl')
     })
@@ -90,17 +90,17 @@ describe('Claude provider', () => {
       ].join('\n')
     )
 
-    const sessions = getRecentSessions('/app')
+    const sessions = await getRecentSessions('/app')
     const claude = sessions.filter((s) => s.agentType === 'claude')
     expect(claude).toHaveLength(1)
     expect(claude[0].sessionId).toBe('s1')
   })
 
-  it('includes sessions from known worktrees when filtering by project path', () => {
+  it('includes sessions from known worktrees when filtering by project path', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => {
       return String(p).includes('.claude/history.jsonl')
     })
-    vi.mocked(listWorktrees).mockReturnValue([
+    vi.mocked(listWorktrees).mockResolvedValue([
       { name: 'feature-a', path: '/worktrees/my-app/feature-a', branch: 'feature-a', isMain: false }
     ])
     vi.mocked(fs.readFileSync).mockReturnValueOnce(
@@ -112,7 +112,7 @@ describe('Claude provider', () => {
       })
     )
 
-    const sessions = getRecentSessions('/app')
+    const sessions = await getRecentSessions('/app')
     const claude = sessions.filter((s) => s.agentType === 'claude')
     expect(claude).toHaveLength(1)
     expect(claude[0].sessionId).toBe('s-worktree')
@@ -120,7 +120,7 @@ describe('Claude provider', () => {
 })
 
 describe('Codex provider', () => {
-  it('returns sessions from sqlite query', () => {
+  it('returns sessions from sqlite query', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => {
       return String(p).includes('.codex/state_5.sqlite')
     })
@@ -128,19 +128,19 @@ describe('Codex provider', () => {
       { id: 'c1', cwd: '/app', title: 'Test', updated_at: 1700000000, first_user_message: '' }
     ])
 
-    const sessions = getRecentSessions()
+    const sessions = await getRecentSessions()
     const codex = sessions.filter((s) => s.agentType === 'codex')
     expect(codex).toHaveLength(1)
     expect(codex[0].sessionId).toBe('c1')
   })
 
-  it('returns empty when DB does not exist', () => {
+  it('returns empty when DB does not exist', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false)
-    const sessions = getRecentSessions()
+    const sessions = await getRecentSessions()
     expect(sessions.filter((s) => s.agentType === 'codex')).toEqual([])
   })
 
-  it('matches Windows project paths after normalization', () => {
+  it('matches Windows project paths after normalization', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes('.codex/state_5.sqlite'))
     libsqlRowsQueue.push([
       {
@@ -159,15 +159,15 @@ describe('Codex provider', () => {
       }
     ])
 
-    const sessions = getRecentSessions('C:\\Users\\Javier\\App\\')
+    const sessions = await getRecentSessions('C:\\Users\\Javier\\App\\')
     const codex = sessions.filter((s) => s.agentType === 'codex')
     expect(codex).toHaveLength(1)
     expect(codex[0].sessionId).toBe('c1')
   })
 
-  it('queries known worktree paths when filtering by project path', () => {
+  it('queries known worktree paths when filtering by project path', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes('.codex/state_5.sqlite'))
-    vi.mocked(listWorktrees).mockReturnValue([
+    vi.mocked(listWorktrees).mockResolvedValue([
       { name: 'feature-a', path: '/worktrees/my-app/feature-a', branch: 'feature-a', isMain: false }
     ])
     libsqlRowsQueue.push([
@@ -180,7 +180,7 @@ describe('Codex provider', () => {
       }
     ])
 
-    const sessions = getRecentSessions('/app')
+    const sessions = await getRecentSessions('/app')
     const codex = sessions.filter((s) => s.agentType === 'codex')
     expect(codex).toHaveLength(1)
     expect(codex[0].sessionId).toBe('c1')
@@ -190,7 +190,7 @@ describe('Codex provider', () => {
     expect(String(sql)).toContain('/worktrees/my-app/feature-a')
   })
 
-  it('lowercases scoped SQL path literals for uppercase POSIX paths', () => {
+  it('lowercases scoped SQL path literals for uppercase POSIX paths', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes('.codex/state_5.sqlite'))
     libsqlRowsQueue.push([
       {
@@ -202,7 +202,7 @@ describe('Codex provider', () => {
       }
     ])
 
-    getRecentSessions('/Users/Javier/App')
+    await getRecentSessions('/Users/Javier/App')
 
     const sql = libsqlSqlCalls[0]
     expect(String(sql)).toContain('/users/javier/app')
@@ -210,7 +210,7 @@ describe('Codex provider', () => {
 })
 
 describe('Copilot provider', () => {
-  it('matches Windows project paths after normalization', () => {
+  it('matches Windows project paths after normalization', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) =>
       String(p).includes('.copilot/session-store.db')
     )
@@ -231,7 +231,7 @@ describe('Copilot provider', () => {
       }
     ])
 
-    const sessions = getRecentSessions('C:\\Users\\Javier\\App\\')
+    const sessions = await getRecentSessions('C:\\Users\\Javier\\App\\')
     const copilot = sessions.filter((s) => s.agentType === 'copilot')
     expect(copilot).toHaveLength(1)
     expect(copilot[0].sessionId).toBe('p1')
@@ -239,7 +239,7 @@ describe('Copilot provider', () => {
 })
 
 describe('OpenCode provider', () => {
-  it('returns sessions from the OpenCode database', () => {
+  it('returns sessions from the OpenCode database', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes('opencode/opencode.db'))
     libsqlRowsQueue.push([
       {
@@ -251,7 +251,7 @@ describe('OpenCode provider', () => {
       }
     ])
 
-    const sessions = getRecentSessions()
+    const sessions = await getRecentSessions()
     const opencode = sessions.filter((s) => s.agentType === 'opencode')
     expect(opencode).toHaveLength(1)
     expect(opencode[0]).toMatchObject({
@@ -264,7 +264,7 @@ describe('OpenCode provider', () => {
     })
   })
 
-  it('filters OpenCode sessions by project path', () => {
+  it('filters OpenCode sessions by project path', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes('opencode/opencode.db'))
     libsqlRowsQueue.push([
       {
@@ -276,7 +276,7 @@ describe('OpenCode provider', () => {
       }
     ])
 
-    const sessions = getRecentSessions('/app')
+    const sessions = await getRecentSessions('/app')
     const opencode = sessions.filter((s) => s.agentType === 'opencode')
     expect(opencode).toHaveLength(1)
 
@@ -286,7 +286,7 @@ describe('OpenCode provider', () => {
 })
 
 describe('aggregate', () => {
-  it('merges all providers, sorted by timestamp, limited', () => {
+  it('merges all providers, sorted by timestamp, limited', async () => {
     // Claude
     vi.mocked(fs.existsSync).mockImplementation((p) => {
       return (
@@ -301,7 +301,7 @@ describe('aggregate', () => {
       { id: 'c1', cwd: '/app', title: 'Codex', updated_at: 4, first_user_message: '' }
     ])
 
-    const sessions = getRecentSessions(undefined, 2)
+    const sessions = await getRecentSessions(undefined, 2)
     expect(sessions.length).toBeLessThanOrEqual(2)
     // Should be sorted by timestamp desc
     for (let i = 1; i < sessions.length; i++) {
@@ -311,7 +311,7 @@ describe('aggregate', () => {
 })
 
 describe('Claude provider path normalization', () => {
-  it('matches when filter has trailing slash but history does not', () => {
+  it('matches when filter has trailing slash but history does not', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes('.claude/history.jsonl'))
     vi.mocked(fs.readFileSync).mockReturnValueOnce(
       JSON.stringify({ sessionId: 's1', display: 'Fix', project: '/app', timestamp: 1000 })
@@ -319,25 +319,25 @@ describe('Claude provider path normalization', () => {
     // realpathSync returns as-is (no symlinks)
     vi.mocked(fs.realpathSync).mockImplementation((p) => String(p))
 
-    const sessions = getRecentSessions('/app/')
+    const sessions = await getRecentSessions('/app/')
     const claude = sessions.filter((s) => s.agentType === 'claude')
     expect(claude).toHaveLength(1)
     expect(claude[0].sessionId).toBe('s1')
   })
 
-  it('matches when history has trailing slash but filter does not', () => {
+  it('matches when history has trailing slash but filter does not', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes('.claude/history.jsonl'))
     vi.mocked(fs.readFileSync).mockReturnValueOnce(
       JSON.stringify({ sessionId: 's1', display: 'Fix', project: '/app/', timestamp: 1000 })
     )
     vi.mocked(fs.realpathSync).mockImplementation((p) => String(p))
 
-    const sessions = getRecentSessions('/app')
+    const sessions = await getRecentSessions('/app')
     const claude = sessions.filter((s) => s.agentType === 'claude')
     expect(claude).toHaveLength(1)
   })
 
-  it('matches via symlink resolution', () => {
+  it('matches via symlink resolution', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => String(p).includes('.claude/history.jsonl'))
     vi.mocked(fs.readFileSync).mockReturnValueOnce(
       JSON.stringify({
@@ -355,7 +355,7 @@ describe('Claude provider path normalization', () => {
       return s
     })
 
-    const sessions = getRecentSessions('/private/var/data')
+    const sessions = await getRecentSessions('/private/var/data')
     const claude = sessions.filter((s) => s.agentType === 'claude')
     expect(claude).toHaveLength(1)
     expect(claude[0].sessionId).toBe('s1')
@@ -363,7 +363,7 @@ describe('Claude provider path normalization', () => {
 })
 
 describe('Gemini provider path normalization', () => {
-  it('matches Windows project paths after normalization', () => {
+  it('matches Windows project paths after normalization', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => {
       const value = String(p)
       return value.includes('.gemini/projects.json') || value.includes('.gemini/tmp/my-app/chats')
@@ -389,14 +389,14 @@ describe('Gemini provider path normalization', () => {
     >)
     vi.mocked(fs.statSync).mockReturnValue({ mtimeMs: 1 } as ReturnType<typeof fs.statSync>)
 
-    const sessions = getRecentSessions('C:\\Users\\Javier\\App\\')
+    const sessions = await getRecentSessions('C:\\Users\\Javier\\App\\')
     const gemini = sessions.filter((s) => s.agentType === 'gemini')
     expect(gemini).toHaveLength(1)
     expect(gemini[0].sessionId).toBe('g1')
     expect(gemini[0].canResumeExact).toBe(false)
   })
 
-  it('discovers project roots from tmp directories and parses structured content titles', () => {
+  it('discovers project roots from tmp directories and parses structured content titles', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => {
       const value = String(p)
       return (
@@ -435,7 +435,7 @@ describe('Gemini provider path normalization', () => {
       return ''
     })
 
-    const sessions = getRecentSessions('/app')
+    const sessions = await getRecentSessions('/app')
     const gemini = sessions.filter((s) => s.agentType === 'gemini')
     expect(gemini).toHaveLength(1)
     expect(gemini[0].display).toBe('Hello from Gemini')

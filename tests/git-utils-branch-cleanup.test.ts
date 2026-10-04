@@ -55,39 +55,39 @@ describe('isGeneratedWorktreeBranch', () => {
 })
 
 describe('deleteBranches', () => {
-  it('uses -d so git refuses anything unmerged', () => {
-    deleteBranches('/repo', ['royal-stanza'])
+  it('uses -d so git refuses anything unmerged', async () => {
+    await deleteBranches('/repo', ['royal-stanza'])
     expect(callArgs()).toContainEqual(['branch', '-d', 'royal-stanza'])
   })
 
-  it('escalates to -D only when forced', () => {
-    deleteBranches('/repo', ['royal-stanza'], true)
+  it('escalates to -D only when forced', async () => {
+    await deleteBranches('/repo', ['royal-stanza'], true)
     expect(callArgs()).toContainEqual(['branch', '-D', 'royal-stanza'])
   })
 
-  it('keeps going after one branch fails and reports both sides', () => {
+  it('keeps going after one branch fails and reports both sides', async () => {
     mockExecFileSync
       .mockImplementationOnce(() => {
         throw new Error('not fully merged')
       })
       .mockReturnValueOnce('' as never)
 
-    const result = deleteBranches('/repo', ['ivory-relic', 'royal-stanza'])
+    const result = await deleteBranches('/repo', ['ivory-relic', 'royal-stanza'])
     expect(result.deleted).toEqual(['royal-stanza'])
     expect(result.failed).toEqual([{ branch: 'ivory-relic', error: 'not fully merged' }])
   })
 })
 
 describe('removeWorktree', () => {
-  it('leaves the branch alone by default', () => {
-    removeWorktree('/repo', '/repo/.vorn-worktrees/p/wt')
+  it('leaves the branch alone by default', async () => {
+    await removeWorktree('/repo', '/repo/.vorn-worktrees/p/wt')
     expect(callArgs()).toEqual([['worktree', 'remove', '/repo/.vorn-worktrees/p/wt']])
   })
 
-  it('reads the branch before removal, then deletes it when asked', () => {
+  it('reads the branch before removal, then deletes it when asked', async () => {
     mockExecFileSync.mockReturnValueOnce('royal-stanza\n' as never)
 
-    removeWorktree('/repo', '/repo/.vorn-worktrees/p/wt', false, undefined, true)
+    await removeWorktree('/repo', '/repo/.vorn-worktrees/p/wt', false, undefined, true)
 
     expect(callArgs()).toEqual([
       ['rev-parse', '--abbrev-ref', 'HEAD'],
@@ -96,10 +96,10 @@ describe('removeWorktree', () => {
     ])
   })
 
-  it('never force-deletes the branch just because the removal was forced', () => {
+  it('never force-deletes the branch just because the removal was forced', async () => {
     mockExecFileSync.mockReturnValueOnce('royal-stanza\n' as never)
 
-    removeWorktree('/repo', '/repo/.vorn-worktrees/p/wt', true, undefined, true)
+    await removeWorktree('/repo', '/repo/.vorn-worktrees/p/wt', true, undefined, true)
 
     expect(callArgs()).toContainEqual([
       'worktree',
@@ -111,52 +111,52 @@ describe('removeWorktree', () => {
     expect(callArgs()).not.toContainEqual(['branch', '-D', 'royal-stanza'])
   })
 
-  it('does not try to delete a branch when the worktree is detached', () => {
+  it('does not try to delete a branch when the worktree is detached', async () => {
     mockExecFileSync.mockReturnValueOnce('HEAD\n' as never)
 
-    removeWorktree('/repo', '/repo/.vorn-worktrees/p/wt', false, undefined, true)
+    await removeWorktree('/repo', '/repo/.vorn-worktrees/p/wt', false, undefined, true)
 
     expect(callArgs().some((a) => a[0] === 'branch')).toBe(false)
   })
 
-  it('reports failure and skips the branch when the removal itself fails', () => {
+  it('reports failure and skips the branch when the removal itself fails', async () => {
     mockExecFileSync.mockReturnValueOnce('royal-stanza\n' as never).mockImplementationOnce(() => {
       throw new Error('worktree is dirty')
     })
 
-    expect(removeWorktree('/repo', '/repo/.vorn-worktrees/p/wt', false, undefined, true)).toBe(
-      false
-    )
+    expect(
+      await removeWorktree('/repo', '/repo/.vorn-worktrees/p/wt', false, undefined, true)
+    ).toBe(false)
     expect(callArgs().some((a) => a[0] === 'branch')).toBe(false)
   })
 })
 
 describe('getDefaultBranch', () => {
-  it('prefers the remote HEAD symref', () => {
+  it('prefers the remote HEAD symref', async () => {
     mockExecFileSync.mockReturnValueOnce('origin/main\n' as never)
-    expect(getDefaultBranch('/repo')).toBe('main')
+    expect(await getDefaultBranch('/repo')).toBe('main')
   })
 
-  it('falls back to a conventional local name when there is no origin/HEAD', () => {
+  it('falls back to a conventional local name when there is no origin/HEAD', async () => {
     mockExecFileSync
       .mockImplementationOnce(() => {
         throw new Error('no symref')
       })
       .mockReturnValueOnce('feature-x\nmaster\ntopic\n' as never)
-    expect(getDefaultBranch('/repo')).toBe('master')
+    expect(await getDefaultBranch('/repo')).toBe('master')
   })
 })
 
 describe('isBranchMerged', () => {
-  it('treats a branch as merged into itself without asking git', () => {
-    expect(isBranchMerged('/repo', 'main', 'main')).toBe(true)
+  it('treats a branch as merged into itself without asking git', async () => {
+    expect(await isBranchMerged('/repo', 'main', 'main')).toBe(true)
     expect(mockExecFileSync).not.toHaveBeenCalled()
   })
 
-  it('reads a non-zero exit from merge-base as not merged', () => {
+  it('reads a non-zero exit from merge-base as not merged', async () => {
     mockExecFileSync.mockImplementationOnce(() => {
       throw new Error('exit 1')
     })
-    expect(isBranchMerged('/repo', 'ivory-relic', 'main')).toBe(false)
+    expect(await isBranchMerged('/repo', 'ivory-relic', 'main')).toBe(false)
   })
 })

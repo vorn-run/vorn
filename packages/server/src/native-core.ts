@@ -24,6 +24,12 @@ export interface NativeCore {
   Screen?: new (cols: number, rows: number) => NativeScreen
   /** The shape `Screen.feed` answers in; absent on a binary from before it was an object. */
   SCREEN_API?: number
+  /**
+   * Runs one git command off the event loop: answered in-process by gix when it
+   * can be answered byte-for-byte as git would, otherwise by `git` on a core
+   * thread. Resolves with stdout; rejects as `execFileSync` throws.
+   */
+  gitRun?(request: NativeGitRequest): Promise<string>
   /** A terminal's screen, scrollback and history framing on a thread of its own. */
   TerminalPipeline?: new (
     cols: number,
@@ -76,6 +82,17 @@ export interface NativePipeline {
   takeFrames(): Buffer
   /** Stops the thread and releases the terminal now. */
   free(): void
+}
+
+export interface NativeGitRequest {
+  /** The git executable, resolved as the JS path resolves it. */
+  bin: string
+  args: string[]
+  cwd: string
+  env: Record<string, string>
+  timeoutMs: number
+  /** Stdout past this many bytes is an error, as `maxBuffer` is for `execFileSync`. */
+  maxBuffer: number
 }
 
 export interface NativeAnalyzer {
@@ -232,11 +249,12 @@ export function activeCore(): CoreSelection {
  * A piece of the terminal pipeline that can run on the core, each behind its
  * own switch in Settings › Experimental.
  */
-export type NativeFeature = 'screen' | 'analysis' | 'pipeline'
+export type NativeFeature = 'screen' | 'analysis' | 'git' | 'pipeline'
 
 const FEATURE_FLAGS: Record<NativeFeature, keyof ExperimentalConfig> = {
   screen: 'nativeScreen',
   analysis: 'nativeAnalysis',
+  git: 'nativeGit',
   pipeline: 'nativePipeline'
 }
 
@@ -253,6 +271,7 @@ export function screenOf(core: NativeCore | null | undefined): NativeCore['Scree
 const FEATURE_EXPORTS: Record<NativeFeature, (core: NativeCore) => boolean> = {
   screen: (core) => screenOf(core) !== undefined,
   analysis: (core) => typeof core.Analyzer === 'function',
+  git: (core) => typeof core.gitRun === 'function',
   pipeline: (core) => typeof core.TerminalPipeline === 'function'
 }
 
@@ -279,8 +298,11 @@ export function forcedCoreMode(value: string | undefined): CoreMode | null {
 
 let flagged: CoreSelection | null = null
 
-/** The binary, loaded the first time a switch asks for it, and only tried once. */
-function flaggedCore(): CoreSelection {
+/**
+ * The binary, loaded the first time a switch asks for it, and only tried once.
+ * Exported for `VORN_GIT=native`, which asks for it without the switch.
+ */
+export function flaggedCore(): CoreSelection {
   flagged ??= selectCore({ env: { ...process.env, VORN_CORE: 'native' }, load: loadOverride })
   return flagged
 }

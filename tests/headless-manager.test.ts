@@ -20,11 +20,11 @@ vi.mock('../packages/server/src/resolve-executable', () => ({
   findOnPath: (name: string) => (name === 'claude' ? '/opt/agents/bin/claude' : null)
 }))
 vi.mock('../packages/server/src/git-utils', () => ({
-  getGitBranch: vi.fn(() => 'main'),
-  checkoutBranch: vi.fn(),
+  getGitBranch: vi.fn(async () => 'main'),
+  checkoutBranch: vi.fn(async () => {}),
   createWorktree: vi.fn(),
   extractWorktreeName: vi.fn(),
-  isGitRepo: vi.fn(() => false)
+  isGitRepo: vi.fn(async () => false)
 }))
 
 import { spawn as spawnImport } from 'node:child_process'
@@ -33,8 +33,8 @@ import { headlessManager } from '../packages/server/src/headless-manager'
 const spawnMock = spawnImport as unknown as ReturnType<typeof vi.fn>
 
 describe('headlessManager.createHeadless', () => {
-  it('preserves the requested Codex UUID and emits exec resume', () => {
-    const session = headlessManager.createHeadless({
+  it('preserves the requested Codex UUID and emits exec resume', async () => {
+    const session = await headlessManager.createHeadless({
       agentType: 'codex',
       projectName: 'p',
       projectPath: '/p',
@@ -56,8 +56,8 @@ describe('headlessManager.createHeadless', () => {
     spawnMock.mockClear()
   })
 
-  it('pins a fresh agentSessionId for claude and injects --session-id', () => {
-    const session = headlessManager.createHeadless({
+  it('pins a fresh agentSessionId for claude and injects --session-id', async () => {
+    const session = await headlessManager.createHeadless({
       agentType: 'claude',
       projectName: 'p',
       projectPath: '/p',
@@ -76,8 +76,8 @@ describe('headlessManager.createHeadless', () => {
     headlessManager.killHeadless(session.id)
   })
 
-  it('spawns the agent by its absolute path, so a poor PATH cannot lose it', () => {
-    const session = headlessManager.createHeadless({
+  it('spawns the agent by its absolute path, so a poor PATH cannot lose it', async () => {
+    const session = await headlessManager.createHeadless({
       agentType: 'claude',
       projectName: 'p',
       projectPath: '/p',
@@ -88,8 +88,8 @@ describe('headlessManager.createHeadless', () => {
     headlessManager.killHeadless(session.id)
   })
 
-  it('keeps a bare name when nothing on PATH answers to it', () => {
-    const session = headlessManager.createHeadless({
+  it('keeps a bare name when nothing on PATH answers to it', async () => {
+    const session = await headlessManager.createHeadless({
       agentType: 'codex',
       projectName: 'p',
       projectPath: '/p',
@@ -100,8 +100,8 @@ describe('headlessManager.createHeadless', () => {
     headlessManager.killHeadless(session.id)
   })
 
-  it('reuses resumeSessionId and uses --resume for claude', () => {
-    const session = headlessManager.createHeadless({
+  it('reuses resumeSessionId and uses --resume for claude', async () => {
+    const session = await headlessManager.createHeadless({
       agentType: 'claude',
       projectName: 'p',
       projectPath: '/p',
@@ -119,9 +119,9 @@ describe('headlessManager.createHeadless', () => {
     headlessManager.killHeadless(session.id)
   })
 
-  it('writes a multi-line claude prompt to stdin instead of argv', () => {
+  it('writes a multi-line claude prompt to stdin instead of argv', async () => {
     const prompt = '# Workflow: Demo\n\n**Step:** one\n\nDo the thing.'
-    const session = headlessManager.createHeadless({
+    const session = await headlessManager.createHeadless({
       agentType: 'claude',
       projectName: 'p',
       projectPath: '/p',
@@ -142,8 +142,8 @@ describe('headlessManager.createHeadless', () => {
     headlessManager.killHeadless(session.id)
   })
 
-  it('does not populate agentSessionId for non-pinning agents', () => {
-    const session = headlessManager.createHeadless({
+  it('does not populate agentSessionId for non-pinning agents', async () => {
+    const session = await headlessManager.createHeadless({
       agentType: 'codex',
       projectName: 'p',
       projectPath: '/p',
@@ -156,8 +156,8 @@ describe('headlessManager.createHeadless', () => {
     headlessManager.killHeadless(session.id)
   })
 
-  it('propagates workflowId / workflowName onto the session', () => {
-    const session = headlessManager.createHeadless({
+  it('propagates workflowId / workflowName onto the session', async () => {
+    const session = await headlessManager.createHeadless({
       agentType: 'claude',
       projectName: 'p',
       projectPath: '/p',
@@ -182,9 +182,9 @@ describe('headlessManager.createHeadless', () => {
 
     // The prompt no longer rides on argv for any agent, but per-step args still
     // do, and those can contain spaces — so the cmd.exe quoting still matters.
-    it('spawns through the shell with argv quoted so it is not word-split', () => {
+    it('spawns through the shell with argv quoted so it is not word-split', async () => {
       setPlatform('win32')
-      const session = headlessManager.createHeadless({
+      const session = await headlessManager.createHeadless({
         agentType: 'gemini',
         projectName: 'p',
         projectPath: '/p',
@@ -209,9 +209,9 @@ describe('headlessManager.createHeadless', () => {
       headlessManager.killHeadless(session.id)
     })
 
-    it('does not quote args on POSIX (no shell wrapper)', () => {
+    it('does not quote args on POSIX (no shell wrapper)', async () => {
       setPlatform('linux')
-      const session = headlessManager.createHeadless({
+      const session = await headlessManager.createHeadless({
         agentType: 'gemini',
         projectName: 'p',
         projectPath: '/p',
@@ -233,10 +233,10 @@ describe('headlessManager.createHeadless', () => {
     // then block on stdin producing no output at all — the step never ends.
     it.each(['claude', 'copilot', 'codex', 'opencode', 'gemini'] as const)(
       'keeps the %s prompt off the Windows command line entirely',
-      (agentType) => {
+      async (agentType) => {
         setPlatform('win32')
         const prompt = '# Workflow: Demo\n\n**Step:** one\n\nDo the thing with spaces.'
-        const session = headlessManager.createHeadless({
+        const session = await headlessManager.createHeadless({
           agentType,
           projectName: 'p',
           projectPath: '/p',
@@ -251,5 +251,34 @@ describe('headlessManager.createHeadless', () => {
         headlessManager.killHeadless(session.id)
       }
     )
+  })
+})
+
+describe('a worktree made for a headless run', () => {
+  it('is held while the run is prepared, and let go once it is a session', async () => {
+    const git = await import('../packages/server/src/git-utils')
+    const { isWorkspaceHeld } = await import('../packages/server/src/workspace-holds')
+    const made = '/p-worktrees/run-0000cccc'
+    const heldDuring: boolean[] = []
+    vi.mocked(git.isGitRepo).mockResolvedValueOnce(true)
+    vi.mocked(git.createWorktree).mockImplementationOnce(
+      async (_project, branch, _name, _remote, onPath) => {
+        onPath?.(made)
+        heldDuring.push(isWorkspaceHeld(made))
+        return { worktreePath: made, branch, name: 'run' }
+      }
+    )
+    const session = await headlessManager.createHeadless({
+      agentType: 'claude',
+      projectName: 'p',
+      projectPath: '/p',
+      useWorktree: true,
+      branch: 'feature/x',
+      initialPrompt: 'go'
+    })
+    expect(heldDuring).toEqual([true])
+    expect(isWorkspaceHeld(made)).toBe(false)
+    expect(headlessManager.getActiveSessionsForWorktree(made)).toMatchObject({ count: 1 })
+    headlessManager.killHeadless(session.id)
   })
 })

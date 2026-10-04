@@ -40,112 +40,112 @@ beforeEach(() => {
 })
 
 describe('isGitRepo', () => {
-  it('returns true for a git repo', () => {
+  it('returns true for a git repo', async () => {
     mockExecFileSync.mockReturnValue('true\n')
-    expect(isGitRepo('/project')).toBe(true)
+    expect(await isGitRepo('/project')).toBe(true)
   })
 
-  it('returns false for non-git directory', () => {
+  it('returns false for non-git directory', async () => {
     mockExecFileSync.mockImplementation(() => {
       throw new Error('not a git repo')
     })
-    expect(isGitRepo('/not-a-repo')).toBe(false)
+    expect(await isGitRepo('/not-a-repo')).toBe(false)
   })
 
-  it('returns false for unexpected output', () => {
+  it('returns false for unexpected output', async () => {
     mockExecFileSync.mockReturnValue('false\n')
-    expect(isGitRepo('/project')).toBe(false)
+    expect(await isGitRepo('/project')).toBe(false)
   })
 })
 
 describe('getGitBranch', () => {
-  it('returns branch name', () => {
+  it('returns branch name', async () => {
     mockExecFileSync.mockReturnValue('main\n')
-    expect(getGitBranch('/project')).toBe('main')
+    expect(await getGitBranch('/project')).toBe('main')
   })
 
-  it('returns null for HEAD (detached)', () => {
+  it('returns null for HEAD (detached)', async () => {
     mockExecFileSync.mockReturnValue('HEAD\n')
-    expect(getGitBranch('/project')).toBeNull()
+    expect(await getGitBranch('/project')).toBeNull()
   })
 
-  it('returns null on error', () => {
+  it('returns null on error', async () => {
     mockExecFileSync.mockImplementation(() => {
       throw new Error('not a git repo')
     })
-    expect(getGitBranch('/project')).toBeNull()
+    expect(await getGitBranch('/project')).toBeNull()
   })
 
-  it('returns null for empty output', () => {
+  it('returns null for empty output', async () => {
     mockExecFileSync.mockReturnValue('')
-    expect(getGitBranch('/project')).toBeNull()
+    expect(await getGitBranch('/project')).toBeNull()
   })
 })
 
 describe('listBranches', () => {
-  it('parses multi-line output', () => {
+  it('parses multi-line output', async () => {
     mockExecFileSync.mockReturnValue('main\nfeature/foo\ndev\n')
-    expect(listBranches('/project')).toEqual(['main', 'feature/foo', 'dev'])
+    expect(await listBranches('/project')).toEqual(['main', 'feature/foo', 'dev'])
   })
 
-  it('returns empty array on error', () => {
+  it('returns empty array on error', async () => {
     mockExecFileSync.mockImplementation(() => {
       throw new Error()
     })
-    expect(listBranches('/project')).toEqual([])
+    expect(await listBranches('/project')).toEqual([])
   })
 
-  it('returns empty for empty output', () => {
+  it('returns empty for empty output', async () => {
     mockExecFileSync.mockReturnValue('')
-    expect(listBranches('/project')).toEqual([])
+    expect(await listBranches('/project')).toEqual([])
   })
 
-  it('trims whitespace from branch names', () => {
+  it('trims whitespace from branch names', async () => {
     mockExecFileSync.mockReturnValue('  main  \n  dev  \n')
-    expect(listBranches('/project')).toEqual(['main', 'dev'])
+    expect(await listBranches('/project')).toEqual(['main', 'dev'])
   })
 })
 
 describe('getGitDiffStat', () => {
-  it('parses numstat output', () => {
+  it('parses numstat output', async () => {
     mockExecFileSync.mockReturnValue('10\t5\tsrc/foo.ts\n3\t1\tsrc/bar.ts\n')
-    expect(getGitDiffStat('/project')).toEqual({
+    expect(await getGitDiffStat('/project')).toEqual({
       filesChanged: 2,
       insertions: 13,
       deletions: 6
     })
   })
 
-  it('handles binary files', () => {
+  it('handles binary files', async () => {
     mockExecFileSync.mockReturnValue('-\t-\timage.png\n5\t2\tsrc/foo.ts\n')
-    expect(getGitDiffStat('/project')).toEqual({
+    expect(await getGitDiffStat('/project')).toEqual({
       filesChanged: 2,
       insertions: 5,
       deletions: 2
     })
   })
 
-  it('returns zeros for empty diff', () => {
+  it('returns zeros for empty diff', async () => {
     mockExecFileSync.mockReturnValue('')
-    expect(getGitDiffStat('/project')).toEqual({
+    expect(await getGitDiffStat('/project')).toEqual({
       filesChanged: 0,
       insertions: 0,
       deletions: 0
     })
   })
 
-  it('returns null on error', () => {
+  it('returns null on error', async () => {
     mockExecFileSync.mockImplementation(() => {
       throw new Error()
     })
-    expect(getGitDiffStat('/project')).toBeNull()
+    expect(await getGitDiffStat('/project')).toBeNull()
   })
 })
 
 describe('gitCommit', () => {
-  it('calls git add -A when includeUnstaged is true', () => {
+  it('calls git add -A when includeUnstaged is true', async () => {
     mockExecFileSync.mockReturnValue('')
-    gitCommit('/project', 'test commit', true)
+    await gitCommit('/project', 'test commit', true)
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
       ['add', '-A'],
@@ -153,9 +153,9 @@ describe('gitCommit', () => {
     )
   })
 
-  it('does not call git add -A when includeUnstaged is false', () => {
+  it('does not call git add -A when includeUnstaged is false', async () => {
     mockExecFileSync.mockReturnValue('')
-    gitCommit('/project', 'test commit', false)
+    await gitCommit('/project', 'test commit', false)
     const calls = mockExecFileSync.mock.calls
     const hasAddCall = calls.some(
       (c) => c[0] === 'git' && Array.isArray(c[1]) && (c[1] as string[]).includes('-A')
@@ -163,9 +163,9 @@ describe('gitCommit', () => {
     expect(hasAddCall).toBe(false)
   })
 
-  it('passes message as argument (not interpolated into command string)', () => {
+  it('passes message as argument (not interpolated into command string)', async () => {
     mockExecFileSync.mockReturnValue('')
-    gitCommit('/project', 'fix: "quotes" and stuff', false)
+    await gitCommit('/project', 'fix: "quotes" and stuff', false)
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
       ['commit', '-m', 'fix: "quotes" and stuff'],
@@ -173,63 +173,63 @@ describe('gitCommit', () => {
     )
   })
 
-  it('returns success on successful commit', () => {
+  it('returns success on successful commit', async () => {
     mockExecFileSync.mockReturnValue('')
-    expect(gitCommit('/project', 'msg', false)).toEqual({ success: true })
+    expect(await gitCommit('/project', 'msg', false)).toEqual({ success: true })
   })
 
-  it('returns error on failure', () => {
+  it('returns error on failure', async () => {
     mockExecFileSync.mockImplementation(() => {
       throw new Error('nothing to commit')
     })
-    const result = gitCommit('/project', 'msg', false)
+    const result = await gitCommit('/project', 'msg', false)
     expect(result.success).toBe(false)
     expect(result.error).toContain('nothing to commit')
   })
 })
 
 describe('listWorktrees', () => {
-  it('parses porcelain output', () => {
+  it('parses porcelain output', async () => {
     mockExecFileSync.mockReturnValue(
       'worktree /path/to/project\nbranch refs/heads/main\n\n' +
         'worktree /path/to/worktree\nbranch refs/heads/feature\n'
     )
-    const result = listWorktrees('/path/to/project')
+    const result = await listWorktrees('/path/to/project')
     expect(result).toEqual([
       { path: '/path/to/project', branch: 'main', isMain: true, name: 'project' },
       { path: '/path/to/worktree', branch: 'feature', isMain: false, name: 'worktree' }
     ])
   })
 
-  it('handles detached HEAD', () => {
+  it('handles detached HEAD', async () => {
     mockExecFileSync.mockReturnValue(
       'worktree /path/to/project\nbranch refs/heads/main\n\n' +
         'worktree /path/to/worktree\ndetached\n'
     )
-    const result = listWorktrees('/path/to/project')
+    const result = await listWorktrees('/path/to/project')
     expect(result[1].branch).toBe('detached')
   })
 
-  it('returns empty on error', () => {
+  it('returns empty on error', async () => {
     mockExecFileSync.mockImplementation(() => {
       throw new Error()
     })
-    expect(listWorktrees('/project')).toEqual([])
+    expect(await listWorktrees('/project')).toEqual([])
   })
 
-  it('returns empty for empty output', () => {
+  it('returns empty for empty output', async () => {
     mockExecFileSync.mockReturnValue('')
-    expect(listWorktrees('/project')).toEqual([])
+    expect(await listWorktrees('/project')).toEqual([])
   })
 })
 
 describe('renameWorktreeBranch', () => {
-  it('renames branch when on an attached HEAD', () => {
+  it('renames branch when on an attached HEAD', async () => {
     // First call: getGitBranch returns current branch
     mockExecFileSync.mockReturnValueOnce('old-branch\n')
     // Second call: git branch -m succeeds
     mockExecFileSync.mockReturnValueOnce('')
-    expect(renameWorktreeBranch('/worktree', 'new-branch')).toBe(true)
+    expect(await renameWorktreeBranch('/worktree', 'new-branch')).toBe(true)
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
       ['branch', '-m', 'new-branch'],
@@ -237,14 +237,14 @@ describe('renameWorktreeBranch', () => {
     )
   })
 
-  it('creates branch when on detached HEAD', () => {
+  it('creates branch when on detached HEAD', async () => {
     // First call: getGitBranch throws (detached HEAD)
     mockExecFileSync.mockImplementationOnce(() => {
       throw new Error('not on a branch')
     })
     // Second call: git switch -c succeeds
     mockExecFileSync.mockReturnValueOnce('')
-    expect(renameWorktreeBranch('/worktree', 'new-branch')).toBe(true)
+    expect(await renameWorktreeBranch('/worktree', 'new-branch')).toBe(true)
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
       ['switch', '-c', 'new-branch'],
@@ -252,31 +252,31 @@ describe('renameWorktreeBranch', () => {
     )
   })
 
-  it('rejects empty branch name', () => {
-    expect(renameWorktreeBranch('/worktree', '')).toBe(false)
-    expect(renameWorktreeBranch('/worktree', '  ')).toBe(false)
+  it('rejects empty branch name', async () => {
+    expect(await renameWorktreeBranch('/worktree', '')).toBe(false)
+    expect(await renameWorktreeBranch('/worktree', '  ')).toBe(false)
     expect(mockExecFileSync).not.toHaveBeenCalled()
   })
 
-  it('rejects option-like branch name', () => {
-    expect(renameWorktreeBranch('/worktree', '-dangerous')).toBe(false)
+  it('rejects option-like branch name', async () => {
+    expect(await renameWorktreeBranch('/worktree', '-dangerous')).toBe(false)
     expect(mockExecFileSync).not.toHaveBeenCalled()
   })
 
-  it('returns false on git error', () => {
+  it('returns false on git error', async () => {
     mockExecFileSync.mockReturnValueOnce('main\n')
     mockExecFileSync.mockImplementationOnce(() => {
       throw new Error('branch already exists')
     })
-    expect(renameWorktreeBranch('/worktree', 'existing')).toBe(false)
+    expect(await renameWorktreeBranch('/worktree', 'existing')).toBe(false)
   })
 })
 
 describe('renameWorktree', () => {
-  it('renames worktree directory via git worktree move', () => {
+  it('renames worktree directory via git worktree move', async () => {
     mockFs.existsSync.mockReturnValue(false)
     mockExecFileSync.mockReturnValue('')
-    const result = renameWorktree('/base/old-name-abcd1234', 'new-name')
+    const result = await renameWorktree('/base/old-name-abcd1234', 'new-name')
     expect(result).toEqual({ newPath: '/base/new-name-abcd1234', name: 'new-name' })
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'git',
@@ -285,42 +285,42 @@ describe('renameWorktree', () => {
     )
   })
 
-  it('sanitizes special characters in name', () => {
+  it('sanitizes special characters in name', async () => {
     mockFs.existsSync.mockReturnValue(false)
     mockExecFileSync.mockReturnValue('')
-    const result = renameWorktree('/base/old-name-abcd1234', 'my cool name!')
+    const result = await renameWorktree('/base/old-name-abcd1234', 'my cool name!')
     expect(result).toEqual({ newPath: '/base/my-cool-name-abcd1234', name: 'my-cool-name' })
   })
 
-  it('returns null for empty name', () => {
-    expect(renameWorktree('/base/old-abcd1234', '')).toBeNull()
-    expect(renameWorktree('/base/old-abcd1234', '  ')).toBeNull()
+  it('returns null for empty name', async () => {
+    expect(await renameWorktree('/base/old-abcd1234', '')).toBeNull()
+    expect(await renameWorktree('/base/old-abcd1234', '  ')).toBeNull()
   })
 
-  it('returns null if path has no short-id suffix', () => {
-    expect(renameWorktree('/base/no-suffix', 'new-name')).toBeNull()
+  it('returns null if path has no short-id suffix', async () => {
+    expect(await renameWorktree('/base/no-suffix', 'new-name')).toBeNull()
   })
 
-  it('returns null if target already exists', () => {
+  it('returns null if target already exists', async () => {
     mockFs.existsSync.mockReturnValue(true)
-    expect(renameWorktree('/base/old-abcd1234', 'new')).toBeNull()
+    expect(await renameWorktree('/base/old-abcd1234', 'new')).toBeNull()
   })
 
-  it('returns null if same path after rename', () => {
-    expect(renameWorktree('/base/same-abcd1234', 'same')).toBeNull()
+  it('returns null if same path after rename', async () => {
+    expect(await renameWorktree('/base/same-abcd1234', 'same')).toBeNull()
   })
 
-  it('returns null on git error', () => {
+  it('returns null on git error', async () => {
     mockFs.existsSync.mockReturnValue(false)
     mockExecFileSync.mockImplementation(() => {
       throw new Error('git worktree move failed')
     })
-    expect(renameWorktree('/base/old-abcd1234', 'new')).toBeNull()
+    expect(await renameWorktree('/base/old-abcd1234', 'new')).toBeNull()
   })
 })
 
 describe('createWorktree', () => {
-  it('uses friendly name as branch when source branch is already checked out', () => {
+  it('uses friendly name as branch when source branch is already checked out', async () => {
     // listBranches returns 'main'
     mockExecFileSync.mockReturnValueOnce('main\n')
     // git worktree add (first attempt fails — branch checked out)
@@ -330,7 +330,7 @@ describe('createWorktree', () => {
     // git worktree add -b <friendlyName> (succeeds)
     mockExecFileSync.mockReturnValueOnce('')
 
-    const result = createWorktree('/project', 'main', 'vivid-nova')
+    const result = await createWorktree('/project', 'main', 'vivid-nova')
     expect(result.branch).toBe('vivid-nova')
     expect(result.name).toBe('vivid-nova')
     expect(mockExecFileSync).toHaveBeenCalledWith(
@@ -340,7 +340,7 @@ describe('createWorktree', () => {
     )
   })
 
-  it('appends shortId to branch name if friendly name already exists as branch', () => {
+  it('appends shortId to branch name if friendly name already exists as branch', async () => {
     // listBranches returns both 'main' and 'vivid-nova'
     mockExecFileSync.mockReturnValueOnce('main\nvivid-nova\n')
     // git worktree add (first attempt fails)
@@ -350,17 +350,17 @@ describe('createWorktree', () => {
     // git worktree add -b (succeeds)
     mockExecFileSync.mockReturnValueOnce('')
 
-    const result = createWorktree('/project', 'main', 'vivid-nova')
+    const result = await createWorktree('/project', 'main', 'vivid-nova')
     // Should fall back to name-shortId since 'vivid-nova' branch exists
     expect(result.branch).toBe('vivid-nova-aaaaaaaa')
     expect(result.name).toBe('vivid-nova')
   })
 
-  it('creates new branch from HEAD when branch does not exist locally', () => {
+  it('creates new branch from HEAD when branch does not exist locally', async () => {
     mockExecFileSync.mockReturnValueOnce('main\n') // listBranches
     mockExecFileSync.mockReturnValueOnce('') // git worktree add -b
 
-    const result = createWorktree('/project', 'feature/new', 'cosmic-flare')
+    const result = await createWorktree('/project', 'feature/new', 'cosmic-flare')
     expect(result.branch).toBe('feature/new')
     expect(result.name).toBe('cosmic-flare')
   })

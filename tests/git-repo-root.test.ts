@@ -23,12 +23,12 @@ afterAll(() => {
 })
 
 describe('the repository a directory sits in', () => {
-  it('is the root, asked from anywhere inside it', () => {
-    expect(getRepoRoot(repo)).toBe(repo)
-    expect(getRepoRoot(path.join(repo, 'packages', 'server'))).toBe(repo)
+  it('is the root, asked from anywhere inside it', async () => {
+    expect(await getRepoRoot(repo)).toBe(repo)
+    expect(await getRepoRoot(path.join(repo, 'packages', 'server'))).toBe(repo)
   })
 
-  it('is nothing at all outside one, rather than an error', () => {
-    expect(getRepoRoot(outside)).toBeNull()
+  it('is nothing at all outside one, rather than an error', async () => {
+    expect(await getRepoRoot(outside)).toBeNull()
   })
 })

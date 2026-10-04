@@ -89,12 +89,12 @@ vi.mock('../packages/server/src/config-manager', () => ({
 }))
 
 vi.mock('../packages/server/src/git-utils', () => ({
-  getGitBranch: vi.fn(() => 'main'),
-  getGitHead: vi.fn(() => 'cafe0000'),
-  checkoutBranch: vi.fn(),
+  getGitBranch: vi.fn(async () => 'main'),
+  getGitHead: vi.fn(async () => 'cafe0000'),
+  checkoutBranch: vi.fn(async () => {}),
   createWorktree: vi.fn(),
   extractWorktreeName: vi.fn((p: string) => path.basename(p)),
-  isGitRepo: vi.fn(() => false)
+  isGitRepo: vi.fn(async () => false)
 }))
 
 vi.mock('../packages/server/src/shell-integration', () => ({
@@ -122,6 +122,7 @@ vi.mock('../packages/server/src/process-utils', async () => {
 import { ptyManager } from '../packages/server/src/pty-manager'
 import { createWorktree, isGitRepo } from '../packages/server/src/git-utils'
 import { buildAgentLaunchLine } from '../packages/server/src/agent-launch'
+import { isWorkspaceHeld } from '../packages/server/src/workspace-holds'
 
 const createWorktreeMock = vi.mocked(createWorktree)
 const isGitRepoMock = vi.mocked(isGitRepo)
@@ -144,11 +145,11 @@ function lastPty(): FakePtyInstance {
   return results[results.length - 1].value as FakePtyInstance
 }
 
-function createAgent(overrides: Partial<CreateTerminalPayload> = {}): {
+async function createAgent(overrides: Partial<CreateTerminalPayload> = {}): Promise<{
   session: TerminalSession
   fake: FakePtyInstance
-} {
-  const session = ptyManager.createPty({
+}> {
+  const session = await ptyManager.createPty({
     agentType: 'claude',
     projectName: 'proj',
     projectPath: '/tmp/vorn-proj',
@@ -157,13 +158,13 @@ function createAgent(overrides: Partial<CreateTerminalPayload> = {}): {
   return { session, fake: lastPty() }
 }
 
-it('records the exact Codex resume ID immediately', () => {
-  const { session } = createAgent({ agentType: 'codex', resumeSessionId: 'known-id' })
+it('records the exact Codex resume ID immediately', async () => {
+  const { session } = await createAgent({ agentType: 'codex', resumeSessionId: 'known-id' })
   expect(session.agentSessionId).toBe('known-id')
 })
 
-it('records a remote Codex resume ID without local discovery', () => {
-  const { session } = createAgent({
+it('records a remote Codex resume ID without local discovery', async () => {
+  const { session } = await createAgent({
     agentType: 'codex',
     resumeSessionId: 'remote-id',
     remoteHostId: REMOTE_HOST.id
@@ -172,11 +173,11 @@ it('records a remote Codex resume ID without local discovery', () => {
   expect(session.remoteHostId).toBe(REMOTE_HOST.id)
 })
 
-it('rejects invalid model selection before spawning a PTY', () => {
+it('rejects invalid model selection before spawning a PTY', async () => {
   vi.mocked(buildAgentLaunchLine).mockImplementationOnce(() => {
     throw new Error('Invalid model')
   })
-  expect(() => createAgent({ model: '-invalid' })).toThrow()
+  await expect(createAgent({ model: '-invalid' })).rejects.toThrow()
   expect(spawnMock).not.toHaveBeenCalled()
 })
 
@@ -200,7 +201,7 @@ beforeEach(() => {
   spawnMock.mockImplementation(() => new FakePty())
   createWorktreeMock.mockReset()
   isGitRepoMock.mockReset()
-  isGitRepoMock.mockReturnValue(false)
+  isGitRepoMock.mockResolvedValue(false)
 
   messages = []
   exited = []
@@ -227,24 +228,24 @@ afterEach(() => {
 })
 
 describe('pty spawn failures', () => {
-  it('propagates the spawn error and registers no session', () => {
+  it('propagates the spawn error and registers no session', async () => {
     spawnMock.mockImplementation(() => {
       throw new Error('posix_spawnp failed')
     })
 
-    expect(() => createAgent()).toThrow(/posix_spawnp failed/)
+    await expect(createAgent()).rejects.toThrow(/posix_spawnp failed/)
     expect(ptyManager.getActiveSessions()).toHaveLength(0)
     expect(created).toHaveLength(0)
     expect(messages).toHaveLength(0)
   })
 
-  it('recovers so the next session after a failed spawn still works', () => {
+  it('recovers so the next session after a failed spawn still works', async () => {
     spawnMock.mockImplementationOnce(() => {
       throw new Error('spawn ENOENT')
     })
-    expect(() => createAgent()).toThrow(/ENOENT/)
+    await expect(createAgent()).rejects.toThrow(/ENOENT/)
 
-    const { session } = createAgent()
+    const { session } = await createAgent()
     expect(session.status).toBe('running')
     expect(ptyManager.getActiveSessions()).toEqual([session])
   })
@@ -258,13 +259,11 @@ describe('pty spawn failures', () => {
     expect(ptyManager.getActiveSessions()).toHaveLength(0)
   })
 
-  it('aborts before spawning when worktree creation fails', () => {
-    isGitRepoMock.mockReturnValue(true)
-    createWorktreeMock.mockImplementation(() => {
-      throw new Error('fatal: could not create worktree')
-    })
+  it('aborts before spawning when worktree creation fails', async () => {
+    isGitRepoMock.mockResolvedValue(true)
+    createWorktreeMock.mockRejectedValue(new Error('fatal: could not create worktree'))
 
-    expect(() => createAgent({ useWorktree: true, branch: 'feature/x' })).toThrow(
+    await expect(createAgent({ useWorktree: true, branch: 'feature/x' })).rejects.toThrow(
       /could not create worktree/
     )
     expect(spawnMock).not.toHaveBeenCalled()
@@ -272,9 +271,45 @@ describe('pty spawn failures', () => {
   })
 })
 
+describe('a worktree made for a new session', () => {
+  it('is held from the moment git names it until the session exists', async () => {
+    isGitRepoMock.mockResolvedValue(true)
+    const made = '/tmp/.vorn-worktrees/vorn-proj/held-0000aaaa'
+    const heldDuring: boolean[] = []
+    createWorktreeMock.mockImplementation(async (_project, branch, _name, _remote, onPath) => {
+      onPath?.(made)
+      heldDuring.push(isWorkspaceHeld(made))
+      return { worktreePath: made, branch, name: 'held' }
+    })
+    const payload = {
+      agentType: 'claude',
+      projectName: 'proj',
+      projectPath: '/tmp/vorn-proj',
+      useWorktree: true,
+      branch: 'feature/x'
+    } as CreateTerminalPayload
+    const prepared = await ptyManager.prepareSession(payload)
+    expect(heldDuring).toEqual([true])
+    expect(isWorkspaceHeld(made)).toBe(true)
+    ptyManager.spawnPty(payload, prepared)
+    expect(isWorkspaceHeld(made)).toBe(false)
+  })
+
+  it('is let go when preparing fails after git made it', async () => {
+    isGitRepoMock.mockResolvedValue(true)
+    const made = '/tmp/.vorn-worktrees/vorn-proj/failed-0000bbbb'
+    createWorktreeMock.mockImplementation(async (_project, _branch, _name, _remote, onPath) => {
+      onPath?.(made)
+      throw new Error('fatal: could not create worktree')
+    })
+    await expect(createAgent({ useWorktree: true, branch: 'feature/x' })).rejects.toThrow()
+    expect(isWorkspaceHeld(made)).toBe(false)
+  })
+})
+
 describe('agent crashes mid-session', () => {
-  it('reports the crash exit code and parks the session as idle', () => {
-    const { session, fake } = createAgent()
+  it('reports the crash exit code and parks the session as idle', async () => {
+    const { session, fake } = await createAgent()
 
     fake.emitExit(139)
 
@@ -283,8 +318,8 @@ describe('agent crashes mid-session', () => {
     expect(session.status).toBe('idle')
   })
 
-  it('flushes buffered output before announcing the exit', () => {
-    const { session, fake } = createAgent()
+  it('flushes buffered output before announcing the exit', async () => {
+    const { session, fake } = await createAgent()
 
     fake.emitData('segfault imminent\n')
     fake.emitExit(1)
@@ -300,8 +335,8 @@ describe('agent crashes mid-session', () => {
     ])
   })
 
-  it('cancels the idle timer so a crashed session is never re-marked', () => {
-    const { session, fake } = createAgent()
+  it('cancels the idle timer so a crashed session is never re-marked', async () => {
+    const { session, fake } = await createAgent()
 
     fake.emitData('still working\n')
     fake.emitExit(1)
@@ -312,8 +347,8 @@ describe('agent crashes mid-session', () => {
     expect(session.status).toBe('idle')
   })
 
-  it('drops the captured output of a crashed session', () => {
-    const { session, fake } = createAgent()
+  it('drops the captured output of a crashed session', async () => {
+    const { session, fake } = await createAgent()
 
     fake.emitData('line one\nline two\n')
     expect(ptyManager.getOutput(session.id)).toEqual(['line one', 'line two'])
@@ -323,10 +358,10 @@ describe('agent crashes mid-session', () => {
     expect(ptyManager.getOutput(session.id)).toEqual([])
   })
 
-  it('asks to clean up the worktree when the last session using it crashes', () => {
+  it('asks to clean up the worktree when the last session using it crashes', async () => {
     const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-wt-'))
     try {
-      const { session, fake } = createAgent({
+      const { session, fake } = await createAgent({
         existingWorktreePath: worktree,
         branch: 'feature/x'
       })
@@ -342,11 +377,11 @@ describe('agent crashes mid-session', () => {
     }
   })
 
-  it('keeps the worktree when another pty session still uses it', () => {
+  it('keeps the worktree when another pty session still uses it', async () => {
     const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-wt-'))
     try {
-      const first = createAgent({ existingWorktreePath: worktree, branch: 'feature/x' })
-      createAgent({ existingWorktreePath: worktree, branch: 'feature/x' })
+      const first = await createAgent({ existingWorktreePath: worktree, branch: 'feature/x' })
+      await createAgent({ existingWorktreePath: worktree, branch: 'feature/x' })
 
       first.fake.emitExit(1)
 
@@ -356,11 +391,11 @@ describe('agent crashes mid-session', () => {
     }
   })
 
-  it('keeps the worktree when a headless session still uses it', () => {
+  it('keeps the worktree when a headless session still uses it', async () => {
     const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-wt-'))
     try {
       ptyManager.setHeadlessWorktreeCounter(() => ({ count: 1, sessionIds: ['headless-1'] }))
-      const { fake } = createAgent({ existingWorktreePath: worktree, branch: 'feature/x' })
+      const { fake } = await createAgent({ existingWorktreePath: worktree, branch: 'feature/x' })
 
       fake.emitExit(1)
 
@@ -370,8 +405,8 @@ describe('agent crashes mid-session', () => {
     }
   })
 
-  it('still reports an exit when killing a session whose pty already died', () => {
-    const { session, fake } = createAgent()
+  it('still reports an exit when killing a session whose pty already died', async () => {
+    const { session, fake } = await createAgent()
     fake.emitExit(139)
     messages = []
     exited = []
@@ -387,8 +422,8 @@ describe('agent crashes mid-session', () => {
     expect(exited).toEqual([session])
   })
 
-  it('swallows a kill that fails because the process is already gone', () => {
-    const { session, fake } = createAgent()
+  it('swallows a kill that fails because the process is already gone', async () => {
+    const { session, fake } = await createAgent()
     fake.killError = new Error('ESRCH')
 
     expect(() => {
@@ -398,8 +433,8 @@ describe('agent crashes mid-session', () => {
     expect(ptyManager.getActiveSessions()).toHaveLength(0)
   })
 
-  it('clears the idle timer when a session is killed', () => {
-    const { session, fake } = createAgent()
+  it('clears the idle timer when a session is killed', async () => {
+    const { session, fake } = await createAgent()
     fake.emitData('working\n')
 
     ptyManager.killPty(session.id)
@@ -420,14 +455,14 @@ describe('SSH connection failures', () => {
     ...overrides
   })
 
-  function createRemoteWithStoredKey(): {
+  async function createRemoteWithStoredKey(): Promise<{
     session: TerminalSession
     fake: FakePtyInstance
     keyPath: string
-  } {
+  }> {
     const before = new Set(tempKeyFiles())
     ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'key-stored' }])
-    const session = ptyManager.createPty(
+    const session = await ptyManager.createPty(
       remotePayload({ _decryptedKeyContent: 'PRIVATE KEY MATERIAL' })
     )
     const added = tempKeyFiles().filter((f) => !before.has(f))
@@ -435,8 +470,8 @@ describe('SSH connection failures', () => {
     return { session, fake: lastPty(), keyPath: path.join(os.tmpdir(), added[0]) }
   }
 
-  it('stops the remote command and deletes the temp key on an SSH error', () => {
-    const { fake, keyPath } = createRemoteWithStoredKey()
+  it('stops the remote command and deletes the temp key on an SSH error', async () => {
+    const { fake, keyPath } = await createRemoteWithStoredKey()
     vi.advanceTimersByTime(300)
     expect(fake.written.join(' ')).toContain(`-i ${keyPath}`)
 
@@ -453,9 +488,9 @@ describe('SSH connection failures', () => {
     'Host key verification failed.',
     'ssh: Could not resolve hostname build.example.com',
     'Connection timed out'
-  ])('treats %j as a connection failure', (errorOutput) => {
+  ])('treats %j as a connection failure', async (errorOutput) => {
     ptyManager.setRemoteHosts([REMOTE_HOST])
-    ptyManager.createPty(remotePayload())
+    await ptyManager.createPty(remotePayload())
     const fake = lastPty()
     vi.advanceTimersByTime(300)
 
@@ -465,8 +500,8 @@ describe('SSH connection failures', () => {
     expect(fake.written.some((w) => w.includes('cd /srv/proj'))).toBe(false)
   })
 
-  it('runs the remote command and deletes the temp key once the marker arrives', () => {
-    const { session, fake, keyPath } = createRemoteWithStoredKey()
+  it('runs the remote command and deletes the temp key once the marker arrives', async () => {
+    const { session, fake, keyPath } = await createRemoteWithStoredKey()
     vi.advanceTimersByTime(300)
 
     fake.emitData(`__VORN_READY_${session.id.slice(0, 8)}__\r\n`)
@@ -477,8 +512,8 @@ describe('SSH connection failures', () => {
     expect(fs.existsSync(keyPath)).toBe(false)
   })
 
-  it('falls back to sending the remote command when the marker never arrives', () => {
-    ptyManager.createPty(remotePayload())
+  it('falls back to sending the remote command when the marker never arrives', async () => {
+    await ptyManager.createPty(remotePayload())
     const fake = lastPty()
 
     vi.advanceTimersByTime(300)
@@ -489,8 +524,8 @@ describe('SSH connection failures', () => {
     expect(fake.written.some((w) => w.includes('cd /srv/proj'))).toBe(true)
   })
 
-  it('never writes to a pty that was killed before the fallback fired', () => {
-    const session = ptyManager.createPty(remotePayload())
+  it('never writes to a pty that was killed before the fallback fired', async () => {
+    const session = await ptyManager.createPty(remotePayload())
     const fake = lastPty()
 
     ptyManager.killPty(session.id)
@@ -499,10 +534,10 @@ describe('SSH connection failures', () => {
     expect(fake.written).toEqual([])
   })
 
-  it('falls back to agent auth when stored-key auth has no decrypted key', () => {
+  it('falls back to agent auth when stored-key auth has no decrypted key', async () => {
     const before = new Set(tempKeyFiles())
     ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'key-stored' }])
-    ptyManager.createPty(remotePayload())
+    await ptyManager.createPty(remotePayload())
     const fake = lastPty()
 
     vi.advanceTimersByTime(300)
@@ -510,8 +545,8 @@ describe('SSH connection failures', () => {
     expect(tempKeyFiles().filter((f) => !before.has(f))).toEqual([])
   })
 
-  it('deletes the temp key when the SSH session drops before connecting', () => {
-    const { session, fake, keyPath } = createRemoteWithStoredKey()
+  it('deletes the temp key when the SSH session drops before connecting', async () => {
+    const { session, fake, keyPath } = await createRemoteWithStoredKey()
     vi.advanceTimersByTime(300)
 
     fake.emitExit(255)
@@ -520,9 +555,9 @@ describe('SSH connection failures', () => {
     expect(messagesOn(IPC.TERMINAL_EXIT)).toEqual([{ id: session.id, exitCode: 255 }])
   })
 
-  it('answers a password prompt once, with the real password', () => {
+  it('answers a password prompt once, with the real password', async () => {
     ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'password' }])
-    ptyManager.createPty(remotePayload({ _decryptedPassword: 'hunter2' }))
+    await ptyManager.createPty(remotePayload({ _decryptedPassword: 'hunter2' }))
     const fake = lastPty()
     vi.advanceTimersByTime(300)
 
@@ -536,9 +571,9 @@ describe('SSH connection failures', () => {
     expect(fake.written.filter((w) => w === 'hunter2\r')).toHaveLength(1)
   })
 
-  it('stops answering password prompts after the listener window closes', () => {
+  it('stops answering password prompts after the listener window closes', async () => {
     ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'password' }])
-    ptyManager.createPty(remotePayload({ _decryptedPassword: 'hunter2' }))
+    await ptyManager.createPty(remotePayload({ _decryptedPassword: 'hunter2' }))
     const fake = lastPty()
 
     vi.advanceTimersByTime(15_000)
@@ -548,10 +583,10 @@ describe('SSH connection failures', () => {
     expect(fake.written).not.toContain('hunter2\r')
   })
 
-  it('keeps the decrypted credentials off the payload', () => {
+  it('keeps the decrypted credentials off the payload', async () => {
     ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'password' }])
     const payload = remotePayload({ _decryptedPassword: 'hunter2' })
-    ptyManager.createPty(payload)
+    await ptyManager.createPty(payload)
 
     expect(payload._decryptedPassword).toBeUndefined()
     expect(payload._decryptedKeyContent).toBeUndefined()
@@ -559,8 +594,8 @@ describe('SSH connection failures', () => {
 })
 
 describe('idle timeout', () => {
-  it('marks a silent session idle after the pattern timeout', () => {
-    const { session, fake } = createAgent()
+  it('marks a silent session idle after the pattern timeout', async () => {
+    const { session, fake } = await createAgent()
 
     fake.emitData('thinking about it\n')
     vi.advanceTimersByTime(4999)
@@ -571,8 +606,8 @@ describe('idle timeout', () => {
     expect(statusUpdatesFor(session.id)).toEqual(['idle'])
   })
 
-  it('restarts the countdown on every chunk of output', () => {
-    const { session, fake } = createAgent()
+  it('restarts the countdown on every chunk of output', async () => {
+    const { session, fake } = await createAgent()
 
     fake.emitData('step one\n')
     vi.advanceTimersByTime(4000)
@@ -584,8 +619,8 @@ describe('idle timeout', () => {
     expect(session.status).toBe('idle')
   })
 
-  it('leaves a session that is waiting for input alone', () => {
-    const { session, fake } = createAgent()
+  it('leaves a session that is waiting for input alone', async () => {
+    const { session, fake } = await createAgent()
 
     fake.emitData('\x1b[?2004hprompt> ')
     expect(session.status).toBe('waiting')
@@ -594,8 +629,8 @@ describe('idle timeout', () => {
     expect(session.status).toBe('waiting')
   })
 
-  it('gives hook-backed sessions the longer timeout', () => {
-    const { session, fake } = createAgent()
+  it('gives hook-backed sessions the longer timeout', async () => {
+    const { session, fake } = await createAgent()
 
     fake.emitData('running a tool\n')
     ptyManager.promoteToHookStatus(session.id)
@@ -608,8 +643,8 @@ describe('idle timeout', () => {
     expect(session.status).toBe('idle')
   })
 
-  it('re-arms the hook timeout on every hook event', () => {
-    const { session, fake } = createAgent()
+  it('re-arms the hook timeout on every hook event', async () => {
+    const { session, fake } = await createAgent()
     fake.emitData('running a tool\n')
 
     ptyManager.promoteToHookStatus(session.id)
@@ -622,8 +657,8 @@ describe('idle timeout', () => {
     expect(session.status).toBe('idle')
   })
 
-  it('does not arm a timer when promoting a session that has produced no output', () => {
-    const { session } = createAgent()
+  it('does not arm a timer when promoting a session that has produced no output', async () => {
+    const { session } = await createAgent()
 
     ptyManager.promoteToHookStatus(session.id)
     vi.advanceTimersByTime(60_000)
@@ -636,8 +671,8 @@ describe('idle timeout', () => {
     expect(() => ptyManager.promoteToHookStatus('no-such-session')).not.toThrow()
   })
 
-  it('revives an idle session when the user types', () => {
-    const { session, fake } = createAgent()
+  it('revives an idle session when the user types', async () => {
+    const { session, fake } = await createAgent()
     fake.emitData('done\n')
     vi.advanceTimersByTime(5000)
     expect(session.status).toBe('idle')
@@ -649,8 +684,8 @@ describe('idle timeout', () => {
     expect(fake.written).toContain('next task\r')
   })
 
-  it('leaves hook-backed sessions to their hooks when the user types', () => {
-    const { session, fake } = createAgent()
+  it('leaves hook-backed sessions to their hooks when the user types', async () => {
+    const { session, fake } = await createAgent()
     fake.emitData('done\n')
     ptyManager.promoteToHookStatus(session.id)
     vi.advanceTimersByTime(30_000)
@@ -692,7 +727,7 @@ describe('idle timeout', () => {
 describe('the bell', () => {
   // Awaited: a terminal on a core thread finds its bell after the flush.
   it('rings for output that is actually arriving', async () => {
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
 
     fake.emitData('done \x07')
     vi.advanceTimersByTime(50)
@@ -716,7 +751,7 @@ describe('the bell', () => {
   const bellsLanded = (): Promise<void> => realSleep(30)
 
   it('stays quiet for output with no bell in it', async () => {
-    const { fake } = createAgent()
+    const { fake } = await createAgent()
 
     fake.emitData('perfectly ordinary output\n')
     vi.advanceTimersByTime(50)
@@ -730,7 +765,7 @@ describe('the bell', () => {
     // which bytes were a seed and which were live. Here it holds by
     // construction: a replay is read from the scrollback and never passes
     // through the flush that announces one.
-    const { session, fake } = createAgent()
+    const { session, fake } = await createAgent()
     fake.emitData('ding \x07 ding')
     vi.advanceTimersByTime(50)
     await bellsLanded()
