@@ -7,7 +7,12 @@ import {
   type LocalServerNotice
 } from '../shared/adoption-channels'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
-import type { RequestMethods, ServerNotifications, TerminalData } from '@vornrun/shared/protocol'
+import type {
+  RequestMethods,
+  ServerNotifications,
+  TerminalData,
+  TerminalPresence
+} from '@vornrun/shared/protocol'
 import type {
   RecordCursor,
   Artifact,
@@ -86,6 +91,20 @@ const api = {
   writeTerminal: (id: string, data: string) => ipcRenderer.send(IPC.TERMINAL_WRITE, { id, data }),
 
   resizeTerminal: (payload: ResizePayload) => ipcRenderer.send(IPC.TERMINAL_RESIZE, payload),
+
+  /** For a session vornd holds: what fits in the pane. vornd decides the size. */
+  terminalViewport: (payload: ResizePayload) => ipcRenderer.send(IPC.TERMINAL_VIEWPORT, payload),
+
+  /** For a session vornd holds: whether the pane is in use, on screen or hidden. */
+  terminalPresence: (id: string, state: TerminalPresence) =>
+    ipcRenderer.send(IPC.TERMINAL_PRESENCE, { id, state }),
+
+  /** "Fit to this device": a session vornd holds takes this pane's size. */
+  takeTerminalSize: (id: string) => ipcRenderer.send(IPC.TERMINAL_TAKE_SIZE, { id }),
+
+  /** Lock a session vornd holds to this pane's size, or release the lock. */
+  lockTerminalSize: (id: string, locked: boolean) =>
+    ipcRenderer.send(IPC.TERMINAL_LOCK_SIZE, { id, locked }),
 
   killTerminal: (id: string) => ipcRenderer.invoke(IPC.TERMINAL_KILL, id),
 

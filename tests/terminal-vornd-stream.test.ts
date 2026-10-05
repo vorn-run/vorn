@@ -8,6 +8,7 @@ const { created } = vi.hoisted(() => ({
     reset: ReturnType<typeof vi.fn>
     resize: ReturnType<typeof vi.fn>
     csi: Array<{ id: unknown; fn: (...a: unknown[]) => boolean }>
+    options: { fontSize: number }
   }>
 }))
 
@@ -56,7 +57,8 @@ vi.mock('@xterm/xterm', () => {
         write: this.write,
         reset: this.reset,
         resize: this.resize,
-        csi: this.csi
+        csi: this.csi,
+        options: this.options
       })
     }
     open(el: HTMLElement): void {
@@ -79,9 +81,10 @@ vi.mock('@xterm/xterm', () => {
 })
 
 vi.mock('@xterm/addon-fit', () => ({
-  // The pane's box fits 80x24.
+  // The pane's box fits 80x24. Its cells are 8x16 px at 13 px and scale with
+  // the font, as a monospace font's do.
   FitAddon: class {
-    term: { cols: number; rows: number; element: unknown } | null = null
+    term: FitAddon['term'] = null
     activate(term: unknown): void {
       this.term = term as FitAddon['term']
     }
@@ -90,9 +93,20 @@ vi.mock('@xterm/addon-fit', () => ({
       this.term.cols = 80
       this.term.rows = 24
     })
+    proposeDimensions(): { cols: number; rows: number } | undefined {
+      const el = this.term?.element as HTMLElement | null | undefined
+      if (!el || !this.term) return undefined
+      const scale = this.term.options.fontSize / 13
+      return {
+        cols: Math.floor((parseInt(el.style.width) || 0) / (8 * scale)),
+        rows: Math.floor((parseInt(el.style.height) || 0) / (16 * scale))
+      }
+    }
   }
 }))
-type FitAddon = { term: { cols: number; rows: number; element: unknown } | null }
+type FitAddon = {
+  term: { cols: number; rows: number; element: unknown; options: { fontSize: number } } | null
+}
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class {} }))
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}))
 
@@ -102,6 +116,8 @@ let resizedListener: (e: {
   cols: number
   rows: number
   rseq: number
+  owner?: string | null
+  reason?: string | null
 }) => void = () => {}
 let reconnectedListener: () => void = () => {}
 const attachTerminal = vi.fn()
@@ -125,6 +141,10 @@ Object.defineProperty(window, 'api', {
     attachTerminal,
     writeTerminal: vi.fn(),
     resizeTerminal: vi.fn(),
+    terminalViewport: vi.fn(),
+    terminalPresence: vi.fn(),
+    takeTerminalSize: vi.fn(),
+    lockTerminalSize: vi.fn(),
     openExternal: vi.fn()
   },
   writable: true
@@ -138,7 +158,12 @@ import {
   setHostRoot,
   syncTerminalOverlay,
   initGlobalDataListener,
-  disposeGlobalDataListener
+  disposeGlobalDataListener,
+  getTerminalSizing,
+  fitTerminalToDevice,
+  setTerminalSizeLock,
+  getPersistentWrapper,
+  unregisterSlot
 } from '../src/renderer/lib/terminal-registry'
 import { encodeTerminalFrameV2 } from '../packages/shared/src/terminal-frame'
 
@@ -304,27 +329,104 @@ describe('a session vornd holds', () => {
   })
 })
 
-describe('a session resized by another client', () => {
-  it("is told this pane's size again at its next fit, not left at the other size", async () => {
-    const host = document.createElement('div')
+describe('the size of a session vornd holds', () => {
+  const api = window.api as unknown as Record<string, ReturnType<typeof vi.fn>>
+  let host: HTMLDivElement
+
+  /** A pane of `w`x`h` px showing the session at `cols`x`rows`. */
+  async function show(cols: number, rows: number, w = 400, h = 300): Promise<HTMLDivElement> {
+    host = document.createElement('div')
     document.body.appendChild(host)
     setHostRoot(host)
-    const resize = window.api.resizeTerminal as ReturnType<typeof vi.fn>
-    attachTerminal.mockResolvedValue({ ...(snapshot(8, 120) as object), cols: 80, rows: 24 })
+    attachTerminal.mockResolvedValue({
+      ...(snapshot(8, 120) as object),
+      cols,
+      rows,
+      client: 'ws:7'
+    })
+    const el = slot()
+    el.getBoundingClientRect = () =>
+      ({ top: 0, left: 0, width: w, height: h, right: w, bottom: h, x: 0, y: 0 }) as DOMRect
+    registerSlot(ID, el)
+    syncTerminalOverlay(ID)
+    await hydrateTerminal(ID)
+    fitTerminal(ID)
+    return el
+  }
+
+  beforeEach(() => {
+    for (const f of Object.values(api)) if (typeof f?.mockClear === 'function') f.mockClear()
+  })
+
+  afterEach(() => {
+    setHostRoot(null)
+    host?.remove()
+  })
+
+  it("never resizes the session: it reports this pane's viewport, and only when it changes", async () => {
+    await show(80, 24)
+    // Another client took the session to 100x30.
+    resizedListener({ id: ID, cols: 100, rows: 30, rseq: 8, owner: 'ws:3', reason: 'input' })
+    expect(term().resize).toHaveBeenLastCalledWith(100, 30)
+    fitTerminal(ID)
+    fitTerminal(ID)
+
+    expect(window.api.resizeTerminal).not.toHaveBeenCalled()
+    expect(api.terminalViewport.mock.calls).toEqual([[{ id: ID, cols: 50, rows: 18 }]])
+  })
+
+  it('draws a larger grid whole: the font scales down, to 9 px, and below that the pane pans', async () => {
+    const opts = (): { fontSize: number } => term().options
+    // 50x18 cells fit at 13 px; a 60x20 grid fits at 13 * 50/60 px.
+    await show(60, 20)
+    expect(opts().fontSize).toBeCloseTo((13 * 50) / 60, 5)
+    expect(getPersistentWrapper(ID)!.style.overflow).toBe('hidden')
+    // 120 columns would need 5.4 px: 9 px it is, and the rest is panned to.
+    resizedListener({ id: ID, cols: 120, rows: 20, rseq: 8, owner: 'ws:3', reason: 'input' })
+    expect(opts().fontSize).toBe(9)
+    expect(getPersistentWrapper(ID)!.style.overflow).toBe('auto')
+    // And a grid that fits is drawn at the user's font, with nothing to pan.
+    resizedListener({ id: ID, cols: 40, rows: 10, rseq: 9, owner: 'ws:7', reason: 'input' })
+    expect(opts().fontSize).toBe(13)
+    expect(getPersistentWrapper(ID)!.style.overflow).toBe('hidden')
+    // The viewport is still counted at the user's font throughout.
+    expect(api.terminalViewport.mock.calls.every(([v]) => v.cols === 50 && v.rows === 18)).toBe(
+      true
+    )
+  })
+
+  it('says it is watching when shown, active when used, and away when hidden', async () => {
+    const el = await show(80, 24)
+    expect(api.terminalPresence.mock.calls).toEqual([[ID, 'watching']])
+    getPersistentWrapper(ID)!.dispatchEvent(new Event('wheel'))
+    expect(api.terminalPresence).toHaveBeenLastCalledWith(ID, 'active')
+    unregisterSlot(ID, el)
+    expect(api.terminalPresence).toHaveBeenLastCalledWith(ID, 'away')
+  })
+
+  it('knows when the size is its own, and asks for it or locks it on request', async () => {
+    await show(80, 24)
+    expect(getTerminalSizing(ID)).toEqual({ owner: false, locked: false })
+    resizedListener({ id: ID, cols: 50, rows: 18, rseq: 8, owner: 'ws:7', reason: 'explicit' })
+    expect(getTerminalSizing(ID)).toEqual({ owner: true, locked: false })
+    fitTerminalToDevice(ID)
+    expect(api.takeTerminalSize).toHaveBeenCalledWith(ID)
+    setTerminalSizeLock(ID, true)
+    expect(api.lockTerminalSize).toHaveBeenCalledWith(ID, true)
+    expect(getTerminalSizing(ID)).toEqual({ owner: true, locked: true })
+  })
+
+  it('leaves a session vornd does not hold to the pane, as before', async () => {
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    setHostRoot(host)
+    attachTerminal.mockResolvedValue({ data: '', seq: 0, live: true })
     registerSlot(ID, slot())
     syncTerminalOverlay(ID)
     await hydrateTerminal(ID)
     fitTerminal(ID)
-    resize.mockClear()
-
-    // Another client took the session to 100x30.
-    resizedListener({ id: ID, cols: 100, rows: 30, rseq: 8 })
-    expect(term().resize).toHaveBeenLastCalledWith(100, 30)
-
-    // This pane's box still fits 80x24: its next fit says so.
-    fitTerminal(ID)
-    expect(resize).toHaveBeenCalledWith({ id: ID, cols: 80, rows: 24 })
-    setHostRoot(null)
-    host.remove()
+    expect(getTerminalSizing(ID)).toBeNull()
+    expect(api.terminalViewport).not.toHaveBeenCalled()
+    expect(api.terminalPresence).not.toHaveBeenCalled()
   })
 })

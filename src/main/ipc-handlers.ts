@@ -11,7 +11,7 @@ import { writeFile } from 'node:fs/promises'
 import { safeHandle } from './ipc-safe-handle'
 import { IPC, ResizePayload, browserPartition } from '../shared/types'
 import type { ServerBridge } from './server/server-bridge'
-import type { RequestMethods } from '@vornrun/shared/protocol'
+import type { RequestMethods, TerminalPresence } from '@vornrun/shared/protocol'
 import * as browserRegistry from './browser-registry'
 import { cliShimStatus, installCliShim } from './cli-shim'
 import { setFileRoot, allowsFileUrl } from './browser-file-scope'
@@ -715,5 +715,21 @@ export function registerIpcHandlers(): void {
 
   ipcMain.on(IPC.TERMINAL_RESIZE, (_, payload: ResizePayload) =>
     bridge?.notify(IPC.TERMINAL_RESIZE, payload)
+  )
+
+  // The size of a session vornd holds: what fits, whether the pane is in
+  // use, and the explicit "fit" and lock. Only sent for those sessions, so
+  // only vornd reads them.
+  ipcMain.on(IPC.TERMINAL_VIEWPORT, (_, payload: ResizePayload) =>
+    bridge?.notify(IPC.TERMINAL_VIEWPORT, payload)
+  )
+  ipcMain.on(IPC.TERMINAL_PRESENCE, (_, payload: { id: string; state: TerminalPresence }) =>
+    bridge?.notify(IPC.TERMINAL_PRESENCE, payload)
+  )
+  ipcMain.on(IPC.TERMINAL_TAKE_SIZE, (_, payload: { id: string }) =>
+    bridge?.notify(IPC.TERMINAL_TAKE_SIZE, payload)
+  )
+  ipcMain.on(IPC.TERMINAL_LOCK_SIZE, (_, payload: { id: string; locked: boolean }) =>
+    bridge?.notify(IPC.TERMINAL_LOCK_SIZE, payload)
   )
 }

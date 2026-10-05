@@ -1,0 +1,391 @@
+//! The size rule as vornd runs it (Terminal State Protocol §10): one
+//! [`vorn_size::Policy`] per session, fed by both kinds of client.
+//!
+//! Bytes clients on the WebSocket report `terminal:viewport` and
+//! `terminal:presence`, and their `terminal:write`s are input when a person
+//! typed them ([`vorn_size::typed`]); grid clients on the local socket send
+//! Viewport, Presence, TakeSize and LockSize, and their Input. Both land
+//! here as [`Ev`]s under the client's [`Who`].
+//!
+//! Who is a desktop is decided from the connection, never from what the
+//! client says: every grid client is on this user's local socket, and a
+//! bytes connection is the desktop's only when it opened with the desktop's
+//! launch token ([`Sizes::desktop`],
+//! [`crate::proxy::is_desktop_credential`]). A phone over the tunnel cannot claim
+//! it.
+//!
+//! The policy decides; the engine's driver sends. It asks [`Sizes::due`]
+//! when to look again and [`Sizes::poll`] for the resizes to send, and each
+//! one goes to sessiond as a Resize request. The terminal and every client
+//! resize when the Resize record comes back, never on the request
+//! ([`Sizes::applied`] names who asked for it, for `Resized`).
+
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Mutex, MutexGuard};
+use std::time::Instant;
+
+use tokio::sync::Notify;
+use vorn_engine::Peer;
+use vorn_size::{Decision, Event, Policy, Presence, Size};
+
+/// A client as the size rule knows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Who {
+    /// A bytes connection on the WebSocket: every session it attaches is
+    /// seen through the one box per session it reports.
+    Bytes(u64),
+    /// One grid attachment.
+    Grid(Peer),
+}
+
+impl Who {
+    /// The name a bytes client sees in `terminal:resized`'s `owner`, and is
+    /// told as its own `client` when it attaches.
+    pub fn name(self) -> String {
+        match self {
+            Who::Bytes(conn) => format!("ws:{conn}"),
+            Who::Grid(p) => format!("grid:{}:{}", p.conn, p.sid),
+        }
+    }
+}
+
+/// What a client did, for [`Sizes::on`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ev {
+    /// It attached; a client that is already attached keeps what the policy
+    /// knows of it, and only takes the viewport given.
+    Attach {
+        viewport: Option<Size>,
+        presence: Presence,
+    },
+    Viewport(Size),
+    Presence(Presence),
+    /// A person's input reached the session from it.
+    Input,
+    /// "Fit to this device", or an older client's `terminal:resize` with the
+    /// size it wants.
+    TakeSize(Option<Size>),
+    LockSize(bool),
+    Detach,
+}
+
+/// Resizes sent and not answered by a record yet, per session. Past this,
+/// the oldest is forgotten: its record then reaches clients without an
+/// owner, which costs nothing but the name.
+const SENT_KEPT: usize = 16;
+
+#[derive(Debug)]
+struct Held {
+    policy: Policy<Who>,
+    /// Resizes sent to sessiond, oldest first, for the records that answer
+    /// them.
+    sent: VecDeque<Decision<Who>>,
+}
+
+#[derive(Debug, Default)]
+struct Inner {
+    sessions: HashMap<String, Held>,
+    /// Bytes connections that opened with the desktop's launch token.
+    desktops: HashSet<u64>,
+}
+
+/// Every session's size rule.
+#[derive(Debug, Default)]
+pub struct Sizes {
+    inner: Mutex<Inner>,
+    /// Woken by every event, so the driver looks at [`Sizes::due`] again.
+    wake: Notify,
+}
+
+impl Sizes {
+    pub fn new() -> Sizes {
+        Sizes::default()
+    }
+
+    fn inner(&self) -> MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A session with a PTY of `size` is held. A session already known (a
+    /// new connection to sessiond recovering it) keeps its clients and its
+    /// history of input, and learns its size.
+    pub fn opened(&self, session: &str, size: Size) {
+        let mut inner = self.inner();
+        match inner.sessions.get_mut(session) {
+            Some(h) => h.policy.applied(size),
+            None => {
+                inner.sessions.insert(
+                    session.to_owned(),
+                    Held {
+                        policy: Policy::new(size),
+                        sent: VecDeque::new(),
+                    },
+                );
+            }
+        }
+    }
+
+    /// The session ended.
+    pub fn closed(&self, session: &str) {
+        self.inner().sessions.remove(session);
+    }
+
+    /// Bytes connection `conn` opened with the desktop's launch token.
+    pub fn desktop(&self, conn: u64) {
+        self.inner().desktops.insert(conn);
+    }
+
+    /// One client's event for `session`. A client the policy has not seen
+    /// is attached first, so an event never depends on an attach arriving
+    /// before it. Nothing for a session without a PTY, which has no size.
+    pub fn on(&self, session: &str, who: Who, ev: Ev, now: Instant) {
+        {
+            let mut inner = self.inner();
+            let desktop = match who {
+                Who::Grid(_) => true,
+                Who::Bytes(conn) => inner.desktops.contains(&conn),
+            };
+            let Some(h) = inner.sessions.get_mut(session) else {
+                return;
+            };
+            let p = &mut h.policy;
+            if ev == Ev::Detach {
+                p.on(Event::Detach { client: who }, now);
+            } else {
+                if !p.has(who) {
+                    let (viewport, presence) = match ev {
+                        Ev::Attach { viewport, presence } => (viewport, presence),
+                        Ev::Presence(state) => (None, state),
+                        _ => (None, Presence::Watching),
+                    };
+                    p.on(
+                        Event::Attach {
+                            client: who,
+                            desktop,
+                            viewport,
+                            presence,
+                        },
+                        now,
+                    );
+                }
+                let event = match ev {
+                    Ev::Attach { viewport, .. } => {
+                        viewport.map(|size| Event::Viewport { client: who, size })
+                    }
+                    Ev::Viewport(size) => Some(Event::Viewport { client: who, size }),
+                    Ev::Presence(state) => Some(Event::Presence { client: who, state }),
+                    Ev::Input => Some(Event::Input { client: who }),
+                    Ev::TakeSize(size) => Some(Event::TakeSize { client: who, size }),
+                    Ev::LockSize(locked) => Some(Event::LockSize {
+                        client: who,
+                        locked,
+                    }),
+                    Ev::Detach => None,
+                };
+                if let Some(e) = event {
+                    p.on(e, now);
+                }
+            }
+        }
+        self.wake.notify_one();
+    }
+
+    /// Bytes connection `conn` closed: it detaches from every session.
+    pub fn bytes_gone(&self, conn: u64, now: Instant) {
+        self.gone(|w| w == Who::Bytes(conn), now);
+        self.inner().desktops.remove(&conn);
+    }
+
+    /// Grid connection `conn` closed: each of its attachments detaches.
+    pub fn grid_gone(&self, conn: u64, now: Instant) {
+        self.gone(|w| matches!(w, Who::Grid(p) if p.conn == conn), now);
+    }
+
+    fn gone(&self, which: impl Fn(Who) -> bool, now: Instant) {
+        {
+            let mut inner = self.inner();
+            for h in inner.sessions.values_mut() {
+                let leaving: Vec<Who> = h.policy.clients().filter(|&w| which(w)).collect();
+                for client in leaving {
+                    h.policy.on(Event::Detach { client }, now);
+                }
+            }
+        }
+        self.wake.notify_one();
+    }
+
+    /// Resolves after the next event. A wake that came while nobody waited
+    /// is kept for the next wait.
+    pub async fn woken(&self) {
+        self.wake.notified().await;
+    }
+
+    /// When some session next has a resize to send, without a new event.
+    pub fn due(&self) -> Option<Instant> {
+        self.inner()
+            .sessions
+            .values()
+            .filter_map(|h| h.policy.due())
+            .min()
+    }
+
+    /// The resizes to send now, each to its session. Each is remembered for
+    /// the record that will answer it.
+    pub fn poll(&self, now: Instant) -> Vec<(String, Decision<Who>)> {
+        let mut out = Vec::new();
+        for (id, h) in &mut self.inner().sessions {
+            if let Some(d) = h.policy.poll(now) {
+                if h.sent.len() == SENT_KEPT {
+                    h.sent.pop_front();
+                }
+                h.sent.push_back(d);
+                out.push((id.clone(), d));
+            }
+        }
+        out
+    }
+
+    /// A Resize record for `size` was applied to `session`: the resize it
+    /// answers, if vornd sent one. sessiond applies requests in order, so
+    /// it is the oldest sent for that size; older ones it passed were
+    /// overtaken and never get a record of their own.
+    pub fn applied(&self, session: &str, size: Size) -> Option<Decision<Who>> {
+        let mut inner = self.inner();
+        let h = inner.sessions.get_mut(session)?;
+        let found = h.sent.iter().position(|d| d.size == size);
+        let decision = found.map(|i| {
+            h.sent.drain(..i);
+            h.sent.pop_front().expect("position found it")
+        });
+        // While later requests are on their way, the size they will bring
+        // is the one the policy should measure against.
+        if h.sent.is_empty() {
+            h.policy.applied(size);
+        }
+        decision
+    }
+
+    /// The grid attachments on `session`, for `Resized`.
+    pub fn grid_peers(&self, session: &str) -> Vec<Peer> {
+        self.inner()
+            .sessions
+            .get(session)
+            .map_or_else(Vec::new, |h| {
+                h.policy
+                    .clients()
+                    .filter_map(|w| match w {
+                        Who::Grid(p) => Some(p),
+                        Who::Bytes(_) => None,
+                    })
+                    .collect()
+            })
+    }
+
+    /// The owner and size of `session`, for tests and the report.
+    pub fn state(&self, session: &str) -> Option<(Size, Option<Who>)> {
+        self.inner()
+            .sessions
+            .get(session)
+            .map(|h| (h.policy.size(), h.policy.owner()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proxy::is_desktop_credential;
+    use std::time::Duration;
+    use vorn_size::Reason;
+
+    const S: &str = "s1";
+
+    fn peer(conn: u64, sid: u32) -> Who {
+        Who::Grid(Peer { conn, sid })
+    }
+
+    /// TP-T9a's last clause: whether a bytes client is a desktop comes from
+    /// the token its connection opened with, never from what it says. A
+    /// client without the token is remote whatever it claims, and loses
+    /// ties to the desktop.
+    #[test]
+    fn t9a_a_native_claim_over_the_tunnel_is_still_remote() {
+        let token = b"launch-secret";
+        assert!(is_desktop_credential(Some(b"Bearer launch-secret"), token));
+        for wrong in [
+            &b"Bearer launch-secreT"[..],
+            b"Bearer launch",
+            b"launch-secret",
+            b"Basic launch-secret",
+            b"Bearer ",
+        ] {
+            assert!(!is_desktop_credential(Some(wrong), token), "{wrong:?}");
+        }
+        assert!(!is_desktop_credential(None, token));
+        assert!(!is_desktop_credential(Some(b"Bearer "), b""));
+
+        // Connection 1 opened with the token; connection 2, a browser over
+        // the tunnel saying it is native, did not.
+        let sizes = Sizes::new();
+        sizes.opened(S, Size::new(100, 30));
+        sizes.desktop(1);
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        let view = |cols, rows| Ev::Attach {
+            viewport: Some(Size::new(cols, rows)),
+            presence: Presence::Watching,
+        };
+        sizes.on(S, Who::Bytes(2), view(50, 30), t0);
+        sizes.on(S, Who::Bytes(1), view(120, 40), t0);
+        sizes.on(S, Who::Bytes(2), Ev::Input, t0);
+        sizes.on(S, Who::Bytes(1), Ev::Input, at(500));
+        sizes.on(S, Who::Bytes(2), Ev::Input, at(1000));
+        assert!(sizes
+            .poll(at(2000))
+            .iter()
+            .all(|(_, d)| d.owner == Some(Who::Bytes(1))));
+        assert_eq!(sizes.state(S).unwrap().1, Some(Who::Bytes(1)));
+    }
+
+    #[test]
+    fn a_record_names_the_resize_it_answers_and_skips_the_overtaken() {
+        let sizes = Sizes::new();
+        sizes.opened(S, Size::new(80, 24));
+        let t0 = Instant::now();
+        let g = peer(4, 1);
+        sizes.on(
+            S,
+            g,
+            Ev::Attach {
+                viewport: Some(Size::new(120, 40)),
+                presence: Presence::Watching,
+            },
+            t0,
+        );
+        sizes.on(S, g, Ev::Input, t0);
+        let sent = sizes.poll(t0 + Duration::from_millis(150));
+        assert_eq!(sent.len(), 1);
+        sizes.on(
+            S,
+            g,
+            Ev::Viewport(Size::new(140, 50)),
+            t0 + Duration::from_secs(1),
+        );
+        assert_eq!(sizes.poll(t0 + Duration::from_secs(2)).len(), 1);
+        // The first request was overtaken: only the second's record comes.
+        let d = sizes.applied(S, Size::new(140, 50)).unwrap();
+        assert_eq!((d.owner, d.reason), (Some(g), Reason::Input));
+        // A record nobody here asked for (a redraw nudge) names no one.
+        assert_eq!(sizes.applied(S, Size::new(140, 49)), None);
+        assert_eq!(sizes.grid_peers(S), vec![Peer { conn: 4, sid: 1 }]);
+        sizes.grid_gone(4, t0 + Duration::from_secs(3));
+        assert!(sizes.grid_peers(S).is_empty());
+    }
+
+    #[test]
+    fn events_for_sessions_without_a_size_are_ignored() {
+        let sizes = Sizes::new();
+        sizes.on("piped", Who::Bytes(1), Ev::Input, Instant::now());
+        assert_eq!(sizes.state("piped"), None);
+        assert_eq!(sizes.due(), None);
+    }
+}

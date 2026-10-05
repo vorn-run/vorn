@@ -76,7 +76,8 @@ export class Vornd {
     readonly port: number
   ) {}
 
-  static async start(upstreamPort: number, home: string): Promise<Vornd> {
+  /** With `desktopToken`, a connection that opens with it is the desktop's. */
+  static async start(upstreamPort: number, home: string, desktopToken?: string): Promise<Vornd> {
     const child = spawn(
       vorndBinary!,
       [
@@ -90,7 +91,11 @@ export class Vornd {
       ],
       {
         stdio: ['ignore', 'pipe', 'inherit'],
-        env: { ...process.env, VORND_LOG: process.env.VORND_LOG ?? 'warn' }
+        env: {
+          ...process.env,
+          VORND_LOG: process.env.VORND_LOG ?? 'warn',
+          ...(desktopToken ? { VORND_DESKTOP_TOKEN: desktopToken } : {})
+        }
       }
     )
     const port = await new Promise<number>((resolve, reject) => {
@@ -147,6 +152,16 @@ interface Pending {
 export class BytesClient {
   readonly term = new Headless({ allowProposedApi: true, cols: 80, rows: 24, scrollback: 10_000 })
   cursor: RecordCursor | null = null
+  /** Every `terminal:resized`, as it came. */
+  resized: Array<{
+    cols: number
+    rows: number
+    rseq: number
+    owner?: string | null
+    reason?: string | null
+  }> = []
+  /** This connection's name in vornd, from the attach answer. */
+  name: string | null = null
   resyncs: string[] = []
   exits: number[] = []
   /** Set when a frame did not start at the cursor: a byte lost or doubled. */
@@ -165,8 +180,12 @@ export class BytesClient {
     })
   }
 
-  async connect(port: number): Promise<void> {
-    this.ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+  /** Opens with `token` as its bearer credential, as the desktop does, when given one. */
+  async connect(port: number, token?: string): Promise<void> {
+    this.ws = new WebSocket(
+      `ws://127.0.0.1:${port}/ws`,
+      token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+    )
     this.ws.binaryType = 'nodebuffer'
     this.ws.on('message', (raw: Buffer, isBinary: boolean) => this.receive(raw, isBinary))
     await new Promise<void>((resolve, reject) => {
@@ -211,7 +230,9 @@ export class BytesClient {
       rows?: number
       resync?: string
       replies?: string
+      client?: string
     }>('terminal:attach', params)
+    this.name = answer.client ?? null
     if (!answer.continued) {
       this.enqueue(() => {
         this.term.reset()
@@ -277,7 +298,9 @@ export class BytesClient {
     const params = msg.params ?? {}
     if (params.id !== this.session) return
     if (msg.method === 'terminal:resized') {
-      const { cols, rows, rseq } = params as { cols: number; rows: number; rseq: number }
+      const resized = params as BytesClient['resized'][number]
+      this.resized.push(resized)
+      const { cols, rows, rseq } = resized
       if (this.cursor) this.cursor = { ...this.cursor, nextRseq: rseq + 1 }
       this.enqueue(() => this.term.resize(cols, rows))
     } else if (msg.method === 'terminal:resync') {

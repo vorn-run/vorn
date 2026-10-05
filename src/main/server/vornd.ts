@@ -17,6 +17,13 @@ import log from '../logger'
 /** The `protocol` vornd reports that this app knows how to use. */
 export const VORND_PROTOCOL = 1
 
+/**
+ * Where vornd reads the desktop's launch token. A WebSocket that opens with it
+ * is the desktop's, which vornd's size rule favours over a phone or a browser.
+ * vornd takes it out of its environment before it starts anything.
+ */
+export const VORND_DESKTOP_TOKEN_ENV = 'VORND_DESKTOP_TOKEN'
+
 /** How long vornd has to say where it listens. It binds before it says anything. */
 export const VORND_START_TIMEOUT_MS = 5_000
 
@@ -92,6 +99,8 @@ export function startVornd(
     spawnImpl?: typeof spawn
     /** The session holder for vornd to keep running, and the data directory it lives in. */
     sessiond?: { binary: string; home: string }
+    /** The credential this app's own connection presents, so vornd can tell it is the desktop. */
+    desktopToken?: string
   } = {}
 ): Promise<Vornd> {
   const run = options.spawnImpl ?? spawn
@@ -105,7 +114,12 @@ export function startVornd(
       }
       child = run(binary, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true
+        windowsHide: true,
+        // In the environment rather than the arguments, which anyone on the
+        // machine can list.
+        ...(options.desktopToken
+          ? { env: { ...process.env, [VORND_DESKTOP_TOKEN_ENV]: options.desktopToken } }
+          : {})
       })
     } catch (err) {
       reject(new Error(`could not start vornd: ${(err as Error).message}`))

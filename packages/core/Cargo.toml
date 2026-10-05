@@ -14,6 +14,7 @@ members = [
   "crates/engine",
   "crates/grid",
   "crates/grid-client",
+  "crates/size",
 ]
 
 [package]

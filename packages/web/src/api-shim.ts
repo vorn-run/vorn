@@ -471,6 +471,13 @@ export function createApiShim(wsUrl: string) {
     createTerminal: (payload: unknown) => rpc.invoke('terminal:create', payload),
     writeTerminal: (id: string, data: string) => rpc.notify('terminal:write', { id, data }),
     resizeTerminal: (payload: unknown) => rpc.notify('terminal:resize', payload),
+    // The size of a session vornd holds: this device reports what fits and
+    // whether it is in use; vornd decides from who is typing.
+    terminalViewport: (payload: unknown) => rpc.notify('terminal:viewport', payload),
+    terminalPresence: (id: string, state: string) => rpc.notify('terminal:presence', { id, state }),
+    takeTerminalSize: (id: string) => rpc.notify('terminal:takeSize', { id }),
+    lockTerminalSize: (id: string, locked: boolean) =>
+      rpc.notify('terminal:lockSize', { id, locked }),
     killTerminal: (id: string) => rpc.invoke('terminal:kill', id),
     createShellTerminal: (cwd?: string) => rpc.invoke('shell:create', cwd),
 
@@ -484,7 +491,14 @@ export function createApiShim(wsUrl: string) {
     onTerminalFrame: (callback: (frame: Uint8Array) => void) =>
       rpc.onLocal('frame', callback as (p: unknown) => void),
     onTerminalResized: (
-      callback: (event: { id: string; cols: number; rows: number; rseq: number }) => void
+      callback: (event: {
+        id: string
+        cols: number
+        rows: number
+        rseq: number
+        owner?: string | null
+        reason?: string | null
+      }) => void
     ) => rpc.on('terminal:resized', callback as (p: unknown) => void),
     onTerminalReconnected: (callback: () => void) => rpc.onLocal('reconnected', () => callback()),
     onTerminalExit: (callback: (event: { id: string; exitCode: number }) => void) =>

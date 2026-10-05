@@ -1048,7 +1048,9 @@ async function routeThroughVornd(upstream: number | null): Promise<void> {
   let started: Vornd
   try {
     started = await startVornd(binary, upstream, {
-      sessiond: sessiond && vorndHome ? { binary: sessiond, home: vorndHome } : undefined
+      sessiond: sessiond && vorndHome ? { binary: sessiond, home: vorndHome } : undefined,
+      // The bridge presents it on every connection, through vornd too.
+      desktopToken: bootstrapToken ?? undefined
     })
   } catch (err) {
     fallBack((err as Error).message)
