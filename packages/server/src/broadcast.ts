@@ -245,6 +245,25 @@ export class ClientRegistry {
   }
 
   /**
+   * Tell every client connected through vornd to attach these terminals again.
+   *
+   * vornd holds them now. A client that attached one in the moments before
+   * vornd did (vornd listening before its session holder was connected) was
+   * answered here, and hears none of its bytes from here while vornd holds it;
+   * attaching again lands on vornd. A client already attached through vornd
+   * just continues from its cursor.
+   */
+  resyncViaVornd(ids: readonly string[]): void {
+    for (const [ws, client] of this.clients) {
+      if (!client.viaVornd || ws.readyState !== ws.OPEN) continue
+      for (const id of ids) {
+        if (client.subscription && !client.subscription.wants('terminal:resync', id)) continue
+        ws.send(JSON.stringify(createNotification('terminal:resync', { id, reason: 'vornd' })))
+      }
+    }
+  }
+
+  /**
    * Whether this flush of terminal output is to be left out for this client.
    *
    * A terminal already behind stays behind until the socket has drained; then

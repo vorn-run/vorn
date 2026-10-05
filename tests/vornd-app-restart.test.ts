@@ -163,6 +163,30 @@ async function statusOf(c: BytesClient, id: string): Promise<string | undefined>
   return (await active(c)).find((s) => s.id === id)?.status
 }
 
+/**
+ * Attach `id` through vornd. vornd holds a session once its engine has taken
+ * it on from the session holder; an attach before that is the server's to
+ * answer, and the server then leaves the stream to vornd (and tells the client
+ * to attach again once vornd has it). Waiting for vornd's report to show the
+ * session live takes that race out of the test.
+ */
+async function attachHeld(
+  app: App,
+  c: BytesClient,
+  id: string,
+  resume = false
+): Promise<{ continued: boolean }> {
+  await until(`vornd to hold ${id}`, async () => {
+    const res = await fetch(`http://127.0.0.1:${app.port}/vornd/sessions`).catch(() => null)
+    if (!res?.ok) return false
+    const report = (await res.json()) as { sessions: Array<{ session: string; state: string }> }
+    return report.sessions.some((s) => s.session === id && s.state === 'live')
+  })
+  const answer = await c.attach(id, resume)
+  expect(answer.replies).toBe('vornd')
+  return answer
+}
+
 let sessiondPid: number | null = null
 
 async function holderPid(app: App): Promise<number | null> {
@@ -224,7 +248,7 @@ describe.runIf(vorndSessionsAvailable)('the app with vornd as its process backen
     for (let k = 0; k < 3; k++) {
       const c = await connected()
       const session = await c.call<TerminalSession>('shell:create', root)
-      await c.attach(session.id)
+      await attachHeld(app, c, session.id)
       shells.push({ id: session.id, c })
     }
     for (const [k, { id, c }] of shells.entries()) {
@@ -244,14 +268,9 @@ describe.runIf(vorndSessionsAvailable)('the app with vornd as its process backen
       for (const s of shells) {
         s.c.close()
         await s.c.connect(app.port, { Authorization: `Bearer ${TOKEN}` })
-        await until('the session to be held again', async () => {
-          try {
-            await s.c.attach(s.id, true)
-            return true
-          } catch {
-            return false
-          }
-        })
+        // From the cursor it had: vornd continues it without a snapshot.
+        const resumed = await attachHeld(app, s.c, s.id, true)
+        expect(resumed.continued).toBe(true)
       }
     }
     for (const [k, { c }] of shells.entries()) {
@@ -291,7 +310,7 @@ describe.runIf(vorndSessionsAvailable)('the app with vornd as its process backen
     const listed = await active(after)
     expect(listed.find((s) => s.id === shell.id)?.pid).toBe(pids.get(shell.id))
     expect(listed.find((s) => s.id === agent.id)?.pid).toBe(pids.get(agent.id))
-    await after.attach(agent.id)
+    await attachHeld(app, after, agent.id)
     after.notify('terminal:write', { id: agent.id, data: 'the tests\r' })
     await until('the agent to work', async () =>
       (await after.text()).includes('done with the tests')
@@ -302,7 +321,7 @@ describe.runIf(vorndSessionsAvailable)('the app with vornd as its process backen
   it('a restarted server takes its terminals back from vornd, under the same ids', async () => {
     const c = await connected()
     const shell = await c.call<TerminalSession>('shell:create', root)
-    await c.attach(shell.id)
+    await attachHeld(app, c, shell.id)
     c.notify('terminal:write', { id: shell.id, data: 'echo before-restart\r' })
     await until('the echo', async () => (await c.text()).includes('before-restart'))
     // The record is saved on a short debounce.
@@ -320,7 +339,7 @@ describe.runIf(vorndSessionsAvailable)('the app with vornd as its process backen
     )
     const restored = await after.call<Array<{ session: { id: string } }>>('sessions:restored', {})
     expect(restored.map((r) => r.session.id)).not.toContain(shell.id)
-    await after.attach(shell.id)
+    await attachHeld(app, after, shell.id)
     after.notify('terminal:write', { id: shell.id, data: 'echo after-restart\r' })
     await until('the echo', async () => (await after.text()).includes('after-restart'))
   }, 90_000)
@@ -334,7 +353,7 @@ describe.runIf(vorndSessionsAvailable)('the app with vornd as its process backen
         projectPath: root
       })
       const watcher = await connected()
-      await watcher.attach(agent.id)
+      await attachHeld(app, watcher, agent.id)
       await until(`${agentType} to start`, async () =>
         (await watcher.text()).includes(`stand-in ${agentType}`)
       )
@@ -367,9 +386,10 @@ describe.runIf(vorndSessionsAvailable)('the app with vornd as its process backen
           return false
         }
       })
+      // A prompt typed ahead of may sit in front of it.
       const started = (await again.text())
         .split('\n')
-        .find((l) => l.startsWith(`stand-in ${agentType}`))!
+        .find((l) => l.includes(`stand-in ${agentType}`))!
       if (agentType === 'claude' || agentType === 'copilot') {
         // A pinned conversation resumes exactly.
         expect(started).toContain(`--resume ${agent.agentSessionId}`)

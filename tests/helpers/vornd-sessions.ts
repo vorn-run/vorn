@@ -140,6 +140,8 @@ export function home(): { dir: string; remove(): void } {
 interface Pending {
   resolve(v: unknown): void
   reject(e: Error): void
+  /** Run as the answer arrives, before any frame that came with it in the same read. */
+  answered?(v: unknown): void
 }
 
 /**
@@ -151,6 +153,8 @@ export class BytesClient {
   readonly term = new Headless({ allowProposedApi: true, cols: 80, rows: 24, scrollback: 10_000 })
   cursor: RecordCursor | null = null
   resyncs: string[] = []
+  /** Whether the last attach was answered by vornd rather than the server. */
+  throughVornd = false
   exits: number[] = []
   /** Set when a frame did not start at the cursor: a byte lost or doubled. */
   broken: string | null = null
@@ -183,10 +187,14 @@ export class BytesClient {
     this.ws?.close()
   }
 
-  call<T = unknown>(method: string, params: unknown): Promise<T> {
+  call<T = unknown>(method: string, params: unknown, answered?: (v: T) => void): Promise<T> {
     const id = ++this.nextId
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject })
+      this.pending.set(id, {
+        resolve: resolve as (v: unknown) => void,
+        reject,
+        answered: answered as ((v: unknown) => void) | undefined
+      })
       this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
     })
   }
@@ -207,7 +215,10 @@ export class BytesClient {
   ): Promise<{ continued: boolean; cursor: RecordCursor; resync?: string; replies?: string }> {
     this.session = session
     const params = resume && this.cursor ? { id: session, cursor: this.cursor } : { id: session }
-    const answer = await this.call<{
+    // Taken as the answer arrives, not when the await resumes: frames that
+    // came in the same read as the answer follow it, and must be checked
+    // against the answer's cursor, not moved past and then reset.
+    return this.call<{
       data: string
       continued: boolean
       cursor: RecordCursor
@@ -215,16 +226,17 @@ export class BytesClient {
       rows?: number
       resync?: string
       replies?: string
-    }>('terminal:attach', params)
-    if (!answer.continued) {
-      this.enqueue(() => {
-        this.term.reset()
-        if (answer.cols && answer.rows) this.term.resize(answer.cols, answer.rows)
-      })
-      this.enqueueWrite(answer.data)
-    }
-    this.cursor = answer.cursor
-    return answer
+    }>('terminal:attach', params, (answer) => {
+      if (!answer.continued) {
+        this.enqueue(() => {
+          this.term.reset()
+          if (answer.cols && answer.rows) this.term.resize(answer.cols, answer.rows)
+        })
+        this.enqueueWrite(answer.data)
+      }
+      this.cursor = answer.cursor
+      this.throughVornd = answer.replies === 'vornd'
+    })
   }
 
   /** Everything the terminal shows, scrollback included, once all written is parsed. */
@@ -275,7 +287,10 @@ export class BytesClient {
       const p = this.pending.get(msg.id)
       this.pending.delete(msg.id)
       if (msg.error) p?.reject(new Error(msg.error.message))
-      else p?.resolve(msg.result)
+      else {
+        p?.answered?.(msg.result)
+        p?.resolve(msg.result)
+      }
       return
     }
     const params = msg.params ?? {}
@@ -286,6 +301,12 @@ export class BytesClient {
       this.enqueue(() => this.term.resize(cols, rows))
     } else if (msg.method === 'terminal:resync') {
       this.resyncs.push(String(params.reason))
+      // The server says vornd holds the session now: an attach the server
+      // answered itself gets nothing more, so attach again, as the renderer
+      // does. One vornd already answered just carries on.
+      if (params.reason === 'vornd' && !this.throughVornd) {
+        void this.attach(this.session, true).catch(() => {})
+      }
     } else if (msg.method === 'terminal:exit') {
       this.exits.push(Number(params.exitCode))
     }
