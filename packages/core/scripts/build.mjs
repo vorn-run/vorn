@@ -2,7 +2,8 @@
 // Builds the crate and copies the cdylib to ./vorn_core.node, the one name the
 // server and electron-builder look for on every platform. Then builds vornd and
 // vorn-sessiond and copies them to ./vornd and ./vorn-sessiond (with .exe on
-// Windows), where the app looks for them.
+// Windows), where the app looks for them. On Windows it also fetches the
+// ConPTY vorn-sessiond ships with to beside it (scripts/fetch-conpty.mjs).
 //
 //   --debug        unoptimized build
 //   --no-ghostty   skip libghostty-vt, for a machine without Zig 0.15.2
@@ -10,6 +11,7 @@ import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { fetchConpty } from './fetch-conpty.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const args = new Set(process.argv.slice(2))
@@ -63,3 +65,13 @@ if (profile === 'release') daemonArgs.push('--release')
 if (args.has('--no-ghostty')) daemonArgs.push('--no-default-features')
 cargo(daemonArgs)
 for (const daemon of ['vornd', 'vorn-sessiond']) copyOut(daemon + exe, daemon + exe)
+
+// vorn-sessiond hosts Windows sessions in the ConPTY shipped beside it.
+if (process.platform === 'win32') {
+  try {
+    await fetchConpty()
+  } catch (e) {
+    console.error(`could not fetch ConPTY: ${e.message}`)
+    process.exit(1)
+  }
+}

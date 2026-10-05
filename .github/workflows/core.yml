@@ -33,6 +33,9 @@ on:
       - 'packages/server/src/vornd-sessions.ts'
       - 'tests/vornd-app-channel.test.ts'
       - 'tests/vornd-app-sessions.test.ts'
+      - 'tests/vornd-app-platforms.test.ts'
+      - 'tests/helpers/vornd-sessions.ts'
+      - 'THIRD_PARTY_NOTICES.md'
       - 'electron-builder.yml'
       - 'package.json'
       - 'yarn.lock'
@@ -114,7 +117,7 @@ jobs:
       # link on every platform. The adapter crate holds no tests of its own.
       - name: Rust tests
         working-directory: packages/core
-        run: cargo test --release --locked -p vorn-screen -p vorn-analysis -p vorn-pipeline -p vorn-term-mirror -p vorn-recovery -p vorn-engine -p vorn-grid -p vorn-grid-client
+        run: cargo test --release --locked -p vorn-screen -p vorn-analysis -p vorn-pipeline -p vorn-term-mirror -p vorn-recovery -p vorn-engine -p vorn-grid -p vorn-grid-client -p vorn-size
 
       # The git crate links nothing from napi, so it runs everywhere, and its
       # parity tests compare against the git each runner has.
@@ -122,12 +125,19 @@ jobs:
         working-directory: packages/core
         run: cargo test --release --locked -p vorn-git
 
-      # The holder tests run the real vorn-sessiond, which cargo only builds
-      # for its own package's tests.
+      # The holder and recovery tests run the real vorn-sessiond and the
+      # recovery harness's output program, which cargo only builds for their
+      # own packages' tests. On Windows sessiond hosts its sessions in the
+      # ConPTY the app ships, so the tests install it beside sessiond too.
       - name: vornd tests
         working-directory: packages/core
+        shell: bash
         run: |
-          cargo build --release --locked -p vorn-sessiond
+          if [ "$RUNNER_OS" = Windows ]; then
+            node scripts/fetch-conpty.mjs
+            export VORN_CONPTY_DIR="$(cygpath -w "$PWD")"
+          fi
+          cargo build --release --locked -p vorn-sessiond -p vorn-recovery --bins
           cargo test --release --locked -p vornd
 
       # The RPC test files again, with every client going through vornd. Linux
@@ -155,6 +165,14 @@ jobs:
       # parse through libghostty-vt.
       - name: Native call
         run: yarn vitest run tests/native-core.test.ts tests/js-reference.test.ts tests/core-pipeline.test.ts tests/git-native-parity.test.ts
+
+      # The server driving its sessions through the real vornd and session
+      # holder, on each platform: a named pipe and ConPTY on Windows.
+      - name: Sessions through vornd
+        shell: bash
+        run: |
+          export VORN_CONFORMANCE_VORND="$(pwd -W 2>/dev/null || pwd)/packages/core/vornd$([ "$RUNNER_OS" = Windows ] && echo .exe)"
+          yarn vitest run tests/vornd-app-platforms.test.ts
 
       # The screen model's memory ceiling and release. One platform is enough
       # for a ceiling.
@@ -214,3 +232,13 @@ jobs:
           fi
           echo "found $sessiond"
           "$sessiond" --version
+          if [ "$RUNNER_OS" = Windows ]; then
+            for name in conpty.dll x64/OpenConsole.exe; do
+              file=$(find dist -ipath "*/resources/vornd/$name" -type f -print -quit)
+              if [ -z "$file" ]; then
+                echo "ERROR: $name is not beside vorn-sessiond in the packaged resources"
+                exit 1
+              fi
+              echo "found $file"
+            done
+          fi

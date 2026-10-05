@@ -221,6 +221,11 @@ fn a_relaunched_vornd_finds_the_same_sessiond() {
     assert_eq!(first["compatible"], true);
     let installed = launch::installed_path(home.path(), &sessiond_version());
     assert!(installed.exists(), "installed as {}", installed.display());
+    assert_eq!(
+        installed.parent(),
+        Some(launch::installed_dir(home.path(), &sessiond_version()).as_path()),
+        "each version in a directory of its own"
+    );
     v.stop();
     assert!(launch::alive(pid(&first)), "sessiond outlives vornd");
 
@@ -388,5 +393,8 @@ fn the_session_report_is_served() {
         std::thread::sleep(Duration::from_millis(50));
     };
     assert_eq!(report["sessions"], serde_json::json!([]));
+    let with_digests = v.get("/vornd/sessions?digest=1");
+    assert_eq!(with_digests["connected"], true, "{with_digests}");
+    assert_eq!(with_digests["sessions"], serde_json::json!([]));
     v.stop();
 }

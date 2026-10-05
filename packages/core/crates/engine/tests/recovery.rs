@@ -636,3 +636,33 @@ fn an_exit_inside_the_newest_checkpoint_is_still_known() {
     assert_eq!(summary.brief.exited, Some((Some(3), None)));
     assert!(summary.screen.starts_with("bye"), "{:?}", summary.screen);
 }
+
+/// A summary carries the terminal's state digest: the same for a session
+/// fed the records in one batch or one at a time, different once the state
+/// moves on, and absent before there is a terminal.
+#[test]
+fn the_summary_carries_the_state_digest() {
+    let entries = eventful();
+    let start = Cursor::start(entries[0].hdr.epoch);
+    let cfg = config(1 << 40);
+    let mut whole = Session::fresh("a", Arc::clone(&cfg), SIZE, start).unwrap();
+    let mut piecemeal = Session::fresh("b", Arc::clone(&cfg), SIZE, start).unwrap();
+    let now = Instant::now();
+    whole.apply_all(&entries, now, &mut Vec::new());
+    for e in &entries {
+        piecemeal.apply_all(std::slice::from_ref(e), now, &mut Vec::new());
+    }
+    let digest = whole.summary().digest.expect("a terminal");
+    assert_eq!(Some(digest), piecemeal.summary().digest);
+    assert_eq!(digest, whole.emulator().unwrap().state_digest());
+
+    let blank = Session::fresh("c", cfg, SIZE, start).unwrap();
+    assert_ne!(blank.summary().digest, Some(digest));
+
+    // Waiting on sessiond for a checkpoint: no terminal yet.
+    let mut open = Open::spawned(start, Some(SIZE));
+    open.newest_cp = Some(start);
+    let waiting = Session::open("d", config(1 << 40), open, now, &mut Vec::new());
+    assert_eq!(waiting.brief().state, State::Attaching);
+    assert_eq!(waiting.summary().digest, None);
+}

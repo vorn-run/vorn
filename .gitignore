@@ -29,3 +29,6 @@ packages/core/vornd
 packages/core/vornd.exe
 packages/core/vorn-sessiond
 packages/core/vorn-sessiond.exe
+packages/core/conpty.dll
+packages/core/x64/
+packages/core/arm64/

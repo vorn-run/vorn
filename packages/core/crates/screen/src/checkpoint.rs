@@ -371,6 +371,16 @@ impl Emulator {
         let _ = writeln!(fp, "labels {:?} {:?}", self.title, self.cwd);
         fp
     }
+
+    /// A 64-bit FNV-1a hash of [`Emulator::fingerprint`]: two terminals in
+    /// the same state, by the measure a checkpoint's restore check uses,
+    /// hash the same. Stable across runs and platforms for one Ghostty
+    /// build, so a process can report it and a test compare it with a
+    /// terminal of its own without either side handing over what is on the
+    /// screen.
+    pub fn state_digest(&self) -> u64 {
+        fnv1a64(self.fingerprint().as_bytes())
+    }
 }
 
 impl Checkpoint {
@@ -476,6 +486,12 @@ impl<'a> Reader<'a> {
         let n = self.u32()? as usize;
         self.take(n)
     }
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    })
 }
 
 fn digest(fp: &str) -> (u32, u32) {
@@ -1605,4 +1621,41 @@ fn cursor_shape_seq(em: &Emulator, out: &mut Vec<u8>) -> std::result::Result<(),
         _ => {}
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fnv1a64_matches_the_reference_values() {
+        assert_eq!(fnv1a64(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a64(b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a64(b"foobar"), 0x8594_4171_f739_67e8);
+    }
+
+    /// The digest follows the state, not the bytes that made it: the same
+    /// screen from output cut differently hashes the same, and any change
+    /// to it does not.
+    #[test]
+    fn the_state_digest_follows_the_state() {
+        let mut fx = Vec::new();
+        let mut a = Emulator::new(40, 6).unwrap();
+        a.feed(b"\x1b[1;31mred\x1b[0m line\r\nnext \xc3\xa9", &mut fx);
+        let mut b = Emulator::new(40, 6).unwrap();
+        for chunk in [
+            &b"\x1b[1;3"[..],
+            b"1mred\x1b[0m li",
+            b"ne\r\nnext \xc3",
+            b"\xa9",
+        ] {
+            b.feed(chunk, &mut fx);
+        }
+        assert_eq!(a.state_digest(), b.state_digest());
+        assert_eq!(a.state_digest(), a.state_digest(), "stable");
+        b.feed(b"\x1b[2;3H", &mut fx);
+        assert_ne!(a.state_digest(), b.state_digest(), "the cursor moved");
+        let blank = Emulator::new(40, 6).unwrap();
+        assert_ne!(a.state_digest(), blank.state_digest());
+    }
 }

@@ -430,6 +430,36 @@ impl Engine {
         })
     }
 
+    /// [`Engine::report`] with each running session's state digest
+    /// ([`Summary::digest`]) as `"digest"`, 16 hex digits: what `?digest=1`
+    /// on [`SESSIONS_PATH`] answers, for tests that compare a recovered
+    /// terminal with one that never died. The digest is a hash of the
+    /// terminal's whole state, so it says whether two terminals agree and
+    /// nothing of what either shows. It walks every session's cells on the
+    /// workers, off the runtime's threads, so it waits on them as
+    /// [`Engine::sessions`] does.
+    pub async fn report_with_digests(&self) -> Value {
+        let digests: HashMap<String, u64> = self
+            .sessions()
+            .await
+            .into_iter()
+            .filter_map(|s| Some((s.brief.session, s.digest?)))
+            .collect();
+        let mut report = self.report();
+        if let Some(Value::Array(sessions)) = report.get_mut("sessions") {
+            for s in sessions {
+                let digest = s
+                    .get("session")
+                    .and_then(Value::as_str)
+                    .and_then(|id| digests.get(id));
+                if let (Some(d), Value::Object(fields)) = (digest, s) {
+                    fields.insert("digest".into(), Value::String(format!("{d:016x}")));
+                }
+            }
+        }
+        report
+    }
+
     /// Cuts a last checkpoint for every session and hands them to sessiond,
     /// as a clean stop does, waiting at most a few seconds.
     pub async fn flush(&self) {

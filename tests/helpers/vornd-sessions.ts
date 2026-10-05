@@ -30,13 +30,12 @@ const sessiondBinary =
       )
     : undefined)
 
-/** Whether this run can start vornd with a session holder: both binaries, on a Unix. */
-export const vorndSessionsAvailable =
-  process.platform !== 'win32' &&
-  !!vorndBinary &&
-  existsSync(vorndBinary) &&
-  !!sessiondBinary &&
-  existsSync(sessiondBinary)
+/** Whether this run can start vornd with a session holder: both binaries. */
+export const vorndBinariesAvailable =
+  !!vorndBinary && existsSync(vorndBinary) && !!sessiondBinary && existsSync(sessiondBinary)
+
+/** The same on a Unix, for tests whose programs are POSIX shell scripts. */
+export const vorndSessionsAvailable = process.platform !== 'win32' && vorndBinariesAvailable
 
 const PATIENCE_MS = 15_000
 
