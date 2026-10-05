@@ -1,7 +1,9 @@
 // Runs the RPC test files through vornd: the same assertions, with every client
 // connecting to vornd instead of the server. `yarn test` runs them direct.
 //
-// Uses VORN_CONFORMANCE_VORND when it names a binary; otherwise builds vornd.
+// Uses VORN_CONFORMANCE_VORND when it names a binary; otherwise builds vornd and
+// the session holder beside it (VORN_CONFORMANCE_SESSIOND, or vorn-sessiond in
+// the same directory as vornd).
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
@@ -9,11 +11,17 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-/** Every test file that talks to a started server over a real WebSocket. */
+/**
+ * Every test file that talks to a started server over a real WebSocket, and
+ * the terminal and attach files for sessions vornd holds itself, which also
+ * need the session holder.
+ */
 const FILES = [
   'tests/server-integration.test.ts',
   'tests/task-write-methods.test.ts',
-  'tests/workflow-methods.test.ts'
+  'tests/workflow-methods.test.ts',
+  'tests/vornd-terminal.test.ts',
+  'tests/vornd-attach.test.ts'
 ]
 
 function run(command, args, env = process.env) {
@@ -34,6 +42,8 @@ if (!binary) {
     '--locked',
     '-p',
     'vornd',
+    '-p',
+    'vorn-sessiond',
     '--manifest-path',
     'packages/core/Cargo.toml'
   ])

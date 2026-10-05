@@ -668,9 +668,28 @@ export interface RequestMethods {
    * is in flight and `seq` is zero.
    */
   'terminal:attach': {
-    params: { id: string }
+    /**
+     * `cursor`, where the client's screen ends, asks to continue from there
+     * without a snapshot. Only vornd reads it, for the sessions it holds; it
+     * continues when every record from the cursor is still retained.
+     */
+    params: { id: string; cursor?: RecordCursor }
     /** `cursor` is where `data` ends in the session's record log; absent with no live process. */
-    result: { data: string; seq: number; live: boolean; cursor?: RecordCursor }
+    result: {
+      data: string
+      seq: number
+      live: boolean
+      cursor?: RecordCursor
+      /** vornd continued from the cursor asked with: keep the screen, apply what follows. */
+      continued?: boolean
+      /** The session's size, which `data` is drawn for. */
+      cols?: number
+      rows?: number
+      /** Why the cursor asked with could not be continued from: `notRetained`, `wrongEpoch`, `gap`. */
+      resync?: string
+      /** vornd answers this session's queries, so the client must not. */
+      replies?: 'vornd'
+    }
   }
   'shell:create': { params: string | undefined; result: TerminalSession }
   'config:load': { params: void; result: AppConfig }
@@ -1366,7 +1385,13 @@ export interface ServerNotifications {
    * numbered above what it was handed.
    */
   /** Bytes for a socket that asked with `subscribe:set`, text for every other. */
-  'terminal:data': { id: string; data: string | Uint8Array; seq: number }
+  'terminal:data': {
+    id: string
+    data: string | Uint8Array
+    seq: number
+    /** From a version 2 frame: the client's cursor once it has applied this chunk. */
+    cursor?: RecordCursor
+  }
   /**
    * A terminal rang. Broadcast rather than read off `terminal:data`, so a
    * session nobody has open still reaches whoever is meant to be interrupted.
@@ -1376,7 +1401,12 @@ export interface ServerNotifications {
    * Output for this terminal was withheld while the client was too far behind.
    * Its screen is now stale: re-attach to get the present one.
    */
-  'terminal:resync': { id: string }
+  'terminal:resync': { id: string; reason?: string }
+  /**
+   * A session vornd holds was resized. Sent between two version 2 frames at its
+   * place in the record log: output after it was written for the new size.
+   */
+  'terminal:resized': { id: string; cols: number; rows: number; rseq: number }
   'terminal:exit': { id: string; exitCode: number }
   'session:created': TerminalSession
   'session:updated': TerminalSession

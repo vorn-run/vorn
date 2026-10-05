@@ -43,6 +43,17 @@ enum Job {
     Close {
         id: String,
     },
+    /// A VT snapshot for a bytes client, answered with `Out::Snapshot`.
+    Snapshot {
+        id: String,
+        token: u64,
+    },
+    /// The analyzer's lines, answered with `Out::Output`.
+    Output {
+        id: String,
+        token: u64,
+        lines: u32,
+    },
     Inspect {
         reply: SyncSender<Vec<Summary>>,
     },
@@ -163,6 +174,39 @@ impl Pool {
                 input,
             },
         );
+    }
+
+    /// Asks session `id` for a VT snapshot, answered through the sink with
+    /// `Out::Snapshot(token, ..)` in order with the session's other outputs.
+    /// False when no such session is open, and nothing will answer.
+    pub fn snapshot(&self, id: &str, token: u64) -> bool {
+        self.ask(
+            id,
+            Job::Snapshot {
+                id: id.to_owned(),
+                token,
+            },
+        )
+    }
+
+    /// Asks session `id` for the analyzer's last `lines` lines, answered
+    /// with `Out::Output(token, ..)`. False when no such session is open.
+    pub fn output(&self, id: &str, token: u64, lines: u32) -> bool {
+        self.ask(
+            id,
+            Job::Output {
+                id: id.to_owned(),
+                token,
+                lines,
+            },
+        )
+    }
+
+    fn ask(&self, id: &str, job: Job) -> bool {
+        let Some(&w) = self.shared.placed().get(id) else {
+            return false;
+        };
+        self.workers[w].0.send(job).is_ok()
     }
 
     /// Drops a session without a last checkpoint.
@@ -290,6 +334,34 @@ impl Worker {
                 Some(Job::Close { id }) => {
                     self.sessions.remove(&id);
                 }
+                Some(Job::Snapshot { id, token }) => match self.sessions.remove(&id) {
+                    Some(mut s) => {
+                        if self
+                            .guarded(&id, |out| s.snapshot(token, now, out))
+                            .is_some()
+                        {
+                            self.sessions.insert(id.clone(), s);
+                            self.settle(&id);
+                        } else {
+                            self.lost(&id);
+                        }
+                    }
+                    // Closed since it was asked: the answer is still owed.
+                    None => (self.sink)(&id, Out::Snapshot(token, None)),
+                },
+                Some(Job::Output { id, token, lines }) => match self.sessions.remove(&id) {
+                    Some(mut s) => {
+                        if self
+                            .guarded(&id, |out| s.output(token, lines, out))
+                            .is_some()
+                        {
+                            self.sessions.insert(id.clone(), s);
+                        } else {
+                            self.lost(&id);
+                        }
+                    }
+                    None => (self.sink)(&id, Out::Output(token, None)),
+                },
                 Some(Job::Inspect { reply }) => {
                     let _ = reply.send(self.inspect());
                 }
