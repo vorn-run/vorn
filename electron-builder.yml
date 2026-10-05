@@ -92,6 +92,15 @@ extraResources:
     to: 'vornd/vorn-sessiond'
   - from: 'packages/core/vorn-sessiond.exe'
     to: 'vornd/vorn-sessiond.exe'
+  # On Windows, the ConPTY vorn-sessiond hosts its sessions in: conpty.dll
+  # beside it and OpenConsole.exe in a folder for the architecture, which vornd
+  # installs with it. Fetched by `yarn build:core` on Windows only.
+  - from: 'packages/core/conpty.dll'
+    to: 'vornd/conpty.dll'
+  - from: 'packages/core/x64/OpenConsole.exe'
+    to: 'vornd/x64/OpenConsole.exe'
+  - from: 'packages/core/arm64/OpenConsole.exe'
+    to: 'vornd/arm64/OpenConsole.exe'
   # Data, not a native module, so extraResources rather than asarUnpack.
   # idb_companion serves no reflection, so the client cannot discover the
   # schema at runtime — the proto has to ship.

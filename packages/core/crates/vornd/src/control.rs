@@ -91,9 +91,11 @@ fn announcement(home: &Path) -> PathBuf {
 
 /// Names `endpoint` in `run/vornd-app`, written whole and renamed into
 /// place, so a reader finds this vornd's endpoint or the last one's, never
-/// half of one.
+/// half of one. On Windows the endpoint is a pipe, so nothing else has
+/// made `run/` on a fresh home.
 pub fn announce(home: &Path, endpoint: &str) -> std::io::Result<()> {
     let file = announcement(home);
+    std::fs::create_dir_all(home.join("run"))?;
     let body = json!({
         "pid": std::process::id(),
         "endpoint": endpoint,
@@ -101,7 +103,18 @@ pub fn announce(home: &Path, endpoint: &str) -> std::io::Result<()> {
     });
     let tmp = file.with_extension(format!("{}.tmp", std::process::id()));
     std::fs::write(&tmp, body.to_string())?;
-    std::fs::rename(&tmp, &file)
+    // Windows refuses to replace a file for a moment while something has it
+    // open, a reader or a scanner.
+    let mut retries = if cfg!(windows) { 20 } else { 0 };
+    loop {
+        match std::fs::rename(&tmp, &file) {
+            Err(e) if retries > 0 && e.kind() == std::io::ErrorKind::PermissionDenied => {
+                retries -= 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            r => return r,
+        }
+    }
 }
 
 /// Takes the announcement back, if it is still this vornd's.
@@ -476,8 +489,8 @@ mod tests {
 
     #[test]
     fn the_announcement_names_the_endpoint_and_is_withdrawn_only_by_its_vornd() {
+        // A fresh home: nothing has made run/ yet.
         let home = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(home.path().join("run")).unwrap();
         announce(home.path(), "/x/app.sock").unwrap();
         let text = std::fs::read_to_string(home.path().join("run").join(ANNOUNCEMENT)).unwrap();
         let v: Value = serde_json::from_str(&text).unwrap();

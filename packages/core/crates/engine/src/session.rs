@@ -344,6 +344,10 @@ pub struct Summary {
     pub screen: String,
     /// The analyzer's last completed lines.
     pub lines: Vec<String>,
+    /// The terminal's [`Emulator::state_digest`], once there is a terminal:
+    /// what a test compares with a terminal that never died. Hashing the
+    /// whole state costs a walk of every cell, so [`Brief`] leaves it out.
+    pub digest: Option<u64>,
 }
 
 /// A restore base being asked for.
@@ -739,12 +743,14 @@ impl Session {
             cwd: String::new(),
             screen: String::new(),
             lines: Vec::new(),
+            digest: None,
         };
         if let Phase::Running(r) = &self.phase {
             s.title = r.term.em.title().to_owned();
             s.cwd = r.term.em.cwd().to_owned();
             s.screen = plain(&r.term.em);
             s.lines = r.term.lines(20);
+            s.digest = Some(r.term.em.state_digest());
         }
         s
     }

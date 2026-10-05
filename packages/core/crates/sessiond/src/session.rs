@@ -165,7 +165,12 @@ impl Session {
             .split_first()
             .ok_or_else(|| std::io::Error::other("empty argv"))?;
         let mut cmd = Command::new(program);
-        cmd.args(args).current_dir(&spec.cwd);
+        if is_cmd(program) {
+            verbatim(&mut cmd, args);
+        } else {
+            cmd.args(args);
+        }
+        cmd.current_dir(&spec.cwd);
         if !spec.env.is_empty() {
             cmd.env_clear().envs(spec.env.iter().cloned());
         }
@@ -526,6 +531,48 @@ fn detach(cmd: &mut Command) {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
+}
+
+/// Whether `program` is cmd.exe, which reads its own command line rather
+/// than by the rules `Command` quotes for. Node's rule for the same choice.
+fn is_cmd(program: &str) -> bool {
+    let name = program.rsplit(['\\', '/']).next().unwrap_or(program);
+    name.eq_ignore_ascii_case("cmd") || name.eq_ignore_ascii_case("cmd.exe")
+}
+
+/// Hands cmd.exe its arguments as they are, joined by spaces, as Node does,
+/// so `/s /c "<command line>"` reaches it unescaped.
+#[cfg(windows)]
+fn verbatim(cmd: &mut Command, args: &[String]) {
+    use std::os::windows::process::CommandExt;
+    for arg in args {
+        cmd.raw_arg(arg);
+    }
+}
+
+#[cfg(not(windows))]
+fn verbatim(cmd: &mut Command, args: &[String]) {
+    cmd.args(args);
+}
+
+#[cfg(test)]
+mod cmd_tests {
+    use super::is_cmd;
+
+    #[test]
+    fn knows_cmd_by_its_name_alone() {
+        for p in [
+            "cmd",
+            "CMD.EXE",
+            r"C:\Windows\System32\cmd.exe",
+            "C:/Windows/cmd.exe",
+        ] {
+            assert!(is_cmd(p), "{p}");
+        }
+        for p in ["cmd2.exe", r"C:\cmd\node.exe", "pwsh.exe", "sh"] {
+            assert!(!is_cmd(p), "{p}");
+        }
     }
 }
 

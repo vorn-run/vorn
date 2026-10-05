@@ -539,6 +539,7 @@ impl Worker {
             cwd: String::new(),
             screen: String::new(),
             lines: Vec::new(),
+            digest: None,
         });
         {
             let mut placed = self.shared.placed();

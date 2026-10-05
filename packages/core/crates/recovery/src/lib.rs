@@ -11,6 +11,8 @@
 //! - [`driver`]: kills a target at chosen, random or timed records, recovers
 //!   it, and runs the differential test in one call.
 //! - [`child`]: the same with a real child process killed by the OS.
+//! - [`emit`]: seeded output for a real terminal, printed by the
+//!   `recovery-emit` binary, for tests that run it in sessiond.
 //!
 //! The harness models sessiond itself (the log, the checkpoint store), so
 //! what it tests is the engine's side of recovery.
@@ -34,6 +36,7 @@
 pub mod child;
 pub mod compare;
 pub mod driver;
+pub mod emit;
 pub mod engine;
 mod error;
 pub mod gen;

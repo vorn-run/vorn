@@ -14,6 +14,13 @@ serde = { version = "1", features = ["derive"] }
 vorn-screen = { path = "../screen" }
 vorn-term-proto = { path = "../term-proto", features = ["serde"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+
 [[bin]]
 name = "recovery-subject"
 path = "src/bin/recovery-subject.rs"
+
+[[bin]]
+name = "recovery-emit"
+path = "src/bin/recovery-emit.rs"

@@ -1,9 +1,12 @@
 //! Installing and starting sessiond so it outlives the app (RC §6 flow C,
 //! §10), and finding the instances already running.
 //!
-//! - Binaries are copied out of the app bundle to
-//!   `$VORN_HOME/bin/vorn-sessiond-<version>`, so replacing the bundle never
-//!   touches a running binary.
+//! - Each version is copied out of the app bundle into a directory of its
+//!   own, `$VORN_HOME/bin/sessiond-<version>/`, so replacing the bundle never
+//!   touches a running binary. The files that must sit beside the binary go
+//!   with it ([`COMPANIONS`]): on Windows, the ConPTY that sessiond loads in
+//!   place of the system's (`conpty.dll`) and the console host it starts
+//!   (`<arch>/OpenConsole.exe`).
 //! - On Linux sessiond gets its own systemd user scope: desktop launchers put
 //!   apps in an `app-*.scope`, and stopping that scope kills every process in
 //!   it. On macOS it starts in its own session. On Windows it breaks away
@@ -107,38 +110,121 @@ pub fn update_ends_sessions(running: &[Instance], vornd_min: u16) -> bool {
     running.iter().any(|i| i.proto < vornd_min)
 }
 
-/// The installed name for a version.
-pub fn installed_path(home: &Path, version: &str) -> PathBuf {
-    let name = format!("vorn-sessiond-{version}{}", std::env::consts::EXE_SUFFIX);
-    home.join("bin").join(name)
+/// Files that go with the bundled binary when they sit beside it, as paths
+/// relative to its directory with `/` between components. On Windows these
+/// are the ConPTY sideload: the binary's directory is where `conpty.dll` is
+/// found first, and that DLL starts the console host from the subdirectory
+/// named for the machine's architecture. A file the bundle does not have is
+/// skipped, so other platforms install the binary alone.
+pub const COMPANIONS: &[&str] = &["conpty.dll", "x64/OpenConsole.exe", "arm64/OpenConsole.exe"];
+
+/// The directory a version is installed in. Named differently from the
+/// single files older builds installed (`vorn-sessiond-<version>`), so the
+/// two layouts never collide.
+pub fn installed_dir(home: &Path, version: &str) -> PathBuf {
+    home.join("bin").join(format!("sessiond-{version}"))
 }
 
-/// Copy the bundled binary to its versioned name, unless that version is
-/// already installed. The copy is renamed into place, so a reader never sees
-/// half a binary, and an installed version is never overwritten while it may
-/// be running.
+/// The installed binary for a version.
+pub fn installed_path(home: &Path, version: &str) -> PathBuf {
+    installed_dir(home, version).join(exe_name())
+}
+
+fn exe_name() -> String {
+    format!("vorn-sessiond{}", std::env::consts::EXE_SUFFIX)
+}
+
+/// Install the bundled binary and its [`COMPANIONS`] under their version,
+/// unless that version is already installed, and answer the installed
+/// binary. The directory is built under a temporary name and renamed into
+/// place, so a reader never sees half an install, and an installed version
+/// is never overwritten while it may be running. When another launcher
+/// installs the same version first, its install is used.
 pub fn install(bundled: &Path, home: &Path, version: &str) -> io::Result<PathBuf> {
     let dest = installed_path(home, version);
     if dest.exists() {
         return Ok(dest);
     }
-    fs::create_dir_all(home.join("bin"))?;
-    let tmp = dest.with_extension(format!("tmp-{}", std::process::id()));
-    fs::copy(bundled, &tmp)?;
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin)?;
+    let tmp = bin.join(format!(".sessiond-{version}.{}.tmp", unique()));
+    let built = stage(bundled, &tmp, &tmp.join(exe_name()));
+    let done = built.and_then(|()| rename_dir(&tmp, &installed_dir(home, version), &dest));
+    match done {
+        Ok(()) => Ok(dest),
+        Err(e) => {
+            let _ = fs::remove_dir_all(&tmp);
+            // Another launcher installed it first: renaming onto its
+            // directory fails, and its binary is there.
+            if dest.exists() {
+                Ok(dest)
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+/// Renames the staged directory `from` to `to`, unless `done` shows another
+/// launcher got there first. On Windows a scanner still reading a file just
+/// copied into `from` makes the rename fail for a moment, so it is tried
+/// again for about a second there.
+fn rename_dir(from: &Path, to: &Path, done: &Path) -> io::Result<()> {
+    let mut retries = if cfg!(windows) { 20 } else { 0 };
+    loop {
+        match fs::rename(from, to) {
+            Err(e)
+                if retries > 0 && e.kind() == io::ErrorKind::PermissionDenied && !done.exists() =>
+            {
+                retries -= 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            r => return r,
+        }
+    }
+}
+
+/// Fill `dir` with the bundled binary, as `exe`, and the companions found
+/// beside it.
+fn stage(bundled: &Path, dir: &Path, exe: &Path) -> io::Result<()> {
+    fs::create_dir(dir)?;
+    fs::copy(bundled, exe)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755))?;
+        fs::set_permissions(exe, fs::Permissions::from_mode(0o755))?;
     }
-    match fs::rename(&tmp, &dest) {
-        // Another launcher installed it first.
-        Err(_) if dest.exists() => {
-            let _ = fs::remove_file(&tmp);
-            Ok(dest)
+    let Some(from) = bundled.parent() else {
+        return Ok(());
+    };
+    for rel in COMPANIONS {
+        let src = rel.split('/').fold(from.to_path_buf(), |p, c| p.join(c));
+        if !src.is_file() {
+            continue;
         }
-        Err(e) => Err(e),
-        Ok(()) => Ok(dest),
+        let to = rel.split('/').fold(dir.to_path_buf(), |p, c| p.join(c));
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(&src, &to)?;
     }
+    Ok(())
+}
+
+/// A name no other install or scope shares, even two at once from one
+/// process.
+fn unique() -> String {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    format!(
+        "{}-{}-{nanos:x}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 /// Start `binary` detached from the caller and wait for it to announce
@@ -233,17 +319,7 @@ fn scope(runner: impl AsRef<std::ffi::OsStr>, binary: &Path, home: &Path) -> Com
 /// A scope name no other start shares, even two from one process.
 #[cfg(target_os = "linux")]
 fn unit_name() -> String {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    static NEXT: AtomicU32 = AtomicU32::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    format!(
-        "vorn-sessiond-{}-{}-{nanos:x}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    )
+    format!("vorn-sessiond-{}", unique())
 }
 
 #[cfg(target_os = "linux")]
@@ -446,6 +522,11 @@ mod tests {
         let src = home.path().join("bundled");
         fs::write(&src, b"v1").unwrap();
         let a = install(&src, home.path(), "0.8.0").unwrap();
+        assert_eq!(a, installed_path(home.path(), "0.8.0"));
+        assert_eq!(
+            a.parent(),
+            Some(installed_dir(home.path(), "0.8.0").as_path())
+        );
         assert_eq!(fs::read(&a).unwrap(), b"v1");
         // The bundle changes; the installed version stays as it was.
         fs::write(&src, b"v2").unwrap();
@@ -462,5 +543,87 @@ mod tests {
                 0o755
             );
         }
+        // No temporary directory is left behind.
+        let mut left: Vec<String> = fs::read_dir(home.path().join("bin"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["sessiond-0.8.0", "sessiond-0.8.1"]);
+    }
+
+    /// An older build's single-file install of the same version is a
+    /// different path, so it neither stops the install nor is touched.
+    #[test]
+    fn the_old_single_file_layout_does_not_collide() {
+        let home = tempfile::tempdir().unwrap();
+        let old = home.path().join("bin").join(format!(
+            "vorn-sessiond-0.8.0{}",
+            std::env::consts::EXE_SUFFIX
+        ));
+        fs::create_dir_all(old.parent().unwrap()).unwrap();
+        fs::write(&old, b"old").unwrap();
+        let src = home.path().join("bundled");
+        fs::write(&src, b"new").unwrap();
+        let a = install(&src, home.path(), "0.8.0").unwrap();
+        assert_ne!(a, old);
+        assert_eq!(fs::read(&a).unwrap(), b"new");
+        assert_eq!(fs::read(&old).unwrap(), b"old");
+    }
+
+    /// The files beside the bundled binary go with it, in the same layout;
+    /// those the bundle lacks are skipped.
+    #[test]
+    fn install_takes_the_companions_present() {
+        let home = tempfile::tempdir().unwrap();
+        let bundle = home.path().join("bundle");
+        fs::create_dir_all(bundle.join("x64")).unwrap();
+        let src = bundle.join("vorn-sessiond");
+        fs::write(&src, b"exe").unwrap();
+        fs::write(bundle.join("conpty.dll"), b"dll").unwrap();
+        fs::write(bundle.join("x64").join("OpenConsole.exe"), b"host").unwrap();
+        // Not a companion: stays behind.
+        fs::write(bundle.join("other.txt"), b"x").unwrap();
+        let exe = install(&src, home.path(), "1.0.0").unwrap();
+        let dir = exe.parent().unwrap();
+        assert_eq!(fs::read(dir.join("conpty.dll")).unwrap(), b"dll");
+        assert_eq!(
+            fs::read(dir.join("x64").join("OpenConsole.exe")).unwrap(),
+            b"host"
+        );
+        assert!(!dir.join("arm64").exists(), "missing ones are skipped");
+        assert!(!dir.join("other.txt").exists());
+
+        // A binary with nothing beside it installs alone.
+        let lone = home.path().join("lone");
+        fs::create_dir_all(&lone).unwrap();
+        fs::write(lone.join("vorn-sessiond"), b"exe").unwrap();
+        let exe = install(&lone.join("vorn-sessiond"), home.path(), "1.0.1").unwrap();
+        let names: Vec<_> = fs::read_dir(exe.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 1, "{names:?}");
+    }
+
+    /// Two launchers installing one version at once both end up with the
+    /// same complete install.
+    #[test]
+    fn concurrent_installs_agree() {
+        let home = tempfile::tempdir().unwrap();
+        let src = home.path().join("bundled");
+        fs::write(&src, vec![7u8; 1 << 20]).unwrap();
+        fs::write(home.path().join("conpty.dll"), b"dll").unwrap();
+        let got: Vec<PathBuf> = std::thread::scope(|s| {
+            let hs: Vec<_> = (0..8)
+                .map(|_| s.spawn(|| install(&src, home.path(), "2.0.0").unwrap()))
+                .collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        assert!(got.iter().all(|p| *p == got[0]));
+        assert_eq!(fs::read(&got[0]).unwrap().len(), 1 << 20);
+        assert!(got[0].parent().unwrap().join("conpty.dll").exists());
+        let entries = fs::read_dir(home.path().join("bin")).unwrap().count();
+        assert_eq!(entries, 1, "temporary directories are cleaned up");
     }
 }

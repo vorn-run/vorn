@@ -198,7 +198,11 @@ pub async fn serve(
 async fn handle(daemon: Arc<Daemon>, req: Request<Incoming>) -> Result<Response<Body>, Infallible> {
     #[cfg(feature = "engine")]
     if req.uri().path() == crate::engine::SESSIONS_PATH && req.method() == Method::GET {
-        return Ok(sessions(&daemon).await);
+        let digests = req
+            .uri()
+            .query()
+            .is_some_and(|q| q.split('&').any(|kv| kv == "digest=1"));
+        return Ok(sessions(&daemon, digests).await);
     }
     if req.uri().path() == HEALTH_PATH && req.method() == Method::GET {
         return Ok(health(&daemon).await);
@@ -258,13 +262,21 @@ async fn health(daemon: &Daemon) -> Response<Body> {
 }
 
 /// The session engine's report: where each session is and how it was
-/// recovered. 404 when vornd keeps no holder with an engine.
+/// recovered, and with `digests` (`?digest=1`) each running session's
+/// state digest. Never the screen, title or cwd; a digest is a hash of the
+/// whole state and gives none of them away. 404 when vornd keeps no holder
+/// with an engine.
 #[cfg(feature = "engine")]
-async fn sessions(daemon: &Daemon) -> Response<Body> {
+async fn sessions(daemon: &Daemon, digests: bool) -> Response<Body> {
     let Some(engine) = daemon.holder.as_ref().and_then(|h| h.engine()) else {
         return plain(StatusCode::NOT_FOUND, "no session engine");
     };
-    let mut res = Response::new(full(engine.report().to_string()));
+    let report = if digests {
+        engine.report_with_digests().await
+    } else {
+        engine.report()
+    };
+    let mut res = Response::new(full(report.to_string()));
     res.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),
