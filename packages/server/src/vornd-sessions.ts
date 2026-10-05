@@ -87,6 +87,9 @@ export const NOTICE_RECEIPT_MS = 24 * 60 * 60 * 1000
 /** How long an exit waits for the output before it, on a session being read. */
 const EXIT_WAIT_MS = 3_000
 
+/** How long a spawn waits for vornd's session holder before asking anyway. */
+export const HOLDER_WAIT_MS = 10_000
+
 /**
  * A session vornd holds, as this server's terminals use one.
  *
@@ -266,6 +269,8 @@ function claim(effectId: string, kind: string): boolean {
 export class VorndSessions extends EventEmitter {
   private channel: VorndChannel | null = null
   private connecting: Promise<boolean> | null = null
+  /** Whether vornd last said its session holder is connected. */
+  private holderUp = false
   private readonly ptys = new Map<string, VorndPty>()
 
   /** What starts vornd, and says whether it is coming. */
@@ -325,6 +330,7 @@ export class VorndSessions extends EventEmitter {
     channel.on('close', (why: string) => {
       if (this.channel !== channel) return
       this.channel = null
+      this.holderUp = false
       log.warn(`[vornd] the channel to vornd closed (${why}); its sessions carry on there`)
     })
     log.info({ endpoint }, '[vornd] connected to vornd')
@@ -342,6 +348,7 @@ export class VorndSessions extends EventEmitter {
       return
     }
     if (this.channel !== channel) return
+    this.holderTold(state.connected)
     try {
       pruneEffectReceipts('notify', Date.now() - NOTICE_RECEIPT_MS)
     } catch {
@@ -410,12 +417,38 @@ export class VorndSessions extends EventEmitter {
     return pty
   }
 
-  /** The channel, once a start or connect in flight is done; null when there is none. */
+  /**
+   * The channel, once a start or connect in flight is done and vornd's
+   * session holder is up; null when there is none. vornd answers before its
+   * holder connects, and a spawn asked of it then would fail.
+   */
   private async whenConnected(): Promise<VorndChannel | null> {
-    if (this.inUse()) return this.channel
-    await this.launcher?.ready()
-    await this.connecting
+    if (!this.inUse()) {
+      await this.launcher?.ready()
+      await this.connecting
+    }
+    if (!this.inUse()) return null
+    if (!this.holderUp) await this.holderWait(HOLDER_WAIT_MS)
     return this.inUse() ? this.channel : null
+  }
+
+  private holderTold(up: boolean): void {
+    this.holderUp = up
+    if (up) this.emit('holder')
+  }
+
+  /** Until vornd says its holder is up, or `ms` pass: then the spawn is asked anyway. */
+  private holderWait(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const done = (): void => {
+        clearTimeout(timer)
+        this.off('holder', done)
+        resolve()
+      }
+      const timer = setTimeout(done, ms)
+      timer.unref?.()
+      this.on('holder', done)
+    })
   }
 
   /**
@@ -510,6 +543,7 @@ export class VorndSessions extends EventEmitter {
         return
       case 'vornd:connected':
         // The holder came back: what it holds may have changed.
+        if (channel === this.channel) this.holderTold(true)
         void this.subscribe(channel)
         return
       case 'terminal:exit':

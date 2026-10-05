@@ -313,6 +313,20 @@ describe('the server with a stand-in vornd', () => {
     expect(exits).toEqual([])
   })
 
+  it('asks for a session once vornd’s holder is up, not before', async () => {
+    fake.state = { connected: false, sessions: [], ended: [], notices: [] }
+    await sessions.connect(fake.endpoint)
+    const pty = sessions.spawn('before-holder', { argv: ['sh'], cwd: '/', env: {} }, false)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(fake.made('vornd:spawn')).toHaveLength(0)
+
+    fake.state = { connected: true, sessions: [], ended: [], notices: [] }
+    fake.send('vornd:connected', {})
+    await until('the spawn to be answered', () => pty.pid !== 0)
+    expect(fake.made('vornd:spawn')).toHaveLength(1)
+    expect(pty.isEnded).toBe(false)
+  })
+
   it('holds a signal sent before the start is answered until vornd knows the session', async () => {
     await sessions.connect(fake.endpoint)
     const pty = sessions.spawn('closed-at-once', { argv: ['sh'], cwd: '/', env: {} }, false)

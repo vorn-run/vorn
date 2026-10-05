@@ -60,7 +60,9 @@ afterEach((ctx) => {
       // Same.
     }
   }
-  for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  // The session holder is detached and may still be writing as it goes.
+  for (const dir of dirs.splice(0))
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 })
 
 /** What a server is started with, and what it is handed for its replacement. */
@@ -85,7 +87,9 @@ function serverCommand(dataDir: string): {
       [BOOTSTRAP_ENV_VAR]: CREDENTIAL,
       VORN_BUILD_CHANNEL: 'packaged',
       VORN_APP_VERSION: '9.9.9',
-      NODE_ENV: 'test'
+      NODE_ENV: 'test',
+      // The servers log, for the transcript a failure prints.
+      VITEST: ''
     }
   }
 }
