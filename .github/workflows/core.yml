@@ -198,6 +198,7 @@ jobs:
       - name: Conformance through vornd, native server
         if: runner.os == 'Linux'
         env:
+          VORN_CONFORMANCE_VORND: packages/core/vornd
           VORND_NATIVE_SERVER: '1'
         run: yarn test:conformance
 
