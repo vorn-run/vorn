@@ -2605,6 +2605,7 @@ version = "0.0.0"
 dependencies = [
  "gix",
  "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -2746,6 +2747,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vorn-engine",
+ "vorn-git",
  "vorn-grid-client",
  "vorn-pipeline",
  "vorn-recovery",
@@ -2753,6 +2755,7 @@ dependencies = [
  "vorn-sessiond",
  "vorn-sessiond-wire",
  "vorn-size",
+ "vorn-store",
  "vorn-term-proto",
 ]
 

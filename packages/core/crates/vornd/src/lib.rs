@@ -1,9 +1,9 @@
 //! vornd: one endpoint in front of Vorn's Node server.
 //!
-//! This first version owns no behaviour of its own. It answers the WebSocket and
-//! HTTP endpoint clients already use and forwards everything to the Node server,
-//! so groups of calls can later move into vornd one at a time behind
-//! [`groups`] switches without clients noticing. It also has the parts every
+//! It answers the WebSocket and HTTP endpoint clients already use and forwards
+//! to the Node server everything it has not taken over, so groups of calls move
+//! into vornd one at a time behind [`groups`] switches without clients
+//! noticing. It also has the parts every
 //! long-running service needs: a log, a health check at
 //! [`proxy::HEALTH_PATH`] and a protocol version ([`protocol::VORND_PROTOCOL`])
 //! that clients see in the `Vornd-Protocol` header when their WebSocket opens.
@@ -13,6 +13,10 @@
 //! those sessions itself ([`terminal`], [`streams`]) and serves grid clients
 //! on a local socket ([`grid`]). Both kinds of client report what fits on
 //! them, and one rule decides each session's size ([`size`]).
+//!
+//! The groups of calls it has taken over from the server ([`native`]) are
+//! answered here when the Native server switch, or a per-group setting,
+//! says so ([`groups`]).
 
 #[cfg(feature = "engine")]
 pub mod control;
@@ -25,6 +29,7 @@ pub mod holder;
 #[cfg(feature = "engine")]
 pub mod journal;
 pub mod names;
+pub mod native;
 pub mod protocol;
 pub mod proxy;
 #[cfg(feature = "engine")]

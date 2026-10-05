@@ -187,6 +187,8 @@ jobs:
           include-hidden-files: true
           retention-days: 1
           if-no-files-found: error
+          # A re-run shard replaces its earlier report, so the merge sees the re-run.
+          overwrite: true
 
   # The required check: merges the test results and coverage, holds a pull
   # request to 80% patch coverage, and passes only when the jobs above did.

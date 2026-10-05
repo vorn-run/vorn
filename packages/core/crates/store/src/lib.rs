@@ -9,6 +9,8 @@
 //!
 //! [`Store::call`] answers a call by its TypeScript name with JSON arguments,
 //! which is how a host that speaks JSON (the server, through napi) drives it.
+//! [`ProjectHosts`] is the one read a second process makes without opening
+//! the store: which projects are on a remote host.
 
 use std::path::{Path, PathBuf};
 
@@ -21,6 +23,7 @@ mod catalog;
 mod config;
 mod connectors;
 mod dispatch;
+mod hosts;
 mod runs;
 mod schema;
 mod sessions;
@@ -28,6 +31,7 @@ mod sql;
 mod tasks;
 
 pub use connectors::MAX_INBOX_ATTEMPTS;
+pub use hosts::{Placement, ProjectHost, ProjectHosts};
 
 /// What the store needs from its host that is not in the database: defaults
 /// the app defines, and facts about the machine.

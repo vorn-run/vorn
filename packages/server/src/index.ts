@@ -63,7 +63,7 @@ import {
 } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
 import { vorndSessions } from './vornd-sessions'
-import { VorndKeeper } from './vornd-process'
+import { nativeServerSwitch, VorndKeeper } from './vornd-process'
 import { peerAddress, relayThroughVornd, relaysThroughVornd } from './vornd-relay'
 import { seedRestored, verifyRestored } from './restored-sessions'
 import { getGitBranchAsync, getGitHeadAsync } from './git-utils'
@@ -157,7 +157,8 @@ const extensionRouteDeps: ExtensionRouteDeps = {
 /** The vornd in front of this server, kept running for as long as it runs. */
 const vorndKeeper = new VorndKeeper({
   connect: (endpoint) => vorndSessions.connect(endpoint),
-  desktopToken: localCredential
+  desktopToken: localCredential,
+  nativeServer: () => nativeServerSwitch(configManager.loadConfig().defaults?.experimental)
 })
 vorndSessions.setLauncher(vorndKeeper)
 

@@ -1819,6 +1819,12 @@ export interface ExperimentalConfig {
    * on the same file. Read by the server when it starts.
    */
   nativeStore?: boolean
+  /**
+   * vornd answers the groups of calls it has taken over from the server (git,
+   * the file explorer, editors) itself. Read by the server each time it starts
+   * vornd, and passed to it.
+   */
+  nativeServer?: boolean
 }
 
 /**
@@ -1840,7 +1846,8 @@ export interface RecordCursor {
 /** Whether vornd is up in front of the server, and where; or why it is not. */
 export type VorndStatus =
   | { state: 'off' }
-  | { state: 'on'; port: number }
+  /** `nativeServer`: whether vornd was started answering the groups it has taken over. */
+  | { state: 'on'; port: number; nativeServer: boolean }
   /** vornd could not be started or reached; the app talks to the server directly. */
   | { state: 'failed'; detail: string }
 

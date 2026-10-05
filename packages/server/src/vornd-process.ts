@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
-import type { VorndStatus } from '@vornrun/shared/types'
+import type { ExperimentalConfig, VorndStatus } from '@vornrun/shared/types'
 import log from './logger'
 
 /**
@@ -29,6 +29,18 @@ export const VORND_PATH_ENV = 'VORN_VORND_PATH'
 
 /** How long vornd has to say where it listens. It binds before it says anything. */
 export const VORND_START_TIMEOUT_MS = 5_000
+
+/**
+ * Settings › Experimental › Native server: vornd answers the groups of calls it
+ * has taken over from the server itself. `VORN_NATIVE_SERVER` overrides it (1
+ * or 0), so a test run can put every call on either side.
+ */
+export function nativeServerSwitch(experimental: ExperimentalConfig | undefined): boolean {
+  const forced = process.env.VORN_NATIVE_SERVER
+  if (forced === '1') return true
+  if (forced === '0') return false
+  return experimental?.nativeServer === true
+}
 
 const STDERR_KEPT = 5
 const STOP_GRACE_MS = 2_000
@@ -119,6 +131,8 @@ export function startVornd(
     sessiond?: { binary: string; home: string }
     /** The credential the desktop's connection presents, so vornd can tell it is the desktop. */
     desktopToken?: string
+    /** Answer the groups vornd has taken over itself, reading the database at `db`. */
+    nativeServer?: { db: string }
   } = {}
 ): Promise<Vornd> {
   const run = options.spawnImpl ?? spawn
@@ -130,6 +144,7 @@ export function startVornd(
       if (options.sessiond) {
         args.push('--sessiond', options.sessiond.binary, '--home', options.sessiond.home)
       }
+      if (options.nativeServer) args.push('--native-server', '--db', options.nativeServer.db)
       child = run(binary, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
@@ -252,6 +267,8 @@ export interface KeeperDeps {
   /** Called with vornd's channel for this server each time one starts. */
   connect: (endpoint: string) => Promise<boolean>
   desktopToken?: () => string | null
+  /** Whether vornd should answer the groups it has taken over; read at each start. */
+  nativeServer?: () => boolean
   now?: () => number
 }
 
@@ -325,10 +342,13 @@ export class VorndKeeper {
     if (!binaries.sessiond) log.error('[vornd] vorn-sessiond is not in this build')
     let started: Vornd
     const upAt = this.now()
+    const nativeServer = this.deps.nativeServer?.() ?? false
     try {
       started = await this.start(binaries.vornd, this.upstream, {
         sessiond: binaries.sessiond ? { binary: binaries.sessiond, home: this.home } : undefined,
-        desktopToken: this.deps.desktopToken?.() ?? undefined
+        desktopToken: this.deps.desktopToken?.() ?? undefined,
+        // The server's database, in the same data directory as the holder.
+        nativeServer: nativeServer ? { db: path.join(this.home, 'vorn.db') } : undefined
       })
     } catch (err) {
       this.fail((err as Error).message)
@@ -340,7 +360,7 @@ export class VorndKeeper {
       return
     }
     this.running = started
-    this.status = { state: 'on', port: started.port }
+    this.status = { state: 'on', port: started.port, nativeServer }
     log.info(`[vornd] forwarding to the server on ${this.upstream} from ${started.port}`)
     started.onExit((detail) => {
       if (this.running !== started) return
