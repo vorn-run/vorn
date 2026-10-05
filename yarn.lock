@@ -5786,6 +5786,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"commander@npm:^14.0.3":
+  version: 14.0.3
+  resolution: "commander@npm:14.0.3"
+  checksum: 10c0/755652564bbf56ff2ff083313912b326450d3f8d8c85f4b71416539c9a05c3c67dbd206821ca72635bf6b160e2afdefcb458e86b317827d5cb333b69ce7f1a24
+  languageName: node
+  linkType: hard
+
 "commander@npm:^2.20.0":
   version: 2.20.3
   resolution: "commander@npm:2.20.3"
@@ -7590,7 +7597,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"glob@npm:^13.0.0":
+"glob@npm:^13.0.0, glob@npm:^13.0.6":
   version: 13.0.6
   resolution: "glob@npm:13.0.6"
   dependencies:
@@ -9591,6 +9598,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"normalize-path@npm:^3.0.0":
+  version: 3.0.0
+  resolution: "normalize-path@npm:3.0.0"
+  checksum: 10c0/e008c8142bcc335b5e38cf0d63cfd39d6cf2d97480af9abdbe9a439221fd4d749763bab492a8ee708ce7a194bb00c9da6d0a115018672310850489137b3da046
+  languageName: node
+  linkType: hard
+
 "normalize-url@npm:^6.0.1":
   version: 6.1.0
   resolution: "normalize-url@npm:6.1.0"
@@ -11186,7 +11200,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"safe-stable-stringify@npm:^2.3.1":
+"safe-stable-stringify@npm:^2.3.1, safe-stable-stringify@npm:^2.5.0":
   version: 2.5.0
   resolution: "safe-stable-stringify@npm:2.5.0"
   checksum: 10c0/baea14971858cadd65df23894a40588ed791769db21bafb7fd7608397dbdce9c5aac60748abae9995e0fc37e15f2061980501e012cd48859740796bea2987f49
@@ -12161,6 +12175,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"ts-json-schema-generator@npm:^2.9.0":
+  version: 2.9.0
+  resolution: "ts-json-schema-generator@npm:2.9.0"
+  dependencies:
+    "@types/json-schema": "npm:^7.0.15"
+    commander: "npm:^14.0.3"
+    glob: "npm:^13.0.6"
+    json5: "npm:^2.2.3"
+    normalize-path: "npm:^3.0.0"
+    safe-stable-stringify: "npm:^2.5.0"
+    tslib: "npm:^2.8.1"
+    typescript: "npm:^5.9.3"
+  bin:
+    ts-json-schema-generator: bin/ts-json-schema-generator.js
+  checksum: 10c0/edd3b2b9bd4bcff3074c2ac706965ea7c00f3f63f42bba557e32f12d9ed486f700e0a180a027462a53235ad22b08a2dda2ce8d1101f2d3724c9df3487abdf0da
+  languageName: node
+  linkType: hard
+
 "tslib@npm:^2.0.0, tslib@npm:^2.4.0, tslib@npm:^2.8.1":
   version: 2.8.1
   resolution: "tslib@npm:2.8.1"
@@ -12338,6 +12370,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"typescript@npm:^5.9.3":
+  version: 5.9.3
+  resolution: "typescript@npm:5.9.3"
+  bin:
+    tsc: bin/tsc
+    tsserver: bin/tsserver
+  checksum: 10c0/6bd7552ce39f97e711db5aa048f6f9995b53f1c52f7d8667c1abdc1700c68a76a308f579cd309ce6b53646deb4e9a1be7c813a93baaf0a28ccd536a30270e1c5
+  languageName: node
+  linkType: hard
+
 "typescript@npm:^6.0.3":
   version: 6.0.3
   resolution: "typescript@npm:6.0.3"
@@ -12345,6 +12387,16 @@ __metadata:
     tsc: bin/tsc
     tsserver: bin/tsserver
   checksum: 10c0/4a25ff5045b984370f48f196b3a0120779b1b343d40b9a68d114ea5e5fff099809b2bb777576991a63a5cd59cf7bffd96ff6fe10afcefbcb8bd6fb96ad4b6606
+  languageName: node
+  linkType: hard
+
+"typescript@patch:typescript@npm%3A^5.9.3#optional!builtin<compat/typescript>":
+  version: 5.9.3
+  resolution: "typescript@patch:typescript@npm%3A5.9.3#optional!builtin<compat/typescript>::version=5.9.3&hash=5786d5"
+  bin:
+    tsc: bin/tsc
+    tsserver: bin/tsserver
+  checksum: 10c0/ad09fdf7a756814dce65bc60c1657b40d44451346858eea230e10f2e95a289d9183b6e32e5c11e95acc0ccc214b4f36289dcad4bf1886b0adb84d711d336a430
   languageName: node
   linkType: hard
 
@@ -12904,6 +12956,7 @@ __metadata:
     shiki: "npm:^4.2.0"
     simple-git-hooks: "npm:^2.13.1"
     tailwindcss: "npm:^4.3.2"
+    ts-json-schema-generator: "npm:^2.9.0"
     typescript: "npm:^6.0.3"
     typescript-eslint: "npm:^8.59.2"
     vite: "npm:^8.2.2"

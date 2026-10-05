@@ -119,6 +119,7 @@
     "prettier": "^3.8.3",
     "simple-git-hooks": "^2.13.1",
     "tailwindcss": "^4.3.2",
+    "ts-json-schema-generator": "^2.9.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.2.2",
