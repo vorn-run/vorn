@@ -479,6 +479,8 @@ export function createApiShim(wsUrl: string) {
       rpc.on('terminal:data', callback as (p: unknown) => void),
     onTerminalBell: (callback: (event: { id: string }) => void) =>
       rpc.on('terminal:bell', callback as (p: unknown) => void),
+    onTerminalNotify: (callback: (event: { id: string; title: string; body: string }) => void) =>
+      rpc.on('terminal:notify', callback as (p: unknown) => void),
     onTerminalResync: (callback: (event: { id: string; reason?: string }) => void) =>
       rpc.on('terminal:resync', callback as (p: unknown) => void),
     onTerminalFrame: (callback: (frame: Uint8Array) => void) =>

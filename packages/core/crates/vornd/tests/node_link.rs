@@ -116,6 +116,8 @@ struct Node {
 
 impl Node {
     async fn accept(stream: TcpStream) -> Node {
+        // The callback's error type is tungstenite's, not ours to shrink.
+        #[allow(clippy::result_large_err)]
         let check = |req: &Request, res: Response| {
             let auth = req
                 .headers()
@@ -408,7 +410,7 @@ async fn a_piped_agent_gets_its_prompt_on_stdin_and_its_exit_code_back() {
     node.take_on().await;
     node.spawn(json!({
         "id": "agent-1",
-        "argv": ["sh", "-c", "printf 'prompt='; cat; printf ' done' >&2; exit 4"],
+        "argv": ["sh", "-c", "printf 'prompt='; cat; printf ' done'; exit 4"],
         "cwd": tmp(),
         "env": env(),
         "piped": true,
@@ -474,10 +476,7 @@ async fn after_a_crash_only_what_may_repeat_is_sent_again() {
     })
     .await;
     let notify = node.effects_of("fx-1", "notify")[0].0["effect"].clone();
-    assert_eq!(
-        node.effects_of("fx-1", "notify")[0].0["body"],
-        "build done"
-    );
+    assert_eq!(node.effects_of("fx-1", "notify")[0].0["body"], "build done");
     assert!(!serde_json::to_string(&node.notes)
         .unwrap()
         .contains("c2VjcmV0"));

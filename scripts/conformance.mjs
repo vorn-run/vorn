@@ -12,16 +12,18 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * Every test file that talks to a started server over a real WebSocket, and
- * the terminal and attach files for sessions vornd holds itself, which also
- * need the session holder.
+ * Every test file that talks to a started server over a real WebSocket, the
+ * terminal and attach files for sessions vornd holds itself, which also need
+ * the session holder, and the app end to end with vornd as the server's
+ * process backend.
  */
 const FILES = [
   'tests/server-integration.test.ts',
   'tests/task-write-methods.test.ts',
   'tests/workflow-methods.test.ts',
   'tests/vornd-terminal.test.ts',
-  'tests/vornd-attach.test.ts'
+  'tests/vornd-attach.test.ts',
+  'tests/vornd-app-restart.test.ts'
 ]
 
 function run(command, args, env = process.env) {

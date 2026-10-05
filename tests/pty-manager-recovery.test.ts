@@ -227,8 +227,16 @@ afterEach(() => {
   ptyManager.removeAllListeners()
 })
 
+/**
+ * With the Native daemon switch on, the program starts in vornd's session holder,
+ * in another process: a start that fails is the session printing why and
+ * exiting, never a throw here (`vornd-backend.test.ts`). These three are the
+ * node-pty backend's.
+ */
+const nodePtyOnly = process.env.VORN_TEST_BACKEND === 'vornd'
+
 describe('pty spawn failures', () => {
-  it('propagates the spawn error and registers no session', async () => {
+  it.skipIf(nodePtyOnly)('propagates the spawn error and registers no session', async () => {
     spawnMock.mockImplementation(() => {
       throw new Error('posix_spawnp failed')
     })
@@ -239,18 +247,21 @@ describe('pty spawn failures', () => {
     expect(messages).toHaveLength(0)
   })
 
-  it('recovers so the next session after a failed spawn still works', async () => {
-    spawnMock.mockImplementationOnce(() => {
-      throw new Error('spawn ENOENT')
-    })
-    await expect(createAgent()).rejects.toThrow(/ENOENT/)
+  it.skipIf(nodePtyOnly)(
+    'recovers so the next session after a failed spawn still works',
+    async () => {
+      spawnMock.mockImplementationOnce(() => {
+        throw new Error('spawn ENOENT')
+      })
+      await expect(createAgent()).rejects.toThrow(/ENOENT/)
 
-    const { session } = await createAgent()
-    expect(session.status).toBe('running')
-    expect(ptyManager.getActiveSessions()).toEqual([session])
-  })
+      const { session } = await createAgent()
+      expect(session.status).toBe('running')
+      expect(ptyManager.getActiveSessions()).toEqual([session])
+    }
+  )
 
-  it('propagates a spawn failure for shell sessions too', () => {
+  it.skipIf(nodePtyOnly)('propagates a spawn failure for shell sessions too', () => {
     spawnMock.mockImplementation(() => {
       throw new Error('shell not found')
     })

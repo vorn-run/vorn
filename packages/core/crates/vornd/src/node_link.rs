@@ -245,10 +245,12 @@ pub struct SpawnRequest {
     pub stdin: Option<Vec<u8>>,
 }
 
-/// Reads `vornd:spawn {id, argv, cwd, env, cols?, rows?, piped?, stdin?}`.
+/// Reads `vornd:spawn {id, argv, cwd, env, cols?, rows?, piped?, shell?, stdin?}`.
 ///
 /// `env` is the program's whole environment: sessiond lets a program inherit
 /// its own only when the spec names none, and the server always names it.
+/// `shell` runs `argv` joined into one line through the platform's shell, as
+/// Node's `shell: true` does; the server has already quoted it for that shell.
 pub fn parse_spawn(p: &Value) -> Result<SpawnRequest, String> {
     let name = p
         .get("id")
@@ -270,6 +272,11 @@ pub fn parse_spawn(p: &Value) -> Result<SpawnRequest, String> {
     if argv.is_empty() {
         return Err("vornd:spawn needs argv".into());
     }
+    let argv = if p.get("shell").and_then(Value::as_bool) == Some(true) {
+        shell_argv(&argv.join(" "))
+    } else {
+        argv
+    };
     let cwd = p
         .get("cwd")
         .and_then(Value::as_str)
@@ -326,6 +333,25 @@ pub fn parse_spawn(p: &Value) -> Result<SpawnRequest, String> {
         },
         stdin,
     })
+}
+
+/// `line` through the platform's shell, the way Node runs `shell: true`.
+#[cfg(windows)]
+fn shell_argv(line: &str) -> Vec<String> {
+    let comspec = std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".to_owned());
+    vec![
+        comspec,
+        "/d".into(),
+        "/s".into(),
+        "/c".into(),
+        line.to_owned(),
+    ]
+}
+
+/// `line` through the platform's shell, the way Node runs `shell: true`.
+#[cfg(not(windows))]
+fn shell_argv(line: &str) -> Vec<String> {
+    vec!["/bin/sh".into(), "-c".into(), line.to_owned()]
 }
 
 /// A signal by the name the server uses for it.
@@ -880,6 +906,16 @@ mod tests {
         .unwrap();
         assert_eq!(piped.spec.io, Io::Piped { stdin: Stdin::Pipe });
         assert_eq!(piped.stdin.as_deref(), Some(&b"go"[..]));
+        #[cfg(not(windows))]
+        assert_eq!(
+            parse_spawn(&json!({
+                "id": "h3", "argv": ["gemini", "--model", "'a b'"], "cwd": "/w", "piped": true, "shell": true,
+            }))
+            .unwrap()
+            .spec
+            .argv,
+            ["/bin/sh", "-c", "gemini --model 'a b'"]
+        );
         let closed = parse_spawn(&json!({
             "id": "h2", "argv": ["codex"], "cwd": "/w", "piped": true,
         }))

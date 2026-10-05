@@ -1,4 +1,3 @@
-import * as pty from 'node-pty'
 import crypto from 'node:crypto'
 import os from 'node:os'
 import fs from 'node:fs'
@@ -67,6 +66,10 @@ import { pipelineFor } from './core-pipeline'
 import type { RecordHeader } from './history/log'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 import { isHandingOver, HANDOVER_MESSAGE } from './handoff/donor'
+import { spawnTerminal } from './process-backend'
+import { VorndProcess } from './vornd-process'
+import type { Listing } from './vornd-link'
+import { consumeRestored } from './restored-sessions'
 
 /**
  * What a PTY starts at, before any client has fitted itself to a pane.
@@ -167,6 +170,28 @@ class PtyManager extends EventEmitter {
   private idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private sessionOrder: string[] = []
   private headlessWorktreeCounter?: WorktreeSessionCounter
+  /**
+   * Sessions whose process lives in vornd's session holder. vornd streams their
+   * bytes to the clients connected through it, and its analysis is where their
+   * agent status comes from.
+   */
+  private backendHeld = new Set<string>()
+
+  /**
+   * Settles once the session's process exists: at once for one here, once the
+   * holder has answered for one in vornd. Callers that hand the session to a
+   * client wait for it, so the client's attach through vornd finds the session
+   * there rather than racing its spawn.
+   */
+  whenStarted(id: string): Promise<void> {
+    const held = this.ptys.get(id)
+    return held instanceof VorndProcess ? held.ready : Promise.resolve()
+  }
+
+  /** Whether vornd holds this session's process, and streams it to the clients connected through it. */
+  isBackendHeld(id: string): boolean {
+    return this.backendHeld.has(id)
+  }
 
   /** Provide headless session counter to avoid circular imports */
   setHeadlessWorktreeCounter(counter: WorktreeSessionCounter): void {
@@ -280,7 +305,9 @@ class PtyManager extends EventEmitter {
    * name, which `startHistory` does on its own queue.
    */
   async createPty(payload: CreateTerminalPayload, reuseId?: string): Promise<TerminalSession> {
-    return this.spawnPty(payload, await this.prepareSession(payload), reuseId)
+    const session = this.spawnPty(payload, await this.prepareSession(payload), reuseId)
+    await this.whenStarted(session.id)
+    return session
   }
 
   /**
@@ -438,8 +465,10 @@ class PtyManager extends EventEmitter {
       branch,
       headCommit
     } = prepared
-    const ptyProcess = pty.spawn(shell, getShellArgs(), {
-      name: 'xterm-256color',
+    const ptyProcess = spawnTerminal({
+      id,
+      file: shell,
+      args: getShellArgs(),
       cols: INITIAL_COLS,
       rows: INITIAL_ROWS,
       cwd: effectivePath,
@@ -498,8 +527,10 @@ class PtyManager extends EventEmitter {
     host: RemoteHost
   ): TerminalSession {
     const agentLine = this.buildAgentLaunchLine(payload)
-    const ptyProcess = pty.spawn(shell, getShellArgs(), {
-      name: 'xterm-256color',
+    const ptyProcess = spawnTerminal({
+      id,
+      file: shell,
+      args: getShellArgs(),
       cols: INITIAL_COLS,
       rows: INITIAL_ROWS,
       cwd: os.homedir(),
@@ -677,8 +708,10 @@ class PtyManager extends EventEmitter {
     })
     // bash and PowerShell have no environment variable that injects
     // initialisation, so integration for them replaces the launch arguments.
-    const ptyProcess = pty.spawn(shell, integration.args ?? getShellArgs(), {
-      name: 'xterm-256color',
+    const ptyProcess = spawnTerminal({
+      id,
+      file: shell,
+      args: integration.args ?? getShellArgs(),
       cols: INITIAL_COLS,
       rows: INITIAL_ROWS,
       cwd: workingDir,
@@ -730,8 +763,10 @@ class PtyManager extends EventEmitter {
     env: Record<string, string>
   }): TerminalSession {
     const id = crypto.randomUUID()
-    const ptyProcess = pty.spawn(params.command, params.args, {
-      name: 'xterm-256color',
+    const ptyProcess = spawnTerminal({
+      id,
+      file: params.command,
+      args: params.args,
       cols: INITIAL_COLS,
       rows: INITIAL_ROWS,
       cwd: params.cwd,
@@ -1135,7 +1170,10 @@ class PtyManager extends EventEmitter {
     if (!session || !analyzer) return data.length
     try {
       const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
-      if (newStatus && newStatus !== session.status) this.setStatus(id, newStatus)
+      // vornd's analysis decides for the sessions it holds; see `backendStatus`.
+      if (newStatus && newStatus !== session.status && !this.statusFromBackend(id, session)) {
+        this.setStatus(id, newStatus)
+      }
     } catch (err) {
       // This can run from a timer, where a throw has nothing behind it. The
       // session carries on without status, rather than ask a faulted analyzer
@@ -1215,6 +1253,19 @@ class PtyManager extends EventEmitter {
     // being respawned has history describing a process that is gone.
     startHistory(id, this.openRecords(id))
 
+    if (ptyProcess instanceof VorndProcess) {
+      this.backendHeld.add(id)
+      // A resize in the session's log, from this server or a client of vornd's:
+      // the size the program is drawing at from here on.
+      ptyProcess.onResize((c, r) => this.noteBackendResize(id, c, r))
+      ptyProcess.onStatus((code) => this.backendStatus(id, code))
+      // The pid is the holder's answer, which comes after the session exists.
+      ptyProcess.onSpawned((pid) => {
+        const session = this.sessions.get(id)
+        if (session) session.pid = pid
+      })
+    }
+
     ptyProcess.onData((data: string) => {
       this.bufferData(id, data)
       // The one consumer that wants raw chunks rather than coalesced ones: it
@@ -1224,6 +1275,8 @@ class PtyManager extends EventEmitter {
     })
 
     ptyProcess.onExit(({ exitCode }) => {
+      // Not while a newer process has taken the id over (a resume).
+      if (this.ptys.get(id) === ptyProcess || !this.ptys.has(id)) this.backendHeld.delete(id)
       // Whatever is buffered is the last thing this terminal ever printed.
       this.drainBuffer(id)
       this.clearBuffer(id)
@@ -1311,6 +1364,14 @@ class PtyManager extends EventEmitter {
     // start. Nothing a terminal is actually displayed at comes near this.
     if (cols > MAX_GEOMETRY || rows > MAX_GEOMETRY) return
 
+    const held = this.ptys.get(id)
+    if (held instanceof VorndProcess) {
+      // The session holder records it, and the record that comes back moves the
+      // session, the model and the history (`noteBackendResize`), in order with
+      // the output around it.
+      held.resize(cols, rows)
+      return
+    }
     const session = this.sessions.get(id)
     if (session) {
       session.cols = cols
@@ -1474,6 +1535,8 @@ class PtyManager extends EventEmitter {
     const panes: DonorPane[] = []
     for (const id of ranked) {
       const held = this.ptys.get(id)
+      // Already outside this process: the replacement finds it in vornd's list.
+      if (held instanceof VorndProcess) continue
       const session = this.sessions.get(id)
       if (!held || !session) {
         // All-or-nothing, the same as a missing descriptor below. A pty whose
@@ -1538,6 +1601,116 @@ class PtyManager extends EventEmitter {
     if (panes.length) {
       log.info({ panes: panes.length }, '[pty] adopted terminals from the previous server')
     }
+  }
+
+  /**
+   * A resize recorded in the log of a session vornd holds. Moves the session
+   * record, the screen model and the history exactly as `resizePty` does for a
+   * process here; the session holder already resized the terminal.
+   */
+  private noteBackendResize(id: string, cols: number, rows: number): void {
+    const session = this.sessions.get(id)
+    if (!session) return
+    session.cols = cols
+    session.rows = rows
+    const at = this.nextRecord(id, 0)
+    const pipeline = pipelineFor(id)
+    if (pipeline) {
+      try {
+        pipeline.resize(cols, rows, noteResize(id, at) ? at : null)
+      } catch (err) {
+        log.warn({ err, id }, '[core] a terminal thread stopped; dropping it')
+        pipelineLost(id)
+        clearScreen(id)
+      }
+      return
+    }
+    recordResize(id, at, cols, rows)
+  }
+
+  /**
+   * Whether this session's agent status comes from vornd's analysis. vornd
+   * parses every byte the session holder records, live or replayed, and
+   * reports a status with the place it reflects; this server's own analyzer
+   * still runs for the output lines agents read back and the idle countdown. A
+   * session whose status comes from hooks keeps taking it from them.
+   */
+  private statusFromBackend(id: string, session: TerminalSession): boolean {
+    return this.backendHeld.has(id) && session.statusSource !== 'hooks'
+  }
+
+  /** A status from vornd's analysis, already known to be newer than the last. */
+  private backendStatus(id: string, code: number): void {
+    const session = this.sessions.get(id)
+    if (!session || session.agentType === 'shell' || !this.statusFromBackend(id, session)) return
+    const status = NATIVE_STATUS[code]
+    if (!status) return
+    // Output before it is analyzed first, so a deferred batch cannot land after it.
+    this.settleAnalysis(id)
+    this.setStatus(id, status)
+    // The idle countdown runs from the analysis of the same output here.
+  }
+
+  /**
+   * Take on the sessions vornd's session holder has, once it is linked.
+   *
+   * Three cases. A session this server is already running through vornd (vornd
+   * restarted and replays it) carries on from its own cursor. A session the
+   * holder kept while this server restarted is rebuilt from the record the
+   * previous run saved, instead of being offered as a restored session to
+   * resume: its program never stopped, and its id is the one every pane knows it
+   * by. A process here that vornd no longer has has ended.
+   *
+   * Piped agents are `headless-manager`'s; they are skipped here.
+   */
+  adoptBackend(listing: Listing): TerminalSession[] {
+    const listed = new Map(listing.sessions.map((s) => [s.id, s]))
+    const ended = new Map(listing.ended.map((e) => [e.id, e.exited]))
+    for (const [id, held] of this.ptys) {
+      if (!(held instanceof VorndProcess) || !held.started || listed.has(id)) continue
+      log.warn({ id }, '[pty] vornd no longer holds this session; it has ended')
+      held.lost(ended.get(id) ?? null)
+    }
+    const adopted: TerminalSession[] = []
+    for (const found of listing.sessions) {
+      if (found.kind !== 'pty' || this.ptys.has(found.id)) continue
+      const cols = found.cols ?? INITIAL_COLS
+      const rows = found.rows ?? INITIAL_ROWS
+      const saved = consumeRestored(found.id)?.session
+      const session: TerminalSession = saved
+        ? { ...saved, status: 'running', pid: found.pid, cols, rows }
+        : {
+            // Nothing saved names it: started by a server that never wrote it
+            // down. Kept visible, so it can be seen and closed.
+            id: found.id,
+            agentType: 'shell',
+            projectName: 'recovered',
+            projectPath: os.homedir(),
+            status: 'running',
+            createdAt: Date.now(),
+            cols,
+            rows,
+            pid: found.pid,
+            displayName: 'Recovered session'
+          }
+      delete session.savedAt
+      delete session.shellExitCode
+      const p = VorndProcess.adopt(found, [cols, rows])
+      this.sessions.set(session.id, session)
+      if (!this.sessionOrder.includes(session.id)) this.sessionOrder.push(session.id)
+      this.normalizedPaths.set(
+        session.id,
+        normalizePath(session.worktreePath || session.projectPath)
+      )
+      this.setupPtyEvents(session.id, p, cols, rows, true)
+      this.ptys.set(session.id, p)
+      adopted.push(session)
+    }
+    if (adopted.length) {
+      log.info({ sessions: adopted.length }, '[pty] took on the sessions vornd holds')
+    }
+    for (const session of adopted) this.emit('session-adopted', session)
+    return adopted
   }
 
   killAll(): void {

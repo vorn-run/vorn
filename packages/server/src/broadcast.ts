@@ -95,7 +95,21 @@ interface Client {
   resync: boolean
   /** Terminals whose output this client has missed, owed a resync once it catches up. */
   behind: Set<string>
+  /**
+   * Connected through vornd, which streams the terminals it holds to this
+   * client itself: their bytes, bells, resyncs and exits from here would arrive
+   * a second time.
+   */
+  viaVornd: boolean
 }
+
+/** What vornd streams itself to the clients connected through it, for the terminals it holds. */
+const VORND_STREAMED = new Set([
+  'terminal:data',
+  'terminal:bell',
+  'terminal:resync',
+  'terminal:exit'
+])
 
 /**
  * How far behind a client may fall before its terminal output is withheld.
@@ -135,12 +149,20 @@ export class ClientRegistry {
   /** Runs while any client is behind, so a terminal that goes quiet is still caught up. */
   private catchUp: ReturnType<typeof setInterval> | null = null
 
-  add(ws: WebSocket, topics?: TopicFilter): void {
+  /** Which terminals vornd holds, and so streams itself; none until the backend says. */
+  private vorndHeld: (id: string) => boolean = () => false
+
+  setVorndHeld(held: (id: string) => boolean): void {
+    this.vorndHeld = held
+  }
+
+  add(ws: WebSocket, topics?: TopicFilter, viaVornd = false): void {
     this.clients.set(ws, {
       subscription: subscriptionFrom(topics),
       terminalBytes: false,
       resync: false,
-      behind: new Set()
+      behind: new Set(),
+      viaVornd
     })
     log.info(`[ws] client connected (total: ${this.clients.size})`)
   }
@@ -208,6 +230,7 @@ export class ClientRegistry {
     for (const [ws, client] of this.clients) {
       if (ws.readyState !== ws.OPEN) continue
       if (client.subscription && !client.subscription.wants(method, scope)) continue
+      if (client.viaVornd && scope && VORND_STREAMED.has(method) && this.vorndHeld(scope)) continue
       if (method === 'terminal:data' && client.resync && this.withhold(ws, client, params)) continue
       if (client.terminalBytes && method === 'terminal:data') {
         ws.send((frame ??= terminalFrame(params as TerminalText)))

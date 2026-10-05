@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   sendAgentNotification,
+  sendTerminalNotification,
   sendWorkflowGateNotification
 } from '../src/renderer/lib/notifications'
 import type { AppConfig, WorkflowDefinition } from '../src/shared/types'
@@ -154,6 +155,31 @@ describe('sendAgentNotification', () => {
   it('does nothing when the window is focused', () => {
     vi.spyOn(document, 'hasFocus').mockReturnValue(true)
     sendAgentNotification(terminal(), 'waiting', makeConfig())
+    expect(NotificationMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('sendTerminalNotification', () => {
+  it('shows what the program asked for, titled by the program or the session', () => {
+    sendTerminalNotification(terminal(), 'Build', 'passed', makeConfig())
+    sendTerminalNotification(terminal(), '', 'tests done', makeConfig())
+    expect(NotificationMock.mock.calls.map(([title, opts]) => [title, opts?.body])).toEqual([
+      ['Build', 'passed'],
+      ['demo', 'tests done']
+    ])
+  })
+
+  it('shows two different ones from one session, but folds the same words repeated', () => {
+    const t = terminal()
+    sendTerminalNotification(t, '', 'one', makeConfig())
+    sendTerminalNotification(t, '', 'two', makeConfig())
+    sendTerminalNotification(t, '', 'two', makeConfig())
+    expect(NotificationMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('follows the bell setting', () => {
+    sendTerminalNotification(terminal(), '', 'x', makeConfig({ onBell: false }))
+    sendTerminalNotification(terminal(), '', 'x', makeConfig({ enabled: false }))
     expect(NotificationMock).not.toHaveBeenCalled()
   })
 })

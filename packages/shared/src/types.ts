@@ -1920,6 +1920,8 @@ export const IPC = {
   TERMINAL_LIST_ACTIVE: 'terminal:listActive',
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_BELL: 'terminal:bell',
+  /** A desktop notification a terminal's program asked for (OSC 9, 777), once per effect id. */
+  TERMINAL_NOTIFY: 'terminal:notify',
   TERMINAL_RESYNC: 'terminal:resync',
   TERMINAL_EXIT: 'terminal:exit',
   /** A version 2 terminal frame from vornd, passed to the renderer undecoded. */

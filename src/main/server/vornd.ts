@@ -20,6 +20,9 @@ export const VORND_PROTOCOL = 1
 /** How long vornd has to say where it listens. It binds before it says anything. */
 export const VORND_START_TIMEOUT_MS = 5_000
 
+/** Where vornd finds the server's credential for the link that makes it the process backend. */
+export const VORND_SERVER_TOKEN_ENV = 'VORND_SERVER_TOKEN'
+
 const STDERR_KEPT = 5
 const STOP_GRACE_MS = 2_000
 
@@ -92,6 +95,14 @@ export function startVornd(
     spawnImpl?: typeof spawn
     /** The session holder for vornd to keep running, and the data directory it lives in. */
     sessiond?: { binary: string; home: string }
+    /**
+     * The server's credential. With a session holder, vornd links to the server
+     * with it and becomes its process backend: the server starts its terminals
+     * and agents in the holder, where they outlive the app. In the environment,
+     * never on the command line, where any process could read it; vornd takes
+     * it out of its own environment before starting anything.
+     */
+    serverToken?: string
   } = {}
 ): Promise<Vornd> {
   const run = options.spawnImpl ?? spawn
@@ -105,7 +116,10 @@ export function startVornd(
       }
       child = run(binary, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true
+        windowsHide: true,
+        ...(options.serverToken && options.sessiond
+          ? { env: { ...process.env, [VORND_SERVER_TOKEN_ENV]: options.serverToken } }
+          : {})
       })
     } catch (err) {
       reject(new Error(`could not start vornd: ${(err as Error).message}`))

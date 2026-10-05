@@ -20,6 +20,7 @@
     "dist": "electron-builder",
     "bench": "node --import tsx bench/run.ts",
     "test:conformance": "node scripts/conformance.mjs",
+    "test:vornd-backend": "node scripts/test-vornd-backend.mjs",
     "lint": "eslint .",
     "lint:lockfile": "node scripts/check-lockfile.mjs",
     "format": "prettier --write .",

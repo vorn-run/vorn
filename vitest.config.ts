@@ -10,6 +10,9 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    // The Native daemon switch on, with vornd's protocol answered in-process:
+    // `yarn test:vornd-backend` runs the process-backend suites this way.
+    setupFiles: process.env.VORN_TEST_BACKEND === 'vornd' ? ['tests/setup/vornd-backend.ts'] : [],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'text-summary', 'lcov'],

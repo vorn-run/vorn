@@ -1048,7 +1048,9 @@ async function routeThroughVornd(upstream: number | null): Promise<void> {
   let started: Vornd
   try {
     started = await startVornd(binary, upstream, {
-      sessiond: sessiond && vorndHome ? { binary: sessiond, home: vorndHome } : undefined
+      sessiond: sessiond && vorndHome ? { binary: sessiond, home: vorndHome } : undefined,
+      // With the holder, vornd becomes the server's process backend.
+      serverToken: bootstrapToken ?? undefined
     })
   } catch (err) {
     fallBack((err as Error).message)

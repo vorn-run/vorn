@@ -433,7 +433,8 @@ impl Conn {
         }
         let start = match a.from {
             AttachFrom::Cursor(c) => c,
-            _ => Cursor::start(0),
+            // The log's own start: a named session's epoch is not 0.
+            _ => Cursor::start(s.with_log(|l| l.epoch())),
         };
         let res = s.with_log(|l| l.attach(a.from));
         let (cp, entries) = match res {

@@ -199,6 +199,7 @@ import { isImplicitConnection, type ConnectorPackSource } from '@vornrun/shared/
 import { catalogEvents, catalogSnapshot, refreshCatalog } from './connectors/catalog'
 import { forEachConnectorItem } from './connectors/paging'
 import { buildConnectorSeededWorkflow } from './default-workflows'
+import { wireVorndBackend } from './vornd-backend'
 import { connectorSeededWorkflowId, connectorSeededWorkflowIdPrefix } from '@vornrun/shared/types'
 import { executeScript, scriptRunnerEvents } from './script-runner'
 import { getTailscaleStatus, clearBinaryCache } from './tailscale'
@@ -755,6 +756,7 @@ export function registerAllMethods(): void {
         // An agent that was told the id names the conversation itself; one that
         // cannot be keeps the claim until it reports, seconds later.
         if (session.agentSessionId) releaseSpawningTranscript(named, id)
+        await ptyManager.whenStarted(session.id)
         return session
       } catch (err) {
         prepared()
@@ -1095,8 +1097,11 @@ export function registerAllMethods(): void {
     cursor: ptyManager.recordCursor(id) ?? undefined
   }))
   registerMethod('terminal:readOutput', ({ id, lines }) => ptyManager.getOutput(id, lines))
-  registerMethod('shell:create', (cwd) => {
+  registerMethod('shell:create', async (cwd) => {
     const session = ptyManager.createShellPty(cwd)
+    // Answered once the process exists, wherever it runs: a client attaching
+    // through vornd next must find it there.
+    await ptyManager.whenStarted(session.id)
     announceSession(session)
     logSessionEvent(session.id, 'created', {
       agentType: session.agentType,
@@ -1227,6 +1232,7 @@ export function registerAllMethods(): void {
         ptyManager.injectOutput(session.id, BETWEEN_RUNS)
         announceSession(session)
         sessionManager.scheduleSave()
+        await ptyManager.whenStarted(session.id)
         return { ok: true as const, session }
       }
 
@@ -1281,6 +1287,7 @@ export function registerAllMethods(): void {
       if (session.agentSessionId) releaseSpawningTranscriptsFor(id)
       ptyManager.injectOutput(session.id, BETWEEN_RUNS)
       sessionManager.scheduleSave()
+      await ptyManager.whenStarted(session.id)
       return { ok: true as const, session }
     } catch (err) {
       log.warn({ err, id }, '[restored] could not resume this session')
@@ -2416,6 +2423,22 @@ export function registerAllMethods(): void {
   // ended up, not every step it took to get there.
   ptyManager.on('session-cwd', () => {
     sessionManager.scheduleSave()
+  })
+
+  // vornd as the process backend, with the Native daemon switch on: the
+  // sessions its holder kept through a restart of this server come back here
+  // as live sessions under their own ids.
+  wireVorndBackend({
+    adopted: (session) => {
+      announceSession(session)
+      logSessionEvent(session.id, 'created', {
+        agentType: session.agentType,
+        projectName: session.projectName,
+        projectPath: session.projectPath
+      })
+      sessionManager.scheduleSave()
+      broadcastWidgetUpdate()
+    }
   })
 
   // Clean up Copilot hooks on session exit

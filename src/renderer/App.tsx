@@ -71,7 +71,11 @@ import { WindowControls } from './components/WindowControls'
 import { isMac, isWeb, TRAFFIC_LIGHT_PAD_PX } from './lib/platform'
 import { useIsMobile } from './hooks/useIsMobile'
 import { syncBoard, reportWarmAttach } from './lib/board-sync'
-import { shouldNotifyBell, sendAgentNotification } from './lib/notifications'
+import {
+  shouldNotifyBell,
+  sendAgentNotification,
+  sendTerminalNotification
+} from './lib/notifications'
 import { restoreDevicePanes } from './lib/device-restore'
 import { markPaneEnded } from './lib/session-resume'
 
@@ -288,6 +292,15 @@ export function App() {
       const terminal = state.terminals.get(id)
       if (!terminal || !shouldNotifyBell(state.config)) return
       sendAgentNotification(terminal, 'bell', state.config, () =>
+        useAppStore.getState().setFocusedTerminal(id)
+      )
+    })
+
+    const removeNotifyListener = window.api.onTerminalNotify?.(({ id, title, body }) => {
+      const state = useAppStore.getState()
+      const terminal = state.terminals.get(id)
+      if (!terminal) return
+      sendTerminalNotification(terminal, title, body, state.config, () =>
         useAppStore.getState().setFocusedTerminal(id)
       )
     })
@@ -525,6 +538,7 @@ export function App() {
       removeReplacedListener?.()
       removeLocalServerListener?.()
       removeBellListener?.()
+      removeNotifyListener?.()
       stopSelectionAnswers()
       removeExitListener()
       removeSessionCreatedListener()

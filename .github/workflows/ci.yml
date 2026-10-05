@@ -89,6 +89,11 @@ jobs:
       - name: Test
         run: yarn test:coverage
 
+      # The process-backend suites again with the Native daemon switch on:
+      # terminals and agents start through the vornd link, answered in-process.
+      - name: Test with vornd as the process backend
+        run: yarn test:vornd-backend
+
       - name: Enforce 80% patch coverage
         if: github.event_name == 'pull_request'
         run: diff-cover coverage/lcov.info --compare-branch=origin/${{ github.base_ref }} --fail-under=80

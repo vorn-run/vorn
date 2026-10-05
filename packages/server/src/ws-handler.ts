@@ -18,6 +18,7 @@ import {
   type ServerIdentity
 } from '@vornrun/shared/protocol'
 import { authenticateCredential, AUTH_TIMEOUT_MS, type Authenticated } from './ws-auth'
+import { vorndLink, VORND_LINK_PROTOCOL } from './vornd-link'
 import { clientRegistry } from './broadcast'
 import { browserBridge } from './browser-bridge'
 import log from './logger'
@@ -271,11 +272,23 @@ export function resetTokenTracking(): void {
   pendingSockets = 0
 }
 
+/**
+ * Whether a vornd may link as the process backend now: the Native daemon switch.
+ * Injected, like the session count, so this layer knows nothing of terminals.
+ */
+let vorndLinkAllowed: () => boolean = () => false
+
+export function setVorndLinkAllowed(fn: () => boolean): void {
+  vorndLinkAllowed = fn
+}
+
 export function handleConnection(
   ws: WebSocket,
   credential?: string,
   initialTopics?: readonly string[],
-  peer?: Peer
+  peer?: Peer,
+  /** Forwarded by vornd, which streams the terminals it holds to this client itself. */
+  viaVornd = false
 ): void {
   // Announce the contract first, so a client that has to authenticate by message
   // knows that it must before it is refused for not having.
@@ -305,7 +318,8 @@ export function handleConnection(
     // never briefly unfiltered. `subscribe:set` can only run after admission, and
     // in that gap a busy machine can push a lot of PTY output at a phone that
     // asked for none — on every reconnect, which on a mobile network is often.
-    clientRegistry.add(ws, initialTopics)
+    if (viaVornd) clientRegistry.add(ws, initialTopics, true)
+    else clientRegistry.add(ws, initialTopics)
     if (result.tokenId) trackToken(result.tokenId, ws)
     if (authTimer) {
       clearTimeout(authTimer)
@@ -373,7 +387,13 @@ export function handleConnection(
     // every launch attempt, so the leftover never leaves and the launches never
     // stop being blocked.
     // Nor `subscribe:set`: the bridge sends it on every hello, adoption probes included.
-    if (session && method !== 'bridge:identify' && method !== 'subscribe:set')
+    // Nor the linked vornd, whose records are output, not somebody using the app.
+    if (
+      session &&
+      method !== 'bridge:identify' &&
+      method !== 'subscribe:set' &&
+      !vorndLink.owns(ws)
+    )
       clientRegistry.touch()
 
     // Everything below this line requires an authenticated socket. The one
@@ -403,6 +423,40 @@ export function handleConnection(
       if (id !== undefined && id !== null) {
         ws.send(JSON.stringify(createResponse(id, { ok: true })))
       }
+      return
+    }
+
+    // The linked vornd's frames: answers to what this server asked it, and the
+    // records and effects of the sessions it holds. Never a client's call.
+    if (vorndLink.owns(ws)) {
+      vorndLink.receive(msg as Parameters<typeof vorndLink.receive>[0])
+      return
+    }
+
+    // vornd claiming the link. Only with the credential this server was
+    // started with, which only the app that started it holds, and only while
+    // the Native daemon switch is on.
+    if (method === 'vornd:identify') {
+      const refuse = (why: string): void => {
+        log.warn(`[ws] refused a vornd link: ${why}`)
+        if (id !== undefined && id !== null) {
+          ws.send(JSON.stringify(createErrorResponse(id, -32000, why)))
+        }
+      }
+      const protocol = (params as { protocol?: unknown } | undefined)?.protocol
+      if (session.kind !== 'bootstrap') return refuse('only the app’s own vornd may link')
+      if (protocol !== VORND_LINK_PROTOCOL) {
+        return refuse(
+          `vornd speaks link protocol ${String(protocol)}, this server ${VORND_LINK_PROTOCOL}`
+        )
+      }
+      if (!vorndLinkAllowed()) return refuse('the Native daemon switch is off')
+      // A process backend, not a client: it hears no broadcasts.
+      clientRegistry.remove(ws)
+      if (id !== undefined && id !== null) {
+        ws.send(JSON.stringify(createResponse(id, { ok: true })))
+      }
+      vorndLink.attach(ws)
       return
     }
 

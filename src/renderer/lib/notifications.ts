@@ -122,6 +122,24 @@ export function sendAgentNotification(
   dispatch(reason, terminal.id, prefs, title, body, onClick)
 }
 
+/**
+ * A notification a terminal's program asked for (OSC 9, 777). The server sends
+ * each one once; the cooldown here is keyed by its text, so it folds only the
+ * same words repeated, never two different notifications.
+ */
+export function sendTerminalNotification(
+  terminal: TerminalState,
+  title: string,
+  body: string,
+  config: AppConfig | null,
+  onClick?: () => void
+): void {
+  const prefs = config?.defaults.notifications
+  if (!shouldNotifyBell(config)) return
+  const name = getDisplayName(terminal.session)
+  dispatch('bell', `notify:${terminal.id}:${title}:${body}`, prefs, title || name, body, onClick)
+}
+
 function dispatchWorkflowWait(
   tag: string,
   title: string,

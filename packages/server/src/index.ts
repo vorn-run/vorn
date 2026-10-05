@@ -291,7 +291,8 @@ export async function startServer(
         // Decides whether the greeting carries this server's identity. Only a
         // desktop on this machine has any use for it, and only loopback can be
         // trusted not to be a stranger on the tailnet.
-        { transport: 'tcp', address: req.socket.remoteAddress }
+        { transport: 'tcp', address: req.socket.remoteAddress },
+        req.headers['vornd-forwarded'] !== undefined
       )
       scheduler.deliverPendingConnectorInbox()
     }

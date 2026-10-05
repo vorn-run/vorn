@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import { EventEmitter } from 'node:events'
@@ -24,6 +24,9 @@ import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import log from './logger'
 import { holdWorkspace } from './workspace-holds'
 import { isDraining, DRAINING_MESSAGE } from './draining'
+import { spawnPiped, type AgentProcess } from './process-backend'
+import { VorndChild } from './vornd-process'
+import type { Listing } from './vornd-link'
 
 const MAX_OUTPUT_LINES = 1000
 const FORCE_KILL_DELAY_MS = 5000
@@ -39,7 +42,7 @@ function forceKillWin(pid: number): void {
 }
 
 class HeadlessManager extends EventEmitter {
-  private processes = new Map<string, ChildProcess>()
+  private processes = new Map<string, AgentProcess>()
   private sessions = new Map<string, HeadlessSession>()
   private outputBuffers = new Map<string, string[]>()
   private agentCommands: Record<AiAgentType, AgentCommandConfig> = { ...DEFAULT_AGENT_COMMANDS }
@@ -155,12 +158,20 @@ class HeadlessManager extends EventEmitter {
         (spawnArgs.stdin != null ? ` (prompt on stdin, ${spawnArgs.stdin.length} chars)` : '')
     )
 
-    const child = spawn(command, spawnArgList, {
-      cwd: effectivePath,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      shell: useShell
+    // Through vornd when it is the process backend: the agent then lives in the
+    // session holder, survives this server, and gets its prompt on stdin there.
+    const child = spawnPiped({
+      id,
+      command,
+      args: spawnArgList,
+      options: {
+        cwd: effectivePath,
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+        shell: useShell
+      },
+      ...(spawnArgs.stdin != null ? { stdin: spawnArgs.stdin } : {})
     })
 
     // Some agents (claude) receive their prompt on stdin rather than as an argv
@@ -216,7 +227,7 @@ class HeadlessManager extends EventEmitter {
     })
 
     // Handle exit
-    child.on('exit', (exitCode) => {
+    child.on('exit', (exitCode: number | null) => {
       log.info(`[headless] process ${id} exited with code ${exitCode}`)
       const sess = this.sessions.get(id)
       if (sess && sess.status === 'running') {
@@ -235,7 +246,7 @@ class HeadlessManager extends EventEmitter {
       }, 30_000)
     })
 
-    child.on('error', (err) => {
+    child.on('error', (err: Error) => {
       log.error({ err }, `[headless] process ${id} error`)
       this.appendOutput(id, `Error: ${err.message}\n`)
       this.emit('client-message', IPC.HEADLESS_DATA, { id, data: `Error: ${err.message}\n` })
@@ -306,6 +317,28 @@ class HeadlessManager extends EventEmitter {
         if (updates.worktreePath !== undefined) s.worktreePath = updates.worktreePath
         this.emit('client-message', IPC.SESSION_UPDATED, s)
       }
+    }
+  }
+
+  /**
+   * vornd's list, once it is linked: an agent this server started through vornd
+   * that the session holder no longer has has ended. Agents the holder kept
+   * while this server restarted are not taken on: nothing here was persisted
+   * about them, and their workflow run picks up on its own.
+   */
+  adoptBackend(listing: Listing): void {
+    const listed = new Set(listing.sessions.map((s) => s.id))
+    for (const [id, proc] of this.processes) {
+      if (!(proc instanceof VorndChild) || listed.has(id) || !proc.pid) continue
+      log.warn(`[headless] vornd no longer holds agent ${id}; it has ended`)
+      proc.emit('exit', 1)
+    }
+    const orphans = listing.sessions.filter((s) => s.kind === 'piped' && !this.sessions.has(s.id))
+    if (orphans.length) {
+      log.info(
+        { agents: orphans.map((s) => s.id) },
+        '[headless] vornd holds agents this run did not start'
+      )
     }
   }
 

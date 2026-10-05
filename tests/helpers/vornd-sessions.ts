@@ -30,6 +30,9 @@ const sessiondBinary =
       )
     : undefined)
 
+/** The two binaries the conformance run built, for tests that start vornd their own way. */
+export const vorndBinaries = { vornd: vorndBinary, sessiond: sessiondBinary }
+
 /** Whether this run can start vornd with a session holder: both binaries, on a Unix. */
 export const vorndSessionsAvailable =
   process.platform !== 'win32' &&
@@ -165,8 +168,9 @@ export class BytesClient {
     })
   }
 
-  async connect(port: number): Promise<void> {
-    this.ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+  /** `headers` carries a credential for a real server behind vornd. */
+  async connect(port: number, headers?: Record<string, string>): Promise<void> {
+    this.ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, headers ? { headers } : undefined)
     this.ws.binaryType = 'nodebuffer'
     this.ws.on('message', (raw: Buffer, isBinary: boolean) => this.receive(raw, isBinary))
     await new Promise<void>((resolve, reject) => {

@@ -534,3 +534,70 @@ async fn the_endpoint_is_for_this_user_only() {
     assert_eq!(mode(&home.path().join("run")), 0o700);
     assert_eq!(mode(std::path::Path::new(&d.endpoint())), 0o600);
 }
+
+/// A session spawned under a name starts in the epoch it was given, and an
+/// attach from its start, made before it has written anything, streams its
+/// records live from that epoch's start. A name in use is refused, and so is
+/// one that is not a plain word.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_named_session_streams_from_its_own_epoch() {
+    let (d, _home, _t) = start(Duration::from_secs(60)).await;
+    let (mut v, _) = Vornd::hello(&d).await;
+    let spec = |argv: Vec<String>| SpawnSpec {
+        argv,
+        cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+        env: Vec::new(),
+        io: Io::Pty { cols: 80, rows: 24 },
+        ring_bytes: None,
+    };
+    v.send(ToSessiond::SpawnAs(SpawnAs {
+        req: 7,
+        session: "pane-1".into(),
+        epoch: 0xbeef,
+        // Quiet at first, so the attach comes before any record.
+        spec: spec(vec![
+            "sh".into(),
+            "-c".into(),
+            "sleep 0.3; i=0; while [ $i -lt 50 ]; do echo line$i; i=$((i+1)); done; exit 7".into(),
+        ]),
+    }))
+    .await;
+    let spawned = loop {
+        match v.recv().await {
+            Some(ToVornd::Spawned(s)) => break s,
+            Some(ToVornd::Failed(f)) => panic!("spawn failed: {}", f.error),
+            Some(_) => continue,
+            None => panic!("closed"),
+        }
+    };
+    assert_eq!(spawned.session, "pane-1");
+    assert_eq!(spawned.start, Cursor::start(0xbeef));
+    v.attach("pane-1", AttachFrom::SessionStart).await;
+    let entries = v.until_exit("pane-1").await;
+    assert!(entries.iter().all(|e| e.hdr.epoch == 0xbeef));
+    assert_eq!(entries[0].hdr.rseq, 0);
+    assert!(String::from_utf8_lossy(&bytes(&entries, None)).contains("line49"));
+    assert_eq!(exit_code(&entries), Some(7));
+
+    for (name, why) in [("pane-1", "still held"), ("../x", "not a session name")] {
+        v.send(ToSessiond::SpawnAs(SpawnAs {
+            req: 8,
+            session: name.into(),
+            epoch: 1,
+            spec: spec(vec!["true".into()]),
+        }))
+        .await;
+        loop {
+            match v.recv().await {
+                Some(ToVornd::Failed(f)) => {
+                    assert!(f.error.contains(why), "{name}: {}", f.error);
+                    break;
+                }
+                Some(ToVornd::Spawned(s)) => panic!("{name} spawned as {}", s.session),
+                Some(_) => continue,
+                None => panic!("closed"),
+            }
+        }
+    }
+}

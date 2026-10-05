@@ -1221,7 +1221,35 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 25 (published artifacts and their comments)')
   }
+
+  if (version < 26) {
+    d.transaction(() => {
+      d.exec(EFFECT_RECEIPTS_DDL)
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '26')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 26 (effects already acted on, by effect id)')
+  }
 }
+
+/**
+ * Effects from vornd this server has acted on, by effect id
+ * (`session:epoch:rseq:index`). vornd delivers notifications and the exits that
+ * start workflow steps at least once, and the same records replayed after a
+ * vornd restart produce the same ids, so a row here is what makes a repeat a
+ * no-op: a notification shown once, a step run once. `kind` sets how long a row
+ * is kept (see `pruneEffectReceipts`).
+ */
+const EFFECT_RECEIPTS_DDL = `
+  CREATE TABLE IF NOT EXISTS effect_receipts (
+    effect_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    received_at INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_effect_receipts_kind_time ON effect_receipts(kind, received_at);
+`
 
 /** Published artifacts, every version they have had, and the comments written on them. */
 const ARTIFACT_DDL = `
@@ -4536,4 +4564,30 @@ function mapArtifactCommentRow(r: Record<string, unknown>): ArtifactComment {
     updatedAt: r.updated_at as string,
     ...(r.sent_at != null && { sentAt: r.sent_at as string })
   }
+}
+
+// ─── Effect receipts ──────────────────────────────────────────────
+
+/**
+ * Record that this server acted on an effect, once. True the first time an id
+ * is claimed, false for every repeat: the caller acts only on true.
+ */
+export function claimEffectReceipt(
+  effectId: string,
+  kind: string,
+  at: number = Date.now()
+): boolean {
+  const result = getDb()
+    .prepare(
+      'INSERT OR IGNORE INTO effect_receipts (effect_id, kind, received_at) VALUES (?, ?, ?)'
+    )
+    .run(effectId, kind, at)
+  return result.changes === 1
+}
+
+/** Forget receipts of `kind` older than `before`; answers how many went. */
+export function pruneEffectReceipts(kind: string, before: number): number {
+  return getDb()
+    .prepare('DELETE FROM effect_receipts WHERE kind = ? AND received_at < ?')
+    .run(kind, before).changes
 }
