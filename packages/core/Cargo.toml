@@ -21,7 +21,7 @@ members = [
 
 [package]
 name = "vorn-core"
-version = "0.8.0-beta.2"
+version = "0.8.0-beta.3"
 edition = "2021"
 rust-version = "1.90"
 license = "MIT"
@@ -58,3 +58,11 @@ napi-build = "2"
 lto = true
 codegen-units = 1
 strip = "symbols"
+
+# What CI tests and checks with: release optimisation without the whole-program
+# LTO pass and single codegen unit, which every test binary would otherwise pay
+# for at link time. The shipped binaries still build with `release`.
+[profile.ci]
+inherits = "release"
+lto = "off"
+codegen-units = 16

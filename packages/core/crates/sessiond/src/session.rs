@@ -14,7 +14,9 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
-use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
+#[cfg(windows)]
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{Child, ChildKiller};
 use tokio::sync::Notify;
 use vorn_term_proto::{Record, Stream};
 
@@ -57,7 +59,7 @@ pub struct Session {
 
 struct State {
     log: SessionLog,
-    master: Option<Box<dyn MasterPty + Send>>,
+    master: Option<Master>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     /// Output streams still open.
     open_streams: u8,
@@ -97,35 +99,7 @@ impl Session {
         pool: SpoolPool,
         on_written: impl Fn(&str, Written) + Send + 'static,
     ) -> std::io::Result<Arc<Session>> {
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(std::io::Error::other)?;
-        let mut cmd = CommandBuilder::from_argv(spec.argv.iter().map(Into::into).collect());
-        cmd.cwd(&spec.cwd);
-        if !spec.env.is_empty() {
-            // The spec carries the whole environment.
-            cmd.env_clear();
-            for (k, v) in &spec.env {
-                cmd.env(k, v);
-            }
-        }
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(std::io::Error::other)?;
-        // Only the child keeps the slave open, so the master reads EOF when
-        // it and everything it started have closed it.
-        drop(pair.slave);
-        let reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(std::io::Error::other)?;
-        let writer = pair.master.take_writer().map_err(std::io::Error::other)?;
+        let (master, reader, writer, child) = open_terminal(spec, cols, rows)?;
         let pid = child.process_id().unwrap_or(0);
         let budget = sized(Budget::PTY, spec.ring_bytes);
         let log = SessionLog::new(0, budget, Overflow::Drop, spool, pool, (cols, rows));
@@ -135,7 +109,7 @@ impl Session {
             pid,
             state: Mutex::new(State {
                 log,
-                master: Some(pair.master),
+                master: Some(master),
                 killer: child.clone_killer(),
                 open_streams: 1,
                 held: 0,
@@ -146,7 +120,7 @@ impl Session {
             room: Condvar::new(),
             input: Mutex::new(None),
         });
-        session.start_writer(Box::new(writer), on_written);
+        session.start_writer(writer, on_written);
         session.start_reader(reader, Stream::Pty);
         session.start_reaper(child);
         Ok(session)
@@ -388,14 +362,7 @@ impl Session {
         let Some(master) = st.master.as_ref() else {
             return false;
         };
-        let ok = master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: px_w,
-                pixel_height: px_h,
-            })
-            .is_ok();
+        let ok = resize(master, cols, rows, px_w, px_h).is_ok();
         if ok {
             let _ = st.log.append(Record::Resize {
                 cols,
@@ -454,6 +421,140 @@ impl Drop for State {
             let _ = self.killer.kill();
         }
     }
+}
+
+/// A terminal's master end: kept for resizing, dropped to close it.
+#[cfg(unix)]
+type Master = crate::pty::Master;
+#[cfg(windows)]
+type Master = Box<dyn MasterPty + Send>;
+
+/// What a terminal session runs on: its master, the master's reading and
+/// writing ends, and the program.
+type Terminal = (
+    Master,
+    Box<dyn Read + Send>,
+    Box<dyn std::io::Write + Send>,
+    Box<dyn Child + Send + Sync>,
+);
+
+/// Start the spec's program on a new terminal. On macOS and Linux sessiond
+/// opens the terminal and starts the program itself ([`crate::pty`]).
+#[cfg(unix)]
+fn open_terminal(spec: &SpawnSpec, cols: u16, rows: u16) -> std::io::Result<Terminal> {
+    let (program, args) = spec
+        .argv
+        .split_first()
+        .ok_or_else(|| std::io::Error::other("empty argv"))?;
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    if !spec.env.is_empty() {
+        // The spec carries the whole environment.
+        cmd.env_clear().envs(spec.env.iter().cloned());
+    }
+    let env = |key: &str| -> Option<std::ffi::OsString> {
+        if spec.env.is_empty() {
+            std::env::var_os(key)
+        } else {
+            spec.env
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.into())
+        }
+    };
+    // A working directory that is gone starts the shell at home instead.
+    if Path::new(&spec.cwd).is_dir() {
+        cmd.current_dir(&spec.cwd);
+    } else if let Some(home) = env("HOME") {
+        cmd.current_dir(home);
+    }
+    // Shells start their own subshells by SHELL.
+    if env("SHELL").is_none() {
+        cmd.env("SHELL", login_shell());
+    }
+    let (master, child) = crate::pty::spawn(cmd, cols, rows)?;
+    let reader = master.reader()?;
+    let writer = master.writer()?;
+    Ok((master, Box::new(reader), Box::new(writer), Box::new(child)))
+}
+
+#[cfg(windows)]
+fn open_terminal(spec: &SpawnSpec, cols: u16, rows: u16) -> std::io::Result<Terminal> {
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(std::io::Error::other)?;
+    let mut cmd = CommandBuilder::from_argv(spec.argv.iter().map(Into::into).collect());
+    cmd.cwd(&spec.cwd);
+    if !spec.env.is_empty() {
+        // The spec carries the whole environment.
+        cmd.env_clear();
+        for (k, v) in &spec.env {
+            cmd.env(k, v);
+        }
+    }
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(std::io::Error::other)?;
+    // Only the child keeps the slave open, so the master reads EOF when
+    // it and everything it started have closed it.
+    drop(pair.slave);
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(std::io::Error::other)?;
+    let writer = pair.master.take_writer().map_err(std::io::Error::other)?;
+    Ok((pair.master, reader, writer, child))
+}
+
+#[cfg(unix)]
+fn resize(master: &Master, cols: u16, rows: u16, px_w: u16, px_h: u16) -> std::io::Result<()> {
+    master.resize(cols, rows, px_w, px_h)
+}
+
+#[cfg(windows)]
+fn resize(master: &Master, cols: u16, rows: u16, px_w: u16, px_h: u16) -> std::io::Result<()> {
+    master
+        .resize(PtySize {
+            rows,
+            cols,
+            pixel_width: px_w,
+            pixel_height: px_h,
+        })
+        .map_err(std::io::Error::other)
+}
+
+/// The user's login shell from the password database, else `/bin/sh`.
+#[cfg(unix)]
+fn login_shell() -> std::ffi::OsString {
+    use std::os::unix::ffi::OsStrExt;
+    let mut buf = vec![0 as libc::c_char; 4096];
+    // SAFETY: an all-zero passwd is a valid out-parameter for getpwuid_r.
+    let mut pw: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut found = std::ptr::null_mut();
+    // SAFETY: every pointer is valid for the call, and `buf.len()` is its size.
+    let rc = unsafe {
+        libc::getpwuid_r(
+            libc::getuid(),
+            &mut pw,
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut found,
+        )
+    };
+    if rc == 0 && !found.is_null() && !pw.pw_shell.is_null() {
+        // SAFETY: getpwuid_r found an entry, whose strings live in `buf`.
+        let shell = unsafe { std::ffi::CStr::from_ptr(pw.pw_shell) };
+        if !shell.is_empty() {
+            return std::ffi::OsStr::from_bytes(shell.to_bytes()).to_owned();
+        }
+    }
+    "/bin/sh".into()
 }
 
 fn sized(base: Budget, ring: Option<u32>) -> Budget {
@@ -595,6 +696,50 @@ mod tests {
             blob_crc32: crc32fast::hash(&blob),
             blob,
         }
+    }
+
+    /// A terminal session reads what the program printed, records a
+    /// resize before what follows it, and ends with the program's exit.
+    #[test]
+    fn a_terminal_session_runs_to_its_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = SpawnSpec {
+            argv: ["sh", "-c", "printf hi; read _; stty size; exit 4"]
+                .map(String::from)
+                .to_vec(),
+            cwd: dir.path().join("gone").to_string_lossy().into_owned(),
+            env: Vec::new(),
+            io: Io::Pty { cols: 80, rows: 24 },
+            ring_bytes: None,
+        };
+        let s =
+            Session::spawn("t".into(), &spec, dir.path(), SpoolPool::new(0), |_, _| {}).unwrap();
+        assert!(s.resize(1, 120, 40, 0, 0));
+        s.write(1, b"\n".to_vec());
+        let t = Instant::now();
+        let (out, exit) = loop {
+            assert!(t.elapsed() < Duration::from_secs(10), "exits");
+            let done = s.with_log(|l| {
+                let (_, recs) = l.attach(AttachFrom::SessionStart).unwrap();
+                let mut out = Vec::new();
+                let mut exit = None;
+                for e in &recs {
+                    match &e.rec {
+                        Record::Data { bytes, .. } => out.extend(bytes),
+                        Record::Exit { code, .. } => exit = Some(*code),
+                        _ => {}
+                    }
+                }
+                exit.map(|x| (String::from_utf8_lossy(&out).into_owned(), x))
+            });
+            if let Some(d) = done {
+                break d;
+            }
+            thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(exit, Some(4));
+        assert!(out.contains("hi"), "{out:?}");
+        assert!(out.contains("40 120"), "{out:?}");
     }
 
     /// A blocking session whose log is full when the program exits keeps
