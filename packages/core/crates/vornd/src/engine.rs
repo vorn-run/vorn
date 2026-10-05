@@ -36,10 +36,10 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vorn_engine::{Brief, Config, Effect, EffectId, Fidelity, Input, Open, Out, Pool, Summary};
 use vorn_sessiond_wire::{
-    Ack, Attach, AttachFrom, Io, Nonce, Resize, SessionRef, Spawn, SpawnSpec, ToSessiond, ToVornd,
-    Welcome, Write,
+    Ack, Attach, AttachFrom, Io, Kind, Nonce, Resize, SessionRef, Sig, Signal, Spawn, SpawnAs,
+    SpawnSpec, ToSessiond, ToVornd, Welcome, Write,
 };
-use vorn_term_proto::Cursor;
+use vorn_term_proto::{Cursor, Entry};
 
 use crate::holder::{Conn, Writer};
 use crate::streams::{Action, Snap, Streams};
@@ -73,6 +73,14 @@ const EVENTS: usize = 1024;
 
 enum Command {
     Spawn(SpawnSpec, oneshot::Sender<Result<String, String>>),
+    /// A spawn under the app's own name, in a fresh epoch.
+    SpawnAs(
+        String,
+        u32,
+        SpawnSpec,
+        oneshot::Sender<Result<String, String>>,
+    ),
+    Signal(String, Sig),
     Write(String, Vec<u8>),
     CloseStdin(String),
     /// Cut a last checkpoint for every session and send them.
@@ -97,6 +105,25 @@ pub enum Event {
     Closed(Arc<Summary>),
 }
 
+/// What the engine hands its tap ([`Engine::tap`]), in the order the
+/// sessions' actors produced it: each session's effects come before the
+/// records of the batch that caused them.
+#[derive(Debug, Clone)]
+pub enum Tapped {
+    /// Records of a session, once applied to its terminal.
+    Records(String, Vec<Entry>),
+    Effect(EffectId, Effect),
+}
+
+/// A session sessiond holds, as the engine learned of it: from a Welcome
+/// or from its own spawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Held {
+    pub kind: Kind,
+    pub pid: u32,
+    pub epoch: u32,
+}
+
 /// The connection the engine is running on, while there is one.
 struct Current {
     pool: Arc<Pool>,
@@ -111,6 +138,10 @@ pub struct Engine {
     closed: Mutex<VecDeque<Brief>>,
     events: broadcast::Sender<Event>,
     streams: Arc<Streams>,
+    /// Every session the current sessiond holds, by id.
+    held: Mutex<HashMap<String, Held>>,
+    /// Where applied records and effects also go, when someone asked.
+    tap: Mutex<Option<mpsc::UnboundedSender<Tapped>>>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -143,7 +174,70 @@ impl Engine {
             closed: Mutex::new(VecDeque::new()),
             events: broadcast::channel(EVENTS).0,
             streams: Streams::new(),
+            held: Mutex::new(HashMap::new()),
+            tap: Mutex::new(None),
         })
+    }
+
+    /// Every applied batch of records and every effect from now on, in
+    /// order and none dropped, for one consumer (the Node link,
+    /// [`crate::node_link`]). A second call replaces the first consumer.
+    /// Unbounded on purpose: what the actors produce is already bounded by
+    /// what sessiond sends, and a consumer that cannot keep up drops its
+    /// own backlog rather than slow every session.
+    pub fn tap(&self) -> mpsc::UnboundedReceiver<Tapped> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *self.tap.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        rx
+    }
+
+    fn tapped(&self, t: Tapped) {
+        let mut tap = self.tap.lock().unwrap_or_else(|e| e.into_inner());
+        if tap.as_ref().is_some_and(|tx| tx.send(t).is_err()) {
+            *tap = None;
+        }
+    }
+
+    fn tapping(&self) -> bool {
+        self.tap.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+    }
+
+    /// Whether the engine is connected to a sessiond now.
+    pub fn connected(&self) -> bool {
+        self.current().is_some()
+    }
+
+    /// The sessions the current sessiond holds, by id.
+    pub fn held(&self) -> HashMap<String, Held> {
+        self.held.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn held_mut(&self) -> std::sync::MutexGuard<'_, HashMap<String, Held>> {
+        self.held.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Starts a session named `name` in sessiond, in `epoch`, and runs it
+    /// through the engine. Refused while a session of that name is still
+    /// held: an ended one is released once its last record is applied.
+    pub async fn spawn_as(&self, name: &str, epoch: u32, spec: SpawnSpec) -> Result<Held, String> {
+        if self.held_mut().contains_key(name) {
+            return Err(format!("session {name} is still held"));
+        }
+        let (tx, rx) = oneshot::channel();
+        self.command(Command::SpawnAs(name.to_owned(), epoch, spec, tx))?;
+        let id = rx
+            .await
+            .map_err(|_| "the session holder connection closed".to_owned())??;
+        self.held_mut()
+            .get(&id)
+            .copied()
+            .ok_or_else(|| format!("session {id} ended as it started"))
+    }
+
+    /// Sends `sig` to a session's program. Its exit comes back as records
+    /// and an [`Effect::Exit`].
+    pub fn signal(&self, session: &str, sig: Sig) -> Result<(), String> {
+        self.command(Command::Signal(session.to_owned(), sig))
     }
 
     /// The terminal streams of the sessions this engine holds.
@@ -307,6 +401,18 @@ impl Engine {
         // However this ends, a dropped future included, the sessions go
         // with the connection.
         let _clear = Clear(self);
+        *self.held_mut() = welcome
+            .sessions
+            .iter()
+            .map(|i| {
+                let held = Held {
+                    kind: i.kind,
+                    pid: i.pid,
+                    epoch: i.epoch,
+                };
+                (i.session.clone(), held)
+            })
+            .collect();
         for info in &welcome.sessions {
             self.streams.opened(&info.session, info.epoch);
             pool.open(&info.session, Open::from_info(info));
@@ -500,6 +606,17 @@ impl Driver<'_> {
             ToVornd::Refused(r) => self.pool.input(&r.session, Input::Refused(r.why)),
             ToVornd::Spawned(s) => {
                 if let Some(p) = self.spawns.remove(&s.req) {
+                    let kind = if p.size.is_some() {
+                        Kind::Pty
+                    } else {
+                        Kind::Piped
+                    };
+                    let held = Held {
+                        kind,
+                        pid: s.pid,
+                        epoch: s.start.epoch,
+                    };
+                    self.engine.held_mut().insert(s.session.clone(), held);
                     self.engine.streams.opened(&s.session, s.start.epoch);
                     self.pool.open(&s.session, Open::spawned(s.start, p.size));
                     let _ = p.reply.send(Ok(s.session));
@@ -557,6 +674,10 @@ impl Driver<'_> {
                 if matches!(effect, Effect::Bell) {
                     self.engine.streams.bell(id);
                 }
+                if self.engine.tapping() {
+                    self.engine
+                        .tapped(Tapped::Effect(fx.clone(), effect.clone()));
+                }
                 let _ = self.engine.events.send(Event::Effect(fx, effect));
             }
             Out::Ready(f) => {
@@ -568,7 +689,13 @@ impl Driver<'_> {
             }
             Out::Lost => warn!(session = id, "session lost"),
             Out::Closed(summary) => self.closed(summary),
-            Out::Applied(entries) => self.engine.streams.applied(id, entries),
+            Out::Applied(entries) => {
+                if self.engine.tapping() {
+                    self.engine
+                        .tapped(Tapped::Records(id.to_owned(), entries.clone()));
+                }
+                self.engine.streams.applied(id, entries)
+            }
             Out::Live(at) => {
                 let actions = self.engine.streams.live(id, at);
                 self.engine.perform(actions);
@@ -596,6 +723,7 @@ impl Driver<'_> {
         let b = &summary.brief;
         if b.exited.is_some() {
             info!(session = %b.session, "session ended; releasing it");
+            self.engine.held_mut().remove(&b.session);
             self.send(ToSessiond::Release(SessionRef {
                 session: b.session.clone(),
             }));
@@ -652,6 +780,23 @@ impl Driver<'_> {
                     req: self.next_req,
                     spec,
                 }));
+            }
+            Command::SpawnAs(session, epoch, spec, reply) => {
+                self.next_req += 1;
+                let size = match spec.io {
+                    Io::Pty { cols, rows } => Some((cols, rows)),
+                    Io::Piped { .. } => None,
+                };
+                self.spawns.insert(self.next_req, Pending { reply, size });
+                self.send(ToSessiond::SpawnAs(SpawnAs {
+                    req: self.next_req,
+                    session,
+                    epoch,
+                    spec,
+                }));
+            }
+            Command::Signal(session, signal) => {
+                self.send(ToSessiond::Signal(Signal { session, signal }));
             }
             Command::Write(session, bytes) => self.write(session, bytes),
             Command::CloseStdin(session) => {

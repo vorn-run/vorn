@@ -58,6 +58,12 @@ pub const HEALTH_PATH: &str = "/vornd/health";
 /// and which version, without anything changing in the frames.
 pub const VORND_PROTOCOL_HEADER: HeaderName = HeaderName::from_static("vornd-protocol");
 
+/// Sent to the server on every WebSocket vornd forwards, so the server knows
+/// that client hears the terminals vornd holds from vornd, and does not send
+/// it their bytes a second time. A client that sets it on its own only
+/// withholds those bytes from itself.
+pub const FORWARDED_HEADER: HeaderName = HeaderName::from_static("vornd-forwarded");
+
 /// The server's own limit for one message is 100 MB; vornd allows a little more
 /// so it is never the one to refuse.
 const MAX_MESSAGE: usize = 128 << 20;
@@ -304,6 +310,9 @@ async fn websocket(daemon: Arc<Daemon>, mut req: Request<Incoming>) -> Response<
         }
     }
 
+    upstream_req
+        .headers_mut()
+        .insert(FORWARDED_HEADER, HeaderValue::from(VORND_PROTOCOL));
     let (server, accepted) =
         match tokio_tungstenite::connect_async_with_config(upstream_req, Some(ws_config()), false)
             .await

@@ -2423,6 +2423,7 @@ name = "vornd"
 version = "0.0.0"
 dependencies = [
  "bytes",
+ "data-encoding",
  "futures-util",
  "http-body-util",
  "hyper",

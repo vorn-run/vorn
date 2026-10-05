@@ -292,6 +292,17 @@ impl Conn {
                 let reply = self.spawn(sp);
                 return self.send(reply).await;
             }
+            ToSessiond::SpawnAs(sp) if self.d.draining.load(Ordering::SeqCst) => {
+                let reply = ToVornd::Failed(Failed {
+                    req: sp.req,
+                    error: "draining: start new sessions on the newer sessiond".into(),
+                });
+                return self.send(reply).await;
+            }
+            ToSessiond::SpawnAs(sp) => {
+                let reply = self.spawn_as(sp);
+                return self.send(reply).await;
+            }
             ToSessiond::Write(w) => {
                 if let Some(s) = self.d.session(&w.session) {
                     s.write(w.input_seq, w.bytes);
@@ -349,6 +360,24 @@ impl Conn {
     fn spawn(&self, sp: Spawn) -> ToVornd {
         let n = self.d.next_id.fetch_add(1, Ordering::SeqCst);
         let id = format!("{:08x}-{n}", self.d.cfg.instance as u32);
+        self.spawn_in(sp.req, id, 0, &sp.spec)
+    }
+
+    /// A spawn under the caller's name and epoch. The name must be a plain
+    /// word and free: a session still held here, ended or not, keeps it
+    /// until vornd releases it.
+    fn spawn_as(&self, sp: SpawnAs) -> ToVornd {
+        let refused = |error: String| ToVornd::Failed(Failed { req: sp.req, error });
+        if !valid_session_name(&sp.session) {
+            return refused(format!("`{}` is not a session name", sp.session));
+        }
+        if self.d.session(&sp.session).is_some() {
+            return refused(format!("session {} is still held", sp.session));
+        }
+        self.spawn_in(sp.req, sp.session, sp.epoch, &sp.spec)
+    }
+
+    fn spawn_in(&self, req: u64, id: String, epoch: u32, spec: &SpawnSpec) -> ToVornd {
         let d = Arc::downgrade(&self.d);
         let on_written = move |session: &str, w: crate::session::Written| {
             if let Some(d) = d.upgrade() {
@@ -361,13 +390,14 @@ impl Conn {
         };
         if let Err(e) = std::fs::create_dir_all(self.d.spool_dir()) {
             return ToVornd::Failed(Failed {
-                req: sp.req,
+                req,
                 error: e.to_string(),
             });
         }
-        match Session::spawn(
+        match Session::spawn_in(
             id.clone(),
-            &sp.spec,
+            epoch,
+            spec,
             &self.d.spool_dir(),
             self.d.pool.clone(),
             on_written,
@@ -376,14 +406,14 @@ impl Conn {
                 let pid = s.pid;
                 self.d.sessions().insert(id.clone(), s);
                 ToVornd::Spawned(Spawned {
-                    req: sp.req,
+                    req,
                     session: id,
                     pid,
-                    start: Cursor::start(0),
+                    start: Cursor::start(epoch),
                 })
             }
             Err(e) => ToVornd::Failed(Failed {
-                req: sp.req,
+                req,
                 error: e.to_string(),
             }),
         }

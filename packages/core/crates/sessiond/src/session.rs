@@ -78,18 +78,35 @@ impl Session {
         pool: SpoolPool,
         on_written: impl Fn(&str, Written) + Send + 'static,
     ) -> std::io::Result<Arc<Session>> {
+        Self::spawn_in(id, 0, spec, spool_dir, pool, on_written)
+    }
+
+    /// Spawn a session whose record log starts in `epoch`: a name used
+    /// again gets an epoch of its own, so no cursor from the earlier run
+    /// names a place in this one.
+    pub fn spawn_in(
+        id: String,
+        epoch: u32,
+        spec: &SpawnSpec,
+        spool_dir: &Path,
+        pool: SpoolPool,
+        on_written: impl Fn(&str, Written) + Send + 'static,
+    ) -> std::io::Result<Arc<Session>> {
         let spool = spool_dir.join(format!("{id}.log"));
         match spec.io {
             Io::Pty { cols, rows } => {
-                Self::spawn_pty(id, spec, cols, rows, spool, pool, on_written)
+                Self::spawn_pty(id, epoch, spec, cols, rows, spool, pool, on_written)
             }
-            Io::Piped { stdin } => Self::spawn_piped(id, spec, stdin, spool, pool, on_written),
+            Io::Piped { stdin } => {
+                Self::spawn_piped(id, epoch, spec, stdin, spool, pool, on_written)
+            }
         }
     }
 
     #[allow(clippy::too_many_arguments)]
     fn spawn_pty(
         id: String,
+        epoch: u32,
         spec: &SpawnSpec,
         cols: u16,
         rows: u16,
@@ -128,7 +145,7 @@ impl Session {
         let writer = pair.master.take_writer().map_err(std::io::Error::other)?;
         let pid = child.process_id().unwrap_or(0);
         let budget = sized(Budget::PTY, spec.ring_bytes);
-        let log = SessionLog::new(0, budget, Overflow::Drop, spool, pool, (cols, rows));
+        let log = SessionLog::new(epoch, budget, Overflow::Drop, spool, pool, (cols, rows));
         let session = Arc::new(Session {
             id,
             kind: Kind::Pty,
@@ -152,8 +169,10 @@ impl Session {
         Ok(session)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn spawn_piped(
         id: String,
+        epoch: u32,
         spec: &SpawnSpec,
         stdin: Stdin,
         spool: std::path::PathBuf,
@@ -182,7 +201,7 @@ impl Session {
         let input = child.stdin.take();
         let pid = child.id();
         let budget = sized(Budget::PIPED, spec.ring_bytes);
-        let log = SessionLog::new(0, budget, Overflow::Block, spool, pool, (0, 0));
+        let log = SessionLog::new(epoch, budget, Overflow::Block, spool, pool, (0, 0));
         let child: Box<dyn Child + Send + Sync> = Box::new(child);
         let session = Arc::new(Session {
             id,

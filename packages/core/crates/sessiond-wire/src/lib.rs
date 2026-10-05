@@ -82,6 +82,32 @@ pub struct Spawn {
     pub spec: SpawnSpec,
 }
 
+/// A spawn under a name the caller chose, in an epoch it chose: the app
+/// keeps its own terminal ids, and a name used again (a resumed session)
+/// starts a new epoch, so no cursor from the earlier run names a place in
+/// the new one. Refused when the name is not [`valid_session_name`] or is
+/// still held.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpawnAs {
+    pub req: u64,
+    pub session: SessionId,
+    pub epoch: u32,
+    pub spec: SpawnSpec,
+}
+
+/// The longest name [`SpawnAs`] accepts.
+pub const MAX_SESSION_NAME: usize = 64;
+
+/// Whether `name` may name a session: 1 to [`MAX_SESSION_NAME`] ASCII
+/// letters, digits, `-` and `_`. Names become file names and thread names,
+/// so nothing that could leave a directory or need quoting gets through.
+pub fn valid_session_name(name: &str) -> bool {
+    (1..=MAX_SESSION_NAME).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Write {
     pub session: SessionId,
@@ -295,6 +321,7 @@ messages! {
         Release(SessionRef) = 0x0a,
         Ping(Nonce) = 0x0b,
         Drain(Drain) = 0x0c,
+        SpawnAs(SpawnAs) = 0x0d,
     }
 }
 
@@ -404,7 +431,31 @@ mod tests {
                 blob: b"blob".to_vec(),
             }),
             ToSessiond::Ping(Nonce { nonce: 42 }),
+            ToSessiond::SpawnAs(SpawnAs {
+                req: 4,
+                session: "0f9c2d1e-3b4a-4c5d-8e7f-a0b1c2d3e4f5".into(),
+                epoch: 0xdead_beef,
+                spec: SpawnSpec {
+                    argv: vec!["sh".into()],
+                    cwd: "/".into(),
+                    env: Vec::new(),
+                    io: Io::Pty { cols: 80, rows: 24 },
+                    ring_bytes: None,
+                },
+            }),
         ]
+    }
+
+    #[test]
+    fn a_session_name_is_a_plain_word() {
+        assert!(valid_session_name("0f9c2d1e-3b4a-4c5d-8e7f-a0b1c2d3e4f5"));
+        assert!(valid_session_name("a_b-9"));
+        assert!(valid_session_name(&"x".repeat(MAX_SESSION_NAME)));
+        assert!(!valid_session_name(""));
+        assert!(!valid_session_name(&"x".repeat(MAX_SESSION_NAME + 1)));
+        for bad in ["../up", "a/b", "a b", "a.log", "é", "a\\b"] {
+            assert!(!valid_session_name(bad), "{bad}");
+        }
     }
 
     #[test]

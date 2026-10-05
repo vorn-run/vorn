@@ -10,12 +10,17 @@
 //! Given a sessiond binary, it also keeps a session holder running
 //! ([`holder`]) and, with the `engine` feature, runs every session it holds
 //! through the session engine ([`engine`]) and answers the terminal calls
-//! for those sessions itself ([`terminal`], [`streams`]).
+//! for those sessions itself ([`terminal`], [`streams`]). Given the
+//! server's credential, it is also the server's process backend
+//! ([`node_link`]): the server creates, signals and feeds its terminals and
+//! piped agents through vornd instead of spawning them itself.
 
 #[cfg(feature = "engine")]
 pub mod engine;
 pub mod groups;
 pub mod holder;
+#[cfg(feature = "engine")]
+pub mod node_link;
 pub mod protocol;
 pub mod proxy;
 pub mod streams;
@@ -23,4 +28,11 @@ pub mod streams;
 pub mod terminal;
 
 pub use groups::{Groups, Mode};
+
+/// The variable the app hands vornd the server's credential in. Here rather
+/// than only in [`node_link`] so a build without the engine still takes it
+/// out of its environment.
+pub const fn node_link_token_env() -> &'static str {
+    "VORND_SERVER_TOKEN"
+}
 pub use proxy::{serve, Daemon};

@@ -2,6 +2,12 @@
 //!
 //! Prints one line of JSON, `{"port":N,"protocol":P}`, once it is listening, so
 //! whoever started it knows where to connect.
+//!
+//! With a session holder and the server's credential in `VORND_SERVER_TOKEN`,
+//! it also links to the server as its process backend
+//! ([`vornd::node_link`]), and says where it listens only once the link is up
+//! or [`LINK_WAIT`] has passed, so the app's first terminals already go
+//! through it.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -32,7 +38,16 @@ const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT]
   --home       the data directory, $VORN_HOME
   --debug-spawn
                answer vornd:spawn, which starts a session in the session holder;
-               for tests, until the app creates its sessions through vornd";
+               for tests
+
+  VORND_SERVER_TOKEN, with --sessiond, makes vornd the server's process
+  backend: it links to the server with that credential and the server starts
+  its terminals and agents through it";
+
+/// How long vornd waits for the server link before saying where it listens.
+/// Under the app's own start timeout for vornd, with room to spare.
+#[cfg(feature = "engine")]
+const LINK_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[derive(Debug)]
 struct Args {
@@ -171,7 +186,35 @@ fn new_holder(_: &HolderConfig) -> Holder {
     Holder::new()
 }
 
+/// Starts the server link and waits a little for it to come up.
+#[cfg(feature = "engine")]
+async fn link(engine: &Arc<vornd::engine::Engine>, upstream: SocketAddr, token: String) {
+    use vornd::node_link::{self, LinkConfig};
+    let (linked, mut up) = tokio::sync::watch::channel(false);
+    tokio::spawn(node_link::run(
+        Arc::clone(engine),
+        LinkConfig { upstream, token },
+        linked,
+    ));
+    if tokio::time::timeout(LINK_WAIT, up.wait_for(|&v| v))
+        .await
+        .is_err()
+    {
+        info!("the server link is not up yet; listening anyway");
+    }
+}
+
+/// The server's credential, taken out of the environment before any thread
+/// or child exists, so no session holder or program inherits it.
+fn take_server_token() -> Option<String> {
+    let token = std::env::var(vornd::node_link_token_env()).ok();
+    // Single-threaded here: nothing else reads the environment yet.
+    std::env::remove_var(vornd::node_link_token_env());
+    token.filter(|t| !t.is_empty())
+}
+
 fn main() -> ExitCode {
+    let server_token = take_server_token();
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(args) => args,
         Err(message) => {
@@ -213,6 +256,10 @@ fn main() -> ExitCode {
             Some(cfg) => {
                 let holder = Arc::new(new_holder(&cfg));
                 tokio::spawn(holder::keep(cfg, holder.clone()));
+                #[cfg(feature = "engine")]
+                if let (Some(token), Some(engine)) = (server_token.clone(), holder.engine()) {
+                    link(engine, args.upstream, token).await;
+                }
                 kept = Some(holder.clone());
                 Daemon::with_holder(args.upstream, args.groups, holder)
             }
