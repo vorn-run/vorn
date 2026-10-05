@@ -61,6 +61,7 @@ import {
   SERVER_LOG_FILENAME
 } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
+import { vorndSessions } from './vornd-sessions'
 import { configureHistory, flushHistory, checkpointAll } from './history/writer'
 import { recoverHistory } from './history/recovery'
 import { seedRestored, markRecovered, verifyRestored, consumeRestored } from './restored-sessions'
@@ -690,6 +691,13 @@ export async function startServer(
 
   log.info(`[server] listening on ${host}:${actualPort} (ready in ${Date.now() - bootStarted}ms)`)
 
+  // A vornd already running for this data directory, from before this server
+  // started: its sessions are this server's terminals. The app also says so
+  // (`server:vorndReady`) whenever it starts one.
+  if (configManager.loadConfig().defaults.experimental?.vornd === true) {
+    void vorndSessions.connect()
+  }
+
   // Graceful shutdown
   const { hookServer } = await import('./hook-server')
   const { uninstallHooks } = await import('./hook-installer')
@@ -735,6 +743,7 @@ export async function startServer(
     scheduler.stopAll()
     headlessManager.killAll()
     ptyManager.killAll()
+    vorndSessions.close()
     stopAllFooters()
     abandonSelections()
     await stopExtensionPageServer()

@@ -1821,7 +1821,9 @@ export interface BranchDeleteResult {
 export interface ExperimentalConfig {
   /**
    * The desktop app talks to the server through vornd, the native daemon,
-   * instead of directly. Read by the app rather than the server, when it starts.
+   * instead of directly, and the server starts its terminals and headless
+   * agents in vornd, so they outlive the server and the app. Read by the app
+   * when it starts, and by the server as each session starts.
    */
   vornd?: boolean
 }
@@ -1924,6 +1926,7 @@ export const IPC = {
   TERMINAL_LIST_ACTIVE: 'terminal:listActive',
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_BELL: 'terminal:bell',
+  TERMINAL_NOTIFY: 'terminal:notify',
   TERMINAL_RESYNC: 'terminal:resync',
   TERMINAL_EXIT: 'terminal:exit',
   /** A version 2 terminal frame from vornd, passed to the renderer undecoded. */

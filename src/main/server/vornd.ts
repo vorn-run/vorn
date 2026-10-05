@@ -76,6 +76,8 @@ export interface Vornd {
   port: number
   /** The server port it forwards to. */
   upstream: number
+  /** Its channel for the server, when it holds sessions: the server starts terminals there. */
+  app?: string
   /** Called once if it exits, with why, unless `stop` was called first. */
   onExit(listener: (detail: string) => void): void
   stop(): void
@@ -177,14 +179,14 @@ export function startVornd(
     const lines = createInterface({ input: child.stdout })
     lines.once('line', (line) => {
       lines.close()
-      let reported: { port?: unknown; protocol?: unknown }
+      let reported: { port?: unknown; protocol?: unknown; app?: unknown }
       try {
         reported = JSON.parse(line) ?? {}
       } catch {
         fail(new Error(`vornd said something other than where it listens: ${line}`))
         return
       }
-      const { port, protocol } = reported
+      const { port, protocol, app } = reported
       if (typeof port !== 'number' || !Number.isInteger(port) || port <= 0) {
         fail(new Error(`vornd reported no usable port: ${line}`))
         return
@@ -198,6 +200,7 @@ export function startVornd(
       resolve({
         port,
         upstream,
+        ...(typeof app === 'string' && app ? { app } : {}),
         onExit(listener) {
           if (stopped) return
           if (exitDetail !== null) listener(exitDetail)

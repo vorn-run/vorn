@@ -67,6 +67,7 @@ import { pipelineFor } from './core-pipeline'
 import type { RecordHeader } from './history/log'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 import { isHandingOver, HANDOVER_MESSAGE } from './handoff/donor'
+import { vorndSessions, VorndPty, type HeldSession, type VorndExit } from './vornd-sessions'
 
 /**
  * What a PTY starts at, before any client has fitted itself to a pane.
@@ -438,10 +439,7 @@ class PtyManager extends EventEmitter {
       branch,
       headCommit
     } = prepared
-    const ptyProcess = pty.spawn(shell, getShellArgs(), {
-      name: 'xterm-256color',
-      cols: INITIAL_COLS,
-      rows: INITIAL_ROWS,
+    const ptyProcess = this.startProcess(id, shell, getShellArgs(), {
       cwd: effectivePath,
       // No shell integration: an agent paints its own full-screen interface
       // and is never drawn as command blocks. Installing the shim anyway made
@@ -458,7 +456,7 @@ class PtyManager extends EventEmitter {
 
     setTimeout(() => ptyProcess.write(launchLine + '\r'), 300)
 
-    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
+    this.wireProcess(id, ptyProcess)
     this.ptys.set(id, ptyProcess)
 
     const session: TerminalSession = {
@@ -498,13 +496,14 @@ class PtyManager extends EventEmitter {
     host: RemoteHost
   ): TerminalSession {
     const agentLine = this.buildAgentLaunchLine(payload)
-    const ptyProcess = pty.spawn(shell, getShellArgs(), {
-      name: 'xterm-256color',
-      cols: INITIAL_COLS,
-      rows: INITIAL_ROWS,
-      cwd: os.homedir(),
-      env: getSafeEnv()
-    })
+    // Read here as well as shown: the login is answered from what it prints.
+    const ptyProcess = this.startProcess(
+      id,
+      shell,
+      getShellArgs(),
+      { cwd: os.homedir(), env: getSafeEnv() },
+      true
+    )
 
     // Build SSH command based on auth method, with a ready marker for reliable prompt detection
     const marker = `__VORN_READY_${id.slice(0, 8)}__`
@@ -621,7 +620,7 @@ class PtyManager extends EventEmitter {
     })
 
     // Forward all data to the renderer from the start
-    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
+    this.wireProcess(id, ptyProcess)
     this.ptys.set(id, ptyProcess)
 
     // Clean up the prompt listener after connection or timeout
@@ -677,10 +676,7 @@ class PtyManager extends EventEmitter {
     })
     // bash and PowerShell have no environment variable that injects
     // initialisation, so integration for them replaces the launch arguments.
-    const ptyProcess = pty.spawn(shell, integration.args ?? getShellArgs(), {
-      name: 'xterm-256color',
-      cols: INITIAL_COLS,
-      rows: INITIAL_ROWS,
+    const ptyProcess = this.startProcess(id, shell, integration.args ?? getShellArgs(), {
       cwd: workingDir,
       env: {
         ...getSafeEnv(),
@@ -689,7 +685,7 @@ class PtyManager extends EventEmitter {
         VORN_SESSION_ID: id
       }
     })
-    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
+    this.wireProcess(id, ptyProcess)
     this.ptys.set(id, ptyProcess)
 
     const shellCount =
@@ -730,14 +726,11 @@ class PtyManager extends EventEmitter {
     env: Record<string, string>
   }): TerminalSession {
     const id = crypto.randomUUID()
-    const ptyProcess = pty.spawn(params.command, params.args, {
-      name: 'xterm-256color',
-      cols: INITIAL_COLS,
-      rows: INITIAL_ROWS,
+    const ptyProcess = this.startProcess(id, params.command, params.args, {
       cwd: params.cwd,
       env: { ...getSafeEnv(), ...params.env, VORN_SESSION_ID: id }
     })
-    this.setupPtyEvents(id, ptyProcess, INITIAL_COLS, INITIAL_ROWS)
+    this.wireProcess(id, ptyProcess)
     this.ptys.set(id, ptyProcess)
 
     const session: TerminalSession = {
@@ -757,6 +750,104 @@ class PtyManager extends EventEmitter {
     this.extensionPtys.add(id)
     this.normalizedPaths.set(id, normalizePath(params.cwd))
     return session
+  }
+
+  /**
+   * Start a session's program: in vornd when the Native daemon switch is on
+   * and vornd is connected, so it outlives this server, else on a PTY here.
+   *
+   * @param watched Whether this server reads the output of a session in vornd.
+   *   Only what answers from the output needs to: a remote login.
+   */
+  private startProcess(
+    id: string,
+    file: string,
+    args: string[] | string,
+    opts: { cwd: string; env: Record<string, string> },
+    watched = false
+  ): ManagedPty {
+    if (vorndSessions.inUse()) {
+      const argv = [file, ...(typeof args === 'string' ? [args] : args)]
+      const spec = { argv, cwd: opts.cwd, env: opts.env, cols: INITIAL_COLS, rows: INITIAL_ROWS }
+      return vorndSessions.spawn(id, spec, watched)
+    }
+    if (configManager.loadConfig().defaults.experimental?.vornd === true) {
+      log.warn(
+        { id },
+        '[pty] vornd is not connected; this terminal starts here and ends with the server'
+      )
+    }
+    return pty.spawn(file, args, {
+      name: 'xterm-256color',
+      cols: INITIAL_COLS,
+      rows: INITIAL_ROWS,
+      cwd: opts.cwd,
+      env: opts.env
+    })
+  }
+
+  /** What a new session's program reports, wherever it runs. */
+  private wireProcess(id: string, held: ManagedPty): void {
+    if (held instanceof VorndPty) this.setupVorndEvents(id, held)
+    else this.setupPtyEvents(id, held, INITIAL_COLS, INITIAL_ROWS)
+  }
+
+  /** The status vornd last reported for each of its sessions. */
+  private vorndStatus = new Map<string, AgentStatus>()
+
+  /**
+   * A session in vornd. Its output never comes here: vornd keeps its screen
+   * and history and serves its clients, and says what the output meant.
+   */
+  private setupVorndEvents(id: string, held: VorndPty): void {
+    held.on('started', (pid: number) => {
+      const session = this.sessions.get(id)
+      if (session) session.pid = pid
+    })
+    held.on('status', (code: number) => {
+      const session = this.sessions.get(id)
+      const status = NATIVE_STATUS[code]
+      if (!session || !status) return
+      this.vorndStatus.set(id, status)
+      if (session.agentType === 'shell' || session.statusSource === 'hooks') return
+      this.setStatus(id, status)
+    })
+    held.on('cwd', (cwd: string) => this.noteShellCwd(id, cwd))
+    held.on('activity', () => {
+      const session = this.sessions.get(id)
+      if (!session || session.agentType === 'shell') return
+      // Printing again after going idle, with nothing new to say: running.
+      if (
+        session.status === 'idle' &&
+        session.statusSource !== 'hooks' &&
+        this.vorndStatus.get(id) === 'running'
+      ) {
+        this.setStatus(id, 'running')
+      }
+      this.armIdle(id, session)
+    })
+    held.onExit((exit) => this.processEnded(id, exit))
+  }
+
+  /**
+   * Take on a terminal vornd still holds from this server's previous run,
+   * under the record that run saved.
+   */
+  adoptVornd(session: TerminalSession, held: HeldSession): void {
+    const watched = !!session.remoteHostId
+    const program = vorndSessions.adopt(held, watched)
+    session.pid = held.pid
+    session.status = 'running'
+    this.sessions.set(session.id, session)
+    if (!this.sessionOrder.includes(session.id)) this.sessionOrder.push(session.id)
+    this.normalizedPaths.set(session.id, normalizePath(session.worktreePath || session.projectPath))
+    this.setupVorndEvents(session.id, program)
+    this.ptys.set(session.id, program)
+  }
+
+  /** Whether vornd holds this session's program. */
+  isInVornd(id: string): boolean {
+    return this.ptys.get(id) instanceof VorndPty
   }
 
   /** Whether this PTY is an extension's pane rather than a session someone started. */
@@ -1223,48 +1314,53 @@ class PtyManager extends EventEmitter {
       this.appendOutput(id, data)
     })
 
-    ptyProcess.onExit(({ exitCode }) => {
-      // Whatever is buffered is the last thing this terminal ever printed.
-      this.drainBuffer(id)
-      this.clearBuffer(id)
-      this.deleteTempKey(id)
-      this.clearSessionTracking(id)
-      this.flushSeq.delete(id)
-      this.cursors.delete(id)
-      clearScrollback(id)
-      // Beside the scrollback it belongs to: the PTY is gone and nothing will
-      // draw into it again. The session record survives so the card can show an
-      // exit code, but its history does not -- that is pre-existing, and this
-      // matches it rather than quietly deciding otherwise.
-      clearScreen(id)
-      // And the same for what was written for it. A terminal whose process has
-      // exited has nothing worth restoring -- refused during shutdown, where the
-      // PTYs are killed after the checkpoints have been written.
-      stopHistory(id)
-      this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
+    ptyProcess.onExit(({ exitCode }) => this.processEnded(id, { exitCode }))
+  }
 
-      this.ptys.delete(id)
-      const session = this.sessions.get(id)
-      if (session) {
-        this.emit('session-exit', session)
-        session.status = 'idle'
-        if (session.agentType === 'shell') {
-          session.shellExitCode = exitCode
-        }
-        if (session.worktreePath) {
-          // Only prompt cleanup when this is the last session using the worktree
-          const remaining = this.countWorktreeSessions(session.worktreePath, session.id)
-          if (remaining === 0) {
-            this.emit('client-message', IPC.WORKTREE_CONFIRM_CLEANUP, {
-              id: session.id,
-              projectPath: session.projectPath,
-              worktreePath: session.worktreePath
-            })
-          }
+  /** A session's program ended, here or in vornd. */
+  private processEnded(id: string, { exitCode, repeated }: VorndExit): void {
+    // Whatever is buffered is the last thing this terminal ever printed.
+    this.drainBuffer(id)
+    this.clearBuffer(id)
+    this.deleteTempKey(id)
+    this.clearSessionTracking(id)
+    this.flushSeq.delete(id)
+    this.cursors.delete(id)
+    clearScrollback(id)
+    // Beside the scrollback it belongs to: the PTY is gone and nothing will
+    // draw into it again. The session record survives so the card can show an
+    // exit code, but its history does not -- that is pre-existing, and this
+    // matches it rather than quietly deciding otherwise.
+    clearScreen(id)
+    // And the same for what was written for it. A terminal whose process has
+    // exited has nothing worth restoring -- refused during shutdown, where the
+    // PTYs are killed after the checkpoints have been written.
+    stopHistory(id)
+    this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
+
+    this.ptys.delete(id)
+    this.vorndStatus.delete(id)
+    const session = this.sessions.get(id)
+    if (session) {
+      this.emit('session-exit', session)
+      session.status = 'idle'
+      if (session.agentType === 'shell') {
+        session.shellExitCode = exitCode
+      }
+      // An exit told again, after vornd restarted, was acted on the first time.
+      if (session.worktreePath && !repeated) {
+        // Only prompt cleanup when this is the last session using the worktree
+        const remaining = this.countWorktreeSessions(session.worktreePath, session.id)
+        if (remaining === 0) {
+          this.emit('client-message', IPC.WORKTREE_CONFIRM_CLEANUP, {
+            id: session.id,
+            projectPath: session.projectPath,
+            worktreePath: session.worktreePath
+          })
         }
       }
-      this.emit('client-message', IPC.TERMINAL_EXIT, { id, exitCode })
-    })
+    }
+    if (!repeated) this.emit('client-message', IPC.TERMINAL_EXIT, { id, exitCode })
   }
 
   writeToPty(id: string, data: string): void {
@@ -1316,6 +1412,8 @@ class PtyManager extends EventEmitter {
       session.cols = cols
       session.rows = rows
     }
+    // vornd sizes its sessions from the clients watching them, and keeps their records.
+    if (this.isInVornd(id)) return
     this.ptys.get(id)?.resize(cols, rows)
     // The same numbers, so the model wraps where the program does. Not awaited:
     // this is reached from a fire-and-forget notification, and the model drains
@@ -1464,7 +1562,8 @@ class PtyManager extends EventEmitter {
    * most of the terminals looks exactly like losing the rest.
    */
   describeForHandoff(): DonorPane[] | null {
-    const live = [...this.ptys.keys()]
+    // A session in vornd is not this server's to hand over: it stays where it is.
+    const live = [...this.ptys.keys()].filter((id) => !this.isInVornd(id))
     const ranked = [...live].sort((a, b) => {
       const ai = this.sessionOrder.indexOf(a)
       const bi = this.sessionOrder.indexOf(b)
@@ -1561,9 +1660,12 @@ class PtyManager extends EventEmitter {
     }
 
     for (const [id, p] of this.ptys) {
-      p.kill()
+      // Left running: a session in vornd outlives this server.
+      if (p instanceof VorndPty) vorndSessions.release(id)
+      else p.kill()
       this.ptys.delete(id)
     }
+    this.vorndStatus.clear()
     this.sessions.clear()
     for (const analyzer of this.analyzers.values()) analyzer.free()
     this.analyzers.clear()
@@ -1706,6 +1808,13 @@ class PtyManager extends EventEmitter {
     }
     this.sessionOrder = ids
     this.emit('client-message', IPC.SESSION_REORDERED, ids)
+  }
+
+  /** `getOutput`, or vornd's model of the screen for a session it holds. */
+  async readOutput(id: string, lines?: number): Promise<string[]> {
+    if (!this.sessions.has(id)) throw new Error(`Session not found: ${id}`)
+    if (this.isInVornd(id)) return vorndSessions.readOutput(id, lines)
+    return this.getOutput(id, lines)
   }
 
   getOutput(id: string, lines?: number): string[] {

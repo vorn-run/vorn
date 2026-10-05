@@ -122,6 +122,19 @@ export function sendAgentNotification(
   dispatch(reason, terminal.id, prefs, title, body, onClick)
 }
 
+/** A notification the program in a terminal asked for, in its own words. */
+export function sendProgramNotification(
+  terminal: TerminalState,
+  title: string,
+  body: string,
+  config: AppConfig | null,
+  onClick?: () => void
+): void {
+  const prefs = config?.defaults.notifications
+  const shown = title || getDisplayName(terminal.session)
+  dispatch('bell', `notify:${terminal.id}`, prefs, shown, body, onClick)
+}
+
 function dispatchWorkflowWait(
   tag: string,
   title: string,

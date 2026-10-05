@@ -18,7 +18,7 @@ import { ToggleSwitch } from './ToggleSwitch'
 const VORND_SWITCH = {
   label: 'Native daemon',
   description:
-    'Connect to the server through vornd, the native daemon, instead of directly. Applies after restarting Vorn'
+    'Run terminals and agents in vornd, the native daemon, so they keep running when Vorn closes. Applies after restarting Vorn'
 }
 
 /** What vornd is doing, when it differs from what the switch says, or null. */

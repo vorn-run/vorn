@@ -113,7 +113,7 @@ async function answer(
     case 'output': {
       const asked = typeof body.lines === 'number' ? body.lines : DEFAULT_OUTPUT_LINES
       const lines = Math.min(Math.max(Math.trunc(asked), 1), MAX_OUTPUT_LINES)
-      const text = ptyManager.getOutput(session.id, lines).join('\n')
+      const text = (await ptyManager.readOutput(session.id, lines)).join('\n')
       // Trimmed from the front: a reader asking for output wants how it ended.
       return { result: text.length > MAX_OUTPUT_BYTES ? text.slice(-MAX_OUTPUT_BYTES) : text }
     }

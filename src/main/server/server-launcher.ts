@@ -1017,7 +1017,10 @@ function stopVornd(): void {
 async function routeThroughVornd(upstream: number | null): Promise<void> {
   const current = bridge
   if (!current) return
-  if (vornd && vornd.upstream === upstream) return
+  if (vornd && vornd.upstream === upstream) {
+    await tellServer(current, vornd)
+    return
+  }
   stopVornd()
 
   const direct = upstream === null ? null : portUrl(upstream)
@@ -1068,6 +1071,11 @@ async function routeThroughVornd(upstream: number | null): Promise<void> {
     fallBack(`vornd exited (${detail})`)
   })
 
+  // Before any window reaches the server through it: the terminals vornd holds
+  // are the server's again by the time anyone asks for the list.
+  await tellServer(current, started)
+  if (vornd !== started) return
+
   current.retarget(portUrl(started.port))
   const connected = await new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => {
@@ -1088,6 +1096,28 @@ async function routeThroughVornd(upstream: number | null): Promise<void> {
   }
   vorndStatus = { state: 'on', port: started.port }
   log.info(`[launcher] talking to the server on ${upstream} through vornd on ${started.port}`)
+}
+
+/** How long the server has to take stock of what vornd holds. */
+const VORND_READY_TIMEOUT_MS = 5_000
+
+/**
+ * Tell the server where vornd's channel for it is, so it starts terminals
+ * there and takes on the ones vornd holds. A server that cannot is left to
+ * start them itself.
+ */
+async function tellServer(server: ServerBridge, started: Vornd): Promise<void> {
+  if (!started.app) return
+  const told = server.request('server:vorndReady', { endpoint: started.app })
+  const late = new Promise<null>((resolve) =>
+    setTimeout(() => resolve(null), VORND_READY_TIMEOUT_MS).unref()
+  )
+  const answer = (await Promise.race([told, late]).catch((err: Error) => {
+    log.warn(`[launcher] the server could not use vornd's sessions: ${err.message}`)
+    return null
+  })) as { connected?: boolean } | null
+  if (answer?.connected) log.info('[launcher] the server starts its terminals in vornd')
+  else log.warn('[launcher] the server is starting its terminals itself')
 }
 
 /**
