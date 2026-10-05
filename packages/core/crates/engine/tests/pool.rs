@@ -256,7 +256,31 @@ fn an_ended_session_leaves_the_pool() {
 /// nobody holds.
 #[test]
 fn a_grid_attach_to_a_session_that_left_fails_closed() {
-    let (pool, rx) = pool_on_channel((*config(1 << 20)).clone());
+    // The worker is held inside the sink while it hands over the exit's
+    // effect: the session is still placed then, and leaves only once the
+    // worker goes on. An attach sent in that window is queued behind the
+    // exit and reaches a worker that has closed the session, every time,
+    // rather than only when this thread wins a race with the worker.
+    let gate = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let (tx, rx) = mpsc::channel::<(String, Out)>();
+    let tx = std::sync::Mutex::new(tx);
+    let held = Arc::clone(&gate);
+    let pool = Pool::new(
+        2,
+        (*config(1 << 20)).clone(),
+        Arc::new(move |id: &str, out: Out| {
+            let exit = matches!(out, Out::Effect(_, Effect::Exit { .. }));
+            let _ = tx.lock().unwrap().send((id.to_owned(), out));
+            if exit {
+                let (open, turn) = &*held;
+                let mut open = open.lock().unwrap();
+                while !*open {
+                    open = turn.wait(open).unwrap();
+                }
+            }
+        }),
+    )
+    .unwrap();
     let attach = |conn| GridIn::Attach {
         peer: Peer { conn, sid: 1 },
         attach: Attach {
@@ -273,20 +297,22 @@ fn a_grid_attach_to_a_session_that_left_fails_closed() {
     });
     d.append(&b.build().entries);
     pool.open("a", Open::spawned(Cursor::start(0), Some(SIZE)));
-    let mut sent = false;
     loop {
         let (id, out) = rx.recv_timeout(Duration::from_secs(10)).unwrap();
         match out {
-            // The exit's records, then an attach queued behind them while the
-            // session is still placed: it reaches a worker that closed it.
             Out::Attach(from) => {
                 for input in d.attach(from) {
                     pool.input(&id, input);
                 }
-                sent = pool.grid(&id, attach(2));
+            }
+            // The worker waits in the sink: the session is still placed.
+            Out::Effect(_, Effect::Exit { .. }) => {
+                assert!(pool.grid(&id, attach(2)), "the session is still open");
+                let (open, turn) = &*gate;
+                *open.lock().unwrap() = true;
+                turn.notify_all();
             }
             Out::Grid(HubOut::Send { conn: 2, msg }) => {
-                assert!(sent);
                 assert!(matches!(msg, ServerMsg::Error { code: 404, .. }), "{msg:?}");
                 return;
             }
