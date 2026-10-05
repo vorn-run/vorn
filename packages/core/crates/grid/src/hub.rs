@@ -184,6 +184,11 @@ pub struct Hub {
     pending: bool,
     /// When synchronized output began, while it lasts.
     sync_since: Option<Instant>,
+    /// Whether the session was live at the last call: nothing renders
+    /// before, so no frame is due either.
+    live: bool,
+    /// When the records waiting began to wait.
+    pending_at: Option<Instant>,
 }
 
 impl Hub {
@@ -206,13 +211,19 @@ impl Hub {
 
     /// Records were applied: render if a frame is due.
     pub fn records(&mut self, ctx: &Ctx<'_>, now: Instant, out: &mut Vec<HubOut>) {
-        self.pending = true;
+        self.live = ctx.live;
+        if !self.pending {
+            self.pending = true;
+            self.pending_at = Some(now);
+        }
         self.tick(ctx, now, out);
     }
 
     /// When the next render update is due, if one is waiting.
     pub fn due(&self) -> Option<Instant> {
-        if !self.pending || !self.atts.iter().any(|a| a.visible) {
+        // While replaying nothing renders: a frame due now would have the
+        // owner wake for it at once, again and again, until replay ends.
+        if !self.live || !self.pending || !self.atts.iter().any(|a| a.visible) {
             return None;
         }
         let mut at = self.last_render.map(|t| t + self.cfg.frame);
@@ -220,12 +231,13 @@ impl Hub {
             let end = since + self.cfg.sync_hold;
             at = Some(at.map_or(end, |a| a.max(end)));
         }
-        // Never rendered: due now.
-        Some(at.unwrap_or_else(Instant::now))
+        // Never rendered: due since the records came.
+        at.or(self.pending_at)
     }
 
     /// Renders if a frame is due by `now`.
     pub fn tick(&mut self, ctx: &Ctx<'_>, now: Instant, out: &mut Vec<HubOut>) {
+        self.live = ctx.live;
         if self.due().is_some_and(|d| d <= now) {
             self.render(ctx, now, out);
         }
@@ -278,6 +290,7 @@ impl Hub {
 
     /// One client request, answered into `out`.
     pub fn handle(&mut self, msg: GridIn, ctx: &Ctx<'_>, now: Instant, out: &mut Vec<HubOut>) {
+        self.live = ctx.live;
         match msg {
             GridIn::Attach { peer, attach } => self.attach(peer, &attach, ctx, now, out),
             GridIn::Detach { peer } => self.atts.retain(|a| a.peer != peer),
@@ -723,4 +736,64 @@ fn tail(g: &mut Grid, ctx: &Ctx<'_>, n: u16) -> Vec<Row> {
     let top = g.term().top_line;
     let from = top.saturating_sub(u64::from(n));
     query::history(t, &f, &mut g.tables, from, n.min((top - from) as u16))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vorn_term_proto::msg::{AttachMode, Size};
+
+    fn ctx(em: &Emulator, live: bool) -> Ctx<'_> {
+        Ctx {
+            em,
+            session: "s",
+            resume: Cursor::default(),
+            live,
+            fidelity: Fidelity::Exact,
+        }
+    }
+
+    /// While a session replays, a visible attachment with records waiting
+    /// has no frame due: one due at once would spin its worker until
+    /// replay ends. Once live, the frame is due.
+    #[test]
+    fn nothing_is_due_while_replaying() {
+        let mut em = Emulator::new(20, 4).unwrap();
+        let mut hub = Hub::new(HubConfig::default());
+        let now = Instant::now();
+        let mut out = Vec::new();
+        let attach = Attach {
+            session: "s".into(),
+            mode: AttachMode::Grid,
+            view: Size::default(),
+            visible: true,
+            resume: None,
+            history_tail: 0,
+        };
+        let peer = Peer { conn: 1, sid: 1 };
+        hub.handle(
+            GridIn::Attach { peer, attach },
+            &ctx(&em, false),
+            now,
+            &mut out,
+        );
+        em.feed(b"replayed", &mut Vec::new());
+        hub.records(&ctx(&em, false), now, &mut out);
+        assert_eq!(hub.due(), None);
+        assert!(!out.iter().any(|o| matches!(
+            o,
+            HubOut::Send {
+                msg: ServerMsg::Snapshot { .. },
+                ..
+            }
+        )));
+        hub.records(&ctx(&em, true), now, &mut out);
+        assert!(out.iter().any(|o| matches!(
+            o,
+            HubOut::Send {
+                msg: ServerMsg::Snapshot { .. },
+                ..
+            }
+        )));
+    }
 }

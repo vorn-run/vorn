@@ -22,6 +22,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use vorn_grid::{GridIn, HubOut};
+use vorn_term_proto::msg::ServerMsg;
+
 use crate::session::{Brief, Config, Input, Open, Out, Session, State, Summary};
 use crate::term::Fidelity;
 
@@ -174,6 +177,20 @@ impl Pool {
                 input,
             },
         );
+    }
+
+    /// A grid client's request for session `id`. False when no such session
+    /// is open, and nothing was sent. One that leaves before the request
+    /// reaches it answers an attach with an `Error` itself, so a client
+    /// never waits on an attachment nobody holds.
+    pub fn grid(&self, id: &str, m: GridIn) -> bool {
+        self.ask(
+            id,
+            Job::Input {
+                id: id.to_owned(),
+                input: Input::Grid(m),
+            },
+        )
     }
 
     /// Asks session `id` for a VT snapshot, answered through the sink with
@@ -333,6 +350,19 @@ impl Worker {
                         } else {
                             self.lost(&id);
                         }
+                    } else if let Input::Grid(GridIn::Attach { peer, .. }) = input {
+                        // The session left after the attach was sent.
+                        let msg = ServerMsg::Error {
+                            code: 404,
+                            message: format!("no session {id}"),
+                        };
+                        (self.sink)(
+                            &id,
+                            Out::Grid(HubOut::Send {
+                                conn: peer.conn,
+                                msg,
+                            }),
+                        );
                     }
                 }
                 Some(Job::Close { id }) => {

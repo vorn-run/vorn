@@ -263,8 +263,11 @@ impl Engine {
         let c = current
             .as_ref()
             .ok_or_else(|| "no session holder connected".to_owned())?;
-        c.pool.input(id, Input::Grid(m));
-        Ok(())
+        if c.pool.grid(id, m) {
+            Ok(())
+        } else {
+            Err(format!("no session {id}"))
+        }
     }
 
     /// A message for grid connection `conn`. One that cannot take it now is
@@ -381,6 +384,10 @@ impl Engine {
             Err(e) => return format!("could not start the session engine: {e}"),
         };
         let (cmd_tx, mut commands) = mpsc::unbounded_channel();
+        // This connection's driver numbers its writes from 0 again: input
+        // waiting on the last one's numbers would be acknowledged by the
+        // wrong writes, and those were never written.
+        self.grid_conns().inputs.clear();
         *self.current() = Some(Current {
             pool: Arc::clone(&pool),
             commands: cmd_tx,

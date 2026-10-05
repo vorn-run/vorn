@@ -336,10 +336,15 @@ pub enum InputEvent {
         x: f32,
         y: f32,
     },
+    /// `x` and `y` in cells, where the pointer is: keys 5 and 6, added to
+    /// TP §7's `Wheel` so a program tracking the mouse scrolls the pane
+    /// under it.
     Wheel {
         dx: f32,
         dy: f32,
         mods: u16,
+        x: f32,
+        y: f32,
     },
     Focus {
         focused: bool,
@@ -408,13 +413,21 @@ impl PartialEq for InputEvent {
                     && y.to_bits() == y2.to_bits()
             }
             (
-                Wheel { dx, dy, mods },
+                Wheel { dx, dy, mods, x, y },
                 Wheel {
                     dx: dx2,
                     dy: dy2,
                     mods: m2,
+                    x: x2,
+                    y: y2,
                 },
-            ) => dx.to_bits() == dx2.to_bits() && dy.to_bits() == dy2.to_bits() && mods == m2,
+            ) => {
+                dx.to_bits() == dx2.to_bits()
+                    && dy.to_bits() == dy2.to_bits()
+                    && mods == m2
+                    && x.to_bits() == x2.to_bits()
+                    && y.to_bits() == y2.to_bits()
+            }
             (Focus { focused: a }, Focus { focused: b }) => a == b,
             (Raw { bytes: a }, Raw { bytes: b }) => a == b,
             _ => false,
@@ -1602,11 +1615,13 @@ fn put_event(w: &mut Writer<'_>, e: &InputEvent) {
             w.key(5).f32(*x);
             w.key(6).f32(*y);
         }
-        InputEvent::Wheel { dx, dy, mods } => {
+        InputEvent::Wheel { dx, dy, mods, x, y } => {
             w.key(1).uint(4);
             w.key(2).f32(*dx);
             w.key(3).f32(*dy);
             w.key(4).uint(u64::from(*mods));
+            w.key(5).f32(*x);
+            w.key(6).f32(*y);
         }
         InputEvent::Focus { focused } => {
             w.key(1).uint(5);
@@ -1660,6 +1675,8 @@ fn get_event(mut d: Dec) -> Result<InputEvent, MsgError> {
             dx: d.float(2)?,
             dy: d.float(3)?,
             mods: d.num_or_zero(4)?,
+            x: d.float(5)?,
+            y: d.float(6)?,
         },
         5 => InputEvent::Focus {
             focused: d.flag(2)?,
@@ -2184,6 +2201,8 @@ mod tests {
                 dx: 0.0,
                 dy: -3.0,
                 mods: mods::ALT,
+                x: 12.0,
+                y: 7.5,
             },
             InputEvent::Focus { focused: true },
             InputEvent::Raw {

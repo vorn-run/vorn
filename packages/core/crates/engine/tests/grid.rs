@@ -821,7 +821,7 @@ fn t16_a_scrolled_line_costs_one_row() {
     }
 }
 
-/// TP-T17: a reflow, ED 3, RIS and a scroll past the scrollback cap each
+/// TP-T17: a reflow, ED 3 (and DECSED 3), RIS and a scroll past the scrollback cap each
 /// raise `sb_epoch` and clear the client's cached history.
 #[test]
 fn t17_epochs_clear_the_history_cache() {
@@ -836,6 +836,8 @@ fn t17_epochs_clear_the_history_cache() {
     b.data(fill.clone());
     b.data("\x1b[3J");
     b.data(fill.clone());
+    b.data("\x1b[?3J");
+    b.data(fill.clone());
     b.data("\x1bc");
     b.data(fill.clone());
     b.data(huge);
@@ -848,6 +850,7 @@ fn t17_epochs_clear_the_history_cache() {
         ("fill", 1),
         ("reflow", 2),
         ("ED 3", 2),
+        ("DECSED 3", 2),
         ("RIS", 2),
         ("past the cap", 1),
     ] {

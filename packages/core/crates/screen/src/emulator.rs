@@ -970,12 +970,12 @@ fn probe_counted(cp: u32) -> Option<bool> {
 }
 
 /// What a dispatched sequence means to the emulator.
-/// ED 3, which erases the scrollback, or RIS.
+/// ED 3 or DECSED 3 (`CSI ? 3 J`), which erase the scrollback, or RIS.
 fn clears_history(e: &Event<'_>) -> bool {
     match *e {
         Event::Esc { inter, fin } => inter.is_empty() && fin == b'c',
         Event::Csi { inter, params, fin } => {
-            fin == b'J' && inter.is_empty() && params.first() == Some(&3)
+            fin == b'J' && matches!(inter, [] | [b'?']) && params.first() == Some(&3)
         }
         _ => false,
     }
@@ -1188,4 +1188,27 @@ fn semantic_hook(data: &[u8]) -> Hook {
         _ => return Hook::None,
     };
     Hook::Semantic(op)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ED 3, DECSED 3 and RIS each count as a scrollback clear; ED 2 does
+    /// not, as it leaves the scrollback alone.
+    #[test]
+    fn scrollback_clears_are_counted() {
+        let mut em = Emulator::with_scrollback(10, 3, 1 << 16).unwrap();
+        let mut fx = Vec::new();
+        for (bytes, want) in [
+            (&b"a\r\nb\r\nc\r\nd\r\n"[..], 0),
+            (b"\x1b[?3J", 1),
+            (b"\x1b[2J", 1),
+            (b"\x1b[3J", 2),
+            (b"\x1bc", 3),
+        ] {
+            em.feed(bytes, &mut fx);
+            assert_eq!(em.history_clears(), want, "{bytes:?}");
+        }
+    }
 }

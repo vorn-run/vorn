@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, info, warn};
@@ -107,8 +108,27 @@ pub async fn serve(mut listener: os::Listener, engine: Arc<Engine>, build: Strin
     }
 }
 
+/// How long one write to a grid client may take. A client that stops
+/// reading is disconnected then, its attachments released, and it resumes
+/// with a snapshot when it comes back (TP §11).
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// One grid connection, until it ends; answers why it ended.
 pub async fn serve_conn<S>(stream: S, engine: Arc<Engine>, build: &str, instance: u64) -> String
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    serve_conn_with(stream, engine, build, instance, WRITE_TIMEOUT).await
+}
+
+/// [`serve_conn`] with its write timeout given.
+pub async fn serve_conn_with<S>(
+    stream: S,
+    engine: Arc<Engine>,
+    build: &str,
+    instance: u64,
+    write_timeout: Duration,
+) -> String
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -122,12 +142,20 @@ where
         match next_message(&mut reader) {
             Ok(Some(ClientMsg::Hello(h))) => break h,
             Ok(Some(_)) => {
-                let _ = refuse(&mut wr, code::BAD_REQUEST, "Hello first").await;
+                let _ = tokio::time::timeout(
+                    write_timeout,
+                    refuse(&mut wr, code::BAD_REQUEST, "Hello first"),
+                )
+                .await;
                 return "no Hello".into();
             }
             Ok(None) => {}
             Err(e) => {
-                let _ = refuse(&mut wr, code::BAD_REQUEST, &e.to_string()).await;
+                let _ = tokio::time::timeout(
+                    write_timeout,
+                    refuse(&mut wr, code::BAD_REQUEST, &e.to_string()),
+                )
+                .await;
                 return e.to_string();
             }
         }
@@ -141,15 +169,16 @@ where
         Ok(w) => {
             info!(build = %hello.build, client = ?hello.client, major = hello.proto_major, "grid client");
             ServerMsg::Welcome(w).encode(&mut out);
-            if let Err(e) = wr.write_all(&out).await {
-                return e.to_string();
+            if let Err(e) = write(&mut wr, &out, write_timeout).await {
+                return e;
             }
             out.clear();
         }
         Err(refusal) => {
             refusal.encode(&mut out);
-            let _ = wr.write_all(&out).await;
-            let _ = wr.shutdown().await;
+            if write(&mut wr, &out, write_timeout).await.is_ok() {
+                let _ = tokio::time::timeout(write_timeout, wr.shutdown()).await;
+            }
             return "unsupported protocol".into();
         }
     }
@@ -177,15 +206,17 @@ where
                         message: e.to_string(),
                     }
                     .encode(&mut out);
-                    let _ = wr.write_all(&out).await;
+                    let _ = write(&mut wr, &out, write_timeout).await;
                     c.close();
                     return e.to_string();
                 }
             }
         }
         if !out.is_empty() {
-            if let Err(e) = wr.write_all(&out).await {
-                break e.to_string();
+            // A client that stops reading parks this write: the timeout
+            // ends the connection and releases its attachments.
+            if let Err(e) = write(&mut wr, &out, write_timeout).await {
+                break e;
             }
             out.clear();
         }
@@ -209,6 +240,18 @@ where
     };
     c.close();
     why
+}
+
+/// Writes `bytes`, or fails once that has taken `limit`.
+async fn write<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    bytes: &[u8],
+    limit: Duration,
+) -> Result<(), String> {
+    match tokio::time::timeout(limit, w.write_all(bytes)).await {
+        Ok(r) => r.map_err(|e| e.to_string()),
+        Err(_) => Err(format!("a write took longer than {limit:?}")),
+    }
 }
 
 fn next_message(reader: &mut FrameReader) -> Result<Option<ClientMsg>, MsgError> {
@@ -248,6 +291,7 @@ impl Conn<'_> {
     fn request(&mut self, m: ClientMsg) -> Option<ServerMsg> {
         let conn = self.conn;
         let peer = |sid| Peer { conn, sid };
+        let mut attaching = None;
         let routed = match m {
             ClientMsg::Hello(_) => {
                 return Some(error(code::BAD_REQUEST, "Hello was already said"));
@@ -265,6 +309,7 @@ impl Conn<'_> {
                 self.next_sid += 1;
                 let sid = self.next_sid;
                 self.sids.insert(sid, a.session.clone());
+                attaching = Some(sid);
                 let session = a.session.clone();
                 (
                     session,
@@ -375,7 +420,14 @@ impl Conn<'_> {
         let (session, m) = routed;
         match self.engine.grid_input(&session, m) {
             Ok(()) => None,
-            Err(e) => Some(error(code::NOT_FOUND, &e)),
+            Err(e) => {
+                // Fail closed: no attachment is left behind for an attach
+                // nobody will answer.
+                if let Some(sid) = attaching {
+                    self.sids.remove(&sid);
+                }
+                Some(error(code::NOT_FOUND, &e))
+            }
         }
     }
 
@@ -399,7 +451,9 @@ fn error(code: u16, message: &str) -> ServerMsg {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vorn_term_proto::msg::ClientKind;
+    use tokio::io::AsyncWriteExt;
+    use vorn_engine::Config;
+    use vorn_term_proto::msg::{Attach, ClientKind};
 
     fn hello(major: u16, caps: u64) -> Hello {
         Hello {
@@ -427,5 +481,40 @@ mod tests {
                 other => panic!("{other:?}"),
             }
         }
+    }
+
+    /// A client that stops reading is let go once a write has taken the
+    /// write timeout, instead of parking its connection, and its
+    /// attachments, for ever.
+    #[tokio::test]
+    async fn a_client_that_stops_reading_is_let_go() {
+        let (mut app, theirs) = tokio::io::duplex(256);
+        let engine = Engine::new(Config::default());
+        let serving = tokio::spawn(async move {
+            serve_conn_with(theirs, engine, "test", 1, Duration::from_millis(100)).await
+        });
+        let mut out = Vec::new();
+        ClientMsg::Hello(hello(PROTO_MAJOR, caps::ALL)).encode(&mut out);
+        // Requests that each get an error back, more than the pipe holds,
+        // and never a read.
+        for _ in 0..64 {
+            ClientMsg::Attach(Attach {
+                session: "none".into(),
+                ..Attach::default()
+            })
+            .encode(&mut out);
+        }
+        // The write blocks once both directions fill, and fails once the
+        // server lets go, so it runs on its own and its result is ignored.
+        let writing = tokio::spawn(async move {
+            let _ = app.write_all(&out).await;
+            app
+        });
+        let why = tokio::time::timeout(Duration::from_secs(5), serving)
+            .await
+            .expect("the connection was let go")
+            .unwrap();
+        assert!(why.contains("longer than"), "{why}");
+        drop(writing.await);
     }
 }

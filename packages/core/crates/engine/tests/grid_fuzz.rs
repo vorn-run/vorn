@@ -21,9 +21,8 @@ use vorn_term_proto::msg::GridResume;
 
 /// Seeds that once failed, kept as regression cases.
 const REGRESSIONS: &[u64] = &[
-    // A combining joiner Ghostty marked no row dirty for.
-    178, // Scrolls and resizes coalesced into one delta.
-    939,
+    178, // A combining joiner Ghostty marked no row dirty for.
+    939, // Scrolls and resizes coalesced into one delta.
 ];
 
 fn seeds() -> u64 {

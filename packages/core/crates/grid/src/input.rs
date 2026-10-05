@@ -118,7 +118,7 @@ impl InputEncoder {
                     &mut out,
                 )?;
             }
-            InputEvent::Wheel { dy, mods, .. } => {
+            InputEvent::Wheel { dy, mods, x, y, .. } => {
                 // A program tracking the mouse gets wheel buttons; otherwise
                 // the client scrolls its own mirror and nothing is sent.
                 if t.is_mouse_tracking()? && *dy != 0.0 {
@@ -132,8 +132,8 @@ impl InputEncoder {
                         mouse::Action::Press,
                         Some(button),
                         *mods,
-                        0.0,
-                        0.0,
+                        *x,
+                        *y,
                         &mut out,
                     )?;
                 }
@@ -292,6 +292,18 @@ mod tests {
             bytes(enc.encode(&t, &paste(false)).unwrap()),
             b"\x1b[200~rm -rf x\n\x1b[201~"
         );
+        // The wheel scrolls the cell under the pointer, in SGR coordinates
+        // counted from 1.
+        t.vt_write(b"\x1b[?1000h\x1b[?1006h");
+        let wheel = InputEvent::Wheel {
+            dx: 0.0,
+            dy: -1.0,
+            mods: 0,
+            x: 5.0,
+            y: 3.0,
+        };
+        assert_eq!(bytes(enc.encode(&t, &wheel).unwrap()), b"\x1b[<64;6;4M");
+        t.vt_write(b"\x1b[?1006l\x1b[?1000l");
         // Focus reports only when the program asked for them.
         let focus = InputEvent::Focus { focused: true };
         assert_eq!(enc.encode(&t, &focus).unwrap(), Encoded::Nothing);
