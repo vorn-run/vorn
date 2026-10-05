@@ -95,15 +95,17 @@ impl Daemon {
     }
 
     fn build(upstream: SocketAddr, groups: Groups, holder: Option<Arc<Holder>>) -> Arc<Daemon> {
+        // The engine's streams, so its sessions' clients are served here.
         #[cfg(feature = "engine")]
         let streams = holder
             .as_ref()
             .and_then(|h| h.engine())
-            .map(|e| Arc::clone(e.streams()));
+            .map(|e| Arc::clone(e.streams()))
+            .unwrap_or_default();
         #[cfg(not(feature = "engine"))]
-        let streams: Option<Arc<Streams>> = None;
+        let streams = Streams::new();
         Arc::new(Daemon {
-            streams: streams.unwrap_or_default(),
+            streams,
             spawn: std::sync::atomic::AtomicBool::new(false),
             upstream,
             groups,

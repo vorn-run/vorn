@@ -32,7 +32,7 @@
 //! records fetched from sessiond) it returns as [`Action`]s.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -41,7 +41,7 @@ use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 use vorn_sessiond_wire::AttachRefusal;
 use vorn_term_proto::bytes::{pack, Lost, Piece, MAX_FLUSH};
-use vorn_term_proto::{Cursor, Entry};
+use vorn_term_proto::{Cursor, Entry, Record};
 
 /// Raw records kept per session after the actor applied them, so a client
 /// that reconnects continues from them without a snapshot (TP §12: 4 MB to
@@ -63,6 +63,11 @@ pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Ended sessions remembered, so an attach after the exit still reports it.
 const ENDED_KEPT: usize = 64;
+
+/// Output a catching-up attachment is sent per step: a step runs while its
+/// connection is under [`QUEUE_CAP`], so the queue holds at most about
+/// this much more than the cap.
+const CATCH_UP_STEP: usize = 256 << 10;
 
 /// One message for a connection's writer.
 #[derive(Debug)]
@@ -92,6 +97,9 @@ impl Outgoing {
 struct Outbox {
     tx: mpsc::UnboundedSender<Outgoing>,
     queued: Arc<AtomicUsize>,
+    /// Set while an attachment on this connection waits to catch up, so the
+    /// writer asks for more as it drains.
+    catching: Arc<AtomicBool>,
 }
 
 impl Outbox {
@@ -145,10 +153,14 @@ impl ClientConn {
         }
     }
 
-    /// `n` bytes taken from the outbox are written.
+    /// `n` bytes taken from the outbox are written. An attachment catching
+    /// up from the tail gets its next step once the queue has room.
     pub fn written(&self, n: usize) {
-        self.queued.fetch_sub(n, Ordering::AcqRel);
+        let left = self.queued.fetch_sub(n, Ordering::AcqRel).saturating_sub(n);
         self.drained.notify_waiters();
+        if left <= QUEUE_CAP / 2 && self.sender.catching.load(Ordering::Acquire) {
+            self.streams.drained(self.id);
+        }
     }
 
     /// A handle that queues the server's own frames behind native ones.
@@ -271,6 +283,9 @@ enum Mode {
     /// Waits for sessiond to send the records from `next` again; answers
     /// the attach once they come.
     Fetching { rpc: Value, at: Instant },
+    /// Resuming from the tail, and more than its connection can queue at
+    /// once is still to send: fed from the tail as the writer drains.
+    Behind,
 }
 
 #[derive(Debug)]
@@ -425,6 +440,7 @@ impl Streams {
         let sender = Outbox {
             tx,
             queued: Arc::clone(&queued),
+            catching: Arc::new(AtomicBool::new(false)),
         };
         let mut inner = self.inner();
         inner.next_conn += 1;
@@ -450,6 +466,28 @@ impl Streams {
             s.early.retain(|a| a.conn != conn);
         }
         inner.waiting.retain(|_, w| w.conn != conn);
+    }
+
+    /// Connection `conn`'s queue has room: the attachments on it catching up
+    /// from the tail get their next steps.
+    fn drained(&self, conn: u64) {
+        let mut inner = self.inner();
+        let Inner {
+            conns, sessions, ..
+        } = &mut *inner;
+        let Some(out) = conns.get(&conn) else {
+            return;
+        };
+        let mut behind = false;
+        for (id, s) in sessions.iter_mut() {
+            if s.attached
+                .get(&conn)
+                .is_some_and(|a| matches!(a.mode, Mode::Behind))
+            {
+                behind |= catch_up(id, s, conn, out);
+            }
+        }
+        out.catching.store(behind, Ordering::Release);
     }
 
     /// Whether vornd answers terminal calls for `session` itself.
@@ -608,6 +646,12 @@ impl Streams {
         let Some(w) = inner.waiting.remove(&token) else {
             return;
         };
+        // It left the engine and its close is on the way: that answers an
+        // attach with how it ended.
+        if matches!(w.wants, Wants::Attach { .. }) && inner.sessions.contains_key(&w.session) {
+            inner.waiting.insert(token, w);
+            return;
+        }
         if let Some(out) = inner.conns.get(&w.conn) {
             out.text(&refuse(&w.rpc, "the session is not running"));
         }
@@ -628,7 +672,11 @@ impl Streams {
             return;
         };
         let Some(snap) = snap else {
-            out.text(&refuse(&w.rpc, "the session has no terminal to show"));
+            let ended = inner.ended.iter().find(|e| e.session == w.session);
+            match (&w.wants, ended) {
+                (Wants::Attach { .. }, Some(e)) => out.text(&answer(&w.rpc, ended_answer(e))),
+                _ => out.text(&refuse(&w.rpc, "the session has no terminal to show")),
+            }
             return;
         };
         let data = String::from_utf8_lossy(snap.vt);
@@ -668,8 +716,9 @@ impl Streams {
                     old.gen.fetch_add(1, Ordering::AcqRel);
                 }
                 // Records applied after the cut and before this answer.
-                let mut packer = Packer::new(&w.session, s.tail.make_contiguous());
-                deliver(&mut s.attached, w.conn, &out, &mut packer);
+                if catch_up(&w.session, s, w.conn, &out) {
+                    out.catching.store(true, Ordering::Release);
+                }
             }
         }
     }
@@ -719,7 +768,7 @@ impl Streams {
                     refused.push((conn, rpc.clone()));
                     false
                 }
-                Mode::Following => true,
+                Mode::Following | Mode::Behind => true,
             });
             refused
         };
@@ -781,6 +830,39 @@ impl Streams {
             return;
         };
         let exit_code = exit_code(code, signal);
+        let ended = Ended {
+            session: session.to_owned(),
+            exit_code,
+            screen: screen.replace('\n', "\r\n"),
+        };
+        // Attaches still waiting on it (before it was live, or for records
+        // from sessiond) are answered with how it ended.
+        let waiting = s
+            .early
+            .iter()
+            .map(|a| (a.conn, &a.rpc))
+            .chain(s.attached.iter().filter_map(|(&conn, a)| match &a.mode {
+                Mode::Fetching { rpc, .. } => Some((conn, rpc)),
+                _ => None,
+            }));
+        for (conn, rpc) in waiting {
+            if let Some(out) = inner.conns.get(&conn) {
+                out.text(&answer(rpc, ended_answer(&ended)));
+            }
+        }
+        let snapshots: Vec<u64> = inner
+            .waiting
+            .iter()
+            .filter(|(_, w)| w.session == session && matches!(w.wants, Wants::Attach { .. }))
+            .map(|(&t, _)| t)
+            .collect();
+        for t in snapshots {
+            if let Some(w) = inner.waiting.remove(&t) {
+                if let Some(out) = inner.conns.get(&w.conn) {
+                    out.text(&answer(&w.rpc, ended_answer(&ended)));
+                }
+            }
+        }
         let v = note(
             "terminal:exit",
             json!({ "id": session, "exitCode": exit_code }),
@@ -793,11 +875,7 @@ impl Streams {
         if inner.ended.len() == ENDED_KEPT {
             inner.ended.pop_front();
         }
-        inner.ended.push_back(Ended {
-            session: session.to_owned(),
-            exit_code,
-            screen: screen.replace('\n', "\r\n"),
-        });
+        inner.ended.push_back(ended);
     }
 
     /// Answers with an error the attaches and reads that have waited longer
@@ -856,17 +934,7 @@ impl Inner {
         };
         let Some(s) = self.sessions.get_mut(session) else {
             match self.ended.iter().find(|e| e.session == session) {
-                Some(e) => out.text(&answer(
-                    &a.rpc,
-                    json!({
-                        "data": e.screen,
-                        "seq": 0,
-                        "live": false,
-                        "continued": false,
-                        "exitCode": e.exit_code,
-                        "replies": "vornd",
-                    }),
-                )),
+                Some(e) => out.text(&answer(&a.rpc, ended_answer(e))),
                 None => out.text(&refuse(&a.rpc, "no such session")),
             }
             return;
@@ -895,25 +963,28 @@ impl Inner {
             );
         }
         if s.covers(&c) {
-            // Packed first: a gap in what is held means a snapshot after all.
-            let packed = prepare(session, c, s.tail.make_contiguous());
-            if let Some(why) = packed.lost {
-                let why = Some(why.as_str());
+            // A gap in what is held means a snapshot after all.
+            let gap = s
+                .tail
+                .iter()
+                .any(|e| !c.includes(&e.hdr) && matches!(e.rec, Record::Gap { .. }));
+            if gap {
+                let why = Some(Lost::Gap.as_str());
                 return self.snapshot_for(session, a.conn, a.rpc, why, actions);
             }
             out.text(&answer(&a.rpc, continued(&c)));
-            let gen = fresh_gen();
-            let queued = queue(&out, &gen, &packed.msgs);
             s.attached.insert(
                 a.conn,
                 Attachment {
-                    next: packed.to,
-                    gen,
+                    next: c,
+                    gen: fresh_gen(),
                     mode: Mode::Following,
                 },
             );
-            if !queued {
-                overflowed(session, &mut s.attached, a.conn, &out);
+            // Sent as the connection drains, not all at once: a client far
+            // behind would otherwise overflow on its own catch-up.
+            if catch_up(session, s, a.conn, &out) {
+                out.catching.store(true, Ordering::Release);
             }
             return;
         }
@@ -968,6 +1039,19 @@ impl Inner {
             token,
         });
     }
+}
+
+/// The answer to an attach of a session that has ended: its last screen as
+/// text, and how it ended.
+fn ended_answer(e: &Ended) -> Value {
+    json!({
+        "data": e.screen,
+        "seq": 0,
+        "live": false,
+        "continued": false,
+        "exitCode": e.exit_code,
+        "replies": "vornd",
+    })
 }
 
 /// The answer to an attach that continues from the client's cursor.
@@ -1090,6 +1174,8 @@ fn deliver(
     let fetched;
     let packed = match &a.mode {
         Mode::Following => packer.from(a.next),
+        // Catching up from the tail, which these records are now part of.
+        Mode::Behind => return,
         // Waiting for sessiond to send the records from its cursor again:
         // they start exactly there, and the attach is answered then.
         Mode::Fetching { rpc, .. } => {
@@ -1107,7 +1193,7 @@ fn deliver(
         }
     };
     a.next = packed.to;
-    if !queue(out, &a.gen, &packed.msgs) {
+    if !queue(out, &a.gen, &packed.msgs, true) {
         return overflowed(session, attached, conn, out);
     }
     if let Some(why) = packed.lost {
@@ -1119,14 +1205,15 @@ fn deliver(
     }
 }
 
-/// Queues an attachment's messages. False when the connection was already
-/// over [`QUEUE_CAP`]: nothing more of its stream was queued.
-fn queue(out: &Outbox, gen: &Arc<AtomicU64>, msgs: &[Ready]) -> bool {
+/// Queues an attachment's messages. With `capped`, false when the
+/// connection was already over [`QUEUE_CAP`]: nothing more of its stream
+/// was queued.
+fn queue(out: &Outbox, gen: &Arc<AtomicU64>, msgs: &[Ready], capped: bool) -> bool {
     let g = gen.load(Ordering::Acquire);
     for m in msgs {
         match m {
             Ready::Stream(msg) => {
-                if out.queued() > QUEUE_CAP {
+                if capped && out.queued() > QUEUE_CAP {
                     return false;
                 }
                 out.push(msg.clone(), Some((Arc::clone(gen), g)));
@@ -1135,6 +1222,47 @@ fn queue(out: &Outbox, gen: &Arc<AtomicU64>, msgs: &[Ready]) -> bool {
         }
     }
     true
+}
+
+/// Sends attachment `conn` what the tail holds past its cursor, a step at
+/// a time while its connection is under [`QUEUE_CAP`]. True when it is
+/// still behind and waits for the connection to drain; false once it has
+/// reached the head and follows live, or could not go on and was told to
+/// resync.
+fn catch_up(session: &str, s: &mut Stream, conn: u64, out: &Outbox) -> bool {
+    loop {
+        let head = s.head;
+        let tail = s.tail.make_contiguous();
+        let Some(a) = s.attached.get_mut(&conn) else {
+            return false;
+        };
+        let start = tail.iter().position(|e| !a.next.includes(&e.hdr));
+        let Some(start) = start.filter(|_| head != Some(a.next)) else {
+            a.mode = Mode::Following;
+            return false;
+        };
+        if out.queued() > QUEUE_CAP {
+            a.mode = Mode::Behind;
+            return true;
+        }
+        let mut end = start;
+        let mut bytes = 0usize;
+        while end < tail.len() && (end == start || bytes < CATCH_UP_STEP) {
+            bytes += tail[end].rec.len() as usize;
+            end += 1;
+        }
+        let packed = prepare(session, a.next, &tail[start..end]);
+        a.next = packed.to;
+        queue(out, &a.gen, &packed.msgs, false);
+        if let Some(why) = packed.lost {
+            s.attached.remove(&conn);
+            out.text(&note(
+                "terminal:resync",
+                json!({ "id": session, "reason": why.as_str() }),
+            ));
+            return false;
+        }
+    }
 }
 
 /// The connection fell [`QUEUE_CAP`] behind: what it had queued for this

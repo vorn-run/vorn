@@ -23,10 +23,12 @@ use vorn_engine::{Cadence, Config};
 use vorn_recovery::gen::{Generator, Profile};
 use vorn_recovery::{LogBuilder, Size};
 use vorn_screen::Emulator;
+use vorn_sessiond::server::{self, Sessiond};
 use vorn_sessiond_wire::{
     AttachFrom, AttachRefusal, Checkpoint, Entries, FrameReader, Kind, Message as _, Refused,
     SessionInfo, ToSessiond, ToVornd, Welcome, PROTO,
 };
+use vorn_sessiond_wire::{Io, SpawnSpec};
 use vorn_term_proto::bytes::BytesFrame;
 use vorn_term_proto::{Cursor, Entry, GapReason, Record, RecordHeader, Stream};
 use vornd::engine::Engine;
@@ -295,6 +297,11 @@ struct Vornd {
 
 impl Vornd {
     fn start(fake: &Fake, cadence: Cadence) -> Vornd {
+        Vornd::start_at(fake.path.to_string_lossy().into_owned(), cadence)
+    }
+
+    /// A vornd connected to the sessiond at `endpoint`.
+    fn start_at(endpoint: String, cadence: Cadence) -> Vornd {
         let engine = Engine::new(Config {
             scrollback: SCROLLBACK,
             cadence,
@@ -302,7 +309,6 @@ impl Vornd {
             ..Config::default()
         });
         let holder = Holder::with_engine(Arc::clone(&engine));
-        let endpoint = fake.path.to_string_lossy().into_owned();
         let task = tokio::spawn(async move {
             let _ = holder::connect(&endpoint, &holder).await;
         });
@@ -408,6 +414,8 @@ struct Client {
     resyncs: Vec<String>,
     exits: Vec<i64>,
     next_rpc: u64,
+    /// The session it attaches.
+    session: String,
 }
 
 impl Client {
@@ -424,6 +432,7 @@ impl Client {
             resyncs: Vec::new(),
             exits: Vec::new(),
             next_rpc: 0,
+            session: SESSION.into(),
         }
     }
 
@@ -456,7 +465,7 @@ impl Client {
     /// Attaches, resuming from `cursor` when given, and waits for the
     /// answer.
     async fn attach(&mut self, cursor: Option<Cursor>) -> Answer {
-        let mut params = json!({ "id": SESSION });
+        let mut params = json!({ "id": self.session });
         if let Some(c) = cursor {
             params["cursor"] =
                 json!({ "epoch": c.epoch, "nextRseq": c.next_rseq, "nextOffset": c.next_offset });
@@ -1150,5 +1159,177 @@ async fn write_resize_and_reads_are_answered_by_vornd() {
         &text,
         false
     ));
+    v.kill().await;
+}
+
+/// A client that dropped while megabytes were printed resumes from vornd's
+/// tail without a snapshot and without overflowing its own catch-up: the
+/// tail is sent as the connection drains, not all at once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_client_far_behind_catches_up_from_the_tail() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::start(dir.path(), (100, 30), Vec::new()).await;
+    let v = Vornd::start(&fake, no_cadence());
+    v.caught_up(&fake).await;
+    let mut c = Client::new(&v);
+    c.attach(None).await;
+    fake.data(b"start\r\n");
+    c.follow_to(fake.head()).await;
+    let at = c.cursor.unwrap();
+    // Gone while 3 MiB arrive: more than a connection may queue, less than
+    // the tail holds.
+    let record = lines(0..8000);
+    for _ in 0..48 {
+        fake.data(&record[..64 << 10]);
+    }
+    v.caught_up(&fake).await;
+    let mut c = c.reconnect(&v);
+    let a = c.attach(Some(at)).await;
+    assert!(a.continued, "{a:?}");
+    assert!(
+        c.conn.queued() <= QUEUE_CAP + (320 << 10),
+        "queued {} at once",
+        c.conn.queued()
+    );
+    let mark = c.bytes.len();
+    c.follow_to(fake.head()).await;
+    assert!(c.resyncs.is_empty(), "{:?}", c.resyncs);
+    let log = fake.held().log.clone();
+    assert_eq!(c.bytes[mark..], bytes_between(&log, at, fake.head())[..]);
+    v.kill().await;
+}
+
+/// A client attaching while the session replays to its exit is answered:
+/// with the live screen and then the exit, or with how it ended.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_attach_racing_the_exit_is_answered() {
+    for _ in 0..5 {
+        let dir = tempfile::tempdir().unwrap();
+        let mut b = LogBuilder::new(Size::new(80, 24));
+        for _ in 0..64 {
+            b.data(lines(0..2000));
+        }
+        b.push(Record::Exit {
+            code: Some(5),
+            signal: None,
+        });
+        let fake = Fake::start(dir.path(), (80, 24), b.build().entries).await;
+        let v = Vornd::start(&fake, no_cadence());
+        let t = Instant::now();
+        while !v.engine.streams().holds(SESSION) {
+            assert!(t.elapsed() < PATIENCE);
+            tokio::task::yield_now().await;
+        }
+        let mut c = Client::new(&v);
+        let rpc = c.call("terminal:attach", json!({ "id": SESSION }));
+        let answer = c.answer(rpc).await;
+        if answer["live"] == false {
+            assert_eq!(answer["exitCode"], 5, "{answer}");
+        } else {
+            c.cursor = Some(cursor_of(&answer["cursor"]));
+            c.term = Some(Emulator::with_scrollback(80, 24, SCROLLBACK).unwrap());
+            let t = Instant::now();
+            while c.exits.is_empty() {
+                assert!(t.elapsed() < PATIENCE, "no exit after {answer}");
+                if let Ok(Some(o)) =
+                    tokio::time::timeout(Duration::from_millis(100), c.conn.next()).await
+                {
+                    c.conn.written(o.size());
+                    c.apply(o.msg);
+                }
+            }
+            assert_eq!(c.exits, [5]);
+        }
+        v.kill().await;
+    }
+}
+
+/// Against the real sessiond, which ends a session's stream to vornd when it
+/// takes an attach: a client whose cursor sessiond has trimmed gets
+/// NotRetained and a snapshot, and the session's output keeps reaching
+/// vornd and every client afterwards.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_fetch_leaves_the_session_streaming() {
+    let home = tempfile::tempdir().unwrap();
+    let d = Sessiond::new(server::Config {
+        home: home.path().to_path_buf(),
+        instance: 0xf7c4,
+        build: "test".into(),
+        idle_exit: Duration::from_secs(600),
+        spool_cap: 64 << 20,
+    });
+    let listener = server::bind(&d).unwrap();
+    let _serving = tokio::spawn(server::serve(Arc::clone(&d), listener));
+    // Checkpoints every few KiB, so sessiond trims behind the client fast.
+    let cadence = Cadence {
+        bytes: 2 << 10,
+        ..no_cadence()
+    };
+    let v = Vornd::start_at(d.endpoint(), cadence);
+    let spec = SpawnSpec {
+        argv: [
+            "sh",
+            "-c",
+            "while read l; do i=0; while [ $i -lt 200 ]; do echo \"$l $i ................................\"; i=$((i+1)); done; done",
+        ]
+        .map(String::from)
+        .to_vec(),
+        cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+        env: Vec::new(),
+        io: Io::Pty { cols: 80, rows: 24 },
+        ring_bytes: None,
+    };
+    let t = Instant::now();
+    let id = loop {
+        match v.engine.spawn(spec.clone()).await {
+            Ok(id) => break id,
+            Err(_) if t.elapsed() < PATIENCE => tokio::time::sleep(Duration::from_millis(20)).await,
+            Err(e) => panic!("spawn: {e}"),
+        }
+    };
+    let mut c = Client::new(&v);
+    c.session = id.clone();
+    c.attach(None).await;
+    let shows = |c: &Client, s: &str| c.term.as_ref().is_some_and(|_| c.text().contains(s));
+    async fn until(c: &mut Client, what: &str) {
+        let t = Instant::now();
+        while !c.text().contains(what) {
+            assert!(t.elapsed() < PATIENCE, "never saw {what}: {}", c.text());
+            if let Ok(Some(o)) =
+                tokio::time::timeout(Duration::from_millis(100), c.conn.next()).await
+            {
+                c.conn.written(o.size());
+                c.apply(o.msg);
+            }
+        }
+    }
+    c.call("terminal:write", json!({ "id": id, "data": "a\r" }));
+    until(&mut c, "a 199").await;
+    let old = c.cursor.unwrap();
+    for word in ["b", "c", "d"] {
+        c.call(
+            "terminal:write",
+            json!({ "id": id, "data": format!("{word}\r") }),
+        );
+        until(&mut c, &format!("{word} 199")).await;
+    }
+    assert!(!shows(&c, "e 199"));
+    v.kill().await;
+
+    let v = Vornd::start_at(d.endpoint(), cadence);
+    let t = Instant::now();
+    while !v.engine.report()["sessions"]
+        .as_array()
+        .is_some_and(|s| s.iter().any(|s| s["state"] == "live"))
+    {
+        assert!(t.elapsed() < PATIENCE, "{}", v.engine.report());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let mut c = c.reconnect(&v);
+    let a = c.attach(Some(old)).await;
+    assert_eq!(a.resync.as_deref(), Some("notRetained"), "{a:?}");
+    // Still streaming: new output reaches vornd and the client.
+    c.call("terminal:write", json!({ "id": id, "data": "e\r" }));
+    until(&mut c, "e 199").await;
     v.kill().await;
 }

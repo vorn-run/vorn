@@ -33,12 +33,13 @@ vi.mock('@xterm/xterm', () => {
     }
     registerMarker = vi.fn()
     registerDecoration = vi.fn()
-    loadAddon = vi.fn()
+    loadAddon = vi.fn((addon: { activate?: (t: unknown) => void }) => addon.activate?.(this))
     onData = vi.fn()
     attachCustomKeyEventHandler = vi.fn()
     dispose = vi.fn()
     focus = vi.fn()
-    write = vi.fn()
+    // xterm.js runs a write's callback once what came before it is parsed.
+    write = vi.fn((_data: unknown, done?: () => void) => done?.())
     reset = vi.fn()
     resize = vi.fn((cols: number, rows: number) => {
       this.cols = cols
@@ -78,10 +79,20 @@ vi.mock('@xterm/xterm', () => {
 })
 
 vi.mock('@xterm/addon-fit', () => ({
+  // The pane's box fits 80x24.
   FitAddon: class {
-    fit = vi.fn()
+    term: { cols: number; rows: number; element: unknown } | null = null
+    activate(term: unknown): void {
+      this.term = term as FitAddon['term']
+    }
+    fit = vi.fn(() => {
+      if (!this.term?.element) return
+      this.term.cols = 80
+      this.term.rows = 24
+    })
   }
 }))
+type FitAddon = { term: { cols: number; rows: number; element: unknown } | null }
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class {} }))
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}))
 
@@ -123,6 +134,9 @@ import {
   registerSlot,
   destroyTerminal,
   hydrateTerminal,
+  fitTerminal,
+  setHostRoot,
+  syncTerminalOverlay,
   initGlobalDataListener,
   disposeGlobalDataListener
 } from '../src/renderer/lib/terminal-registry'
@@ -159,7 +173,11 @@ function slot(): HTMLDivElement {
 const term = (): (typeof created)[number] => created[created.length - 1]!
 const text = (d: unknown): string =>
   typeof d === 'string' ? d : new TextDecoder().decode(d as Uint8Array)
-const writes = (): string[] => term().write.mock.calls.map((c) => text(c[0]))
+// The empty writes are the barriers resizes wait behind.
+const writes = (): string[] =>
+  term()
+    .write.mock.calls.map((c) => text(c[0]))
+    .filter((w) => w !== '')
 
 /** A frame of records `first..=last`, its bytes starting at `offset`. */
 function send(first: number, last: number, offset: number, data: string): void {
@@ -283,5 +301,30 @@ describe('a session vornd holds', () => {
     await hydrateTerminal(ID)
     const other = term().csi.find((h) => JSON.stringify(h.id) === JSON.stringify({ final: 'c' }))!
     expect(other.fn([])).toBe(false)
+  })
+})
+
+describe('a session resized by another client', () => {
+  it("is told this pane's size again at its next fit, not left at the other size", async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    setHostRoot(host)
+    const resize = window.api.resizeTerminal as ReturnType<typeof vi.fn>
+    attachTerminal.mockResolvedValue({ ...(snapshot(8, 120) as object), cols: 80, rows: 24 })
+    registerSlot(ID, slot())
+    syncTerminalOverlay(ID)
+    await hydrateTerminal(ID)
+    fitTerminal(ID)
+    resize.mockClear()
+
+    // Another client took the session to 100x30.
+    resizedListener({ id: ID, cols: 100, rows: 30, rseq: 8 })
+    expect(term().resize).toHaveBeenLastCalledWith(100, 30)
+
+    // This pane's box still fits 80x24: its next fit says so.
+    fitTerminal(ID)
+    expect(resize).toHaveBeenCalledWith({ id: ID, cols: 80, rows: 24 })
+    setHostRoot(null)
+    host.remove()
   })
 })

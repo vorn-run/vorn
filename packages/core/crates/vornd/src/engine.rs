@@ -321,6 +321,7 @@ impl Engine {
             spawns: HashMap::new(),
             next_req: 0,
             input_seq: 0,
+            repumping: std::collections::HashSet::new(),
         };
         let mut ping = tokio::time::interval(PING_EVERY);
         ping.tick().await;
@@ -460,6 +461,9 @@ struct Driver<'a> {
     next_req: u64,
     /// Numbers this connection's writes.
     input_seq: u64,
+    /// Sessions re-attached from vornd's own cursor after a refused fetch,
+    /// until sessiond answers.
+    repumping: std::collections::HashSet<String>,
 }
 
 impl Driver<'_> {
@@ -470,7 +474,10 @@ impl Driver<'_> {
     /// A message from sessiond, for the session it names.
     fn received(&mut self, m: ToVornd) {
         match m {
-            ToVornd::Entries(e) => self.pool.input(&e.session, Input::Entries(e.entries)),
+            ToVornd::Entries(e) => {
+                self.repumping.remove(&e.session);
+                self.pool.input(&e.session, Input::Entries(e.entries))
+            }
             ToVornd::CheckpointIs(cp) => {
                 let id = cp.session.clone();
                 self.pool.input(&id, Input::Checkpoint(cp));
@@ -480,6 +487,15 @@ impl Driver<'_> {
             ToVornd::Refused(r) if self.engine.streams.fetching(&r.session) => {
                 let actions = self.engine.streams.fetch_refused(&r.session, r.why);
                 self.engine.perform(actions);
+                self.repump(r.session);
+            }
+            // The cursor a repump asked from is gone too: the newest
+            // checkpoint is always held, and the actor skips what it has.
+            ToVornd::Refused(r) if self.repumping.remove(&r.session) => {
+                self.send(ToSessiond::Attach(Attach {
+                    session: r.session,
+                    from: AttachFrom::NewestCheckpoint,
+                }));
             }
             ToVornd::Refused(r) => self.pool.input(&r.session, Input::Refused(r.why)),
             ToVornd::Spawned(s) => {
@@ -597,6 +613,21 @@ impl Driver<'_> {
             .streams
             .closed(&b.session, b.exited, &summary.screen);
         let _ = self.engine.events.send(Event::Closed(Arc::from(summary)));
+    }
+
+    /// Starts the session's records flowing again after a refused fetch.
+    /// sessiond ends a session's stream to vornd when it takes an attach,
+    /// before it knows whether it can serve it; a refused one leaves none.
+    /// A served fetch needs nothing: sessiond carries on live after it.
+    fn repump(&mut self, session: String) {
+        let from = match self.engine.streams.head(&session) {
+            Some(c) => {
+                self.repumping.insert(session.clone());
+                AttachFrom::Cursor(c)
+            }
+            None => AttachFrom::NewestCheckpoint,
+        };
+        self.send(ToSessiond::Attach(Attach { session, from }));
     }
 
     fn write(&mut self, session: String, bytes: Vec<u8>) {

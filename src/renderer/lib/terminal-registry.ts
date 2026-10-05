@@ -17,6 +17,7 @@ import type { TerminalData } from '@vornrun/shared/protocol'
 import type { RecordCursor } from '@vornrun/shared/types'
 import { decodeTerminalFrameV2, frameResume } from '@vornrun/shared/terminal-frame'
 import { swallowQueries } from './vornd-replies'
+import { resizeInOrder } from './stream-resize'
 
 interface TerminalEntry {
   term: Terminal
@@ -102,6 +103,19 @@ type Chunk =
  */
 const vorndStreams = new Map<string, { cursor: RecordCursor | null }>()
 
+/**
+ * The session's size changed under this pane: remembered as the size last
+ * agreed, so the pane's next fit tells the session its own size when that
+ * differs, rather than finding the two equal and leaving the grid and the
+ * pty at different sizes.
+ */
+function sessionSized(id: string, term: Terminal, cols: number, rows: number): void {
+  const entry = registry.get(id)
+  if (!entry || entry.term !== term) return
+  entry.lastSyncedCols = cols
+  entry.lastSyncedRows = rows
+}
+
 /** Moves a vornd stream's cursor past a chunk that was just applied. */
 function advance(id: string, chunk: Chunk): void {
   const stream = vorndStreams.get(id)
@@ -123,7 +137,8 @@ function writeChunks(id: string, term: Terminal, chunks: readonly Chunk[]): void
         text = ''
       }
       // Output after a resize record was written for the new size.
-      term.resize(chunk.resize.cols, chunk.resize.rows)
+      const { cols, rows } = chunk.resize
+      resizeInOrder(term, cols, rows, () => sessionSized(id, term, cols, rows))
       advance(id, chunk)
       continue
     }
@@ -308,9 +323,11 @@ export function hydrateTerminal(
       }
       // vornd's snapshot is drawn for the session's size.
       if (fromVornd && answer.cols && answer.rows) {
-        if (entry.term.cols !== answer.cols || entry.term.rows !== answer.rows) {
-          entry.term.resize(answer.cols, answer.rows)
-        }
+        const cols = answer.cols
+        const rows = answer.rows
+        resizeInOrder(entry.term, cols, rows, () =>
+          sessionSized(terminalId, entry.term, cols, rows)
+        )
       }
       // A resync replaces the screen only with something. A terminal that
       // ended while this window was behind comes back empty, and what is on
