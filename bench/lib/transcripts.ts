@@ -41,10 +41,10 @@ function make(name: string, description: string, chunks: string[]): Transcript {
 const SPINNER = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const FILES = [
   'packages/server/src/pty-manager.ts',
-  'packages/server/src/terminal-screen.ts',
+  'packages/server/src/vornd-sessions.ts',
   'src/renderer/lib/terminal-registry.ts',
   'packages/shared/src/protocol.ts',
-  'tests/pty-manager-screen.test.ts'
+  'tests/pty-manager-recovery.test.ts'
 ]
 
 /**

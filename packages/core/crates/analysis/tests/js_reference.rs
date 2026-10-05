@@ -4,7 +4,7 @@
 //! Each case feeds its reads in order through one analyzer, as the server fed
 //! each flush, and compares the status after every read, the completed lines
 //! and the line in progress. The one accepted difference is named
-//! [`REDRAWN_LINES`], as in `tests/helpers/analysis-parity.ts`.
+//! [`REDRAWN_LINES`].
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -188,7 +188,7 @@ fn analysis_matches_js_reference() {
 }
 
 #[test]
-fn redraw_test_matches_the_typescript_pattern() {
+fn redraw_matcher_follows_its_pattern() {
     // A carriage return only counts before the end of the line.
     assert!(is_redrawn("a\rb"));
     assert!(!is_redrawn("a\r"));

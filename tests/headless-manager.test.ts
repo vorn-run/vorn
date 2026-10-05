@@ -1,21 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-vi.mock('node:child_process', async () => {
-  const { EventEmitter } = await import('node:events')
-  class FakeChild extends EventEmitter {
-    pid = 4242
-    stdin = { on: vi.fn(), end: vi.fn(), write: vi.fn() }
-    stdout = new EventEmitter()
-    stderr = new EventEmitter()
-    kill = vi.fn()
-    unref = vi.fn()
-  }
-  return {
-    spawn: vi.fn(() => new FakeChild()),
-    execFileSync: vi.fn(() => '/usr/bin/cmd')
-  }
+/** Each agent vornd was asked to start, with what it was written, in order. */
+const { spawnMock } = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { EventEmitter } = require('node:events') as typeof import('node:events')
+  const spawnMock = vi.fn(() => {
+    const agent = Object.assign(new EventEmitter(), {
+      written: [] as string[],
+      isEnded: false,
+      write: vi.fn((data: string) => void agent.written.push(data)),
+      closeStdin: vi.fn(),
+      kill: vi.fn(),
+      onData: vi.fn(),
+      onExit: vi.fn()
+    })
+    return agent
+  })
+  return { spawnMock }
 })
 
+vi.mock('../packages/server/src/vornd-sessions', () => ({
+  vorndSessions: { spawn: spawnMock, release: vi.fn() }
+}))
 vi.mock('../packages/server/src/resolve-executable', () => ({
   findOnPath: (name: string) => (name === 'claude' ? '/opt/agents/bin/claude' : null)
 }))
@@ -27,10 +33,24 @@ vi.mock('../packages/server/src/git-utils', () => ({
   isGitRepo: vi.fn(async () => false)
 }))
 
-import { spawn as spawnImport } from 'node:child_process'
 import { headlessManager } from '../packages/server/src/headless-manager'
 
-const spawnMock = spawnImport as unknown as ReturnType<typeof vi.fn>
+/** The `n`th start: the command, its arguments, and the agent that came back. */
+function started(n = 0): {
+  command: string
+  args: string[]
+  spec: { argv: string[]; cwd: string; piped?: boolean }
+  agent: { written: string[]; closeStdin: ReturnType<typeof vi.fn> }
+} {
+  const call = spawnMock.mock.calls[n] as unknown as [string, { argv: string[]; cwd: string }]
+  const spec = call[1]
+  return {
+    command: spec.argv[0],
+    args: spec.argv.slice(1),
+    spec,
+    agent: spawnMock.mock.results[n].value
+  }
+}
 
 describe('headlessManager.createHeadless', () => {
   it('preserves the requested Codex UUID and emits exec resume', async () => {
@@ -42,7 +62,7 @@ describe('headlessManager.createHeadless', () => {
       initialPrompt: 'continue'
     })
     expect(session.agentSessionId).toBe('known-id')
-    expect(spawnMock.mock.calls.at(-1)?.[1]).toEqual([
+    expect(started(spawnMock.mock.calls.length - 1).args).toEqual([
       '-a',
       'never',
       'exec',
@@ -67,8 +87,8 @@ describe('headlessManager.createHeadless', () => {
 
     expect(session.agentSessionId).toMatch(/^[0-9a-f-]{36}$/)
 
-    const spawnCall = spawnMock.mock.calls[0]
-    const args = spawnCall[1] as string[]
+    const { args, spec } = started()
+    expect(spec.piped).toBe(true)
     const idx = args.indexOf('--session-id')
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(args[idx + 1]).toBe(session.agentSessionId)
@@ -84,7 +104,7 @@ describe('headlessManager.createHeadless', () => {
       initialPrompt: 'go',
       headless: true
     })
-    expect(spawnMock.mock.calls[0][0]).toBe('/opt/agents/bin/claude')
+    expect(started().command).toBe('/opt/agents/bin/claude')
     headlessManager.killHeadless(session.id)
   })
 
@@ -96,7 +116,7 @@ describe('headlessManager.createHeadless', () => {
       initialPrompt: 'go',
       headless: true
     })
-    expect(spawnMock.mock.calls[0][0]).toBe('codex')
+    expect(started().command).toBe('codex')
     headlessManager.killHeadless(session.id)
   })
 
@@ -112,7 +132,7 @@ describe('headlessManager.createHeadless', () => {
 
     expect(session.agentSessionId).toBe('existing-session')
 
-    const args = spawnMock.mock.calls[0][1] as string[]
+    const { args } = started()
     expect(args).toContain('--resume')
     expect(args).toContain('existing-session')
 
@@ -129,14 +149,12 @@ describe('headlessManager.createHeadless', () => {
       headless: true
     })
 
-    const child = spawnMock.mock.results[0].value as {
-      stdin: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
-    }
-    expect(child.stdin.write).toHaveBeenCalledWith(prompt)
-    expect(child.stdin.end).toHaveBeenCalled()
+    const { agent } = started()
+    expect(agent.written).toEqual([prompt])
+    expect(agent.closeStdin).toHaveBeenCalled()
 
     // The prompt must not leak onto argv, where the Windows shell would split it.
-    const args = spawnMock.mock.calls[0][1] as string[]
+    const { args } = started()
     expect(args).not.toContain(prompt)
 
     headlessManager.killHeadless(session.id)
@@ -193,18 +211,18 @@ describe('headlessManager.createHeadless', () => {
         headless: true
       })
 
-      const [, args, options] = spawnMock.mock.calls[0] as [string, string[], { shell?: boolean }]
-      expect(options.shell).toBe(true)
-      // The value must NOT appear as a bare element (that word-splits under
-      // cmd.exe); it must be a single quoted token that still contains the text.
-      expect(args).not.toContain('some model name')
-      const quoted = args.filter((a) => a.includes('some model name'))
-      expect(quoted).toHaveLength(1)
-      // cmd.exe quoting (double quotes) is used regardless of the machine's
-      // default shell, since Node's shell:true always runs cmd.exe — not
-      // PowerShell single-quotes, which cmd.exe wouldn't treat as quoting.
-      expect(quoted[0].startsWith('"')).toBe(true)
-      expect(quoted[0].endsWith('"')).toBe(true)
+      // What `shell: true` would run, spelled out: cmd.exe with one command line.
+      const { command, args } = started()
+      expect(command).toMatch(/cmd/i)
+      expect(args.slice(0, 3)).toEqual(['/d', '/s', '/c'])
+      const line = args[3]
+      expect(line).toBe(`"${session.launchCommand}"`)
+      // The value must NOT appear bare (that word-splits under cmd.exe); it
+      // must be a single quoted token that still contains the text. cmd.exe
+      // quoting (double quotes) is used regardless of the machine's default
+      // shell, not PowerShell single-quotes, which cmd.exe wouldn't treat as quoting.
+      expect(line).toContain('"some model name"')
+      expect(line).not.toContain("'some model name'")
 
       headlessManager.killHeadless(session.id)
     })
@@ -220,8 +238,8 @@ describe('headlessManager.createHeadless', () => {
         headless: true
       })
 
-      const [, args, options] = spawnMock.mock.calls[0] as [string, string[], { shell?: boolean }]
-      expect(options.shell).toBe(false)
+      const { command, args } = started()
+      expect(command).toBe('gemini')
       // Passed to execve verbatim — one unquoted element.
       expect(args).toContain('some model name')
 
@@ -244,7 +262,7 @@ describe('headlessManager.createHeadless', () => {
           headless: true
         })
 
-        const [, args] = spawnMock.mock.calls[0] as [string, string[], { shell?: boolean }]
+        const { args } = started()
         expect(args.some((a) => a.includes('Do the thing with spaces.'))).toBe(false)
         expect(args.some((a) => a.includes('\n'))).toBe(false)
 

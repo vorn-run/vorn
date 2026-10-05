@@ -97,14 +97,9 @@ export interface TerminalSession {
    *
    * Held because a program renders against it: wrap points, cursor position and
    * every full-screen repaint are decided by these numbers, so anything that
-   * models the screen has to agree with them exactly. Nothing recorded them
-   * before -- all three spawn sites passed 80x24 to node-pty and `resizePty`
-   * forwarded new values without keeping them.
-   *
-   * Last writer wins between attached clients, because node-pty already works
-   * that way: a phone fitting to 60x20 and a desktop at 200x50 will fight, and
-   * whichever resized last is what the program is drawing against. That is a
-   * pre-existing behaviour, and this records it rather than changing it.
+   * models the screen has to agree with them exactly. The size itself is
+   * vornd's to decide, from the clients watching; this is the last size a
+   * client asked the server for.
    *
    * Optional because not every `TerminalSession` has a PTY behind it -- a
    * workflow builds a synthetic one to describe its source, and inventing a

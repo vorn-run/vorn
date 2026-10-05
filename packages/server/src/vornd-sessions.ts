@@ -99,6 +99,8 @@ export class VorndPty extends EventEmitter {
   epoch: number | null = null
   private ready = false
   private queued: string[] = []
+  /** A signal sent before vornd knew the session, sent once it does. */
+  private queuedSignal: string | null = null
   private ended = false
   private readonly dataListeners = new Set<(data: string) => void>()
   private readonly exitListeners = new Set<(event: VorndExit) => void>()
@@ -124,6 +126,8 @@ export class VorndPty extends EventEmitter {
     this.ready = true
     this.emit('started', pid)
     for (const data of this.queued.splice(0)) this.owner.write(this.id, data)
+    if (this.queuedSignal) this.owner.kill(this.id, this.queuedSignal)
+    this.queuedSignal = null
     if (this.watched) this.owner.watch(this)
   }
 
@@ -141,6 +145,11 @@ export class VorndPty extends EventEmitter {
 
   kill(signal = 'SIGHUP'): void {
     if (this.ended) return
+    // Before the spawn is answered vornd does not know the name yet.
+    if (!this.ready) {
+      this.queuedSignal = signal
+      return
+    }
     this.owner.kill(this.id, signal)
   }
 
@@ -222,12 +231,15 @@ export class VorndPty extends EventEmitter {
     this.ended = true
     clearTimeout(this.exitTimer)
     this.queued = []
+    this.queuedSignal = null
     const tail = this.decoder.decode()
     if (tail) for (const listener of this.dataListeners) listener(tail)
     // One exit per run of the session: its effect id names it, and a session
-    // that ended unseen has the run's epoch to go by.
-    const receipt = this.exitSeen?.effectId ?? `${this.id}/${this.epoch ?? 0}/exit`
-    const repeated = !claim(receipt, 'exit')
+    // that ended unseen has the run's epoch to go by. One that never started
+    // has no run to tell twice: a resume reusing its id may fail again.
+    const receipt =
+      this.exitSeen?.effectId ?? (this.epoch === null ? null : `${this.id}/${this.epoch}/exit`)
+    const repeated = receipt !== null && !claim(receipt, 'exit')
     this.owner.forget(this)
     for (const listener of this.exitListeners) listener({ exitCode, repeated })
   }
@@ -275,15 +287,16 @@ export class VorndSessions extends EventEmitter {
   }
 
   /**
-   * Connect to vornd at `endpoint`, or where its announcement says, and take
-   * stock of what it holds. Answers whether the channel is up.
+   * Connect to vornd's channel at `endpoint` and take stock of what it holds.
+   * Answers whether the channel is up.
    */
-  connect(where: string): Promise<boolean> {
+  connect(endpoint: string): Promise<boolean> {
     const before = this.connecting ?? Promise.resolve(false)
-    const attempt = before.then(() => this.open(where))
-    this.connecting = attempt.finally(() => {
-      if (this.connecting === attempt) this.connecting = null
+    const attempt = before.then(() => this.open(endpoint))
+    const tracked: Promise<boolean> = attempt.finally(() => {
+      if (this.connecting === tracked) this.connecting = null
     })
+    this.connecting = tracked
     return attempt
   }
 

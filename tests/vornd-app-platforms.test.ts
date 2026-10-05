@@ -6,10 +6,9 @@ import path from 'node:path'
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
 }))
-// The Native daemon switch on, as Settings › Experimental sets it.
 vi.mock('../packages/server/src/config-manager', () => ({
   configManager: {
-    loadConfig: () => ({ defaults: { experimental: { vornd: true } } }),
+    loadConfig: () => ({ defaults: {} }),
     onChange: () => () => {}
   }
 }))
@@ -19,12 +18,7 @@ import { IPC } from '../packages/shared/src/types'
 import { ptyManager } from '../packages/server/src/pty-manager'
 import { headlessManager } from '../packages/server/src/headless-manager'
 import { onHeadlessExit } from '../packages/server/src/workflows/host'
-import {
-  VorndSessions,
-  vorndSessions,
-  announcedEndpoint,
-  type VorndExit
-} from '../packages/server/src/vornd-sessions'
+import { VorndSessions, vorndSessions, type VorndExit } from '../packages/server/src/vornd-sessions'
 import {
   vorndBinariesAvailable,
   upstream,
@@ -32,7 +26,8 @@ import {
   BytesClient,
   until,
   home as testHome,
-  killPid
+  killPid,
+  announcedEndpoint
 } from './helpers/vornd-sessions'
 
 /**
@@ -64,7 +59,7 @@ describe.skipIf(!vorndBinariesAvailable)('sessions through vornd on this platfor
     initDatabase(h.dir)
     vornd = await Vornd.start(up.port, h.dir)
     await until('the announcement', () => announcedEndpoint(h.dir) !== null)
-    expect(await vorndSessions.connect()).toBe(true)
+    expect(await vorndSessions.connect(announcedEndpoint(h.dir)!)).toBe(true)
     ptyManager.on('client-message', record)
     headlessManager.on('client-message', record)
   }, 30_000)
@@ -83,7 +78,6 @@ describe.skipIf(!vorndBinariesAvailable)('sessions through vornd on this platfor
 
   it('runs a shell in vornd: its output read back, its exit code told', async () => {
     const session = ptyManager.createShellPty(os.tmpdir())
-    expect(ptyManager.isInVornd(session.id)).toBe(true)
     await until(
       'its pid',
       () => (ptyManager.getActiveSessions().find((s) => s.id === session.id)?.pid ?? 0) > 0
@@ -177,6 +171,6 @@ describe.skipIf(!vorndBinariesAvailable)('sessions through vornd on this platfor
     await until('the exit', () => ended.length === 1)
     sessions.close()
     // The server's own channel, killed with the old vornd, finds the new one.
-    expect(await vorndSessions.connect()).toBe(true)
+    expect(await vorndSessions.connect(announcedEndpoint(h.dir)!)).toBe(true)
   }, 30_000)
 })

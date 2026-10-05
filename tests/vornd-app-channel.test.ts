@@ -6,15 +6,11 @@ import path from 'node:path'
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
 }))
-vi.mock('../packages/server/src/config-manager', () => ({
-  configManager: { loadConfig: () => ({ defaults: { experimental: { vornd: true } } }) }
-}))
 
 import { initDatabase, closeDatabase, claimEffect } from '../packages/server/src/database'
 import { FakeVornd, effect } from './helpers/fake-vornd'
 import {
   VorndSessions,
-  announcedEndpoint,
   type HeldSession,
   type VorndExit
 } from '../packages/server/src/vornd-sessions'
@@ -25,7 +21,8 @@ import {
   BytesClient,
   until,
   home as testHome,
-  killPid
+  killPid,
+  announcedEndpoint
 } from './helpers/vornd-sessions'
 
 /**
@@ -63,8 +60,7 @@ describe('the server with a stand-in vornd', () => {
     await fake.stop()
   })
 
-  it('finds vornd by its announcement and starts sessions there by name', async () => {
-    expect(announcedEndpoint(dataDir)).toBe(fake.endpoint)
+  it('connects to vornd and starts sessions there by name', async () => {
     expect(sessions.inUse()).toBe(false)
     expect(await sessions.connect(fake.endpoint)).toBe(true)
     expect(sessions.inUse()).toBe(true)
@@ -288,6 +284,31 @@ describe('the server with a stand-in vornd', () => {
     expect(exits[0]!.exitCode).toBe(1)
     fake = new FakeVornd(dataDir)
     await fake.start()
+  })
+
+  it('tells each refused start of a reused id, as a resume that fails twice does', async () => {
+    await sessions.connect(fake.endpoint)
+    fake.spawnError = 'no such program'
+    const exits: VorndExit[] = []
+    for (let n = 0; n < 2; n++) {
+      const pty = sessions.spawn('resumed', { argv: ['nope'], cwd: '/', env: {} }, false)
+      pty.onExit((e) => exits.push(e))
+      await until(`refusal ${n + 1}`, () => exits.length === n + 1)
+    }
+    expect(exits).toEqual([
+      { exitCode: 1, repeated: false },
+      { exitCode: 1, repeated: false }
+    ])
+  })
+
+  it('holds a signal sent before the start is answered until vornd knows the session', async () => {
+    await sessions.connect(fake.endpoint)
+    const pty = sessions.spawn('closed-at-once', { argv: ['sh'], cwd: '/', env: {} }, false)
+    pty.kill('SIGHUP')
+    await until('the kill', () => fake.made('vornd:kill').length === 1)
+    const order = fake.calls.map((c) => c.method).filter((m) => m.startsWith('vornd:'))
+    expect(order.indexOf('vornd:kill')).toBeGreaterThan(order.indexOf('vornd:spawn'))
+    expect(fake.made('vornd:kill')[0]).toEqual({ id: 'closed-at-once', signal: 'hup' })
   })
 })
 

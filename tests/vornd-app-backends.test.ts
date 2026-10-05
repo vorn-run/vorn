@@ -5,28 +5,17 @@ import path from 'node:path'
 import type { CreateTerminalPayload } from '@vornrun/shared/types'
 
 /**
- * The terminals and headless agents of the app with the Native daemon switch
- * on, against a stand-in vornd: what each asks vornd to do, and what each does
+ * The terminals and headless agents of the app, against a stand-in vornd: what each asks vornd to do, and what each does
  * with what vornd tells it. The same paths run against the real vornd in
  * `vornd-app-sessions.test.ts` when the binaries are built.
  */
 
-const { spawnMock } = vi.hoisted(() => ({
-  spawnMock: vi.fn(() => {
-    throw new Error('nothing here may spawn a PTY with vornd connected')
-  })
-}))
-
-vi.mock('../packages/server/node_modules/node-pty', () => ({
-  default: { spawn: spawnMock },
-  spawn: spawnMock
-}))
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
 }))
 vi.mock('../packages/server/src/config-manager', () => ({
   configManager: {
-    loadConfig: vi.fn(() => ({ defaults: { shell: '/bin/sh', experimental: { vornd: true } } }))
+    loadConfig: vi.fn(() => ({ defaults: { shell: '/bin/sh' } }))
   }
 }))
 vi.mock('../packages/server/src/git-utils', () => ({
@@ -85,7 +74,7 @@ beforeAll(async () => {
   initDatabase(dataDir)
   fake = new FakeVornd(dataDir)
   await fake.start()
-  expect(await vorndSessions.connect()).toBe(true)
+  expect(await vorndSessions.connect(fake.endpoint)).toBe(true)
   ptyManager.on('client-message', record)
   headlessManager.on('client-message', record)
 })
@@ -111,8 +100,6 @@ function spawned(id: string): Record<string, unknown> | undefined {
 describe('terminals in vornd', () => {
   it('start a shell there, under its own id, with its pid once vornd answers', async () => {
     const session = ptyManager.createShellPty('/work')
-    expect(ptyManager.isInVornd(session.id)).toBe(true)
-    expect(spawnMock).not.toHaveBeenCalled()
     await until('the pid', () => session.pid > 0)
     const spec = spawned(session.id)!
     expect(spec.cwd).toBe('/work')
@@ -127,9 +114,6 @@ describe('terminals in vornd', () => {
     ptyManager.resizePty(session.id, 120, 40)
     expect(session.cols).toBe(120)
     expect(fake.made('terminal:resize')).toEqual([])
-
-    // Never handed over: vornd keeps it.
-    expect(ptyManager.describeForHandoff()?.some((p) => p.session.id === session.id)).toBe(false)
 
     // Read from vornd's model of the screen.
     fake.output = ['$ make', 'ok']
@@ -200,7 +184,6 @@ describe('terminals in vornd', () => {
       cwd: effect('from-last-run', 'cwd', 2, { cwd: '/p/src' }),
       exit: null
     })
-    expect(ptyManager.isInVornd('from-last-run')).toBe(true)
     const live = ptyManager.getLiveSessions().find((s) => s.id === 'from-last-run')!
     expect(live.pid).toBe(77)
     expect(live.status).toBe('running')

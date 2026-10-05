@@ -64,6 +64,7 @@ import {
 import { ptyManager } from './pty-manager'
 import { vorndSessions } from './vornd-sessions'
 import { VorndKeeper } from './vornd-process'
+import { peerAddress, relayThroughVornd, relaysThroughVornd } from './vornd-relay'
 import { seedRestored, verifyRestored } from './restored-sessions'
 import { getGitBranchAsync, getGitHeadAsync } from './git-utils'
 import { sessionManager } from './session-persistence'
@@ -282,16 +283,27 @@ export async function startServer(
       }
     },
     (socket, req) => {
-      handleConnection(
-        socket,
-        bearerFrom(req.headers.authorization),
-        parseTopics(req.query),
-        // Decides whether the greeting carries this server's identity. Only a
-        // desktop on this machine has any use for it, and only loopback can be
-        // trusted not to be a stranger on the tailnet.
-        { transport: 'tcp', address: req.socket.remoteAddress }
-      )
-      scheduler.deliverPendingConnectorInbox()
+      const remote = req.socket.remoteAddress
+      const serve = (): void => {
+        handleConnection(
+          socket,
+          bearerFrom(req.headers.authorization),
+          parseTopics(req.query),
+          // Decides whether the greeting carries this server's identity. Only a
+          // desktop on this machine has any use for it, and only loopback can be
+          // trusted not to be a stranger on the tailnet; a socket vornd relays
+          // for another machine is judged by where that machine is.
+          { transport: 'tcp', address: peerAddress(remote, req.headers) }
+        )
+        scheduler.deliverPendingConnectorInbox()
+      }
+      // From another machine: through vornd, which holds every terminal.
+      const vorndPort = vorndKeeper.port
+      if (relaysThroughVornd(remote, vorndPort)) {
+        relayThroughVornd(socket, req, vorndPort, remote as string, serve)
+        return
+      }
+      serve()
     }
   )
 
@@ -574,6 +586,18 @@ export async function startServer(
   // where it matters.
   if (endpoint) watchEndpoint(() => endpoint?.holds() ?? false)
 
+  // What older servers wrote of every terminal's output, to replay it after a
+  // restart. vornd keeps that now, so nothing reads it again.
+  void fs.promises
+    .rm(path.join(dataDir, 'history'), { recursive: true, force: true })
+    .catch((err) => log.warn({ err }, '[server] could not remove the old terminal history'))
+
+  // vornd, in front of this server for its clients, and where every terminal
+  // starts. After the listen, because it forwards to that port, and before the
+  // first request can arrive on the endpoint: a terminal asked for while it
+  // starts waits for it.
+  void vorndKeeper.launch(actualPort, dataDir)
+
   // git is worth a short wait for the shell's PATH; a slow shell is not worth the boot.
   const verifying = shellEnvSettled(1000).then(() =>
     verifyRestored({
@@ -664,11 +688,6 @@ export async function startServer(
   writePortFile(dataDir, actualPort, ownsPublished)
 
   log.info(`[server] listening on ${host}:${actualPort} (ready in ${Date.now() - bootStarted}ms)`)
-
-  // vornd, in front of this server for its clients, and where every terminal
-  // starts. After the port file and the listen, because it forwards to that
-  // port; a terminal asked for before it is up waits for it.
-  void vorndKeeper.launch(actualPort, dataDir)
 
   // Graceful shutdown
   const { hookServer } = await import('./hook-server')

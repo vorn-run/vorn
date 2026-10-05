@@ -13,7 +13,7 @@ import {
 } from '../packages/server/src/native-core'
 
 const fakeCore: NativeCore = {
-  info: () => ({ version: '0.0.0', ghostty: null }),
+  info: () => ({ version: '0.0.0' }),
   hello: (name) => `hello ${name}`
 }
 
@@ -119,7 +119,7 @@ describe('selectCore', () => {
 
   it('keeps what the binary reported about itself', () => {
     const core = selectCore({ env: {}, load: () => fakeCore })
-    expect(core.info).toEqual({ version: '0.0.0', ghostty: null })
+    expect(core.info).toEqual({ version: '0.0.0' })
   })
 
   it('looks in the default places when given nothing', () => {
@@ -166,21 +166,11 @@ describe('the active core', () => {
       loaded: true,
       version: '0.0.0',
       error: null,
-      missing: [
-        'the screen model',
-        'agent status and the terminal output agents read',
-        'git off the main thread',
-        'the native store'
-      ]
+      missing: ['git off the main thread', 'the native store']
     })
-    class Analyzer {}
-    class TerminalPipeline {}
     class NativeStore {}
     const gitRun = async (): Promise<string> => ''
-    resetCoreSelection(
-      () =>
-        ({ ...fakeCore, Analyzer, gitRun, TerminalPipeline, NativeStore }) as unknown as NativeCore
-    )
+    resetCoreSelection(() => ({ ...fakeCore, gitRun, NativeStore }) as unknown as NativeCore)
     expect(coreStatus()).toMatchObject({ loaded: true, missing: [] })
   })
 })
@@ -194,36 +184,11 @@ describe.runIf(fs.existsSync(builtCore))('vorn_core.node', () => {
     expect(core.info().version).toMatch(/^\d+\.\d+\.\d+/)
   })
 
-  it('analyzes JavaScript strings across the UTF-16 boundary', () => {
-    const core = loadNativeCore([builtCore])
-    const analyzer = new core.Analyzer!()
-    try {
-      analyzer.append('\x1b[32mplain ascii\x1b[0m\r\n', true)
-      analyzer.append('héllo wörld — 日本語 👩‍👩‍👧\n', true)
-      // Whole pairs only: node-pty decodes on character boundaries, and every
-      // batch and flush cut keeps a pair together.
-      analyzer.append('a line ', true)
-      analyzer.append('in 😀 two reads\n', true)
-      analyzer.append('partial', true)
-      expect(analyzer.output()).toEqual([
-        'plain ascii',
-        'héllo wörld — 日本語 👩‍👩‍👧',
-        'a line in 😀 two reads'
-      ])
-      expect(analyzer.partial()).toBe('partial')
-      expect(analyzer.append('\x1b[?2004h> ', true)).toBe(2)
-    } finally {
-      analyzer.free()
-    }
-  })
-
-  it('parses with libghostty-vt exactly when it reports being built with it', () => {
-    const core = loadNativeCore([builtCore])
-    if (core.parseTitle) {
-      expect(core.parseTitle(Buffer.from('\x1b]2;vorn\x07'))).toBe('vorn')
-      expect(core.info().ghostty).toBeTruthy()
-    } else {
-      expect(core.info().ghostty ?? null).toBeNull()
-    }
+  it('exports git and the store, and nothing for terminals, which run in vornd', () => {
+    const core = loadNativeCore([builtCore]) as unknown as Record<string, unknown>
+    expect(typeof core.gitRun).toBe('function')
+    expect(typeof core.NativeStore).toBe('function')
+    expect(core.TerminalPipeline).toBeUndefined()
+    expect(core.Analyzer).toBeUndefined()
   })
 })
