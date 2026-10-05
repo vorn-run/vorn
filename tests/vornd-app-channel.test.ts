@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
-import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -12,16 +11,10 @@ vi.mock('../packages/server/src/config-manager', () => ({
 }))
 
 import { initDatabase, closeDatabase, claimEffect } from '../packages/server/src/database'
-import {
-  FrameSplitter,
-  encodeFrame,
-  KIND_TEXT,
-  APP_PROTOCOL
-} from '../packages/server/src/vornd-channel'
+import { FakeVornd, effect } from './helpers/fake-vornd'
 import {
   VorndSessions,
   announcedEndpoint,
-  type EffectNote,
   type HeldSession,
   type VorndExit
 } from '../packages/server/src/vornd-sessions'
@@ -54,85 +47,6 @@ afterEach(() => {
   closeDatabase()
   fs.rmSync(dataDir, { recursive: true, force: true })
 })
-
-/** A vornd that answers what a test tells it to, on a socket in the data directory. */
-class FakeVornd {
-  readonly endpoint: string
-  private server!: net.Server
-  private conns = new Set<net.Socket>()
-  /** What `vornd:subscribe` answers. */
-  state: { connected: boolean; sessions: HeldSession[]; ended: HeldSession[]; notices: unknown[] } =
-    { connected: true, sessions: [], ended: [], notices: [] }
-  /** Every call the server made, in order. */
-  calls: Array<{ method: string; params: Record<string, unknown> }> = []
-  nextPid = 100
-
-  constructor(dir: string) {
-    this.endpoint =
-      process.platform === 'win32'
-        ? `\\\\.\\pipe\\vorn-app-test-${process.pid}-${Date.now()}`
-        : path.join(dir, `app-${Date.now()}.sock`)
-  }
-
-  async start(): Promise<void> {
-    this.server = net.createServer((socket) => {
-      this.conns.add(socket)
-      const frames = new FrameSplitter()
-      socket.on('data', (chunk: Buffer) => {
-        frames.push(chunk)
-        for (let f = frames.next(); f; f = frames.next()) {
-          if (f.kind === KIND_TEXT) this.answer(socket, JSON.parse(f.payload.toString()))
-        }
-      })
-      socket.on('close', () => this.conns.delete(socket))
-    })
-    await new Promise<void>((resolve) => this.server.listen(this.endpoint, () => resolve()))
-    fs.mkdirSync(path.join(dataDir, 'run'), { recursive: true })
-    fs.writeFileSync(
-      path.join(dataDir, 'run', 'vornd-app'),
-      JSON.stringify({ pid: process.pid, endpoint: this.endpoint, protocol: APP_PROTOCOL })
-    )
-  }
-
-  /** Tells every connection `method`. */
-  send(method: string, params: unknown): void {
-    const frame = encodeFrame(KIND_TEXT, Buffer.from(JSON.stringify({ method, params })))
-    for (const c of this.conns) c.write(frame)
-  }
-
-  /** Drops every connection, as a vornd that died. */
-  dropAll(): void {
-    for (const c of this.conns) c.destroy()
-  }
-
-  async stop(): Promise<void> {
-    this.dropAll()
-    await new Promise<void>((resolve) => this.server.close(() => resolve()))
-  }
-
-  private answer(
-    socket: net.Socket,
-    msg: { id?: number; method: string; params?: Record<string, unknown> }
-  ): void {
-    this.calls.push({ method: msg.method, params: msg.params ?? {} })
-    let result: unknown = null
-    if (msg.method === 'vornd:hello') result = { protocol: APP_PROTOCOL, build: 'test' }
-    else if (msg.method === 'vornd:subscribe') result = this.state
-    else if (msg.method === 'vornd:spawn') {
-      result = { id: msg.params?.name, pid: this.nextPid++, epoch: 7 }
-    } else if (msg.method === 'terminal:attach') {
-      result = { live: true, continued: true, cursor: msg.params?.cursor }
-    }
-    if (msg.id === undefined) return
-    socket.write(
-      encodeFrame(KIND_TEXT, Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result })))
-    )
-  }
-}
-
-function effect(id: string, kind: EffectNote['kind'], rseq: number, extra: object): EffectNote {
-  return { effectId: `${id}/7/${rseq}/0`, id, epoch: 7, rseq, index: 0, kind, ...extra }
-}
 
 describe('the server with a stand-in vornd', () => {
   let fake: FakeVornd
@@ -283,6 +197,85 @@ describe('the server with a stand-in vornd', () => {
     // One it holds that nothing here stands for is offered to be taken on.
     await until('the strangers', () => strangers.length === 1)
     expect(strangers[0]!.map((s) => s.id)).toEqual(['stranger'])
+  })
+
+  it('reads a session from where it left off, and from a screen when it cannot continue', async () => {
+    await sessions.connect(fake.endpoint)
+    const pty = sessions.spawn('read-1', { argv: ['sh'], cwd: '/', env: {} }, true)
+    let out = ''
+    pty.onData((d) => (out += d))
+    await until('the attach', () => fake.made('terminal:attach').length === 1)
+    fake.sendOutput('read-1', 7, 0, 'a')
+    // Another epoch's bytes are not this run's.
+    fake.sendOutput('read-1', 8, 1, 'x')
+    fake.sendOutput('read-1', 7, 1, 'b')
+    await until('the bytes', () => out === 'ab')
+
+    // vornd asks for a fresh read: from where this server stands.
+    fake.send('terminal:resync', { id: 'read-1', reason: 'restarted' })
+    await until('the second attach', () => fake.made('terminal:attach').length === 2)
+    expect(fake.made('terminal:attach')[1]!.cursor).toEqual({
+      epoch: 7,
+      nextRseq: 2,
+      nextOffset: 0
+    })
+    // A read that could not continue starts after the screen it was given.
+    pty.attached({
+      live: true,
+      continued: false,
+      cursor: { epoch: 9, nextRseq: 40, nextOffset: 0 }
+    })
+    fake.sendOutput('read-1', 9, 39, 'old')
+    fake.sendOutput('read-1', 9, 40, 'c')
+    await until('the new run', () => out === 'abc')
+
+    // An attach answered with how it ended ends it.
+    const exits: VorndExit[] = []
+    pty.onExit((e) => exits.push(e))
+    pty.attached({ live: false, exitCode: 6 })
+    expect(exits).toEqual([{ exitCode: 6, repeated: false }])
+    expect(pty.readCursor()).toEqual({ epoch: 9, nextRseq: 41, nextOffset: 0 })
+  })
+
+  it('waits for the last output before an exit, on a session it reads', async () => {
+    await sessions.connect(fake.endpoint)
+    const pty = sessions.spawn('read-2', { argv: ['sh'], cwd: '/', env: {} }, true)
+    await until('the attach', () => fake.made('terminal:attach').length === 1)
+    const seen: string[] = []
+    pty.onData((d) => seen.push(d))
+    pty.onExit((e) => seen.push(`exit ${e.exitCode}`))
+    fake.send('vornd:effect', effect('read-2', 'exit', 5, { code: 2, exitCode: 2 }))
+    fake.sendOutput('read-2', 7, 0, 'last words')
+    await new Promise((r) => setTimeout(r, 50))
+    expect(seen).toEqual(['last words'])
+    fake.send('terminal:exit', { id: 'read-2', exitCode: 2 })
+    await until('the exit', () => seen.length === 2)
+    expect(seen).toEqual(['last words', 'exit 2'])
+  })
+
+  it('asks nothing of a vornd that is gone', async () => {
+    expect(await sessions.readOutput('none')).toEqual([])
+    await sessions.connect(fake.endpoint)
+    fake.output = ['one', 'two']
+    expect(await sessions.readOutput('x', 1)).toEqual(['one', 'two'])
+    const pty = sessions.spawn('gone-1', { argv: ['sh'], cwd: '/', env: {} }, false)
+    await until('the spawn', () => pty.pid !== 0)
+    sessions.close()
+    expect(sessions.inUse()).toBe(false)
+    // Written, signalled and closed with nothing listening: dropped, not thrown.
+    pty.write('lost')
+    pty.kill('SIGINT')
+    pty.closeStdin()
+    expect(() => sessions.spawn('gone-2', { argv: ['sh'], cwd: '/', env: {} }, false)).toThrow()
+  })
+
+  it('refuses a vornd speaking another protocol', async () => {
+    const other = new FakeVornd(dataDir)
+    other.protocol = 99
+    await other.start()
+    expect(await sessions.connect(other.endpoint)).toBe(false)
+    expect(await sessions.connect(path.join(dataDir, 'nothing.sock'))).toBe(false)
+    await other.stop()
   })
 
   it('a spawn vornd refuses ends the session', async () => {

@@ -383,11 +383,12 @@ export class VorndSessions extends EventEmitter {
 
   /**
    * Take on a session vornd already holds, from a previous run of this
-   * server.
+   * server. `wire` listens to it before its latest states are told.
    */
-  adopt(held: HeldSession, watched: boolean): VorndPty {
+  adopt(held: HeldSession, watched: boolean, wire?: (pty: VorndPty) => void): VorndPty {
     const pty = new VorndPty(this, held.id, watched)
     this.ptys.set(held.id, pty)
+    wire?.(pty)
     pty.started(held.pid, held.status?.epoch ?? held.cwd?.epoch ?? 0)
     this.states(held)
     return pty

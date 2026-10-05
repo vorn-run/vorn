@@ -835,13 +835,12 @@ class PtyManager extends EventEmitter {
    */
   adoptVornd(session: TerminalSession, held: HeldSession): void {
     const watched = !!session.remoteHostId
-    const program = vorndSessions.adopt(held, watched)
     session.pid = held.pid
     session.status = 'running'
     this.sessions.set(session.id, session)
     if (!this.sessionOrder.includes(session.id)) this.sessionOrder.push(session.id)
     this.normalizedPaths.set(session.id, normalizePath(session.worktreePath || session.projectPath))
-    this.setupVorndEvents(session.id, program)
+    const program = vorndSessions.adopt(held, watched, (p) => this.setupVorndEvents(session.id, p))
     this.ptys.set(session.id, program)
   }
 
