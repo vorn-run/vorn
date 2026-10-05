@@ -199,6 +199,13 @@ jobs:
           VORN_NATIVE_STORE: '1'
         run: yarn test:conformance
 
+      # The same files with every group vornd can answer itself answered there.
+      - name: Conformance through vornd, native server
+        if: runner.os == 'Linux'
+        env:
+          VORND_NATIVE_SERVER: '1'
+        run: yarn test:conformance
+
       # The server driving its sessions through the real vornd and session
       # holder, on each platform: a named pipe and ConPTY on Windows.
       - name: Sessions through vornd
