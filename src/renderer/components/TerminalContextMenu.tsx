@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Copy, ClipboardPaste, Workflow, ChevronRight } from 'lucide-react'
+import { Copy, ClipboardPaste, Workflow, ChevronRight, Maximize2, Lock, Unlock } from 'lucide-react'
 import {
   getTerminalSelection,
   clearTerminalSelection,
   pasteToTerminal,
-  focusTerminal
+  focusTerminal,
+  getTerminalSizing,
+  fitTerminalToDevice,
+  setTerminalSizeLock
 } from '../lib/terminal-registry'
 import { useAppStore } from '../stores'
 import { useWorkspaceWorkflows } from '../hooks/useWorkspaceWorkflows'
@@ -23,6 +26,8 @@ export function TerminalContextMenu({ terminalId, position, onClose }: Props) {
   const submenuRef = useRef<HTMLDivElement>(null)
   const hideTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selection = getTerminalSelection(terminalId)
+  // Only a session vornd holds has a size this pane can ask for.
+  const sizing = getTerminalSizing(terminalId)
   const workspaceWorkflows = useWorkspaceWorkflows()
   const sourceSession = useAppStore((s) => s.terminals.get(terminalId)?.session)
 
@@ -79,6 +84,16 @@ export function TerminalContextMenu({ terminalId, position, onClose }: Props) {
     close()
   }
 
+  const handleFit = () => {
+    fitTerminalToDevice(terminalId)
+    close()
+  }
+
+  const handleLock = () => {
+    if (sizing) void setTerminalSizeLock(terminalId, !sizing.locked)
+    close()
+  }
+
   const workflowSubmenuItems = buildWorkflowMenuItems(
     workspaceWorkflows,
     close,
@@ -86,9 +101,9 @@ export function TerminalContextMenu({ terminalId, position, onClose }: Props) {
   )
 
   const hasWorkflows = workflowSubmenuItems.length > 0
-  const itemCount = 2 + (hasWorkflows ? 1 : 0)
+  const itemCount = 2 + (hasWorkflows ? 1 : 0) + (sizing ? 2 : 0)
   const menuWidth = 180
-  const menuHeight = itemCount * 32 + (hasWorkflows ? 9 : 0) + 16
+  const menuHeight = itemCount * 32 + (hasWorkflows ? 9 : 0) + (sizing ? 9 : 0) + 16
   const left = Math.max(8, Math.min(position.x, window.innerWidth - menuWidth - 8))
   const top = Math.max(8, Math.min(position.y, window.innerHeight - menuHeight - 8))
 
@@ -134,6 +149,43 @@ export function TerminalContextMenu({ terminalId, position, onClose }: Props) {
           <ClipboardPaste size={14} className="text-gray-500" />
           <span>Paste</span>
         </button>
+
+        {sizing && (
+          <>
+            <div className="border-t border-white/[0.06] my-1" />
+            <button
+              role="menuitem"
+              onClick={handleFit}
+              disabled={sizing.owner}
+              title="Resize the session to this window"
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-gray-300
+                         hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors
+                         disabled:opacity-40 disabled:pointer-events-none"
+            >
+              <Maximize2 size={14} className="text-gray-500" />
+              <span>Fit to this device</span>
+            </button>
+            <button
+              role="menuitem"
+              aria-pressed={sizing.locked}
+              onClick={handleLock}
+              title={
+                sizing.locked
+                  ? 'Let the session follow whoever is typing again'
+                  : 'Keep the session at this window size'
+              }
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-gray-300
+                         hover:bg-white/[0.06] active:bg-white/[0.1] transition-colors"
+            >
+              {sizing.locked ? (
+                <Unlock size={14} className="text-gray-500" />
+              ) : (
+                <Lock size={14} className="text-gray-500" />
+              )}
+              <span>{sizing.locked ? 'Unlock size' : 'Lock size'}</span>
+            </button>
+          </>
+        )}
 
         {hasWorkflows && (
           <>

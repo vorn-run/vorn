@@ -6,24 +6,45 @@
 //! (Node's own PTYs) are forwarded as they always were. What answers them is
 //! in [`crate::streams`]; this module only reads the calls.
 //!
+//! The size of a held session is the size rule's ([`crate::size`]). A
+//! client reports `terminal:viewport {id, cols, rows}` and
+//! `terminal:presence {id, state}` (`active`, `watching` or `away`), and may
+//! send `terminal:takeSize {id}` ("Fit to this device") and
+//! `terminal:lockSize {id, locked}`. `terminal:resize {id, cols, rows}`, which
+//! an older client sends on every fit, is taken as a TakeSize with that
+//! size, so such a client still works the way it did.
+//!
+//! Each of these calls, `terminal:attach` and `terminal:write` included, may
+//! name the pane it comes from with `pane` (a number): the desktop's windows
+//! share one connection, and the size rule counts each pane as its own client.
+//! A lock another client holds is refused, in the answer to the request.
+//!
 //! `vornd:spawn` starts a session in sessiond through the engine. It exists
 //! for tests until the app creates sessions through vornd, and is answered
 //! only when vornd was started with `--debug-spawn`.
 
+use std::time::Instant;
+
 use serde_json::{json, Value};
 use vorn_sessiond_wire::{Io, SpawnSpec, Stdin};
+use vorn_size::{Presence, Size};
 use vorn_term_proto::Cursor;
 
 use crate::engine::Engine;
+use crate::size::{Ev, Who};
 use crate::streams::{answer, refuse, Forwarder};
 
 /// The calls vornd may answer, cheap to test for before parsing a frame.
-const NATIVE: [&str; 6] = [
+const NATIVE: [&str; 10] = [
     "\"terminal:attach\"",
     "\"terminal:write\"",
     "\"terminal:resize\"",
     "\"terminal:readScrollback\"",
     "\"terminal:readOutput\"",
+    "\"terminal:viewport\"",
+    "\"terminal:presence\"",
+    "\"terminal:takeSize\"",
+    "\"terminal:lockSize\"",
     "\"vornd:spawn\"",
 ];
 
@@ -61,10 +82,20 @@ pub fn handle(
     if !streams.holds(session) {
         return false;
     }
+    let sizes = engine.sizes();
+    // 0 when the client names no pane: the connection is then one client.
+    let pane = params.get("pane").and_then(Value::as_u64).unwrap_or(0);
+    let who = Who::Bytes { conn, pane };
+    let now = Instant::now();
     match method {
         "terminal:attach" => {
             let Some(rpc) = rpc else { return true };
             let cursor = params.get("cursor").and_then(cursor_of);
+            let ev = Ev::Attach {
+                viewport: size_of(&params),
+                presence: Presence::Watching,
+            };
+            sizes.on(session, who, ev, now);
             engine.perform(streams.attach(conn, session, rpc, cursor));
         }
         "terminal:readScrollback" => {
@@ -81,22 +112,56 @@ pub fn handle(
         }
         "terminal:write" => {
             let done = match params.get("data").and_then(Value::as_str) {
-                Some(data) => engine.write(session, data.as_bytes().to_vec()),
+                Some(data) => {
+                    // A person's typing takes the size; focus and scroll
+                    // reports do not.
+                    if vorn_size::typed(data.as_bytes()) {
+                        sizes.on(session, who, Ev::Input, now);
+                    }
+                    engine.write(session, data.as_bytes().to_vec())
+                }
                 None => Err("terminal:write needs data".to_owned()),
             };
             settle(reply, rpc, done);
         }
         "terminal:resize" => {
-            let size = |k: &str| {
-                params
-                    .get(k)
-                    .and_then(Value::as_u64)
-                    .and_then(|n| u16::try_from(n).ok())
-                    .filter(|&n| n > 0)
+            let done = match size_of(&params) {
+                Some(size) => {
+                    sizes.on(session, who, Ev::TakeSize(Some(size)), now);
+                    Ok(())
+                }
+                None => Err("terminal:resize needs cols and rows from 1 to 65535".to_owned()),
             };
-            let done = match (size("cols"), size("rows")) {
-                (Some(cols), Some(rows)) => engine.resize(session, cols, rows),
-                _ => Err("terminal:resize needs cols and rows from 1 to 65535".to_owned()),
+            settle(reply, rpc, done);
+        }
+        "terminal:viewport" => {
+            let done = match size_of(&params) {
+                Some(size) => {
+                    sizes.on(session, who, Ev::Viewport(size), now);
+                    Ok(())
+                }
+                None => Err("terminal:viewport needs cols and rows from 1 to 65535".to_owned()),
+            };
+            settle(reply, rpc, done);
+        }
+        "terminal:presence" => {
+            let state = match params.get("state").and_then(Value::as_str) {
+                Some("active") => Ok(Presence::Active),
+                Some("watching") => Ok(Presence::Watching),
+                Some("away") => Ok(Presence::Away),
+                _ => Err("terminal:presence needs a state: active, watching or away".to_owned()),
+            };
+            let done = state.map(|state| sizes.on(session, who, Ev::Presence(state), now));
+            settle(reply, rpc, done);
+        }
+        "terminal:takeSize" => {
+            sizes.on(session, who, Ev::TakeSize(size_of(&params)), now);
+            settle(reply, rpc, Ok(()));
+        }
+        "terminal:lockSize" => {
+            let done = match params.get("locked").and_then(Value::as_bool) {
+                Some(locked) => sizes.lock(session, who, locked, now),
+                None => Err("terminal:lockSize needs locked: true or false".to_owned()),
             };
             settle(reply, rpc, done);
         }
@@ -112,6 +177,18 @@ fn settle(reply: &Forwarder, rpc: Option<Value>, done: Result<(), String>) {
         Ok(()) => reply.send_now(&answer(&rpc, Value::Null)),
         Err(e) => reply.send_now(&refuse(&rpc, &e)),
     }
+}
+
+/// `cols` and `rows` from a call's params, each from 1 to 65535.
+fn size_of(params: &Value) -> Option<Size> {
+    let n = |k: &str| {
+        params
+            .get(k)
+            .and_then(Value::as_u64)
+            .and_then(|n| u16::try_from(n).ok())
+            .filter(|&n| n > 0)
+    };
+    Some(Size::new(n("cols")?, n("rows")?))
 }
 
 /// A cursor as clients send it: `{epoch, nextRseq, nextOffset}`.
@@ -189,6 +266,23 @@ fn spawn(engine: &std::sync::Arc<Engine>, reply: &Forwarder, rpc: Option<Value>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_a_size_only_when_both_sides_fit() {
+        assert_eq!(
+            size_of(&json!({ "cols": 120, "rows": 40 })),
+            Some(Size::new(120, 40))
+        );
+        for bad in [
+            json!({ "cols": 0, "rows": 40 }),
+            json!({ "cols": 70000, "rows": 40 }),
+            json!({ "cols": 120 }),
+            json!({ "cols": -1, "rows": 2 }),
+            json!(null),
+        ] {
+            assert_eq!(size_of(&bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn reads_a_cursor_and_refuses_half_of_one() {

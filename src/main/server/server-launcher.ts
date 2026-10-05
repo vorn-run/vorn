@@ -1050,7 +1050,9 @@ async function routeThroughVornd(upstream: number | null): Promise<void> {
     started = await startVornd(binary, upstream, {
       sessiond: sessiond && vorndHome ? { binary: sessiond, home: vorndHome } : undefined,
       // With the holder, vornd becomes the server's process backend.
-      serverToken: bootstrapToken ?? undefined
+      serverToken: bootstrapToken ?? undefined,
+      // The bridge presents it on every connection, through vornd too.
+      desktopToken: bootstrapToken ?? undefined
     })
   } catch (err) {
     fallBack((err as Error).message)

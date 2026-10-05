@@ -18,9 +18,10 @@
 //!   marks (keys 7 and 8), because history rows are encoded when they are
 //!   fetched and may use styles minted since the client's last frame.
 //!
-//! Size policy (`Viewport`, `Presence`, `TakeSize`, `LockSize`) and
-//! `SetDefaults` have kinds reserved here and decode to
+//! `SetDefaults` has its kind reserved here and decodes to
 //! [`ClientMsg::Unhandled`]; the bytes mode's messages are the WebSocket's.
+//! `Resized` is both modes' (TP §7): a grid client reads it for the owner and
+//! the reason, and takes the new size itself from the frame that carries it.
 
 use std::fmt;
 
@@ -463,6 +464,18 @@ pub enum CopyFormat {
     Html,
 }
 
+/// Whether a client is in use (TP §10): `0 Active, 1 Watching, 2 Away`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Presence {
+    /// Keyboard, paste, mouse input or scrolling in the last few seconds.
+    Active,
+    /// The pane is on screen.
+    #[default]
+    Watching,
+    /// Hidden, the app in the background, the device locked.
+    Away,
+}
+
 /// Everything a grid client says to vornd.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientMsg {
@@ -520,6 +533,27 @@ pub enum ClientMsg {
         regex: bool,
         case: bool,
         from_line: Option<u64>,
+    },
+    /// `{1 sid, 2 size}`: what fits on the client at its preferred font.
+    /// Never a resize request.
+    Viewport {
+        sid: u32,
+        size: Size,
+    },
+    /// `{1 sid, 2 state}`
+    Presence {
+        sid: u32,
+        state: Presence,
+    },
+    /// `{1 sid}`: "Fit to this device", the size taken explicitly.
+    TakeSize {
+        sid: u32,
+    },
+    /// `{1 sid, 2 locked}`: lock the size to this client's viewport, or
+    /// release the lock.
+    LockSize {
+        sid: u32,
+        locked: bool,
     },
     /// A kind this build reserves but does not act on yet.
     Unhandled(u8),
@@ -583,6 +617,22 @@ pub enum EventKind {
         code: Option<i32>,
         signal: Option<i32>,
     },
+}
+
+/// Why a session has the size it has, in `Resized`:
+/// `0 Input, 1 Returned, 2 Explicit, 3 Locked, 4 Launch`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResizeReason {
+    /// The owner typed into it, or its viewport changed while it owned it.
+    Input,
+    /// The owner went away and the size came back to a watcher.
+    Returned,
+    /// A client took it with "Fit to this device".
+    Explicit,
+    /// A client locked it to its viewport.
+    Locked,
+    /// The size the session was launched with.
+    Launch,
 }
 
 /// Why a client gets a snapshot rather than a delta.
@@ -670,6 +720,19 @@ pub enum ServerMsg {
         sid: u32,
         id: EventId,
         kind: EventKind,
+    },
+    /// `{1 sid, 2 cols, 3 rows, 4 rseq, 5 rev, 6 owner, 7 reason}`: the
+    /// session was resized at record `rseq`. `owner` is the receiving
+    /// attachment's own sid when it owns the size, and absent otherwise;
+    /// `reason` is absent for a resize vornd did not decide (a redraw nudge).
+    Resized {
+        sid: u32,
+        cols: u16,
+        rows: u16,
+        rseq: u64,
+        rev: Option<u64>,
+        owner: Option<u32>,
+        reason: Option<ResizeReason>,
     },
     /// `{1 sid, 2 reason}`: a snapshot follows.
     Resync {
@@ -869,6 +932,25 @@ impl Dec {
 // ---------------------------------------------------------------------------
 // Shared types on the wire
 // ---------------------------------------------------------------------------
+
+/// `{1 cols, 2 rows, 3 px_w, 4 px_h}`, as Attach's view.
+fn put_size(w: &mut Writer<'_>, s: &Size) {
+    w.map();
+    w.key(1).uint(u64::from(s.cols));
+    w.key(2).uint(u64::from(s.rows));
+    w.key(3).uint(u64::from(s.px_w));
+    w.key(4).uint(u64::from(s.px_h));
+    w.end();
+}
+
+fn get_size(mut d: Dec) -> Result<Size, MsgError> {
+    Ok(Size {
+        cols: d.num_or_zero(1)?,
+        rows: d.num_or_zero(2)?,
+        px_w: d.num_or_zero(3)?,
+        px_h: d.num_or_zero(4)?,
+    })
+}
 
 fn put_cursor(w: &mut Writer<'_>, c: &Cursor) {
     w.map();
@@ -1281,6 +1363,10 @@ impl ClientMsg {
             ClientMsg::SelectAt { .. } => kind::SELECT_AT,
             ClientMsg::Copy { .. } => kind::COPY,
             ClientMsg::Search { .. } => kind::SEARCH,
+            ClientMsg::Viewport { .. } => kind::VIEWPORT,
+            ClientMsg::Presence { .. } => kind::PRESENCE,
+            ClientMsg::TakeSize { .. } => kind::TAKE_SIZE,
+            ClientMsg::LockSize { .. } => kind::LOCK_SIZE,
             ClientMsg::Unhandled(k) => *k,
         }
     }
@@ -1419,6 +1505,26 @@ impl ClientMsg {
                         w.key(6).uint(*l);
                     }
                 }
+                ClientMsg::Viewport { sid, size } => {
+                    w.key(1).uint(u64::from(*sid));
+                    w.key(2);
+                    put_size(w, size);
+                }
+                ClientMsg::Presence { sid, state } => {
+                    w.key(1).uint(u64::from(*sid));
+                    w.key(2).uint(match state {
+                        Presence::Active => 0,
+                        Presence::Watching => 1,
+                        Presence::Away => 2,
+                    });
+                }
+                ClientMsg::TakeSize { sid } => {
+                    w.key(1).uint(u64::from(*sid));
+                }
+                ClientMsg::LockSize { sid, locked } => {
+                    w.key(1).uint(u64::from(*sid));
+                    w.key(2).bool(*locked);
+                }
                 ClientMsg::Unhandled(_) => {}
             }
             w.end();
@@ -1550,6 +1656,27 @@ impl ClientMsg {
                 regex: d.flag(4)?,
                 case: d.flag(5)?,
                 from_line: d.opt_num(6)?,
+            },
+            kind::VIEWPORT => ClientMsg::Viewport {
+                sid: d.num(1)?,
+                size: match d.map(2)? {
+                    Some(s) => get_size(s)?,
+                    None => Size::default(),
+                },
+            },
+            kind::PRESENCE => ClientMsg::Presence {
+                sid: d.num(1)?,
+                state: match d.variant(2)?.unwrap_or(1) {
+                    0 => Presence::Active,
+                    2 => Presence::Away,
+                    // Watching, and any state a newer client names.
+                    _ => Presence::Watching,
+                },
+            },
+            kind::TAKE_SIZE => ClientMsg::TakeSize { sid: d.num(1)? },
+            kind::LOCK_SIZE => ClientMsg::LockSize {
+                sid: d.num(1)?,
+                locked: d.flag(2)?,
             },
             other => ClientMsg::Unhandled(other),
         };
@@ -1705,6 +1832,7 @@ impl ServerMsg {
             ServerMsg::Copied { .. } => kind::COPIED,
             ServerMsg::SearchHits { .. } => kind::SEARCH_HITS,
             ServerMsg::Event { .. } => kind::EVENT,
+            ServerMsg::Resized { .. } => kind::RESIZED,
             ServerMsg::Resync { .. } => kind::RESYNC,
             ServerMsg::Error { .. } => kind::ERROR,
         }
@@ -1725,6 +1853,7 @@ impl ServerMsg {
             | ServerMsg::Copied { sid, .. }
             | ServerMsg::SearchHits { sid, .. }
             | ServerMsg::Event { sid, .. }
+            | ServerMsg::Resized { sid, .. }
             | ServerMsg::Resync { sid, .. } => Some(*sid),
         }
     }
@@ -1884,6 +2013,35 @@ impl ServerMsg {
                     }
                     w.end();
                 }
+                ServerMsg::Resized {
+                    sid,
+                    cols,
+                    rows,
+                    rseq,
+                    rev,
+                    owner,
+                    reason,
+                } => {
+                    w.key(1).uint(u64::from(*sid));
+                    w.key(2).uint(u64::from(*cols));
+                    w.key(3).uint(u64::from(*rows));
+                    w.key(4).uint(*rseq);
+                    if let Some(rev) = rev {
+                        w.key(5).uint(*rev);
+                    }
+                    if let Some(owner) = owner {
+                        w.key(6).uint(u64::from(*owner));
+                    }
+                    if let Some(reason) = reason {
+                        w.key(7).uint(match reason {
+                            ResizeReason::Input => 0,
+                            ResizeReason::Returned => 1,
+                            ResizeReason::Explicit => 2,
+                            ResizeReason::Locked => 3,
+                            ResizeReason::Launch => 4,
+                        });
+                    }
+                }
                 ServerMsg::Resync { sid, reason } => {
                     w.key(1).uint(u64::from(*sid));
                     w.key(2).uint(match reason {
@@ -1907,7 +2065,7 @@ impl ServerMsg {
     /// an optional one it does not know, or one of the bytes mode's.
     pub fn decode(k: u8, payload: &[u8]) -> Result<Option<ServerMsg>, MsgError> {
         match k {
-            kind::BYTES | kind::VT_SNAPSHOT | kind::RESIZED => return Ok(None),
+            kind::BYTES | kind::VT_SNAPSHOT => return Ok(None),
             kind::WELCOME..=kind::ERROR => {}
             _ if k & kind::OPTIONAL != 0 => return Ok(None),
             _ => return Err(MsgError::UnknownKind(k)),
@@ -2050,6 +2208,24 @@ impl ServerMsg {
                 };
                 ServerMsg::Event { sid, id, kind }
             }
+            kind::RESIZED => ServerMsg::Resized {
+                sid: d.num(1)?,
+                cols: d.num_or_zero(2)?,
+                rows: d.num_or_zero(3)?,
+                rseq: d.num_or_zero(4)?,
+                rev: d.opt_num(5)?,
+                owner: d.opt_num(6)?,
+                reason: match d.variant(7)? {
+                    None => None,
+                    Some(0) => Some(ResizeReason::Input),
+                    Some(1) => Some(ResizeReason::Returned),
+                    Some(2) => Some(ResizeReason::Explicit),
+                    Some(3) => Some(ResizeReason::Locked),
+                    Some(4) => Some(ResizeReason::Launch),
+                    // A reason a newer vornd names: the resize stands.
+                    Some(_) => None,
+                },
+            },
             kind::RESYNC => ServerMsg::Resync {
                 sid: d.num(1)?,
                 reason: match d.variant(2)?.unwrap_or(0) {
@@ -2249,7 +2425,28 @@ mod tests {
             case: false,
             from_line: Some(5),
         });
-        round_client(ClientMsg::Unhandled(kind::VIEWPORT));
+        round_client(ClientMsg::Viewport {
+            sid: 3,
+            size: Size {
+                cols: 120,
+                rows: 40,
+                px_w: 960,
+                px_h: 640,
+            },
+        });
+        for state in [Presence::Active, Presence::Watching, Presence::Away] {
+            round_client(ClientMsg::Presence { sid: 3, state });
+        }
+        round_client(ClientMsg::TakeSize { sid: 3 });
+        round_client(ClientMsg::LockSize {
+            sid: 3,
+            locked: true,
+        });
+        round_client(ClientMsg::LockSize {
+            sid: 3,
+            locked: false,
+        });
+        round_client(ClientMsg::Unhandled(kind::SET_DEFAULTS));
     }
 
     #[test]
@@ -2409,6 +2606,33 @@ mod tests {
         round_server(ServerMsg::Error {
             code: 426,
             message: "upgrade".into(),
+        });
+        for reason in [
+            None,
+            Some(ResizeReason::Input),
+            Some(ResizeReason::Returned),
+            Some(ResizeReason::Explicit),
+            Some(ResizeReason::Locked),
+            Some(ResizeReason::Launch),
+        ] {
+            round_server(ServerMsg::Resized {
+                sid: 2,
+                cols: 120,
+                rows: 40,
+                rseq: 77,
+                rev: Some(9),
+                owner: reason.map(|_| 2),
+                reason,
+            });
+        }
+        round_server(ServerMsg::Resized {
+            sid: 2,
+            cols: 1,
+            rows: 1,
+            rseq: 0,
+            rev: None,
+            owner: None,
+            reason: None,
         });
     }
 

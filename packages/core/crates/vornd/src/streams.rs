@@ -30,10 +30,16 @@
 //! [`Streams::snapshot_ready`]), so a snapshot's cursor and the records
 //! after it always line up. What it needs done elsewhere (a snapshot cut,
 //! records fetched from sessiond) it returns as [`Action`]s.
+//!
+//! A `terminal:resized` names who the size now follows and why, as the size
+//! rule decided it ([`crate::size`]), once the driver has said so with
+//! [`Streams::resized_by`]. Each client learns its own name, `client`, in
+//! the answer to its attach.
 
+use std::collections::BTreeMap;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -295,6 +301,17 @@ struct Attachment {
     mode: Mode,
 }
 
+/// Who asked for the resize at a record, and why.
+#[derive(Debug, Clone)]
+struct ResizeNote {
+    owner: Option<String>,
+    reason: Option<&'static str>,
+}
+
+/// Resize records remembered with who asked for them, per session: enough
+/// for every resize still in the tail of a session resized often.
+const NOTES_KEPT: usize = 256;
+
 /// One session, as the hub keeps it.
 #[derive(Debug)]
 struct Stream {
@@ -310,6 +327,8 @@ struct Stream {
     early: Vec<Asked>,
     /// A fetch from sessiond in flight, from this cursor.
     fetch: Option<Cursor>,
+    /// Who asked for the resize at each record, by rseq.
+    resizes: BTreeMap<u64, ResizeNote>,
 }
 
 impl Stream {
@@ -323,6 +342,7 @@ impl Stream {
             attached: HashMap::new(),
             early: Vec::new(),
             fetch: None,
+            resizes: BTreeMap::new(),
         }
     }
 
@@ -393,10 +413,23 @@ struct Inner {
     next_token: u64,
 }
 
+/// Called with a connection's id once it has closed.
+pub type OnDisconnect = Box<dyn Fn(u64) + Send + Sync>;
+
+struct Hook(OnDisconnect);
+
+impl std::fmt::Debug for Hook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Hook")
+    }
+}
+
 /// Every session's stream and every client connection.
 #[derive(Debug, Default)]
 pub struct Streams {
     inner: Mutex<Inner>,
+    /// Told when a connection closes, outside the lock.
+    left: OnceLock<Hook>,
 }
 
 /// A JSON-RPC notification.
@@ -466,15 +499,45 @@ impl Streams {
     }
 
     fn disconnect(&self, conn: u64) {
-        let mut inner = self.inner();
-        inner.conns.remove(&conn);
-        for s in inner.sessions.values_mut() {
-            if let Some(a) = s.attached.remove(&conn) {
-                a.gen.fetch_add(1, Ordering::AcqRel);
+        {
+            let mut inner = self.inner();
+            inner.conns.remove(&conn);
+            for s in inner.sessions.values_mut() {
+                if let Some(a) = s.attached.remove(&conn) {
+                    a.gen.fetch_add(1, Ordering::AcqRel);
+                }
+                s.early.retain(|a| a.conn != conn);
             }
-            s.early.retain(|a| a.conn != conn);
+            inner.waiting.retain(|_, w| w.conn != conn);
         }
-        inner.waiting.retain(|_, w| w.conn != conn);
+        if let Some(Hook(f)) = self.left.get() {
+            f(conn);
+        }
+    }
+
+    /// Sets what is told when a connection closes. Only the first is kept.
+    pub fn on_disconnect(&self, f: OnDisconnect) {
+        let _ = self.left.set(Hook(f));
+    }
+
+    /// The resize record `rseq` of `session` was asked for by `owner`, for
+    /// `reason`: its `terminal:resized` names them. Said before the record
+    /// is handed to [`Streams::applied`].
+    pub fn resized_by(
+        &self,
+        session: &str,
+        rseq: u64,
+        owner: Option<String>,
+        reason: Option<&'static str>,
+    ) {
+        let mut inner = self.inner();
+        let Some(s) = inner.sessions.get_mut(session) else {
+            return;
+        };
+        s.resizes.insert(rseq, ResizeNote { owner, reason });
+        while s.resizes.len() > NOTES_KEPT {
+            s.resizes.pop_first();
+        }
     }
 
     /// Connection `conn`'s queue has room: the attachments on it catching up
@@ -708,6 +771,7 @@ impl Streams {
                     "title": snap.title,
                     "cwd": snap.cwd,
                     "replies": "vornd",
+                    "client": client_name(w.conn),
                 });
                 if let Some(why) = resync {
                     result["resync"] = json!(why);
@@ -743,7 +807,7 @@ impl Streams {
         let Some(s) = sessions.get_mut(session) else {
             return;
         };
-        let mut packer = Packer::new(session, &entries);
+        let mut packer = Packer::new(session, &entries, &s.resizes);
         let ids: Vec<u64> = s.attached.keys().copied().collect();
         for conn in ids {
             if let Some(out) = conns.get(&conn) {
@@ -981,7 +1045,9 @@ impl Inner {
                 let why = Some(Lost::Gap.as_str());
                 return self.snapshot_for(session, a.conn, a.rpc, why, actions);
             }
-            out.text(&answer(&a.rpc, continued(&c)));
+            let mut result = continued(&c);
+            result["client"] = json!(client_name(a.conn));
+            out.text(&answer(&a.rpc, result));
             s.attached.insert(
                 a.conn,
                 Attachment {
@@ -1075,6 +1141,12 @@ fn continued(c: &Cursor) -> Value {
     })
 }
 
+/// A bytes connection's name for the size rule, as `terminal:resized`
+/// names an owner ([`crate::size::Who`]).
+fn client_name(conn: u64) -> String {
+    format!("ws:{conn}")
+}
+
 /// A new attachment's generation counter. Each attachment has its own, so
 /// bytes a replaced one had queued are dropped with it.
 fn fresh_gen() -> Arc<AtomicU64> {
@@ -1101,7 +1173,12 @@ enum Ready {
     Exit(Message),
 }
 
-fn prepare(session: &str, from: Cursor, entries: &[Entry]) -> Packed {
+fn prepare(
+    session: &str,
+    from: Cursor,
+    entries: &[Entry],
+    notes: &BTreeMap<u64, ResizeNote>,
+) -> Packed {
     let mut to = from;
     let mut pieces = Vec::new();
     // Only an id that does not fit a frame fails, and sessiond's ids are
@@ -1122,14 +1199,13 @@ fn prepare(session: &str, from: Cursor, entries: &[Entry]) -> Packed {
             }
             Piece::Resized { rseq, cols, rows } => {
                 at.next_rseq = rseq + 1;
+                let mut params = json!({ "id": session, "cols": cols, "rows": rows, "rseq": rseq });
+                if let Some(n) = notes.get(&rseq) {
+                    params["owner"] = json!(n.owner);
+                    params["reason"] = json!(n.reason);
+                }
                 Some(Ready::Stream(
-                    Message::text(
-                        note(
-                            "terminal:resized",
-                            json!({ "id": session, "cols": cols, "rows": rows, "rseq": rseq }),
-                        )
-                        .to_string(),
-                    ),
+                    Message::text(note("terminal:resized", params).to_string()),
                     at,
                 ))
             }
@@ -1158,14 +1234,20 @@ fn prepare(session: &str, from: Cursor, entries: &[Entry]) -> Packed {
 struct Packer<'a> {
     session: &'a str,
     entries: &'a [Entry],
+    notes: &'a BTreeMap<u64, ResizeNote>,
     done: Vec<Packed>,
 }
 
 impl<'a> Packer<'a> {
-    fn new(session: &'a str, entries: &'a [Entry]) -> Packer<'a> {
+    fn new(
+        session: &'a str,
+        entries: &'a [Entry],
+        notes: &'a BTreeMap<u64, ResizeNote>,
+    ) -> Packer<'a> {
         Packer {
             session,
             entries,
+            notes,
             done: Vec::new(),
         }
     }
@@ -1174,7 +1256,8 @@ impl<'a> Packer<'a> {
         let i = match self.done.iter().position(|p| p.from == at) {
             Some(i) => i,
             None => {
-                self.done.push(prepare(self.session, at, self.entries));
+                self.done
+                    .push(prepare(self.session, at, self.entries, self.notes));
                 self.done.len() - 1
             }
         };
@@ -1210,10 +1293,12 @@ fn deliver(
             else {
                 return;
             };
-            out.text(&answer(rpc, continued(&a.next)));
+            let mut result = continued(&a.next);
+            result["client"] = json!(client_name(conn));
+            out.text(&answer(rpc, result));
             a.mode = Mode::Following;
             from_tail = false;
-            fetched = prepare(session, a.next, &packer.entries[start..]);
+            fetched = prepare(session, a.next, &packer.entries[start..], packer.notes);
             &fetched
         }
     };
@@ -1287,7 +1372,7 @@ fn catch_up(session: &str, s: &mut Stream, conn: u64, out: &Outbox) -> bool {
             bytes += tail[end].rec.len() as usize;
             end += 1;
         }
-        let packed = prepare(session, a.next, &tail[start..end]);
+        let packed = prepare(session, a.next, &tail[start..end], &s.resizes);
         if let Some(stopped) = queue(out, &a.gen, &packed.msgs, packed.from) {
             a.next = stopped;
             continue;

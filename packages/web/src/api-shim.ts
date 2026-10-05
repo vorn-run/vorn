@@ -469,8 +469,27 @@ export function createApiShim(wsUrl: string) {
 
     // ── Terminal Management ──
     createTerminal: (payload: unknown) => rpc.invoke('terminal:create', payload),
-    writeTerminal: (id: string, data: string) => rpc.notify('terminal:write', { id, data }),
+    writeTerminal: (id: string, data: string, pane?: number) =>
+      rpc.notify('terminal:write', pane === undefined ? { id, data } : { id, data, pane }),
     resizeTerminal: (payload: unknown) => rpc.notify('terminal:resize', payload),
+    // The size of a session vornd holds: this device reports what fits and
+    // whether it is in use; vornd decides from who is typing.
+    terminalViewport: (payload: unknown) => rpc.notify('terminal:viewport', payload),
+    terminalPresence: (id: string, state: string, pane?: number) =>
+      rpc.notify('terminal:presence', { id, state, pane }),
+    takeTerminalSize: (id: string, pane?: number) => rpc.notify('terminal:takeSize', { id, pane }),
+    lockTerminalSize: async (
+      id: string,
+      locked: boolean,
+      pane?: number
+    ): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        await rpc.invoke('terminal:lockSize', { id, locked, pane })
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    },
     killTerminal: (id: string) => rpc.invoke('terminal:kill', id),
     createShellTerminal: (cwd?: string) => rpc.invoke('shell:create', cwd),
 
@@ -486,7 +505,14 @@ export function createApiShim(wsUrl: string) {
     onTerminalFrame: (callback: (frame: Uint8Array) => void) =>
       rpc.onLocal('frame', callback as (p: unknown) => void),
     onTerminalResized: (
-      callback: (event: { id: string; cols: number; rows: number; rseq: number }) => void
+      callback: (event: {
+        id: string
+        cols: number
+        rows: number
+        rseq: number
+        owner?: string | null
+        reason?: string | null
+      }) => void
     ) => rpc.on('terminal:resized', callback as (p: unknown) => void),
     onTerminalReconnected: (callback: () => void) => rpc.onLocal('reconnected', () => callback()),
     onTerminalExit: (callback: (event: { id: string; exitCode: number }) => void) =>

@@ -11,10 +11,11 @@
 //! ([`holder`]) and, with the `engine` feature, runs every session it holds
 //! through the session engine ([`engine`]), answers the terminal calls for
 //! those sessions itself ([`terminal`], [`streams`]) and serves grid clients
-//! on a local socket ([`grid`]). Given the server's credential, it is also
-//! the server's process backend ([`node_link`]): the server creates, signals
-//! and feeds its terminals and piped agents through vornd instead of spawning
-//! them itself.
+//! on a local socket ([`grid`]). Both kinds of client report what fits on
+//! them, and one rule decides each session's size ([`size`]). Given the
+//! server's credential, it is also the server's process backend
+//! ([`node_link`]): the server creates, signals and feeds its terminals and
+//! piped agents through vornd instead of spawning them itself.
 
 #[cfg(feature = "engine")]
 pub mod engine;
@@ -26,6 +27,8 @@ pub mod holder;
 pub mod node_link;
 pub mod protocol;
 pub mod proxy;
+#[cfg(feature = "engine")]
+pub mod size;
 pub mod streams;
 #[cfg(feature = "engine")]
 pub mod terminal;

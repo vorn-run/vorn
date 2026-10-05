@@ -27,7 +27,9 @@
 //! every record the actors apply. Grid clients ([`crate::grid`]) reach them
 //! through [`Engine::grid_open`] and [`Engine::grid_input`]: their requests
 //! go to the session's actor, and what it answers comes back on the
-//! connection's queue.
+//! connection's queue. Each session's size is decided by [`Engine::sizes`]
+//! ([`crate::size`]); the driver sends what it decides to sessiond, and
+//! tells every client who asked for each resize when its record comes back.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -45,10 +47,11 @@ use vorn_sessiond_wire::{
     Ack, Attach, AttachFrom, Io, Kind, Nonce, Resize, SessionRef, Sig, Signal, Spawn, SpawnAs,
     SpawnSpec, ToSessiond, ToVornd, Welcome, Write,
 };
-use vorn_term_proto::msg::ServerMsg;
-use vorn_term_proto::{Cursor, Entry};
+use vorn_term_proto::msg::{ResizeReason, ServerMsg};
+use vorn_term_proto::{Cursor, Entry, Record};
 
 use crate::holder::{Conn, Writer};
+use crate::size::{Sizes, Who};
 use crate::streams::{Action, Snap, Streams};
 
 /// The path the session report is served at.
@@ -170,6 +173,7 @@ pub struct Engine {
     held: Mutex<HashMap<String, Held>>,
     /// Where applied records and effects also go, when someone asked.
     tap: Mutex<Option<mpsc::UnboundedSender<Tapped>>>,
+    sizes: Arc<Sizes>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -190,6 +194,13 @@ impl Engine {
     /// An engine that gives a connection up after a write has taken
     /// `write_timeout`.
     pub fn with_write_timeout(cfg: Config, write_timeout: Duration) -> Arc<Engine> {
+        let streams = Streams::new();
+        let sizes = Arc::new(Sizes::new());
+        // A bytes connection that closes leaves every session's size rule.
+        let left = Arc::clone(&sizes);
+        streams.on_disconnect(Box::new(move |conn| {
+            left.bytes_gone(conn, std::time::Instant::now())
+        }));
         Arc::new(Engine {
             // Every session's records go on to bytes clients.
             cfg: Config {
@@ -202,10 +213,16 @@ impl Engine {
             closed: Mutex::new(VecDeque::new()),
             events: broadcast::channel(EVENTS).0,
             grid: Mutex::new(GridConns::default()),
-            streams: Streams::new(),
+            streams,
+            sizes,
             held: Mutex::new(HashMap::new()),
             tap: Mutex::new(None),
         })
+    }
+
+    /// Every session's size rule.
+    pub fn sizes(&self) -> &Arc<Sizes> {
+        &self.sizes
     }
 
     /// Every applied batch of records and every effect from now on, in
@@ -274,8 +291,9 @@ impl Engine {
         &self.streams
     }
 
-    /// A client's resize of `session`. sessiond applies it and records it,
-    /// and the terminal and every client resize when they reach the record.
+    /// A resize of `session`, past the size rule. sessiond applies it and
+    /// records it, and the terminal and every client resize when they reach
+    /// the record. Clients' resizes go through [`Engine::sizes`] instead.
     pub fn resize(&self, session: &str, cols: u16, rows: u16) -> Result<(), String> {
         self.command(Command::Resize(session.to_owned(), cols, rows))
     }
@@ -343,6 +361,7 @@ impl Engine {
             g.conns.remove(&conn);
             g.inputs.retain(|_, (peer, _)| peer.conn != conn);
         }
+        self.sizes.grid_gone(conn, std::time::Instant::now());
         for s in sessions {
             let _ = self.grid_input(&s, GridIn::Gone { conn });
         }
@@ -507,7 +526,11 @@ impl Engine {
             .collect();
         for info in &welcome.sessions {
             self.streams.opened(&info.session, info.epoch);
-            pool.open(&info.session, Open::from_info(info));
+            let open = Open::from_info(info);
+            if open.pty {
+                self.sizes.opened(&info.session, size_of(open.size));
+            }
+            pool.open(&info.session, open);
         }
         info!(sessions = welcome.sessions.len(), "recovering sessions");
         if self.tapping() {
@@ -541,6 +564,8 @@ impl Engine {
                     d.send(ToSessiond::Ping(Nonce { nonce }));
                 }
                 _ = expire.tick() => self.streams.expire(std::time::Instant::now()),
+                () = until(self.sizes.due()) => d.resize_due(),
+                () = self.sizes.woken() => d.resize_due(),
                 r = &mut writing => break r.unwrap_or_else(|e| e.to_string()),
             }
         };
@@ -551,6 +576,28 @@ impl Engine {
         // The pool stops with the last reference, without last checkpoints:
         // the sessions are sessiond's, and the next connection recovers them.
         why
+    }
+}
+
+/// Resolves at `at`, or never.
+async fn until(at: Option<std::time::Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await,
+        None => std::future::pending().await,
+    }
+}
+
+fn size_of((cols, rows): (u16, u16)) -> vorn_size::Size {
+    vorn_size::Size::new(cols, rows)
+}
+
+fn wire_reason(r: vorn_size::Reason) -> ResizeReason {
+    match r {
+        vorn_size::Reason::Input => ResizeReason::Input,
+        vorn_size::Reason::Returned => ResizeReason::Returned,
+        vorn_size::Reason::Explicit => ResizeReason::Explicit,
+        vorn_size::Reason::Locked => ResizeReason::Locked,
+        vorn_size::Reason::Launch => ResizeReason::Launch,
     }
 }
 
@@ -716,6 +763,9 @@ impl Driver<'_> {
                     };
                     self.engine.held_mut().insert(s.session.clone(), held);
                     self.engine.streams.opened(&s.session, s.start.epoch);
+                    if let Some(size) = p.size {
+                        self.engine.sizes.opened(&s.session, size_of(size));
+                    }
                     self.pool.open(&s.session, Open::spawned(s.start, p.size));
                     let _ = p.reply.send(Ok(s.session));
                 }
@@ -807,6 +857,7 @@ impl Driver<'_> {
                 }
             }
             Out::Applied(entries) => {
+                self.resized(id, &entries);
                 if self.engine.tapping() {
                     self.engine
                         .tapped(Tapped::Records(id.to_owned(), entries.clone()));
@@ -832,6 +883,54 @@ impl Driver<'_> {
         }
     }
 
+    /// The resizes among records the actor applied: who asked for each,
+    /// noted for bytes clients' `terminal:resized` before the records go
+    /// out, and sent to the session's grid clients as `Resized`.
+    fn resized(&mut self, id: &str, entries: &[Entry]) {
+        for e in entries {
+            let Record::Resize { cols, rows, .. } = e.rec else {
+                continue;
+            };
+            let decided = self.engine.sizes.applied(id, size_of((cols, rows)));
+            let owner = decided.and_then(|d| d.owner);
+            let reason = decided.map(|d| d.reason);
+            self.engine.streams.resized_by(
+                id,
+                e.hdr.rseq,
+                owner.map(Who::name),
+                reason.map(vorn_size::Reason::as_str),
+            );
+            for peer in self.engine.sizes.grid_peers(id) {
+                let msg = ServerMsg::Resized {
+                    sid: peer.sid,
+                    cols,
+                    rows,
+                    rseq: e.hdr.rseq,
+                    rev: None,
+                    owner: (owner == Some(Who::Grid(peer))).then_some(peer.sid),
+                    reason: reason.map(wire_reason),
+                };
+                self.engine.grid_send(peer.conn, msg);
+            }
+        }
+    }
+
+    /// The resizes the size rule has ready, to sessiond.
+    fn resize_due(&mut self) {
+        for (session, d) in self.engine.sizes.poll(std::time::Instant::now()) {
+            debug!(session, ?d, "resize");
+            self.next_req += 1;
+            self.send(ToSessiond::Resize(Resize {
+                session,
+                req: self.next_req,
+                cols: d.size.cols,
+                rows: d.size.rows,
+                px_w: 0,
+                px_h: 0,
+            }));
+        }
+    }
+
     /// Session `id` left the engine. One whose program ended is released in
     /// sessiond: its exit has been delivered, and nothing more will come.
     /// One that was lost stays in sessiond, for the next connection to take
@@ -841,6 +940,7 @@ impl Driver<'_> {
         if b.exited.is_some() {
             info!(session = %b.session, "session ended; releasing it");
             self.engine.held_mut().remove(&b.session);
+            self.engine.sizes.closed(&b.session);
             self.send(ToSessiond::Release(SessionRef {
                 session: b.session.clone(),
             }));

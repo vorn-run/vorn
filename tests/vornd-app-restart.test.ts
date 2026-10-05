@@ -129,7 +129,13 @@ async function openApp(server: Server): Promise<App> {
     ],
     {
       stdio: ['pipe', 'pipe', 'inherit'],
-      env: { ...process.env, VORND_LOG: process.env.VORND_LOG ?? 'warn', VORND_SERVER_TOKEN: TOKEN }
+      env: {
+        ...process.env,
+        VORND_LOG: process.env.VORND_LOG ?? 'warn',
+        VORND_SERVER_TOKEN: TOKEN,
+        // As the app starts it: the desktop's own connections present the same credential.
+        VORND_DESKTOP_TOKEN: TOKEN
+      }
     }
   )
   const port = await new Promise<number>((resolve, reject) => {
@@ -151,7 +157,7 @@ async function closeApp(app: App): Promise<void> {
 
 async function client(app: App): Promise<BytesClient> {
   const c = new BytesClient()
-  await c.connect(app.port, { Authorization: `Bearer ${TOKEN}` })
+  await c.connect(app.port, TOKEN)
   return c
 }
 
@@ -267,7 +273,7 @@ describe.runIf(vorndSessionsAvailable)('the app with vornd as its process backen
       app = await openApp(server)
       for (const s of shells) {
         s.c.close()
-        await s.c.connect(app.port, { Authorization: `Bearer ${TOKEN}` })
+        await s.c.connect(app.port, TOKEN)
         // From the cursor it had: vornd continues it without a snapshot.
         const resumed = await attachHeld(app, s.c, s.id, true)
         expect(resumed.continued).toBe(true)
