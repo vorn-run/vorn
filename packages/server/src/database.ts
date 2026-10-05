@@ -539,6 +539,7 @@ function createSchema(): void {
       ON connector_inbox(connection_id, created_at);
   `)
   d.exec(ARTIFACT_DDL)
+  d.exec(EFFECT_RECEIPTS_DDL)
 
   migrateSchema(d)
   verifySchema(d)
@@ -1221,7 +1222,34 @@ function migrateSchema(d: Database.Database): void {
     })()
     log.info('[database] migrated schema to version 25 (published artifacts and their comments)')
   }
+
+  if (version < 26) {
+    d.transaction(() => {
+      d.exec(EFFECT_RECEIPTS_DDL)
+      d.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '26')"
+      ).run()
+    })()
+    log.info('[database] migrated schema to version 26 (receipts for session effects)')
+  }
 }
+
+/**
+ * The effects of a session's output this server has acted on, by the id the
+ * native daemon gives each one. An effect can be delivered more than once (a
+ * replay after the daemon restarted, a reconnect after this server did), and
+ * the id is the same every time, so a receipt is what makes a workflow step
+ * start once and a notification show once.
+ */
+const EFFECT_RECEIPTS_DDL = `
+  CREATE TABLE IF NOT EXISTS effect_receipts (
+    effect_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    received_at INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_effect_receipts_received ON effect_receipts(received_at);
+`
 
 /** Published artifacts, every version they have had, and the comments written on them. */
 const ARTIFACT_DDL = `
@@ -4194,6 +4222,27 @@ export function listAllWorkflowRuns(
 // ─── Session Events ───────────────────────────────────────────────
 
 const MAX_SESSION_EVENTS_PER_SESSION = 200
+
+/**
+ * Records that the effect `effectId` was acted on. True the first time, false
+ * for every delivery after: the caller acts only on true.
+ */
+export function claimEffect(effectId: string, kind: string, now = Date.now()): boolean {
+  return (
+    getDb()
+      .prepare(
+        'INSERT OR IGNORE INTO effect_receipts (effect_id, kind, received_at) VALUES (?, ?, ?)'
+      )
+      .run(effectId, kind, now).changes === 1
+  )
+}
+
+/** Forgets receipts of `kind` older than `before`, and answers how many went. */
+export function pruneEffectReceipts(kind: string, before: number): number {
+  return getDb()
+    .prepare('DELETE FROM effect_receipts WHERE kind = ? AND received_at < ?')
+    .run(kind, before).changes
+}
 
 export function insertSessionEvent(event: SessionEvent): void {
   const d = getDb()

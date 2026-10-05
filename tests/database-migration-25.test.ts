@@ -63,7 +63,7 @@ describe('migration 25 — published artifacts', () => {
     expect(tables()).toEqual(
       expect.arrayContaining(['artifacts', 'artifact_versions', 'artifact_comments'])
     )
-    expect(version()).toBe('25')
+    expect(Number(version())).toBeGreaterThanOrEqual(25)
   })
 
   it('repairs the gate edit columns when a version was stamped without them', () => {

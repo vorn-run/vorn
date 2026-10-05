@@ -44,13 +44,15 @@ use vorn_engine::{
     Summary,
 };
 use vorn_sessiond_wire::{
-    Ack, Attach, AttachFrom, Io, Nonce, Resize, SessionRef, Spawn, SpawnSpec, ToSessiond, ToVornd,
-    Welcome, Write,
+    Ack, Attach, AttachFrom, Io, Nonce, Resize, SessionRef, Sig, Signal, Spawn, SpawnSpec,
+    ToSessiond, ToVornd, Welcome, Write,
 };
 use vorn_term_proto::msg::{ResizeReason, ServerMsg};
 use vorn_term_proto::{Cursor, Entry, Record};
 
 use crate::holder::{Conn, Writer};
+use crate::journal::{Journal, Kind};
+use crate::names::Names;
 use crate::size::{Sizes, Who};
 use crate::streams::{Action, Snap, Streams};
 
@@ -63,6 +65,12 @@ pub const SESSIONS_PATH: &str = "/vornd/sessions";
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(20);
 
 const PING_EVERY: Duration = Duration::from_secs(15);
+
+/// Bytes queued for sessiond and not yet written, past which the connection
+/// is given up: a sessiond that stopped reading costs a reconnect, and the
+/// queue never grows past this while one write waits out
+/// [`WRITE_TIMEOUT`].
+pub const WRITE_QUEUE_CAP: usize = 64 << 20;
 
 /// The default foreground and background a session's terminal answers
 /// colour queries (OSC 10, 11) with: the app's terminal theme, which is what
@@ -82,7 +90,14 @@ const CLOSED_KEPT: usize = 64;
 const EVENTS: usize = 1024;
 
 enum Command {
-    Spawn(SpawnSpec, oneshot::Sender<Result<String, String>>),
+    /// Start a session, under a name when one is given.
+    Spawn(
+        SpawnSpec,
+        Option<String>,
+        oneshot::Sender<Result<Spawned, String>>,
+    ),
+    /// A signal for a session's program.
+    Signal(String, Sig),
     Write(String, Vec<u8>),
     CloseStdin(String),
     /// Cut a last checkpoint for every session and send them.
@@ -105,6 +120,22 @@ pub enum Event {
     /// The session left the engine: its program ended, or it was lost.
     /// How it stood last.
     Closed(Arc<Summary>),
+    /// The session printed: reported at most once a second while it does
+    /// ([`crate::journal::ACTIVITY_EVERY`]).
+    Activity(String),
+    /// The engine connected to sessiond and opened every session it holds.
+    Connected,
+}
+
+/// A session started through the engine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spawned {
+    /// The id it goes by: its name, or sessiond's id when it has none.
+    pub id: String,
+    pub pid: u32,
+    /// The epoch its log starts in: a reader that wants every byte
+    /// attaches from `{epoch, 0, 0}`.
+    pub epoch: u32,
 }
 
 /// Messages queued for one grid connection before it drops behind. A
@@ -139,6 +170,8 @@ pub struct Engine {
     grid: Mutex<GridConns>,
     streams: Arc<Streams>,
     sizes: Arc<Sizes>,
+    names: Mutex<Names>,
+    journal: Mutex<Journal>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -166,7 +199,15 @@ impl Engine {
         streams.on_disconnect(Box::new(move |conn| {
             left.bytes_gone(conn, std::time::Instant::now())
         }));
+        // Kept beside the history, in vornd's own directory.
+        let names_file = cfg
+            .history
+            .as_ref()
+            .and_then(|h| h.parent())
+            .map(|d| d.join("names.json"));
         Arc::new(Engine {
+            names: Mutex::new(Names::load(names_file)),
+            journal: Mutex::new(Journal::default()),
             // Every session's records go on to bytes clients.
             cfg: Config {
                 stream: true,
@@ -241,6 +282,16 @@ impl Engine {
         self.closed.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    fn names(&self) -> std::sync::MutexGuard<'_, Names> {
+        self.names.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// What the app is told about the sessions: their states and the last
+    /// notifications ([`crate::journal`]).
+    pub fn journal(&self) -> std::sync::MutexGuard<'_, Journal> {
+        self.journal.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn grid_conns(&self) -> std::sync::MutexGuard<'_, GridConns> {
         self.grid.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -267,6 +318,11 @@ impl Engine {
         for s in sessions {
             let _ = self.grid_input(&s, GridIn::Gone { conn });
         }
+    }
+
+    /// Whether the engine is connected to a sessiond.
+    pub fn connected(&self) -> bool {
+        self.current().is_some()
     }
 
     /// Whether the engine runs session `id` now.
@@ -319,10 +375,22 @@ impl Engine {
     /// Starts a session in sessiond and runs it through the engine.
     /// Answers its id.
     pub async fn spawn(&self, spec: SpawnSpec) -> Result<String, String> {
+        self.spawn_as(spec, None).await.map(|s| s.id)
+    }
+
+    /// Starts a session in sessiond under `name` ([`crate::names`]), or
+    /// under sessiond's id with none, and runs it through the engine.
+    /// Refused when another session goes by the name.
+    pub async fn spawn_as(&self, spec: SpawnSpec, name: Option<String>) -> Result<Spawned, String> {
         let (tx, rx) = oneshot::channel();
-        self.command(Command::Spawn(spec, tx))?;
+        self.command(Command::Spawn(spec, name, tx))?;
         rx.await
             .map_err(|_| "the session holder connection closed".to_owned())?
+    }
+
+    /// A signal for the program of `session`.
+    pub fn signal(&self, session: &str, signal: Sig) -> Result<(), String> {
+        self.command(Command::Signal(session.to_owned(), signal))
     }
 
     /// Input for a session's program.
@@ -389,7 +457,13 @@ impl Engine {
             }
         });
         let (to_send, queued) = mpsc::unbounded_channel();
-        let mut writing = tokio::spawn(write_queued(writer, queued, self.write_timeout));
+        let backlog = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut writing = tokio::spawn(write_queued(
+            writer,
+            queued,
+            self.write_timeout,
+            Arc::clone(&backlog),
+        ));
         // The tasks end with the connection, however that ends.
         let _tasks = Abort([reading.abort_handle(), writing.abort_handle()]);
 
@@ -414,21 +488,39 @@ impl Engine {
         // However this ends, a dropped future included, the sessions go
         // with the connection.
         let _clear = Clear(self);
+        // Names of sessions this sessiond no longer holds go; every other
+        // session goes by its name from here on.
+        self.names()
+            .keep_only(welcome.sessions.iter().map(|i| i.session.as_str()));
         for info in &welcome.sessions {
-            self.streams.opened(&info.session, info.epoch);
+            let id = self.names().public(&info.session).to_owned();
+            self.streams.opened(&id, info.epoch);
             let open = Open::from_info(info);
             if open.pty {
-                self.sizes.opened(&info.session, size_of(open.size));
+                self.sizes.opened(&id, size_of(open.size));
             }
-            pool.open(&info.session, open);
+            let kind = if open.pty { Kind::Pty } else { Kind::Piped };
+            self.journal().opened(&id, kind, info.pid);
+            pool.open(&id, open);
+        }
+        {
+            let ids: std::collections::HashSet<String> = welcome
+                .sessions
+                .iter()
+                .map(|i| self.names().public(&i.session).to_owned())
+                .collect();
+            self.journal().keep_only(|id| ids.contains(id));
         }
         info!(sessions = welcome.sessions.len(), "recovering sessions");
+        let _ = self.events.send(Event::Connected);
         // The pool moves into the driver so that `_clear` drops the last
         // reference, off the runtime's threads.
         let mut d = Driver {
             engine: self,
             pool,
             to_send,
+            backlog,
+            overflowed: false,
             spawns: HashMap::new(),
             next_req: 0,
             input_seq: 0,
@@ -454,6 +546,11 @@ impl Engine {
                 () = until(self.sizes.due()) => d.resize_due(),
                 () = self.sizes.woken() => d.resize_due(),
                 r = &mut writing => break r.unwrap_or_else(|e| e.to_string()),
+            }
+            if d.overflowed {
+                break format!(
+                    "more than {WRITE_QUEUE_CAP} bytes queued for sessiond and not written"
+                );
             }
         };
         for (_, p) in d.spawns.drain() {
@@ -495,7 +592,8 @@ async fn ended(task: &mut JoinHandle<String>) -> String {
 
 /// What the writer is given.
 enum Queued {
-    Message(ToSessiond),
+    /// A message and the bytes it counts against the backlog.
+    Message(ToSessiond, usize),
     /// Answered once everything queued before it is written.
     Written(oneshot::Sender<()>),
 }
@@ -506,11 +604,14 @@ async fn write_queued(
     mut w: Writer,
     mut queued: mpsc::UnboundedReceiver<Queued>,
     timeout: Duration,
+    backlog: Arc<std::sync::atomic::AtomicUsize>,
 ) -> String {
     while let Some(q) = queued.recv().await {
         match q {
-            Queued::Message(m) => match tokio::time::timeout(timeout, w.send(&m)).await {
-                Ok(Ok(())) => {}
+            Queued::Message(m, size) => match tokio::time::timeout(timeout, w.send(&m)).await {
+                Ok(Ok(())) => {
+                    backlog.fetch_sub(size, std::sync::atomic::Ordering::AcqRel);
+                }
                 Ok(Err(e)) => return e.to_string(),
                 Err(_) => return format!("a write to sessiond timed out after {timeout:?}"),
             },
@@ -580,9 +681,49 @@ fn brief(s: &Brief) -> Value {
 
 /// A spawn sent and not answered yet.
 struct Pending {
-    reply: oneshot::Sender<Result<String, String>>,
+    reply: oneshot::Sender<Result<Spawned, String>>,
     /// The PTY size, or `None` for a piped agent.
     size: Option<(u16, u16)>,
+    /// The name the session is to go by.
+    name: Option<String>,
+}
+
+/// The session a message to sessiond names.
+fn outbound_session(m: &mut ToSessiond) -> Option<&mut String> {
+    match m {
+        ToSessiond::Attach(a) => Some(&mut a.session),
+        ToSessiond::Write(w) => Some(&mut w.session),
+        ToSessiond::CloseStdin(r) | ToSessiond::Release(r) => Some(&mut r.session),
+        ToSessiond::Resize(r) => Some(&mut r.session),
+        ToSessiond::Signal(s) => Some(&mut s.session),
+        ToSessiond::Ack(a) => Some(&mut a.session),
+        ToSessiond::PutCheckpoint(cp) => Some(&mut cp.session),
+        ToSessiond::Hello(_)
+        | ToSessiond::Spawn(_)
+        | ToSessiond::Ping(_)
+        | ToSessiond::Drain(_) => None,
+    }
+}
+
+/// The session a message from sessiond names. A spawn's answer is named
+/// where the spawn is matched to its request.
+fn inbound_session(m: &mut ToVornd) -> Option<&mut String> {
+    match m {
+        ToVornd::CheckpointIs(cp) => Some(&mut cp.session),
+        ToVornd::Refused(r) => Some(&mut r.session),
+        ToVornd::Entries(e) => Some(&mut e.session),
+        ToVornd::InputDone(d) => Some(&mut d.session),
+        ToVornd::Welcome(_) | ToVornd::Spawned(_) | ToVornd::Failed(_) | ToVornd::Pong(_) => None,
+    }
+}
+
+/// A rough size of a message to sessiond, for the writer's backlog.
+fn queued_size(m: &ToSessiond) -> usize {
+    match m {
+        ToSessiond::Write(w) => w.bytes.len() + 64,
+        ToSessiond::PutCheckpoint(cp) => cp.blob.len() + 128,
+        _ => 64,
+    }
 }
 
 struct Driver<'a> {
@@ -591,6 +732,10 @@ struct Driver<'a> {
     /// The writer's queue. Sending never waits; a writer that has stopped
     /// ends the connection, which the driver learns from its task.
     to_send: mpsc::UnboundedSender<Queued>,
+    /// Bytes queued for the writer and not yet written.
+    backlog: Arc<std::sync::atomic::AtomicUsize>,
+    /// The backlog passed [`WRITE_QUEUE_CAP`]: the connection is given up.
+    overflowed: bool,
     /// Spawns sent and not answered: who asked, and the PTY size.
     spawns: HashMap<u64, Pending>,
     next_req: u64,
@@ -602,12 +747,31 @@ struct Driver<'a> {
 }
 
 impl Driver<'_> {
-    fn send(&self, m: ToSessiond) {
-        let _ = self.to_send.send(Queued::Message(m));
+    /// Queues `m` for sessiond, under sessiond's id for the session it
+    /// names.
+    fn send(&mut self, mut m: ToSessiond) {
+        if let Some(session) = outbound_session(&mut m) {
+            let held = self.engine.names().held(session).to_owned();
+            *session = held;
+        }
+        let size = queued_size(&m);
+        let queued = self
+            .backlog
+            .fetch_add(size, std::sync::atomic::Ordering::AcqRel)
+            + size;
+        if queued > WRITE_QUEUE_CAP {
+            self.overflowed = true;
+        }
+        let _ = self.to_send.send(Queued::Message(m, size));
     }
 
-    /// A message from sessiond, for the session it names.
-    fn received(&mut self, m: ToVornd) {
+    /// A message from sessiond, for the session it names, which goes by its
+    /// name from here on.
+    fn received(&mut self, mut m: ToVornd) {
+        if let Some(session) = inbound_session(&mut m) {
+            let public = self.engine.names().public(session).to_owned();
+            *session = public;
+        }
         match m {
             ToVornd::Entries(e) => {
                 self.repumping.remove(&e.session);
@@ -635,12 +799,29 @@ impl Driver<'_> {
             ToVornd::Refused(r) => self.pool.input(&r.session, Input::Refused(r.why)),
             ToVornd::Spawned(s) => {
                 if let Some(p) = self.spawns.remove(&s.req) {
-                    self.engine.streams.opened(&s.session, s.start.epoch);
+                    let id = match p.name {
+                        Some(name) => {
+                            self.engine.names().name(&s.session, &name);
+                            name
+                        }
+                        None => s.session,
+                    };
+                    self.engine.streams.opened(&id, s.start.epoch);
                     if let Some(size) = p.size {
-                        self.engine.sizes.opened(&s.session, size_of(size));
+                        self.engine.sizes.opened(&id, size_of(size));
                     }
-                    self.pool.open(&s.session, Open::spawned(s.start, p.size));
-                    let _ = p.reply.send(Ok(s.session));
+                    let kind = if p.size.is_some() {
+                        Kind::Pty
+                    } else {
+                        Kind::Piped
+                    };
+                    self.engine.journal().opened(&id, kind, s.pid);
+                    self.pool.open(&id, Open::spawned(s.start, p.size));
+                    let _ = p.reply.send(Ok(Spawned {
+                        id,
+                        pid: s.pid,
+                        epoch: s.start.epoch,
+                    }));
                 }
             }
             ToVornd::Failed(f) => {
@@ -707,6 +888,7 @@ impl Driver<'_> {
                 if matches!(effect, Effect::Bell) {
                     self.engine.streams.bell(id);
                 }
+                self.engine.journal().record(&fx, &effect);
                 let _ = self.engine.events.send(Event::Effect(fx, effect));
             }
             Out::Ready(f) => {
@@ -726,6 +908,15 @@ impl Driver<'_> {
                 }
             }
             Out::Applied(entries) => {
+                let printed = entries.iter().any(|e| matches!(e.rec, Record::Data { .. }));
+                if printed
+                    && self
+                        .engine
+                        .journal()
+                        .activity(id, std::time::Instant::now())
+                {
+                    let _ = self.engine.events.send(Event::Activity(session.clone()));
+                }
                 self.resized(id, &entries);
                 self.engine.streams.applied(id, entries)
             }
@@ -808,9 +999,13 @@ impl Driver<'_> {
             self.send(ToSessiond::Release(SessionRef {
                 session: b.session.clone(),
             }));
+            // After the release, which went out under sessiond's id.
+            let held = self.engine.names().held(&b.session).to_owned();
+            self.engine.names().forget(&held);
         } else {
             warn!(session = %b.session, reason = ?b.reason, "session lost; the next connection takes it on again");
         }
+        self.engine.journal().closed(&b.session, b.exited.is_some());
         {
             let mut closed = self.engine.closed();
             if closed.len() == CLOSED_KEPT {
@@ -839,6 +1034,24 @@ impl Driver<'_> {
         self.send(ToSessiond::Attach(Attach { session, from }));
     }
 
+    /// Whether a session may be started under `name`: no session the
+    /// engine runs, nor one waiting to be started, goes by it already.
+    fn name_free(&self, name: &str) -> Result<(), String> {
+        let running = |id: &str| self.pool.briefs().iter().any(|b| b.session == id);
+        if running(name)
+            || self
+                .spawns
+                .values()
+                .any(|p| p.name.as_deref() == Some(name))
+        {
+            return Err(crate::names::Refused::Taken.to_string());
+        }
+        self.engine
+            .names()
+            .check(name, &running)
+            .map_err(|e| e.to_string())
+    }
+
     fn write(&mut self, session: String, bytes: Vec<u8>) {
         self.input_seq += 1;
         self.send(ToSessiond::Write(Write {
@@ -850,19 +1063,29 @@ impl Driver<'_> {
 
     async fn command(&mut self, c: Command, outs: &mut mpsc::UnboundedReceiver<(String, Out)>) {
         match c {
-            Command::Spawn(spec, reply) => {
+            Command::Spawn(spec, name, reply) => {
+                if let Some(name) = &name {
+                    if let Err(e) = self.name_free(name) {
+                        let _ = reply.send(Err(e));
+                        return;
+                    }
+                }
                 self.next_req += 1;
                 let size = match spec.io {
                     Io::Pty { cols, rows } => Some((cols, rows)),
                     Io::Piped { .. } => None,
                 };
-                self.spawns.insert(self.next_req, Pending { reply, size });
+                self.spawns
+                    .insert(self.next_req, Pending { reply, size, name });
                 self.send(ToSessiond::Spawn(Spawn {
                     req: self.next_req,
                     spec,
                 }));
             }
             Command::Write(session, bytes) => self.write(session, bytes),
+            Command::Signal(session, signal) => {
+                self.send(ToSessiond::Signal(Signal { session, signal }));
+            }
             Command::CloseStdin(session) => {
                 self.send(ToSessiond::CloseStdin(SessionRef { session }));
             }

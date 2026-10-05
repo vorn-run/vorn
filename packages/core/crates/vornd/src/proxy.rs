@@ -446,9 +446,11 @@ async fn pump<C, S>(
         let _ = to_server.close().await;
     });
 
+    let streams = Arc::clone(&daemon.streams);
     let downward = tokio::spawn(async move {
         while let Some(Ok(msg)) = from_server.next().await {
             let msg = match msg {
+                Message::Text(text) if told_here(&streams, text.as_str()) => continue,
                 Message::Text(text) => match inspect_server_frame(text.as_str()) {
                     ServerFrame::Pass => Message::Text(text),
                     ServerFrame::Unsupported(version) => {
@@ -499,6 +501,24 @@ async fn pump<C, S>(
     {
         writer.abort();
     }
+}
+
+/// Whether a frame from the server is a session's exit that vornd tells
+/// clients about itself ([`Streams::answers_for`]).
+fn told_here(streams: &Streams, text: &str) -> bool {
+    if !text.contains("\"terminal:exit\"") {
+        return false;
+    }
+    let Ok(serde_json::Value::Object(frame)) = serde_json::from_str::<serde_json::Value>(text)
+    else {
+        return false;
+    };
+    frame.get("method").and_then(|m| m.as_str()) == Some("terminal:exit")
+        && frame
+            .get("params")
+            .and_then(|p| p.get("id"))
+            .and_then(|i| i.as_str())
+            .is_some_and(|id| streams.answers_for(id))
 }
 
 /// Whether vornd answered a client's frame itself.

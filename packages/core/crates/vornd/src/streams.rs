@@ -865,6 +865,14 @@ impl Streams {
             .is_some_and(|s| s.fetch.is_some())
     }
 
+    /// Whether vornd tells clients about `session` itself: it holds it, or
+    /// held it until it ended lately. What the server says about such a
+    /// session's exit is then not passed on, so a client hears it once.
+    pub fn answers_for(&self, session: &str) -> bool {
+        let inner = self.inner();
+        inner.sessions.contains_key(session) || inner.ended.iter().any(|e| e.session == session)
+    }
+
     /// The bell rang in `session`: every connection hears it.
     pub fn bell(&self, session: &str) {
         let v = note("terminal:bell", json!({ "id": session }));
