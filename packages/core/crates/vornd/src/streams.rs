@@ -1148,3 +1148,71 @@ fn overflowed(session: &str, attached: &mut HashMap<u64, Attachment>, conn: u64,
         json!({ "id": session, "reason": "overflow" }),
     ));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vorn_term_proto::{Record, RecordHeader, Stream as Out};
+
+    fn data(rseq: u64, start: u64, n: usize) -> Entry {
+        Entry {
+            hdr: RecordHeader {
+                epoch: 0,
+                rseq,
+                start_offset: start,
+            },
+            at_ns: 0,
+            rec: Record::Data {
+                stream: Out::Pty,
+                bytes: vec![b'x'; n],
+            },
+        }
+    }
+
+    /// Records 0..n of `size` bytes each.
+    fn run(n: u64, size: usize) -> Vec<Entry> {
+        (0..n).map(|i| data(i, i * size as u64, size)).collect()
+    }
+
+    #[test]
+    fn the_tail_keeps_the_newest_records_up_to_its_cap() {
+        let mut s = Stream::new(0);
+        let size = 64 << 10;
+        let n = (TAIL_BYTES / size) as u64 + 10;
+        s.extend(run(n, size));
+        assert!(s.tail_bytes <= TAIL_BYTES);
+        assert_eq!(
+            s.head,
+            Some(data(n - 1, (n - 1) * size as u64, size).after())
+        );
+        // What is held is every record from its first to the head.
+        let first = s.tail.front().unwrap().hdr;
+        assert!(s.covers(&Cursor {
+            epoch: 0,
+            next_rseq: first.rseq,
+            next_offset: first.start_offset,
+        }));
+        assert!(!s.covers(&Cursor::start(0)), "the oldest are gone");
+        assert!(s.covers(&s.head.unwrap()));
+    }
+
+    #[test]
+    fn records_sent_again_are_skipped_and_a_gap_restarts_the_tail() {
+        let mut s = Stream::new(0);
+        s.extend(run(5, 10));
+        // A fetch from an older cursor sends some of them again.
+        s.extend(run(5, 10)[2..].to_vec());
+        assert_eq!(s.tail.len(), 5);
+        assert!(s.covers(&Cursor::start(0)));
+        // Records 5..7 never came: what is held cannot be continued through.
+        s.extend(vec![data(8, 80, 10)]);
+        assert_eq!(s.tail.len(), 1);
+        assert!(!s.covers(&Cursor::start(0)));
+        // A cursor whose offset does not match its record is not retained.
+        assert!(!s.covers(&Cursor {
+            epoch: 0,
+            next_rseq: 8,
+            next_offset: 81,
+        }));
+    }
+}
