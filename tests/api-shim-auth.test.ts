@@ -4,7 +4,7 @@ import {
   CLOSE_UNAUTHENTICATED,
   RUNTIME_PROTOCOL_VERSION
 } from '@vornrun/shared/protocol'
-import { encodeTerminalFrame } from '../packages/shared/src/terminal-frame'
+import { encodeTerminalFrame, encodeTerminalFrameV2 } from '../packages/shared/src/terminal-frame'
 
 /**
  * The web client's half of the auth boundary.
@@ -392,5 +392,63 @@ describe('terminal output as bytes', () => {
     sockets[0].binary(Uint8Array.from([0, 1, 2]))
 
     expect(seen).toEqual([])
+  })
+})
+
+// vornd's frames go to the terminal registry as they came, and a socket that comes back says so.
+describe('terminal streams from vornd', () => {
+  it('hands a version 2 frame to its listeners undecoded, and never as terminal:data', async () => {
+    const api = createApiShim('ws://x/ws')
+    sockets[0].open()
+    sockets[0].authOk()
+    const frames: Uint8Array[] = []
+    const data: unknown[] = []
+    api.onTerminalFrame((f) => frames.push(f))
+    api.onTerminalData((d) => data.push(d))
+    const wire = encodeTerminalFrameV2({
+      id: 's',
+      epoch: 0,
+      firstRseq: 0,
+      lastRseq: 0,
+      startOffset: 0,
+      data: new TextEncoder().encode('hi')
+    })
+
+    sockets[0].binary(wire)
+
+    expect(frames).toEqual([wire])
+    expect(data).toEqual([])
+  })
+
+  it('says when a socket that dropped is admitted again, and not on the first', async () => {
+    localStorage.setItem('vorn.deviceToken', 'ok')
+    const api = createApiShim('ws://x/ws')
+    let reconnects = 0
+    api.onTerminalReconnected(() => reconnects++)
+    sockets[0].open()
+    sockets[0].authOk()
+    expect(reconnects).toBe(0)
+
+    sockets[0].closeWith(1006)
+    await vi.advanceTimersByTimeAsync(2000)
+    sockets[1].open()
+    sockets[1].authOk()
+    expect(reconnects).toBe(1)
+  })
+
+  it('attaches with a cursor only when it has one', () => {
+    const api = createApiShim('ws://x/ws')
+    sockets[0].open()
+    sockets[0].authOk()
+    void api.attachTerminal('s').catch(() => {})
+    void api.attachTerminal('s', { epoch: 0, nextRseq: 8, nextOffset: 120 }).catch(() => {})
+    const attaches = sockets[0].sent
+      .map((m) => JSON.parse(m) as { method: string; params: unknown })
+      .filter((m) => m.method === 'terminal:attach')
+      .map((m) => m.params)
+    expect(attaches).toEqual([
+      { id: 's' },
+      { id: 's', cursor: { epoch: 0, nextRseq: 8, nextOffset: 120 } }
+    ])
   })
 })

@@ -60,6 +60,8 @@ pub(crate) struct Term {
     /// The agent status last reported, so only changes are.
     pub(crate) status: u32,
     pub(crate) fidelity: Fidelity,
+    /// The default colours queries are answered with, kept across a reset.
+    colors: Option<([u8; 3], [u8; 3])>,
 }
 
 impl Term {
@@ -70,7 +72,18 @@ impl Term {
             carry: Vec::new(),
             status: vorn_analysis::STATUS_NONE,
             fidelity: Fidelity::Exact,
+            colors: None,
         })
+    }
+
+    /// Sets the default colours, which OSC 10 and 11 queries are answered
+    /// with. Not part of a checkpoint: each vornd sets its own.
+    pub(crate) fn set_colors(&mut self, colors: Option<([u8; 3], [u8; 3])>) {
+        self.colors = colors;
+        if colors.is_some() {
+            // A terminal that refuses them answers no colour query, as before.
+            let _ = self.em.set_default_colors(colors);
+        }
     }
 
     /// Feeds output to both readers. Returns the agent status when it
@@ -136,13 +149,21 @@ impl Term {
         self.em = Emulator::with_scrollback(u32::from(cols), u32::from(rows), scrollback)?;
         self.carry.clear();
         self.fidelity = Fidelity::Approximate;
+        self.set_colors(self.colors);
         Ok(())
     }
 
     /// Cuts a checkpoint here, carrying on from the terminal rebuilt from
     /// it (see [`Emulator::checkpoint`]), and returns the blob.
     pub(crate) fn save(&mut self) -> Result<Vec<u8>, Uncut> {
-        let screen = self.em.checkpoint()?.encode();
+        // Cut without them, so the restore check compares like with like:
+        // a rebuild has Ghostty's defaults until its vornd sets its own.
+        if self.colors.is_some() {
+            let _ = self.em.set_default_colors(None);
+        }
+        let cut = self.em.checkpoint();
+        self.set_colors(self.colors);
+        let screen = cut?.encode();
         let analysis = self.analyzer.save();
         let mut out = Vec::with_capacity(16 + screen.len() + analysis.len());
         out.push(match self.fidelity {
@@ -175,6 +196,7 @@ impl Term {
             carry: parts.carry.to_vec(),
             status: parts.status,
             fidelity: parts.fidelity,
+            colors: None,
         };
         if cp.matches(&term.em) {
             Ok(term)
@@ -265,6 +287,28 @@ mod tests {
         assert_eq!(a.em.fingerprint(), b.em.fingerprint());
         assert_eq!(a.lines(0), b.lines(0));
         assert_eq!(a.status, b.status);
+    }
+
+    #[test]
+    fn default_colours_answer_queries_and_survive_a_checkpoint() {
+        let mut t = Term::fresh(20, 4, 0).unwrap();
+        t.set_colors(Some(([0xd4, 0xd4, 0xd8], [0x14, 0x14, 0x16])));
+        let mut fx = Vec::new();
+        t.feed(b"hi\x1b]11;?\x1b\\", true, &mut fx);
+        let replies: Vec<_> = fx
+            .iter()
+            .filter_map(|f| match f {
+                Effect::Reply(b) => Some(String::from_utf8_lossy(b).into_owned()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(replies.len(), 1, "{replies:?}");
+        assert!(replies[0].contains("1414/1414/1616"), "{replies:?}");
+        let blob = t.save().expect("a checkpoint with default colours set");
+        assert!(Term::load(&blob).is_ok());
+        fx.clear();
+        t.feed(b"\x1b]10;?\x1b\\", true, &mut fx);
+        assert_eq!(fx.len(), 1, "still answered after the cut: {fx:?}");
     }
 
     #[test]

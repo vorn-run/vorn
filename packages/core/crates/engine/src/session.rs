@@ -35,6 +35,7 @@ use vorn_sessiond_wire::{AttachFrom, AttachRefusal, Checkpoint, Kind, SessionInf
 use vorn_term_proto::msg::{self, EventId as WireEventId, EventKind};
 use vorn_term_proto::{Cursor, Entry, Record, RecordHeader};
 
+use crate::snapshot::VtSnapshot;
 use crate::term::{Fidelity, Rejected, Term, FORMAT};
 
 /// The size a piped agent's output is parsed at. It has no terminal, so
@@ -81,6 +82,13 @@ pub struct Config {
     pub build: String,
     /// Grid mode's render clock, hold and credits.
     pub grid: HubConfig,
+    /// Hand each batch of records back once applied ([`Out::Applied`]), for
+    /// a host that streams them to bytes clients.
+    pub stream: bool,
+    /// Default foreground and background, as RGB: what OSC 10 and 11
+    /// queries are answered with. None leaves them unset, and those queries
+    /// unanswered.
+    pub colors: Option<([u8; 3], [u8; 3])>,
 }
 
 impl Default for Config {
@@ -93,6 +101,8 @@ impl Default for Config {
             history_cap: vorn_pipeline::history::DEFAULT_CAP,
             build: String::new(),
             grid: HubConfig::default(),
+            stream: false,
+            colors: None,
         }
     }
 }
@@ -264,6 +274,20 @@ pub enum Out {
     /// For grid clients: a message for a connection, or input bytes for
     /// the program.
     Grid(HubOut),
+    /// The records of one [`Input::Entries`], given back once applied, when
+    /// [`Config::stream`] is set. Some may have been skipped as already
+    /// applied; they are real records of the log all the same.
+    Applied(Vec<Entry>),
+    /// The answer to [`Session::snapshot`] with the same token: `None` when
+    /// the session has no terminal to cut one from.
+    Snapshot(u64, Option<Box<VtSnapshot>>),
+    /// The answer to [`Session::output`] with the same token.
+    Output(u64, Option<Vec<String>>),
+    /// When [`Config::stream`] is set, once per base, after [`Out::Ready`]
+    /// and after the [`Out::Applied`] of the call that went live: where the
+    /// terminal stands then, which a host that streams records cannot learn
+    /// otherwise when nothing came after the base.
+    Live(Cursor),
 }
 
 /// Where a session is, for the debug report.
@@ -359,6 +383,8 @@ struct Run {
     nudge: bool,
     /// The session's grid clients, carried from one run to the next.
     hub: Hub,
+    /// Whether [`Out::Live`] was sent for going live.
+    live_reported: bool,
 }
 
 pub struct Session {
@@ -378,6 +404,8 @@ pub struct Session {
     fx: Vec<vorn_screen::Effect>,
     /// Grid requests that arrived before there was a terminal.
     waiting: Vec<GridIn>,
+    /// Snapshots asked for and not cut yet, and when each was asked.
+    snapshots: Vec<(u64, Instant)>,
 }
 
 impl Session {
@@ -396,6 +424,7 @@ impl Session {
         };
         let mut s = Session::new(id, cfg, open, steps);
         s.next_step(now, out);
+        s.report_live(out);
         s
     }
 
@@ -453,6 +482,7 @@ impl Session {
             exited: open.exited,
             fx: Vec::new(),
             waiting: Vec::new(),
+            snapshots: Vec::new(),
         }
     }
 
@@ -483,6 +513,29 @@ impl Session {
         }
     }
 
+    /// Asks for a [`VtSnapshot`] of the terminal, answered with
+    /// [`Out::Snapshot`] under `token`: now when the stream is at a point
+    /// where one can be cut, otherwise at the next record boundary that is,
+    /// or once it has waited [`crate::snapshot::HOLD`].
+    pub fn snapshot(&mut self, token: u64, now: Instant, out: &mut Vec<Out>) {
+        let Phase::Running(run) = &mut self.phase else {
+            out.push(Out::Snapshot(token, None));
+            return;
+        };
+        self.snapshots.push((token, now));
+        answer_snapshots(run, &mut self.snapshots, None, out);
+    }
+
+    /// The analyzer's last `lines` completed lines, answered with
+    /// [`Out::Output`] under `token`.
+    pub fn output(&mut self, token: u64, lines: u32, out: &mut Vec<Out>) {
+        let lines = match &self.phase {
+            Phase::Running(r) => Some(r.term.lines(lines)),
+            _ => None,
+        };
+        out.push(Out::Output(token, lines));
+    }
+
     /// Takes one message from sessiond.
     pub fn input(&mut self, input: Input, now: Instant, out: &mut Vec<Out>) {
         match input {
@@ -510,10 +563,29 @@ impl Session {
                 }
                 _ => {}
             },
-            Input::Entries(entries) => self.apply_all(&entries, now, out),
+            Input::Entries(entries) => {
+                self.apply_all(&entries, now, out);
+                if self.cfg.stream && !entries.is_empty() {
+                    out.push(Out::Applied(entries));
+                }
+            }
             Input::Grid(m) => self.waiting.push(m),
         }
+        self.report_live(out);
         self.serve_grid(now, out);
+    }
+
+    /// Sends [`Out::Live`] once the session has gone live on its base.
+    fn report_live(&mut self, out: &mut Vec<Out>) {
+        if !self.cfg.stream {
+            return;
+        }
+        if let Phase::Running(run) = &mut self.phase {
+            if run.live && !run.live_reported {
+                run.live_reported = true;
+                out.push(Out::Live(run.cursor));
+            }
+        }
     }
 
     /// Hands waiting grid requests to the hub once there is a terminal.
@@ -592,6 +664,9 @@ impl Session {
             // After the record's effects, never before: a checkpoint covers
             // its record, and recovery from it does not emit them again.
             run.cut_due(&ctx, false, &mut self.checkpoints, &mut self.uncut, out);
+            if !self.snapshots.is_empty() {
+                answer_snapshots(run, &mut self.snapshots, None, out);
+            }
         }
         if applied {
             out.push(Out::Ack(run.cursor));
@@ -627,6 +702,9 @@ impl Session {
         let Phase::Running(run) = &mut self.phase else {
             return;
         };
+        if !self.snapshots.is_empty() {
+            answer_snapshots(run, &mut self.snapshots, Some(now), out);
+        }
         let c = &self.cfg.cadence;
         if run.since_cut >= c.quiet_bytes && now.duration_since(run.last_output) >= c.quiet {
             let ctx = Ctx {
@@ -801,7 +879,7 @@ impl Session {
 
     fn run(
         &mut self,
-        term: Term,
+        mut term: Term,
         at: Cursor,
         base: Base,
         size_known: bool,
@@ -823,6 +901,7 @@ impl Session {
             _ => Hub::new(self.cfg.grid),
         };
         hub.rebuilt();
+        term.set_colors(self.cfg.colors);
         let mut run = Box::new(Run {
             term,
             base,
@@ -836,6 +915,7 @@ impl Session {
             history,
             nudge: false,
             hub,
+            live_reported: false,
         });
         run.reach(self.open.head, self.open.pty, out);
         self.phase = Phase::Running(run);
@@ -1105,6 +1185,28 @@ fn event_kind(effect: &Effect) -> Option<EventKind> {
         },
         Effect::Cwd(_) => return None,
     })
+}
+
+/// Cuts the snapshots waiting when the terminal is at a point where one can
+/// be cut, or, given `now`, those that have waited too long wherever it is.
+fn answer_snapshots(
+    run: &mut Run,
+    waiting: &mut Vec<(u64, Instant)>,
+    now: Option<Instant>,
+    out: &mut Vec<Out>,
+) {
+    let cuttable = run.term.em.uncuttable().is_none();
+    let mut cut: Option<VtSnapshot> = None;
+    waiting.retain(|&(token, asked)| {
+        let overdue = now.is_some_and(|n| n.duration_since(asked) >= crate::snapshot::HOLD);
+        if !cuttable && !overdue {
+            return true;
+        }
+        let s =
+            cut.get_or_insert_with(|| crate::snapshot::cut(&run.term.em, run.cursor, !cuttable));
+        out.push(Out::Snapshot(token, Some(Box::new(s.clone()))));
+        false
+    });
 }
 
 fn history_path(dir: &std::path::Path, id: &str) -> std::path::PathBuf {

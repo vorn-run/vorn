@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { WebSocketServer, type WebSocket as WsSocket } from 'ws'
 import { ServerBridge } from '../src/main/server/server-bridge'
-import { encodeTerminalFrame } from '../packages/shared/src/terminal-frame'
+import { encodeTerminalFrame, encodeTerminalFrameV2 } from '../packages/shared/src/terminal-frame'
 
 // The bridge asks for bytes per connection, of a server that can send them, and hands a frame on as the notification it stands for.
 
@@ -110,6 +110,29 @@ describe('terminal output as bytes, at the bridge', () => {
     const [method, params] = await arrived
     expect(method).toBe('terminal:data')
     expect(params).toEqual({ id: 'term-1', seq: 4, data })
+  })
+
+  it('passes a version 2 frame from vornd on undecoded, for the renderer to read', async () => {
+    const { bridge, socket } = await connect()
+    const arrived = new Promise<[string, unknown]>((resolve) =>
+      bridge.once('server-notification', (method: string, params: unknown) =>
+        resolve([method, params])
+      )
+    )
+    const wire = encodeTerminalFrameV2({
+      id: 'held-by-vornd',
+      epoch: 0,
+      firstRseq: 4,
+      lastRseq: 6,
+      startOffset: 120,
+      data: new TextEncoder().encode('ok')
+    })
+
+    socket.send(wire, { binary: true })
+
+    const [method, params] = await arrived
+    expect(method).toBe('terminal:frame')
+    expect(new Uint8Array(params as Uint8Array)).toEqual(wire)
   })
 
   it('drops binary it cannot read rather than passing it on', async () => {

@@ -23,7 +23,8 @@ vi.mock('@xterm/xterm', () => {
     }
     parser = {
       registerOscHandler: vi.fn().mockReturnValue({ dispose: vi.fn() }),
-      registerCsiHandler: vi.fn().mockReturnValue({ dispose: vi.fn() })
+      registerCsiHandler: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+      registerDcsHandler: vi.fn().mockReturnValue({ dispose: vi.fn() })
     }
     registerMarker = vi.fn()
     registerDecoration = vi.fn()

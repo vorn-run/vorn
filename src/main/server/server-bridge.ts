@@ -7,7 +7,7 @@ import type {
   ServerIdentity
 } from '@vornrun/shared/protocol'
 import { createRequest, createNotification } from '@vornrun/shared/protocol'
-import { decodeTerminalFrame } from '@vornrun/shared/terminal-frame'
+import { decodeTerminalFrame, terminalFrameVersion } from '@vornrun/shared/terminal-frame'
 import { IPC } from '@vornrun/shared/types'
 import log from '../logger'
 
@@ -145,6 +145,13 @@ export class ServerBridge extends EventEmitter {
     this.ws.on('message', (raw: Buffer, isBinary: boolean) => {
       // Terminal output as bytes, for the renderer as it is.
       if (isBinary) {
+        // vornd's frames name their records; the renderer reads them, so they
+        // pass through untouched, copied only out of a pooled buffer.
+        if (terminalFrameVersion(raw) === 2) {
+          const whole = raw.byteOffset === 0 && raw.byteLength === raw.buffer.byteLength
+          this.emit('server-notification', IPC.TERMINAL_FRAME, whole ? raw : new Uint8Array(raw))
+          return
+        }
         const frame = decodeTerminalFrame(raw)
         if (frame) this.emit('server-notification', IPC.TERMINAL_DATA, frame)
         else log.warn('[bridge] dropped a binary frame it could not read')

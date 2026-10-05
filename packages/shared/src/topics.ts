@@ -6,7 +6,8 @@
  * `terminal:exit` and `terminal:bell` stay by name because the ended strip and
  * the notification need them for cards that are not on screen.
  * `terminal:resync` is only ever sent about a terminal whose bytes a client was
- * receiving, so naming it costs nothing.
+ * receiving, so naming it costs nothing; `terminal:resized` likewise, which
+ * vornd sends only to a client attached to the terminal.
  */
 export const PHONE_BASE_TOPICS: readonly string[] = [
   'artifact:*',
@@ -22,7 +23,8 @@ export const PHONE_BASE_TOPICS: readonly string[] = [
   'worktree:*',
   'terminal:exit',
   'terminal:bell',
-  'terminal:resync'
+  'terminal:resync',
+  'terminal:resized'
 ]
 
 /** The instance form the server's filter understands. */

@@ -13,12 +13,14 @@
 //!   each session's grid render clock.
 //! - the checkpoint blob, [`FORMAT`]: the terminal, the analyzer and the
 //!   state between them.
+//! - [`snapshot`]: the VT snapshot a bytes client starts from.
 //!
 //! Plain Rust with no sockets in it: vornd's driver carries [`Input`] from
 //! sessiond and [`Out`] back.
 
 pub mod pool;
 pub mod session;
+pub mod snapshot;
 mod term;
 
 pub use pool::{Pool, Sink};
@@ -26,5 +28,6 @@ pub use session::{
     Base, Brief, Cadence, Config, Effect, EffectId, Input, Open, Out, Session, State, Summary,
     PIPED_SIZE,
 };
+pub use snapshot::VtSnapshot;
 pub use term::{Fidelity, Rejected, FORMAT};
 pub use vorn_grid::{GridIn, HubConfig, HubOut, Peer};

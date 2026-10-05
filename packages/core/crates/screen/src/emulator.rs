@@ -523,6 +523,22 @@ impl Emulator {
         self.term.vt_write(bytes);
     }
 
+    /// The colours a program sees as the defaults, as `(fg, bg)` RGB: what
+    /// an OSC 10 or 11 query is answered with. Ghostty answers neither query
+    /// until they are set; `None` unsets them.
+    pub fn set_default_colors(&mut self, colors: Option<([u8; 3], [u8; 3])>) -> Result<()> {
+        let rgb = |c: [u8; 3]| libghostty_vt::style::RgbColor {
+            r: c[0],
+            g: c[1],
+            b: c[2],
+        };
+        self.term
+            .set_default_fg_color(colors.map(|(fg, _)| rgb(fg)))?;
+        self.term
+            .set_default_bg_color(colors.map(|(_, bg)| rgb(bg)))?;
+        Ok(())
+    }
+
     /// Ghostty's parser is in its ground state with no UTF-8 sequence open.
     pub fn at_ground(&self) -> bool {
         self.parser.at_ground()

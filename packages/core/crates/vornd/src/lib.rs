@@ -9,8 +9,9 @@
 //! that clients see in the `Vornd-Protocol` header when their WebSocket opens.
 //! Given a sessiond binary, it also keeps a session holder running
 //! ([`holder`]) and, with the `engine` feature, runs every session it holds
-//! through the session engine ([`engine`]) and serves grid clients on a
-//! local socket ([`grid`]).
+//! through the session engine ([`engine`]), answers the terminal calls for
+//! those sessions itself ([`terminal`], [`streams`]) and serves grid clients
+//! on a local socket ([`grid`]).
 
 #[cfg(feature = "engine")]
 pub mod engine;
@@ -20,6 +21,9 @@ pub mod groups;
 pub mod holder;
 pub mod protocol;
 pub mod proxy;
+pub mod streams;
+#[cfg(feature = "engine")]
+pub mod terminal;
 
 pub use groups::{Groups, Mode};
 pub use proxy::{serve, Daemon};

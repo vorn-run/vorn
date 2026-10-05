@@ -1,4 +1,4 @@
-//! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--groups git=shadow] [--log-file PATH] [--sessiond PATH --home DIR]`
+//! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--groups git=shadow] [--log-file PATH] [--sessiond PATH --home DIR] [--debug-spawn]`
 //!
 //! Prints one line of JSON, `{"port":N,"protocol":P}`, once it is listening, so
 //! whoever started it knows where to connect. With a session holder and the
@@ -18,7 +18,7 @@ use vornd::holder::{self, Holder, HolderConfig};
 use vornd::protocol::VORND_PROTOCOL;
 use vornd::{proxy, Daemon, Groups};
 
-const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--groups group=mode,...] [--log-file PATH] [--exit-with-stdin] [--sessiond PATH --home DIR]
+const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--groups group=mode,...] [--log-file PATH] [--exit-with-stdin] [--sessiond PATH --home DIR] [--debug-spawn]
 
   --upstream   the Node server to forward to
   --listen     where to listen; loopback only (default 127.0.0.1:0)
@@ -30,7 +30,10 @@ const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT]
                even if that process is killed
   --sessiond   the vorn-sessiond binary this build ships: keep one running under
                --home (its run/ directory is where running ones are found)
-  --home       the data directory, $VORN_HOME";
+  --home       the data directory, $VORN_HOME
+  --debug-spawn
+               answer vornd:spawn, which starts a session in the session holder;
+               for tests, until the app creates its sessions through vornd";
 
 #[derive(Debug)]
 struct Args {
@@ -40,6 +43,7 @@ struct Args {
     log_file: Option<String>,
     exit_with_stdin: bool,
     holder: Option<HolderConfig>,
+    debug_spawn: bool,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -50,6 +54,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut exit_with_stdin = false;
     let mut sessiond = None;
     let mut home = None;
+    let mut debug_spawn = false;
     while let Some(flag) = args.next() {
         let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
         match flag.as_str() {
@@ -70,6 +75,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--exit-with-stdin" => exit_with_stdin = true,
             "--sessiond" => sessiond = Some(PathBuf::from(value("--sessiond")?)),
             "--home" => home = Some(PathBuf::from(value("--home")?)),
+            "--debug-spawn" => debug_spawn = true,
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument `{other}`")),
         }
@@ -99,6 +105,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         log_file,
         exit_with_stdin,
         holder,
+        debug_spawn,
     })
 }
 
@@ -247,6 +254,9 @@ fn main() -> ExitCode {
             }
             None => Daemon::new(args.upstream, args.groups),
         };
+        if args.debug_spawn {
+            daemon.allow_spawn();
+        }
         proxy::log_upstream(&daemon).await;
         info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
         let mut stdout = std::io::stdout().lock();

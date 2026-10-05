@@ -23,7 +23,7 @@ Rust binaries:
 | `crates/screen` (`vorn-screen`)               | A terminal's screen on libghostty-vt: feed, title, cwd, serialize                           |
 | `crates/analysis` (`vorn-analysis`)           | Stripped line ring, bracketed paste and status patterns                                     |
 | `crates/pipeline` (`vorn-pipeline`)           | A terminal's thread: screen, scrollback ring, history frames and checkpoint bodies          |
-| `crates/term-proto` (`vorn-term-proto`)       | Wire types: record headers and cursors, the screen mirror's rows, `row_fmt` 1               |
+| `crates/term-proto` (`vorn-term-proto`)       | Wire types: record headers and cursors, the screen mirror's rows, `row_fmt` 1, bytes frames |
 | `crates/term-mirror` (`vorn-term-mirror`)     | A client's copy of a screen, kept from snapshots and deltas with no parser                  |
 | `crates/grid` (`vorn-grid`)                   | Grid mode's server half: render updates, row cache, tables, credits, history                |
 | `crates/grid-client` (`vorn-grid-client`)     | A headless grid client: the mirror behind grid mode's framing                               |
@@ -67,6 +67,17 @@ implementation. A group is the method name before its first colon. `--log-file`
 and `VORND_LOG` control the log. Clients see the version in the
 `Vornd-Protocol` header on the WebSocket upgrade, and vornd closes a connection
 whose server speaks a protocol version it does not know.
+
+For the sessions its session holder keeps, vornd answers the terminal calls
+itself (`terminal:attach`, `write`, `resize`, `readScrollback`, `readOutput`)
+and streams their output as version 2 bytes frames, which name the records they
+carry, with `terminal:resized` between them in record order. A client that
+attaches with its cursor continues without a snapshot while vornd's tail or
+the holder's ring still has everything after it, across a vornd restart too;
+otherwise it gets a snapshot and the reason. Calls for any other session go to
+the server as before. `--debug-spawn` lets a test start a session through vornd
+with `vornd:spawn`; `yarn test:conformance` builds the holder too and runs the
+terminal and attach files that way.
 
 ## Build
 
