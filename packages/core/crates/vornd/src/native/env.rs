@@ -84,18 +84,22 @@ impl SafeEnv {
     /// this process's until then, filtered either way. Asks the shell again
     /// when it is time to.
     pub fn get(self: &Arc<Self>) -> Env {
-        let answered = {
+        let (answered, ask) = {
             let mut shell = self.shell();
             match &*shell {
-                Shell::Answered(env) => Some(Arc::clone(env)),
+                Shell::Answered(env) => (Some(Arc::clone(env)), false),
                 Shell::Waiting(at) if Instant::now() >= *at => {
                     *shell = Shell::Asking;
-                    self.ask();
-                    None
+                    (None, true)
                 }
-                _ => None,
+                _ => (None, false),
             }
         };
+        // Asked with the lock released: on Windows the answer is stored
+        // before `ask` returns, under the same lock.
+        if ask {
+            self.ask();
+        }
         match answered {
             Some(env) => filter(env.iter().cloned()),
             None => filter(std::env::vars()),

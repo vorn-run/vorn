@@ -729,8 +729,10 @@ mod tests {
             ),
             Answer::Forward
         );
+        // An absolute path on this platform, which is answered here.
+        let missing = std::env::temp_dir().join("vornd-no-such-file");
         assert_eq!(
-            native.call("file:stamp", &json!({ "filePath": "/no/such" })),
+            native.call("file:stamp", &json!({ "filePath": missing })),
             Answer::Result(Value::Null)
         );
     }
