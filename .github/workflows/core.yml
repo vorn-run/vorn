@@ -180,13 +180,18 @@ jobs:
       - name: Native call
         run: yarn vitest run tests/native-core.test.ts tests/js-reference.test.ts tests/core-pipeline.test.ts tests/git-native-parity.test.ts
 
+      # Both stores answering the same calls, on each platform.
+      - name: Native store
+        run: yarn vitest run tests/native-store.test.ts
+
       # Every test that keeps data, again with the database in the native
       # store, which fails the run rather than fall back to the TypeScript one.
-      - name: Native store
-        shell: bash
+      # Linux only, as these files run in the main suite.
+      - name: Store tests on the native store
+        if: runner.os == 'Linux'
         env:
           VORN_NATIVE_STORE: '1'
-        run: yarn vitest run tests/native-store.test.ts $(grep -l -E 'initTestDatabase|initDatabase' tests/*.test.ts tests/*.test.tsx 2>/dev/null)
+        run: yarn vitest run $(grep -l -E 'initTestDatabase|initDatabase' tests/*.test.ts tests/*.test.tsx)
 
       - name: Conformance through vornd, native store
         if: runner.os == 'Linux'

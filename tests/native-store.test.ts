@@ -450,7 +450,12 @@ describe.skipIf(!available)('native store', () => {
       ])
     } finally {
       store.closeDatabase()
-      fs.rmSync(dataDir, { recursive: true, force: true })
+      try {
+        fs.rmSync(dataDir, { recursive: true, force: true })
+      } catch {
+        // Windows refuses while libsql still holds the file: its close() leaves
+        // the handle open until the process exits. The temp dir can stay.
+      }
     }
   })
 })
