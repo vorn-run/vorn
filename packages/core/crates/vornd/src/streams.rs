@@ -40,7 +40,7 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 use vorn_sessiond_wire::AttachRefusal;
-use vorn_term_proto::bytes::{pack, Lost, Piece, MAX_FLUSH};
+use vorn_term_proto::bytes::{pack, BytesFrame, Lost, Piece, MAX_FLUSH};
 use vorn_term_proto::{Cursor, Entry, Record};
 
 /// Raw records kept per session after the actor applied them, so a client
@@ -338,13 +338,13 @@ impl Stream {
                     self.tail_bytes = 0;
                 }
             }
-            self.tail_bytes += e.rec.len() as usize;
+            self.tail_bytes += held(&e);
             self.head = Some(e.after());
             self.tail.push_back(e);
         }
         while self.tail_bytes > TAIL_BYTES && self.tail.len() > 1 {
             if let Some(e) = self.tail.pop_front() {
-                self.tail_bytes -= e.rec.len() as usize;
+                self.tail_bytes -= held(&e);
             }
         }
     }
@@ -363,6 +363,15 @@ impl Stream {
         self.tail
             .iter()
             .any(|e| e.hdr.rseq == c.next_rseq && e.hdr.start_offset == c.next_offset)
+    }
+}
+
+/// The bytes a record takes in the tail: a gap holds none of the output it
+/// stands for.
+fn held(e: &Entry) -> usize {
+    match &e.rec {
+        Record::Data { bytes, .. } => bytes.len(),
+        _ => 0,
     }
 }
 
@@ -1086,8 +1095,8 @@ struct Packed {
 
 /// A message ready for an attachment's outbox.
 enum Ready {
-    /// Bytes or a resize: dropped with the rest when the client falls behind.
-    Stream(Message),
+    /// Bytes or a resize, and the client's cursor once it has it.
+    Stream(Message, Cursor),
     /// The exit, which every client is told even after an overflow.
     Exit(Message),
 }
@@ -1099,17 +1108,31 @@ fn prepare(session: &str, from: Cursor, entries: &[Entry]) -> Packed {
     // UUIDs; such a session's clients would get no bytes, never wrong ones.
     let _ = pack(session, &mut to, entries, MAX_FLUSH, &mut pieces);
     let mut lost = None;
+    // Where the client stands after each piece, so a delivery can stop
+    // between two and carry on from the tail.
+    let mut at = from;
     let msgs = pieces
         .into_iter()
         .filter_map(|p| match p {
-            Piece::Frame(f) => Some(Ready::Stream(Message::binary(f))),
-            Piece::Resized { rseq, cols, rows } => Some(Ready::Stream(Message::text(
-                note(
-                    "terminal:resized",
-                    json!({ "id": session, "cols": cols, "rows": rows, "rseq": rseq }),
-                )
-                .to_string(),
-            ))),
+            Piece::Frame(f) => {
+                if let Ok(frame) = BytesFrame::decode(&f) {
+                    at = frame.resume();
+                }
+                Some(Ready::Stream(Message::binary(f), at))
+            }
+            Piece::Resized { rseq, cols, rows } => {
+                at.next_rseq = rseq + 1;
+                Some(Ready::Stream(
+                    Message::text(
+                        note(
+                            "terminal:resized",
+                            json!({ "id": session, "cols": cols, "rows": rows, "rseq": rseq }),
+                        )
+                        .to_string(),
+                    ),
+                    at,
+                ))
+            }
             Piece::Exit { code, signal, .. } => Some(Ready::Exit(Message::text(
                 note(
                     "terminal:exit",
@@ -1172,6 +1195,7 @@ fn deliver(
         return;
     };
     let fetched;
+    let mut from_tail = true;
     let packed = match &a.mode {
         Mode::Following => packer.from(a.next),
         // Catching up from the tail, which these records are now part of.
@@ -1188,14 +1212,24 @@ fn deliver(
             };
             out.text(&answer(rpc, continued(&a.next)));
             a.mode = Mode::Following;
+            from_tail = false;
             fetched = prepare(session, a.next, &packer.entries[start..]);
             &fetched
         }
     };
-    a.next = packed.to;
-    if !queue(out, &a.gen, &packed.msgs, true) {
-        return overflowed(session, attached, conn, out);
+    if let Some(stopped) = queue(out, &a.gen, &packed.msgs, packed.from) {
+        // The connection is full. These records go into the tail with this
+        // batch, so the rest follows from there as it drains; records sent
+        // again by sessiond do not, and that client starts over instead.
+        if !from_tail {
+            return overflowed(session, attached, conn, out);
+        }
+        a.next = stopped;
+        a.mode = Mode::Behind;
+        out.catching.store(true, Ordering::Release);
+        return;
     }
+    a.next = packed.to;
     if let Some(why) = packed.lost {
         attached.remove(&conn);
         out.text(&note(
@@ -1205,23 +1239,25 @@ fn deliver(
     }
 }
 
-/// Queues an attachment's messages. With `capped`, false when the
-/// connection was already over [`QUEUE_CAP`]: nothing more of its stream
-/// was queued.
-fn queue(out: &Outbox, gen: &Arc<AtomicU64>, msgs: &[Ready], capped: bool) -> bool {
+/// Queues an attachment's messages, starting from cursor `from`, while its
+/// connection is under [`QUEUE_CAP`]. `None` when all were queued; otherwise
+/// the cursor after the last one that was, where the attachment carries on.
+fn queue(out: &Outbox, gen: &Arc<AtomicU64>, msgs: &[Ready], from: Cursor) -> Option<Cursor> {
     let g = gen.load(Ordering::Acquire);
+    let mut at = from;
     for m in msgs {
         match m {
-            Ready::Stream(msg) => {
-                if capped && out.queued() > QUEUE_CAP {
-                    return false;
+            Ready::Stream(msg, after) => {
+                if out.queued() > QUEUE_CAP {
+                    return Some(at);
                 }
                 out.push(msg.clone(), Some((Arc::clone(gen), g)));
+                at = *after;
             }
             Ready::Exit(msg) => out.push(msg.clone(), None),
         }
     }
-    true
+    None
 }
 
 /// Sends attachment `conn` what the tail holds past its cursor, a step at
@@ -1252,13 +1288,22 @@ fn catch_up(session: &str, s: &mut Stream, conn: u64, out: &Outbox) -> bool {
             end += 1;
         }
         let packed = prepare(session, a.next, &tail[start..end]);
+        if let Some(stopped) = queue(out, &a.gen, &packed.msgs, packed.from) {
+            a.next = stopped;
+            continue;
+        }
         a.next = packed.to;
-        queue(out, &a.gen, &packed.msgs, false);
         if let Some(why) = packed.lost {
             s.attached.remove(&conn);
+            // Fallen further behind than the tail holds: what it needed was
+            // dropped, as a queue overflow drops it (TP §11).
+            let why = match why {
+                Lost::NotRetained => "overflow",
+                other => other.as_str(),
+            };
             out.text(&note(
                 "terminal:resync",
-                json!({ "id": session, "reason": why.as_str() }),
+                json!({ "id": session, "reason": why }),
             ));
             return false;
         }

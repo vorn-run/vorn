@@ -1333,3 +1333,35 @@ async fn a_refused_fetch_leaves_the_session_streaming() {
     until(&mut c, "e 199").await;
     v.kill().await;
 }
+
+/// The same resume while vornd is still applying the output: the hub holds
+/// only part of it when the client attaches, and the rest arrives as one
+/// batch larger than a connection may queue. It follows from the tail as the
+/// connection drains, never an overflow, however the two interleave.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_resume_during_a_burst_never_overflows() {
+    for _ in 0..5 {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Fake::start(dir.path(), (100, 30), Vec::new()).await;
+        let v = Vornd::start(&fake, no_cadence());
+        v.caught_up(&fake).await;
+        let mut c = Client::new(&v);
+        c.attach(None).await;
+        fake.data(b"start\r\n");
+        c.follow_to(fake.head()).await;
+        let at = c.cursor.unwrap();
+        let record = lines(0..8000);
+        for _ in 0..48 {
+            fake.data(&record[..64 << 10]);
+        }
+        let mut c = c.reconnect(&v);
+        let a = c.attach(Some(at)).await;
+        assert!(a.continued, "{a:?}");
+        let mark = c.bytes.len();
+        c.follow_to(fake.head()).await;
+        assert!(c.resyncs.is_empty(), "{:?}", c.resyncs);
+        let log = fake.held().log.clone();
+        assert_eq!(c.bytes[mark..], bytes_between(&log, at, fake.head())[..]);
+        v.kill().await;
+    }
+}
