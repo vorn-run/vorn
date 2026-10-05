@@ -203,6 +203,9 @@ mod tests {
         assert_eq!(fg, pid, "the terminal is its controlling one");
         use std::io::Write;
         master.writer().unwrap().write_all(b"\n").unwrap();
+        // macOS holds the program's exit until the terminal's echo of that
+        // line is read.
+        read_all(&master);
         assert_eq!(child.wait().unwrap().code(), Some(5));
     }
 
