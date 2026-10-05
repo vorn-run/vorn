@@ -57,6 +57,7 @@ describe.skipIf(!vorndBinariesAvailable)('sessions through vornd on this platfor
     return [process.execPath, file]
   }
 
+  // A fresh machine's first sessiond start, checked by the OS, can be slow.
   beforeAll(async () => {
     up = await upstream()
     h = testHome()
@@ -66,18 +67,18 @@ describe.skipIf(!vorndBinariesAvailable)('sessions through vornd on this platfor
     expect(await vorndSessions.connect()).toBe(true)
     ptyManager.on('client-message', record)
     headlessManager.on('client-message', record)
-  })
+  }, 30_000)
 
   afterAll(async () => {
     ptyManager.off('client-message', record)
     headlessManager.off('client-message', record)
     vorndSessions.close()
-    const pid = await vornd.sessiondPid().catch(() => null)
-    await vornd.kill()
+    const pid = vornd ? await vornd.sessiondPid().catch(() => null) : null
+    await vornd?.kill()
     killPid(pid)
     closeDatabase()
-    up.close()
-    h.remove()
+    up?.close()
+    h?.remove()
   })
 
   it('runs a shell in vornd: its output read back, its exit code told', async () => {
