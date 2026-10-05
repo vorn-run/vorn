@@ -3,8 +3,9 @@
  *
  * Every namespace the web client registers a handler for, except terminal
  * bytes: those are asked for one terminal at a time, as cards come on screen.
- * `terminal:exit` and `terminal:bell` stay by name because the ended strip and
- * the notification need them for cards that are not on screen.
+ * `terminal:exit`, `terminal:bell` and `terminal:notify` stay by name because
+ * the ended strip and the notifications need them for cards that are not on
+ * screen.
  * `terminal:resync` is only ever sent about a terminal whose bytes a client was
  * receiving, so naming it costs nothing; `terminal:resized` likewise, which
  * vornd sends only to a client attached to the terminal.
@@ -23,6 +24,7 @@ export const PHONE_BASE_TOPICS: readonly string[] = [
   'worktree:*',
   'terminal:exit',
   'terminal:bell',
+  'terminal:notify',
   'terminal:resync',
   'terminal:resized'
 ]

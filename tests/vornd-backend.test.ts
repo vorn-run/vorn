@@ -551,6 +551,7 @@ describe('after this server restarts, its terminals come back from vornd', () =>
       projectPath: '/tmp/proj',
       status: 'idle',
       createdAt: 1,
+      pid: 1,
       displayName: 'Fix the tests',
       groupId: 'g1',
       savedAt: Date.now()
