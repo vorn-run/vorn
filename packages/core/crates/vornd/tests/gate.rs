@@ -586,7 +586,7 @@ fn sideloaded_conpty_in_use(home: &Path) {
 /// Starts the eight sessions on the app's channel: four PTYs, four piped.
 async fn spawn_all(rig: &Rig, emitter: &Path, plan: Plan) -> Vec<Spawned> {
     let vornd = rig.vornd.as_ref().expect("a vornd");
-    let mut app = App::connect(&rig.home, vornd.child.id()).await;
+    let mut app = App::connect(&rig.home, vornd.child.id(), &vornd.log).await;
     let hello = app.call("vornd:hello", json!({})).await.expect("hello");
     assert!(hello["protocol"].as_u64().is_some(), "{hello}");
     // Room for everything, and for what a terminal adds to it.
@@ -647,7 +647,7 @@ impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> Duplex for 
 
 impl App {
     /// Connects to the endpoint vornd `pid` announced under `home`.
-    async fn connect(home: &Path, pid: u32) -> App {
+    async fn connect(home: &Path, pid: u32, log: &Path) -> App {
         let file = home.join("run").join(vornd::control::ANNOUNCEMENT);
         let t = Instant::now();
         loop {
@@ -671,8 +671,9 @@ impl App {
             }
             assert!(
                 t.elapsed() < PATIENCE,
-                "vornd {pid} announced no app endpoint in {}",
-                file.display()
+                "vornd {pid} announced no app endpoint in {}; its log:\n{}",
+                file.display(),
+                std::fs::read_to_string(log).unwrap_or_default()
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
