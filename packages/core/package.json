@@ -1,6 +1,6 @@
 {
   "name": "@vornrun/core",
-  "version": "0.8.0-beta.2",
+  "version": "0.8.0-beta.3",
   "private": true,
   "description": "Vorn's Rust core, built into vorn_core.node and loaded by the server",
   "scripts": {
