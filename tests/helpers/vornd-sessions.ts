@@ -135,10 +135,17 @@ export class Vornd {
 /** A data directory for one test, and its cleanup. */
 export function home(): { dir: string; remove(): void } {
   const dir = mkdtempSync(path.join(tmpdir(), 'vornd-sessions-'))
-  // Windows can hold a file that was just closed for a moment longer.
   return {
     dir,
-    remove: () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    remove: () => {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+      } catch (err) {
+        // Windows can keep a file in the temp directory locked after the test
+        // closed it; as with Rust's tempfile, what is left is the OS's to clear.
+        if (process.platform !== 'win32') throw err
+      }
+    }
   }
 }
 
