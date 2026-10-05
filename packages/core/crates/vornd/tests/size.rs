@@ -600,3 +600,89 @@ async fn a_lock_holds_against_typing_until_its_client_leaves() {
     );
     rig.task.abort();
 }
+
+impl Phone {
+    /// Reads until the answer to `rpc`, applying what comes before it.
+    async fn answer(&mut self, rpc: u64) -> Value {
+        let t = Instant::now();
+        loop {
+            let o = tokio::time::timeout(PATIENCE.saturating_sub(t.elapsed()), self.conn.next())
+                .await
+                .expect("an answer")
+                .expect("open");
+            self.conn.written(o.size());
+            if let Message::Text(t) = &o.msg {
+                let v: Value = serde_json::from_str(t.as_str()).unwrap();
+                if v["id"] == json!(rpc) {
+                    return v;
+                }
+            }
+        }
+    }
+}
+
+/// The desktop's windows share one connection, and each pane is its own
+/// client: one window hiding its pane leaves the size with the pane still on
+/// screen. And a lock another client holds is refused, in the answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn panes_on_one_connection_are_separate_and_locks_are_not_taken_over() {
+    let rig = Rig::start().await;
+    let id = rig.spawn().await;
+    let mut desk = rig.phone();
+    rig.engine.sizes().desktop(desk.conn.id());
+    desk.attach(&id).await;
+    let mut phone = rig.phone();
+    phone.attach(&id).await;
+    for (pane, (cols, rows)) in [(1, DESKTOP), (2, (80, 20))] {
+        desk.call(
+            "terminal:viewport",
+            json!({ "id": id, "pane": pane, "cols": cols, "rows": rows }),
+        );
+        desk.call(
+            "terminal:presence",
+            json!({ "id": id, "pane": pane, "state": "watching" }),
+        );
+    }
+    phone.call(
+        "terminal:viewport",
+        json!({ "id": id, "cols": PHONE.0, "rows": PHONE.1 }),
+    );
+    desk.call(
+        "terminal:write",
+        json!({ "id": id, "pane": 1, "data": "x" }),
+    );
+    tokio::time::sleep(SETTLED).await;
+    assert_eq!(rig.engine_view(&id).await.0, DESKTOP);
+    // The second window hides its pane, long past the grace period.
+    desk.call(
+        "terminal:presence",
+        json!({ "id": id, "pane": 2, "state": "away" }),
+    );
+    tokio::time::sleep(Duration::from_secs(11)).await;
+    assert_eq!(
+        rig.engine_view(&id).await.0,
+        DESKTOP,
+        "the size left a pane on screen"
+    );
+    desk.read_for(Duration::from_millis(100)).await;
+    assert_eq!(desk.resized.len(), 1);
+    assert_eq!(desk.resized[0]["owner"], json!(format!("{}:1", desk.name)));
+
+    // The phone locks; the desktop's lock is refused and says so.
+    let rpc = phone.call("terminal:lockSize", json!({ "id": id, "locked": true }));
+    assert!(phone.answer(rpc).await.get("error").is_none());
+    let rpc = desk.call(
+        "terminal:lockSize",
+        json!({ "id": id, "pane": 1, "locked": true }),
+    );
+    let refused = desk.answer(rpc).await;
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("locked by another client")),
+        "{refused}"
+    );
+    tokio::time::sleep(SETTLED).await;
+    assert_eq!(rig.engine_view(&id).await.0, PHONE);
+    rig.task.abort();
+}

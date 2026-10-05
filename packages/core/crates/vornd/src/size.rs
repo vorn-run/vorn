@@ -31,9 +31,13 @@ use vorn_size::{Decision, Event, Policy, Presence, Size};
 /// A client as the size rule knows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Who {
-    /// A bytes connection on the WebSocket: every session it attaches is
-    /// seen through the one box per session it reports.
-    Bytes(u64),
+    /// One pane on a bytes connection on the WebSocket. Every window of the
+    /// desktop shares the app's one connection, so a pane names itself with
+    /// `pane` in what it reports, the way a grid attachment has its sid
+    /// (TP §7): two panes showing one session never overwrite each other's
+    /// box or presence. `pane` 0 is the connection as a whole, for a client
+    /// that names no pane.
+    Bytes { conn: u64, pane: u64 },
     /// One grid attachment.
     Grid(Peer),
 }
@@ -43,7 +47,8 @@ impl Who {
     /// told as its own `client` when it attaches.
     pub fn name(self) -> String {
         match self {
-            Who::Bytes(conn) => format!("ws:{conn}"),
+            Who::Bytes { conn, pane: 0 } => format!("ws:{conn}"),
+            Who::Bytes { conn, pane } => format!("ws:{conn}:{pane}"),
             Who::Grid(p) => format!("grid:{}:{}", p.conn, p.sid),
         }
     }
@@ -143,7 +148,7 @@ impl Sizes {
             let mut inner = self.inner();
             let desktop = match who {
                 Who::Grid(_) => true,
-                Who::Bytes(conn) => inner.desktops.contains(&conn),
+                Who::Bytes { conn, .. } => inner.desktops.contains(&conn),
             };
             let Some(h) = inner.sessions.get_mut(session) else {
                 return;
@@ -190,9 +195,30 @@ impl Sizes {
         self.wake.notify_one();
     }
 
+    /// A lock asked for, or released. A lock another client holds is
+    /// refused, and the refusal is the answer the client gets; a release by
+    /// a client that holds none changes nothing.
+    pub fn lock(&self, session: &str, who: Who, locked: bool, now: Instant) -> Result<(), String> {
+        if locked {
+            let inner = self.inner();
+            let held = inner
+                .sessions
+                .get(session)
+                .and_then(|h| h.policy.locked_by());
+            if held.is_some_and(|w| w != who) {
+                return Err("the size is locked by another client".to_owned());
+            }
+        }
+        self.on(session, who, Ev::LockSize(locked), now);
+        Ok(())
+    }
+
     /// Bytes connection `conn` closed: it detaches from every session.
     pub fn bytes_gone(&self, conn: u64, now: Instant) {
-        self.gone(|w| w == Who::Bytes(conn), now);
+        self.gone(
+            |w| matches!(w, Who::Bytes { conn: c, .. } if c == conn),
+            now,
+        );
         self.inner().desktops.remove(&conn);
     }
 
@@ -275,7 +301,7 @@ impl Sizes {
                     .clients()
                     .filter_map(|w| match w {
                         Who::Grid(p) => Some(p),
-                        Who::Bytes(_) => None,
+                        Who::Bytes { .. } => None,
                     })
                     .collect()
             })
@@ -334,16 +360,19 @@ mod tests {
             viewport: Some(Size::new(cols, rows)),
             presence: Presence::Watching,
         };
-        sizes.on(S, Who::Bytes(2), view(50, 30), t0);
-        sizes.on(S, Who::Bytes(1), view(120, 40), t0);
-        sizes.on(S, Who::Bytes(2), Ev::Input, t0);
-        sizes.on(S, Who::Bytes(1), Ev::Input, at(500));
-        sizes.on(S, Who::Bytes(2), Ev::Input, at(1000));
+        sizes.on(S, Who::Bytes { conn: 2, pane: 0 }, view(50, 30), t0);
+        sizes.on(S, Who::Bytes { conn: 1, pane: 0 }, view(120, 40), t0);
+        sizes.on(S, Who::Bytes { conn: 2, pane: 0 }, Ev::Input, t0);
+        sizes.on(S, Who::Bytes { conn: 1, pane: 0 }, Ev::Input, at(500));
+        sizes.on(S, Who::Bytes { conn: 2, pane: 0 }, Ev::Input, at(1000));
         assert!(sizes
             .poll(at(2000))
             .iter()
-            .all(|(_, d)| d.owner == Some(Who::Bytes(1))));
-        assert_eq!(sizes.state(S).unwrap().1, Some(Who::Bytes(1)));
+            .all(|(_, d)| d.owner == Some(Who::Bytes { conn: 1, pane: 0 })));
+        assert_eq!(
+            sizes.state(S).unwrap().1,
+            Some(Who::Bytes { conn: 1, pane: 0 })
+        );
     }
 
     #[test]
@@ -381,10 +410,52 @@ mod tests {
         assert!(sizes.grid_peers(S).is_empty());
     }
 
+    /// Two panes of the desktop's one connection, one hidden: the other
+    /// still watches, so the size stays; and a second lock is refused.
+    #[test]
+    fn panes_on_one_connection_are_separate_clients_and_a_lock_is_kept() {
+        let sizes = Sizes::new();
+        sizes.opened(S, Size::new(100, 30));
+        sizes.desktop(1);
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        let (a, b, phone) = (
+            Who::Bytes { conn: 1, pane: 11 },
+            Who::Bytes { conn: 1, pane: 12 },
+            Who::Bytes { conn: 2, pane: 0 },
+        );
+        let view = |cols, rows| Ev::Attach {
+            viewport: Some(Size::new(cols, rows)),
+            presence: Presence::Watching,
+        };
+        sizes.on(S, a, view(120, 40), t0);
+        sizes.on(S, b, view(80, 20), t0);
+        sizes.on(S, phone, view(50, 30), t0);
+        sizes.on(S, a, Ev::Input, t0);
+        assert_eq!(sizes.poll(at(200)).len(), 1);
+        sizes.applied(S, Size::new(120, 40));
+        // The second window hides its pane; the first still shows the session.
+        sizes.on(S, b, Ev::Presence(Presence::Away), at(1_000));
+        assert_eq!(sizes.poll(at(20_000)), Vec::new());
+        assert_eq!(sizes.state(S).unwrap(), (Size::new(120, 40), Some(a)));
+        assert_eq!(a.name(), "ws:1:11");
+
+        assert_eq!(sizes.lock(S, phone, true, at(21_000)), Ok(()));
+        assert!(sizes.lock(S, a, true, at(22_000)).is_err());
+        assert_eq!(sizes.state(S).unwrap().1, Some(phone));
+        assert_eq!(sizes.lock(S, phone, false, at(23_000)), Ok(()));
+        assert_eq!(sizes.lock(S, a, true, at(24_000)), Ok(()));
+    }
+
     #[test]
     fn events_for_sessions_without_a_size_are_ignored() {
         let sizes = Sizes::new();
-        sizes.on("piped", Who::Bytes(1), Ev::Input, Instant::now());
+        sizes.on(
+            "piped",
+            Who::Bytes { conn: 1, pane: 0 },
+            Ev::Input,
+            Instant::now(),
+        );
         assert_eq!(sizes.state("piped"), None);
         assert_eq!(sizes.due(), None);
     }

@@ -14,6 +14,11 @@
 //! an older client sends on every fit, is taken as a TakeSize with that
 //! size, so such a client still works the way it did.
 //!
+//! Each of these calls, `terminal:attach` and `terminal:write` included, may
+//! name the pane it comes from with `pane` (a number): the desktop's windows
+//! share one connection, and the size rule counts each pane as its own client.
+//! A lock another client holds is refused, in the answer to the request.
+//!
 //! `vornd:spawn` starts a session in sessiond through the engine. It exists
 //! for tests until the app creates sessions through vornd, and is answered
 //! only when vornd was started with `--debug-spawn`.
@@ -78,7 +83,9 @@ pub fn handle(
         return false;
     }
     let sizes = engine.sizes();
-    let who = Who::Bytes(conn);
+    // 0 when the client names no pane: the connection is then one client.
+    let pane = params.get("pane").and_then(Value::as_u64).unwrap_or(0);
+    let who = Who::Bytes { conn, pane };
     let now = Instant::now();
     match method {
         "terminal:attach" => {
@@ -153,10 +160,7 @@ pub fn handle(
         }
         "terminal:lockSize" => {
             let done = match params.get("locked").and_then(Value::as_bool) {
-                Some(locked) => {
-                    sizes.on(session, who, Ev::LockSize(locked), now);
-                    Ok(())
-                }
+                Some(locked) => sizes.lock(session, who, locked, now),
                 None => Err("terminal:lockSize needs locked: true or false".to_owned()),
             };
             settle(reply, rpc, done);

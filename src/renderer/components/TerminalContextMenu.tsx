@@ -90,7 +90,7 @@ export function TerminalContextMenu({ terminalId, position, onClose }: Props) {
   }
 
   const handleLock = () => {
-    if (sizing) setTerminalSizeLock(terminalId, !sizing.locked)
+    if (sizing) void setTerminalSizeLock(terminalId, !sizing.locked)
     close()
   }
 

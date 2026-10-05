@@ -185,7 +185,9 @@ pub enum Event<C> {
         client: C,
         size: Option<Size>,
     },
-    /// Lock the size to this client's viewport, or release its lock.
+    /// Lock the size to this client's viewport, or release its lock. A lock
+    /// another client holds is never taken over: it lasts until that client
+    /// releases it or detaches ([`Policy::may_lock`]).
     LockSize {
         client: C,
         locked: bool,
@@ -269,6 +271,11 @@ impl<C: Copy + Ord + Debug> Policy<C> {
     /// The client holding a lock, if any.
     pub fn locked_by(&self) -> Option<C> {
         self.lock
+    }
+
+    /// Whether `client` may lock the size: nobody holds a lock, or it does.
+    pub fn may_lock(&self, client: C) -> bool {
+        self.lock.is_none_or(|l| l == client)
     }
 
     /// Whether anyone has typed into the session since it launched.
@@ -362,6 +369,9 @@ impl<C: Copy + Ord + Debug> Policy<C> {
                         // owner's does.
                         self.owner_reason = Reason::Input;
                     }
+                    return;
+                }
+                if !self.may_lock(client) {
                     return;
                 }
                 let Some(c) = self.clients.get(&client) else {
@@ -653,6 +663,30 @@ mod tests {
             (d.size, d.owner, d.reason),
             (Size::new(120, 40), Some(1), Reason::Returned)
         );
+    }
+
+    #[test]
+    fn a_lock_is_never_taken_over_by_another_client() {
+        let t0 = Instant::now();
+        let mut p = Policy::new(Size::new(80, 24));
+        attach(&mut p, 1, true, Size::new(120, 40), t0);
+        attach(&mut p, 2, false, Size::new(50, 30), t0);
+        let lock = |client, locked| Event::LockSize { client, locked };
+        p.on(lock(2, true), t0);
+        assert!(!p.may_lock(1));
+        // The desktop's lock is refused: the phone's stands, at its size.
+        p.on(lock(1, true), at(t0, 1_000));
+        assert_eq!((p.locked_by(), p.owner()), (Some(2), Some(2)));
+        assert_eq!(
+            p.poll(at(t0, 2_000)).map(|d| d.size),
+            Some(Size::new(50, 30))
+        );
+        // So the phone's own release is the one that counts.
+        p.on(lock(2, false), at(t0, 3_000));
+        assert_eq!(p.locked_by(), None);
+        assert!(p.may_lock(1));
+        p.on(lock(1, true), at(t0, 3_000));
+        assert_eq!(p.locked_by(), Some(1));
     }
 
     #[test]

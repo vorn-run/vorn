@@ -41,6 +41,11 @@ interface TerminalEntry {
   userFont: number
   /** The grid is larger than the box even at the smallest font, and the pane pans across it. */
   panned: boolean
+  /**
+   * This pane's own number in what it tells vornd. Every window of the desktop
+   * shares one connection, so vornd tells two panes of one session apart by it.
+   */
+  pane: number
   /** The cells the box holds at the user's font, for the box size it was counted in. */
   room: { width: number; height: number; cols: number; rows: number } | null
   _loadRenderer?: (() => void) | null
@@ -136,6 +141,19 @@ interface Sizing {
 }
 
 const sizing = new Map<string, Sizing>()
+
+/**
+ * A number for a new pane, unlikely to be any other pane's in any window: the
+ * windows have no counter in common, and vornd only needs them distinct.
+ */
+function newPaneId(): number {
+  return Math.floor(Math.random() * 2 ** 48) + 1
+}
+
+/** The pane's number, for a session vornd holds; undefined for any other. */
+function paneOf(id: string): number | undefined {
+  return vorndStreams.has(id) ? registry.get(id)?.pane : undefined
+}
 
 /** How long input or scrolling keeps a pane `active` rather than `watching`. */
 const ACTIVE_MS = 5_000
@@ -412,9 +430,17 @@ export function hydrateTerminal(
         vorndStreams.delete(terminalId)
         dropSizing(terminalId)
       }
+      // vornd hears what fits here and whether anyone is looking, never a
+      // size; a new connection hears it afresh, a continued stream included.
+      const reportHeld = (): void => {
+        if (!fromVornd) return
+        if (entry.term.element && entry.lastAppliedRect) fitHeldGrid(entry, terminalId)
+        reportPresence(terminalId)
+      }
       if (answer.continued) {
         // Nothing missed: the screen stays, and what follows the cursor applies.
         flushHeld(seq)
+        reportHeld()
         return
       }
       // vornd's snapshot is drawn for the session's size.
@@ -465,12 +491,7 @@ export function hydrateTerminal(
       // reconciliation to tell it -- this is where it finds out.
       if (live === false) reportNotLive?.(terminalId)
       if (live === true) reportLive?.(terminalId)
-      // vornd hears what fits here and whether anyone is looking, never a
-      // size; the server's own pty hears the size a fit held back meanwhile.
-      if (fromVornd) {
-        if (entry.term.element && entry.lastAppliedRect) fitHeldGrid(entry, terminalId)
-        reportPresence(terminalId)
-      }
+      reportHeld()
     } catch (err) {
       console.error('[terminal] could not attach', terminalId, err)
       if (!stillOurs()) return
@@ -524,6 +545,14 @@ export function reattachTerminal(terminalId: string): Promise<void> {
   return inFlight.then(() => {
     const entry = registry.get(terminalId)
     if (!entry || !vorndStreams.has(terminalId)) return
+    // The old connection's lock and ownership went with it: vornd released
+    // them when it closed.
+    const s = sizing.get(terminalId)
+    if (s) {
+      s.locked = false
+      s.owner = null
+      notifySizing()
+    }
     entry._hydrated = false
     return hydrateTerminal(terminalId, { resume: true })
   })
@@ -724,7 +753,9 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
     if (seeding.has(terminalId)) return
     // A focus report is the terminal's, not the person's.
     if (data !== '\x1b[I' && data !== '\x1b[O') markActive(terminalId)
-    window.api.writeTerminal(terminalId, data)
+    const pane = paneOf(terminalId)
+    if (pane === undefined) window.api.writeTerminal(terminalId, data)
+    else window.api.writeTerminal(terminalId, data, pane)
   })
 
   const disposeCommandBlocks = attachCommandBlocks(terminalId, term)
@@ -744,7 +775,8 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
     resizeDeadline: null,
     userFont: getEffectiveFontSize(),
     panned: false,
-    room: null
+    room: null,
+    pane: newPaneId()
   }
 
   entry._loadRenderer = loadRenderer
@@ -1093,7 +1125,7 @@ function reportViewport(id: string, room: { cols: number; rows: number }): void 
   const s = sizingFor(id)
   if (s.viewport && s.viewport.cols === room.cols && s.viewport.rows === room.rows) return
   s.viewport = room
-  window.api.terminalViewport?.({ id, cols: room.cols, rows: room.rows })
+  window.api.terminalViewport?.({ id, cols: room.cols, rows: room.rows, pane: paneOf(id) })
 }
 
 function presenceOf(id: string): TerminalPresence {
@@ -1110,7 +1142,7 @@ function reportPresence(id: string): void {
   const now = presenceOf(id)
   if (now === s.presence) return
   s.presence = now
-  window.api.terminalPresence?.(id, now)
+  window.api.terminalPresence?.(id, now, paneOf(id))
 }
 
 /** Input or scrolling in a pane: in use for a few seconds from now. */
@@ -1137,7 +1169,8 @@ export interface TerminalSizing {
 export function getTerminalSizing(terminalId: string): TerminalSizing | null {
   const s = sizing.get(terminalId)
   if (!s || !vorndStreams.has(terminalId)) return null
-  return { owner: s.client !== null && s.owner === s.client, locked: s.locked }
+  const pane = registry.get(terminalId)?.pane
+  return { owner: s.client !== null && s.owner === `${s.client}:${pane}`, locked: s.locked }
 }
 
 /** Told when any pane's standing toward its session's size changes. */
@@ -1151,15 +1184,27 @@ export function onTerminalSizingChange(cb: () => void): () => void {
 /** "Fit to this device": the session takes this pane's size. */
 export function fitTerminalToDevice(terminalId: string): void {
   if (!vorndStreams.has(terminalId)) return
-  window.api.takeTerminalSize?.(terminalId)
+  window.api.takeTerminalSize?.(terminalId, paneOf(terminalId))
 }
 
-/** Lock the session's size to this pane's, or release the lock. */
-export function setTerminalSizeLock(terminalId: string, locked: boolean): void {
-  if (!vorndStreams.has(terminalId)) return
-  sizingFor(terminalId).locked = locked
-  window.api.lockTerminalSize?.(terminalId, locked)
-  notifySizing()
+/**
+ * Lock the session's size to this pane's, or release the lock. vornd refuses
+ * a lock another client holds; the pane shows a lock only once vornd took it.
+ * Answers whether it did.
+ */
+export async function setTerminalSizeLock(terminalId: string, locked: boolean): Promise<boolean> {
+  if (!vorndStreams.has(terminalId) || !window.api.lockTerminalSize) return false
+  const answer = await window.api.lockTerminalSize(terminalId, locked, paneOf(terminalId))
+  const s = sizing.get(terminalId)
+  if (!answer?.ok) {
+    console.warn('[terminal] size lock refused', terminalId, answer?.error)
+    return false
+  }
+  if (s) {
+    s.locked = locked
+    notifySizing()
+  }
+  return true
 }
 
 /** The first box is taken at once; a later one once it settles, so a drag is one refit and one SIGWINCH rather than one per frame. */

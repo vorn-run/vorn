@@ -46,6 +46,8 @@ pub mod code {
     pub const NOT_SERVED: u16 = 501;
     /// The first message was not a Hello, or a frame did not decode.
     pub const BAD_REQUEST: u16 = 400;
+    /// The size is locked by another client.
+    pub const LOCKED: u16 = 423;
 }
 
 /// The endpoint for this vornd under `home`: one per process, so a vornd
@@ -460,7 +462,12 @@ impl Conn<'_> {
             }
             ClientMsg::TakeSize { sid } => return self.size(sid, Ev::TakeSize(None), now),
             ClientMsg::LockSize { sid, locked } => {
-                return self.size(sid, Ev::LockSize(locked), now)
+                let session = self.sids.get(&sid)?;
+                let who = Who::Grid(peer(sid));
+                return match self.engine.sizes().lock(session, who, locked, now) {
+                    Ok(()) => None,
+                    Err(e) => Some(error(code::LOCKED, &e)),
+                };
             }
             // Default colours are not served yet; a client that sends them
             // carries on.

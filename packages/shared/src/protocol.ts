@@ -655,6 +655,11 @@ export interface RequestMethods {
    */
   'terminal:readScrollback': { params: { id: string }; result: { data: string } }
   /**
+   * Lock a session vornd holds to this pane's size, or release the lock.
+   * Refused while another client holds the lock.
+   */
+  'terminal:lockSize': { params: { id: string; locked: boolean; pane?: number }; result: null }
+  /**
    * Everything a pane needs to start showing a terminal it did not create.
    *
    * `data` is the scrollback; `seq` is the flush it reflects, so the caller can
@@ -1497,19 +1502,21 @@ export type TerminalSizeReason = 'input' | 'returned' | 'explicit' | 'locked' | 
 // ─── Client Notifications (client → server, fire-and-forget) ────
 
 export interface ClientNotifications {
-  'terminal:write': { id: string; data: string }
+  /** `pane` names the pane the input came from, for a session vornd holds. */
+  'terminal:write': { id: string; data: string; pane?: number }
   'terminal:resize': ResizePayload
   /**
    * For a session vornd holds: what fits in this pane at the user's font.
    * Never a resize request; vornd decides the size from who is typing.
+   *
+   * `pane` in these calls names the pane, which vornd counts as a client of
+   * its own: every window of the desktop shares one connection.
    */
-  'terminal:viewport': ResizePayload
+  'terminal:viewport': ResizePayload & { pane?: number }
   /** For a session vornd holds: whether this pane is in use, on screen, or hidden. */
-  'terminal:presence': { id: string; state: TerminalPresence }
+  'terminal:presence': { id: string; state: TerminalPresence; pane?: number }
   /** "Fit to this device": the session takes this pane's size. */
-  'terminal:takeSize': { id: string }
-  /** Lock the session's size to this pane's, or release the lock. */
-  'terminal:lockSize': { id: string; locked: boolean }
+  'terminal:takeSize': { id: string; pane?: number }
   /**
    * Narrow which server notifications this socket receives.
    *

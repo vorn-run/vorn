@@ -9,6 +9,7 @@ const { created } = vi.hoisted(() => ({
     resize: ReturnType<typeof vi.fn>
     csi: Array<{ id: unknown; fn: (...a: unknown[]) => boolean }>
     options: { fontSize: number }
+    onData: ReturnType<typeof vi.fn>
   }>
 }))
 
@@ -58,7 +59,8 @@ vi.mock('@xterm/xterm', () => {
         reset: this.reset,
         resize: this.resize,
         csi: this.csi,
-        options: this.options
+        options: this.options,
+        onData: this.onData
       })
     }
     open(el: HTMLElement): void {
@@ -354,8 +356,12 @@ describe('the size of a session vornd holds', () => {
     return el
   }
 
+  /** The number this pane names itself by to vornd, from its first viewport. */
+  const pane = (): number => (api.terminalViewport.mock.calls[0]![0] as { pane: number }).pane
+
   beforeEach(() => {
     for (const f of Object.values(api)) if (typeof f?.mockClear === 'function') f.mockClear()
+    api.lockTerminalSize.mockResolvedValue({ ok: true })
   })
 
   afterEach(() => {
@@ -372,7 +378,10 @@ describe('the size of a session vornd holds', () => {
     fitTerminal(ID)
 
     expect(window.api.resizeTerminal).not.toHaveBeenCalled()
-    expect(api.terminalViewport.mock.calls).toEqual([[{ id: ID, cols: 50, rows: 18 }]])
+    expect(api.terminalViewport.mock.calls).toEqual([
+      [{ id: ID, cols: 50, rows: 18, pane: pane() }]
+    ])
+    expect(pane()).toBeGreaterThan(0)
   })
 
   it('draws a larger grid whole: the font scales down, to 9 px, and below that the pane pans', async () => {
@@ -397,23 +406,80 @@ describe('the size of a session vornd holds', () => {
 
   it('says it is watching when shown, active when used, and away when hidden', async () => {
     const el = await show(80, 24)
-    expect(api.terminalPresence.mock.calls).toEqual([[ID, 'watching']])
+    expect(api.terminalPresence.mock.calls).toEqual([[ID, 'watching', pane()]])
     getPersistentWrapper(ID)!.dispatchEvent(new Event('wheel'))
-    expect(api.terminalPresence).toHaveBeenLastCalledWith(ID, 'active')
+    expect(api.terminalPresence).toHaveBeenLastCalledWith(ID, 'active', pane())
     unregisterSlot(ID, el)
-    expect(api.terminalPresence).toHaveBeenLastCalledWith(ID, 'away')
+    expect(api.terminalPresence).toHaveBeenLastCalledWith(ID, 'away', pane())
   })
 
   it('knows when the size is its own, and asks for it or locks it on request', async () => {
     await show(80, 24)
     expect(getTerminalSizing(ID)).toEqual({ owner: false, locked: false })
-    resizedListener({ id: ID, cols: 50, rows: 18, rseq: 8, owner: 'ws:7', reason: 'explicit' })
+    // The connection is shared by every window: the size is this pane's
+    // only when it names this pane.
+    resizedListener({ id: ID, cols: 50, rows: 18, rseq: 8, owner: 'ws:7', reason: 'input' })
+    expect(getTerminalSizing(ID)).toEqual({ owner: false, locked: false })
+    resizedListener({
+      id: ID,
+      cols: 50,
+      rows: 18,
+      rseq: 9,
+      owner: `ws:7:${pane()}`,
+      reason: 'explicit'
+    })
     expect(getTerminalSizing(ID)).toEqual({ owner: true, locked: false })
     fitTerminalToDevice(ID)
-    expect(api.takeTerminalSize).toHaveBeenCalledWith(ID)
-    setTerminalSizeLock(ID, true)
-    expect(api.lockTerminalSize).toHaveBeenCalledWith(ID, true)
+    expect(api.takeTerminalSize).toHaveBeenCalledWith(ID, pane())
+    expect(await setTerminalSizeLock(ID, true)).toBe(true)
+    expect(api.lockTerminalSize).toHaveBeenCalledWith(ID, true, pane())
     expect(getTerminalSizing(ID)).toEqual({ owner: true, locked: true })
+  })
+
+  it('names itself in what it types, so vornd tells its input from another window', async () => {
+    await show(80, 24)
+    const typed = term().onData.mock.calls[0]![0] as (data: string) => void
+    typed('ls\r')
+    expect(window.api.writeTerminal).toHaveBeenLastCalledWith(ID, 'ls\r', pane())
+  })
+
+  it('shows no lock that vornd refused', async () => {
+    await show(80, 24)
+    api.lockTerminalSize.mockResolvedValue({
+      ok: false,
+      error: 'the size is locked by another client'
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(await setTerminalSizeLock(ID, true)).toBe(false)
+    expect(getTerminalSizing(ID)).toEqual({ owner: false, locked: false })
+    warn.mockRestore()
+  })
+
+  it('reports its viewport and presence again on a continued reattach, and drops the old lock', async () => {
+    await show(80, 24)
+    expect(await setTerminalSizeLock(ID, true)).toBe(true)
+    const first = pane()
+    api.terminalViewport.mockClear()
+    api.terminalPresence.mockClear()
+
+    attachTerminal.mockResolvedValueOnce({
+      data: '',
+      seq: 7,
+      live: true,
+      cursor: { epoch: 0, nextRseq: 8, nextOffset: 120 },
+      continued: true,
+      replies: 'vornd',
+      client: 'ws:9'
+    })
+    reconnectedListener()
+    await vi.waitFor(() => expect(api.terminalViewport).toHaveBeenCalled())
+
+    // The new connection hears this pane's box and presence: without them it
+    // could never follow this pane's typing, nor come home to it.
+    expect(api.terminalViewport).toHaveBeenCalledWith({ id: ID, cols: 50, rows: 18, pane: first })
+    expect(api.terminalPresence).toHaveBeenCalledWith(ID, 'watching', first)
+    // vornd let the old connection's lock go with it.
+    expect(getTerminalSizing(ID)).toEqual({ owner: false, locked: false })
   })
 
   it('leaves a session vornd does not hold to the pane, as before', async () => {

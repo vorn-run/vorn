@@ -709,8 +709,10 @@ export function registerIpcHandlers(): void {
   ipcMain.on(IPC.EXTENSION_SELECTION_RESULT, (_, payload: { requestId: number; text: string }) =>
     bridge?.notify(IPC.EXTENSION_SELECTION_RESULT, payload)
   )
-  ipcMain.on(IPC.TERMINAL_WRITE, (_, { id, data }: { id: string; data: string }) =>
-    bridge?.notify(IPC.TERMINAL_WRITE, { id, data })
+  ipcMain.on(
+    IPC.TERMINAL_WRITE,
+    (_, { id, data, pane }: { id: string; data: string; pane?: number }) =>
+      bridge?.notify(IPC.TERMINAL_WRITE, pane === undefined ? { id, data } : { id, data, pane })
   )
 
   ipcMain.on(IPC.TERMINAL_RESIZE, (_, payload: ResizePayload) =>
@@ -720,16 +722,28 @@ export function registerIpcHandlers(): void {
   // The size of a session vornd holds: what fits, whether the pane is in
   // use, and the explicit "fit" and lock. Only sent for those sessions, so
   // only vornd reads them.
-  ipcMain.on(IPC.TERMINAL_VIEWPORT, (_, payload: ResizePayload) =>
+  ipcMain.on(IPC.TERMINAL_VIEWPORT, (_, payload: ResizePayload & { pane?: number }) =>
     bridge?.notify(IPC.TERMINAL_VIEWPORT, payload)
   )
-  ipcMain.on(IPC.TERMINAL_PRESENCE, (_, payload: { id: string; state: TerminalPresence }) =>
-    bridge?.notify(IPC.TERMINAL_PRESENCE, payload)
+  ipcMain.on(
+    IPC.TERMINAL_PRESENCE,
+    (_, payload: { id: string; state: TerminalPresence; pane?: number }) =>
+      bridge?.notify(IPC.TERMINAL_PRESENCE, payload)
   )
-  ipcMain.on(IPC.TERMINAL_TAKE_SIZE, (_, payload: { id: string }) =>
+  ipcMain.on(IPC.TERMINAL_TAKE_SIZE, (_, payload: { id: string; pane?: number }) =>
     bridge?.notify(IPC.TERMINAL_TAKE_SIZE, payload)
   )
-  ipcMain.on(IPC.TERMINAL_LOCK_SIZE, (_, payload: { id: string; locked: boolean }) =>
-    bridge?.notify(IPC.TERMINAL_LOCK_SIZE, payload)
+  // A request, so a refusal (another client holds the lock) reaches the pane.
+  ipcMain.handle(
+    IPC.TERMINAL_LOCK_SIZE,
+    async (_, payload: { id: string; locked: boolean; pane?: number }) => {
+      try {
+        if (!bridge) return { ok: false, error: 'not connected' }
+        await bridge.request(IPC.TERMINAL_LOCK_SIZE, payload)
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
   )
 }
