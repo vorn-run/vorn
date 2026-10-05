@@ -2572,11 +2572,15 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "serde",
+ "serde_json",
  "tokio",
  "vorn-analysis",
  "vorn-git",
  "vorn-pipeline",
+ "vorn-protocol",
  "vorn-screen",
+ "vorn-store",
 ]
 
 [[package]]

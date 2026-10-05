@@ -427,11 +427,7 @@ fn set_version(conn: &Connection, v: i64) -> Result<()> {
 }
 
 /// Runs `body` in one transaction and records version `v` with it.
-fn step(
-    conn: &mut Connection,
-    v: i64,
-    body: impl FnOnce(&Connection) -> Result<()>,
-) -> Result<()> {
+fn step(conn: &mut Connection, v: i64, body: impl FnOnce(&Connection) -> Result<()>) -> Result<()> {
     let tx = conn.transaction()?;
     body(&tx)?;
     set_version(&tx, v)?;
@@ -439,7 +435,11 @@ fn step(
     Ok(())
 }
 
-fn migrate(conn: &mut Connection, workspace: &vorn_protocol::WorkspaceConfig, owner: &str) -> Result<()> {
+fn migrate(
+    conn: &mut Connection,
+    workspace: &vorn_protocol::WorkspaceConfig,
+    owner: &str,
+) -> Result<()> {
     let version = version(conn)?;
 
     if version < 1 {
@@ -538,11 +538,10 @@ fn migrate(conn: &mut Connection, workspace: &vorn_protocol::WorkspaceConfig, ow
             let has_old = has(d, "sessions", "claude_session_id")?;
             let has_new = has(d, "sessions", "agent_session_id")?;
             if has_old && !has_new {
-                if d
-                    .execute_batch(
-                        "ALTER TABLE sessions RENAME COLUMN claude_session_id TO agent_session_id",
-                    )
-                    .is_err()
+                if d.execute_batch(
+                    "ALTER TABLE sessions RENAME COLUMN claude_session_id TO agent_session_id",
+                )
+                .is_err()
                 {
                     d.execute_batch(
                         "ALTER TABLE sessions ADD COLUMN agent_session_id TEXT;
@@ -602,7 +601,11 @@ fn migrate(conn: &mut Connection, workspace: &vorn_protocol::WorkspaceConfig, ow
                    UNIQUE (connection_id, external_id)
                  );",
             )?;
-            for column in ["source_connector_id", "source_external_url", "source_external_id"] {
+            for column in [
+                "source_connector_id",
+                "source_external_url",
+                "source_external_id",
+            ] {
                 if !has(d, "tasks", column)? {
                     d.execute_batch(&format!("ALTER TABLE tasks ADD COLUMN {column} TEXT"))?;
                 }
@@ -876,11 +879,15 @@ fn migrate(conn: &mut Connection, workspace: &vorn_protocol::WorkspaceConfig, ow
     }
 
     if version < 23 {
-        step(conn, 23, |d| add_missing(d, "workflow_run_nodes", &GATE_COLUMNS))?;
+        step(conn, 23, |d| {
+            add_missing(d, "workflow_run_nodes", &GATE_COLUMNS)
+        })?;
     }
 
     if version < 24 {
-        step(conn, 24, |d| add_missing(d, "workflow_run_nodes", &GATE_EDIT_COLUMNS))?;
+        step(conn, 24, |d| {
+            add_missing(d, "workflow_run_nodes", &GATE_EDIT_COLUMNS)
+        })?;
     }
 
     if version < 25 {
@@ -916,42 +923,84 @@ fn verify(conn: &mut Connection) -> Result<()> {
     let mut expected: Vec<(&str, Vec<(String, String)>)> = vec![
         (
             "projects",
-            vec![col("workspace_id", "ALTER TABLE projects ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'personal'")],
+            vec![col(
+                "workspace_id",
+                "ALTER TABLE projects ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'personal'",
+            )],
         ),
         (
             "workflows",
-            vec![col("workspace_id", "ALTER TABLE workflows ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'personal'")],
+            vec![col(
+                "workspace_id",
+                "ALTER TABLE workflows ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'personal'",
+            )],
         ),
         (
             "remote_hosts",
             vec![
-                col("auth_method", "ALTER TABLE remote_hosts ADD COLUMN auth_method TEXT"),
-                col("credential_id", "ALTER TABLE remote_hosts ADD COLUMN credential_id TEXT"),
-                col("encrypted_password", "ALTER TABLE remote_hosts ADD COLUMN encrypted_password TEXT"),
+                col(
+                    "auth_method",
+                    "ALTER TABLE remote_hosts ADD COLUMN auth_method TEXT",
+                ),
+                col(
+                    "credential_id",
+                    "ALTER TABLE remote_hosts ADD COLUMN credential_id TEXT",
+                ),
+                col(
+                    "encrypted_password",
+                    "ALTER TABLE remote_hosts ADD COLUMN encrypted_password TEXT",
+                ),
             ],
         ),
         (
             "sessions",
             vec![
-                col("sort_order", "ALTER TABLE sessions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"),
+                col(
+                    "sort_order",
+                    "ALTER TABLE sessions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+                ),
                 col("group_id", "ALTER TABLE sessions ADD COLUMN group_id TEXT"),
-                col("worktree_name", "ALTER TABLE sessions ADD COLUMN worktree_name TEXT"),
-                col("agent_session_id", "ALTER TABLE sessions ADD COLUMN agent_session_id TEXT"),
-                col("shell_cwd", "ALTER TABLE sessions ADD COLUMN shell_cwd TEXT"),
-                col("head_commit", "ALTER TABLE sessions ADD COLUMN head_commit TEXT"),
-                col("renamed_by_person", "ALTER TABLE sessions ADD COLUMN renamed_by_person INTEGER"),
+                col(
+                    "worktree_name",
+                    "ALTER TABLE sessions ADD COLUMN worktree_name TEXT",
+                ),
+                col(
+                    "agent_session_id",
+                    "ALTER TABLE sessions ADD COLUMN agent_session_id TEXT",
+                ),
+                col(
+                    "shell_cwd",
+                    "ALTER TABLE sessions ADD COLUMN shell_cwd TEXT",
+                ),
+                col(
+                    "head_commit",
+                    "ALTER TABLE sessions ADD COLUMN head_commit TEXT",
+                ),
+                col(
+                    "renamed_by_person",
+                    "ALTER TABLE sessions ADD COLUMN renamed_by_person INTEGER",
+                ),
             ],
         ),
         (
             "agent_commands",
-            vec![col("headless_args", "ALTER TABLE agent_commands ADD COLUMN headless_args TEXT")],
+            vec![col(
+                "headless_args",
+                "ALTER TABLE agent_commands ADD COLUMN headless_args TEXT",
+            )],
         ),
         (
             "workflow_runs",
             vec![
                 col("inputs", "ALTER TABLE workflow_runs ADD COLUMN inputs TEXT"),
-                col("connector_item", "ALTER TABLE workflow_runs ADD COLUMN connector_item TEXT"),
-                col("connector_inbox_id", "ALTER TABLE workflow_runs ADD COLUMN connector_inbox_id INTEGER"),
+                col(
+                    "connector_item",
+                    "ALTER TABLE workflow_runs ADD COLUMN connector_item TEXT",
+                ),
+                col(
+                    "connector_inbox_id",
+                    "ALTER TABLE workflow_runs ADD COLUMN connector_inbox_id INTEGER",
+                ),
                 col(
                     "connector_inbox_lease_token",
                     "ALTER TABLE workflow_runs ADD COLUMN connector_inbox_lease_token TEXT",
@@ -960,27 +1009,57 @@ fn verify(conn: &mut Connection) -> Result<()> {
                     "connector_inbox_disposition",
                     "ALTER TABLE workflow_runs ADD COLUMN connector_inbox_disposition TEXT",
                 ),
-                col("definition", "ALTER TABLE workflow_runs ADD COLUMN definition TEXT"),
+                col(
+                    "definition",
+                    "ALTER TABLE workflow_runs ADD COLUMN definition TEXT",
+                ),
             ],
         ),
         (
             "connector_inbox",
-            vec![col("lease_token", "ALTER TABLE connector_inbox ADD COLUMN lease_token TEXT")],
+            vec![col(
+                "lease_token",
+                "ALTER TABLE connector_inbox ADD COLUMN lease_token TEXT",
+            )],
         ),
         ("workflow_run_nodes", {
             let mut nodes = vec![
-                col("waiting_for", "ALTER TABLE workflow_run_nodes ADD COLUMN waiting_for TEXT"),
-                col("agent_type", "ALTER TABLE workflow_run_nodes ADD COLUMN agent_type TEXT"),
-                col("project_name", "ALTER TABLE workflow_run_nodes ADD COLUMN project_name TEXT"),
-                col("project_path", "ALTER TABLE workflow_run_nodes ADD COLUMN project_path TEXT"),
-                col("approved_at", "ALTER TABLE workflow_run_nodes ADD COLUMN approved_at TEXT"),
-                col("diagnostics", "ALTER TABLE workflow_run_nodes ADD COLUMN diagnostics TEXT"),
-                col("output", "ALTER TABLE workflow_run_nodes ADD COLUMN output TEXT"),
+                col(
+                    "waiting_for",
+                    "ALTER TABLE workflow_run_nodes ADD COLUMN waiting_for TEXT",
+                ),
+                col(
+                    "agent_type",
+                    "ALTER TABLE workflow_run_nodes ADD COLUMN agent_type TEXT",
+                ),
+                col(
+                    "project_name",
+                    "ALTER TABLE workflow_run_nodes ADD COLUMN project_name TEXT",
+                ),
+                col(
+                    "project_path",
+                    "ALTER TABLE workflow_run_nodes ADD COLUMN project_path TEXT",
+                ),
+                col(
+                    "approved_at",
+                    "ALTER TABLE workflow_run_nodes ADD COLUMN approved_at TEXT",
+                ),
+                col(
+                    "diagnostics",
+                    "ALTER TABLE workflow_run_nodes ADD COLUMN diagnostics TEXT",
+                ),
+                col(
+                    "output",
+                    "ALTER TABLE workflow_run_nodes ADD COLUMN output TEXT",
+                ),
                 col(
                     "structured_output",
                     "ALTER TABLE workflow_run_nodes ADD COLUMN structured_output TEXT",
                 ),
-                col("iteration", "ALTER TABLE workflow_run_nodes ADD COLUMN iteration INTEGER"),
+                col(
+                    "iteration",
+                    "ALTER TABLE workflow_run_nodes ADD COLUMN iteration INTEGER",
+                ),
             ];
             for (column, kind) in GATE_COLUMNS.iter().chain(GATE_EDIT_COLUMNS.iter()) {
                 nodes.push(col(
@@ -993,10 +1072,22 @@ fn verify(conn: &mut Connection) -> Result<()> {
         (
             "tasks",
             vec![
-                col("source_connector_id", "ALTER TABLE tasks ADD COLUMN source_connector_id TEXT"),
-                col("source_external_url", "ALTER TABLE tasks ADD COLUMN source_external_url TEXT"),
-                col("source_external_id", "ALTER TABLE tasks ADD COLUMN source_external_id TEXT"),
-                col("archived_at", "ALTER TABLE tasks ADD COLUMN archived_at TEXT"),
+                col(
+                    "source_connector_id",
+                    "ALTER TABLE tasks ADD COLUMN source_connector_id TEXT",
+                ),
+                col(
+                    "source_external_url",
+                    "ALTER TABLE tasks ADD COLUMN source_external_url TEXT",
+                ),
+                col(
+                    "source_external_id",
+                    "ALTER TABLE tasks ADD COLUMN source_external_id TEXT",
+                ),
+                col(
+                    "archived_at",
+                    "ALTER TABLE tasks ADD COLUMN archived_at TEXT",
+                ),
             ],
         ),
     ];
@@ -1033,7 +1124,9 @@ fn seed_legacy_connector_poll_state(conn: &mut Connection) -> Result<()> {
     let workflows: Vec<(String, String)> = {
         let mut stmt = conn.prepare("SELECT id, nodes FROM workflows")?;
         let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         rows
     };
@@ -1174,7 +1267,10 @@ mod tests {
             "users",
             "workflow_run_nodes",
         ] {
-            assert!(tables.iter().any(|t| t == table), "{table} missing: {tables:?}");
+            assert!(
+                tables.iter().any(|t| t == table),
+                "{table} missing: {tables:?}"
+            );
         }
     }
 

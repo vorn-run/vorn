@@ -28,6 +28,25 @@ export interface NativeCore {
     rows: number,
     onEvent: (event: PipelineEvent) => void
   ) => NativePipeline
+  /** The store on rusqlite, which `database.ts` uses with the Native store switch on. */
+  NativeStore?: NativeStoreClass
+}
+
+/** Opens a database in the Rust store. `options` is JSON: what the store needs from the server. */
+export interface NativeStoreClass {
+  open(path: string, options: string): NativeStore
+  openInMemory(options: string): NativeStore
+  /** A `defaults` row of the file as stored, or null, without creating or migrating it. */
+  readDefault(path: string, key: string): string | null
+}
+
+/** One open database in the Rust store. */
+export interface NativeStore {
+  /** Calls the `database.ts` function named `call` with a JSON array of its arguments; returns its result as JSON. */
+  call(call: string, args: string): string
+  close(): void
+  /** Where a corrupt file was copied before the store replaced it, or null. */
+  readonly recovered: string | null
 }
 
 /** Where a record sits in a session's stream; the history log's `RecordHeader`. */
@@ -228,7 +247,8 @@ export function nativeCore(): NativeCore | null {
 const OPTIONAL_EXPORTS: Array<[keyof NativeCore, string]> = [
   ['TerminalPipeline', 'the screen model'],
   ['Analyzer', 'agent status and the terminal output agents read'],
-  ['gitRun', 'git off the main thread']
+  ['gitRun', 'git off the main thread'],
+  ['NativeStore', 'the native store']
 ]
 
 /** What Settings › Experimental shows about the core. */

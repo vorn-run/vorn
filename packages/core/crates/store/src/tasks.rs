@@ -133,7 +133,10 @@ impl Store {
             }
         }
         if let Some(value) = updates.get("useWorktree") {
-            set("use_worktree = ?", SqlValue::Integer(i64::from(crate::sql::truthy(value))));
+            set(
+                "use_worktree = ?",
+                SqlValue::Integer(i64::from(crate::sql::truthy(value))),
+            );
         }
         for (key, column) in [
             ("assignedAgent", "assigned_agent = ?"),
@@ -145,7 +148,10 @@ impl Store {
                 set(column, bind(value));
             }
         }
-        for (key, column) in [("completedAt", "completed_at = ?"), ("archivedAt", "archived_at = ?")] {
+        for (key, column) in [
+            ("completedAt", "completed_at = ?"),
+            ("archivedAt", "archived_at = ?"),
+        ] {
             if updates.contains_key(key) || present.iter().any(|k| k == key) {
                 set(column, updates.get(key).map_or(SqlValue::Null, bind));
             }
@@ -171,7 +177,8 @@ impl Store {
     }
 
     pub fn db_delete_task(&self, id: &str) -> Result<()> {
-        self.conn().execute("DELETE FROM tasks WHERE id = ?", [id])?;
+        self.conn()
+            .execute("DELETE FROM tasks WHERE id = ?", [id])?;
         Ok(())
     }
 

@@ -108,11 +108,6 @@ pub fn get_opt_text(row: &Row<'_>, name: &str) -> Result<Option<String>> {
     get_text(row, name).map(Some)
 }
 
-/// Whether a table has a column, by name.
-pub fn has_column(row_names: &[String], name: &str) -> bool {
-    row_names.iter().any(|c| c == name)
-}
-
 /// How JavaScript prints a number with `String(n)`, for the cases a store
 /// meets: integers without a fraction, anything else as Rust prints it.
 pub fn format_js_number(f: f64) -> String {
@@ -242,11 +237,20 @@ mod tests {
 
     #[test]
     fn iso_strings_round_trip_as_javascript_writes_them() {
-        for ms in [0, 1_728_148_604_123, 951_782_400_000, -1, 253_402_300_799_999] {
+        for ms in [
+            0,
+            1_728_148_604_123,
+            951_782_400_000,
+            -1,
+            253_402_300_799_999,
+        ] {
             let iso = iso_from_millis(ms);
             assert_eq!(parse_iso_millis(&iso), Some(ms), "{iso}");
         }
-        assert_eq!(iso_from_millis(1_728_148_604_123), "2024-10-05T17:16:44.123Z");
+        assert_eq!(
+            iso_from_millis(1_728_148_604_123),
+            "2024-10-05T17:16:44.123Z"
+        );
         assert_eq!(iso_from_millis(0), "1970-01-01T00:00:00.000Z");
     }
 

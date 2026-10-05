@@ -6,6 +6,29 @@ import { randomUUID } from 'node:crypto'
 import log from './logger'
 import { getDefaultShell } from './process-utils'
 import { removeGateViews } from './workflows/gate-views'
+import { nativeCore, type NativeStore, type NativeStoreClass } from './native-core'
+import type {
+  ArtifactCommentChange,
+  ArtifactCommentFilter,
+  ArtifactFilter,
+  ConnectorInboxClaim,
+  ConnectorInboxItem,
+  ConnectorInboxRetry,
+  ConnectorPollError,
+  ConnectorPollPage,
+  DeviceTokenSecret,
+  NewArtifact,
+  NewArtifactComment,
+  NewDeviceToken,
+  WebhookEvent
+} from './store-types'
+
+export type {
+  ConnectorInboxItem,
+  DeviceTokenSecret,
+  NewArtifact,
+  NewDeviceToken
+} from './store-types'
 import type {
   Artifact,
   ArtifactAnchor,
@@ -74,9 +97,33 @@ const MAX_LOG_ENTRIES = 200
 
 let db: Database.Database | null = null
 
+/**
+ * The Rust store, when the Native store switch put the database there. Every
+ * exported call below goes to it first and to libsql only when it is null, so
+ * one process never writes the file through both.
+ */
+let native: NativeStore | null = null
+
+/** Why the Native store switch is on but the TypeScript store is answering. */
+let nativeError: string | null = null
+
 function getDb(): Database.Database {
   if (!db) throw new Error('Database not initialized. Call initDatabase() first.')
   return db
+}
+
+/**
+ * One call into the Rust store: the function's name and its arguments, as
+ * JSON both ways. `undefined` crosses as null, which every call treats as
+ * absent, as the TypeScript does.
+ */
+function nativeCall<T>(store: NativeStore, call: string, ...args: unknown[]): T {
+  return JSON.parse(store.call(call, JSON.stringify(args))) as T
+}
+
+/** Which store answers, for Settings › Experimental. */
+export function storeStatus(): { native: boolean; error: string | null } {
+  return { native: native !== null, error: native ? null : nativeError }
 }
 
 /**
@@ -101,6 +148,16 @@ export function initDatabase(dataDir?: string): void {
     fs.mkdirSync(getDataDir(), { recursive: true, mode: 0o700 })
   }
 
+  // With the Native store switch on, the Rust store opens, migrates and seeds
+  // the file, and libsql never opens it in this process: two SQLite libraries
+  // holding one file in one process drop each other's locks, and either one's
+  // last close can remove the -wal and -shm files the other still uses.
+  if (nativeStoreWanted()) {
+    openNativeStore((store) => store.open(dbPath(), nativeOptions()))
+    requireForcedNativeStore()
+    if (native) return
+  }
+
   try {
     db = new Database(dbPath())
     db.pragma('journal_mode = WAL')
@@ -123,6 +180,115 @@ export function initDatabase(dataDir?: string): void {
       throw err
     }
   }
+
+  // Without the binary the switch cannot be read before opening; say why it
+  // did nothing once libsql can read it.
+  if (!nativeStoreClass() && nativeStoreFlag(readDefault('experimental'))) {
+    nativeError = NO_NATIVE_STORE
+    log.warn(`[database] Native store is on, but ${nativeError}; using the TypeScript store`)
+  }
+}
+
+/** `VORN_NATIVE_STORE=1` is for test runs, where falling back would hide the failure. */
+function requireForcedNativeStore(): void {
+  if (process.env.VORN_NATIVE_STORE === '1' && !native)
+    throw new Error(`VORN_NATIVE_STORE=1 but the native store did not open: ${nativeError}`)
+}
+
+const NO_NATIVE_STORE = 'the native core is not loaded, or was built without the store'
+
+/**
+ * Settings › Experimental › Native store, read from the file before either
+ * store opens it. `VORN_NATIVE_STORE` overrides it (1 or 0), so a test run
+ * can put every database on either store.
+ */
+function nativeStoreWanted(): boolean {
+  const forced = process.env.VORN_NATIVE_STORE
+  if (forced === '1') return true
+  if (forced === '0') return false
+  const NativeStoreClass = nativeStoreClass()
+  if (!NativeStoreClass) return false
+  try {
+    return nativeStoreFlag(NativeStoreClass.readDefault(dbPath(), 'experimental'))
+  } catch (err) {
+    // A file the Rust store cannot read is libsql's to recover.
+    log.warn({ err }, '[database] could not read the Native store switch')
+    return false
+  }
+}
+
+function nativeStoreFlag(experimental: string | null): boolean {
+  try {
+    const flags = experimental ? (JSON.parse(experimental) as unknown) : null
+    return isPlainObject(flags) && flags.nativeStore === true
+  } catch {
+    return false
+  }
+}
+
+/** A `defaults` row as stored, through libsql. */
+function readDefault(key: string): string | null {
+  try {
+    const row = getDb().prepare('SELECT value FROM defaults WHERE key = ?').get(key) as
+      | { value: string }
+      | undefined
+    return row?.value ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Hands the database to the Rust store. When the binary is missing or the
+ * store does not open, libsql opens it instead, and the reason is logged and
+ * shown on the settings page.
+ */
+function openNativeStore(open: (store: NativeStoreClass) => NativeStore): void {
+  const NativeStoreClass = nativeStoreClass()
+  if (!NativeStoreClass) {
+    nativeError = NO_NATIVE_STORE
+    log.warn(`[database] Native store is on, but ${nativeError}; using the TypeScript store`)
+    return
+  }
+  try {
+    native = open(NativeStoreClass)
+    if (native.recovered) {
+      log.warn(
+        `[database] the native store replaced a corrupt database; backup at ${native.recovered}`
+      )
+    }
+    nativeError = null
+    log.info('[database] using the native store')
+  } catch (err) {
+    native = null
+    nativeError = err instanceof Error ? err.message : String(err)
+    log.error({ err }, '[database] the native store did not open; using the TypeScript store')
+  }
+}
+
+function nativeStoreClass(): NativeStoreClass | null {
+  const NativeStoreClass = nativeCore()?.NativeStore
+  return typeof NativeStoreClass === 'function' ? NativeStoreClass : null
+}
+
+/** What the Rust store needs that only the server knows. */
+function nativeOptions(): string {
+  let ownerName = 'owner'
+  try {
+    ownerName = os.userInfo().username || ownerName
+  } catch {
+    // No OS user available (some sandboxes) — the fallback is fine.
+  }
+  return JSON.stringify({
+    defaultShell: getDefaultShell(),
+    defaultAgentCommands: DEFAULT_AGENT_COMMANDS,
+    defaultWorkspace: DEFAULT_WORKSPACE,
+    ownerName,
+    seedWorkflows: [
+      { flag: 'hasSeededDefaultTaskWorkflow', workflow: buildDefaultTaskWorkflow() },
+      { flag: 'hasSeededDevServerWorkflow', workflow: buildDevServerWorkflow() }
+    ]
+  })
 }
 
 /**
@@ -135,6 +301,7 @@ export function initDatabase(dataDir?: string): void {
  * database via `initTestDatabase` without spinning up the full init path.
  */
 export function seedSystemDefaults(): void {
+  if (native) return nativeCall(native, 'seedSystemDefaults')
   seedWorkflowOnce(
     'hasSeededDefaultTaskWorkflow',
     DEFAULT_TASK_WORKFLOW_ID,
@@ -250,6 +417,10 @@ export function dbSignalChange(): void {
 }
 
 export function closeDatabase(): void {
+  if (native) {
+    native.close()
+    native = null
+  }
   if (db) {
     db.close()
     db = null
@@ -263,6 +434,11 @@ export function initTestDatabase(): () => void {
   // (dbSignalChange, task images) still needs one resolved. Point it at the temp
   // directory so tests cannot write into the developer's real ~/.vorn.
   resolvedDataDir = os.tmpdir()
+  if (process.env.VORN_NATIVE_STORE === '1') {
+    openNativeStore((store) => store.openInMemory(nativeOptions()))
+    requireForcedNativeStore()
+    return () => closeDatabase()
+  }
   db = new Database(':memory:')
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
@@ -1496,6 +1672,7 @@ function verifySchema(d: Database.Database): void {
 // ---------------------------------------------------------------------------
 
 export function loadConfig(): AppConfig {
+  if (native) return nativeCall(native, 'loadConfig')
   const d = getDb()
 
   const defaults = loadDefaults(d)
@@ -1812,7 +1989,24 @@ function pruneMissing(
   }
 }
 
+/**
+ * `saveConfig`'s arguments for the Rust store. JSON drops `undefined`, which
+ * means something here: a default set to it is deleted, and an agent command
+ * set to it keeps its row. The keys of the first cross on their own, and the
+ * second crosses as null.
+ */
+function nativeConfig(config: AppConfig): [AppConfig, string[]] {
+  const deleted = Object.entries(config.defaults)
+    .filter(([, value]) => value === undefined)
+    .map(([key]) => key)
+  const agentCommands =
+    config.agentCommands &&
+    Object.fromEntries(Object.entries(config.agentCommands).map(([key, cmd]) => [key, cmd ?? null]))
+  return [{ ...config, ...(agentCommands && { agentCommands }) }, deleted]
+}
+
 export function saveConfig(config: AppConfig): void {
+  if (native) return nativeCall(native, 'saveConfig', ...nativeConfig(config))
   const d = getDb()
 
   const run = d.transaction(() => {
@@ -2123,6 +2317,7 @@ export function saveConfig(config: AppConfig): void {
 // ---------------------------------------------------------------------------
 
 export function dbListTasks(projectName?: string, status?: string): TaskConfig[] {
+  if (native) return nativeCall(native, 'dbListTasks', projectName, status)
   const d = getDb()
   let sql = 'SELECT * FROM tasks'
   const params: string[] = []
@@ -2158,6 +2353,7 @@ export function dbListTasks(projectName?: string, status?: string): TaskConfig[]
 }
 
 export function dbGetTask(id: string): TaskConfig | null {
+  if (native) return nativeCall(native, 'dbGetTask', id)
   const row = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id) as
     | {
         id: string
@@ -2181,6 +2377,7 @@ export function dbGetTask(id: string): TaskConfig | null {
 }
 
 export function dbInsertTask(task: TaskConfig): void {
+  if (native) return nativeCall(native, 'dbInsertTask', task)
   getDb()
     .prepare(
       `INSERT INTO tasks (id, project_name, title, description, status, "order", assigned_session_id, assigned_agent, agent_session_id, branch, use_worktree, created_at, updated_at, completed_at, archived_at, source_connector_id, source_external_url, source_external_id)
@@ -2209,6 +2406,7 @@ export function dbInsertTask(task: TaskConfig): void {
 }
 
 export function dbUpdateTask(id: string, updates: Partial<TaskConfig>): void {
+  if (native) return nativeCall(native, 'dbUpdateTask', id, updates, Object.keys(updates))
   const sets: string[] = []
   const params: unknown[] = []
   if (updates.projectName !== undefined) {
@@ -2283,10 +2481,12 @@ export function dbUpdateTask(id: string, updates: Partial<TaskConfig>): void {
 }
 
 export function dbDeleteTask(id: string): void {
+  if (native) return nativeCall(native, 'dbDeleteTask', id)
   getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id)
 }
 
 export function dbGetMaxTaskOrder(projectName: string): number {
+  if (native) return nativeCall(native, 'dbGetMaxTaskOrder', projectName)
   const row = getDb()
     .prepare('SELECT MAX("order") as m FROM tasks WHERE project_name = ?')
     .get(projectName) as { m: number | null }
@@ -2332,6 +2532,7 @@ function rowToSourceConnection(r: SourceConnectionRow): SourceConnection {
 }
 
 export function dbListSourceConnections(connectorId?: string): SourceConnection[] {
+  if (native) return nativeCall(native, 'dbListSourceConnections', connectorId)
   const d = getDb()
   if (connectorId) {
     const rows = d
@@ -2344,6 +2545,7 @@ export function dbListSourceConnections(connectorId?: string): SourceConnection[
 }
 
 export function dbGetSourceConnection(id: string): SourceConnection | null {
+  if (native) return nativeCall(native, 'dbGetSourceConnection', id)
   const row = getDb().prepare('SELECT * FROM source_connections WHERE id = ?').get(id) as
     | SourceConnectionRow
     | undefined
@@ -2351,6 +2553,7 @@ export function dbGetSourceConnection(id: string): SourceConnection | null {
 }
 
 export function dbInsertSourceConnection(conn: SourceConnection): void {
+  if (native) return nativeCall(native, 'dbInsertSourceConnection', conn)
   getDb()
     .prepare(
       `INSERT INTO source_connections (id, connector_id, name, filters, sync_interval_minutes, status_mapping, execution_project, last_sync_at, last_sync_error, sync_cursor, created_at, signed_in_as, signed_in_at)
@@ -2374,6 +2577,8 @@ export function dbInsertSourceConnection(conn: SourceConnection): void {
 }
 
 export function dbUpdateSourceConnection(id: string, updates: Partial<SourceConnection>): void {
+  if (native)
+    return nativeCall(native, 'dbUpdateSourceConnection', id, updates, Object.keys(updates))
   const sets: string[] = []
   const params: unknown[] = []
   if (updates.name !== undefined) {
@@ -2421,31 +2626,20 @@ export function dbSetConnectionSignIn(
   signedInAs: string | null,
   signedInAt: string | null
 ): void {
+  if (native) return nativeCall(native, 'dbSetConnectionSignIn', id, signedInAs, signedInAt)
   getDb()
     .prepare('UPDATE source_connections SET signed_in_as = ?, signed_in_at = ? WHERE id = ?')
     .run(signedInAs, signedInAt, id)
 }
 
 export function dbDeleteSourceConnection(id: string): void {
+  if (native) return nativeCall(native, 'dbDeleteSourceConnection', id)
   getDb().prepare('DELETE FROM source_connections WHERE id = ?').run(id)
 }
 
 // ---------------------------------------------------------------------------
 // Durable connector ingestion
 // ---------------------------------------------------------------------------
-
-export interface ConnectorInboxItem {
-  id: number
-  leaseToken: string
-  workflowId: string
-  connectionId: string
-  connectorId: string
-  eventId: string
-  eventType: string
-  eventTimestamp: string
-  connectorItem: ConnectorItemContext
-  attempts: number
-}
 
 interface ConnectorInboxRow {
   id: number
@@ -2479,6 +2673,12 @@ export function dbGetConnectorPollCursor(
   workflowId: string,
   connectionId: string
 ): string | undefined {
+  if (native) {
+    return (
+      nativeCall<string | null>(native, 'dbGetConnectorPollCursor', workflowId, connectionId) ??
+      undefined
+    )
+  }
   const row = getDb()
     .prepare('SELECT cursor FROM connector_poll_state WHERE workflow_id = ? AND connection_id = ?')
     .get(workflowId, connectionId) as { cursor: string | null } | undefined
@@ -2486,6 +2686,7 @@ export function dbGetConnectorPollCursor(
 }
 
 export function dbCountActiveConnectorInboxLeases(now: string): number {
+  if (native) return nativeCall(native, 'dbCountActiveConnectorInboxLeases', now)
   const row = getDb()
     .prepare(
       `SELECT COUNT(*) AS count
@@ -2502,12 +2703,8 @@ export function dbCountActiveConnectorInboxLeases(now: string): number {
  * beyond events which were only held in memory.
  */
 /** One webhook request becomes one durable inbox row. */
-export function dbEnqueueWebhookEvent(args: {
-  workflowId: string
-  eventId: string
-  receivedAt: string
-  item: ConnectorItemContext
-}): void {
+export function dbEnqueueWebhookEvent(args: WebhookEvent): void {
+  if (native) return nativeCall(native, 'dbEnqueueWebhookEvent', args)
   const d = getDb()
   // The inbox requires a connection row; webhook events share one internal one.
   d.prepare(
@@ -2529,19 +2726,8 @@ export function dbEnqueueWebhookEvent(args: {
   )
 }
 
-export function dbRecordConnectorPollPage(args: {
-  workflowId: string
-  connectionId: string
-  connectorId: string
-  cursor?: string
-  polledAt: string
-  events: Array<{
-    eventId: string
-    eventType: string
-    eventTimestamp: string
-    connectorItem: ConnectorItemContext
-  }>
-}): number {
+export function dbRecordConnectorPollPage(args: ConnectorPollPage): number {
+  if (native) return nativeCall(native, 'dbRecordConnectorPollPage', args)
   const d = getDb()
   return d.transaction(() => {
     let inserted = 0
@@ -2589,12 +2775,8 @@ export function dbRecordConnectorPollPage(args: {
   })()
 }
 
-export function dbRecordConnectorPollError(args: {
-  workflowId: string
-  connectionId: string
-  error: string
-  polledAt: string
-}): void {
+export function dbRecordConnectorPollError(args: ConnectorPollError): void {
+  if (native) return nativeCall(native, 'dbRecordConnectorPollError', args)
   const d = getDb()
   d.transaction(() => {
     d.prepare(
@@ -2622,11 +2804,8 @@ export function dbRecordConnectorPollError(args: {
  * reclaimable after a renderer/server crash. Retry backoff caps at one hour,
  * but rows remain pending until they succeed or the user removes their source.
  */
-export function dbClaimConnectorInbox(args: {
-  now: string
-  leaseUntil: string
-  limit: number
-}): ConnectorInboxItem[] {
+export function dbClaimConnectorInbox(args: ConnectorInboxClaim): ConnectorInboxItem[] {
+  if (native) return nativeCall(native, 'dbClaimConnectorInbox', args)
   const d = getDb()
   return d.transaction(() => {
     const rows = d
@@ -2669,6 +2848,7 @@ export function dbCompleteConnectorInbox(
   leaseToken: string,
   processedAt: string
 ): boolean {
+  if (native) return nativeCall(native, 'dbCompleteConnectorInbox', id, leaseToken, processedAt)
   const result = getDb()
     .prepare(
       `UPDATE connector_inbox
@@ -2683,12 +2863,8 @@ export function dbCompleteConnectorInbox(
 /** Retries stop here: a row this old is failing for a reason a retry won't fix. */
 export const MAX_INBOX_ATTEMPTS = 8
 
-export function dbRetryConnectorInbox(args: {
-  id: number
-  leaseToken: string
-  error: string
-  now: string
-}): boolean {
+export function dbRetryConnectorInbox(args: ConnectorInboxRetry): boolean {
+  if (native) return nativeCall(native, 'dbRetryConnectorInbox', args)
   const d = getDb()
   const row = d
     .prepare(
@@ -2742,6 +2918,7 @@ export function dbDeferConnectorInbox(
   leaseToken: string,
   availableAt: string
 ): boolean {
+  if (native) return nativeCall(native, 'dbDeferConnectorInbox', id, leaseToken, availableAt)
   const result = getDb()
     .prepare(
       `UPDATE connector_inbox
@@ -2761,6 +2938,7 @@ export function dbRenewConnectorInboxLease(
   leaseToken: string,
   leaseUntil: string
 ): boolean {
+  if (native) return nativeCall(native, 'dbRenewConnectorInboxLease', id, leaseToken, leaseUntil)
   const result = getDb()
     .prepare(
       `UPDATE connector_inbox
@@ -2774,6 +2952,7 @@ export function dbRenewConnectorInboxLease(
 /** Server restarts invalidate every in-memory workflow owner, so leases from
  * the previous process must be immediately reclaimable. */
 export function dbReleaseConnectorInboxLeases(now: string): void {
+  if (native) return nativeCall(native, 'dbReleaseConnectorInboxLeases', now)
   getDb()
     .prepare(
       `UPDATE connector_inbox
@@ -2814,6 +2993,7 @@ function rowToTaskSourceLink(r: TaskSourceLinkRow): TaskSourceLink {
 }
 
 export function dbGetTaskSourceLink(taskId: string): TaskSourceLink | null {
+  if (native) return nativeCall(native, 'dbGetTaskSourceLink', taskId)
   const row = getDb().prepare('SELECT * FROM task_source_links WHERE task_id = ?').get(taskId) as
     | TaskSourceLinkRow
     | undefined
@@ -2824,6 +3004,7 @@ export function dbGetTaskSourceLinkByExternalId(
   connectionId: string,
   externalId: string
 ): TaskSourceLink | null {
+  if (native) return nativeCall(native, 'dbGetTaskSourceLinkByExternalId', connectionId, externalId)
   const row = getDb()
     .prepare('SELECT * FROM task_source_links WHERE connection_id = ? AND external_id = ?')
     .get(connectionId, externalId) as TaskSourceLinkRow | undefined
@@ -2841,6 +3022,7 @@ export function dbFindTaskByConnectorExternalId(
   connectorId: string,
   externalId: string
 ): TaskConfig | null {
+  if (native) return nativeCall(native, 'dbFindTaskByConnectorExternalId', connectorId, externalId)
   const row = getDb()
     .prepare('SELECT * FROM tasks WHERE source_connector_id = ? AND source_external_id = ? LIMIT 1')
     .get(connectorId, externalId) as
@@ -2858,6 +3040,7 @@ export function dbFindTaskByConnectorExternalId(
 }
 
 export function dbListTaskSourceLinks(connectionId: string): TaskSourceLink[] {
+  if (native) return nativeCall(native, 'dbListTaskSourceLinks', connectionId)
   const rows = getDb()
     .prepare('SELECT * FROM task_source_links WHERE connection_id = ?')
     .all(connectionId) as TaskSourceLinkRow[]
@@ -2865,6 +3048,7 @@ export function dbListTaskSourceLinks(connectionId: string): TaskSourceLink[] {
 }
 
 export function dbInsertTaskSourceLink(link: TaskSourceLink): void {
+  if (native) return nativeCall(native, 'dbInsertTaskSourceLink', link)
   getDb()
     .prepare(
       `INSERT INTO task_source_links (task_id, connection_id, connector_id, external_id, external_url, source_status_raw, source_updated_at, last_synced_at, conflict_state)
@@ -2884,6 +3068,7 @@ export function dbInsertTaskSourceLink(link: TaskSourceLink): void {
 }
 
 export function dbUpdateTaskSourceLink(taskId: string, updates: Partial<TaskSourceLink>): void {
+  if (native) return nativeCall(native, 'dbUpdateTaskSourceLink', taskId, updates)
   const sets: string[] = []
   const params: unknown[] = []
   if (updates.sourceStatusRaw !== undefined) {
@@ -2910,10 +3095,12 @@ export function dbUpdateTaskSourceLink(taskId: string, updates: Partial<TaskSour
 }
 
 export function dbDeleteTaskSourceLink(taskId: string): void {
+  if (native) return nativeCall(native, 'dbDeleteTaskSourceLink', taskId)
   getDb().prepare('DELETE FROM task_source_links WHERE task_id = ?').run(taskId)
 }
 
 export function dbListProjects(): ProjectConfig[] {
+  if (native) return nativeCall(native, 'dbListProjects')
   const rows = getDb().prepare('SELECT * FROM projects').all() as Array<{
     name: string
     path: string
@@ -2927,6 +3114,7 @@ export function dbListProjects(): ProjectConfig[] {
 }
 
 export function dbGetProject(name: string): ProjectConfig | null {
+  if (native) return nativeCall(native, 'dbGetProject', name)
   const row = getDb().prepare('SELECT * FROM projects WHERE name = ?').get(name) as
     | {
         name: string
@@ -2942,6 +3130,7 @@ export function dbGetProject(name: string): ProjectConfig | null {
 }
 
 export function dbInsertProject(project: ProjectConfig): void {
+  if (native) return nativeCall(native, 'dbInsertProject', project)
   getDb()
     .prepare(
       'INSERT INTO projects (name, path, preferred_agents, icon, icon_color, host_ids, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -2958,6 +3147,7 @@ export function dbInsertProject(project: ProjectConfig): void {
 }
 
 export function dbUpdateProject(name: string, updates: Partial<ProjectConfig>): void {
+  if (native) return nativeCall(native, 'dbUpdateProject', name, updates)
   const sets: string[] = []
   const params: unknown[] = []
   if (updates.path !== undefined) {
@@ -2992,6 +3182,7 @@ export function dbUpdateProject(name: string, updates: Partial<ProjectConfig>): 
 }
 
 export function dbDeleteProject(name: string): void {
+  if (native) return nativeCall(native, 'dbDeleteProject', name)
   const d = getDb()
   d.transaction(() => {
     d.prepare('DELETE FROM tasks WHERE project_name = ?').run(name)
@@ -3004,6 +3195,7 @@ export function dbDeleteProject(name: string): void {
 // ---------------------------------------------------------------------------
 
 export function dbListWorkflows(): WorkflowDefinition[] {
+  if (native) return nativeCall(native, 'dbListWorkflows')
   const rows = getDb().prepare('SELECT * FROM workflows').all() as Array<{
     id: string
     name: string
@@ -3021,6 +3213,7 @@ export function dbListWorkflows(): WorkflowDefinition[] {
 }
 
 export function dbGetWorkflow(id: string): WorkflowDefinition | null {
+  if (native) return nativeCall(native, 'dbGetWorkflow', id)
   const row = getDb().prepare('SELECT * FROM workflows WHERE id = ?').get(id) as
     | {
         id: string
@@ -3040,6 +3233,7 @@ export function dbGetWorkflow(id: string): WorkflowDefinition | null {
 }
 
 export function dbInsertWorkflow(workflow: WorkflowDefinition): void {
+  if (native) return nativeCall(native, 'dbInsertWorkflow', workflow)
   getDb()
     .prepare(
       `INSERT INTO workflows (id, name, icon, icon_color, nodes, edges, enabled, last_run_at, last_run_status, stagger_delay_ms, workspace_id)
@@ -3075,6 +3269,7 @@ export function dbInsertWorkflow(workflow: WorkflowDefinition): void {
  * for the row to disappear in.
  */
 export function dbUpdateWorkflow(id: string, updates: Partial<WorkflowDefinition>): number {
+  if (native) return nativeCall(native, 'dbUpdateWorkflow', id, updates)
   const sets: string[] = []
   const params: unknown[] = []
   if (updates.name !== undefined) {
@@ -3118,38 +3313,13 @@ export function dbUpdateWorkflow(id: string, updates: Partial<WorkflowDefinition
 }
 
 export function dbDeleteWorkflow(id: string): void {
+  if (native) return nativeCall(native, 'dbDeleteWorkflow', id)
   getDb().prepare('DELETE FROM workflows WHERE id = ?').run(id)
 }
 
 // ---------------------------------------------------------------------------
 // Targeted CRUD: Identity and device tokens
 // ---------------------------------------------------------------------------
-
-/**
- * What verification needs, and nothing else.
- *
- * Deliberately NOT a superset of `DeviceToken`. An `extends DeviceToken` shape
- * would be structurally assignable to it, so returning one from a handler typed
- * `DeviceToken` would compile and ship `tokenHash` over the wire — and
- * `./database` is an export of this package, so `packages/mcp` can reach it.
- * Keeping the shapes incompatible makes the compiler enforce what would
- * otherwise be a comment.
- */
-export interface DeviceTokenSecret {
-  id: string
-  userId: string
-  tokenHash: string
-  revokedAt: string | null
-}
-
-/** Fields needed to persist a new token. */
-export interface NewDeviceToken {
-  id: string
-  userId: string
-  name: string
-  tokenHash: string
-  createdAt: string
-}
 
 interface DeviceTokenRow {
   id: string
@@ -3174,6 +3344,7 @@ function rowToDeviceToken(row: Omit<DeviceTokenRow, 'token_hash'>): DeviceToken 
 
 /** The seeded owner. Present after migration 14 on any initialized database. */
 export function dbGetOwnerUser(): User | null {
+  if (native) return nativeCall(native, 'dbGetOwnerUser')
   const row = getDb()
     .prepare("SELECT * FROM users WHERE role = 'owner' ORDER BY created_at LIMIT 1")
     .get() as { id: string; name: string; role: UserRole; created_at: string } | undefined
@@ -3182,6 +3353,7 @@ export function dbGetOwnerUser(): User | null {
 }
 
 export function dbInsertDeviceToken(token: NewDeviceToken): void {
+  if (native) return nativeCall(native, 'dbInsertDeviceToken', token)
   getDb()
     .prepare(
       `INSERT INTO device_tokens (id, user_id, name, token_hash, created_at)
@@ -3192,6 +3364,7 @@ export function dbInsertDeviceToken(token: NewDeviceToken): void {
 
 /** Carries the hash — for verification only. */
 export function dbGetDeviceTokenSecret(id: string): DeviceTokenSecret | null {
+  if (native) return nativeCall(native, 'dbGetDeviceTokenSecret', id)
   const row = getDb()
     .prepare('SELECT id, user_id, token_hash, revoked_at FROM device_tokens WHERE id = ?')
     .get(id) as Pick<DeviceTokenRow, 'id' | 'user_id' | 'token_hash' | 'revoked_at'> | undefined
@@ -3209,6 +3382,7 @@ export function dbGetDeviceTokenSecret(id: string): DeviceTokenSecret | null {
  * hash never leaves the data layer even if a later `...row` spread is careless.
  */
 export function dbListDeviceTokens(): DeviceToken[] {
+  if (native) return nativeCall(native, 'dbListDeviceTokens')
   const rows = getDb()
     .prepare(
       `SELECT id, user_id, name, created_at, last_seen_at, revoked_at
@@ -3220,11 +3394,13 @@ export function dbListDeviceTokens(): DeviceToken[] {
 
 /** Cheaper than listing when the caller only wants to know whether any exist. */
 export function dbHasDeviceTokens(): boolean {
+  if (native) return nativeCall(native, 'dbHasDeviceTokens')
   return getDb().prepare('SELECT 1 FROM device_tokens LIMIT 1').get() !== undefined
 }
 
 /** Returns false when the id is unknown or the token was already revoked. */
 export function dbRevokeDeviceToken(id: string, revokedAt: string): boolean {
+  if (native) return nativeCall(native, 'dbRevokeDeviceToken', id, revokedAt)
   const result = getDb()
     .prepare('UPDATE device_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL')
     .run(revokedAt, id)
@@ -3232,6 +3408,7 @@ export function dbRevokeDeviceToken(id: string, revokedAt: string): boolean {
 }
 
 export function dbTouchDeviceToken(id: string, seenAt: string): void {
+  if (native) return nativeCall(native, 'dbTouchDeviceToken', id, seenAt)
   getDb().prepare('UPDATE device_tokens SET last_seen_at = ? WHERE id = ?').run(seenAt, id)
 }
 
@@ -3240,6 +3417,7 @@ export function dbTouchDeviceToken(id: string, seenAt: string): void {
 // ---------------------------------------------------------------------------
 
 export function dbListWorkspaces(): WorkspaceConfig[] {
+  if (native) return nativeCall(native, 'dbListWorkspaces')
   const rows = getDb().prepare('SELECT * FROM workspaces ORDER BY "order"').all() as Array<{
     id: string
     name: string
@@ -3251,6 +3429,7 @@ export function dbListWorkspaces(): WorkspaceConfig[] {
 }
 
 export function dbInsertWorkspace(workspace: WorkspaceConfig): void {
+  if (native) return nativeCall(native, 'dbInsertWorkspace', workspace)
   getDb()
     .prepare(`INSERT INTO workspaces (id, name, icon, icon_color, "order") VALUES (?, ?, ?, ?, ?)`)
     .run(
@@ -3263,6 +3442,7 @@ export function dbInsertWorkspace(workspace: WorkspaceConfig): void {
 }
 
 export function dbUpdateWorkspace(id: string, updates: Partial<WorkspaceConfig>): void {
+  if (native) return nativeCall(native, 'dbUpdateWorkspace', id, updates)
   const sets: string[] = []
   const params: unknown[] = []
   if (updates.name !== undefined) {
@@ -3289,6 +3469,7 @@ export function dbUpdateWorkspace(id: string, updates: Partial<WorkspaceConfig>)
 }
 
 export function dbDeleteWorkspace(id: string): void {
+  if (native) return nativeCall(native, 'dbDeleteWorkspace', id)
   const d = getDb()
   d.transaction(() => {
     // Move projects and workflows to 'personal' before deleting. A group belongs
@@ -3308,6 +3489,7 @@ export function dbDeleteWorkspace(id: string): void {
 // ---------------------------------------------------------------------------
 
 export function dbListSessionGroups(): SessionGroupConfig[] {
+  if (native) return nativeCall(native, 'dbListSessionGroups')
   const rows = getDb().prepare('SELECT * FROM session_groups ORDER BY "order"').all() as Array<{
     id: string
     name: string
@@ -3320,6 +3502,7 @@ export function dbListSessionGroups(): SessionGroupConfig[] {
 }
 
 export function dbInsertSessionGroup(group: SessionGroupConfig): void {
+  if (native) return nativeCall(native, 'dbInsertSessionGroup', group)
   getDb()
     .prepare(
       `INSERT INTO session_groups (id, name, icon, icon_color, "order", workspace_id) VALUES (?, ?, ?, ?, ?, ?)`
@@ -3335,6 +3518,7 @@ export function dbInsertSessionGroup(group: SessionGroupConfig): void {
 }
 
 export function dbUpdateSessionGroup(id: string, updates: Partial<SessionGroupConfig>): void {
+  if (native) return nativeCall(native, 'dbUpdateSessionGroup', id, updates)
   const sets: string[] = []
   const params: unknown[] = []
   if (updates.name !== undefined) {
@@ -3365,6 +3549,7 @@ export function dbUpdateSessionGroup(id: string, updates: Partial<SessionGroupCo
 }
 
 export function dbDeleteSessionGroup(id: string): void {
+  if (native) return nativeCall(native, 'dbDeleteSessionGroup', id)
   const d = getDb()
   d.transaction(() => {
     // Let the sessions go first; deleting a group never kills one.
@@ -3378,6 +3563,7 @@ export function dbDeleteSessionGroup(id: string): void {
 // ---------------------------------------------------------------------------
 
 export function dbSaveSSHKey(key: SSHKey): void {
+  if (native) return nativeCall(native, 'dbSaveSSHKey', key)
   getDb()
     .prepare(
       'INSERT INTO ssh_keys (id, label, encrypted_private_key, public_key, certificate, key_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -3394,6 +3580,7 @@ export function dbSaveSSHKey(key: SSHKey): void {
 }
 
 export function dbListSSHKeys(): SSHKeyMeta[] {
+  if (native) return nativeCall(native, 'dbListSSHKeys')
   const rows = getDb()
     .prepare('SELECT id, label, key_type, public_key, created_at FROM ssh_keys')
     .all() as Array<{
@@ -3413,6 +3600,7 @@ export function dbListSSHKeys(): SSHKeyMeta[] {
 }
 
 export function dbGetSSHKey(id: string): SSHKey | null {
+  if (native) return nativeCall(native, 'dbGetSSHKey', id)
   const row = getDb().prepare('SELECT * FROM ssh_keys WHERE id = ?').get(id) as
     | {
         id: string
@@ -3437,6 +3625,7 @@ export function dbGetSSHKey(id: string): SSHKey | null {
 }
 
 export function dbDeleteSSHKey(id: string): void {
+  if (native) return nativeCall(native, 'dbDeleteSSHKey', id)
   getDb().prepare('DELETE FROM ssh_keys WHERE id = ?').run(id)
 }
 
@@ -3579,6 +3768,7 @@ export function updateWorkflowRunStatus(
   lastRunAt: string,
   lastRunStatus: string
 ): void {
+  if (native) return nativeCall(native, 'updateWorkflowRunStatus', id, lastRunAt, lastRunStatus)
   getDb()
     .prepare('UPDATE workflows SET last_run_at = ?, last_run_status = ? WHERE id = ?')
     .run(lastRunAt, lastRunStatus, id)
@@ -3589,6 +3779,7 @@ export function updateWorkflowRunStatus(
 // ---------------------------------------------------------------------------
 
 export function saveSessions(sessions: TerminalSession[]): void {
+  if (native) return nativeCall(native, 'saveSessions', sessions)
   const d = getDb()
   const savedAt = Date.now()
 
@@ -3637,6 +3828,7 @@ export function saveSessions(sessions: TerminalSession[]): void {
 }
 
 export function getPreviousSessions(): TerminalSession[] {
+  if (native) return nativeCall(native, 'getPreviousSessions')
   const rows = getDb().prepare('SELECT * FROM sessions ORDER BY sort_order ASC').all() as Array<{
     id: string
     agent_type: string
@@ -3692,6 +3884,7 @@ export function getPreviousSessions(): TerminalSession[] {
 }
 
 export function clearSessions(): void {
+  if (native) return nativeCall(native, 'clearSessions')
   getDb().prepare('DELETE FROM sessions').run()
 }
 
@@ -3700,6 +3893,7 @@ export function clearSessions(): void {
 // ---------------------------------------------------------------------------
 
 export function addScheduleLogEntry(entry: ScheduleLogEntry): void {
+  if (native) return nativeCall(native, 'addScheduleLogEntry', entry)
   const d = getDb()
   d.prepare(
     `INSERT INTO schedule_log (workflow_id, workflow_name, executed_at, status, sessions_launched, error)
@@ -3725,6 +3919,7 @@ export function addScheduleLogEntry(entry: ScheduleLogEntry): void {
 }
 
 export function getScheduleLogEntries(workflowId?: string): ScheduleLogEntry[] {
+  if (native) return nativeCall(native, 'getScheduleLogEntries', workflowId)
   const d = getDb()
   let rows: Array<{
     workflow_id: string
@@ -3754,6 +3949,7 @@ export function getScheduleLogEntries(workflowId?: string): ScheduleLogEntry[] {
 }
 
 export function clearScheduleLog(): void {
+  if (native) return nativeCall(native, 'clearScheduleLog')
   getDb().prepare('DELETE FROM schedule_log').run()
 }
 
@@ -3764,6 +3960,11 @@ export function clearScheduleLog(): void {
 const MAX_WORKFLOW_RUNS = 50
 
 export function saveWorkflowRun(execution: WorkflowExecution): void {
+  if (native) {
+    const trimmed = nativeCall<string[]>(native, 'saveWorkflowRun', execution)
+    for (const id of trimmed) removeGateViews(getDataDir(), id)
+    return
+  }
   const d = getDb()
 
   const runId = workflowRunId(execution)
@@ -3874,6 +4075,7 @@ export function saveWorkflowRun(execution: WorkflowExecution): void {
 
 /** Every run id kept, so review pages of runs trimmed while the server was down can go too. */
 export function listWorkflowRunIds(): string[] {
+  if (native) return nativeCall(native, 'listWorkflowRunIds')
   return (getDb().prepare('SELECT id FROM workflow_runs').all() as Array<{ id: string }>).map(
     (r) => r.id
   )
@@ -4073,6 +4275,7 @@ export function withoutDefinition<T extends WorkflowExecution>(run: T): Omit<T, 
 export function dbGetWorkflowRunByConnectorInboxId(
   connectorInboxId: number
 ): WorkflowExecution | null {
+  if (native) return nativeCall(native, 'dbGetWorkflowRunByConnectorInboxId', connectorInboxId)
   const d = getDb()
   const row = d
     .prepare(
@@ -4088,6 +4291,7 @@ export function dbGetWorkflowRunByConnectorInboxId(
 
 /** One run by its id — what the engine reads when a gate is answered after a restart. */
 export function getWorkflowRun(runId: string): WorkflowExecution | null {
+  if (native) return nativeCall(native, 'getWorkflowRun', runId)
   const d = getDb()
   const row = d.prepare('SELECT * FROM workflow_runs WHERE id = ?').get(runId) as RunRow | undefined
   if (!row) return null
@@ -4095,6 +4299,7 @@ export function getWorkflowRun(runId: string): WorkflowExecution | null {
 }
 
 export function listWorkflowRuns(workflowId: string, limit = 20): WorkflowExecution[] {
+  if (native) return nativeCall(native, 'listWorkflowRuns', workflowId, limit)
   const d = getDb()
   const rows = d
     .prepare('SELECT * FROM workflow_runs WHERE workflow_id = ? ORDER BY started_at DESC LIMIT ?')
@@ -4112,6 +4317,7 @@ export function listWorkflowRunsByTask(
   taskId: string,
   limit = 20
 ): (WorkflowExecution & { workflowName?: string })[] {
+  if (native) return nativeCall(native, 'listWorkflowRunsByTask', taskId, limit)
   const d = getDb()
   const rows = d
     .prepare(
@@ -4140,6 +4346,7 @@ export function listWorkflowRunsByTask(
  * stuck. The reconciler closes these out against `session_events`.
  */
 export function listRunningRuns(): WorkflowExecution[] {
+  if (native) return nativeCall(native, 'listRunningRuns')
   const d = getDb()
   const rows = d
     .prepare(
@@ -4162,6 +4369,7 @@ export function listRunningRuns(): WorkflowExecution[] {
 // matches the real backlog. If this ever grows, cap with a LIMIT here and
 // chunk `fetchNodesByRunIds` to stay under SQLite's IN-clause variable cap.
 export function listRunsWithWaitingGates(kind?: 'signIn'): WorkflowExecution[] {
+  if (native) return nativeCall(native, 'listRunsWithWaitingGates', kind)
   const d = getDb()
   const rows = d
     .prepare(
@@ -4191,6 +4399,7 @@ export function listAllWorkflowRuns(
   workspaceId?: string,
   limit = 50
 ): (WorkflowExecution & { workflowName?: string })[] {
+  if (native) return nativeCall(native, 'listAllWorkflowRuns', workspaceId, limit)
   const d = getDb()
   // Clamp to keep the IN-clause below SQLite's default 999-variable cap
   // when fetching node rows for each run.
@@ -4228,6 +4437,7 @@ const MAX_SESSION_EVENTS_PER_SESSION = 200
  * for every delivery after: the caller acts only on true.
  */
 export function claimEffect(effectId: string, kind: string, now = Date.now()): boolean {
+  if (native) return nativeCall(native, 'claimEffect', effectId, kind, now)
   return (
     getDb()
       .prepare(
@@ -4239,12 +4449,14 @@ export function claimEffect(effectId: string, kind: string, now = Date.now()): b
 
 /** Forgets receipts of `kind` older than `before`, and answers how many went. */
 export function pruneEffectReceipts(kind: string, before: number): number {
+  if (native) return nativeCall(native, 'pruneEffectReceipts', kind, before)
   return getDb()
     .prepare('DELETE FROM effect_receipts WHERE kind = ? AND received_at < ?')
     .run(kind, before).changes
 }
 
 export function insertSessionEvent(event: SessionEvent): void {
+  if (native) return nativeCall(native, 'insertSessionEvent', event)
   const d = getDb()
   d.prepare(
     `INSERT INTO session_events (session_id, event_type, timestamp, metadata)
@@ -4265,6 +4477,7 @@ export function insertSessionEvent(event: SessionEvent): void {
 }
 
 export function listSessionEvents(eventType?: SessionEventType, limit = 100): SessionEvent[] {
+  if (native) return nativeCall(native, 'listSessionEvents', eventType, limit)
   const d = getDb()
   let rows: Array<Record<string, unknown>>
   if (eventType) {
@@ -4280,6 +4493,7 @@ export function listSessionEvents(eventType?: SessionEventType, limit = 100): Se
 }
 
 export function listSessionEventsBySession(sessionId: string, limit = 100): SessionEvent[] {
+  if (native) return nativeCall(native, 'listSessionEventsBySession', sessionId, limit)
   const d = getDb()
   const rows = d
     .prepare('SELECT * FROM session_events WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?')
@@ -4300,17 +4514,9 @@ function mapSessionEventRow(r: Record<string, unknown>): SessionEvent {
 
 // ─── Artifacts ────────────────────────────────────────────────────
 
-export interface NewArtifact {
-  kind: ArtifactKind
-  title: string
-  sessionId: string | null
-  projectName: string | null
-  gateRunId?: string
-  gateNodeId?: string
-}
-
 /** Create an artifact with no versions yet, and the token that unlocks its pages. */
 export function insertArtifact(fields: NewArtifact): { artifact: Artifact; token: string } {
+  if (native) return nativeCall(native, 'insertArtifact', fields)
   const now = new Date().toISOString()
   const id = randomUUID()
   const token = randomUUID().replace(/-/g, '')
@@ -4336,6 +4542,7 @@ export function insertArtifact(fields: NewArtifact): { artifact: Artifact; token
 }
 
 export function getArtifact(id: string): Artifact | null {
+  if (native) return nativeCall(native, 'getArtifact', id)
   const row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(id) as
     | Record<string, unknown>
     | undefined
@@ -4343,6 +4550,7 @@ export function getArtifact(id: string): Artifact | null {
 }
 
 export function getArtifactToken(id: string): string | null {
+  if (native) return nativeCall(native, 'getArtifactToken', id)
   const row = getDb().prepare('SELECT token FROM artifacts WHERE id = ?').get(id) as
     | { token: string }
     | undefined
@@ -4350,10 +4558,8 @@ export function getArtifactToken(id: string): string | null {
 }
 
 /** The newest first, narrowed to one session or one project when asked. */
-export function listArtifacts(
-  filter: { sessionId?: string; projectName?: string } = {},
-  limit = 50
-): Artifact[] {
+export function listArtifacts(filter: ArtifactFilter = {}, limit = 50): Artifact[] {
+  if (native) return nativeCall(native, 'listArtifacts', filter, limit)
   const where: string[] = []
   const params: unknown[] = []
   if (filter.sessionId) {
@@ -4374,6 +4580,7 @@ export function listArtifacts(
 
 /** The artifact a gate's review pages are kept as, one version per round. */
 export function findGateArtifact(runId: string, nodeId: string): Artifact | null {
+  if (native) return nativeCall(native, 'findGateArtifact', runId, nodeId)
   const row = getDb()
     .prepare('SELECT * FROM artifacts WHERE gate_run_id = ? AND gate_node_id = ?')
     .get(runId, nodeId) as Record<string, unknown> | undefined
@@ -4381,6 +4588,7 @@ export function findGateArtifact(runId: string, nodeId: string): Artifact | null
 }
 
 export function renameArtifact(id: string, title: string): void {
+  if (native) return nativeCall(native, 'renameArtifact', id, title)
   getDb().prepare('UPDATE artifacts SET title = ? WHERE id = ?').run(title, id)
 }
 
@@ -4390,6 +4598,7 @@ export function addArtifactVersion(
   author: ArtifactAuthor,
   answersBatchId?: string
 ): ArtifactVersion {
+  if (native) return nativeCall(native, 'addArtifactVersion', artifactId, author, answersBatchId)
   const d = getDb()
   return d.transaction(() => {
     const row = d.prepare('SELECT latest_version FROM artifacts WHERE id = ?').get(artifactId) as
@@ -4412,6 +4621,7 @@ export function addArtifactVersion(
 }
 
 export function listArtifactVersions(artifactId: string): ArtifactVersion[] {
+  if (native) return nativeCall(native, 'listArtifactVersions', artifactId)
   const rows = getDb()
     .prepare('SELECT * FROM artifact_versions WHERE artifact_id = ? ORDER BY version')
     .all(artifactId) as Array<Record<string, unknown>>
@@ -4426,6 +4636,7 @@ export function listArtifactVersions(artifactId: string): ArtifactVersion[] {
 
 /** The latest batch sent on this artifact that no version has answered yet. */
 export function unansweredBatchId(artifactId: string): string | undefined {
+  if (native) return nativeCall<string | null>(native, 'unansweredBatchId', artifactId) ?? undefined
   const row = getDb()
     .prepare(
       `SELECT batch_id FROM artifact_comments
@@ -4442,8 +4653,9 @@ export function unansweredBatchId(artifactId: string): string | undefined {
 
 export function listArtifactComments(
   artifactId: string,
-  filter: { version?: number; state?: ArtifactComment['state']; batchId?: string } = {}
+  filter: ArtifactCommentFilter = {}
 ): ArtifactComment[] {
+  if (native) return nativeCall(native, 'listArtifactComments', artifactId, filter)
   const where = ['artifact_id = ?']
   const params: unknown[] = [artifactId]
   if (filter.version !== undefined) {
@@ -4465,18 +4677,15 @@ export function listArtifactComments(
 }
 
 export function getArtifactComment(id: string): ArtifactComment | null {
+  if (native) return nativeCall(native, 'getArtifactComment', id)
   const row = getDb().prepare('SELECT * FROM artifact_comments WHERE id = ?').get(id) as
     | Record<string, unknown>
     | undefined
   return row ? mapArtifactCommentRow(row) : null
 }
 
-export function insertArtifactComment(fields: {
-  artifactId: string
-  version: number
-  anchor: ArtifactAnchor | null
-  body: string
-}): ArtifactComment {
+export function insertArtifactComment(fields: NewArtifactComment): ArtifactComment {
+  if (native) return nativeCall(native, 'insertArtifactComment', fields)
   const now = new Date().toISOString()
   const id = randomUUID()
   getDb()
@@ -4499,8 +4708,9 @@ export function insertArtifactComment(fields: {
 /** Change a draft's words or anchor; a sent comment is part of the record and stays as it was. */
 export function updateArtifactComment(
   id: string,
-  change: { body?: string; anchor?: ArtifactAnchor | null }
+  change: ArtifactCommentChange
 ): ArtifactComment | null {
+  if (native) return nativeCall(native, 'updateArtifactComment', id, change)
   const current = getArtifactComment(id)
   if (!current || current.state !== 'draft') return null
   const anchor = change.anchor === undefined ? current.anchor : change.anchor
@@ -4517,6 +4727,7 @@ export function updateArtifactComment(
 
 /** Drop a draft. Returns false when there was no draft by that id. */
 export function deleteArtifactComment(id: string): boolean {
+  if (native) return nativeCall(native, 'deleteArtifactComment', id)
   const result = getDb()
     .prepare("DELETE FROM artifact_comments WHERE id = ? AND state = 'draft'")
     .run(id)
@@ -4527,6 +4738,7 @@ export function deleteArtifactComment(id: string): boolean {
 export function sendArtifactDrafts(
   artifactId: string
 ): { batchId: string; comments: ArtifactComment[] } | null {
+  if (native) return nativeCall(native, 'sendArtifactDrafts', artifactId)
   const d = getDb()
   return d.transaction(() => {
     const batchId = randomUUID()
@@ -4543,6 +4755,7 @@ export function sendArtifactDrafts(
 
 /** Remove artifacts untouched since `cutoff`, returning their ids so their pages can go too. */
 export function deleteArtifactsUpdatedBefore(cutoff: string): string[] {
+  if (native) return nativeCall(native, 'deleteArtifactsUpdatedBefore', cutoff)
   const d = getDb()
   const rows = d.prepare('SELECT id FROM artifacts WHERE updated_at < ?').all(cutoff) as Array<{
     id: string
@@ -4552,6 +4765,7 @@ export function deleteArtifactsUpdatedBefore(cutoff: string): string[] {
 }
 
 export function listArtifactIds(): string[] {
+  if (native) return nativeCall(native, 'listArtifactIds')
   const rows = getDb().prepare('SELECT id FROM artifacts').all() as Array<{ id: string }>
   return rows.map((r) => r.id)
 }
