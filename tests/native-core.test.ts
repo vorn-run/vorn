@@ -169,14 +169,17 @@ describe('the active core', () => {
       missing: [
         'the screen model',
         'agent status and the terminal output agents read',
-        'git off the main thread'
+        'git off the main thread',
+        'the native store'
       ]
     })
     class Analyzer {}
     class TerminalPipeline {}
+    class NativeStore {}
     const gitRun = async (): Promise<string> => ''
     resetCoreSelection(
-      () => ({ ...fakeCore, Analyzer, gitRun, TerminalPipeline }) as unknown as NativeCore
+      () =>
+        ({ ...fakeCore, Analyzer, gitRun, TerminalPipeline, NativeStore }) as unknown as NativeCore
     )
     expect(coreStatus()).toMatchObject({ loaded: true, missing: [] })
   })
