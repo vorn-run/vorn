@@ -15,6 +15,12 @@
 //! Anything that breaks one is a reconnect or a bug, and the answer is the
 //! same: drop the frame and ask for a resync. A frame is checked whole before
 //! any of it is applied, so a refused frame leaves the mirror as it was.
+//!
+//! History is a cache keyed by absolute line (TP §9): rows that scroll off
+//! the viewport move into it with no transfer, lines that scrolled past
+//! between two frames are gaps ([`Mirror::gaps`]), filled by the rows of a
+//! `History` reply ([`Mirror::apply_history`]). A new scrollback epoch, or
+//! a snapshot under another `state_gen` or `table_gen`, empties it.
 
 use vorn_term_proto::row::{self, DecodeError, Run, ROW_FMT};
 use vorn_term_proto::screen::{
@@ -58,8 +64,8 @@ pub struct Mirror {
     styles: Vec<StyleDef>,
     links: Vec<LinkDef>,
     rows: Vec<Row>,
-    /// Rows that scrolled off the viewport, oldest first: a cache, fetched
-    /// again by line when it has gaps.
+    /// Rows that scrolled off the viewport or were fetched, by line, oldest
+    /// first, one row a line: a cache with gaps.
     history: Vec<Row>,
 }
 
@@ -87,8 +93,77 @@ impl Mirror {
         for r in snap.rows {
             m.place(r)?;
         }
-        m.history = snap.history;
+        m.insert_history(snap.history);
         Ok(m)
+    }
+
+    /// A snapshot in place of this mirror, keeping the history cache when
+    /// its lines still mean the same: the same `state_gen`, `table_gen` and
+    /// scrollback epoch, as after a resync that only outran the scroll log.
+    pub fn resnapshot(&mut self, snap: Snapshot) -> Result<(), Refused> {
+        let keep = snap.state_gen == self.state_gen
+            && snap.table_gen == self.table_gen
+            && snap.term.sb_epoch == self.term.sb_epoch;
+        let mut next = Mirror::from_snapshot(snap)?;
+        if keep {
+            let fresh = std::mem::take(&mut next.history);
+            next.history = std::mem::take(&mut self.history);
+            next.insert_history(fresh);
+        }
+        *self = next;
+        Ok(())
+    }
+
+    /// The rows of a `History` reply, with the table definitions it
+    /// carries. Rows from another scrollback epoch are dropped: the reply
+    /// raced an epoch change and the client asks again. Checked whole
+    /// before anything is applied, like a delta.
+    pub fn apply_history(
+        &mut self,
+        sb_epoch: u32,
+        rows: Vec<Row>,
+        styles: Vec<StyleDef>,
+        links: Vec<LinkDef>,
+    ) -> Result<(), Refused> {
+        let style_mark = next_mark(self.style_mark(), styles.iter().map(|s| s.id))?;
+        let link_mark = next_mark(self.link_mark(), links.iter().map(|l| l.id))?;
+        for r in &rows {
+            check_row(r, style_mark, link_mark)?;
+        }
+        self.extend_tables(styles, links)?;
+        if sb_epoch == self.term.sb_epoch {
+            self.insert_history(rows);
+        }
+        Ok(())
+    }
+
+    /// The cached history row at absolute `line`.
+    pub fn history_line(&self, line: u64) -> Option<&Row> {
+        self.history
+            .binary_search_by_key(&line, |r| r.line)
+            .ok()
+            .map(|i| &self.history[i])
+    }
+
+    /// The lines in `from..to` the history cache lacks, as `(first, count)`
+    /// ranges in order: what to fetch before showing them.
+    pub fn gaps(&self, from: u64, to: u64) -> Vec<(u64, u64)> {
+        let mut gaps = Vec::new();
+        let mut next = from;
+        let start = self.history.partition_point(|r| r.line < from);
+        for r in &self.history[start..] {
+            if r.line >= to {
+                break;
+            }
+            if r.line > next {
+                gaps.push((next, r.line - next));
+            }
+            next = r.line + 1;
+        }
+        if next < to {
+            gaps.push((next, to - next));
+        }
+        gaps
     }
 
     /// Apply a delta, or refuse it whole.
@@ -121,11 +196,15 @@ impl Mirror {
         }
 
         self.extend_tables(delta.styles, delta.links)?;
-        let mut new_epoch = false;
+        let mut keep = true;
         if let Some(t) = delta.term {
-            new_epoch = self.update_term(t);
+            let screen = self.term.screen;
+            let new_epoch = self.update_term(t);
+            // Rows that leave the viewport in a frame that switches screens
+            // or epochs are not history of this epoch's primary screen.
+            keep = !new_epoch && screen == self.term.screen;
         }
-        self.scroll(delta.scrolled, !new_epoch);
+        self.scroll(delta.scrolled, keep);
         for r in delta.rows {
             self.place(r)?;
         }
@@ -140,6 +219,10 @@ impl Mirror {
 
     pub fn rev(&self) -> u64 {
         self.rev
+    }
+
+    pub fn table_gen(&self) -> u32 {
+        self.table_gen
     }
 
     pub fn resume(&self) -> Cursor {
@@ -272,15 +355,29 @@ impl Mirror {
             return;
         }
         let n = (scrolled as usize).min(self.rows.len());
-        let gone = self.rows.drain(..n);
+        let gone: Vec<Row> = self.rows.drain(..n).collect();
         if keep {
-            self.history.extend(gone);
-        } else {
-            drop(gone);
+            self.insert_history(gone);
         }
         self.rows.extend(blank_rows(n as u16));
         for (y, r) in self.rows.iter_mut().enumerate() {
             r.y = y as u16;
+        }
+    }
+
+    /// Adds rows to the history cache in line order, a row replacing any
+    /// cached under the same line.
+    fn insert_history(&mut self, rows: Vec<Row>) {
+        for r in rows {
+            // Rows mostly arrive in order, newest last.
+            if self.history.last().is_none_or(|last| last.line < r.line) {
+                self.history.push(r);
+                continue;
+            }
+            match self.history.binary_search_by_key(&r.line, |h| h.line) {
+                Ok(i) => self.history[i] = r,
+                Err(i) => self.history.insert(i, r),
+            }
         }
     }
 
@@ -585,6 +682,86 @@ mod tests {
         d.rows = vec![line(4, 0, "ok"), line(0, 9, "bad")];
         assert_eq!(m.apply(d), Err(Refused::UnknownStyle(9)));
         assert_eq!((m.term().rows, m.rows().len()), (3, 3));
+    }
+
+    fn hist(line: u64, text: &str) -> Row {
+        Row {
+            line,
+            ..self::line(0, 0, text)
+        }
+    }
+
+    #[test]
+    fn history_is_a_cache_by_line_with_gaps() {
+        let mut m = Mirror::from_snapshot(snapshot()).unwrap();
+        let mut d = delta(1, 2);
+        d.scrolled = 2;
+        m.apply(d).unwrap();
+        // Lines 0 and 1 scrolled in; 2..10 are a gap until fetched.
+        assert_eq!(m.gaps(0, 10), vec![(2, 8)]);
+        m.apply_history(
+            0,
+            vec![hist(5, "five"), hist(3, "three")],
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(m.gaps(0, 10), vec![(2, 1), (4, 1), (6, 4)]);
+        assert_eq!(row_text(m.history_line(3).unwrap()), "three");
+        // A refetch replaces the row it names.
+        m.apply_history(0, vec![hist(3, "THREE")], Vec::new(), Vec::new())
+            .unwrap();
+        assert_eq!(row_text(m.history_line(3).unwrap()), "THREE");
+        let lines: Vec<u64> = m.history().iter().map(|r| r.line).collect();
+        assert_eq!(lines, vec![0, 1, 3, 5]);
+        // A reply from an older epoch extends the tables but caches nothing.
+        let mut styles = vec![style(2)];
+        styles[0].attrs = 1;
+        m.apply_history(7, vec![hist(9, "stale")], styles, Vec::new())
+            .unwrap();
+        assert!(m.history_line(9).is_none());
+        assert_eq!(m.style_mark(), 3);
+        // Rows must not outrun the tables, here or in a delta.
+        let mut bad = hist(9, "x");
+        bad.cells = row::encode(&[Run {
+            style: 40,
+            link: 0,
+            cells: vec![vorn_term_proto::row::Cell::new("x")],
+        }]);
+        assert_eq!(
+            m.apply_history(0, vec![bad], Vec::new(), Vec::new()),
+            Err(Refused::UnknownStyle(40))
+        );
+    }
+
+    #[test]
+    fn rows_that_leave_with_a_screen_switch_are_not_history() {
+        let mut m = Mirror::from_snapshot(snapshot()).unwrap();
+        let mut d = delta(1, 2);
+        d.scrolled = 1;
+        d.term = Some(TermDelta {
+            screen: Some(Screen::Alternate),
+            ..TermDelta::default()
+        });
+        m.apply(d).unwrap();
+        assert!(m.history().is_empty());
+    }
+
+    #[test]
+    fn a_resnapshot_keeps_history_only_while_lines_mean_the_same() {
+        let mut m = Mirror::from_snapshot(snapshot()).unwrap();
+        let mut d = delta(1, 2);
+        d.scrolled = 1;
+        m.apply(d).unwrap();
+        let mut again = snapshot();
+        again.rev = 5;
+        again.history = vec![hist(7, "seven")];
+        m.resnapshot(again.clone()).unwrap();
+        assert_eq!(m.history().len(), 2);
+        assert_eq!(m.rev(), 5);
+        again.state_gen = 10;
+        m.resnapshot(again).unwrap();
+        assert_eq!(m.history().len(), 1);
     }
 
     #[test]

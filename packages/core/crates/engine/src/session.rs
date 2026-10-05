@@ -18,14 +18,21 @@
 //! that record ([`EffectId`]). Replay from a valid base is the live
 //! computation repeated, so the same effect gets the same id, and receivers
 //! drop the repeats of at-least-once effects by it.
+//!
+//! Grid clients are served from here too, on the thread that owns the
+//! terminal: the session's [`Hub`] cuts their frames after each batch of
+//! records and on the render clock ([`Session::due`], [`Session::frame`]),
+//! and answers their requests ([`Input::Grid`]) with [`Out::Grid`].
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
+use vorn_grid::{Ctx as GridCtx, GridIn, Hub, HubConfig, HubOut};
 use vorn_pipeline::history::History;
 use vorn_screen::{ClipboardTarget, Emulator};
 use vorn_sessiond_wire::{AttachFrom, AttachRefusal, Checkpoint, Kind, SessionInfo};
+use vorn_term_proto::msg::{self, EventId as WireEventId, EventKind};
 use vorn_term_proto::{Cursor, Entry, Record, RecordHeader};
 
 use crate::snapshot::VtSnapshot;
@@ -73,6 +80,8 @@ pub struct Config {
     pub history_cap: u64,
     /// This build, stamped on checkpoints for diagnostics.
     pub build: String,
+    /// Grid mode's render clock, hold and credits.
+    pub grid: HubConfig,
     /// Hand each batch of records back once applied ([`Out::Applied`]), for
     /// a host that streams them to bytes clients.
     pub stream: bool,
@@ -91,6 +100,7 @@ impl Default for Config {
             history: None,
             history_cap: vorn_pipeline::history::DEFAULT_CAP,
             build: String::new(),
+            grid: HubConfig::default(),
             stream: false,
             colors: None,
         }
@@ -169,6 +179,8 @@ pub enum Input {
     Checkpoint(Checkpoint),
     Refused(AttachRefusal),
     Entries(Vec<Entry>),
+    /// A grid client's request, from vornd's grid listener.
+    Grid(GridIn),
 }
 
 /// The restore base a session runs from.
@@ -259,6 +271,9 @@ pub enum Out {
     /// is applied, or it was lost. How it stood last. Nothing more comes
     /// for it.
     Closed(Box<Summary>),
+    /// For grid clients: a message for a connection, or input bytes for
+    /// the program.
+    Grid(HubOut),
     /// The records of one [`Input::Entries`], given back once applied, when
     /// [`Config::stream`] is set. Some may have been skipped as already
     /// applied; they are real records of the log all the same.
@@ -366,6 +381,8 @@ struct Run {
     history: Option<History>,
     /// A redraw nudge owed to the program once the session is live.
     nudge: bool,
+    /// The session's grid clients, carried from one run to the next.
+    hub: Hub,
     /// Whether [`Out::Live`] was sent for going live.
     live_reported: bool,
 }
@@ -385,6 +402,8 @@ pub struct Session {
     exited: Option<(Option<i32>, Option<i32>)>,
     /// Reused for each record's effects.
     fx: Vec<vorn_screen::Effect>,
+    /// Grid requests that arrived before there was a terminal.
+    waiting: Vec<GridIn>,
     /// Snapshots asked for and not cut yet, and when each was asked.
     snapshots: Vec<(u64, Instant)>,
 }
@@ -462,6 +481,7 @@ impl Session {
             uncut: None,
             exited: open.exited,
             fx: Vec::new(),
+            waiting: Vec::new(),
             snapshots: Vec::new(),
         }
     }
@@ -549,8 +569,10 @@ impl Session {
                     out.push(Out::Applied(entries));
                 }
             }
+            Input::Grid(m) => self.waiting.push(m),
         }
         self.report_live(out);
+        self.serve_grid(now, out);
     }
 
     /// Sends [`Out::Live`] once the session has gone live on its base.
@@ -564,6 +586,42 @@ impl Session {
                 out.push(Out::Live(run.cursor));
             }
         }
+    }
+
+    /// Hands waiting grid requests to the hub once there is a terminal.
+    fn serve_grid(&mut self, now: Instant, out: &mut Vec<Out>) {
+        if self.waiting.is_empty() {
+            return;
+        }
+        let Phase::Running(run) = &mut self.phase else {
+            return;
+        };
+        let mut hub_out = Vec::new();
+        let ctx = grid_ctx(&run.term, run.cursor, run.live, &self.id);
+        for m in self.waiting.drain(..) {
+            run.hub.handle(m, &ctx, now, &mut hub_out);
+        }
+        out.extend(hub_out.into_iter().map(Out::Grid));
+    }
+
+    /// When the grid's render clock next wants [`Session::frame`] called.
+    pub fn due(&self) -> Option<Instant> {
+        match &self.phase {
+            Phase::Running(r) => r.hub.due(),
+            _ => None,
+        }
+    }
+
+    /// Cuts the grid frame that was waiting on the render clock, if it is
+    /// due by `now`.
+    pub fn frame(&mut self, now: Instant, out: &mut Vec<Out>) {
+        let Phase::Running(run) = &mut self.phase else {
+            return;
+        };
+        let mut hub_out = Vec::new();
+        let ctx = grid_ctx(&run.term, run.cursor, run.live, &self.id);
+        run.hub.tick(&ctx, now, &mut hub_out);
+        out.extend(hub_out.into_iter().map(Out::Grid));
     }
 
     /// Applies records in order: what [`Input::Entries`] does.
@@ -612,6 +670,7 @@ impl Session {
         }
         if applied {
             out.push(Out::Ack(run.cursor));
+            run.grid_records(&self.id, now, first, out);
         }
         debug_assert!(effects_precede_checkpoints(&out[first..]), "{out:?}");
     }
@@ -835,6 +894,13 @@ impl Session {
         if self.cfg.history.is_some() && history.is_none() {
             self.reason.get_or_insert("history log unwritable");
         }
+        // Grid clients stay attached across runs; the new terminal is a
+        // new build for them.
+        let mut hub = match std::mem::replace(&mut self.phase, Phase::Lost) {
+            Phase::Running(old) => old.hub,
+            _ => Hub::new(self.cfg.grid),
+        };
+        hub.rebuilt();
         term.set_colors(self.cfg.colors);
         let mut run = Box::new(Run {
             term,
@@ -848,6 +914,7 @@ impl Session {
             last_output: now,
             history,
             nudge: false,
+            hub,
             live_reported: false,
         });
         run.reach(self.open.head, self.open.pty, out);
@@ -869,6 +936,41 @@ struct Ctx<'a> {
 }
 
 impl Run {
+    /// After a batch of records: the effects it caused go to every grid
+    /// client as events, then a frame is cut if one is due.
+    fn grid_records(&mut self, id: &str, now: Instant, first: usize, out: &mut Vec<Out>) {
+        let mut hub_out = Vec::new();
+        // Nothing to do while no client is attached but remember that the
+        // terminal moved on, which is cheap.
+        let events = if self.hub.attached() {
+            &out[first..]
+        } else {
+            &[]
+        };
+        for o in events {
+            if let Out::Effect(fx, effect) = o {
+                if let Some(kind) = event_kind(effect) {
+                    let wire = WireEventId {
+                        epoch: fx.epoch,
+                        rseq: fx.rseq,
+                        index: fx.index,
+                    };
+                    self.hub.event(wire, kind, &mut hub_out);
+                }
+            }
+        }
+        let ended = out[first..]
+            .iter()
+            .any(|o| matches!(o, Out::Effect(_, Effect::Exit { .. })));
+        let ctx = grid_ctx(&self.term, self.cursor, self.live, id);
+        self.hub.records(&ctx, now, &mut hub_out);
+        if ended {
+            // The session leaves the engine once its exit is applied.
+            self.hub.finish(&ctx, now, &mut hub_out);
+        }
+        out.extend(hub_out.into_iter().map(Out::Grid));
+    }
+
     fn apply(
         &mut self,
         ctx: &Ctx<'_>,
@@ -968,6 +1070,7 @@ impl Run {
         if self.term.reset().is_err() {
             self.term.fidelity = Fidelity::Approximate;
         }
+        self.hub.rebuilt();
         reason.get_or_insert(why);
         self.nudge = true;
     }
@@ -1015,7 +1118,12 @@ impl Run {
             *uncut = Some(why);
             return;
         }
-        match self.term.save() {
+        // A cut reads the render state and carries on from a rebuilt
+        // terminal: grid line numbers are settled on the old one first.
+        self.hub.before_swap(&self.term.em);
+        let saved = self.term.save();
+        self.hub.after_swap(&self.term.em);
+        match saved {
             Ok(blob) => {
                 out.push(Out::Checkpoint(Checkpoint {
                     session: ctx.id.to_owned(),
@@ -1037,6 +1145,46 @@ impl Run {
         }
         self.since_cut = 0;
     }
+}
+
+/// What the grid hub reads of a running session.
+fn grid_ctx<'a>(term: &'a Term, resume: Cursor, live: bool, id: &'a str) -> GridCtx<'a> {
+    GridCtx {
+        em: &term.em,
+        session: id,
+        resume,
+        live,
+        fidelity: match term.fidelity {
+            Fidelity::Exact => msg::Fidelity::Exact,
+            Fidelity::Approximate => msg::Fidelity::Approximate,
+        },
+    }
+}
+
+/// An effect as a grid client's event; states it reads from frames (the
+/// cwd) are not events.
+fn event_kind(effect: &Effect) -> Option<EventKind> {
+    Some(match effect {
+        Effect::Bell => EventKind::Bell,
+        Effect::Clipboard { contents, .. } => EventKind::Clipboard {
+            text: contents
+                .iter()
+                .find(|(mime, _)| mime.starts_with("text/plain") || mime.is_empty())
+                .or(contents.first())
+                .map(|(_, data)| data.clone())
+                .unwrap_or_default(),
+        },
+        Effect::Notify { title, body } => EventKind::Notify {
+            title: title.clone(),
+            body: body.clone(),
+        },
+        Effect::Status(state) => EventKind::Status { state: *state },
+        Effect::Exit { code, signal } => EventKind::Exit {
+            code: *code,
+            signal: *signal,
+        },
+        Effect::Cwd(_) => return None,
+    })
 }
 
 /// Cuts the snapshots waiting when the terminal is at a point where one can

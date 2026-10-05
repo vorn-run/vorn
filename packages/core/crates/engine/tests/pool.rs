@@ -8,9 +8,12 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use common::{config, Sessiond};
-use vorn_engine::{Config, Effect, Fidelity, Input, Open, Out, Pool, Session, State};
+use vorn_engine::{
+    Config, Effect, Fidelity, GridIn, HubOut, Input, Open, Out, Peer, Pool, Session, State,
+};
 use vorn_recovery::gen::{Generator, Profile};
 use vorn_recovery::Size;
+use vorn_term_proto::msg::{Attach, ServerMsg};
 use vorn_term_proto::{Cursor, Record};
 
 const SIZE: (u16, u16) = (100, 30);
@@ -245,6 +248,51 @@ fn an_ended_session_leaves_the_pool() {
     assert!(pool.sessions().is_empty());
     let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
     assert!(left.is_empty(), "{left:?}");
+}
+
+/// A grid attach for a session that is not open is refused at once, and one
+/// that reaches a session after it left is answered with an error by the
+/// worker: either way the client hears, and never waits on an attachment
+/// nobody holds.
+#[test]
+fn a_grid_attach_to_a_session_that_left_fails_closed() {
+    let (pool, rx) = pool_on_channel((*config(1 << 20)).clone());
+    let attach = |conn| GridIn::Attach {
+        peer: Peer { conn, sid: 1 },
+        attach: Attach {
+            session: "a".into(),
+            ..Attach::default()
+        },
+    };
+    assert!(!pool.grid("a", attach(1)));
+    let mut d = Sessiond::new(0, SIZE);
+    let mut b = vorn_recovery::LogBuilder::new(Size::new(SIZE.0, SIZE.1));
+    b.data("bye\r\n").push(Record::Exit {
+        code: Some(0),
+        signal: None,
+    });
+    d.append(&b.build().entries);
+    pool.open("a", Open::spawned(Cursor::start(0), Some(SIZE)));
+    let mut sent = false;
+    loop {
+        let (id, out) = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        match out {
+            // The exit's records, then an attach queued behind them while the
+            // session is still placed: it reaches a worker that closed it.
+            Out::Attach(from) => {
+                for input in d.attach(from) {
+                    pool.input(&id, input);
+                }
+                sent = pool.grid(&id, attach(2));
+            }
+            Out::Grid(HubOut::Send { conn: 2, msg }) => {
+                assert!(sent);
+                assert!(matches!(msg, ServerMsg::Error { code: 404, .. }), "{msg:?}");
+                return;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// A session with nothing to carry on from is lost and leaves the pool,

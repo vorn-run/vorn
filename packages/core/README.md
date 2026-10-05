@@ -25,6 +25,8 @@ Rust binaries:
 | `crates/pipeline` (`vorn-pipeline`)           | A terminal's thread: screen, scrollback ring, history frames and checkpoint bodies          |
 | `crates/term-proto` (`vorn-term-proto`)       | Wire types: record headers and cursors, the screen mirror's rows, `row_fmt` 1, bytes frames |
 | `crates/term-mirror` (`vorn-term-mirror`)     | A client's copy of a screen, kept from snapshots and deltas with no parser                  |
+| `crates/grid` (`vorn-grid`)                   | Grid mode's server half: render updates, row cache, tables, credits, history                |
+| `crates/grid-client` (`vorn-grid-client`)     | A headless grid client: the mirror behind grid mode's framing                               |
 | `crates/engine` (`vorn-engine`)               | vornd's session engine: parses each session's records, cuts checkpoints, recovers from them |
 | `crates/vornd` (`vornd`)                      | A daemon in front of the server: forwards its calls, keeps sessiond and runs its sessions   |
 | `crates/sessiond` (`vorn-sessiond`)           | Holds terminal sessions and their output so the app can reconnect                           |
@@ -53,6 +55,11 @@ cargo run -p vornd -- --upstream 127.0.0.1:50091   # prints {"port":N,"protocol"
 curl http://127.0.0.1:N/vornd/health                # server reachable, calls per group
 yarn test:conformance                               # the RPC test files, through vornd
 ```
+
+With `--sessiond` and `--home` it also serves grid mode, the native app's
+attachment to sessions as frames of their screens: on a user-only local socket
+(`$VORN_HOME/run/vornd-grid-<pid>.sock`, or a named pipe on Windows) that its
+ready line names as `"grid"`.
 
 It listens on loopback only. `--groups git=shadow` (or `VORND_GROUPS`) sets a
 group's mode: `forward`, `shadow`, or `native` once a group has a native

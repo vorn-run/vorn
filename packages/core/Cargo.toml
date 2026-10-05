@@ -12,6 +12,8 @@ members = [
   "crates/sessiond-wire",
   "crates/recovery",
   "crates/engine",
+  "crates/grid",
+  "crates/grid-client",
 ]
 
 [package]

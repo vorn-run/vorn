@@ -1,7 +1,8 @@
 //! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--groups git=shadow] [--log-file PATH] [--sessiond PATH --home DIR] [--debug-spawn]`
 //!
 //! Prints one line of JSON, `{"port":N,"protocol":P}`, once it is listening, so
-//! whoever started it knows where to connect.
+//! whoever started it knows where to connect. With a session holder and the
+//! engine, the line also names the grid endpoint: `"grid":"<socket or pipe>"`.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -171,6 +172,39 @@ fn new_holder(_: &HolderConfig) -> Holder {
     Holder::new()
 }
 
+/// Opens the grid endpoint for the engine's sessions, and answers where it
+/// is. Without it vornd runs on; only grid clients go without.
+#[cfg(feature = "engine")]
+fn serve_grid(cfg: &HolderConfig, holder: &Holder) -> Option<String> {
+    let engine = holder.engine()?.clone();
+    let endpoint = vornd::grid::endpoint(&cfg.home);
+    match vorn_sessiond::os::Listener::bind(&cfg.home, &endpoint) {
+        Ok(listener) => {
+            let instance = u64::from(std::process::id())
+                ^ std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_nanos() as u64);
+            tokio::spawn(vornd::grid::serve(
+                listener,
+                engine,
+                env!("CARGO_PKG_VERSION").into(),
+                instance,
+            ));
+            info!(%endpoint, "grid endpoint");
+            Some(endpoint)
+        }
+        Err(err) => {
+            error!(%endpoint, %err, "no grid endpoint");
+            None
+        }
+    }
+}
+
+#[cfg(not(feature = "engine"))]
+fn serve_grid(_: &HolderConfig, _: &Holder) -> Option<String> {
+    None
+}
+
 fn main() -> ExitCode {
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(args) => args,
@@ -209,9 +243,11 @@ fn main() -> ExitCode {
             info!(group, %mode, "group switch");
         }
         let mut kept = None;
+        let mut grid: Option<String> = None;
         let daemon = match args.holder {
             Some(cfg) => {
                 let holder = Arc::new(new_holder(&cfg));
+                grid = serve_grid(&cfg, &holder);
                 tokio::spawn(holder::keep(cfg, holder.clone()));
                 kept = Some(holder.clone());
                 Daemon::with_holder(args.upstream, args.groups, holder)
@@ -224,7 +260,11 @@ fn main() -> ExitCode {
         proxy::log_upstream(&daemon).await;
         info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
         let mut stdout = std::io::stdout().lock();
-        let _ = writeln!(stdout, "{{\"port\":{port},\"protocol\":{VORND_PROTOCOL}}}");
+        let ready = match &grid {
+            Some(g) => serde_json::json!({ "port": port, "protocol": VORND_PROTOCOL, "grid": g }),
+            None => serde_json::json!({ "port": port, "protocol": VORND_PROTOCOL }),
+        };
+        let _ = writeln!(stdout, "{ready}");
         let _ = stdout.flush();
         drop(stdout);
         let exit_with_stdin = args.exit_with_stdin;
@@ -244,6 +284,11 @@ fn main() -> ExitCode {
         #[cfg(feature = "engine")]
         if let Some(engine) = kept.as_ref().and_then(|h| h.engine()) {
             engine.flush().await;
+        }
+        // The grid socket is named for this process; nothing else removes it.
+        #[cfg(unix)]
+        if let Some(endpoint) = &grid {
+            let _ = std::fs::remove_file(endpoint);
         }
         drop(kept);
         info!("stopped");
