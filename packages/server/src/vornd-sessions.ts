@@ -358,6 +358,9 @@ export class VorndSessions extends EventEmitter {
         this.states(now)
         continue
       }
+      // Its spawn waited for this connect and is not answered yet: the
+      // answer says how it went.
+      if (pty.epoch === null) continue
       // Not held: it ended, maybe while nothing here was connected. Without
       // a holder vornd cannot tell, and nothing is said until it can.
       if (!state.connected) continue

@@ -301,6 +301,18 @@ describe('the server with a stand-in vornd', () => {
     ])
   })
 
+  it('starts a session asked for while it connects, though vornd does not hold it yet', async () => {
+    const connected = sessions.connect(fake.endpoint)
+    const pty = sessions.spawn('during-connect', { argv: ['sh'], cwd: '/', env: {} }, false)
+    const exits: VorndExit[] = []
+    pty.onExit((e) => exits.push(e))
+    expect(await connected).toBe(true)
+    await until('the spawn to be answered', () => pty.pid !== 0)
+    expect(fake.made('vornd:spawn')).toHaveLength(1)
+    expect(pty.isEnded).toBe(false)
+    expect(exits).toEqual([])
+  })
+
   it('holds a signal sent before the start is answered until vornd knows the session', async () => {
     await sessions.connect(fake.endpoint)
     const pty = sessions.spawn('closed-at-once', { argv: ['sh'], cwd: '/', env: {} }, false)
