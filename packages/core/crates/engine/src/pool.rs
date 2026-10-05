@@ -22,6 +22,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use vorn_grid::{GridIn, HubOut};
+use vorn_term_proto::msg::ServerMsg;
+
 use crate::session::{Brief, Config, Input, Open, Out, Session, State, Summary};
 use crate::term::Fidelity;
 
@@ -176,6 +179,20 @@ impl Pool {
         );
     }
 
+    /// A grid client's request for session `id`. False when no such session
+    /// is open, and nothing was sent. One that leaves before the request
+    /// reaches it answers an attach with an `Error` itself, so a client
+    /// never waits on an attachment nobody holds.
+    pub fn grid(&self, id: &str, m: GridIn) -> bool {
+        self.ask(
+            id,
+            Job::Input {
+                id: id.to_owned(),
+                input: Input::Grid(m),
+            },
+        )
+    }
+
     /// Asks session `id` for a VT snapshot, answered through the sink with
     /// `Out::Snapshot(token, ..)` in order with the session's other outputs.
     /// False when no such session is open, and nothing will answer.
@@ -300,7 +317,11 @@ impl Worker {
     fn run(mut self, rx: Receiver<Job>) {
         let mut last_tick = Instant::now();
         loop {
-            let job = match rx.recv_timeout(TICK) {
+            // Wake for the earliest grid frame due, or the tick.
+            let wait = self.next_frame().map_or(TICK, |d| {
+                d.saturating_duration_since(Instant::now()).min(TICK)
+            });
+            let job = match rx.recv_timeout(wait) {
                 Ok(job) => Some(job),
                 Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => return,
@@ -329,6 +350,19 @@ impl Worker {
                         } else {
                             self.lost(&id);
                         }
+                    } else if let Input::Grid(GridIn::Attach { peer, .. }) = input {
+                        // The session left after the attach was sent.
+                        let msg = ServerMsg::Error {
+                            code: 404,
+                            message: format!("no session {id}"),
+                        };
+                        (self.sink)(
+                            &id,
+                            Out::Grid(HubOut::Send {
+                                conn: peer.conn,
+                                msg,
+                            }),
+                        );
                     }
                 }
                 Some(Job::Close { id }) => {
@@ -377,6 +411,7 @@ impl Worker {
                 }
                 None => {}
             }
+            self.frames(Instant::now());
             if now.duration_since(last_tick) >= TICK {
                 last_tick = now;
                 let ids: Vec<String> = self.sessions.keys().cloned().collect();
@@ -389,6 +424,30 @@ impl Worker {
                             self.lost(&id);
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// When the earliest grid frame on this worker is due.
+    fn next_frame(&self) -> Option<Instant> {
+        self.sessions.values().filter_map(Session::due).min()
+    }
+
+    /// Cuts the grid frames due by `now`.
+    fn frames(&mut self, now: Instant) {
+        let due: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|(_, s)| s.due().is_some_and(|d| d <= now))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in due {
+            if let Some(mut s) = self.sessions.remove(&id) {
+                if self.guarded(&id, |out| s.frame(now, out)).is_some() {
+                    self.sessions.insert(id.clone(), s);
+                } else {
+                    self.lost(&id);
                 }
             }
         }

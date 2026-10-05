@@ -1,0 +1,12 @@
+[package]
+name = "vorn-grid-client"
+version = "0.7.5"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "A headless grid client: vorn-term-mirror behind grid mode's framing, with no terminal and no I/O of its own"
+
+[dependencies]
+vorn-term-mirror = { path = "../term-mirror" }
+vorn-term-proto = { path = "../term-proto" }

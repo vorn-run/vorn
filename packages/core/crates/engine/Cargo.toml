@@ -11,6 +11,7 @@ description = "vornd's session engine: one actor per session on a fixed worker p
 crc32fast = "1"
 libghostty-vt = { version = "0.2.2", default-features = false }
 vorn-analysis = { path = "../analysis" }
+vorn-grid = { path = "../grid" }
 vorn-pipeline = { path = "../pipeline" }
 vorn-screen = { path = "../screen" }
 vorn-sessiond-wire = { path = "../sessiond-wire" }
@@ -19,5 +20,7 @@ vorn-term-proto = { path = "../term-proto" }
 [dev-dependencies]
 postcard = { version = "1", default-features = false, features = ["use-std"] }
 tempfile = "3"
+vorn-grid-client = { path = "../grid-client" }
 vorn-recovery = { path = "../recovery" }
 vorn-sessiond = { path = "../sessiond" }
+vorn-term-mirror = { path = "../term-mirror" }

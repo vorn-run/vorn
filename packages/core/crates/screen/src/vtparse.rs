@@ -79,6 +79,35 @@ pub(crate) enum Event<'a> {
     },
 }
 
+/// Whether a printed codepoint may join the cell before it (a combining
+/// mark, a joiner, a variation selector, an emoji modifier) instead of
+/// taking a cell of its own: a cheap filter before asking Ghostty's width
+/// tables. Conservative: everything from U+0300 on except the blocks
+/// terminal programs print most (box drawing, braille spinners, symbols,
+/// CJK, Hangul syllables, emoji pictographs, private use), none of which
+/// holds a zero-width character.
+pub(crate) fn may_join(cp: u32) -> bool {
+    if cp < 0x300 {
+        return false;
+    }
+    let plain = matches!(cp,
+        0x2010..=0x2027
+            | 0x2030..=0x205e
+            | 0x2070..=0x20cf
+            | 0x2100..=0x2bff
+            | 0x2e00..=0x2e7f
+            | 0x3000..=0x3029
+            | 0x3030..=0x3098
+            | 0x309b..=0x9fff
+            | 0xac00..=0xd7a3
+            | 0xe000..=0xf8ff
+            | 0xff00..=0xffef
+            | 0x1f000..=0x1f3fa
+            | 0x1f400..=0x1faff
+            | 0x20000..=0x3ffff);
+    !plain
+}
+
 /// The last few codepoints printed, newest last, for the caller's model of
 /// what REP repeats.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -132,7 +161,16 @@ pub(crate) struct Parser {
     pub(crate) printed: u64,
     /// The highest codepoint printed since the caller last reset it.
     pub(crate) printed_max: u32,
+    /// Distinct codepoints printed since the caller last took them that may
+    /// have joined the cell before them rather than taking one of their own
+    /// (see [`may_join`]), at most [`JOIN_CANDIDATES`]...
+    pub(crate) join_candidates: Vec<u32>,
+    /// ...and whether more were printed than that.
+    pub(crate) join_overflow: bool,
 }
+
+/// How many distinct join candidates are kept between two takes.
+pub(crate) const JOIN_CANDIDATES: usize = 16;
 
 impl Default for Parser {
     fn default() -> Self {
@@ -150,6 +188,8 @@ impl Default for Parser {
             recent: Recent::default(),
             printed: 0,
             printed_max: 0,
+            join_candidates: Vec::new(),
+            join_overflow: false,
         }
     }
 }
@@ -238,6 +278,13 @@ impl Parser {
         self.recent.push(cp);
         self.printed += 1;
         self.printed_max = self.printed_max.max(cp);
+        if may_join(cp) && !self.join_candidates.contains(&cp) {
+            if self.join_candidates.len() < JOIN_CANDIDATES {
+                self.join_candidates.push(cp);
+            } else {
+                self.join_overflow = true;
+            }
+        }
     }
 
     fn enter_escape(&mut self) {

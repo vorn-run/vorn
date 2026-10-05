@@ -38,6 +38,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 [dev-dependencies]
 libghostty-vt = { version = "0.2.2", default-features = false }
 tempfile = "3"
+vorn-grid-client = { path = "../grid-client" }
 vorn-pipeline = { path = "../pipeline" }
 vorn-recovery = { path = "../recovery" }
 vorn-screen = { path = "../screen" }
