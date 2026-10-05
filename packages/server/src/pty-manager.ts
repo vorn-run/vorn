@@ -188,6 +188,11 @@ class PtyManager extends EventEmitter {
     return held instanceof VorndProcess ? held.ready : Promise.resolve()
   }
 
+  /** Every session whose process vornd holds. */
+  backendHeldIds(): string[] {
+    return [...this.backendHeld]
+  }
+
   /** Whether vornd holds this session's process, and streams it to the clients connected through it. */
   isBackendHeld(id: string): boolean {
     return this.backendHeld.has(id)
@@ -1275,8 +1280,11 @@ class PtyManager extends EventEmitter {
     })
 
     ptyProcess.onExit(({ exitCode }) => {
-      // Not while a newer process has taken the id over (a resume).
-      if (this.ptys.get(id) === ptyProcess || !this.ptys.has(id)) this.backendHeld.delete(id)
+      // Not while a newer process has taken the id over (a resume). Let go of
+      // only after the last bytes and the exit below have gone out: vornd
+      // streamed both to its own clients already, and while the id is held
+      // they are not sent to those clients a second time.
+      const releaseHeld = this.ptys.get(id) === ptyProcess || !this.ptys.has(id)
       // Whatever is buffered is the last thing this terminal ever printed.
       this.drainBuffer(id)
       this.clearBuffer(id)
@@ -1317,6 +1325,7 @@ class PtyManager extends EventEmitter {
         }
       }
       this.emit('client-message', IPC.TERMINAL_EXIT, { id, exitCode })
+      if (releaseHeld) this.backendHeld.delete(id)
     })
   }
 
@@ -1664,12 +1673,11 @@ class PtyManager extends EventEmitter {
    * Piped agents are `headless-manager`'s; they are skipped here.
    */
   adoptBackend(listing: Listing): TerminalSession[] {
-    const listed = new Map(listing.sessions.map((s) => [s.id, s]))
-    const ended = new Map(listing.ended.map((e) => [e.id, e.exited]))
-    for (const [id, held] of this.ptys) {
-      if (!(held instanceof VorndProcess) || !held.started || listed.has(id)) continue
-      log.warn({ id }, '[pty] vornd no longer holds this session; it has ended')
-      held.lost(ended.get(id) ?? null)
+    // With no session holder connected, vornd's list says nothing about what
+    // is running; the next one it connects to will.
+    if (!listing.connected) return []
+    for (const held of [...this.ptys.values()]) {
+      if (held instanceof VorndProcess) held.reconcile(listing)
     }
     const adopted: TerminalSession[] = []
     for (const found of listing.sessions) {

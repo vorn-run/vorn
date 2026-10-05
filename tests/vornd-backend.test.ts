@@ -341,6 +341,8 @@ describe('output, resizes and the exit', () => {
   it('moves the session to a size recorded in its log, once', async () => {
     const session = ptyManager.createShellPty('/tmp')
     ptyManager.resizePty(session.id, 120, 40)
+    // Held until the holder has the session, then sent.
+    await new Promise((r) => setImmediate(r))
     expect(lastPty().resizes).toEqual([[120, 40]])
     expect(ptyManager.getActiveSessions()[0]).toMatchObject({ cols: 120, rows: 40 })
     // The same size again goes nowhere.
@@ -640,5 +642,125 @@ describe('clients connected through vornd', () => {
       clientRegistry.remove(viaVornd as never)
       clientRegistry.remove(direct as never)
     }
+  })
+})
+
+describe('the review fixes', () => {
+  it('sends a terminal\u2019s last bytes and its exit to clients through vornd once, from vornd', async () => {
+    const viaVornd = new (class extends EventEmitter {
+      OPEN = 1
+      readyState = 1
+      bufferedAmount = 0
+      sent: string[] = []
+      send(m: string): void {
+        this.sent.push(m)
+      }
+    })()
+    clientRegistry.add(viaVornd as never, undefined, true)
+    const forward = (channel: string, payload: unknown): void =>
+      clientRegistry.broadcast(channel, payload, (payload as { id?: string }).id)
+    ptyManager.on('client-message', forward)
+    try {
+      const session = ptyManager.createShellPty('/tmp')
+      // The first small read goes at once; the second is still held when the
+      // program exits, and is drained by the exit.
+      lastPty().emitData('a')
+      lastPty().emitData('bye\r\n')
+      lastPty().emitExit(0)
+      await afterFlush()
+      expect(dataOf(session.id)).toBe('abye\r\n')
+      const mine = viaVornd.sent.filter((m) => m.includes(session.id))
+      expect(mine).toEqual([])
+    } finally {
+      ptyManager.off('client-message', forward)
+      clientRegistry.remove(viaVornd as never)
+    }
+  })
+
+  it('tells clients through vornd to attach again once vornd holds the sessions', async () => {
+    const client = (): EventEmitter & { sent: string[] } =>
+      Object.assign(new EventEmitter(), {
+        OPEN: 1,
+        readyState: 1,
+        bufferedAmount: 0,
+        sent: [] as string[],
+        send(this: { sent: string[] }, m: string) {
+          this.sent.push(m)
+        }
+      })
+    const viaVornd = client()
+    const direct = client()
+    clientRegistry.add(viaVornd as never, undefined, true)
+    clientRegistry.add(direct as never)
+    try {
+      const session = ptyManager.createShellPty('/tmp')
+      await new Promise((r) => setImmediate(r))
+      vornd.unlink()
+      vornd.link()
+      await until('the resync', () => viaVornd.sent.length > 0)
+      const mine = viaVornd.sent.map((m) => JSON.parse(m)).filter((m) => m.params.id === session.id)
+      expect(mine).toEqual([
+        { jsonrpc: '2.0', method: 'terminal:resync', params: { id: session.id, reason: 'vornd' } }
+      ])
+      expect(direct.sent).toEqual([])
+    } finally {
+      clientRegistry.remove(viaVornd as never)
+      clientRegistry.remove(direct as never)
+    }
+  })
+
+  it('ends a terminal whose session holder died once vornd connects to another', async () => {
+    const session = ptyManager.createShellPty('/tmp')
+    await new Promise((r) => setImmediate(r))
+    vornd.drop(session.id)
+    vornd.heldChanged()
+    await until('the exit', () => on(IPC.TERMINAL_EXIT).length === 1)
+    expect(ptyManager.hasLivePty(session.id)).toBe(false)
+  })
+
+  it('sends a size asked for while nothing was linked once a vornd links', async () => {
+    const session = ptyManager.createShellPty('/tmp')
+    await new Promise((r) => setImmediate(r))
+    const fake = lastPty()
+    vornd.unlink()
+    ptyManager.resizePty(session.id, 120, 40)
+    expect(fake.resizes).toEqual([])
+    vornd.link()
+    await until('the resize', () => fake.resizes.length === 1)
+    expect(fake.resizes).toEqual([[120, 40]])
+    expect(ptyManager.getActiveSessions().find((s) => s.id === session.id)).toMatchObject({
+      cols: 120,
+      rows: 40
+    })
+  })
+
+  it('keeps a session whose spawn answer was lost with the link, and takes it at the next link', async () => {
+    vornd.dropLinkOnSpawn = true
+    const session = ptyManager.createShellPty('/tmp')
+    await ptyManager.whenStarted(session.id)
+    expect(on(IPC.TERMINAL_EXIT)).toEqual([])
+    const fake = lastPty()
+    ptyManager.writeToPty(session.id, 'ls\r')
+    vornd.link()
+    await until('the input', () => fake.written.length > 0)
+    expect(fake.written).toEqual(['ls\r'])
+    // The same session, not a second one recovered beside it.
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    expect(adopted).toEqual([])
+    expect(ptyManager.getActiveSessions().map((s) => s.id)).toEqual([session.id])
+  })
+
+  it('spawns again when the lost spawn never reached the holder', async () => {
+    vornd.dropLinkOnSpawn = true
+    const session = ptyManager.createShellPty('/tmp')
+    await ptyManager.whenStarted(session.id)
+    vornd.drop(session.id)
+    vornd.link()
+    await until('a second spawn', () => spawnMock.mock.calls.length === 2)
+    await until(
+      'it to start',
+      () => ptyManager.hasLivePty(session.id) && vornd.sessions.has(session.id)
+    )
+    expect(on(IPC.TERMINAL_EXIT)).toEqual([])
   })
 })
