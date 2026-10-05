@@ -1,4 +1,3 @@
-import * as pty from 'node-pty'
 import crypto from 'node:crypto'
 import os from 'node:os'
 import fs from 'node:fs'
@@ -14,7 +13,6 @@ import {
   CreateTerminalPayload,
   IPC,
   TerminalSession,
-  RecordCursor,
   RemoteHost,
   supportsSessionIdPinning,
   supportsExactSessionResume
@@ -41,30 +39,7 @@ import {
 
 import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
-import { nativeCore, NATIVE_STATUS, type NativeAnalyzer } from './native-core'
-import { appendScrollback, clearScrollback } from './terminal-scrollback'
-import { holdOutput, takeOutput, MAX_FLUSH_UNITS, type HeldOutput } from './output-buffer'
-import {
-  createScreen,
-  hasScreen,
-  clearScreen,
-  setCwdReporter,
-  setBellReporter
-} from './terminal-screen'
-import type { ManagedPty } from './handoff/adopted-pty'
-import type { AdoptedPane } from './handoff/heir'
-import type { DonorPane } from './handoff/donor'
-import {
-  startHistory,
-  recordOutput,
-  recordResize,
-  noteOutput,
-  noteResize,
-  pipelineLost,
-  stopHistory
-} from './history/writer'
-import { pipelineFor } from './core-pipeline'
-import type { RecordHeader } from './history/log'
+import { NATIVE_STATUS } from './native-core'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 import { isHandingOver, HANDOVER_MESSAGE } from './handoff/donor'
 import { vorndSessions, VorndPty, type HeldSession, type VorndExit } from './vornd-sessions'
@@ -119,19 +94,10 @@ type WorktreeSessionCounter = (
   excludeId?: string
 ) => { count: number; sessionIds: string[] }
 
-/**
- * node-pty exposes `fd` as a getter its typings never declared, so this asks past
- * the type. Both kinds of pty answer it, because a handoff must work twice.
- */
-function masterFd(held: ManagedPty): number | null {
-  const fd = (held as unknown as { fd?: unknown }).fd
-  return typeof fd === 'number' && Number.isInteger(fd) && fd >= 0 ? fd : null
-}
-
 class PtyManager extends EventEmitter {
   /** Recorded HEAD per session, refreshed by the save loop. */
   readonly heads = new HeadRefresh(getGitHead)
-  private ptys = new Map<string, ManagedPty>()
+  private ptys = new Map<string, VorndPty>()
   private sessions = new Map<string, TerminalSession>()
   /**
    * PTYs an extension's pane is drawing, which are not sessions.
@@ -146,27 +112,7 @@ class PtyManager extends EventEmitter {
   private normalizedPaths = new Map<string, string>()
   private agentCommands: Record<AiAgentType, AgentCommandConfig> = { ...DEFAULT_AGENT_COMMANDS }
   private remoteHosts: RemoteHost[] = []
-  private dataBuffers = new Map<string, HeldOutput>()
-  private flushTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private tempKeyPaths = new Map<string, string>()
-  /**
-   * Each session's output analysis on the Rust core: agent status, and the
-   * output lines agents read back. Created on its first output.
-   */
-  private analyzers = new Map<string, NativeAnalyzer>()
-  /** Sessions with no analysis: the core is missing, or its analyzer failed for them. */
-  private unanalyzed = new Set<string>()
-  /** Raw chunks since the last native analysis, joined (a rope, so O(1) per chunk). */
-  private pendingAnalysis = new Map<string, HeldOutput>()
-  /**
-   * Where in a pending batch the last read that switched bracketed paste ends,
-   * in units from its front. Status is taken per read: a read with the switch
-   * sets it, and the reads after it fall back to the patterns. A batch
-   * analyzed whole would let the switch win over every read that followed it,
-   * so a batch is never taken past this point in one call.
-   */
-  private analysisSignalEnd = new Map<string, number>()
-  private analysisTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private sessionOrder: string[] = []
   private headlessWorktreeCounter?: WorktreeSessionCounter
@@ -189,13 +135,6 @@ class PtyManager extends EventEmitter {
   constructor() {
     super()
     setImmediate(() => this.cleanStaleTempKeys())
-    // Told when a shell moves, rather than checking after every flush. The
-    // report comes from inside xterm's parser, which is the only moment the new
-    // directory is actually known -- a flush ends before the bytes it delivered
-    // have been parsed, so anything reading there reads the previous value.
-    setCwdReporter((id, cwd) => this.noteShellCwd(id, cwd))
-    // A terminal on a core thread finds its bells after the flush has gone.
-    setBellReporter((id) => this.emit('client-message', IPC.TERMINAL_BELL, { id }))
   }
 
   /**
@@ -205,8 +144,8 @@ class PtyManager extends EventEmitter {
    * put somebody back where they started rather than where they were. This is
    * the record that gets persisted and the one a restored shell is offered.
    *
-   * Runs inside the parser, so it stays a map lookup and an event, and the save
-   * it triggers is debounced -- a script running `cd` in a loop costs one write
+   * Told by vornd as the shell reports it, so it stays a map lookup and an
+   * event, and the save it triggers is debounced -- a script running `cd` in a loop costs one write
    * rather than hundreds.
    */
   private noteShellCwd(id: string, cwd: string): void {
@@ -458,7 +397,6 @@ class PtyManager extends EventEmitter {
 
     setTimeout(() => ptyProcess.write(launchLine + '\r'), 300)
 
-    this.wireProcess(id, ptyProcess)
     this.ptys.set(id, ptyProcess)
 
     const session: TerminalSession = {
@@ -622,7 +560,6 @@ class PtyManager extends EventEmitter {
     })
 
     // Forward all data to the renderer from the start
-    this.wireProcess(id, ptyProcess)
     this.ptys.set(id, ptyProcess)
 
     // Clean up the prompt listener after connection or timeout
@@ -687,7 +624,6 @@ class PtyManager extends EventEmitter {
         VORN_SESSION_ID: id
       }
     })
-    this.wireProcess(id, ptyProcess)
     this.ptys.set(id, ptyProcess)
 
     const shellCount =
@@ -732,7 +668,6 @@ class PtyManager extends EventEmitter {
       cwd: params.cwd,
       env: { ...getSafeEnv(), ...params.env, VORN_SESSION_ID: id }
     })
-    this.wireProcess(id, ptyProcess)
     this.ptys.set(id, ptyProcess)
 
     const session: TerminalSession = {
@@ -755,11 +690,11 @@ class PtyManager extends EventEmitter {
   }
 
   /**
-   * Start a session's program: in vornd when the Native daemon switch is on
-   * and vornd is connected, so it outlives this server, else on a PTY here.
+   * Start a session's program in vornd, which keeps it in its session holder so
+   * it outlives this server.
    *
-   * @param watched Whether this server reads the output of a session in vornd.
-   *   Only what answers from the output needs to: a remote login.
+   * @param watched Whether this server reads the session's output. Only what
+   *   answers from the output needs to: a remote login.
    */
   private startProcess(
     id: string,
@@ -767,34 +702,15 @@ class PtyManager extends EventEmitter {
     args: string[] | string,
     opts: { cwd: string; env: Record<string, string> },
     watched = false
-  ): ManagedPty {
-    if (vorndSessions.inUse()) {
-      const argv = [file, ...(typeof args === 'string' ? [args] : args)]
-      // vornd starts the program with exactly this environment, so it carries
-      // the TERM node-pty would have set from its `name` below.
-      const env = process.platform === 'win32' ? opts.env : { ...opts.env, TERM: PTY_TERM }
-      const spec = { argv, cwd: opts.cwd, env, cols: INITIAL_COLS, rows: INITIAL_ROWS }
-      return vorndSessions.spawn(id, spec, watched)
-    }
-    if (configManager.loadConfig().defaults.experimental?.vornd === true) {
-      log.warn(
-        { id },
-        '[pty] vornd is not connected; this terminal starts here and ends with the server'
-      )
-    }
-    return pty.spawn(file, args, {
-      name: PTY_TERM,
-      cols: INITIAL_COLS,
-      rows: INITIAL_ROWS,
-      cwd: opts.cwd,
-      env: opts.env
-    })
-  }
-
-  /** What a new session's program reports, wherever it runs. */
-  private wireProcess(id: string, held: ManagedPty): void {
-    if (held instanceof VorndPty) this.setupVorndEvents(id, held)
-    else this.setupPtyEvents(id, held, INITIAL_COLS, INITIAL_ROWS)
+  ): VorndPty {
+    const argv = [file, ...(typeof args === 'string' ? [args] : args)]
+    // vornd starts the program with exactly this environment, so it carries
+    // the terminal type programs are told they run in.
+    const env = process.platform === 'win32' ? opts.env : { ...opts.env, TERM: PTY_TERM }
+    const spec = { argv, cwd: opts.cwd, env, cols: INITIAL_COLS, rows: INITIAL_ROWS }
+    const program = vorndSessions.spawn(id, spec, watched)
+    this.setupVorndEvents(id, program)
+    return program
   }
 
   /** The status vornd last reported for each of its sessions. */
@@ -849,428 +765,17 @@ class PtyManager extends EventEmitter {
     this.ptys.set(session.id, program)
   }
 
-  /** Whether vornd holds this session's program. */
-  isInVornd(id: string): boolean {
-    return this.ptys.get(id) instanceof VorndPty
-  }
-
   /** Whether this PTY is an extension's pane rather than a session someone started. */
   isExtensionPty(id: string): boolean {
     return this.extensionPtys.has(id)
   }
 
-  /** How long a stream is held so its many small reads go out as one flush. */
-  private static readonly BUFFER_FLUSH_MS = 8
-  /** A read this small after a quiet spell is a keystroke's echo; a TUI's repaint is never this small. */
-  private static readonly ECHO_MAX_BYTES = 64
-
-  /**
-   * Put bytes into a session's output as though the process had written them.
-   *
-   * There is exactly one caller and one reason: a resumed session hands a new
-   * process a terminal the previous one was still using, and something has to
-   * sit between the two runs saying so. Doing it in the client cannot work --
-   * the client is not what orders these bytes. A cold pane has not mounted when
-   * the resume starts, so it has no terminal to reset yet, and the screen it
-   * replays is written when it finally does mount, by which time the new
-   * process has been streaming for a second. The two interleave and what
-   * arrives is both frames at once with the escapes showing.
-   *
-   * Through `bufferData` rather than beside it, so this takes a sequence number,
-   * a place in the scrollback and a line in the history like any other output.
-   * That is what makes it arrive in the right order for a client that attaches
-   * in a minute as well as for the one watching now.
-   */
-  injectOutput(id: string, data: string): void {
-    this.bufferData(id, data)
-  }
-
-  private bufferData(id: string, data: string): void {
-    const existing = this.dataBuffers.get(id)
-    const held = holdOutput(existing, data)
-    if (!existing) this.dataBuffers.set(id, held)
-    // A full flush's worth goes out on the next turn rather than waiting out
-    // the timer: holding more would only make that flush longer.
-    if (held.units >= MAX_FLUSH_UNITS) this.queueDrain(id)
-    // A pending timer means a stream is in flight, and this read joins it.
-    if (this.flushTimers.has(id)) return
-
-    // An echo held for company that never comes is what a keystroke feels as lag.
-    if (!existing && Buffer.byteLength(data) <= PtyManager.ECHO_MAX_BYTES) this.flushBuffer(id)
-    this.armFlush(id)
-  }
-
-  /**
-   * Sessions with more than one flush's worth held, served one flush per turn.
-   *
-   * One queue for every session, and one flush per turn of the event loop,
-   * rather than draining each session to empty or each on its own
-   * `setImmediate`. Immediates queued together all run in the same turn, so a
-   * burst across eight terminals would hold the loop for eight flushes at once;
-   * this holds it for one, and lets timers -- a keystroke's echo, an RPC reply
-   * -- in between. Round-robin, so a session printing a gigabyte does not
-   * starve one printing a line.
-   */
-  private drainQueue = new Set<string>()
-  /** The same, for native analysis that a burst left more than 64 KB of. */
-  private analysisQueue = new Set<string>()
-  private drainScheduled = false
-  /** Whether the next drain turn is analysis, when both are waiting. */
-  private analyseNext = false
-
-  private queueDrain(id: string): void {
-    this.drainQueue.add(id)
-    this.scheduleDrain()
-  }
-
-  private queueAnalysis(id: string): void {
-    this.analysisQueue.add(id)
-    this.scheduleDrain()
-  }
-
-  private scheduleDrain(): void {
-    if (this.drainScheduled) return
-    this.drainScheduled = true
-    setImmediate(() => this.drainOne())
-  }
-
-  /**
-   * One flush's worth of flushing and one of analysis, then back to the loop.
-   *
-   * By size rather than by count: small flushes from many quiet sessions go
-   * out together in one turn, and one large one goes out alone.
-   */
-  private drainOne(): void {
-    this.drainScheduled = false
-    // Flushing and analysing take turns rather than sharing one: each is up to
-    // a budget's worth of work, and the two together in one turn were the
-    // longest the loop went without answering anything else.
-    const analyse = this.analysisQueue.size > 0 && (this.analyseNext || !this.drainQueue.size)
-    this.analyseNext = !analyse
-    let budget = MAX_FLUSH_UNITS
-    while (budget > 0) {
-      const id = first(analyse ? this.analysisQueue : this.drainQueue)
-      if (id === undefined) break
-      if (analyse) {
-        this.analysisQueue.delete(id)
-        budget -= this.flushAnalysis(id, budget)
-      } else {
-        this.drainQueue.delete(id)
-        // Flushing re-queues it at the back if a full flush's worth is still
-        // held, or if the budget cut it short.
-        budget -= this.flushBuffer(id, budget)
-      }
-    }
-    if (this.drainQueue.size || this.analysisQueue.size) this.scheduleDrain()
-  }
-
-  /** The hold, re-armed while a stream keeps coming so quiet is the timer lapsing with nothing to send. */
-  private armFlush(id: string): void {
-    this.flushTimers.set(
-      id,
-      setTimeout(() => {
-        this.flushTimers.delete(id)
-        if (!this.dataBuffers.has(id)) return
-        // Through the shared queue rather than flushed here: every session's
-        // timer can fire in the same turn, and eight flushes at once is the
-        // stall the cap exists to prevent.
-        this.queueDrain(id)
-        this.armFlush(id)
-      }, PtyManager.BUFFER_FLUSH_MS)
-    )
-  }
-
-  /**
-   * How many flushes each session has had.
-   *
-   * The number a client uses to tell what it already has. A pane attaching
-   * asks for the scrollback and is told which flush it reflects; every
-   * `terminal:data` carries the same counter, so anything at or below that
-   * number is already in what it was handed and anything above it is not.
-   *
-   * This works only because `flushBuffer` below is one synchronous block. The
-   * counter moves and the buffer it describes is appended in the same tick, with
-   * nothing awaited between them, so a reader that takes both in one turn cannot
-   * catch them disagreeing. **Introduce an `await` in there and this silently
-   * stops being true**, and the symptom is a terminal that duplicates or loses a
-   * few hundred milliseconds of output on attach.
-   */
-  private flushSeq = new Map<string, number>()
-
-  /** What the last flush of this session was numbered. */
-  lastFlushSeq(id: string): number {
-    return this.flushSeq.get(id) ?? 0
-  }
-
-  /**
-   * Where each session's record log has reached: the first record and byte
-   * not yet given out. The Session Recovery Contract's cursor, assigned here
-   * because this is the one place that sees output and resizes in the order
-   * they happened. Moves in the same synchronous block as `flushSeq`, so an
-   * attach that reads both in one turn gets numbers that agree.
-   */
-  private cursors = new Map<string, RecordCursor>()
-
-  /** The cursor after this session's last record, or null when it has none. */
-  recordCursor(id: string): RecordCursor | null {
-    const at = this.cursors.get(id)
-    return at ? { ...at } : null
-  }
-
-  /**
-   * Start a session's record log again, in an epoch of its own.
-   *
-   * Random rather than counted, so it cannot repeat across server restarts
-   * without anything persisted: a cursor from a previous run of this id names
-   * nothing in this one, and comparing epochs is how a reader finds that out.
-   */
-  private openRecords(id: string): RecordCursor {
-    const at = { epoch: crypto.randomInt(1, 0xffffffff), nextRseq: 0, nextOffset: 0 }
-    this.cursors.set(id, at)
-    return { ...at }
-  }
-
-  /** Number the next record, `bytes` long, and move the cursor past it. */
-  private nextRecord(id: string, bytes: number): RecordHeader {
-    const at = this.cursors.get(id) ?? this.openRecords(id)
-    const header = { rseq: at.nextRseq, startOffset: at.nextOffset }
-    at.nextRseq += 1
-    at.nextOffset += bytes
-    return header
-  }
-
-  /**
-   * Send up to one flush's worth of what is held, or `cap` when a drain turn
-   * has less than that left, and say how much that was.
-   */
-  private flushBuffer(id: string, cap = MAX_FLUSH_UNITS): number {
-    const held = this.dataBuffers.get(id)
-    if (!held) return 0
-    const data = takeOutput(held, Math.min(cap, MAX_FLUSH_UNITS))
-    if (held.units === 0) this.dataBuffers.delete(id)
-    // Cut short by the turn's budget, it goes on in the next turn rather than
-    // waiting out the timer.
-    else if (held.units >= MAX_FLUSH_UNITS || cap < MAX_FLUSH_UNITS) this.queueDrain(id)
-    if (data) {
-      const seq = this.lastFlushSeq(id) + 1
-      this.flushSeq.set(id, seq)
-
-      // Clients first, always. What follows models the screen for nobody who is
-      // waiting; this line is a person watching their terminal, and it must not
-      // be behind anything that can fail or stall.
-      this.emit('client-message', IPC.TERMINAL_DATA, { id, data, seq })
-
-      // Fed from here rather than from `onData` for two reasons. `term.write`
-      // queues a macrotask per call and node-pty emits a few bytes at a time
-      // while somebody types, so this is one queued write per session per flush
-      // instead of one per keystroke. And it puts the model in step with the
-      // clients rather than ahead of them -- fed from `onData`, a screen read
-      // mid-flush would describe something nobody has seen yet.
-      // All three from here, on the same bytes, in one place.
-      //
-      // `appendScrollback` used to sit on `onData` instead, and that was not
-      // merely inconsistent -- it put the byte buffer ahead of the screen model
-      // by up to one flush. A checkpoint takes both at the same instant, so it
-      // could hold bytes in its scrollback that its screen had not seen; those
-      // bytes then arrived again as log frames after it, and a restore counted
-      // them twice. Fed from one point they cannot disagree.
-      const bytes = Buffer.byteLength(data, 'utf-8')
-      const at = this.nextRecord(id, bytes)
-      const pipeline = pipelineFor(id)
-      if (pipeline) {
-        // All three in one hand-off to the terminal's thread, which parses,
-        // keeps and frames them there, in this order with every other flush.
-        // Its bell, if it rings one, comes through the reporter.
-        try {
-          pipeline.feed(data, noteOutput(id, at, bytes) ? at : null)
-        } catch (err) {
-          log.warn({ err, id }, '[core] a terminal thread stopped; dropping it')
-          pipelineLost(id)
-          clearScreen(id)
-        }
-        return data.length
-      }
-      // No pipeline: no core, or its thread stopped. The scrollback and the
-      // history are kept here instead, with no screen model.
-      appendScrollback(id, data)
-      recordOutput(id, at, data)
-
-      // The bell, said out loud rather than left for whoever happens to be
-      // attached. A client only sees bytes for terminals it has opened, so a
-      // notification that depended on that was a notification you got for the
-      // sessions you were already looking at -- and missed for the one ringing
-      // out of view, which is the only one worth interrupting anybody for.
-      //
-      // On the raw bytes, before any stripping: BEL is exactly what `stripAnsi`
-      // exists to remove. Here rather than in `appendOutput`, which returns
-      // early for a plain shell -- a shell rings too.
-      //
-      // With a pipeline, its screen model tells a bell from the BEL that ends
-      // every OSC title an agent sets; without one, any 0x07 counts.
-      if (data.includes('\x07')) {
-        this.emit('client-message', IPC.TERMINAL_BELL, { id })
-      }
-    }
-    return data.length
-  }
-
-  private clearBuffer(id: string): void {
-    const timer = this.flushTimers.get(id)
-    if (timer) clearTimeout(timer)
-    this.flushTimers.delete(id)
-    this.dataBuffers.delete(id)
-    this.drainQueue.delete(id)
-  }
-
-  /** Push what is buffered now, without waiting out the timer that would. */
-  private drainBuffer(id: string): void {
-    const timer = this.flushTimers.get(id)
-    if (timer) clearTimeout(timer)
-    // Forgotten as well as cleared: a timer left in the map reads as a stream in flight, and every read after it would wait for a flush that never comes.
-    this.flushTimers.delete(id)
-    this.drainQueue.delete(id)
-    // All of it, still in flushes of at most the cap: this is the last chance.
-    while (this.dataBuffers.has(id)) this.flushBuffer(id)
-    this.drainQueue.delete(id)
-  }
-
   private clearSessionTracking(id: string): void {
-    this.analyzers.get(id)?.free()
-    this.analyzers.delete(id)
-    this.unanalyzed.delete(id)
-    this.pendingAnalysis.delete(id)
-    this.analysisSignalEnd.delete(id)
-    this.analysisQueue.delete(id)
-    const analysisTimer = this.analysisTimers.get(id)
-    if (analysisTimer) clearTimeout(analysisTimer)
-    this.analysisTimers.delete(id)
     this.extensionPtys.delete(id)
+    this.vorndStatus.delete(id)
     const idleTimer = this.idleTimers.get(id)
     if (idleTimer) clearTimeout(idleTimer)
     this.idleTimers.delete(id)
-  }
-
-  /** The session's analyzer, created on its first output, or null when it has none. */
-  private analyzerFor(id: string): NativeAnalyzer | null {
-    const existing = this.analyzers.get(id)
-    if (existing) return existing
-    if (this.unanalyzed.has(id)) return null
-    const Analyzer = nativeCore()?.Analyzer
-    try {
-      if (!Analyzer) throw new Error('the vorn core is not loaded')
-      const analyzer = new Analyzer()
-      this.analyzers.set(id, analyzer)
-      return analyzer
-    } catch (err) {
-      log.warn({ err, id }, '[core] no output analysis for this session')
-      this.unanalyzed.add(id)
-      return null
-    }
-  }
-
-  /**
-   * How analysis batches: the first read after a quiet spell is
-   * analyzed at once, so a prompt reads as waiting the moment it appears and
-   * the idle countdown starts from it. Reads that follow within this window
-   * wait and go into the core together, one call per window rather than per
-   * read, for as long as the stream keeps coming. Status during a stream lags
-   * its bytes by at most this long.
-   */
-  static readonly ANALYSIS_MS = 8
-
-  private appendOutput(id: string, data: string): void {
-    const session = this.sessions.get(id)
-    if (!session) return
-
-    // Plain shells don't run agents — skip bracketed-paste / pattern / idle analysis.
-    // They stay 'running' until the PTY exits (setupPtyEvents sets 'idle').
-    if (session.agentType === 'shell') return
-
-    if (!this.analyzerFor(id)) {
-      // No status to take, but the session still goes idle when output stops.
-      this.armIdle(id, session)
-      return
-    }
-    const pending = this.pendingAnalysis.get(id)
-    const held = holdOutput(pending, data)
-    if (!pending) this.pendingAnalysis.set(id, held)
-    if (data.includes('\x1b[?2004')) this.analysisSignalEnd.set(id, held.units)
-    if (held.units >= MAX_FLUSH_UNITS) this.queueAnalysis(id)
-    if (this.analysisTimers.has(id)) return
-    this.flushAnalysis(id)
-    this.armAnalysis(id)
-  }
-
-  /** The batching window, re-armed while reads keep arriving so quiet is it lapsing with nothing queued. */
-  private armAnalysis(id: string): void {
-    this.analysisTimers.set(
-      id,
-      setTimeout(() => {
-        this.analysisTimers.delete(id)
-        if (!this.pendingAnalysis.has(id)) return
-        this.queueAnalysis(id)
-        this.armAnalysis(id)
-      }, PtyManager.ANALYSIS_MS)
-    )
-  }
-
-  /**
-   * Analyze what is waiting for a session now, up to one flush's worth.
-   * The rest is analyzed on the turns that follow, like a capped flush, so a
-   * burst never holds the loop for more than 64 KB of analysis at once.
-   */
-  private flushAnalysis(id: string, cap = MAX_FLUSH_UNITS): number {
-    const held = this.pendingAnalysis.get(id)
-    if (held === undefined) return 0
-    const data = this.takeAnalysis(id, held, Math.min(cap, MAX_FLUSH_UNITS))
-    if (held.units === 0) this.pendingAnalysis.delete(id)
-    else this.queueAnalysis(id)
-    const session = this.sessions.get(id)
-    const analyzer = this.analyzers.get(id)
-    if (!session || !analyzer) return data.length
-    try {
-      const newStatus = NATIVE_STATUS[analyzer.append(data, session.statusSource !== 'hooks')]
-      if (newStatus && newStatus !== session.status) this.setStatus(id, newStatus)
-    } catch (err) {
-      // This can run from a timer, where a throw has nothing behind it. The
-      // session carries on without status, rather than ask a faulted analyzer
-      // again on every read.
-      log.warn({ err, id }, '[core] output analysis failed; this session has no status from here')
-      this.dropAnalysis(id)
-    }
-    // Re-armed per batch rather than per read, which is most of what analysis
-    // per read spent on a spinner.
-    this.armIdle(id, session)
-    return data.length
-  }
-
-  /** Take up to `cap` units of a pending batch, never past `analysisSignalEnd`. */
-  private takeAnalysis(id: string, held: HeldOutput, cap: number): string {
-    const end = this.analysisSignalEnd.get(id)
-    const data = takeOutput(held, end === undefined ? cap : Math.min(cap, end))
-    if (end !== undefined) {
-      if (end > data.length) this.analysisSignalEnd.set(id, end - data.length)
-      else this.analysisSignalEnd.delete(id)
-    }
-    return data
-  }
-
-  /** Stop analyzing a session whose analyzer failed, letting go of what it held. */
-  private dropAnalysis(id: string): void {
-    const analyzer = this.analyzers.get(id)
-    this.analyzers.delete(id)
-    this.unanalyzed.add(id)
-    this.pendingAnalysis.delete(id)
-    this.analysisSignalEnd.delete(id)
-    this.analysisQueue.delete(id)
-    const timer = this.analysisTimers.get(id)
-    if (timer) clearTimeout(timer)
-    this.analysisTimers.delete(id)
-    try {
-      analyzer?.free()
-    } catch {
-      // Nothing more to release.
-    }
   }
 
   // Idle timer — if no output arrives within timeout, mark idle.
@@ -1291,55 +796,10 @@ class PtyManager extends EventEmitter {
     )
   }
 
-  /**
-   * @param cols - what the PTY was spawned at, passed rather than looked up.
-   *   Every caller runs this *before* registering the session, so a lookup here
-   *   finds nothing and silently falls back -- which is invisible while all
-   *   three spawn at the same size and wrong the moment one does not.
-   */
-  private setupPtyEvents(
-    id: string,
-    ptyProcess: ManagedPty,
-    cols: number,
-    rows: number,
-    /** An inherited pty already has its screen rebuilt from disk, and `createScreen` clears. */
-    adopted = false
-  ): void {
-    if (!adopted || !hasScreen(id)) createScreen(id, cols, rows)
-    // Replaces whatever was left under this id. A recovered session that is
-    // being respawned has history describing a process that is gone.
-    startHistory(id, this.openRecords(id))
-
-    ptyProcess.onData((data: string) => {
-      this.bufferData(id, data)
-      // The one consumer that wants raw chunks rather than coalesced ones: it
-      // reassembles partial lines and scans for bracketed paste, so it has to
-      // see the stream as it arrived. Everything else is fed from the flush.
-      this.appendOutput(id, data)
-    })
-
-    ptyProcess.onExit(({ exitCode }) => this.processEnded(id, { exitCode }))
-  }
-
-  /** A session's program ended, here or in vornd. */
+  /** A session's program ended. */
   private processEnded(id: string, { exitCode, repeated }: VorndExit): void {
-    // Whatever is buffered is the last thing this terminal ever printed.
-    this.drainBuffer(id)
-    this.clearBuffer(id)
     this.deleteTempKey(id)
     this.clearSessionTracking(id)
-    this.flushSeq.delete(id)
-    this.cursors.delete(id)
-    clearScrollback(id)
-    // Beside the scrollback it belongs to: the PTY is gone and nothing will
-    // draw into it again. The session record survives so the card can show an
-    // exit code, but its history does not -- that is pre-existing, and this
-    // matches it rather than quietly deciding otherwise.
-    clearScreen(id)
-    // And the same for what was written for it. A terminal whose process has
-    // exited has nothing worth restoring -- refused during shutdown, where the
-    // PTYs are killed after the checkpoints have been written.
-    stopHistory(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
 
     this.ptys.delete(id)
@@ -1372,8 +832,6 @@ class PtyManager extends EventEmitter {
     // For non-hook sessions, user input means the session is active.
     // Hook sessions rely on hooks to transition to running (e.g. PreToolUse).
     const session = this.sessions.get(id)
-    // A prompt still waiting for analysis must not land after the input.
-    if (session && session.statusSource !== 'hooks') this.settleAnalysis(id)
     if (
       session &&
       session.statusSource !== 'hooks' &&
@@ -1384,57 +842,19 @@ class PtyManager extends EventEmitter {
   }
 
   /**
-   * Change the geometry a program is rendering against.
+   * Note the size a client fitted a session to.
    *
-   * Guarded before anything is touched. This arrives as an RPC *notification*
-   * -- fire-and-forget, no caller to catch a throw -- and `resize(0, 0)` throws
-   * inside node-pty, so a client that fitted itself to a collapsed pane would
-   * take down the handler rather than be ignored.
-   *
-   * The session record is updated alongside the PTY, with the same numbers, so
-   * anything modelling the screen can agree with what the program is actually
-   * drawing against. Two clients still fight over it -- node-pty has always been
-   * last-writer-wins here and this does not change that -- but now the record
-   * says which of them won.
+   * vornd decides a session's size from the clients watching it and answers
+   * their resizes itself; this only keeps the session record's numbers, guarded
+   * because it arrives as a fire-and-forget notification.
    */
   resizePty(id: string, cols: number, rows: number): void {
-    // An id this manager does not know is not merely a no-op below: the screen
-    // model is keyed by session id and a restored one exists without a PTY, so a
-    // cold pane fitting itself would reflow a screen nothing is drawing to.
-    if (!this.sessions.has(id)) return
-    if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols <= 0 || rows <= 0) return
-    // Bounded as well as positive, because this now outlives the process. A
-    // resize frame stores its dimensions in sixteen bits, so a client asking for
-    // seventy thousand columns would be recorded as four thousand -- a durable
-    // disagreement between what the program was rendering against and what a
-    // replay lays it out at, and one that is re-applied on every subsequent
-    // start. Nothing a terminal is actually displayed at comes near this.
-    if (cols > MAX_GEOMETRY || rows > MAX_GEOMETRY) return
-
     const session = this.sessions.get(id)
-    if (session) {
-      session.cols = cols
-      session.rows = rows
-    }
-    // vornd sizes its sessions from the clients watching them, and keeps their records.
-    if (this.isInVornd(id)) return
-    this.ptys.get(id)?.resize(cols, rows)
-    // The same numbers, so the model wraps where the program does. Not awaited:
-    // this is reached from a fire-and-forget notification, and the model drains
-    // its own queue before applying the size.
-    const at = this.nextRecord(id, 0)
-    const pipeline = pipelineFor(id)
-    if (pipeline) {
-      try {
-        pipeline.resize(cols, rows, noteResize(id, at) ? at : null)
-      } catch (err) {
-        log.warn({ err, id }, '[core] a terminal thread stopped; dropping it')
-        pipelineLost(id)
-        clearScreen(id)
-      }
-      return
-    }
-    recordResize(id, at, cols, rows)
+    if (!session) return
+    if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols <= 0 || rows <= 0) return
+    if (cols > MAX_GEOMETRY || rows > MAX_GEOMETRY) return
+    session.cols = cols
+    session.rows = rows
   }
 
   /**
@@ -1447,22 +867,14 @@ class PtyManager extends EventEmitter {
    * an offer to delete the worktree the agent is at that moment being resumed
    * into. Taking it removes the tree out from under a running agent.
    *
-   * It also called `stopHistory`, which queues a recursive remove of the very
-   * directory `startHistory` is about to reset a few lines later.
-   *
-   * So this releases the id and says nothing: the maps, the buffers and the
-   * screen model, which `createPty` is about to replace anyway.
+   * So this releases the id and says nothing: the maps, which `createPty` is
+   * about to replace anyway.
    */
   releaseForResume(id: string): void {
-    this.drainBuffer(id)
-    this.clearBuffer(id)
     this.sessions.delete(id)
     this.heads.forget(id)
     this.normalizedPaths.delete(id)
     this.clearSessionTracking(id)
-    this.flushSeq.delete(id)
-    this.cursors.delete(id)
-    clearScreen(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.ptys.delete(id)
   }
@@ -1489,25 +901,14 @@ class PtyManager extends EventEmitter {
   killPty(id: string): void {
     const p = this.ptys.get(id)
 
-    this.drainBuffer(id)
-    this.clearBuffer(id)
-
-    // Delete session and PTY from maps BEFORE killing so the onExit handler
-    // (setupPtyEvents) won't find them and emit a duplicate 'session-exit'.
+    // Delete session and PTY from maps BEFORE killing so the exit handler
+    // (setupVorndEvents) won't find them and emit a duplicate 'session-exit'.
     // Delete-then-check pattern: single removal point prevents races.
     const session = this.sessions.get(id)
     this.sessions.delete(id)
     this.heads.forget(id)
     this.normalizedPaths.delete(id)
     this.clearSessionTracking(id)
-    this.flushSeq.delete(id)
-    this.cursors.delete(id)
-    // Not beside a `clearScrollback`, because there is not one here -- but this
-    // path deletes the session outright, so nothing would ever feed or free the
-    // model again. A `Terminal` holds buffers; leaving it is a leak per closed
-    // session for the life of the server.
-    clearScreen(id)
-    stopHistory(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.ptys.delete(id)
 
@@ -1526,10 +927,8 @@ class PtyManager extends EventEmitter {
       }
     }
     if (p) {
-      // Defer the actual kill so the IPC response returns immediately.
-      // All state cleanup is already done above, so the renderer can proceed
-      // without waiting for the process to die (avoids UI freeze on Windows
-      // where conpty termination can block the event loop).
+      // Defer the actual kill so the IPC response returns immediately: all
+      // state cleanup is already done above.
       setImmediate(() => {
         try {
           p.kill()
@@ -1544,140 +943,15 @@ class PtyManager extends EventEmitter {
     }
   }
 
-  /**
-   * Push out whatever is sitting in the flush buffers, without waiting for their
-   * timers.
-   *
-   * For shutdown. The buffers hold up to `BUFFER_FLUSH_MS` of output, and that
-   * output is the most recent thing the terminal showed -- the part somebody is
-   * most likely to want back. `killAll` below drops it deliberately, which was
-   * right while nothing outlived the process.
-   */
-  flushPendingOutput(): void {
-    // Copied because `flushBuffer` deletes from the maps it is walking. Both,
-    // because a session can hold output between a drained flush and its timer.
-    for (const id of new Set([...this.flushTimers.keys(), ...this.dataBuffers.keys()])) {
-      this.drainBuffer(id)
-    }
-  }
-
-  /**
-   * Every live pane, or null if even one cannot be described: a handoff carrying
-   * most of the terminals looks exactly like losing the rest.
-   */
-  describeForHandoff(): DonorPane[] | null {
-    // A session in vornd is not this server's to hand over: it stays where it is.
-    const live = [...this.ptys.keys()].filter((id) => !this.isInVornd(id))
-    const ranked = [...live].sort((a, b) => {
-      const ai = this.sessionOrder.indexOf(a)
-      const bi = this.sessionOrder.indexOf(b)
-      return (ai === -1 ? Number.MAX_SAFE_INTEGER : ai) - (bi === -1 ? Number.MAX_SAFE_INTEGER : bi)
-    })
-
-    const panes: DonorPane[] = []
-    for (const id of ranked) {
-      const held = this.ptys.get(id)
-      const session = this.sessions.get(id)
-      if (!held || !session) {
-        // All-or-nothing, the same as a missing descriptor below. A pty whose
-        // record has gone is one the replacement could not be told about, and
-        // skipping it would hand over a machine quietly missing a pane.
-        log.warn({ id }, '[pty] this terminal has no session record to hand over')
-        return null
-      }
-      const fd = masterFd(held)
-      if (fd === null) {
-        log.warn({ id }, '[pty] this terminal has no descriptor to hand over')
-        return null
-      }
-      panes.push({
-        session,
-        fd,
-        pid: held.pid,
-        cols: session.cols ?? INITIAL_COLS,
-        rows: session.rows ?? INITIAL_ROWS
-      })
-    }
-    return panes
-  }
-
-  /** Stop every reader, so a handoff describes a machine that is holding still. */
-  pauseAllForHandoff(): void {
-    for (const held of this.ptys.values()) {
-      try {
-        held.pause()
-      } catch (err) {
-        log.warn({ err }, '[pty] could not pause a terminal for the handoff')
-      }
-    }
-  }
-
-  /** Start reading again, for a handoff that did not happen. */
-  resumeAllForHandoff(): void {
-    for (const held of this.ptys.values()) {
-      try {
-        held.resume()
-      } catch (err) {
-        log.warn({ err }, '[pty] could not resume a terminal after an abandoned handoff')
-      }
-    }
-  }
-
-  /** Called after `recoverHistory`, so the first byte read is the first with somewhere to go. */
-  adoptPanes(panes: AdoptedPane[]): void {
-    for (const pane of panes) {
-      const { session } = pane
-      this.sessions.set(session.id, session)
-      if (!this.sessionOrder.includes(session.id)) this.sessionOrder.push(session.id)
-      this.normalizedPaths.set(
-        session.id,
-        normalizePath(session.worktreePath || session.projectPath)
-      )
-      this.setupPtyEvents(session.id, pane.pty, pane.cols, pane.rows, true)
-      this.ptys.set(session.id, pane.pty)
-    }
-    // Every session wired before any of them reads.
-    for (const pane of panes) pane.pty.resume()
-    if (panes.length) {
-      log.info({ panes: panes.length }, '[pty] adopted terminals from the previous server')
-    }
-  }
-
+  /** Let go of every session for a server on its way out: vornd keeps them running. */
   killAll(): void {
-    // Dropped rather than flushed. `shutdown()` calls `flushPendingOutput()`
-    // ahead of this precisely because these bytes do matter now that history
-    // outlives the process -- by the time this runs they have been written, and
-    // what is left is whatever arrived in between, with nowhere to go.
-    for (const timer of this.flushTimers.values()) {
-      clearTimeout(timer)
-    }
-    this.dataBuffers.clear()
-    this.drainQueue.clear()
-    this.analysisQueue.clear()
-    this.flushTimers.clear()
-    this.flushSeq.clear()
-    this.cursors.clear()
-
-    // Clean up any remaining temp key files
     for (const sessionId of this.tempKeyPaths.keys()) {
       this.deleteTempKey(sessionId)
     }
-
-    for (const [id, p] of this.ptys) {
-      // Left running: a session in vornd outlives this server.
-      if (p instanceof VorndPty) vorndSessions.release(id)
-      else p.kill()
-      this.ptys.delete(id)
-    }
+    for (const id of this.ptys.keys()) vorndSessions.release(id)
+    this.ptys.clear()
     this.vorndStatus.clear()
     this.sessions.clear()
-    for (const analyzer of this.analyzers.values()) analyzer.free()
-    this.analyzers.clear()
-    this.unanalyzed.clear()
-    this.pendingAnalysis.clear()
-    this.analysisSignalEnd.clear()
-    for (const timer of this.analysisTimers.values()) clearTimeout(timer)
-    this.analysisTimers.clear()
     for (const timer of this.idleTimers.values()) clearTimeout(timer)
     this.idleTimers.clear()
     this.sessionOrder = []
@@ -1734,19 +1008,9 @@ class PtyManager extends EventEmitter {
     return ordered
   }
 
-  /**
-   * A status from outside the output (a hook, a permission request). Output
-   * that arrived before it is analyzed first, so a deferred batch can't land
-   * after it and overwrite it.
-   */
+  /** A status from outside the output (a hook, a permission request). */
   updateSessionStatus(id: string, status: AgentStatus): void {
-    this.settleAnalysis(id)
     this.setStatus(id, status)
-  }
-
-  /** Analyze everything that has arrived for a native session, past the cap. */
-  private settleAnalysis(id: string): void {
-    while (this.pendingAnalysis.has(id)) this.flushAnalysis(id)
   }
 
   private setStatus(id: string, status: AgentStatus): void {
@@ -1761,8 +1025,6 @@ class PtyManager extends EventEmitter {
   promoteToHookStatus(id: string): void {
     const session = this.sessions.get(id)
     if (!session) return
-    // Output from before the hook is analyzed as the session was then.
-    this.settleAnalysis(id)
 
     if (session.statusSource !== 'hooks') {
       session.statusSource = 'hooks'
@@ -1814,18 +1076,10 @@ class PtyManager extends EventEmitter {
     this.emit('client-message', IPC.SESSION_REORDERED, ids)
   }
 
-  /** `getOutput`, or vornd's model of the screen for a session it holds. */
+  /** The last `lines` lines a session printed, from vornd's model of its screen. */
   async readOutput(id: string, lines?: number): Promise<string[]> {
     if (!this.sessions.has(id)) throw new Error(`Session not found: ${id}`)
-    if (this.isInVornd(id)) return vorndSessions.readOutput(id, lines)
-    return this.getOutput(id, lines)
-  }
-
-  getOutput(id: string, lines?: number): string[] {
-    if (!this.sessions.has(id)) throw new Error(`Session not found: ${id}`)
-    // What has arrived counts, analyzed or not -- all of it, past the cap.
-    this.settleAnalysis(id)
-    return this.analyzers.get(id)?.output(lines) ?? []
+    return vorndSessions.readOutput(id, lines)
   }
 
   getActiveSessionsForWorktree(
@@ -1883,8 +1137,3 @@ class PtyManager extends EventEmitter {
 }
 
 export const ptyManager = new PtyManager()
-
-/** The oldest entry of a set, which iterates in insertion order. */
-function first<T>(set: Set<T>): T | undefined {
-  return set.values().next().value
-}

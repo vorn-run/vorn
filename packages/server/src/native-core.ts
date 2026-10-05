@@ -1,33 +1,20 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { CoreStatus, RecordCursor } from '@vornrun/shared/types'
+import type { CoreStatus } from '@vornrun/shared/types'
 
 /**
  * What `packages/core/src/lib.rs` exports: `vorn_core.node`, the Rust crate in
- * `packages/core`, which runs the terminal pipeline, output analysis and git.
+ * `packages/core`, which runs git and the native store. Terminals run in vornd.
  */
 export interface NativeCore {
-  info(): { version: string; ghostty?: string | null }
+  info(): { version: string }
   hello(name: string): string
-  /** Only present when the crate was built with libghostty-vt. */
-  parseTitle?(bytes: Buffer): string
-  /** `appendOutput`'s per-chunk analysis. Returns a `NATIVE_STATUS` code. */
-  Analyzer?: new () => NativeAnalyzer
   /**
    * Runs one git command off the event loop: answered in-process by gix when it
    * can be answered byte-for-byte as git would, otherwise by `git` on a core
    * thread. Resolves with stdout; rejects as `execFileSync` throws.
    */
   gitRun?(request: NativeGitRequest): Promise<string>
-  /**
-   * A terminal's screen, scrollback and history framing on a thread of its own.
-   * Only present when the crate was built with libghostty-vt.
-   */
-  TerminalPipeline?: new (
-    cols: number,
-    rows: number,
-    onEvent: (event: PipelineEvent) => void
-  ) => NativePipeline
   /** The store on rusqlite, which `database.ts` uses with the Native store switch on. */
   NativeStore?: NativeStoreClass
 }
@@ -49,59 +36,6 @@ export interface NativeStore {
   readonly recovered: string | null
 }
 
-/** Where a record sits in a session's stream; the history log's `RecordHeader`. */
-export interface PipelineRecord {
-  rseq: number
-  startOffset: number
-}
-
-/** What a terminal's thread noticed, delivered on the event loop. */
-export interface PipelineEvent {
-  kind: 'bell' | 'cwd' | 'screen-failed'
-  cwd?: string | null
-  error?: string | null
-}
-
-/** A terminal's screen as escape sequences, and what has to travel beside it. */
-export interface NativeSnapshot {
-  screen: string
-  cols: number
-  rows: number
-  title: string
-  cwd: string
-}
-
-/**
- * One terminal's output, handled on its own thread in the order it was given.
- * Writes return at once; a read waits for everything given before it.
- */
-export interface NativePipeline {
-  /** One flush: parsed, kept as scrollback, and framed for the history when `at` is given. */
-  feed(data: string, at?: PipelineRecord | null): void
-  /** The screen alone, for a replay: not kept as scrollback, not framed. */
-  feedScreen(data: string): void
-  resize(cols: number, rows: number, at?: PipelineRecord | null): void
-  restoreLabels(title?: string | null, cwd?: string | null): void
-  seedScrollback(data: string): void
-  /** Scrollback alone, neither parsed nor recorded. */
-  appendScrollback(data: string): void
-  serialize(): NativeSnapshot
-  scrollback(): string
-  /**
-   * A checkpoint file's body (absent once the screen model has failed) and the
-   * history frames built before it, all at the point in the stream this is
-   * called at. Resolves when the thread gets there; rejects if it stops first.
-   */
-  cut(meta: { generation: number; resume: RecordCursor; closedCleanly?: boolean }): Promise<{
-    body?: Buffer | null
-    frames: Buffer
-  }>
-  /** History frames built so far, without waiting for output still queued. */
-  takeFrames(): Buffer
-  /** Stops the thread and releases the terminal now. */
-  free(): void
-}
-
 export interface NativeGitRequest {
   /** The git executable, resolved by `gitBin`. */
   bin: string
@@ -113,16 +47,7 @@ export interface NativeGitRequest {
   maxBuffer: number
 }
 
-export interface NativeAnalyzer {
-  append(data: string, analyze: boolean): number
-  output(lines?: number): string[]
-  /** The line in progress, stripped: what callers read as the partial. */
-  partial(): string
-  /** Drops the line ring, which V8 does not see, now rather than at GC. */
-  free(): void
-}
-
-/** What `NativeAnalyzer.append` returns, in order. */
+/** The agent status codes vornd's status effects carry, in order. */
 export const NATIVE_STATUS = [null, 'running', 'waiting', 'error'] as const
 
 export interface CoreSelection {
@@ -188,8 +113,8 @@ export function loadNativeCore(
  *
  * Never throws. Every build ships the binary, so a server without one is a
  * checkout that has not run `yarn build:core`, or a broken install: it keeps
- * running, with its terminals drawn and recorded but without a screen model or
- * agent status, and says why in the log and on the settings page.
+ * running, with git on a child process and no native store, and says why in
+ * the log and on the settings page.
  */
 export function selectCore(
   options: {
@@ -241,12 +166,9 @@ export function nativeCore(): NativeCore | null {
 
 /**
  * The exports the server uses beyond `info` and `hello`, and what is missing
- * without them. A build without libghostty-vt has no `TerminalPipeline`; the
- * others are absent only from a binary older than the server.
+ * without them: absent only from a binary older than the server.
  */
 const OPTIONAL_EXPORTS: Array<[keyof NativeCore, string]> = [
-  ['TerminalPipeline', 'the screen model'],
-  ['Analyzer', 'agent status and the terminal output agents read'],
   ['gitRun', 'git off the main thread'],
   ['NativeStore', 'the native store']
 ]

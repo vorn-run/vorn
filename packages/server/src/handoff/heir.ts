@@ -1,23 +1,15 @@
-import tty from 'node:tty'
-import type { TerminalSession } from '@vornrun/shared/types'
 import log from '../logger'
-import { AdoptedPty } from './adopted-pty'
 import { readManifest, discardManifest } from './manifest'
 
 /**
- * Taking a running machine over from the server that had it.
+ * Taking over from the server this one replaces.
  *
- * Split along the commit boundary: before `imported`, only what proves the panes
- * can be taken, because giving up is still free. After `commit`, an ordinary
- * startup that happens to begin with terminals in hand.
+ * Split along the commit boundary: before `imported`, only what proves the
+ * takeover can happen, because giving up is still free. After `commit`, an
+ * ordinary startup. Every terminal is in vornd's session holder, which this
+ * server's vornd takes over, so nothing is carried across but the endpoint; a
+ * server that still holds terminals of its own keeps them.
  */
-
-export interface AdoptedPane {
-  session: TerminalSession
-  pty: AdoptedPty
-  cols: number
-  rows: number
-}
 
 const COMMIT_DEADLINE_MS = 30_000
 
@@ -34,63 +26,42 @@ export interface HandoffChannel {
   off(event: string, listener: (...args: unknown[]) => void): unknown
 }
 
-/** Null means this process must not serve; the outgoing server still has everything. */
+/** False means this process must not serve; the outgoing server still has everything. */
 export async function receiveHandoff(
   source: string,
   channel: HandoffChannel = process
-): Promise<AdoptedPane[] | null> {
+): Promise<boolean> {
   if (typeof channel.send !== 'function') {
     log.error('[handoff] started with --adopt-handoff but no channel to answer on')
-    return null
+    return false
   }
 
   const manifest = readManifest(source)
   if (!manifest) {
-    // Not "no panes": serving nothing while holding their descriptors is how work disappears.
     log.error({ source }, '[handoff] the manifest is missing or unreadable')
-    return null
+    return false
+  }
+  if (manifest.panes.length) {
+    // Its terminals run on it, not in vornd, and nothing here can read them.
+    log.error(
+      { panes: manifest.panes.length },
+      '[handoff] the outgoing server holds terminals of its own; it keeps them'
+    )
+    return false
   }
 
-  const panes: AdoptedPane[] = []
-  for (const pane of manifest.panes) {
-    // Checked, not trusted: a slot that is not a pty is a pane that would never run anything.
-    if (!tty.isatty(pane.slot)) {
-      log.error(
-        { slot: pane.slot, session: pane.session.id },
-        '[handoff] a slot named in the manifest is not a terminal'
-      )
-      return null
-    }
-    try {
-      // Built paused: the bytes stay in the kernel's buffer until a session can hold them.
-      const adopted = new AdoptedPty(pane.slot, pane.pid)
-      adopted.pause()
-      panes.push({ session: pane.session, pty: adopted, cols: pane.cols, rows: pane.rows })
-    } catch (err) {
-      log.error(
-        { err, slot: pane.slot },
-        '[handoff] could not build a reader over an inherited pty'
-      )
-      return null
-    }
-  }
-
-  log.info(
-    { panes: panes.length, donor: manifest.donorPid },
-    '[handoff] panes taken; waiting for the commit'
-  )
   channel.send({ kind: 'imported' })
 
   const committed = await waitForCommit(channel)
   if (!committed) {
     log.error('[handoff] the outgoing server never committed; standing down')
-    return null
+    return false
   }
 
   discardManifest(source)
   // The outgoing server is about to exit and close this channel.
   process.channel?.unref()
-  return panes
+  return true
 }
 
 function waitForCommit(channel: HandoffChannel): Promise<boolean> {

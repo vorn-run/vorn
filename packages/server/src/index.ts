@@ -39,12 +39,13 @@ import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
 import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
 import { handOver, type HandoffHost } from './handoff/donor'
-import { receiveHandoff, announceServing, type AdoptedPane } from './handoff/heir'
+import { receiveHandoff, announceServing } from './handoff/heir'
 import { releaseListener, retakeListener } from './server-rebind'
 import { beginDraining, isDraining, watchEndpoint } from './draining'
 import {
   initBootstrapSecret,
   publishLocalCredential,
+  localCredential,
   clearLocalCredential,
   bearerFrom
 } from './ws-auth'
@@ -62,9 +63,8 @@ import {
 } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
 import { vorndSessions } from './vornd-sessions'
-import { configureHistory, flushHistory, checkpointAll } from './history/writer'
-import { recoverHistory } from './history/recovery'
-import { seedRestored, markRecovered, verifyRestored, consumeRestored } from './restored-sessions'
+import { VorndKeeper } from './vornd-process'
+import { seedRestored, verifyRestored } from './restored-sessions'
 import { getGitBranchAsync, getGitHeadAsync } from './git-utils'
 import { sessionManager } from './session-persistence'
 import { headlessManager } from './headless-manager'
@@ -153,6 +153,13 @@ const extensionRouteDeps: ExtensionRouteDeps = {
   sessionRenamed: extensionRenamedSession
 }
 
+/** The vornd in front of this server, kept running for as long as it runs. */
+const vorndKeeper = new VorndKeeper({
+  connect: (endpoint) => vorndSessions.connect(endpoint),
+  desktopToken: localCredential
+})
+vorndSessions.setLauncher(vorndKeeper)
+
 export async function startServer(
   options: {
     host?: string
@@ -161,8 +168,6 @@ export async function startServer(
     idleShutdown?: boolean
     /** Origins beyond this server's own that may frame a pane, such as the desktop's. */
     extensionFrameAncestors?: string[]
-    /** Terminals inherited from the server this one replaces, already taken and paused. */
-    adopted?: AdoptedPane[]
   } = {}
 ) {
   // First, so the shell answers while the database opens and the modules load.
@@ -178,23 +183,15 @@ export async function startServer(
   // Anything launched from a session inherits VORN_DATA_DIR and can then find the
   // port and credential files even when --data-dir moved them.
   setLaunchDataDir(dataDir)
-  // Before anything listens, so there is no window where a session is created
-  // and then never recorded. Nothing is written until a terminal exists, and a
-  // server that loses the endpoint claim exits without ever having one.
-  configureHistory(dataDir)
-
-  // The Rust core runs each terminal's screen model, its output analysis and
-  // git. Loaded here, before any terminal, so a missing or broken binary is in
-  // the log at startup rather than when the first terminal opens.
+  // The Rust core runs git and the native store. Loaded here so a missing or
+  // broken binary is in the log at startup rather than at the first git call.
   const core = activeCore()
   if (core.native) {
     log.info({ core: core.info }, `[core] native ${core.info?.version}`)
     const { missing } = coreStatus()
     if (missing.length) log.warn(`[core] this build of the core has no ${missing.join(', ')}`)
   } else {
-    log.error(
-      `[core] the vorn core did not load, so terminals have no screen model, agent status or terminal output for agents: ${core.error}`
-    )
+    log.error(`[core] the vorn core did not load, so git runs on a child process: ${core.error}`)
   }
 
   // Who this server is, so a desktop can decide whether to adopt it instead of
@@ -431,12 +428,7 @@ export async function startServer(
   // this is holding had already been erased by the thing it exists to survive.
   // Uptime counts through sleep, so a laptop closed overnight is not a reboot.
   const bootTime = Date.now() - os.uptime() * 1000
-  const carriedOver = seedRestored(sessionManager.readPreviousSessions(), Date.now(), bootTime)
-
-  const adopted = options.adopted ?? []
-  // Handed-over sessions are live, but the previous server wrote them down on its
-  // way out, so they are also sitting in the list above being offered as resumable.
-  for (const pane of adopted) consumeRestored(pane.session.id)
+  seedRestored(sessionManager.readPreviousSessions(), Date.now(), bootTime)
 
   // Register all RPC methods
   registerAllMethods()
@@ -582,26 +574,6 @@ export async function startServer(
   // where it matters.
   if (endpoint) watchEndpoint(() => endpoint?.holds() ?? false)
 
-  // After the claim, so a server that arrives second exits above rather than
-  // replaying every terminal first; awaited before the port file, so no client
-  // can be told there is no history. Adopted sessions are rebuilt from the
-  // previous server's checkpoint, and a session absent from the list has its
-  // history swept. Null sweeps nothing.
-  const recoverable =
-    carriedOver === null
-      ? null
-      : [
-          ...carriedOver,
-          ...adopted
-            .filter((pane) => !carriedOver.some((s) => s.id === pane.session.id))
-            .map((pane) => pane.session)
-        ]
-  if (carriedOver === null && adopted.length) {
-    log.warn(
-      '[handoff] the session list could not be read; adopted terminals start without scrollback'
-    )
-  }
-  const recovering = recoverHistory(dataDir, recoverable)
   // git is worth a short wait for the shell's PATH; a slow shell is not worth the boot.
   const verifying = shellEnvSettled(1000).then(() =>
     verifyRestored({
@@ -620,10 +592,11 @@ export async function startServer(
   /** Registered here because every closure needs the endpoint, port and file ownership. */
   const handoffHost: HandoffHost = {
     dataDir,
-    describePanes: () => ptyManager.describeForHandoff(),
-    pauseAll: () => ptyManager.pauseAllForHandoff(),
+    // Every terminal is in vornd's session holder, which the replacement's
+    // vornd takes over: there is none here to hand across.
+    describePanes: () => [],
+    pauseAll: () => {},
     resumeAll: () => {
-      ptyManager.resumeAllForHandoff()
       // A handoff that did not happen must not leave this server never persisting again.
       sessionManager.startAutoSave(sessionsToPersist)
     },
@@ -633,8 +606,6 @@ export async function startServer(
       // `persistNow` reads -- the other order saves nothing at all.
       sessionManager.persistNow()
       sessionManager.stopAutoSave()
-      ptyManager.flushPendingOutput()
-      await checkpointAll()
     },
     openLogFd: () => fs.openSync(path.join(dataDir, SERVER_LOG_FILENAME), 'a'),
     release: async () => {
@@ -646,6 +617,9 @@ export async function startServer(
       // The draining watch is pointed away first, or giving the name up
       // deliberately would latch it irreversibly on a server that may roll back.
       watchEndpoint(() => true)
+      // The replacement starts a vornd of its own, which takes the session
+      // holder over; two at once would both answer for it.
+      vorndKeeper.stop()
       endpoint?.relinquish()
       removePortFile(dataDir, ownsPublished)
       await releaseListener()
@@ -662,6 +636,7 @@ export async function startServer(
       // and would go on creating sessions nothing can reach.
       watchEndpoint(() => endpoint?.holds() ?? false)
       if (listening) writePortFile(dataDir, actualPort, ownsPublished)
+      void vorndKeeper.launch(actualPort, dataDir)
       return listening && again.kind === 'held'
     },
     // Not `shutdown()`: that kills every PTY, which is the one thing a handoff must not do.
@@ -675,13 +650,12 @@ export async function startServer(
   }
 
   registerMethod('server:handoff', (params) => handOver(params, handoffHost))
+  registerMethod('server:vornd', async () => {
+    await vorndKeeper.ready()
+    return vorndKeeper.state
+  })
 
-  markRecovered((await recovering).recovered)
   await verifying
-
-  // After recovery, whose rebuilt screens `createScreen` would otherwise clear, and
-  // before the port file, so no client can find this server and be told it is empty.
-  ptyManager.adoptPanes(adopted)
 
   // Published together, after the claim, because they are one announcement: the
   // port says where, the credential says how, and a reader that finds one
@@ -691,12 +665,10 @@ export async function startServer(
 
   log.info(`[server] listening on ${host}:${actualPort} (ready in ${Date.now() - bootStarted}ms)`)
 
-  // A vornd already running for this data directory, from before this server
-  // started: its sessions are this server's terminals. The app also says so
-  // (`server:vorndReady`) whenever it starts one.
-  if (configManager.loadConfig().defaults.experimental?.vornd === true) {
-    void vorndSessions.connect()
-  }
+  // vornd, in front of this server for its clients, and where every terminal
+  // starts. After the port file and the listen, because it forwards to that
+  // port; a terminal asked for before it is up waits for it.
+  void vorndKeeper.launch(actualPort, dataDir)
 
   // Graceful shutdown
   const { hookServer } = await import('./hook-server')
@@ -727,14 +699,6 @@ export async function startServer(
     // other order made this write nothing on every shutdown.
     sessionManager.persistNow()
     sessionManager.stopAutoSave()
-    // The last few milliseconds of output, then every terminal's screen, before
-    // anything kills a PTY. After `killAll()` the buffers this reads have been
-    // emptied; before `persistNow()` the sessions these belong to are not yet
-    // saved. Awaited because serializing a screen is asynchronous by necessity,
-    // and bounded from the inside -- it is on the same path as the unref'd
-    // `SHUTDOWN_DEADLINE_MS` and must not be able to spend all of it.
-    ptyManager.flushPendingOutput()
-    await flushHistory()
     hookServer.stop()
     clearLocalCredential()
     uninstallHooks()
@@ -744,6 +708,8 @@ export async function startServer(
     headlessManager.killAll()
     ptyManager.killAll()
     vorndSessions.close()
+    // Its sessions carry on in the session holder, for the next server.
+    vorndKeeper.stop()
     stopAllFooters()
     abandonSelections()
     await stopExtensionPageServer()
@@ -865,15 +831,15 @@ if (isDirectRun) {
    * Before `startServer`, and that ordering is the transaction: the cheap certain
    * work while failing is still free, the fallible work after the commit.
    */
-  const adopting = adoptHandoff ? receiveHandoff(adoptHandoff) : Promise.resolve([])
+  const adopting = adoptHandoff ? receiveHandoff(adoptHandoff) : Promise.resolve(true)
 
   adopting
-    .then((adopted) => {
-      if (adopted === null) {
-        log.error('[handoff] could not take the terminals; leaving the previous server with them')
+    .then((taken) => {
+      if (!taken) {
+        log.error('[handoff] could not take over; leaving the previous server serving')
         process.exit(1)
       }
-      return startServer({ port, host, dataDir, adopted })
+      return startServer({ port, host, dataDir })
     })
     .then(({ port: actualPort }) => {
       // The last moment the handoff could have been abandoned.

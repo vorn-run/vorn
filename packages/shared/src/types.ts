@@ -1820,13 +1820,6 @@ export interface BranchDeleteResult {
 /** Work in progress that can be tried before it is the default. */
 export interface ExperimentalConfig {
   /**
-   * The desktop app talks to the server through vornd, the native daemon,
-   * instead of directly, and the server starts its terminals and headless
-   * agents in vornd, so they outlive the server and the app. Read by the app
-   * when it starts, and by the server as each session starts.
-   */
-  vornd?: boolean
-  /**
    * The server keeps its database through the Rust store instead of its own,
    * on the same file. Read by the server when it starts.
    */
@@ -1849,11 +1842,11 @@ export interface RecordCursor {
   nextOffset: number
 }
 
-/** Whether the desktop app is talking to its server through vornd. */
+/** Whether vornd is up in front of the server, and where; or why it is not. */
 export type VorndStatus =
   | { state: 'off' }
   | { state: 'on'; port: number }
-  /** The switch is on but vornd could not be used, so the app went straight to the server. */
+  /** vornd could not be started or reached; the app talks to the server directly. */
   | { state: 'failed'; detail: string }
 
 /** One vorn-sessiond, as vornd reports it. */

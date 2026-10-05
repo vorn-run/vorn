@@ -1,14 +1,11 @@
 # @vornrun/core
 
-Vorn's Rust core, loaded into the server as `vorn_core.node` through
-[napi-rs](https://napi.rs). It parses terminal output with
-[libghostty-vt](https://crates.io/crates/libghostty-vt), Ghostty's VT engine.
-
-The server's terminals run on it: each one's screen model, scrollback and
-history framing on a thread of its own (`TerminalPipeline`), agent status from
-its output (`Analyzer`), and every git command the server runs (`gitRun`). A
-server whose binary is missing or will not load keeps running: its terminals
-are drawn and recorded but have no screen model or agent status, git runs as a
+Vorn's Rust core. The server loads `vorn_core.node` through
+[napi-rs](https://napi.rs) for every git command it runs (`gitRun`) and for the
+native store (`NativeStore`). Terminals run in vornd, which parses their output
+with [libghostty-vt](https://crates.io/crates/libghostty-vt), Ghostty's VT
+engine, and keeps each one's screen model, scrollback and agent status. A
+server whose binary is missing or will not load keeps running: git runs as a
 child process, and the reason is in the log and on **Settings › Experimental**.
 `VORN_CORE_PATH` points the server at a specific binary.
 
@@ -87,7 +84,7 @@ builds libghostty-vt from source on the first build.
 ```sh
 yarn build:core                                 # release build, writes packages/core/vorn_core.node
 yarn workspace @vornrun/core build --debug      # unoptimized
-yarn workspace @vornrun/core build --no-ghostty # without libghostty-vt, no Zig needed
+yarn workspace @vornrun/core build --no-ghostty # vornd without libghostty-vt, no Zig needed
 ```
 
 `yarn dist` ships the binary at `resources/core/vorn_core.node` when it has

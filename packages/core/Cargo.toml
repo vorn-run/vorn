@@ -31,20 +31,10 @@ description = "Vorn's native core, loaded into the Node server through napi-rs: 
 [lib]
 crate-type = ["cdylib"]
 
-[features]
-default = ["ghostty"]
-# libghostty-vt is built from source by Zig 0.15.2, the version the pinned Ghostty commit requires. Turning it off lets the crate
-# build on a machine without Zig, which is enough for the boundary itself.
-ghostty = ["dep:libghostty-vt", "dep:vorn-screen", "dep:vorn-pipeline"]
-
 [dependencies]
 napi = { version = "3", default-features = false, features = ["napi6", "async", "tokio_rt"] }
 napi-derive = "3"
-libghostty-vt = { version = "0.2.2", default-features = false, optional = true }
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "sync"] }
-vorn-analysis = { path = "crates/analysis" }
-vorn-screen = { path = "crates/screen", optional = true }
-vorn-pipeline = { path = "crates/pipeline", optional = true }
 vorn-git = { path = "crates/vorn-git" }
 vorn-protocol = { path = "crates/protocol" }
 vorn-store = { path = "crates/store" }
