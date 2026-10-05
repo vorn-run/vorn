@@ -53,7 +53,7 @@ vi.mock('../packages/server/src/git-utils', () => ({
 vi.mock('../packages/server/src/pty-manager', () => ({
   ptyManager: {
     getLiveSessions: () => sessions,
-    getOutput: () => output,
+    readOutput: async () => output,
     writeToPty: (id: string, data: string) => wrote.push({ id, data }),
     renameSession: (id: string, name: string, byPerson = true) =>
       renamed.push({ id, name, byPerson })
