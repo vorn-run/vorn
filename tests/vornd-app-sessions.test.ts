@@ -108,7 +108,12 @@ describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
     ptyManager.on('session-cwd', onCwd)
     const session = ptyManager.createShellPty(os.tmpdir())
     const target = fs.realpathSync(h.dir)
-    ptyManager.writeToPty(session.id, `printf '\\033]5522;cwd;%s\\007' '${target}'\r`)
+    // Moved for real, so a shell whose integration reports each prompt's
+    // directory agrees with the report written here.
+    ptyManager.writeToPty(
+      session.id,
+      `cd '${target}' && printf '\\033]5522;cwd;%s\\007' '${target}'\r`
+    )
     await until('the directory', () => cwds.includes(target))
     expect(ptyManager.getActiveSessions().find((s) => s.id === session.id)?.shellCwd).toBe(target)
     ptyManager.off('session-cwd', onCwd)
