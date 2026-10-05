@@ -134,7 +134,9 @@ export class Vornd {
 
 /** A data directory for one test, and its cleanup. */
 export function home(): { dir: string; remove(): void } {
-  const dir = mkdtempSync(path.join(tmpdir(), 'vornd-sessions-'))
+  // macOS's own temp directory is too deep for the sockets under run/.
+  const base = process.platform === 'darwin' ? '/tmp' : tmpdir()
+  const dir = mkdtempSync(path.join(base, 'vornd-sessions-'))
   return {
     dir,
     remove: () => {
