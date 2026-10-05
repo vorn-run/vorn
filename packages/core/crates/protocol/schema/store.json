@@ -1,0 +1,1289 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AgentCommandConfig": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "args": {},
+        "headlessArgs": {},
+        "fallbackCommand": {
+          "type": "string"
+        },
+        "fallbackArgs": {}
+      },
+      "required": [
+        "command",
+        "args"
+      ]
+    },
+    "AgentStatus": {
+      "type": "string"
+    },
+    "AgentType": {
+      "type": "string"
+    },
+    "AiAgentType": {
+      "type": "string"
+    },
+    "Artifact": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ArtifactKind"
+        },
+        "title": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "latestVersion": {
+          "type": "number"
+        },
+        "gateRunId": {
+          "type": "string"
+        },
+        "gateNodeId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "sessionId",
+        "projectName",
+        "latestVersion",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ArtifactAuthor": {
+      "type": "string"
+    },
+    "ArtifactComment": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "artifactId": {
+          "type": "string"
+        },
+        "version": {
+          "type": "number"
+        },
+        "anchor": {},
+        "body": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/ArtifactCommentState"
+        },
+        "batchId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "sentAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "artifactId",
+        "version",
+        "anchor",
+        "body",
+        "state",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ArtifactCommentChange": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "anchor": {}
+      }
+    },
+    "ArtifactCommentFilter": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number"
+        },
+        "state": {
+          "$ref": "#/definitions/ArtifactCommentState"
+        },
+        "batchId": {
+          "type": "string"
+        }
+      }
+    },
+    "ArtifactCommentState": {
+      "type": "string"
+    },
+    "ArtifactFilter": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "projectName": {
+          "type": "string"
+        }
+      }
+    },
+    "ArtifactKind": {
+      "type": "string"
+    },
+    "ArtifactVersion": {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string"
+        },
+        "version": {
+          "type": "number"
+        },
+        "author": {
+          "$ref": "#/definitions/ArtifactAuthor"
+        },
+        "answersBatchId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifactId",
+        "version",
+        "author",
+        "createdAt"
+      ]
+    },
+    "AuthMethod": {
+      "type": "string"
+    },
+    "ConnectorInboxClaim": {
+      "type": "object",
+      "properties": {
+        "now": {
+          "type": "string"
+        },
+        "leaseUntil": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "now",
+        "leaseUntil",
+        "limit"
+      ]
+    },
+    "ConnectorInboxItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number"
+        },
+        "leaseToken": {
+          "type": "string"
+        },
+        "workflowId": {
+          "type": "string"
+        },
+        "connectionId": {
+          "type": "string"
+        },
+        "connectorId": {
+          "type": "string"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "eventType": {
+          "type": "string"
+        },
+        "eventTimestamp": {
+          "type": "string"
+        },
+        "connectorItem": {},
+        "attempts": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "leaseToken",
+        "workflowId",
+        "connectionId",
+        "connectorId",
+        "eventId",
+        "eventType",
+        "eventTimestamp",
+        "connectorItem",
+        "attempts"
+      ]
+    },
+    "ConnectorInboxRetry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number"
+        },
+        "leaseToken": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "now": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "leaseToken",
+        "error",
+        "now"
+      ]
+    },
+    "ConnectorItemContext": {
+      "type": "object",
+      "properties": {
+        "inboxId": {
+          "type": "number"
+        },
+        "inboxLeaseToken": {
+          "type": "string"
+        },
+        "connectionId": {
+          "type": "string"
+        },
+        "connectorId": {
+          "type": "string"
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "externalUrl": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "raw": {
+          "type": "object",
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "connectionId",
+        "connectorId",
+        "externalId",
+        "title",
+        "raw"
+      ]
+    },
+    "ConnectorPollError": {
+      "type": "object",
+      "properties": {
+        "workflowId": {
+          "type": "string"
+        },
+        "connectionId": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "polledAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflowId",
+        "connectionId",
+        "error",
+        "polledAt"
+      ]
+    },
+    "ConnectorPollPage": {
+      "type": "object",
+      "properties": {
+        "workflowId": {
+          "type": "string"
+        },
+        "connectionId": {
+          "type": "string"
+        },
+        "connectorId": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "polledAt": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "eventId": {
+                "type": "string"
+              },
+              "eventType": {
+                "type": "string"
+              },
+              "eventTimestamp": {
+                "type": "string"
+              },
+              "connectorItem": {}
+            },
+            "required": [
+              "eventId",
+              "eventType",
+              "eventTimestamp",
+              "connectorItem"
+            ]
+          }
+        }
+      },
+      "required": [
+        "workflowId",
+        "connectionId",
+        "connectorId",
+        "polledAt",
+        "events"
+      ]
+    },
+    "DeviceToken": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "lastSeenAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revokedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "name",
+        "createdAt",
+        "lastSeenAt",
+        "revokedAt"
+      ]
+    },
+    "DeviceTokenSecret": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "tokenHash": {
+          "type": "string"
+        },
+        "revokedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "tokenHash",
+        "revokedAt"
+      ]
+    },
+    "NewArtifact": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/ArtifactKind"
+        },
+        "title": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gateRunId": {
+          "type": "string"
+        },
+        "gateNodeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "title",
+        "sessionId",
+        "projectName"
+      ]
+    },
+    "NewArtifactComment": {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string"
+        },
+        "version": {
+          "type": "number"
+        },
+        "anchor": {},
+        "body": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifactId",
+        "version",
+        "anchor",
+        "body"
+      ]
+    },
+    "NewDeviceToken": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "tokenHash": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "name",
+        "tokenHash",
+        "createdAt"
+      ]
+    },
+    "NodeExecutionState": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/NodeExecutionStatus"
+        },
+        "skipReason": {
+          "type": "string"
+        },
+        "waitingFor": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "completedAt": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "logs": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "structuredOutput": {},
+        "iteration": {
+          "type": "number"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "agentSessionId": {
+          "type": "string"
+        },
+        "agentType": {
+          "$ref": "#/definitions/AiAgentType"
+        },
+        "projectName": {
+          "type": "string"
+        },
+        "projectPath": {
+          "type": "string"
+        },
+        "worktreePath": {
+          "type": "string"
+        },
+        "worktreeName": {
+          "type": "string"
+        },
+        "worktreeOrigin": {
+          "type": "string"
+        },
+        "approvedAt": {
+          "type": "string"
+        },
+        "rejectedAt": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "viewToken": {
+          "type": "string"
+        },
+        "round": {
+          "type": "number"
+        },
+        "feedback": {},
+        "editableText": {
+          "type": "string"
+        },
+        "editedText": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodeId",
+        "status"
+      ]
+    },
+    "NodeExecutionStatus": {
+      "type": "string"
+    },
+    "ProjectConfig": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "preferredAgents": {},
+        "icon": {
+          "type": "string"
+        },
+        "iconColor": {
+          "type": "string"
+        },
+        "hostIds": {},
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "preferredAgents"
+      ]
+    },
+    "RemoteHost": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        },
+        "port": {
+          "type": "number"
+        },
+        "authMethod": {
+          "$ref": "#/definitions/AuthMethod"
+        },
+        "sshKeyPath": {
+          "type": "string"
+        },
+        "credentialId": {
+          "type": "string"
+        },
+        "encryptedPassword": {
+          "type": "string"
+        },
+        "sshOptions": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "hostname",
+        "user",
+        "port"
+      ]
+    },
+    "SSHKey": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "encryptedPrivateKey": {
+          "type": "string"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "certificate": {
+          "type": "string"
+        },
+        "keyType": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "encryptedPrivateKey",
+        "createdAt"
+      ]
+    },
+    "SSHKeyMeta": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "keyType": {
+          "type": "string"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "createdAt"
+      ]
+    },
+    "ScheduleLogEntry": {
+      "type": "object",
+      "properties": {
+        "workflowId": {
+          "type": "string"
+        },
+        "workflowName": {
+          "type": "string"
+        },
+        "executedAt": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "sessionsLaunched": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflowId",
+        "workflowName",
+        "executedAt",
+        "status",
+        "sessionsLaunched"
+      ]
+    },
+    "SessionEvent": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "eventType": {
+          "$ref": "#/definitions/SessionEventType"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "metadata": {}
+      },
+      "required": [
+        "sessionId",
+        "eventType",
+        "timestamp"
+      ]
+    },
+    "SessionEventType": {
+      "type": "string"
+    },
+    "SessionGroupConfig": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "iconColor": {
+          "type": "string"
+        },
+        "order": {
+          "type": "number"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "order",
+        "workspaceId"
+      ]
+    },
+    "SourceConnection": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "connectorId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "filters": {},
+        "syncIntervalMinutes": {
+          "type": "number"
+        },
+        "statusMapping": {},
+        "executionProject": {
+          "type": "string"
+        },
+        "lastSyncAt": {
+          "type": "string"
+        },
+        "lastSyncError": {
+          "type": "string"
+        },
+        "syncCursor": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "signedInAs": {
+          "type": "string"
+        },
+        "signedInAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "connectorId",
+        "name",
+        "filters",
+        "syncIntervalMinutes",
+        "statusMapping",
+        "createdAt"
+      ]
+    },
+    "TaskConfig": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "projectName": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TaskStatus"
+        },
+        "order": {
+          "type": "number"
+        },
+        "assignedSessionId": {
+          "type": "string"
+        },
+        "assignedAgent": {
+          "$ref": "#/definitions/AiAgentType"
+        },
+        "agentSessionId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "useWorktree": {
+          "type": "boolean"
+        },
+        "worktreePath": {
+          "type": "string"
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "completedAt": {
+          "type": "string"
+        },
+        "archivedAt": {
+          "type": "string"
+        },
+        "sourceConnectorId": {
+          "type": "string"
+        },
+        "sourceExternalId": {
+          "type": "string"
+        },
+        "sourceExternalUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "projectName",
+        "title",
+        "description",
+        "status",
+        "order",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TaskSourceLink": {
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "connectionId": {
+          "type": "string"
+        },
+        "connectorId": {
+          "type": "string"
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "externalUrl": {
+          "type": "string"
+        },
+        "sourceStatusRaw": {
+          "type": "string"
+        },
+        "sourceUpdatedAt": {
+          "type": "string"
+        },
+        "lastSyncedAt": {
+          "type": "string"
+        },
+        "conflictState": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "taskId",
+        "connectionId",
+        "connectorId",
+        "externalId",
+        "externalUrl",
+        "sourceStatusRaw",
+        "sourceUpdatedAt",
+        "lastSyncedAt",
+        "conflictState"
+      ]
+    },
+    "TaskStatus": {
+      "type": "string"
+    },
+    "TerminalSession": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "agentType": {
+          "$ref": "#/definitions/AgentType"
+        },
+        "projectName": {
+          "type": "string"
+        },
+        "projectPath": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/AgentStatus"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "pid": {
+          "type": "number"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "worktreePath": {
+          "type": "string"
+        },
+        "worktreeName": {
+          "type": "string"
+        },
+        "isWorktree": {
+          "type": "boolean"
+        },
+        "remoteHostId": {
+          "type": "string"
+        },
+        "remoteHostLabel": {
+          "type": "string"
+        },
+        "hookSessionId": {
+          "type": "string"
+        },
+        "agentSessionId": {
+          "type": "string"
+        },
+        "statusSource": {
+          "type": "string"
+        },
+        "groupId": {
+          "type": "string"
+        },
+        "cols": {
+          "type": "number"
+        },
+        "rows": {
+          "type": "number"
+        },
+        "renamedByPerson": {
+          "type": "boolean"
+        },
+        "shellCwd": {
+          "type": "string"
+        },
+        "headCommit": {
+          "type": "string"
+        },
+        "shellExitCode": {
+          "type": "number"
+        },
+        "savedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "agentType",
+        "projectName",
+        "projectPath",
+        "status",
+        "createdAt",
+        "pid"
+      ]
+    },
+    "User": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/UserRole"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "role",
+        "createdAt"
+      ]
+    },
+    "UserRole": {
+      "type": "string"
+    },
+    "WebhookEvent": {
+      "type": "object",
+      "properties": {
+        "workflowId": {
+          "type": "string"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "receivedAt": {
+          "type": "string"
+        },
+        "item": {}
+      },
+      "required": [
+        "workflowId",
+        "eventId",
+        "receivedAt",
+        "item"
+      ]
+    },
+    "WorkflowDefinition": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "iconColor": {
+          "type": "string"
+        },
+        "nodes": {},
+        "edges": {},
+        "enabled": {
+          "type": "boolean"
+        },
+        "lastRunAt": {
+          "type": "string"
+        },
+        "lastRunStatus": {
+          "type": "string"
+        },
+        "staggerDelayMs": {
+          "type": "number"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "autoCleanupWorktrees": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "icon",
+        "iconColor",
+        "nodes",
+        "edges",
+        "enabled"
+      ]
+    },
+    "WorkflowExecution": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "workflowId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "completedAt": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "nodeStates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NodeExecutionState"
+          }
+        },
+        "triggerTaskId": {
+          "type": "string"
+        },
+        "triggerSession": {},
+        "dedupeParams": {
+          "type": "string"
+        },
+        "inputs": {},
+        "connectorItem": {},
+        "connectorInboxId": {
+          "type": "number"
+        },
+        "connectorInboxLeaseToken": {
+          "type": "string"
+        },
+        "connectorInboxDisposition": {
+          "type": "string"
+        },
+        "partial": {
+          "type": "boolean"
+        },
+        "retryOfRunId": {
+          "type": "string"
+        },
+        "definition": {}
+      },
+      "required": [
+        "runId",
+        "workflowId",
+        "startedAt",
+        "status",
+        "nodeStates"
+      ]
+    },
+    "WorkspaceConfig": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "iconColor": {
+          "type": "string"
+        },
+        "order": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "order"
+      ]
+    }
+  }
+}

@@ -31,6 +31,23 @@ function vorndNote(on: boolean, status: VorndStatus | null): string | null {
   return null
 }
 
+/** The store's switch. The server reads it when it starts. */
+const STORE_SWITCH = {
+  label: 'Native store',
+  description:
+    'Keep tasks, workflows and settings through the native store, on the same database. Applies after restarting Vorn'
+}
+
+/** What the store is doing, when it differs from what the switch says, or null. */
+function storeNote(on: boolean, status: CoreStatus['store'] | undefined): string | null {
+  if (!status) return null
+  if (on && !status.native && status.error)
+    return `Vorn kept its built-in store, because the native store did not open: ${status.error}.`
+  if (on && !status.native) return 'Vorn uses the native store the next time it starts.'
+  if (!on && status.native) return 'Vorn goes back to its built-in store the next time it starts.'
+  return null
+}
+
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 
 /** What an older session holder means for the sessions on it. */
@@ -105,6 +122,7 @@ export function ExperimentalSettings() {
   const flags = config.defaults.experimental ?? {}
   const note = coreNote(status)
   const daemonNote = vorndNote(flags.vornd === true, daemon)
+  const nativeStoreNote = storeNote(flags.nativeStore === true, status?.store)
 
   const endHolder = (h: SessionHolder): void => {
     const count = h.sessions === null ? 'the sessions' : plural(h.sessions, 'session', 'sessions')
@@ -177,6 +195,20 @@ export function ExperimentalSettings() {
           </div>
         ))}
       {endFailure && <div className="mt-2 text-xs text-red-400">{endFailure}</div>}
+      <div className="mt-1 space-y-1">
+        <SettingRow label={STORE_SWITCH.label} description={STORE_SWITCH.description}>
+          <ToggleSwitch
+            checked={flags.nativeStore === true}
+            onChange={(value) => setFlag('nativeStore', value)}
+            label={STORE_SWITCH.label}
+          />
+        </SettingRow>
+      </div>
+      {nativeStoreNote && (
+        <div className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
+          {nativeStoreNote}
+        </div>
+      )}
       {status?.version && (
         <div className="mt-4 text-xs text-gray-500">Native core {status.version}</div>
       )}

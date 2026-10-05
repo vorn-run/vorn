@@ -35,6 +35,14 @@ on:
       - 'tests/vornd-app-sessions.test.ts'
       - 'tests/vornd-app-platforms.test.ts'
       - 'tests/helpers/vornd-sessions.ts'
+      - 'packages/server/src/database.ts'
+      - 'packages/server/src/store-types.ts'
+      - 'packages/shared/src/types.ts'
+      - 'scripts/gen-store-schema.mjs'
+      - 'tests/native-store.test.ts'
+      - 'tests/helpers/store-parity.ts'
+      - 'tests/database-*.test.ts'
+      - 'tests/artifact-*.test.ts'
       - 'THIRD_PARTY_NOTICES.md'
       - 'electron-builder.yml'
       - 'package.json'
@@ -117,7 +125,13 @@ jobs:
       # link on every platform. The adapter crate holds no tests of its own.
       - name: Rust tests
         working-directory: packages/core
-        run: cargo test --release --locked -p vorn-screen -p vorn-analysis -p vorn-pipeline -p vorn-term-mirror -p vorn-recovery -p vorn-engine -p vorn-grid -p vorn-grid-client -p vorn-size
+        run: cargo test --release --locked -p vorn-screen -p vorn-analysis -p vorn-pipeline -p vorn-term-mirror -p vorn-recovery -p vorn-engine -p vorn-grid -p vorn-grid-client -p vorn-size -p vorn-protocol -p vorn-store
+
+      # The store's protocol types are generated from packages/shared; the
+      # committed schema has to be the one the TypeScript gives today.
+      - name: Store schema is current
+        if: runner.os == 'Linux'
+        run: node scripts/gen-store-schema.mjs --check
 
       # The git crate links nothing from napi, so it runs everywhere, and its
       # parity tests compare against the git each runner has.
@@ -165,6 +179,25 @@ jobs:
       # parse through libghostty-vt.
       - name: Native call
         run: yarn vitest run tests/native-core.test.ts tests/js-reference.test.ts tests/core-pipeline.test.ts tests/git-native-parity.test.ts
+
+      # Both stores answering the same calls, on each platform.
+      - name: Native store
+        run: yarn vitest run tests/native-store.test.ts
+
+      # Every test that keeps data, again with the database in the native
+      # store, which fails the run rather than fall back to the TypeScript one.
+      # Linux only, as these files run in the main suite.
+      - name: Store tests on the native store
+        if: runner.os == 'Linux'
+        env:
+          VORN_NATIVE_STORE: '1'
+        run: yarn vitest run $(grep -l -E 'initTestDatabase|initDatabase' tests/*.test.ts tests/*.test.tsx)
+
+      - name: Conformance through vornd, native store
+        if: runner.os == 'Linux'
+        env:
+          VORN_NATIVE_STORE: '1'
+        run: yarn test:conformance
 
       # The server driving its sessions through the real vornd and session
       # holder, on each platform: a named pipe and ConPTY on Windows.

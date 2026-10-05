@@ -13,6 +13,7 @@ pub mod git;
 pub mod pipeline;
 #[cfg(feature = "ghostty")]
 pub mod screen;
+pub mod store;
 
 // Every exported function uses `#[napi(catch_unwind)]`: napi-rs only turns a
 // panic into a JS exception when asked to, and an uncaught one unwinding into
