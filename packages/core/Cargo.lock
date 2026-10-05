@@ -2568,18 +2568,14 @@ dependencies = [
 name = "vorn-core"
 version = "0.8.0-beta.3"
 dependencies = [
- "libghostty-vt",
  "napi",
  "napi-build",
  "napi-derive",
  "serde",
  "serde_json",
  "tokio",
- "vorn-analysis",
  "vorn-git",
- "vorn-pipeline",
  "vorn-protocol",
- "vorn-screen",
  "vorn-store",
 ]
 

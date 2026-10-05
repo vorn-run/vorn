@@ -92,10 +92,10 @@ describe('defaults survive a save/load round trip', () => {
 
 describe('the experimental switches', () => {
   it('round-trip, so a switch turned on stays on after a restart', () => {
-    saveConfig(configWith({ experimental: { vornd: true } }))
-    expect(loadConfig().defaults.experimental).toEqual({ vornd: true })
-    saveConfig(configWith({ experimental: { vornd: false } }))
-    expect(loadConfig().defaults.experimental).toEqual({ vornd: false })
+    saveConfig(configWith({ experimental: { nativeStore: true } }))
+    expect(loadConfig().defaults.experimental).toEqual({ nativeStore: true })
+    saveConfig(configWith({ experimental: { nativeStore: false } }))
+    expect(loadConfig().defaults.experimental).toEqual({ nativeStore: false })
   })
 
   it('are absent until one has been touched', () => {
@@ -119,13 +119,13 @@ describe('the four keys that were declared but never listed', () => {
   })
 
   it('experimental, which the app reads when it starts', () => {
-    saveConfig(configWith({ experimental: { vornd: true } }))
-    expect(loadConfig().defaults.experimental).toEqual({ vornd: true })
+    saveConfig(configWith({ experimental: { nativeStore: true } }))
+    expect(loadConfig().defaults.experimental).toEqual({ nativeStore: true })
   })
 
   it('experimental, keeping only switches that are true or false', () => {
     const edited = {
-      vornd: 'yes',
+      nativeStore: 'yes',
       other: false
     } as unknown as AppConfig['defaults']['experimental']
     saveConfig(configWith({ experimental: edited }))

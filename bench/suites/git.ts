@@ -3,8 +3,7 @@
  *
  * Git runs on the core, off the loop. `stall.*` is how long a call holds the
  * loop before the loop can take its next turn: only handing the first request
- * to the core. `wall.*` is how long until the answer arrives. `event-loop.ts`
- * measures what a stall does to a live burst.
+ * to the core. `wall.*` is how long until the answer arrives.
  */
 import { execFileSync } from 'node:child_process'
 import {

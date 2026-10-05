@@ -96,6 +96,14 @@ let pendingDataDir: string | null = null
  * existed -- the same failure this whole change is about, arrived at through the
  * race rather than through a dev server.
  */
+/**
+ * The local credential: what the desktop's connection presents. vornd
+ * favours a connection that opens with it over a phone or a browser.
+ */
+export function localCredential(): string | null {
+  return bootstrapSecret?.toString('utf8') ?? null
+}
+
 export function publishLocalCredential(owned: boolean): void {
   const dataDir = pendingDataDir
   const secret = bootstrapSecret?.toString('utf8')

@@ -20,11 +20,8 @@ import {
   consumeAllRestored,
   restoreHeld
 } from './restored-sessions'
-import { clearScreen } from './terminal-screen'
-import { discardHistory } from './history/writer'
 import { buildRestorePayload } from '@vornrun/shared/session-restore'
 import { resumeCwdFor } from './resume-cwd'
-import { clearScrollback, readScrollback } from './terminal-scrollback'
 import {
   claimTranscriptFor,
   sessionToBindOnCreate,
@@ -218,7 +215,7 @@ import { captureAgentSessionId } from './agent-session-capture'
 import { listAgentModels } from './agent-model-catalog'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
 import log from './logger'
-import { vorndSessions, announcedEndpoint, type HeldSession } from './vornd-sessions'
+import { vorndSessions, type HeldSession } from './vornd-sessions'
 import { onePerKey } from './one-per-key'
 import { isWorkspaceHeld } from './workspace-holds'
 import { coreStatus } from './native-core'
@@ -663,16 +660,6 @@ export async function syncExtensionsAfterPackChange(extensionId: string): Promis
   for (const session of ptyManager.getLiveSessions()) syncExtensionsFor(session)
 }
 
-/**
- * Let go of everything held for a session from a previous run.
- *
- * Called when one is claimed, closed or dismissed -- the three ways a carried
- * over record stops being offered. All three end the same way, so they end in
- * one place.
- *
- * At module scope rather than inside `registerAllMethods` because it captures
- * nothing from it, and out here it can be tested without standing up a socket.
- */
 /** Whether a path is a directory right now, answering false for every other case. */
 function isDirectory(at: string): boolean {
   try {
@@ -680,18 +667,6 @@ function isDirectory(at: string): boolean {
   } catch {
     return false
   }
-}
-
-export async function forgetRestored(id: string): Promise<void> {
-  clearScreen(id)
-  // Recovery seeds a restored session's scrollback so a pane can be shown one
-  // (`history/recovery.ts`). Nothing else ever frees it: this session has no PTY,
-  // so it never reaches the `clearScrollback` on the kill path, and letting the
-  // record go is the last thing that happens to it. Without this the bytes stay
-  // held for the life of the server -- the same reasoning that put `clearScreen`
-  // here.
-  clearScrollback(id)
-  await discardHistory(id)
 }
 
 /** Named because a rolled-back handoff has to start saving again, with exactly this. */
@@ -799,11 +774,6 @@ export function registerAllMethods(): void {
     // resume makes -- so it goes through the same door, and a second client
     // closing the same pane finds nothing rather than an error.
     if (consumeRestored(id)) {
-      // Nothing follows, so the caller does not wait on the files going --
-      // but a rejection here still has to land somewhere.
-      void forgetRestored(id).catch((err) => {
-        log.warn({ err, id }, '[restored] could not forget a session that was closed')
-      })
       // The row is only removed by a save, and saves are event-driven. Without
       // this, closing a restored pane and quitting leaves the record behind --
       // and the next start offers a session whose files have gone, as an empty
@@ -1105,26 +1075,15 @@ export function registerAllMethods(): void {
     return { ok: true }
   })
 
-  registerMethod('terminal:readScrollback', ({ id }) => ({ data: readScrollback(id) }))
-  // Read in one tick on purpose: the scrollback and the flush counter move
-  // together inside `flushBuffer`, so taking both in the same turn is what
-  // guarantees the caller can trust one against the other.
+  // vornd answers both for every session it holds, which is every live one.
+  // What reaches the server is a session it has no screen of: one from a
+  // previous run, or one asked for by a client that is not behind vornd.
+  registerMethod('terminal:readScrollback', () => ({ data: '' }))
   registerMethod('terminal:attach', ({ id }) => ({
-    data: readScrollback(id),
-    seq: ptyManager.lastFlushSeq(id),
-    live: ptyManager.hasLivePty(id),
-    cursor: ptyManager.recordCursor(id) ?? undefined
+    data: '',
+    seq: 0,
+    live: ptyManager.hasLivePty(id)
   }))
-  // Only ever the endpoint vornd announced in this data directory, which only
-  // this user can write: a caller naming another would have the server's
-  // terminals started wherever it pointed.
-  registerMethod('server:vorndReady', async (params) => {
-    const announced = announcedEndpoint()
-    if (!announced || (params?.endpoint !== undefined && params.endpoint !== announced)) {
-      return { connected: false }
-    }
-    return { connected: await vorndSessions.connect(announced) }
-  })
   registerMethod('terminal:readOutput', ({ id, lines }) => ptyManager.readOutput(id, lines))
   registerMethod('shell:create', (cwd) => {
     const session = ptyManager.createShellPty(cwd)
@@ -1153,29 +1112,12 @@ export function registerAllMethods(): void {
 
   // Sessions
   registerMethod('sessions:clear', () => {
-    // The offer is being declined for all of them at once. Same rule as closing
-    // one: the record goes and so does what was written for it.
-    for (const one of consumeAllRestored()) {
-      void forgetRestored(one.session.id).catch((err) => {
-        log.warn({ err, id: one.session.id }, '[restored] could not forget a declined session')
-      })
-    }
+    // The offer is being declined for all of them at once.
+    consumeAllRestored()
     sessionManager.clear()
   })
 
   registerMethod('sessions:restored', () => listRestored())
-
-  /**
-   * What goes between the run that ended and the run taking its place.
-   *
-   * Leave the alternate screen, soft reset, default attributes, cursor shown,
-   * then a line of its own. A soft reset (DECSTR) and deliberately not a full
-   * one: RIS would clear the scrollback, and the scrollback is the thing being
-   * resumed. Without it the new process inherits the last one's scroll region,
-   * origin mode and unclosed attributes -- it assumes a terminal at its defaults
-   * and so never sets them -- and its first redraw lands inside the old frame.
-   */
-  const BETWEEN_RUNS = '\x1b[?1049l\x1b[!p\x1b[0m\x1b[?25h\r\n'
 
   registerMethod('sessions:resume', async ({ id }) => {
     // Claimed before anything is started, and that ordering is the point. Two
@@ -1205,7 +1147,6 @@ export function registerAllMethods(): void {
     if (holder) {
       // Its conversation is already running; hand back what is writing it.
       if (dead) ptyManager.releaseForResume(id)
-      await forgetRestored(id)
       sessionManager.scheduleSave()
       return { ok: true as const, session: holder, boundTo: holder.id }
     }
@@ -1254,8 +1195,6 @@ export function registerAllMethods(): void {
           // out is written back as null by the save below and gone for good.
           ...(previous.groupId !== undefined && { groupId: previous.groupId })
         })
-        // Synchronously, so it is in the buffer before the shell's first byte.
-        ptyManager.injectOutput(session.id, BETWEEN_RUNS)
         announceSession(session)
         sessionManager.scheduleSave()
         return { ok: true as const, session }
@@ -1310,7 +1249,6 @@ export function registerAllMethods(): void {
       // The record names the conversation now, so the claim standing in for it is
       // spent; leaving it would hold an id the session already reports.
       if (session.agentSessionId) releaseSpawningTranscriptsFor(id)
-      ptyManager.injectOutput(session.id, BETWEEN_RUNS)
       sessionManager.scheduleSave()
       return { ok: true as const, session }
     } catch (err) {

@@ -1,13 +1,12 @@
 //! The app's channel: how the app's server starts, drives and hears about
 //! the sessions vornd holds.
 //!
-//! With the Native daemon switch on, the server no longer starts terminals
-//! itself. It asks vornd here, and vornd starts them in sessiond, so they
-//! outlive the server and the app. The server keeps what it owns (names,
-//! groups, agents, workflows, the database) and is told what each session's
-//! output meant as effects ([`crate::journal`]): never the output itself,
-//! except for sessions it asks to read, which it attaches to as any bytes
-//! client does.
+//! The server does not start terminals itself. It asks vornd here, and vornd
+//! starts them in sessiond, so they outlive the server and the app. The
+//! server keeps what it owns (names, groups, agents, workflows, the
+//! database) and is told what each session's output meant as effects
+//! ([`crate::journal`]): never the output itself, except for sessions it
+//! asks to read, which it attaches to as any bytes client does.
 //!
 //! The endpoint is a local socket only this user can open, like the grid
 //! endpoint ([`crate::grid`]). vornd names it in `run/vornd-app` under its

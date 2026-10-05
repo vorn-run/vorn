@@ -1,4 +1,3 @@
-import { spawn, ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import { EventEmitter } from 'node:events'
@@ -29,19 +28,8 @@ import { vorndSessions, type VorndPty } from './vornd-sessions'
 const MAX_OUTPUT_LINES = 1000
 const FORCE_KILL_DELAY_MS = 5000
 
-/** Force-kill a Windows process tree via taskkill (best-effort). */
-function forceKillWin(pid: number): void {
-  const child = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], {
-    stdio: 'ignore',
-    windowsHide: true
-  })
-  child.on('error', () => {})
-  child.unref()
-}
-
 class HeadlessManager extends EventEmitter {
-  private processes = new Map<string, ChildProcess>()
-  /** Agents running in vornd, with the Native daemon switch on: they outlive this server. */
+  /** Agents running in vornd: they outlive this server. */
   private inVornd = new Map<string, VorndPty>()
   private sessions = new Map<string, HeadlessSession>()
   private outputBuffers = new Map<string, string[]>()
@@ -186,68 +174,26 @@ class HeadlessManager extends EventEmitter {
       this.emit('client-message', IPC.HEADLESS_DATA, { id, data })
     }
 
-    if (vorndSessions.inUse()) {
-      // What `shell: true` runs on Windows, spelled out: vornd takes an argv.
-      const argv = useShell
-        ? [process.env.ComSpec || 'cmd.exe', '/d', '/s', '/c', `"${launchCommand}"`]
-        : [command, ...spawnArgList]
-      const agent = vorndSessions.spawn(id, { argv, cwd: effectivePath, env, piped: true }, true)
-      if (spawnArgs.stdin != null) agent.write(spawnArgs.stdin)
-      agent.closeStdin()
-      this.inVornd.set(id, agent)
-      this.outputBuffers.set(id, [])
-      this.sessions.set(id, session)
-      agent.on('started', (pid: number) => {
-        session.pid = pid
-      })
-      agent.onData(output)
-      agent.onExit(({ exitCode, repeated }) => {
-        this.inVornd.delete(id)
-        this.exited(id, exitCode, repeated)
-      })
-      return session
-    }
-
-    const child = spawn(command, spawnArgList, {
-      cwd: effectivePath,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      shell: useShell
-    })
-
-    // Some agents (claude) receive their prompt on stdin rather than as an argv
-    // element, so a multi-line workflow prompt isn't mangled by the Windows
-    // `shell: true` command line. Write it, then close stdin. When there's no
-    // stdin payload, close immediately so the process doesn't hang on input.
-    child.stdin?.on('error', () => {}) // prevent EPIPE if process exits early
-    if (spawnArgs.stdin != null) {
-      child.stdin?.write(spawnArgs.stdin)
-    }
-    child.stdin?.end()
-
-    this.processes.set(id, child)
+    // On pipes in vornd's session holder, not a terminal: some agents behave
+    // differently on a TTY, and the prompt goes in on stdin, which then closes.
+    // What `shell: true` would run on Windows, spelled out: vornd takes an argv.
+    const argv = useShell
+      ? [process.env.ComSpec || 'cmd.exe', '/d', '/s', '/c', `"${launchCommand}"`]
+      : [command, ...spawnArgList]
+    const agent = vorndSessions.spawn(id, { argv, cwd: effectivePath, env, piped: true }, true)
+    if (spawnArgs.stdin != null) agent.write(spawnArgs.stdin)
+    agent.closeStdin()
+    this.inVornd.set(id, agent)
     this.outputBuffers.set(id, [])
-    session.pid = child.pid || 0
     this.sessions.set(id, session)
-
-    child.stdout?.on('data', (chunk: Buffer) => output(chunk.toString()))
-    child.stderr?.on('data', (chunk: Buffer) => output(chunk.toString()))
-
-    // Handle exit
-    child.on('exit', (exitCode) => {
-      this.processes.delete(id)
-      this.exited(id, exitCode ?? undefined)
+    agent.on('started', (pid: number) => {
+      session.pid = pid
     })
-
-    child.on('error', (err) => {
-      log.error({ err }, `[headless] process ${id} error`)
-      output(`Error: ${err.message}\n`)
-      // Mark session as exited so workflow steps detect the failure
-      this.processes.delete(id)
-      this.exited(id, 1)
+    agent.onData(output)
+    agent.onExit(({ exitCode, repeated }) => {
+      this.inVornd.delete(id)
+      this.exited(id, exitCode, repeated)
     })
-
     return session
   }
 
@@ -277,26 +223,11 @@ class HeadlessManager extends EventEmitter {
 
   killHeadless(id: string): void {
     const agent = this.inVornd.get(id)
-    if (agent) {
-      agent.kill('SIGTERM')
-      setTimeout(() => {
-        if (!agent.isEnded) agent.kill('SIGKILL')
-      }, FORCE_KILL_DELAY_MS)
-      return
-    }
-    const proc = this.processes.get(id)
-    if (!proc) return
-    if (process.platform === 'win32') {
-      proc.kill()
-      setTimeout(() => {
-        if (this.processes.has(id) && proc.pid) forceKillWin(proc.pid)
-      }, FORCE_KILL_DELAY_MS)
-    } else {
-      proc.kill('SIGTERM')
-      setTimeout(() => {
-        if (this.processes.has(id)) proc.kill('SIGKILL')
-      }, FORCE_KILL_DELAY_MS)
-    }
+    if (!agent) return
+    agent.kill('SIGTERM')
+    setTimeout(() => {
+      if (!agent.isEnded) agent.kill('SIGKILL')
+    }, FORCE_KILL_DELAY_MS)
   }
 
   getOutput(id: string): string[] {
@@ -334,16 +265,8 @@ class HeadlessManager extends EventEmitter {
     }
   }
 
+  /** Let go of every agent for a server on its way out. */
   killAll(): void {
-    for (const [id, proc] of this.processes) {
-      if (process.platform === 'win32') {
-        proc.kill()
-        if (proc.pid) forceKillWin(proc.pid)
-      } else {
-        proc.kill('SIGKILL')
-      }
-      this.processes.delete(id)
-    }
     // Left running: an agent in vornd outlives this server.
     for (const id of this.inVornd.keys()) vorndSessions.release(id)
     this.inVornd.clear()

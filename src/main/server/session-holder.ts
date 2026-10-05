@@ -1,36 +1,14 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import type { SessionHolder, SessionHolders } from '@vornrun/shared/types'
 
 /**
- * vorn-sessiond, the session holder vornd keeps running when its Experimental
- * switch is on.
+ * vorn-sessiond, the session holder vornd keeps running.
  *
- * vornd finds or starts it and drains one left by an older build. The app only
- * ships the binary, reads what vornd reports about the holders, and ends an
- * older one when the person asks it to.
+ * vornd finds or starts it and drains one left by an older build. The app
+ * reads what vornd reports about the holders, and ends an older one when the
+ * person asks it to.
  */
-
-/**
- * Where vorn-sessiond is on this machine, or null when this build has none.
- * It ships next to vornd, and in dev sits where vornd does.
- */
-export function findSessiond(
-  where: { packaged: boolean; resourcesPath: string; repoRoot: string },
-  platform: NodeJS.Platform = process.platform,
-  exists: (file: string) => boolean = existsSync
-): string | null {
-  const name = platform === 'win32' ? 'vorn-sessiond.exe' : 'vorn-sessiond'
-  const core = path.join(where.repoRoot, 'packages', 'core')
-  const candidates = where.packaged
-    ? [path.join(where.resourcesPath, 'vornd', name)]
-    : [
-        path.join(core, name),
-        path.join(core, 'target', 'release', name),
-        path.join(core, 'target', 'debug', name)
-      ]
-  return candidates.find((file) => exists(file)) ?? null
-}
 
 const HEALTH_TIMEOUT_MS = 2_000
 

@@ -33,6 +33,8 @@ export class FakeVornd {
   nextPid = 100
   /** What `vornd:hello` reports. */
   protocol = APP_PROTOCOL
+  /** Set, every `vornd:spawn` is refused with it. */
+  spawnError: string | null = null
 
   constructor(private readonly dataDir: string) {
     // Each its own endpoint: two made in the same millisecond must not share one.
@@ -104,6 +106,13 @@ export class FakeVornd {
   ): void {
     this.calls.push({ method: msg.method, params: msg.params ?? {} })
     let result: unknown = null
+    if (msg.method === 'vornd:spawn' && this.spawnError !== null && msg.id !== undefined) {
+      const error = { code: -32000, message: this.spawnError }
+      socket.write(
+        encodeFrame(KIND_TEXT, Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error })))
+      )
+      return
+    }
     if (msg.method === 'vornd:hello') result = { protocol: this.protocol, build: 'test' }
     else if (msg.method === 'vornd:subscribe') result = this.state
     else if (msg.method === 'vornd:spawn') {

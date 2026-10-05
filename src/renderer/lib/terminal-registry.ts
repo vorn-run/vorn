@@ -90,9 +90,9 @@ const registry = new Map<string, TerminalEntry>()
  * a seed there is nobody to answer and the replies are dropped. Only during the
  * seed -- a live program asking the same question is owed a real answer.
  *
- * The server's own screen model has been guarded against this since it was
- * written (`pty-manager-screen.test.ts`); the client had the same hole and no
- * seeded screen to fall into it until this branch.
+ * The server's own screen model was guarded against this from the start; the
+ * client had the same hole and no seeded screen to fall into it until this
+ * branch.
  */
 const seeding = new Set<string>()
 const readyCallbacks = new Map<string, Set<() => void>>()

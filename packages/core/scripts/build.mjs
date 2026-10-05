@@ -6,7 +6,9 @@
 // ConPTY vorn-sessiond ships with to beside it (scripts/fetch-conpty.mjs).
 //
 //   --debug        unoptimized build
-//   --no-ghostty   skip libghostty-vt, for a machine without Zig 0.15.2
+//   --no-ghostty   build vornd without its session engine and libghostty-vt,
+//                  for a machine without Zig 0.15.2; vorn_core.node and
+//                  vorn-sessiond never link Ghostty
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
@@ -19,7 +21,6 @@ const profile = args.has('--debug') ? 'debug' : 'release'
 
 const cargoArgs = ['build', '--locked']
 if (profile === 'release') cargoArgs.push('--release')
-if (args.has('--no-ghostty')) cargoArgs.push('--no-default-features')
 
 function cargo(argv) {
   const built = spawnSync('cargo', argv, { cwd: root, stdio: 'inherit' })

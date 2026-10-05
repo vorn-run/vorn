@@ -1,28 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'node:events'
-import path from 'node:path'
 import { RUNTIME_PROTOCOL_VERSION, type ServerIdentity } from '@vornrun/shared/protocol'
+import type { VorndStatus } from '@vornrun/shared/types'
 
 /**
- * The launcher putting vornd in front of the server when Settings ›
- * Experimental asks for it.
+ * The launcher talking to the server through the vornd the server keeps in
+ * front of itself.
  *
  * What matters most is the way out: whatever goes wrong with vornd, the app
  * ends up talking to the server directly, and says why.
  */
 
 const published = { port: 50091 as number | null }
-const settings = { vornd: false, nativeServer: false }
-const daemon = {
-  binary: '/app/Resources/vornd/vornd' as string | null,
-  failure: null as string | null,
-  /** Whether the bridge connects through vornd once pointed at it. */
-  reachable: true,
-  /** What vornd was told about its session holder. */
-  sessiond: null as { binary: string; home: string } | null,
-  /** What vornd was told about the Native server switch. */
-  nativeServer: null as { db: string } | null,
-  holderBinary: '/app/Resources/vornd/vorn-sessiond' as string | null
+/** What the server answers to `server:vornd`, or the error it fails with. */
+const server = {
+  vornd: { state: 'on', port: 47001, nativeServer: false } as VorndStatus | Error,
+  /** Whether the bridge connects once pointed at vornd. */
+  reachable: true
 }
 
 const bridges: FakeBridge[] = []
@@ -50,20 +44,23 @@ class FakeBridge extends EventEmitter {
   }
   connect(): void {
     setImmediate(() => {
-      if (this.url.includes(':47001') && !daemon.reachable) return
+      if (!this.url.includes(':50091') && !server.reachable) return
       this.isConnected = true
       this.emit('connected')
       this.emit('identity', identity)
     })
   }
+  /** The connection dropping, as it does when vornd ends. */
+  drop(): void {
+    this.isConnected = false
+    this.emit('disconnected')
+  }
   async request(method: string): Promise<unknown> {
     this.requests.push(method)
-    if (method === 'config:load')
-      return {
-        defaults: {
-          experimental: { vornd: settings.vornd, nativeServer: settings.nativeServer }
-        }
-      }
+    if (method === 'server:vornd') {
+      if (server.vornd instanceof Error) throw server.vornd
+      return server.vornd
+    }
     return {}
   }
   close(): void {
@@ -78,49 +75,10 @@ const identity: ServerIdentity = {
   appVersion: '0.7.0'
 }
 
-interface FakeVornd {
-  port: number
-  upstream: number
-  stopped: boolean
-  exit: (detail: string) => void
-  onExit(listener: (detail: string) => void): void
-  stop(): void
-}
-const started: FakeVornd[] = []
-
-vi.mock('../src/main/server/vornd', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/main/server/vornd')>()
-  return {
-    ...actual,
-    findVornd: () => daemon.binary,
-    startVornd: async (
-      _binary: string,
-      upstream: number,
-      options: {
-        sessiond?: { binary: string; home: string }
-        nativeServer?: { db: string }
-      } = {}
-    ) => {
-      daemon.sessiond = options.sessiond ?? null
-      daemon.nativeServer = options.nativeServer ?? null
-      if (daemon.failure) throw new Error(daemon.failure)
-      let listener: ((detail: string) => void) | null = null
-      const vornd: FakeVornd = {
-        port: 47001,
-        upstream,
-        stopped: false,
-        exit: (detail) => listener?.(detail),
-        onExit: (l) => void (listener = l),
-        stop: () => void (vornd.stopped = true)
-      }
-      started.push(vornd)
-      return vornd
-    }
-  }
-})
+const holders = vi.hoisted(() => ({ read: vi.fn() }))
 vi.mock('../src/main/server/session-holder', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/main/server/session-holder')>()
-  return { ...actual, findSessiond: () => daemon.holderBinary }
+  return { ...actual, readSessionHolders: holders.read }
 })
 vi.mock('../src/main/server/host-store', () => ({
   readHostSettings: () => ({ mode: 'local', url: '', token: undefined })
@@ -151,19 +109,12 @@ vi.mock('../src/main/server/server-adoption', async (importOriginal) => {
 
 beforeEach(() => {
   vi.resetModules()
-  ;(process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = '/app/Resources'
   bridges.length = 0
-  started.length = 0
   published.port = 50091
-  settings.vornd = false
-  settings.nativeServer = false
-  delete process.env.VORN_NATIVE_SERVER
-  daemon.nativeServer = null
-  daemon.binary = '/app/Resources/vornd/vornd'
-  daemon.failure = null
-  daemon.reachable = true
-  daemon.sessiond = null
-  daemon.holderBinary = '/app/Resources/vornd/vorn-sessiond'
+  server.vornd = { state: 'on', port: 47001, nativeServer: false }
+  server.reachable = true
+  holders.read.mockReset()
+  holders.read.mockResolvedValue({ current: null, older: [], error: null })
 })
 
 async function launch() {
@@ -172,70 +123,28 @@ async function launch() {
   return { ...launcher, bridge }
 }
 
-describe('vornd in front of the server', () => {
-  it('stays out of the way while the switch is off', async () => {
-    const { bridge, getVorndStatus } = await launch()
-    expect(started).toEqual([])
-    expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
-    expect(getVorndStatus()).toEqual({ state: 'off' })
-  })
+const settled = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
 
-  it('connects through vornd, forwarding to the server, when the switch is on', async () => {
-    settings.vornd = true
+describe('vornd in front of the server', () => {
+  it('connects through the vornd the server keeps', async () => {
     const { bridge, getVorndStatus } = await launch()
-    expect(started.map((v) => v.upstream)).toEqual([50091])
+    expect(bridge.requests).toContain('server:vornd')
     expect(bridge.url).toBe('ws://127.0.0.1:47001/ws')
     expect(bridge.isConnected).toBe(true)
     expect(getVorndStatus()).toEqual({ state: 'on', port: 47001, nativeServer: false })
-    expect(daemon.nativeServer).toBeNull()
   })
 
-  it('has vornd answer natively, reading the server database, with the native server switch on', async () => {
-    settings.vornd = true
-    settings.nativeServer = true
-    const { getVorndStatus } = await launch()
-    expect(daemon.nativeServer).toEqual({ db: path.join('/Users/x/.vorn', 'vorn.db') })
-    expect(getVorndStatus()).toEqual({ state: 'on', port: 47001, nativeServer: true })
+  it('reads the session holders from that vornd', async () => {
+    const { getSessionHolders } = await launch()
+    expect(await getSessionHolders()).toEqual({ current: null, older: [], error: null })
+    expect(holders.read).toHaveBeenCalledWith(47001)
   })
 
-  it('leaves the native server switch to the daemon switch', async () => {
-    settings.nativeServer = true
-    const { getVorndStatus } = await launch()
-    expect(started).toEqual([])
-    expect(getVorndStatus()).toEqual({ state: 'off' })
-  })
-
-  it('lets VORN_NATIVE_SERVER decide over the setting, both ways', async () => {
-    settings.vornd = true
-    process.env.VORN_NATIVE_SERVER = '1'
-    await launch()
-    expect(daemon.nativeServer).not.toBeNull()
-    vi.resetModules()
-    settings.nativeServer = true
-    process.env.VORN_NATIVE_SERVER = '0'
-    await launch()
-    expect(daemon.nativeServer).toBeNull()
-  })
-
-  it('has vornd keep the session holder in the data directory', async () => {
-    settings.vornd = true
-    await launch()
-    expect(daemon.sessiond).toEqual({
-      binary: '/app/Resources/vornd/vorn-sessiond',
-      home: '/Users/x/.vorn'
-    })
-  })
-
-  it('still forwards through vornd when this build has no session holder', async () => {
-    settings.vornd = true
-    daemon.holderBinary = null
-    const { bridge } = await launch()
-    expect(daemon.sessiond).toBeNull()
-    expect(bridge.url).toBe('ws://127.0.0.1:47001/ws')
-  })
-
-  it('reports no session holders, and ends none, while vornd is not in use', async () => {
-    const { getSessionHolders, endOlderSessionHolder } = await launch()
+  it('stays on the server, and says why, when its vornd is not running', async () => {
+    server.vornd = { state: 'failed', detail: 'vornd is not in this build' }
+    const { bridge, getVorndStatus, getSessionHolders, endOlderSessionHolder } = await launch()
+    expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
+    expect(getVorndStatus()).toEqual({ state: 'failed', detail: 'vornd is not in this build' })
     expect(await getSessionHolders()).toBeNull()
     expect(await endOlderSessionHolder('1a2b')).toEqual({
       ok: false,
@@ -243,25 +152,25 @@ describe('vornd in front of the server', () => {
     })
   })
 
-  it('goes to the server directly when this build has no vornd', async () => {
-    settings.vornd = true
-    daemon.binary = null
+  it('stays on the server when it cannot say where its vornd is', async () => {
+    server.vornd = new Error('Method not found: server:vornd')
     const { bridge, getVorndStatus } = await launch()
     expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
-    expect(getVorndStatus()).toEqual({ state: 'failed', detail: 'vornd is not in this build' })
+    expect(getVorndStatus()).toEqual({
+      state: 'failed',
+      detail: 'Method not found: server:vornd'
+    })
   })
 
-  it('goes to the server directly, and says why, when vornd will not start', async () => {
-    settings.vornd = true
-    daemon.failure = 'vornd exited before it was listening (code=2, signal=null)'
+  it('stays on the server when vornd answers nothing it can use', async () => {
+    server.vornd = { state: 'off' }
     const { bridge, getVorndStatus } = await launch()
     expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
-    expect(getVorndStatus()).toEqual({ state: 'failed', detail: daemon.failure })
+    expect(getVorndStatus()).toEqual({ state: 'failed', detail: 'the server reports no vornd' })
   })
 
   it('goes back to the server when nothing connects through vornd', async () => {
-    settings.vornd = true
-    daemon.reachable = false
+    server.reachable = false
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
       const launcher = await import('../src/main/server/server-launcher')
@@ -269,7 +178,6 @@ describe('vornd in front of the server', () => {
       await vi.advanceTimersByTimeAsync(6_000)
       const bridge = (await attempt) as unknown as FakeBridge
       expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
-      expect(started[0]?.stopped).toBe(true)
       expect(launcher.getVorndStatus()).toEqual({
         state: 'failed',
         detail: 'the server could not be reached through vornd'
@@ -279,28 +187,21 @@ describe('vornd in front of the server', () => {
     }
   })
 
-  it('goes back to the server when vornd exits under it', async () => {
-    settings.vornd = true
+  it('follows vornd to its new port when it starts again', async () => {
     const { bridge, getVorndStatus } = await launch()
-    started[0]!.exit('code=null, signal=SIGKILL')
+    server.vornd = { state: 'on', port: 47002, nativeServer: false }
+    bridge.drop()
+    // Back to the server, which says where vornd is now.
     expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
-    expect(getVorndStatus()).toEqual({
-      state: 'failed',
-      detail: 'vornd exited (code=null, signal=SIGKILL)'
-    })
+    expect(getVorndStatus()).toEqual({ state: 'failed', detail: 'vornd went away' })
+    for (let i = 0; i < 5; i++) await settled()
+    expect(bridge.url).toBe('ws://127.0.0.1:47002/ws')
+    expect(getVorndStatus()).toEqual({ state: 'on', port: 47002, nativeServer: false })
   })
 
-  it('stops vornd when the app lets go of the server', async () => {
-    settings.vornd = true
-    const { detachFromServer } = await launch()
+  it('forgets vornd when the app lets go of the server', async () => {
+    const { detachFromServer, getVorndStatus } = await launch()
     detachFromServer()
-    expect(started[0]?.stopped).toBe(true)
-  })
-
-  it('stops vornd when the app stops the server', async () => {
-    settings.vornd = true
-    const { stopServer } = await launch()
-    await stopServer()
-    expect(started[0]?.stopped).toBe(true)
+    expect(getVorndStatus()).toEqual({ state: 'off' })
   })
 })

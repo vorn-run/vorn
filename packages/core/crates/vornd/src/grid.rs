@@ -4,8 +4,8 @@
 //! The endpoint is a local socket only this user can open, the same kind
 //! sessiond serves on: a Unix socket in the 0700 `run/` directory with the
 //! peer's UID checked, or a named pipe whose DACL grants only this user. It
-//! exists only while the session engine does, so with the Native daemon
-//! switch off nothing listens.
+//! exists only while the session engine does, so a vornd built without it
+//! has nothing listening here.
 //!
 //! A connection says Hello and gets Welcome (or Error 426 for a protocol
 //! major this vornd cannot serve), then attaches to sessions. vornd names

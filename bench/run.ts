@@ -23,28 +23,12 @@ import { median, round } from './lib/stats'
 import type { Metric, SuiteResult } from './lib/suite'
 
 const ROOT = path.resolve(__dirname, '..')
-const SUITES = [
-  'output-analysis',
-  'screen-model',
-  'flush',
-  'git',
-  'event-loop',
-  'renderer',
-  'memory'
-]
+const SUITES = ['git', 'renderer']
 /**
  * Processes per run, for suites whose numbers move between processes more than
- * within one: the output analysis and the screen parse land up to 15% apart
- * from one process to the next on the same machine, and event-loop percentiles
- * depend on how the OS schedules that one process. One run of these is the
- * median of three processes.
+ * within one. One run of these is the median of that many processes.
  */
-const PROCESSES: Record<string, number> = {
-  'output-analysis': 3,
-  'screen-model': 3,
-  'event-loop': 3,
-  memory: 3
-}
+const PROCESSES: Record<string, number> = {}
 const SPREAD_LIMIT = 10
 /** Baselines this close to zero (e.g. no long tasks at all) give a meaningless %. */
 const ZERO_BASELINE = 1e-9

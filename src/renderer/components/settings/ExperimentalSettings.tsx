@@ -11,45 +11,27 @@ import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
 
-/**
- * The daemon's switch. The desktop app reads it when it starts, not the
- * server, so it is shown only where vornd can run.
- */
-const VORND_SWITCH = {
-  label: 'Native daemon',
-  description:
-    'Run terminals and agents in vornd, the native daemon, so they keep running when Vorn closes. Applies after restarting Vorn'
+/** Why vornd, which runs every terminal, is not in use, or null. */
+function vorndNote(status: VorndStatus | null): string | null {
+  if (status?.state !== 'failed') return null
+  return `Terminals cannot run, because vornd, the native daemon, is not in use: ${status.detail}.`
 }
 
-/** What vornd is doing, when it differs from what the switch says, or null. */
-function vorndNote(on: boolean, status: VorndStatus | null): string | null {
-  if (!status) return null
-  if (status.state === 'failed')
-    return `Vorn is connected to the server directly: ${status.detail}.`
-  if (on && status.state === 'off') return 'Vorn connects through vornd the next time it starts.'
-  if (!on && status.state === 'on') return 'Vorn stops using vornd the next time it starts.'
-  return null
-}
-
-/**
- * The native server's switch. The desktop app reads it when it starts and
- * passes it to vornd, so it does something only with the daemon's on too.
- */
+/** The native server's switch. The server reads it when it starts vornd. */
 const SERVER_SWITCH = {
   label: 'Native server',
   description:
-    'Answer git, file explorer and editor calls in vornd instead of the server. Needs Native daemon. Applies after restarting Vorn'
+    'Answer git, file explorer and editor calls in vornd instead of the server. Applies after restarting Vorn'
 }
 
 /** What the native server is doing, when it differs from what the switch says, or null. */
-function serverNote(on: boolean, daemonOn: boolean, status: VorndStatus | null): string | null {
-  if (on && !daemonOn)
-    return 'Native server needs Native daemon, so the server answers these calls itself.'
+function serverNote(on: boolean, status: VorndStatus | null): string | null {
   if (!status) return null
-  const answering = status.state === 'on' && status.nativeServer
   if (on && status.state === 'failed')
-    return 'The server answers these calls itself while Vorn is connected to it directly.'
-  if (on && !answering) return 'vornd answers these calls the next time Vorn starts.'
+    return 'The server answers these calls itself while vornd is not in use.'
+  const answering = status.state === 'on' && status.nativeServer
+  if (on && status.state === 'on' && !answering)
+    return 'vornd answers these calls the next time Vorn starts.'
   if (!on && answering) return 'The server answers these calls again the next time Vorn starts.'
   return null
 }
@@ -89,7 +71,7 @@ function olderNote(h: SessionHolder): string {
 function coreNote(status: CoreStatus | null): string | null {
   if (!status) return null
   if (!status.loaded) {
-    return `The native core did not load, so terminals have no screen model, agent status or terminal output for agents${
+    return `The native core did not load, so git runs more slowly and the native store is not available${
       status.error ? `: ${status.error}` : '.'
     }`
   }
@@ -104,8 +86,7 @@ export function ExperimentalSettings() {
   const setConfig = useAppStore((s) => s.setConfig)
   // Null until it arrives, and for a server older than the method.
   const [status, setStatus] = useState<CoreStatus | null>(null)
-  // Null until it arrives, and for good where vornd cannot run (the browser):
-  // the daemon's row is shown only once there is a status to show it with.
+  // Null until it arrives, and for good where vornd's status cannot be asked (the browser).
   const [daemon, setDaemon] = useState<VorndStatus | null>(null)
   const [holders, setHolders] = useState<SessionHolders | null>(null)
   const [endFailure, setEndFailure] = useState<string | null>(null)
@@ -144,9 +125,9 @@ export function ExperimentalSettings() {
 
   const flags = config.defaults.experimental ?? {}
   const note = coreNote(status)
-  const daemonNote = vorndNote(flags.vornd === true, daemon)
-  const nativeServerNote = serverNote(flags.nativeServer === true, flags.vornd === true, daemon)
+  const daemonNote = vorndNote(daemon)
   const nativeStoreNote = storeNote(flags.nativeStore === true, status?.store)
+  const nativeServerNote = serverNote(flags.nativeServer === true, daemon)
 
   const endHolder = (h: SessionHolder): void => {
     const count = h.sessions === null ? 'the sessions' : plural(h.sessions, 'session', 'sessions')
@@ -180,17 +161,6 @@ export function ExperimentalSettings() {
           {note}
         </div>
       )}
-      <div className="space-y-1">
-        {daemon && (
-          <SettingRow label={VORND_SWITCH.label} description={VORND_SWITCH.description}>
-            <ToggleSwitch
-              checked={flags.vornd === true}
-              onChange={(value) => setFlag('vornd', value)}
-              label={VORND_SWITCH.label}
-            />
-          </SettingRow>
-        )}
-      </div>
       {daemonNote && (
         <div className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
           {daemonNote}
@@ -219,18 +189,16 @@ export function ExperimentalSettings() {
           </div>
         ))}
       {endFailure && <div className="mt-2 text-xs text-red-400">{endFailure}</div>}
-      {daemon && (
-        <div className="mt-1 space-y-1">
-          <SettingRow label={SERVER_SWITCH.label} description={SERVER_SWITCH.description}>
-            <ToggleSwitch
-              checked={flags.nativeServer === true}
-              onChange={(value) => setFlag('nativeServer', value)}
-              label={SERVER_SWITCH.label}
-            />
-          </SettingRow>
-        </div>
-      )}
-      {daemon && nativeServerNote && (
+      <div className="mt-1 space-y-1">
+        <SettingRow label={SERVER_SWITCH.label} description={SERVER_SWITCH.description}>
+          <ToggleSwitch
+            checked={flags.nativeServer === true}
+            onChange={(value) => setFlag('nativeServer', value)}
+            label={SERVER_SWITCH.label}
+          />
+        </SettingRow>
+      </div>
+      {nativeServerNote && (
         <div className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
           {nativeServerNote}
         </div>

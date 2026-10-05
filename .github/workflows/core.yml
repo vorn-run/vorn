@@ -14,16 +14,10 @@ on:
       - 'packages/server/src/git-utils.ts'
       - 'tests/native-core.test.ts'
       - 'tests/git-native-parity.test.ts'
-      - 'packages/server/src/terminal-screen.ts'
       - 'tests/js-reference.test.ts'
       - 'tests/fixtures/js-reference/**'
       - 'tests/helpers/screen-view.ts'
-      - 'tests/helpers/analysis-parity.ts'
-      - 'tests/terminal-screen-memory.process.test.ts'
-      - 'tests/helpers/measure-screens.ts'
       - 'tests/helpers/screen-parity.ts'
-      - 'packages/server/src/core-pipeline.ts'
-      - 'tests/core-pipeline.test.ts'
       - 'tests/helpers/front-door.ts'
       - 'tests/server-integration.test.ts'
       - 'tests/task-write-methods.test.ts'
@@ -31,6 +25,7 @@ on:
       - 'scripts/conformance.mjs'
       - 'packages/server/src/vornd-channel.ts'
       - 'packages/server/src/vornd-sessions.ts'
+      - 'packages/server/src/vornd-process.ts'
       - 'tests/vornd-app-channel.test.ts'
       - 'tests/vornd-app-sessions.test.ts'
       - 'tests/vornd-app-platforms.test.ts'
@@ -163,16 +158,9 @@ jobs:
           VORN_CONFORMANCE_VORND: packages/core/vornd
         run: yarn test:conformance
 
-      # The native tests skip themselves when the binary lacks an export, so a
-      # default build that lost Ghostty would turn them into silent skips.
-      - name: Default build exports TerminalPipeline
-        shell: bash
-        run: node -e "const c = require('./packages/core/vorn_core.node'); if (typeof c.TerminalPipeline !== 'function') { console.error('vorn_core.node has no TerminalPipeline'); process.exit(1) }"
-
-      # With the binary present these run the real call from Node, including a
-      # parse through libghostty-vt.
+      # With the binary present these run the real call from Node.
       - name: Native call
-        run: yarn vitest run tests/native-core.test.ts tests/js-reference.test.ts tests/core-pipeline.test.ts tests/git-native-parity.test.ts
+        run: yarn vitest run tests/native-core.test.ts tests/git-native-parity.test.ts
 
       # Both stores answering the same calls, on each platform.
       - name: Native store
@@ -203,18 +191,14 @@ jobs:
         run: yarn test:conformance
 
       # The server driving its sessions through the real vornd and session
-      # holder, on each platform: a named pipe and ConPTY on Windows.
+      # holder, on each platform: a named pipe and ConPTY on Windows. The
+      # screen against the recorded reference runs where its programs (POSIX
+      # shell) do.
       - name: Sessions through vornd
         shell: bash
         run: |
           export VORN_CONFORMANCE_VORND="$(pwd -W 2>/dev/null || pwd)/packages/core/vornd$([ "$RUNNER_OS" = Windows ] && echo .exe)"
-          yarn vitest run tests/vornd-app-platforms.test.ts
-
-      # The screen model's memory ceiling and release. One platform is enough
-      # for a ceiling.
-      - name: Native screen memory
-        if: runner.os == 'Linux'
-        run: yarn vitest run tests/terminal-screen-memory.process.test.ts
+          yarn vitest run tests/vornd-app-platforms.test.ts tests/js-reference.test.ts
 
       - name: Build app
         run: yarn build

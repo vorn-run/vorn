@@ -68,8 +68,6 @@ const store = vi.hoisted(() => ({
   notified: 0
 }))
 
-vi.mock('node-pty', () => ({ default: { spawn: vi.fn() }, spawn: vi.fn() }))
-
 /**
  * Booting a server probes Tailscale, and the probe is a real process.
  *

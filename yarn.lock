@@ -4861,7 +4861,6 @@ __metadata:
     fastify: "npm:^5.11.0"
     libsql: "npm:^0.5.29"
     node-cron: "npm:^4.2.1"
-    node-pty: "npm:1.2.0-beta.15"
     pino: "npm:^10.3.1"
     tar: "npm:^7.5.21"
     tsup: "npm:^8.5.1"
@@ -9477,15 +9476,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"node-addon-api@npm:^7.1.0":
-  version: 7.1.1
-  resolution: "node-addon-api@npm:7.1.1"
-  dependencies:
-    node-gyp: "npm:latest"
-  checksum: 10c0/fb32a206276d608037fa1bcd7e9921e177fe992fc610d098aa3128baca3c0050fc1e014fa007e9b3874cf865ddb4f5bd9f43ccb7cbbbe4efaff6a83e920b17e9
-  languageName: node
-  linkType: hard
-
 "node-api-version@npm:^0.2.1":
   version: 0.2.1
   resolution: "node-api-version@npm:0.2.1"
@@ -9546,26 +9536,6 @@ __metadata:
   version: 0.4.0
   resolution: "node-int64@npm:0.4.0"
   checksum: 10c0/a6a4d8369e2f2720e9c645255ffde909c0fbd41c92ea92a5607fc17055955daac99c1ff589d421eee12a0d24e99f7bfc2aabfeb1a4c14742f6c099a51863f31a
-  languageName: node
-  linkType: hard
-
-"node-pty@npm:1.2.0-beta.13":
-  version: 1.2.0-beta.13
-  resolution: "node-pty@npm:1.2.0-beta.13"
-  dependencies:
-    node-addon-api: "npm:^7.1.0"
-    node-gyp: "npm:latest"
-  checksum: 10c0/56ad1661013f1fdbe3eb1675854e657d8a9c1834aa5a7e51fc5132858c528ca63a3edff6568ed4f90f174de716cd9378a40d5c3fad80182210f0006020a06458
-  languageName: node
-  linkType: hard
-
-"node-pty@npm:1.2.0-beta.15":
-  version: 1.2.0-beta.15
-  resolution: "node-pty@npm:1.2.0-beta.15"
-  dependencies:
-    node-addon-api: "npm:^7.1.0"
-    node-gyp: "npm:latest"
-  checksum: 10c0/2f2bcca18efe94f56fd5c9fc9611164f63af912b96286ea4d858f4886e3b25aa9c529e3d7680d47e5ddefc6c3e799786ed11dc4b80947e40438e00a67dbc2fbf
   languageName: node
   linkType: hard
 
@@ -12945,7 +12915,6 @@ __metadata:
     lucide-react: "npm:1.34.0"
     node-cron: "npm:^4.2.1"
     node-gyp: "npm:^13.0.1"
-    node-pty: "npm:1.2.0-beta.13"
     playwright-core: "npm:1.56.1"
     postcss: "npm:^8.5.23"
     prettier: "npm:^3.8.3"
