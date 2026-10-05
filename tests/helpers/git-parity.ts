@@ -17,6 +17,10 @@
  *   their directory names, which the random ids decide.
  * - {@link fileMtime}: the same file written on two copies is written at two
  *   moments.
+ * - {@link failedGitWording}: when git fails with nothing on stderr, the
+ *   server's own two ways of running git word it differently: a child process
+ *   ends the message with a newline, the core does not. Applied to every
+ *   answer by {@link answerOf}.
  */
 
 /** A received JSON-RPC frame without its id. */
@@ -25,7 +29,16 @@ export type Answer = Record<string, unknown>
 /** The frame as a client reads it, without the id it echoes. */
 export function answerOf(frame: Record<string, unknown>): Answer {
   const { id: _id, ...rest } = frame
-  return JSON.parse(JSON.stringify(rest)) as Answer
+  return failedGitWording(JSON.parse(JSON.stringify(rest)) as Answer)
+}
+
+/** `Command failed: <command>` with nothing after it loses a trailing newline. */
+export function failedGitWording<T>(value: T): T {
+  return mapStrings(value, (s) =>
+    s.startsWith('Command failed: ') && s.endsWith('\n') && !s.slice(0, -1).includes('\n')
+      ? s.slice(0, -1)
+      : s
+  )
 }
 
 /** Every path and message naming `root` names `<root>` instead. */
