@@ -327,11 +327,9 @@ class HeadlessManager extends EventEmitter {
    * about them, and their workflow run picks up on its own.
    */
   adoptBackend(listing: Listing): void {
-    const listed = new Set(listing.sessions.map((s) => s.id))
-    for (const [id, proc] of this.processes) {
-      if (!(proc instanceof VorndChild) || listed.has(id) || !proc.pid) continue
-      log.warn(`[headless] vornd no longer holds agent ${id}; it has ended`)
-      proc.emit('exit', 1)
+    if (!listing.connected) return
+    for (const proc of [...this.processes.values()]) {
+      if (proc instanceof VorndChild) proc.reconcile(listing)
     }
     const orphans = listing.sessions.filter((s) => s.kind === 'piped' && !this.sessions.has(s.id))
     if (orphans.length) {

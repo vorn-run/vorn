@@ -35,6 +35,7 @@ struct Rig {
 /// One vornd: the engine on sessiond and the link to the server. Aborting
 /// both kills it, as a crash would.
 struct Vornd {
+    engine: Arc<Engine>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
@@ -84,6 +85,7 @@ impl Rig {
         let (linked, _) = watch::channel(false);
         let link_task = tokio::spawn(node_link::run(Arc::clone(&engine), cfg, linked));
         Vornd {
+            engine,
             tasks: vec![engine_task, link_task],
         }
     }
@@ -112,6 +114,8 @@ struct Node {
     /// the server does it.
     output: HashMap<String, String>,
     seen: HashSet<(String, u32, u64)>,
+    /// `vornd:held` notices: the engine connected to a sessiond.
+    held: u32,
 }
 
 impl Node {
@@ -182,6 +186,7 @@ impl Node {
             effects: HashMap::new(),
             output: HashMap::new(),
             seen: HashSet::new(),
+            held: 0,
         }
     }
 
@@ -211,6 +216,7 @@ impl Node {
                     }
                 }
             }
+            Some("vornd:held") => self.held += 1,
             Some("vornd:effect") => {
                 let key = p["effect"].as_str().unwrap().to_owned();
                 let e = self.effects.entry(key).or_insert((p.clone(), 0));
@@ -505,4 +511,55 @@ async fn after_a_crash_only_what_may_repeat_is_sent_again() {
     let status = again.effects_of("fx-1", "status");
     assert_eq!(status.last().unwrap().0["status"], 2, "status converges");
     second.kill().await;
+}
+
+/// RC §6 flow E through the link: the sessiond holding a session dies and the
+/// engine connects to a new one. The server is told to list again, and the
+/// list no longer names the session, so the server can end it; while no
+/// sessiond is connected, the list says so rather than naming stale sessions.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_session_holder_that_died_takes_its_sessions_off_the_list() {
+    let rig = Rig::start().await;
+    let v = rig.vornd();
+    let mut node = rig.node().await;
+    node.take_on().await;
+    node.spawn(json!({
+        "id": "gone-1", "argv": ["sleep", "30"], "cwd": tmp(), "env": env(),
+    }))
+    .await;
+    let listed = node.call("vornd:list", json!({})).await.unwrap();
+    assert_eq!(listed["sessions"][0]["id"], "gone-1");
+    let before = node.held;
+
+    // The engine loses its sessiond; the link to the server stays.
+    let Vornd { engine, mut tasks } = v;
+    let link = tasks.pop().unwrap();
+    let lost = tasks.pop().unwrap();
+    lost.abort();
+    let _ = lost.await;
+    let t = Instant::now();
+    loop {
+        let listed = node.call("vornd:list", json!({})).await.unwrap();
+        if listed["connected"] == false {
+            assert_eq!(listed["sessions"], json!([]), "nothing is known to be held");
+            break;
+        }
+        assert!(t.elapsed() < PATIENCE, "the engine never noticed");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // Another sessiond, holding nothing of what the first one held.
+    let other = Rig::start().await;
+    let holder = Holder::with_engine(Arc::clone(&engine));
+    let endpoint = other.d.endpoint();
+    let again = tokio::spawn(async move {
+        let _ = holder::connect(&endpoint, &holder).await;
+    });
+    node.until("the server to be told to list again", |n| n.held > before)
+        .await;
+    let listed = node.call("vornd:list", json!({})).await.unwrap();
+    assert_eq!(listed["connected"], true);
+    assert_eq!(listed["sessions"], json!([]));
+    again.abort();
+    link.abort();
 }

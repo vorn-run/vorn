@@ -174,6 +174,11 @@ class VorndLink extends EventEmitter {
       else p.resolve(frame.result)
       return
     }
+    // vornd connected to a session holder: what it holds is to be listed again.
+    if (frame.method === 'vornd:held') {
+      this.emit('held')
+      return
+    }
     const params = frame.params as { id?: unknown } | undefined
     const id = typeof params?.id === 'string' ? params.id : null
     if (!id) return

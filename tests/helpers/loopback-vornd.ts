@@ -70,6 +70,8 @@ export class LoopbackVornd {
   holdExits = false
   /** Send nothing until the server asks to follow, as vornd does; otherwise follow at once. */
   waitForFollow = false
+  /** Start the next spawn, then lose the link before answering it. */
+  dropLinkOnSpawn = false
   private socket: FakeSocket | null = null
   private nextEpoch = 1000
   private following = false
@@ -112,6 +114,12 @@ export class LoopbackVornd {
           this.following = true
           return this.reply(msg.id, { ok: true })
         case 'vornd:spawn': {
+          if (this.dropLinkOnSpawn) {
+            this.dropLinkOnSpawn = false
+            this.spawn(p)
+            this.unlink()
+            return
+          }
           const answer = (): void => {
             try {
               this.reply(msg.id, this.spawn(p))
@@ -308,6 +316,11 @@ export class LoopbackVornd {
       .filter((h) => h.exited && !this.holdExits)
       .map((h) => ({ id: h.id, exited: h.exited! }))
     return { connected: true, sessions, ended }
+  }
+
+  /** vornd connected to a session holder again: the server is to list what it holds. */
+  heldChanged(): void {
+    this.deliver({ method: 'vornd:held', params: {} })
   }
 
   /** Forget a session, as a holder that died would. */

@@ -46,6 +46,14 @@ export function wireVorndBackend(deps: BackendDeps): void {
     })
   })
 
+  // vornd's session holder came back (or another took its place): the ones it
+  // did not keep have ended, the way a holder that died ends them.
+  vorndLink.on('held', () => {
+    void reconcile().catch((err) => {
+      log.warn({ err }, '[vornd-backend] could not list the sessions vornd holds')
+    })
+  })
+
   vorndLink.on('effect', (effect: LinkEffect) => {
     if (effect.kind !== 'notify') return
     if (!claimEffect(effect.effect, 'notify')) return
@@ -58,8 +66,15 @@ export function wireVorndBackend(deps: BackendDeps): void {
 }
 
 async function takeOn(): Promise<void> {
+  await reconcile()
+  await vorndLink.follow()
+  // A client that attached in the gap before vornd held its sessions was
+  // answered here; it attaches again, through vornd.
+  clientRegistry.resyncViaVornd(ptyManager.backendHeldIds())
+}
+
+async function reconcile(): Promise<void> {
   const listing = await vorndLink.list()
   ptyManager.adoptBackend(listing)
   headlessManager.adoptBackend(listing)
-  await vorndLink.follow()
 }

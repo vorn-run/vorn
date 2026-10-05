@@ -16,8 +16,10 @@
 //!   `vornd:write`, `vornd:resize`, `vornd:signal` and `vornd:closeStdin`;
 //! - vornd tells: `vornd:records`, every record once it is applied, in order,
 //!   for what the server still does with output itself (its scrollback and
-//!   history, analysis lines, headless output), and `vornd:effect`, every
-//!   effect with its `effect_id` (RC §7).
+//!   history, analysis lines, headless output), `vornd:effect`, every
+//!   effect with its `effect_id` (RC §7), and `vornd:held` whenever the
+//!   engine connects to a sessiond, so the server lists again and ends the
+//!   sessions a sessiond that died took with it (RC §6 flow E).
 //!
 //! Delivery follows RC §7. Records and effects go out once per vornd life,
 //! and a replay after a restart sends them again with the same positions and
@@ -154,7 +156,7 @@ fn weight(t: &Tapped) -> usize {
                 _ => 0,
             })
             .sum(),
-        Tapped::Effect(..) => 0,
+        Tapped::Effect(..) | Tapped::Held => 0,
     }
 }
 
@@ -620,6 +622,8 @@ fn tapped_note(t: &Tapped) -> Value {
     match t {
         Tapped::Records(session, entries) => records_note(session, entries),
         Tapped::Effect(id, effect) => effect_note(id, effect),
+        // The server lists again and ends what is gone.
+        Tapped::Held => note("vornd:held", json!({})),
     }
 }
 

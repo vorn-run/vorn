@@ -120,6 +120,10 @@ pub enum Tapped {
     /// Records of a session, once applied to its terminal.
     Records(String, Vec<Entry>),
     Effect(EffectId, Effect),
+    /// The engine connected to a sessiond and took on what it holds: a
+    /// session the consumer had that is not there now has gone with an
+    /// earlier sessiond (RC §6 flow E), and only [`Engine::held`] can say.
+    Held,
 }
 
 /// A session sessiond holds, as the engine learned of it: from a Welcome
@@ -506,6 +510,9 @@ impl Engine {
             pool.open(&info.session, Open::from_info(info));
         }
         info!(sessions = welcome.sessions.len(), "recovering sessions");
+        if self.tapping() {
+            self.tapped(Tapped::Held);
+        }
         // The pool moves into the driver so that `_clear` drops the last
         // reference, off the runtime's threads.
         let mut d = Driver {
@@ -598,6 +605,9 @@ impl Drop for Clear<'_> {
         let Some(c) = self.0.current().take() else {
             return;
         };
+        // Until the next Welcome, nothing is known to be held: a sessiond
+        // that died took its sessions with it.
+        self.0.held_mut().clear();
         // Dropping the pool joins its workers, each finishing the job in
         // hand: not on a runtime thread.
         match tokio::runtime::Handle::try_current() {

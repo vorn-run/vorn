@@ -10,6 +10,7 @@ import {
   type LinkReceiver,
   type LinkRecord,
   type LinkSpawn,
+  type Listing,
   type VorndLink
 } from './vornd-link'
 
@@ -85,7 +86,15 @@ export class VorndProcess implements ManagedPty, LinkReceiver {
   readonly ready: Promise<void>
   private settleReady: () => void = () => {}
   private exitTimer: ReturnType<typeof setTimeout> | null = null
+  /** The size vornd last accepted, so an identical re-fit is not sent again. */
   private size: [number, number] | null
+  /** A size asked for while vornd could not take it: sent once it can. */
+  private pendingSize: [number, number] | null = null
+  /**
+   * The spawn whose answer was lost with the link: whether the program
+   * started is learned from vornd's list once a vornd links again.
+   */
+  private orphaned: LinkSpawn | null = null
   private saidGap = false
 
   private constructor(
@@ -157,6 +166,14 @@ export class VorndProcess implements ManagedPty, LinkReceiver {
         break
       } catch (err) {
         const message = (err as Error).message
+        // The link went before vornd answered: the holder may well have
+        // started the program. Not a failure; vornd's list says, once linked.
+        if (/vornd is not linked/.test(message) && !this.ended) {
+          log.warn({ id: this.id }, '[vornd] the link went during a spawn; waiting for vornd')
+          this.orphaned = spec
+          this.settleReady()
+          return
+        }
         // A resumed session's name is released once vornd has every record of
         // the run before it; that is moments away.
         if (/still held/.test(message) && Date.now() < deadline && !this.ended) {
@@ -170,6 +187,11 @@ export class VorndProcess implements ManagedPty, LinkReceiver {
         return
       }
     }
+    this.holderStarted()
+  }
+
+  /** The holder has the program: send what waited for it. */
+  private holderStarted(): void {
     this.spawned = true
     this.settleReady()
     this.events.emit('spawned', this.pid)
@@ -179,6 +201,38 @@ export class VorndProcess implements ManagedPty, LinkReceiver {
     }
     for (const data of this.queued) this.link.notify('vornd:write', { id: this.id, data })
     this.queued = []
+    this.flushSize()
+  }
+
+  /**
+   * vornd's list, after a vornd linked (or its session holder came back):
+   * what this process should make of it. A spawn whose answer was lost takes
+   * the session if vornd has it and spawns again if not; a started one that
+   * vornd no longer has has ended, as `ended` says or with no code; one it
+   * has gets a size that could not be sent while nothing was linked.
+   */
+  reconcile(listing: Listing): void {
+    if (this.ended) return
+    const found = listing.sessions.find((s) => s.id === this.id)
+    if (this.orphaned) {
+      const spec = this.orphaned
+      this.orphaned = null
+      if (found) {
+        this.pid = found.pid
+        this.holderStarted()
+      } else {
+        void this.start(spec)
+      }
+      return
+    }
+    if (!this.spawned) return
+    if (!found) {
+      const ended = listing.ended.find((e) => e.id === this.id)
+      log.warn({ id: this.id }, '[vornd] vornd no longer holds this session; it has ended')
+      this.lost(ended?.exited ?? null)
+      return
+    }
+    this.flushSize()
   }
 
   write(data: string): void {
@@ -196,10 +250,26 @@ export class VorndProcess implements ManagedPty, LinkReceiver {
 
   resize(cols: number, rows: number): void {
     if (this.ended || this.piped) return
-    if (this.size && this.size[0] === cols && this.size[1] === rows) return
-    this.size = [cols, rows]
-    // The record that comes back is what moves the session's size.
-    this.link.notify('vornd:resize', { id: this.id, cols, rows })
+    this.pendingSize = [cols, rows]
+    this.flushSize()
+  }
+
+  /**
+   * Sends the size asked for, once vornd can take it. The record that comes
+   * back is what moves the session's size; this only remembers what vornd
+   * accepted, so a size lost while nothing was linked is sent again rather
+   * than taken for done.
+   */
+  private flushSize(): void {
+    const want = this.pendingSize
+    if (!want || !this.spawned) return
+    if (this.size && this.size[0] === want[0] && this.size[1] === want[1]) {
+      this.pendingSize = null
+      return
+    }
+    if (!this.link.notify('vornd:resize', { id: this.id, cols: want[0], rows: want[1] })) return
+    this.size = want
+    this.pendingSize = null
   }
 
   kill(signal?: string): void {
@@ -359,6 +429,11 @@ export class VorndChild extends EventEmitter {
 
   get pid(): number {
     return this.proc.pid
+  }
+
+  /** See `VorndProcess.reconcile`; an agent vornd no longer has exits with 1. */
+  reconcile(listing: Listing): void {
+    this.proc.reconcile(listing)
   }
 
   kill(signal?: NodeJS.Signals | number): boolean {
