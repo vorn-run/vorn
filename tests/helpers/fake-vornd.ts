@@ -17,6 +17,8 @@ import { encodeTerminalFrameV2 } from '../../packages/shared/src/terminal-frame'
  * can tell the server anything vornd can, as often as a test likes, which the
  * real vornd does only around a crash.
  */
+let endpoints = 0
+
 export class FakeVornd {
   readonly endpoint: string
   private server!: net.Server
@@ -33,10 +35,12 @@ export class FakeVornd {
   protocol = APP_PROTOCOL
 
   constructor(private readonly dataDir: string) {
+    // Each its own endpoint: two made in the same millisecond must not share one.
+    const n = ++endpoints
     this.endpoint =
       process.platform === 'win32'
-        ? `\\\\.\\pipe\\vorn-app-test-${process.pid}-${Date.now()}`
-        : path.join(dataDir, `app-${Date.now()}.sock`)
+        ? `\\\\.\\pipe\\vorn-app-test-${process.pid}-${n}`
+        : path.join(dataDir, `app-${n}.sock`)
   }
 
   async start(): Promise<void> {
