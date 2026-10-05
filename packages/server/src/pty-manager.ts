@@ -81,6 +81,8 @@ const MAX_GEOMETRY = 10_000
 
 const INITIAL_COLS = 80
 const INITIAL_ROWS = 24
+/** The terminal type programs are told they run in. */
+const PTY_TERM = 'xterm-256color'
 const IDLE_TIMEOUT_MS = 5000
 const IDLE_TIMEOUT_HOOKS_MS = 30_000
 
@@ -768,7 +770,10 @@ class PtyManager extends EventEmitter {
   ): ManagedPty {
     if (vorndSessions.inUse()) {
       const argv = [file, ...(typeof args === 'string' ? [args] : args)]
-      const spec = { argv, cwd: opts.cwd, env: opts.env, cols: INITIAL_COLS, rows: INITIAL_ROWS }
+      // vornd starts the program with exactly this environment, so it carries
+      // the TERM node-pty would have set from its `name` below.
+      const env = process.platform === 'win32' ? opts.env : { ...opts.env, TERM: PTY_TERM }
+      const spec = { argv, cwd: opts.cwd, env, cols: INITIAL_COLS, rows: INITIAL_ROWS }
       return vorndSessions.spawn(id, spec, watched)
     }
     if (configManager.loadConfig().defaults.experimental?.vornd === true) {
@@ -778,7 +783,7 @@ class PtyManager extends EventEmitter {
       )
     }
     return pty.spawn(file, args, {
-      name: 'xterm-256color',
+      name: PTY_TERM,
       cols: INITIAL_COLS,
       rows: INITIAL_ROWS,
       cwd: opts.cwd,

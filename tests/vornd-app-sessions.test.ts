@@ -100,6 +100,24 @@ describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
     client.close()
   })
 
+  it('tells a shell in vornd it runs in xterm-256color, as a PTY here would', async () => {
+    const before = process.env.TERM
+    process.env.TERM = 'dumb'
+    const session = ptyManager.createShellPty(os.tmpdir())
+    if (before === undefined) delete process.env.TERM
+    else process.env.TERM = before
+
+    const client = new BytesClient()
+    await client.connect(vornd.port)
+    await client.attach(session.id)
+    ptyManager.writeToPty(session.id, 'echo "term=[$TERM]"\r')
+    // The command line echoes back as `[$TERM]`: wait for what the shell printed.
+    await until('the echo', async () => /term=\[[^$]*\]/.test(await client.text()))
+    expect(await client.text()).toContain('term=[xterm-256color]')
+    ptyManager.writeToPty(session.id, 'exit\r')
+    client.close()
+  })
+
   it('reports where a shell moved from what vornd parsed', async () => {
     const cwds: string[] = []
     const onCwd = (_id: string, cwd: string): void => {
