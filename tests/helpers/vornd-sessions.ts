@@ -135,7 +135,11 @@ export class Vornd {
 /** A data directory for one test, and its cleanup. */
 export function home(): { dir: string; remove(): void } {
   const dir = mkdtempSync(path.join(tmpdir(), 'vornd-sessions-'))
-  return { dir, remove: () => rmSync(dir, { recursive: true, force: true }) }
+  // Windows can hold a file that was just closed for a moment longer.
+  return {
+    dir,
+    remove: () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  }
 }
 
 interface Pending {
