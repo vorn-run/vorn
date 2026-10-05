@@ -10,7 +10,10 @@
 //! The one exception: terminal calls for a session vornd itself holds are
 //! answered here and never reach the server ([`crate::terminal`]). What
 //! vornd sends a client and what the server sends it share one ordered
-//! outbox per connection ([`crate::streams::ClientConn`]).
+//! outbox per connection ([`crate::streams::ClientConn`]). A connection that
+//! opens with the desktop's launch token in its `Authorization` is the
+//! desktop's, which the size rule favours ([`crate::size`]); nothing a
+//! client says later changes that.
 //!
 //! Headers that describe the client's request go through untouched, `Host` and
 //! `Origin` in particular: the server checks that they match, and both name
@@ -82,6 +85,8 @@ pub struct Daemon {
     streams: Arc<Streams>,
     /// Whether `vornd:spawn` is answered (`--debug-spawn`).
     spawn: std::sync::atomic::AtomicBool,
+    /// The desktop's launch token, when the app that started vornd gave it.
+    desktop_token: std::sync::OnceLock<Vec<u8>>,
 }
 
 impl Daemon {
@@ -107,6 +112,7 @@ impl Daemon {
         Arc::new(Daemon {
             streams,
             spawn: std::sync::atomic::AtomicBool::new(false),
+            desktop_token: std::sync::OnceLock::new(),
             upstream,
             groups,
             client: Client::builder(TokioExecutor::new()).build_http(),
@@ -126,6 +132,25 @@ impl Daemon {
     /// through vornd, for tests until the app creates sessions this way.
     pub fn allow_spawn(&self) {
         self.spawn.store(true, Ordering::Relaxed);
+    }
+
+    /// The desktop's launch token: a WebSocket that opens with it as its
+    /// bearer credential is the desktop's. Only the first one given is kept.
+    pub fn set_desktop_token(&self, token: Vec<u8>) {
+        if !token.is_empty() {
+            let _ = self.desktop_token.set(token);
+        }
+    }
+
+    /// Whether a WebSocket that opened with these headers is the desktop's.
+    fn is_desktop(&self, headers: &HeaderMap) -> bool {
+        let Some(token) = self.desktop_token.get() else {
+            return false;
+        };
+        let auth = headers
+            .get(header::AUTHORIZATION)
+            .map(HeaderValue::as_bytes);
+        is_desktop_credential(auth, token)
     }
 
     /// Asks the server's own health route, and answers its status if it answered.
@@ -284,6 +309,7 @@ async fn websocket(daemon: Arc<Daemon>, mut req: Request<Incoming>) -> Response<
     let Some(key) = req.headers().get(header::SEC_WEBSOCKET_KEY).cloned() else {
         return plain(StatusCode::BAD_REQUEST, "missing Sec-WebSocket-Key");
     };
+    let desktop = daemon.is_desktop(req.headers());
     let path = req.uri().path_and_query().map_or("/", |p| p.as_str());
     let mut upstream_req = match format!("ws://{}{}", daemon.upstream, path).into_client_request() {
         Ok(r) => r,
@@ -351,7 +377,7 @@ async fn websocket(daemon: Arc<Daemon>, mut req: Request<Incoming>) -> Response<
         .await;
         daemon.open.fetch_add(1, Ordering::Relaxed);
         daemon.served.fetch_add(1, Ordering::Relaxed);
-        pump(&daemon, client, server).await;
+        pump(&daemon, client, server, desktop).await;
         daemon.open.fetch_sub(1, Ordering::Relaxed);
     });
     res
@@ -363,8 +389,12 @@ async fn websocket(daemon: Arc<Daemon>, mut req: Request<Incoming>) -> Response<
 /// Frames to the client go through the connection's outbox, which one writer
 /// drains, so the server's frames and what vornd answers itself stay in the
 /// order they were queued.
-async fn pump<C, S>(daemon: &Arc<Daemon>, client: WebSocketStream<C>, server: WebSocketStream<S>)
-where
+async fn pump<C, S>(
+    daemon: &Arc<Daemon>,
+    client: WebSocketStream<C>,
+    server: WebSocketStream<S>,
+    desktop: bool,
+) where
     C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -372,6 +402,9 @@ where
     let (mut to_server, mut from_server) = server.split();
     let mut conn = daemon.streams.connect();
     let conn_id = conn.id();
+    if desktop {
+        mark_desktop(daemon, conn_id);
+    }
     let forward = conn.forwarder();
 
     let writer = tokio::spawn(async move {
@@ -481,6 +514,35 @@ fn answered_here(daemon: &Daemon, conn: u64, reply: &Forwarder, text: &str) -> b
 #[cfg(not(feature = "engine"))]
 fn answered_here(_: &Daemon, _: u64, _: &Forwarder, _: &str) -> bool {
     false
+}
+
+/// Tells the size rule that connection `conn` is the desktop's.
+#[cfg(feature = "engine")]
+fn mark_desktop(daemon: &Daemon, conn: u64) {
+    if let Some(engine) = daemon.holder.as_ref().and_then(|h| h.engine()) {
+        engine.sizes().desktop(conn);
+    }
+}
+
+#[cfg(not(feature = "engine"))]
+fn mark_desktop(_: &Daemon, _: u64) {}
+
+/// Whether the `Authorization` a WebSocket opened with carries `token`,
+/// compared in constant time: the desktop's launch token decides who is a
+/// desktop, and the comparison must not say how much of a guess was right.
+pub fn is_desktop_credential(authorization: Option<&[u8]>, token: &[u8]) -> bool {
+    let Some(presented) = authorization.and_then(|a| a.strip_prefix(b"Bearer ")) else {
+        return false;
+    };
+    let presented = presented.trim_ascii();
+    if token.is_empty() || presented.len() != token.len() {
+        return false;
+    }
+    presented
+        .iter()
+        .zip(token)
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
 }
 
 fn is_websocket_upgrade(headers: &HeaderMap) -> bool {

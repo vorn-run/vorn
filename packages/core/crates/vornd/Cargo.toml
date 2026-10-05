@@ -31,6 +31,7 @@ tracing = "0.1"
 vorn-sessiond = { path = "../sessiond" }
 vorn-sessiond-wire = { path = "../sessiond-wire" }
 vorn-engine = { path = "../engine", optional = true }
+vorn-size = { path = "../size" }
 vorn-term-proto = { path = "../term-proto" }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
 

@@ -118,6 +118,19 @@ describe('starting vornd', () => {
     expect(vornd.upstream).toBe(50091)
   })
 
+  it("hands vornd the desktop's token in its environment, never in its arguments", async () => {
+    let seen: { args: string[]; env?: Record<string, string | undefined> } = { args: [] }
+    const spawnImpl = ((binary: string, args: string[], options: { env?: never }) => {
+      seen = { args, env: options.env }
+      return stubSpawn('ok')(binary, args, options as never)
+    }) as unknown as typeof spawn
+    started.push(await startVornd('vornd', 50091, { spawnImpl, desktopToken: 'launch-secret' }))
+    expect(seen.env?.VORND_DESKTOP_TOKEN).toBe('launch-secret')
+    expect(seen.args.join(' ')).not.toContain('launch-secret')
+    started.push(await startVornd('vornd', 50091, { spawnImpl }))
+    expect(seen.env).toBeUndefined()
+  })
+
   it('passes the session holder and its data directory when there is one', async () => {
     let seen: string[] = []
     const spawnImpl = ((binary: string, args: string[], options: object) => {

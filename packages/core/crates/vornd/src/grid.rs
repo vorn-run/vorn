@@ -13,22 +13,27 @@
 //! session's actor ([`crate::engine::Engine::grid_input`]), and writes what
 //! the actor answers. A client that stops reading is disconnected once its
 //! queue fills ([`crate::engine::GRID_QUEUE`]), and resumes with a snapshot.
+//!
+//! Its attachments' views, presence, input and size requests also go to the
+//! size rule ([`crate::size`]), where every grid client counts as a
+//! desktop: only this user can open the socket.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{debug, info, warn};
 use vorn_engine::{GridIn, Peer};
 use vorn_sessiond::os;
 use vorn_term_proto::msg::{
-    caps, major_supported, AttachMode, ClientMsg, FrameReader, Hello, MsgError, ServerMsg, Welcome,
-    PROTO_MAJOR, PROTO_MINOR,
+    caps, major_supported, AttachMode, ClientMsg, FrameReader, Hello, InputEvent, KeyAction,
+    MouseAction, MsgError, Presence, ServerMsg, Welcome, PROTO_MAJOR, PROTO_MINOR,
 };
 
 use crate::engine::Engine;
+use crate::size::{Ev, Who};
 
 /// Error codes a grid connection can get.
 pub mod code {
@@ -41,6 +46,8 @@ pub mod code {
     pub const NOT_SERVED: u16 = 501;
     /// The first message was not a Hello, or a frame did not decode.
     pub const BAD_REQUEST: u16 = 400;
+    /// The size is locked by another client.
+    pub const LOCKED: u16 = 423;
 }
 
 /// The endpoint for this vornd under `home`: one per process, so a vornd
@@ -291,7 +298,10 @@ impl Conn<'_> {
     fn request(&mut self, m: ClientMsg) -> Option<ServerMsg> {
         let conn = self.conn;
         let peer = |sid| Peer { conn, sid };
+        let now = Instant::now();
         let mut attaching = None;
+        // What the size rule hears of this request, once it is routed.
+        let mut sized: Option<(u32, Ev)> = None;
         let routed = match m {
             ClientMsg::Hello(_) => {
                 return Some(error(code::BAD_REQUEST, "Hello was already said"));
@@ -310,6 +320,17 @@ impl Conn<'_> {
                 let sid = self.next_sid;
                 self.sids.insert(sid, a.session.clone());
                 attaching = Some(sid);
+                sized = Some((
+                    sid,
+                    Ev::Attach {
+                        viewport: vorn_size::Size::new(a.view.cols, a.view.rows).usable(),
+                        presence: if a.visible {
+                            vorn_size::Presence::Watching
+                        } else {
+                            vorn_size::Presence::Away
+                        },
+                    },
+                ));
                 let session = a.session.clone();
                 (
                     session,
@@ -321,15 +342,26 @@ impl Conn<'_> {
             }
             ClientMsg::Detach { sid } => {
                 let s = self.sids.remove(&sid)?;
+                self.engine
+                    .sizes()
+                    .on(&s, Who::Grid(peer(sid)), Ev::Detach, now);
                 (s, GridIn::Detach { peer: peer(sid) })
             }
-            ClientMsg::SetVisible { sid, visible } => (
-                self.session(sid)?,
-                GridIn::SetVisible {
-                    peer: peer(sid),
-                    visible,
-                },
-            ),
+            ClientMsg::SetVisible { sid, visible } => {
+                let state = if visible {
+                    vorn_size::Presence::Watching
+                } else {
+                    vorn_size::Presence::Away
+                };
+                sized = Some((sid, Ev::Presence(state)));
+                (
+                    self.session(sid)?,
+                    GridIn::SetVisible {
+                        peer: peer(sid),
+                        visible,
+                    },
+                )
+            }
             ClientMsg::Ack { sid, rev } => (
                 self.session(sid)?,
                 GridIn::Ack {
@@ -341,14 +373,19 @@ impl Conn<'_> {
                 sid,
                 input_seq,
                 event,
-            } => (
-                self.session(sid)?,
-                GridIn::Input {
-                    peer: peer(sid),
-                    input_seq,
-                    event,
-                },
-            ),
+            } => {
+                if typing(&event) {
+                    sized = Some((sid, Ev::Input));
+                }
+                (
+                    self.session(sid)?,
+                    GridIn::Input {
+                        peer: peer(sid),
+                        input_seq,
+                        event,
+                    },
+                )
+            }
             ClientMsg::FetchHistory {
                 sid,
                 req,
@@ -410,14 +447,43 @@ impl Conn<'_> {
                     from_line,
                 },
             ),
-            // Size policy and default colours are not served yet; a client
-            // that sends them carries on.
+            // The size rule's alone: the actor has no part in them.
+            ClientMsg::Viewport { sid, size } => {
+                let size = vorn_size::Size::new(size.cols, size.rows);
+                return self.size(sid, Ev::Viewport(size), now);
+            }
+            ClientMsg::Presence { sid, state } => {
+                let state = match state {
+                    Presence::Active => vorn_size::Presence::Active,
+                    Presence::Watching => vorn_size::Presence::Watching,
+                    Presence::Away => vorn_size::Presence::Away,
+                };
+                return self.size(sid, Ev::Presence(state), now);
+            }
+            ClientMsg::TakeSize { sid } => return self.size(sid, Ev::TakeSize(None), now),
+            ClientMsg::LockSize { sid, locked } => {
+                let session = self.sids.get(&sid)?;
+                let who = Who::Grid(peer(sid));
+                return match self.engine.sizes().lock(session, who, locked, now) {
+                    Ok(()) => None,
+                    Err(e) => Some(error(code::LOCKED, &e)),
+                };
+            }
+            // Default colours are not served yet; a client that sends them
+            // carries on.
             ClientMsg::Unhandled(kind) => {
                 debug!(kind, "grid request not served yet");
                 return None;
             }
         };
         let (session, m) = routed;
+        // Input is seen before the actor writes it, so the size it takes is
+        // decided from the same moment.
+        if let Some((sid, ev)) = sized {
+            self.engine
+                .sizes()
+                .on(&session, Who::Grid(peer(sid)), ev, now);
+        }
         match self.engine.grid_input(&session, m) {
             Ok(()) => None,
             Err(e) => {
@@ -425,6 +491,9 @@ impl Conn<'_> {
                 // nobody will answer.
                 if let Some(sid) = attaching {
                     self.sids.remove(&sid);
+                    self.engine
+                        .sizes()
+                        .on(&session, Who::Grid(peer(sid)), Ev::Detach, now);
                 }
                 Some(error(code::NOT_FOUND, &e))
             }
@@ -435,9 +504,33 @@ impl Conn<'_> {
         self.sids.get(&sid).cloned()
     }
 
+    /// A request for the size rule alone.
+    fn size(&self, sid: u32, ev: Ev, now: Instant) -> Option<ServerMsg> {
+        let session = self.sids.get(&sid)?;
+        let who = Who::Grid(Peer {
+            conn: self.conn,
+            sid,
+        });
+        self.engine.sizes().on(session, who, ev, now);
+        None
+    }
+
     fn close(&mut self) {
         let sessions: Vec<String> = self.sids.drain().map(|(_, s)| s).collect();
         self.engine.grid_close(self.conn, sessions);
+    }
+}
+
+/// Whether an input event is a person's work in the session, which takes
+/// the size (TP §10): keys pressed, text, pastes and clicks. Focus, the
+/// wheel, motion and key releases are not.
+fn typing(e: &InputEvent) -> bool {
+    match e {
+        InputEvent::Key { action, .. } => *action != KeyAction::Release,
+        InputEvent::Text { .. } | InputEvent::Paste { .. } => true,
+        InputEvent::Mouse { action, .. } => *action != MouseAction::Motion,
+        InputEvent::Wheel { .. } | InputEvent::Focus { .. } => false,
+        InputEvent::Raw { bytes } => vorn_size::typed(bytes),
     }
 }
 

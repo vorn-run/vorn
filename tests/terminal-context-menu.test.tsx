@@ -7,12 +7,18 @@ const mockGetTerminalSelection = vi.fn()
 const mockClearTerminalSelection = vi.fn()
 const mockPasteToTerminal = vi.fn()
 const mockFocusTerminal = vi.fn()
+const mockGetTerminalSizing = vi.fn()
+const mockFitTerminalToDevice = vi.fn()
+const mockSetTerminalSizeLock = vi.fn()
 
 vi.mock('../src/renderer/lib/terminal-registry', () => ({
   getTerminalSelection: (...args: unknown[]) => mockGetTerminalSelection(...args),
   clearTerminalSelection: (...args: unknown[]) => mockClearTerminalSelection(...args),
   pasteToTerminal: (...args: unknown[]) => mockPasteToTerminal(...args),
-  focusTerminal: (...args: unknown[]) => mockFocusTerminal(...args)
+  focusTerminal: (...args: unknown[]) => mockFocusTerminal(...args),
+  getTerminalSizing: (...args: unknown[]) => mockGetTerminalSizing(...args),
+  fitTerminalToDevice: (...args: unknown[]) => mockFitTerminalToDevice(...args),
+  setTerminalSizeLock: (...args: unknown[]) => mockSetTerminalSizeLock(...args)
 }))
 
 // Running is a request to the server; the menu only makes it.
@@ -37,6 +43,7 @@ const mockConfig = {
 beforeEach(() => {
   vi.clearAllMocks()
   mockGetTerminalSelection.mockReturnValue('')
+  mockGetTerminalSizing.mockReturnValue(null)
 
   Object.defineProperty(navigator, 'clipboard', {
     value: {
@@ -403,5 +410,48 @@ describe('TerminalContextMenu', () => {
 
     expect(screen.getByText('Manual Deploy')).toBeInTheDocument()
     expect(screen.queryByText('Nightly Build')).not.toBeInTheDocument()
+  })
+
+  describe('the size of a session vornd holds', () => {
+    it('offers nothing for a session vornd does not hold', () => {
+      render(
+        <TerminalContextMenu terminalId="term-1" position={{ x: 100, y: 100 }} onClose={vi.fn()} />
+      )
+      expect(screen.queryByText('Fit to this device')).toBeNull()
+      expect(screen.queryByText('Lock size')).toBeNull()
+    })
+
+    it("fits the session to this device, unless it already is this pane's", () => {
+      mockGetTerminalSizing.mockReturnValue({ owner: false, locked: false })
+      const { unmount } = render(
+        <TerminalContextMenu terminalId="term-1" position={{ x: 100, y: 100 }} onClose={vi.fn()} />
+      )
+      fireEvent.click(screen.getByText('Fit to this device'))
+      expect(mockFitTerminalToDevice).toHaveBeenCalledWith('term-1')
+      unmount()
+
+      mockGetTerminalSizing.mockReturnValue({ owner: true, locked: false })
+      render(
+        <TerminalContextMenu terminalId="term-1" position={{ x: 100, y: 100 }} onClose={vi.fn()} />
+      )
+      expect(screen.getByText('Fit to this device').closest('button')).toBeDisabled()
+    })
+
+    it('locks the size and unlocks it again', () => {
+      mockGetTerminalSizing.mockReturnValue({ owner: true, locked: false })
+      const { unmount } = render(
+        <TerminalContextMenu terminalId="term-1" position={{ x: 100, y: 100 }} onClose={vi.fn()} />
+      )
+      fireEvent.click(screen.getByText('Lock size'))
+      expect(mockSetTerminalSizeLock).toHaveBeenLastCalledWith('term-1', true)
+      unmount()
+
+      mockGetTerminalSizing.mockReturnValue({ owner: true, locked: true })
+      render(
+        <TerminalContextMenu terminalId="term-1" position={{ x: 100, y: 100 }} onClose={vi.fn()} />
+      )
+      fireEvent.click(screen.getByText('Unlock size'))
+      expect(mockSetTerminalSizeLock).toHaveBeenLastCalledWith('term-1', false)
+    })
   })
 })

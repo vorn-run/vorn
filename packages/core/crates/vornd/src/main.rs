@@ -1,5 +1,10 @@
 //! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--groups git=shadow] [--log-file PATH] [--sessiond PATH --home DIR] [--debug-spawn]`
 //!
+//! The app passes the desktop's launch token in `VORND_DESKTOP_TOKEN`: a
+//! WebSocket that opens with it is the desktop's (TP §10). It is read once
+//! and taken out of the environment before anything is started, so neither
+//! sessiond nor any program it runs inherits it.
+//!
 //! Prints one line of JSON, `{"port":N,"protocol":P}`, once it is listening, so
 //! whoever started it knows where to connect. With a session holder and the
 //! engine, the line also names the grid endpoint: `"grid":"<socket or pipe>"`.
@@ -205,7 +210,19 @@ fn serve_grid(_: &HolderConfig, _: &Holder) -> Option<String> {
     None
 }
 
+/// Where the app passes the desktop's launch token.
+const DESKTOP_TOKEN_VAR: &str = "VORND_DESKTOP_TOKEN";
+
+/// The desktop's launch token, taken out of the environment. Called first
+/// in `main`, while vornd has one thread and has started nothing.
+fn take_desktop_token() -> Option<Vec<u8>> {
+    let token = std::env::var_os(DESKTOP_TOKEN_VAR)?;
+    std::env::remove_var(DESKTOP_TOKEN_VAR);
+    Some(token.into_encoded_bytes()).filter(|t| !t.is_empty())
+}
+
 fn main() -> ExitCode {
+    let desktop_token = take_desktop_token();
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(args) => args,
         Err(message) => {
@@ -256,6 +273,9 @@ fn main() -> ExitCode {
         };
         if args.debug_spawn {
             daemon.allow_spawn();
+        }
+        if let Some(token) = desktop_token {
+            daemon.set_desktop_token(token);
         }
         proxy::log_upstream(&daemon).await;
         info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");

@@ -398,3 +398,229 @@ async fn the_endpoint_is_a_user_only_socket() {
     let got = c.receive(&buf[..n]).unwrap();
     assert!(matches!(got.first(), Some(Got::Welcome(_))), "{got:?}");
 }
+
+/// TP-T8 for grid clients: 100 resizes while a program prints markers.
+/// Every frame the client applies has the size of the last resize record
+/// before its resume cursor, and no row is wider than its frame. Each
+/// resize also reaches the client as `Resized` at its record. (Replaying
+/// the same records from the ring is the bytes half's, in streams.rs: a grid
+/// client that reattaches gets a snapshot, not the frames again.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn t8_resizes_reach_grid_clients_in_record_order() {
+    let rig = Rig::start().await;
+    let v = rig.vornd();
+    let id = v
+        .spawn(&[
+            "sh",
+            "-c",
+            "i=0; while [ $i -lt 300 ]; do echo marker $i; i=$((i+1)); sleep 0.01; done; sleep 60",
+        ])
+        .await;
+    v.live(&id).await;
+    let mut app = v.app(hello(PROTO_MAJOR));
+    app.client.attach(attach(&id, None));
+    app.until("attached", |a| a.attached().is_some()).await;
+    let sid = app.attached().unwrap();
+    // Each frame: where it resumes, and the size and widest row it drew.
+    let mut frames: Vec<(u64, (u16, u16), usize)> = Vec::new();
+    let mut seen = 0;
+    let record = |app: &App, frames: &mut Vec<_>, seen: &mut usize| {
+        for g in &app.got[*seen..] {
+            if let Got::Frame { sid: s, .. } = g {
+                if *s != sid {
+                    continue;
+                }
+                let m = app.client.pane(sid).unwrap().mirror().unwrap();
+                let widest = m
+                    .text()
+                    .iter()
+                    .map(|l| l.trim_end().chars().count())
+                    .max()
+                    .unwrap_or(0);
+                frames.push((m.resume().next_rseq, (m.term().cols, m.term().rows), widest));
+            }
+        }
+        *seen = app.got.len();
+    };
+    for i in 0..100u16 {
+        let (cols, rows) = (40 + i * 7 % 80, 10 + i * 3 % 30);
+        v.engine.resize(&id, cols, rows).unwrap();
+        // Frames are read as they come, so each is checked as applied.
+        let t = Instant::now() + Duration::from_millis(15);
+        while Instant::now() < t {
+            let n = app.got.len();
+            app.until("frames", |a| a.got.len() > n || Instant::now() >= t)
+                .await;
+            record(&app, &mut frames, &mut seen);
+        }
+    }
+    app.until("every resize named", |a| {
+        a.got
+            .iter()
+            .filter(|g| matches!(g, Got::Message(ServerMsg::Resized { .. })))
+            .count()
+            == 100
+    })
+    .await;
+    record(&app, &mut frames, &mut seen);
+    let resized: Vec<(u64, (u16, u16))> = app
+        .got
+        .iter()
+        .filter_map(|g| match g {
+            Got::Message(ServerMsg::Resized {
+                rseq, cols, rows, ..
+            }) => Some((*rseq, (*cols, *rows))),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        resized.windows(2).all(|w| w[0].0 < w[1].0),
+        "in record order"
+    );
+    assert!(frames.len() > 10, "{} frames", frames.len());
+    for (next_rseq, size, widest) in &frames {
+        let want = resized
+            .iter()
+            .rev()
+            .find(|(rseq, _)| rseq < next_rseq)
+            .map_or((60, 12), |(_, s)| *s);
+        assert_eq!(*size, want, "the frame resuming at record {next_rseq}");
+        assert!(*widest <= usize::from(size.0), "a row wider than {size:?}");
+    }
+    v.kill().await;
+}
+
+/// TP-T10: input order. Two grid clients and a bytes client type and paste
+/// at once into a program that records its input. Each paste arrives whole,
+/// each client's events arrive in its order, and each grid client's
+/// acknowledgements come in its order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn t10_concurrent_input_keeps_pastes_whole_and_order_per_client() {
+    let rig = Rig::start().await;
+    let v = rig.vornd();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("input");
+    let script = format!(
+        "stty raw -echo; printf ready; exec cat > '{}'",
+        file.display()
+    );
+    let id = v.spawn(&["sh", "-c", &script]).await;
+    v.live(&id).await;
+    let t = Instant::now();
+    while !v.screen(&id).await.contains("ready") {
+        assert!(t.elapsed() < PATIENCE, "the program never got ready");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    const N: usize = 40;
+    let paste = |who: char, i: usize| format!("<{who}{i}:{}>", who.to_string().repeat(1500));
+    let mut apps = Vec::new();
+    for who in ['A', 'B'] {
+        let mut app = v.app(hello(PROTO_MAJOR));
+        app.client.attach(attach(&id, None));
+        app.until("attached", |a| a.attached().is_some()).await;
+        let sid = app.attached().unwrap();
+        for i in 0..N {
+            let seq = app.client.input_seq();
+            app.client.send(&ClientMsg::Input {
+                sid,
+                input_seq: seq,
+                event: InputEvent::Text {
+                    utf8: format!("{}{i};", who.to_ascii_lowercase()),
+                },
+            });
+            let seq = app.client.input_seq();
+            app.client.send(&ClientMsg::Input {
+                sid,
+                input_seq: seq,
+                event: InputEvent::Paste {
+                    utf8: paste(who, i),
+                    confirmed: false,
+                },
+            });
+        }
+        apps.push((who, app, sid));
+    }
+    // Everything goes at once: the bytes client's calls between the grid
+    // clients' writes.
+    let conn = v.engine.streams().connect();
+    let write = |data: String| {
+        let text = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "terminal:write",
+            "params": { "id": id, "data": data },
+        })
+        .to_string();
+        assert!(vornd::terminal::handle(
+            &v.engine,
+            conn.id(),
+            &conn.forwarder(),
+            &text,
+            false
+        ));
+    };
+    for (_, app, _) in &mut apps {
+        app.flush().await;
+    }
+    for i in 0..N {
+        write(format!("c{i};"));
+        write(paste('C', i));
+    }
+    for (_, app, _) in &mut apps {
+        let want = (2 * N) as u64;
+        app.until("every input acknowledged", |a| {
+            a.got
+                .iter()
+                .filter(|g| matches!(g, Got::Message(ServerMsg::InputAck { .. })))
+                .count() as u64
+                == want
+        })
+        .await;
+        let acks: Vec<u64> = app
+            .got
+            .iter()
+            .filter_map(|g| match g {
+                Got::Message(ServerMsg::InputAck { input_seq, .. }) => Some(*input_seq),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(acks, (1..=want).collect::<Vec<_>>(), "acks in order");
+    }
+    let total: usize = ['A', 'B', 'C']
+        .iter()
+        .map(|&w| {
+            (0..N)
+                .map(|i| paste(w, i).len() + format!("x{i};").len())
+                .sum::<usize>()
+        })
+        .sum();
+    let t = Instant::now();
+    let got = loop {
+        let got = std::fs::read_to_string(&file).unwrap_or_default();
+        if got.len() >= total {
+            break got;
+        }
+        assert!(
+            t.elapsed() < PATIENCE,
+            "{} of {total} bytes arrived",
+            got.len()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(got.len(), total);
+    for who in ['A', 'B', 'C'] {
+        let mut last_paste = 0;
+        let mut last_key = 0;
+        for i in 0..N {
+            let p = got
+                .find(&paste(who, i))
+                .unwrap_or_else(|| panic!("paste {who}{i} is not whole"));
+            assert!(i == 0 || p > last_paste, "{who}{i} out of order");
+            last_paste = p;
+            let key = format!("{}{i};", who.to_ascii_lowercase());
+            let k = got.find(&key).unwrap_or_else(|| panic!("{key} is missing"));
+            assert!(i == 0 || k > last_key, "{key} out of order");
+            last_key = k;
+        }
+    }
+    v.kill().await;
+}

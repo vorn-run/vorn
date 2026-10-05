@@ -7,7 +7,12 @@ import {
   type LocalServerNotice
 } from '../shared/adoption-channels'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
-import type { RequestMethods, ServerNotifications, TerminalData } from '@vornrun/shared/protocol'
+import type {
+  RequestMethods,
+  ServerNotifications,
+  TerminalData,
+  TerminalPresence
+} from '@vornrun/shared/protocol'
 import type {
   RecordCursor,
   Artifact,
@@ -83,9 +88,31 @@ const api = {
   createTerminal: (payload: CreateTerminalPayload) =>
     ipcRenderer.invoke(IPC.TERMINAL_CREATE, payload),
 
-  writeTerminal: (id: string, data: string) => ipcRenderer.send(IPC.TERMINAL_WRITE, { id, data }),
+  /** `pane` names the pane typed into, for a session vornd holds. */
+  writeTerminal: (id: string, data: string, pane?: number) =>
+    ipcRenderer.send(IPC.TERMINAL_WRITE, pane === undefined ? { id, data } : { id, data, pane }),
 
   resizeTerminal: (payload: ResizePayload) => ipcRenderer.send(IPC.TERMINAL_RESIZE, payload),
+
+  /** For a session vornd holds: what fits in the pane. vornd decides the size. */
+  terminalViewport: (payload: ResizePayload & { pane?: number }) =>
+    ipcRenderer.send(IPC.TERMINAL_VIEWPORT, payload),
+
+  /** For a session vornd holds: whether the pane is in use, on screen or hidden. */
+  terminalPresence: (id: string, state: TerminalPresence, pane?: number) =>
+    ipcRenderer.send(IPC.TERMINAL_PRESENCE, { id, state, pane }),
+
+  /** "Fit to this device": a session vornd holds takes this pane's size. */
+  takeTerminalSize: (id: string, pane?: number) =>
+    ipcRenderer.send(IPC.TERMINAL_TAKE_SIZE, { id, pane }),
+
+  /** Lock a session vornd holds to this pane's size, or release the lock; refused while another client holds it. */
+  lockTerminalSize: (
+    id: string,
+    locked: boolean,
+    pane?: number
+  ): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(IPC.TERMINAL_LOCK_SIZE, { id, locked, pane }),
 
   killTerminal: (id: string) => ipcRenderer.invoke(IPC.TERMINAL_KILL, id),
 

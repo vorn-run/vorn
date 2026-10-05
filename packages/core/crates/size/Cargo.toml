@@ -1,0 +1,10 @@
+[package]
+name = "vorn-size"
+version = "0.7.5"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Who decides a shared terminal's size: the adaptive rule of the Terminal State Protocol as a state machine driven by an injected clock"
+
+[dependencies]
