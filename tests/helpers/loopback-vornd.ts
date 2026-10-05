@@ -330,16 +330,20 @@ export class LoopbackVornd {
 
   /** Back to the switch as configured, with nothing linked. */
   uninstall(): void {
-    this.unlink()
+    // Every session ends, and the server hears it while still linked, so no
+    // process of this test is left waiting on a vornd that never comes back.
+    this.holdExits = false
+    this.following = true
     for (const held of this.sessions.values()) {
-      if (!held.exited) {
-        try {
-          held.proc.kill()
-        } catch {
-          // A fake that cannot be killed is already gone.
-        }
+      if (held.exited) continue
+      try {
+        held.proc.kill()
+      } catch {
+        // A fake that cannot be killed is already gone.
       }
+      if (this.socket) this.exit(held, { code: null, signal: 1 })
     }
+    this.unlink()
     this.sessions.clear()
     setNativeDaemonOverride(null)
   }

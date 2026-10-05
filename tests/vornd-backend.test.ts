@@ -677,6 +677,38 @@ describe('the review fixes', () => {
     }
   })
 
+  it('keeps what the server typed while no vornd was linked, and sends it in order once one is', async () => {
+    vi.useFakeTimers()
+    const session = await ptyManager.createPty({
+      agentType: 'claude',
+      projectName: 'p',
+      projectPath: '/tmp'
+    })
+    const fake = lastPty()
+    // The app closes before the launch line is typed.
+    vornd.unlink()
+    vi.advanceTimersByTime(300)
+    ptyManager.writeToPty(session.id, 'next\r')
+    expect(fake.written).toEqual([])
+    vi.useRealTimers()
+    vornd.link()
+    await until('the held input', () => fake.written.length === 2)
+    expect(fake.written).toEqual(['claude-launch\r', 'next\r'])
+  })
+
+  it('sends a signal asked for while no vornd was linked once one is', async () => {
+    const session = ptyManager.createShellPty('/tmp')
+    await ptyManager.whenStarted(session.id)
+    const fake = lastPty()
+    vornd.unlink()
+    ptyManager.killPty(session.id)
+    await new Promise((r) => setImmediate(r))
+    expect(fake.killedWith).toEqual([])
+    vornd.link()
+    await until('the signal', () => fake.killedWith.length === 1)
+    expect(fake.killedWith).toEqual(['SIGHUP'])
+  })
+
   it('tells clients through vornd to attach again once vornd holds the sessions', async () => {
     const client = (): EventEmitter & { sent: string[] } =>
       Object.assign(new EventEmitter(), {

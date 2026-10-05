@@ -176,6 +176,8 @@ class PtyManager extends EventEmitter {
    * agent status comes from.
    */
   private backendHeld = new Set<string>()
+  /** vornd's sessions closed here whose program has not exited yet. */
+  private ending = new Map<string, VorndProcess>()
 
   /**
    * Settles once the session's process exists: at once for one here, once the
@@ -1493,6 +1495,15 @@ class PtyManager extends EventEmitter {
         }
       }
     }
+    if (p instanceof VorndProcess && !p.exited) {
+      // Closed here but still running in the holder until the signal lands,
+      // which waits for a vornd when none is linked: kept in sight of vornd's
+      // list until it exits, and never taken on again as a session.
+      this.ending.set(id, p)
+      p.onExit(() => {
+        if (this.ending.get(id) === p) this.ending.delete(id)
+      })
+    }
     if (p) {
       // Defer the actual kill so the IPC response returns immediately.
       // All state cleanup is already done above, so the renderer can proceed
@@ -1676,12 +1687,12 @@ class PtyManager extends EventEmitter {
     // With no session holder connected, vornd's list says nothing about what
     // is running; the next one it connects to will.
     if (!listing.connected) return []
-    for (const held of [...this.ptys.values()]) {
+    for (const held of [...this.ptys.values(), ...this.ending.values()]) {
       if (held instanceof VorndProcess) held.reconcile(listing)
     }
     const adopted: TerminalSession[] = []
     for (const found of listing.sessions) {
-      if (found.kind !== 'pty' || this.ptys.has(found.id)) continue
+      if (found.kind !== 'pty' || this.ptys.has(found.id) || this.ending.has(found.id)) continue
       const cols = found.cols ?? INITIAL_COLS
       const rows = found.rows ?? INITIAL_ROWS
       const saved = consumeRestored(found.id)?.session

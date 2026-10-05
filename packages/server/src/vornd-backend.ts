@@ -70,11 +70,20 @@ async function takeOn(): Promise<void> {
   await vorndLink.follow()
   // A client that attached in the gap before vornd held its sessions was
   // answered here; it attaches again, through vornd.
-  clientRegistry.resyncViaVornd(ptyManager.backendHeldIds())
+  const held = ptyManager.backendHeldIds()
+  clientRegistry.resyncViaVornd(held)
+  log.info(
+    { terminals: held.length },
+    '[vornd-backend] following vornd; clients told to attach again'
+  )
 }
 
 async function reconcile(): Promise<void> {
   const listing = await vorndLink.list()
-  ptyManager.adoptBackend(listing)
+  const adopted = ptyManager.adoptBackend(listing)
   headlessManager.adoptBackend(listing)
+  log.info(
+    { connected: listing.connected, listed: listing.sessions.length, adopted: adopted.length },
+    '[vornd-backend] reconciled with vornd'
+  )
 }

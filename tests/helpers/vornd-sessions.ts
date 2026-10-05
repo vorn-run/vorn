@@ -168,6 +168,11 @@ export class BytesClient {
   /** This connection's name in vornd, from the attach answer. */
   name: string | null = null
   resyncs: string[] = []
+  /**
+   * The last few things this client heard, newest last: attach answers,
+   * frames, resizes, resyncs and exits. For a test to print when it fails.
+   */
+  readonly trace: string[] = []
   /** Whether the last attach was answered by vornd rather than the server. */
   throughVornd = false
   exits: number[] = []
@@ -256,7 +261,16 @@ export class BytesClient {
       }
       this.cursor = answer.cursor
       this.throughVornd = answer.replies === 'vornd'
+      this.note(
+        `attach answered by ${answer.replies === 'vornd' ? 'vornd' : 'the server'}: ` +
+          `continued=${answer.continued} cursor=${JSON.stringify(answer.cursor)} name=${answer.client ?? null}`
+      )
     })
+  }
+
+  private note(what: string): void {
+    this.trace.push(`${new Date().toISOString()} ${what}`)
+    if (this.trace.length > 60) this.trace.shift()
   }
 
   /** Everything the terminal shows, scrollback included, once all written is parsed. */
@@ -293,6 +307,9 @@ export class BytesClient {
         this.broken ??= `frame ${frame.firstRseq}@${frame.startOffset} after ${JSON.stringify(at)}`
       }
       this.cursor = frameResume(frame)
+      this.note(
+        `frame ${frame.firstRseq}-${frame.lastRseq}@${frame.startOffset}: ${JSON.stringify(new TextDecoder().decode(frame.data).slice(0, 80))}`
+      )
       this.enqueueWrite(frame.data)
       return
     }
@@ -315,6 +332,7 @@ export class BytesClient {
     }
     const params = msg.params ?? {}
     if (params.id !== this.session) return
+    if (msg.method?.startsWith('terminal:')) this.note(`${msg.method} ${JSON.stringify(params)}`)
     if (msg.method === 'terminal:resized') {
       const resized = params as BytesClient['resized'][number]
       this.resized.push(resized)

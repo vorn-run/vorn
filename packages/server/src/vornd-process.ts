@@ -40,6 +40,9 @@ import {
 const SPAWN_RETRY_MS = 5_000
 const SPAWN_RETRY_STEP_MS = 100
 
+/** Input kept for vornd while it cannot take it, past which more is dropped. */
+const MAX_HELD_INPUT = 256 * 1024
+
 /** How long an exit effect waits for the records it follows before it is taken alone. */
 const EXIT_WAIT_MS = 2_000
 
@@ -76,8 +79,9 @@ export class VorndProcess implements ManagedPty, LinkReceiver {
   private cursor: RecordCursor | null
   private readonly decoder = new StringDecoder('utf8')
   private readonly events = new EventEmitter()
-  /** Input written before the session exists, sent once it does. */
+  /** Input not yet handed to vornd, sent in order once it can be. */
   private queued: string[] = []
+  private queuedBytes = 0
   private spawned = false
   private ended = false
   private killWhenSpawned: string | null = null
@@ -199,8 +203,7 @@ export class VorndProcess implements ManagedPty, LinkReceiver {
       this.kill(this.killWhenSpawned)
       return
     }
-    for (const data of this.queued) this.link.notify('vornd:write', { id: this.id, data })
-    this.queued = []
+    this.flushInput()
     this.flushSize()
   }
 
@@ -232,19 +235,46 @@ export class VorndProcess implements ManagedPty, LinkReceiver {
       this.lost(ended?.exited ?? null)
       return
     }
+    this.flushInput()
     this.flushSize()
+    const signal = this.killWhenSpawned
+    if (signal) {
+      this.killWhenSpawned = null
+      this.kill(signal)
+    }
   }
 
   write(data: string): void {
     if (this.ended || !data) return
-    if (!this.spawned) {
-      this.queued.push(data)
+    // Behind anything still held, so input keeps its order.
+    this.hold(data)
+    this.flushInput()
+  }
+
+  /**
+   * Keeps input this server has not handed to vornd yet: before the holder has
+   * the session, or while no vornd is linked (an agent's launch line typed
+   * moments after the app closed is the case that matters). It goes out, in
+   * order, once a vornd links. That is not a retry: input already handed over
+   * is at most once and never sent again. Bounded, so a session nobody links
+   * to again does not keep growing.
+   */
+  private hold(data: string): void {
+    if (this.queuedBytes + data.length > MAX_HELD_INPUT) {
+      log.warn({ id: this.id }, '[vornd] input dropped: too much is waiting for vornd')
       return
     }
-    if (!this.link.notify('vornd:write', { id: this.id, data })) {
-      // Input is at most once: what was typed while nothing was linked is gone,
-      // and the person can see it was.
-      log.warn({ id: this.id }, '[vornd] input dropped: vornd is not linked')
+    this.queued.push(data)
+    this.queuedBytes += data.length
+  }
+
+  /** Sends the input held for vornd, while it is linked. */
+  private flushInput(): void {
+    while (this.queued.length > 0 && this.spawned && this.link.linked()) {
+      const data = this.queued[0]!
+      if (!this.link.notify('vornd:write', { id: this.id, data })) return
+      this.queued.shift()
+      this.queuedBytes -= data.length
     }
   }
 
@@ -280,7 +310,10 @@ export class VorndProcess implements ManagedPty, LinkReceiver {
       return
     }
     if (!this.link.notify('vornd:signal', { id: this.id, signal: name })) {
-      log.warn({ id: this.id }, '[vornd] could not signal a session: vornd is not linked')
+      // Sent once a vornd links: a session closed while the app was away
+      // still ends.
+      log.warn({ id: this.id }, '[vornd] vornd is not linked; the signal waits for it')
+      this.killWhenSpawned = name
     }
   }
 

@@ -40,10 +40,13 @@ const repo = path.resolve(__dirname, '..')
 
 /** A stand-in agent: says how it was started, then a prompt, and echoes work until `quit`. */
 const STAND_IN = `#!/bin/sh
+log="$(dirname "$0")/../stand-in.log"
 echo "stand-in $(basename "$0") $*"
+echo "$$ started: $*" >> "$log"
 while true; do
   printf '> '
   read line || exit 0
+  echo "$$ read: $line" >> "$log"
   [ "$line" = quit ] && exit 0
   echo "working on $line"
   sleep 0.3
@@ -115,7 +118,11 @@ interface App {
 }
 
 /** vornd as the app starts it: in front of the server, with its credential, ending with the app. */
+let opened = 0
+
 async function openApp(server: Server): Promise<App> {
+  // Its log in a file of its own per start, for a failing test to print.
+  const log = fs.openSync(path.join(root, `vornd-${++opened}.log`), 'a')
   const vornd = spawn(
     vorndBinaries.vornd!,
     [
@@ -128,10 +135,10 @@ async function openApp(server: Server): Promise<App> {
       dataDir
     ],
     {
-      stdio: ['pipe', 'pipe', 'inherit'],
+      stdio: ['pipe', 'pipe', log],
       env: {
         ...process.env,
-        VORND_LOG: process.env.VORND_LOG ?? 'warn',
+        VORND_LOG: process.env.VORND_LOG ?? 'info',
         VORND_SERVER_TOKEN: TOKEN,
         // As the app starts it: the desktop's own connections present the same credential.
         VORND_DESKTOP_TOKEN: TOKEN
@@ -191,6 +198,80 @@ async function attachHeld(
   const answer = await c.attach(id, resume)
   expect(answer.replies).toBe('vornd')
   return answer
+}
+
+/**
+ * Everything that says why a client did not see a session do what it should:
+ * what the client heard, how vornd and the server stand with the session, and
+ * what the stand-in agent read. Printed only when a wait times out.
+ */
+async function explain(app: App, c: BytesClient, id: string): Promise<string> {
+  const tail = (file: string, n: number, keep: (l: string) => boolean = () => true): string => {
+    try {
+      return fs
+        .readFileSync(path.join(root, file), 'utf8')
+        .split('\n')
+        .filter(keep)
+        .slice(-n)
+        .join('\n')
+    } catch (err) {
+      return `(${(err as Error).message})`
+    }
+  }
+  const sessions = await fetch(`http://127.0.0.1:${app.port}/vornd/sessions`)
+    .then((r) => r.json())
+    .catch((err: Error) => `(${err.message})`)
+  const health = await fetch(`http://127.0.0.1:${app.port}/vornd/health`)
+    .then((r) => r.json())
+    .catch((err: Error) => `(${err.message})`)
+  const listed = await c.call('terminal:listActive', {}).catch((err: Error) => `(${err.message})`)
+  const vorndLogs = fs
+    .readdirSync(root)
+    .filter((f) => /^vornd-\d+\.log$/.test(f))
+    .sort()
+    .map((f) => `--- ${f}\n${tail(f, 30, (l) => !l.includes('DEBUG'))}`)
+    .join('\n')
+  return [
+    `=== session ${id}`,
+    `--- what the client heard (attach answers, frames, notices)`,
+    c.trace.join('\n'),
+    `--- the client's screen`,
+    await c.text(),
+    `--- vornd's report of the session`,
+    JSON.stringify(
+      typeof sessions === 'object' && sessions
+        ? {
+            connected: (sessions as { connected?: unknown }).connected,
+            session: (sessions as { sessions?: Array<{ session: string }> }).sessions?.find(
+              (s) => s.session === id
+            )
+          }
+        : sessions
+    ),
+    `--- vornd's health (session holder)`,
+    JSON.stringify((health as { sessiond?: unknown })?.sessiond ?? health),
+    `--- the server's terminal list`,
+    JSON.stringify(listed),
+    `--- the server's log: the link, reconciling, following, resyncs`,
+    tail('server.log', 30, (l) => /vornd|backend|link|resync/i.test(l)),
+    `--- what the stand-in agents read`,
+    tail('stand-in.log', 30),
+    vorndLogs
+  ].join('\n')
+}
+
+/** `until`, printing `explain` first when it times out. */
+async function untilOr(
+  what: string,
+  check: () => Promise<boolean>,
+  why: () => Promise<string>
+): Promise<void> {
+  try {
+    await until(what, check)
+  } catch (err) {
+    console.error(await why())
+    throw err
+  }
 }
 
 let sessiondPid: number | null = null
@@ -300,13 +381,20 @@ describe.runIf(vorndSessionsAvailable)('the app with vornd as its process backen
       projectName: 'proj',
       projectPath: root
     })
-    await until(
-      'the agent to wait for input',
-      async () => (await statusOf(c, agent.id)) === 'waiting'
-    )
     const pids = new Map((await active(c)).map((s) => [s.id, s.pid]))
 
+    // At once, before the server types the agent's launch line into its
+    // shell: that line waits for the next vornd rather than being lost.
     await closeApp(app)
+    // VORN_TEST_STALL_REOPEN=1 freezes the session holder and the server for
+    // 2 to 4 s around the reopen, as a slow machine would.
+    if (process.env.VORN_TEST_STALL_REOPEN) {
+      for (const pid of [sessiondPid, server.child.pid]) {
+        if (!pid) continue
+        process.kill(pid, 'SIGSTOP')
+        setTimeout(() => process.kill(pid, 'SIGCONT'), 2000 + Math.random() * 2000)
+      }
+    }
     // Nothing is linked now; the holder keeps both running.
     expect(process.kill(pids.get(shell.id)!, 0)).toBe(true)
     expect(process.kill(pids.get(agent.id)!, 0)).toBe(true)
@@ -317,11 +405,28 @@ describe.runIf(vorndSessionsAvailable)('the app with vornd as its process backen
     expect(listed.find((s) => s.id === shell.id)?.pid).toBe(pids.get(shell.id))
     expect(listed.find((s) => s.id === agent.id)?.pid).toBe(pids.get(agent.id))
     await attachHeld(app, after, agent.id)
-    after.notify('terminal:write', { id: agent.id, data: 'the tests\r' })
-    await until('the agent to work', async () =>
-      (await after.text()).includes('done with the tests')
+    const why = (): Promise<string> => explain(app, after, agent.id)
+    await untilOr(
+      'the agent to start',
+      async () => (await after.text()).includes('stand-in claude'),
+      why
     )
-    await until('it to wait again', async () => (await statusOf(after, agent.id)) === 'waiting')
+    await untilOr(
+      'the agent to wait for input',
+      async () => (await statusOf(after, agent.id)) === 'waiting',
+      why
+    )
+    after.notify('terminal:write', { id: agent.id, data: 'the tests\r' })
+    await untilOr(
+      'the agent to work',
+      async () => (await after.text()).includes('done with the tests'),
+      why
+    )
+    await untilOr(
+      'it to wait again',
+      async () => (await statusOf(after, agent.id)) === 'waiting',
+      why
+    )
   }, 60_000)
 
   it('a restarted server takes its terminals back from vornd, under the same ids', async () => {
