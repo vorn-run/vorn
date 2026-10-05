@@ -337,6 +337,15 @@ function applyLoginItem(config: unknown): void {
  * renderer and widget windows.
  */
 function wireServerNotifications(bridge: ServerBridge): void {
+  // A socket that comes back is a new connection: vornd's terminal streams on
+  // the old one are gone, and the renderer attaches them again from its cursor.
+  let connectedBefore = bridge.isConnected
+  bridge.on('connected', () => {
+    if (connectedBefore && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC.TERMINAL_RECONNECTED)
+    }
+    connectedBefore = true
+  })
   bridge.on('server-notification', (method: string, params: unknown) => {
     // Before the switch rather than inside it: `CONFIG_CHANGED` is one label in a
     // fall-through group that forwards seventeen events identically, so giving it
@@ -351,6 +360,8 @@ function wireServerNotifications(bridge: ServerBridge): void {
       case IPC.TERMINAL_BELL:
       case IPC.TERMINAL_RESYNC:
       case IPC.TERMINAL_EXIT:
+      case IPC.TERMINAL_FRAME:
+      case IPC.TERMINAL_RESIZED:
       case IPC.HEADLESS_DATA:
       case IPC.HEADLESS_EXIT:
       case IPC.SCRIPT_DATA:

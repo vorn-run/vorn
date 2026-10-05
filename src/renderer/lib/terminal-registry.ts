@@ -14,6 +14,9 @@ import { clearBlockLog } from './block-log'
 import { startOverlaySync, type OverlaySync } from './overlay-sync'
 import { TERMINAL_BACKGROUND } from '../../shared/surface'
 import type { TerminalData } from '@vornrun/shared/protocol'
+import type { RecordCursor } from '@vornrun/shared/types'
+import { decodeTerminalFrameV2, frameResume } from '@vornrun/shared/terminal-frame'
+import { swallowQueries } from './vornd-replies'
 
 interface TerminalEntry {
   term: Terminal
@@ -81,13 +84,50 @@ const registry = new Map<string, TerminalEntry>()
 const seeding = new Set<string>()
 const readyCallbacks = new Map<string, Set<() => void>>()
 
-/** One flush of a session's output; see `PtyManager.flushSeq` for `seq`. */
-type Chunk = Pick<TerminalData, 'data' | 'seq'>
+/**
+ * One flush of a session's output; see `PtyManager.flushSeq` for `seq`.
+ *
+ * From vornd, `seq` is the last record the chunk holds and `cursor` where the
+ * screen ends once it is applied; a resize of the session is a chunk too, at
+ * its place among them, with its record as `seq`.
+ */
+type Chunk =
+  | Pick<TerminalData, 'data' | 'seq' | 'cursor'>
+  | { resize: { cols: number; rows: number }; seq: number }
+
+/**
+ * Terminals vornd streams, and where each one's screen ends in its session's
+ * record log. A reconnect attaches them again from there, so they carry on
+ * without a snapshot while vornd still has what follows.
+ */
+const vorndStreams = new Map<string, { cursor: RecordCursor | null }>()
+
+/** Moves a vornd stream's cursor past a chunk that was just applied. */
+function advance(id: string, chunk: Chunk): void {
+  const stream = vorndStreams.get(id)
+  if (!stream) return
+  if ('resize' in chunk) {
+    if (stream.cursor) stream.cursor = { ...stream.cursor, nextRseq: chunk.seq + 1 }
+  } else if (chunk.cursor) {
+    stream.cursor = chunk.cursor
+  }
+}
 
 /** The chunks held behind a seed: text joined, bytes as they came, since joining bytes means copying them. */
-function writeChunks(term: Terminal, chunks: readonly Chunk[]): void {
+function writeChunks(id: string, term: Terminal, chunks: readonly Chunk[]): void {
   let text = ''
   for (const chunk of chunks) {
+    if ('resize' in chunk) {
+      if (text) {
+        term.write(text)
+        text = ''
+      }
+      // Output after a resize record was written for the new size.
+      term.resize(chunk.resize.cols, chunk.resize.rows)
+      advance(id, chunk)
+      continue
+    }
+    advance(id, chunk)
     if (typeof chunk.data === 'string') {
       text += chunk.data
       continue
@@ -128,7 +168,12 @@ function receive(id: string, chunk: Chunk): void {
   }
   const entry = registry.get(id)
   if (!entry) return
+  if ('resize' in chunk) {
+    writeChunks(id, entry.term, [chunk])
+    return
+  }
   entry.term.write(chunk.data)
+  advance(id, chunk)
   // While a shrinking box waits out its hold, its window shows the rows around
   // the cursor, which output moves without moving any layout.
   if (entry.resizeTimer) overlaySync?.request()
@@ -136,6 +181,7 @@ function receive(id: string, chunk: Chunk): void {
 
 let removeGlobalDataListener: (() => void) | null = null
 let removeResyncListener: (() => void) | null = null
+let removeStreamListeners: Array<() => void> = []
 
 export function initGlobalDataListener(): void {
   if (removeGlobalDataListener) return
@@ -144,6 +190,22 @@ export function initGlobalDataListener(): void {
   )
   // Optional for a surface older than the notification, as attach is below.
   removeResyncListener = window.api.onTerminalResync?.(({ id }) => void resyncTerminal(id)) ?? null
+  // vornd's streams: frames read here, resizes in order with them, and a new
+  // connection attaching every one of them again from its cursor.
+  const frames = window.api.onTerminalFrame?.((bytes) => {
+    const frame = decodeTerminalFrameV2(bytes)
+    if (frame)
+      receive(frame.id, { data: frame.data, seq: frame.lastRseq, cursor: frameResume(frame) })
+  })
+  const resized = window.api.onTerminalResized?.(({ id, cols, rows, rseq }) =>
+    receive(id, { resize: { cols, rows }, seq: rseq })
+  )
+  const reconnected = window.api.onTerminalReconnected?.(() => {
+    for (const id of vorndStreams.keys()) void reattachTerminal(id)
+  })
+  removeStreamListeners = [frames, resized, reconnected].filter(
+    (off): off is () => void => typeof off === 'function'
+  )
 }
 
 export function disposeGlobalDataListener(): void {
@@ -151,8 +213,11 @@ export function disposeGlobalDataListener(): void {
   removeGlobalDataListener = null
   removeResyncListener?.()
   removeResyncListener = null
+  for (const off of removeStreamListeners) off()
+  removeStreamListeners = []
   hydrating.clear()
   seeding.clear()
+  vorndStreams.clear()
 }
 
 /**
@@ -180,7 +245,7 @@ export function disposeGlobalDataListener(): void {
  */
 export function hydrateTerminal(
   terminalId: string,
-  { replace = false }: { replace?: boolean } = {}
+  { replace = false, resume = false }: { replace?: boolean; resume?: boolean } = {}
 ): Promise<void> {
   const already = hydrating.get(terminalId)
   if (already) return already.done
@@ -208,7 +273,7 @@ export function hydrateTerminal(
         !Number.isFinite(chunk.seq) || !Number.isFinite(above) || (chunk.seq as number) > above
     )
     if (!kept.length) return
-    writeChunks(entry.term, kept)
+    writeChunks(terminalId, entry.term, kept)
   }
 
   /**
@@ -227,12 +292,31 @@ export function hydrateTerminal(
 
   state.done = (async () => {
     try {
-      const { data, seq, live } = await window.api.attachTerminal(terminalId)
+      // A terminal vornd streams resumes from where its screen ends, when
+      // asked to: vornd continues from there if it still can.
+      const cursor = resume ? (vorndStreams.get(terminalId)?.cursor ?? undefined) : undefined
+      const answer = await window.api.attachTerminal(terminalId, cursor)
+      const { data, seq, live } = answer
       if (!stillOurs()) return
+      const fromVornd = answer.replies === 'vornd'
+      if (fromVornd) vorndStreams.set(terminalId, { cursor: answer.cursor ?? null })
+      else vorndStreams.delete(terminalId)
+      if (answer.continued) {
+        // Nothing missed: the screen stays, and what follows the cursor applies.
+        flushHeld(seq)
+        return
+      }
+      // vornd's snapshot is drawn for the session's size.
+      if (fromVornd && answer.cols && answer.rows) {
+        if (entry.term.cols !== answer.cols || entry.term.rows !== answer.rows) {
+          entry.term.resize(answer.cols, answer.rows)
+        }
+      }
       // A resync replaces the screen only with something. A terminal that
       // ended while this window was behind comes back empty, and what is on
-      // screen here is then more than the server still has.
-      if (replace && data) {
+      // screen here is then more than the server still has. A stream that
+      // could not continue is replaced by vornd's snapshot the same way.
+      if ((replace || (fromVornd && resume)) && data) {
         entry.term.reset()
         // The seed replays the shell's command marks, and the log would take
         // every command in it a second time. It is rebuilt from the seed, as
@@ -300,6 +384,22 @@ export function resyncTerminal(terminalId: string): Promise<void> {
     if (!entry) return
     entry._hydrated = false
     return hydrateTerminal(terminalId, { replace: true })
+  })
+}
+
+/**
+ * Attach a terminal vornd streams again after the connection came back, from
+ * where its screen ends. vornd continues the stream from there while it still
+ * holds what follows, through a vornd restart included; otherwise it answers
+ * with a snapshot, which replaces the screen.
+ */
+export function reattachTerminal(terminalId: string): Promise<void> {
+  const inFlight = hydrating.get(terminalId)?.done ?? Promise.resolve()
+  return inFlight.then(() => {
+    const entry = registry.get(terminalId)
+    if (!entry || !vorndStreams.has(terminalId)) return
+    entry._hydrated = false
+    return hydrateTerminal(terminalId, { resume: true })
   })
 }
 
@@ -488,6 +588,9 @@ function createTerminalEntry(terminalId: string): TerminalEntry {
         loadCanvas()
       })
   }
+
+  // vornd answers the queries of the sessions it holds; this terminal must not.
+  swallowQueries(term, () => vorndStreams.has(terminalId))
 
   // Forward keystrokes to pty
   term.onData((data) => {
@@ -1112,6 +1215,7 @@ export function destroyTerminal(terminalId: string): void {
   // A seed still in flight would otherwise resolve and write into a terminal
   // that no longer exists.
   hydrating.delete(terminalId)
+  vorndStreams.delete(terminalId)
   clearHold(entry)
   entry._disposeCommandBlocks?.()
   entry._disposeCommandBlocks = null

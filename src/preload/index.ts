@@ -7,8 +7,9 @@ import {
   type LocalServerNotice
 } from '../shared/adoption-channels'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
-import type { TerminalData } from '@vornrun/shared/protocol'
+import type { RequestMethods, ServerNotifications, TerminalData } from '@vornrun/shared/protocol'
 import type {
+  RecordCursor,
   Artifact,
   ArtifactAnchor,
   ArtifactComment,
@@ -88,9 +89,15 @@ const api = {
 
   killTerminal: (id: string) => ipcRenderer.invoke(IPC.TERMINAL_KILL, id),
 
-  /** Everything a pane needs to show a terminal it did not create. */
-  attachTerminal: (id: string): Promise<{ data: string; seq: number; live: boolean }> =>
-    ipcRenderer.invoke(IPC.TERMINAL_ATTACH, id),
+  /**
+   * Everything a pane needs to show a terminal it did not create. With a
+   * cursor, vornd continues from it when it still can (see the protocol).
+   */
+  attachTerminal: (
+    id: string,
+    cursor?: RecordCursor
+  ): Promise<RequestMethods['terminal:attach']['result']> =>
+    ipcRenderer.invoke(IPC.TERMINAL_ATTACH, id, cursor),
 
   /**
    * What the server has, which is not the same as what the database remembers.
@@ -122,11 +129,42 @@ const api = {
   },
 
   /** Output for a terminal was withheld while this window fell behind; re-attach it. */
-  onTerminalResync: (callback: (event: { id: string }) => void) => {
-    const listener = (_: Electron.IpcRendererEvent, event: { id: string }): void => callback(event)
+  onTerminalResync: (callback: (event: { id: string; reason?: string }) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, event: { id: string; reason?: string }): void =>
+      callback(event)
     ipcRenderer.on(IPC.TERMINAL_RESYNC, listener)
     return () => {
       ipcRenderer.removeListener(IPC.TERMINAL_RESYNC, listener)
+    }
+  },
+
+  /** A version 2 terminal frame from vornd, as it came off the socket. */
+  onTerminalFrame: (callback: (frame: Uint8Array) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, frame: Uint8Array): void => callback(frame)
+    ipcRenderer.on(IPC.TERMINAL_FRAME, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.TERMINAL_FRAME, listener)
+    }
+  },
+
+  /** A session vornd holds was resized, in order with its frames. */
+  onTerminalResized: (callback: (event: ServerNotifications['terminal:resized']) => void) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      event: ServerNotifications['terminal:resized']
+    ): void => callback(event)
+    ipcRenderer.on(IPC.TERMINAL_RESIZED, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.TERMINAL_RESIZED, listener)
+    }
+  },
+
+  /** The connection to the server came back: terminals vornd streams attach again. */
+  onTerminalReconnected: (callback: () => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on(IPC.TERMINAL_RECONNECTED, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.TERMINAL_RECONNECTED, listener)
     }
   },
 

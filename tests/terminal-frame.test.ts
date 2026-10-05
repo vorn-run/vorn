@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
   decodeTerminalFrame,
+  decodeTerminalFrameV2,
   encodeTerminalFrame,
+  encodeTerminalFrameV2,
+  frameResume,
+  terminalFrameVersion,
   MAX_FRAME_ID_BYTES
 } from '../packages/shared/src/terminal-frame'
 
@@ -71,5 +75,93 @@ describe('a terminal frame', () => {
       })
     ).toThrow(/id/)
     expect(() => encodeTerminalFrame({ id: '', seq: 1, data: new Uint8Array() })).toThrow(/id/)
+  })
+})
+
+// Version 2 names the records a frame holds, so a client always knows where its screen ends.
+describe('a version 2 terminal frame', () => {
+  const v2 = {
+    id: 'abc-123',
+    epoch: 3,
+    firstRseq: 2 ** 40 + 7,
+    lastRseq: 2 ** 40 + 9,
+    startOffset: 2 ** 52 + 100,
+    data: new TextEncoder().encode('\u001b[31mhi\u001b[0m')
+  }
+
+  it('carries the records and offsets back exactly, past 32 bits', () => {
+    const frame = decodeTerminalFrameV2(encodeTerminalFrameV2(v2))
+    expect(frame).toEqual(v2)
+    expect(frameResume(frame!)).toEqual({
+      epoch: 3,
+      nextRseq: 2 ** 40 + 10,
+      nextOffset: 2 ** 52 + 100 + v2.data.length
+    })
+  })
+
+  it('reads the bytes vornd writes', () => {
+    // vorn-term-proto's encoding of {s, epoch 1, records 2..=3, offset 5, "ab"}.
+    const wire = bytes(
+      2,
+      1,
+      0x73,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      3,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      5,
+      0x61,
+      0x62
+    )
+    expect(decodeTerminalFrameV2(wire)).toEqual({
+      id: 's',
+      epoch: 1,
+      firstRseq: 2,
+      lastRseq: 3,
+      startOffset: 5,
+      data: bytes(0x61, 0x62)
+    })
+  })
+
+  it('leaves version 1 to its own reader, and each refuses the other', () => {
+    const one = encodeTerminalFrame({ id: 't', seq: 1, data: bytes(1) })
+    const two = encodeTerminalFrameV2(v2)
+    expect(terminalFrameVersion(one)).toBe(1)
+    expect(terminalFrameVersion(two)).toBe(2)
+    expect(decodeTerminalFrameV2(one)).toBeNull()
+    expect(decodeTerminalFrame(two)).toBeNull()
+  })
+
+  it('refuses a frame that is cut short or ends before it starts', () => {
+    const wire = encodeTerminalFrameV2(v2)
+    for (let n = 0; n < wire.length - v2.data.length; n++) {
+      expect(decodeTerminalFrameV2(wire.subarray(0, n))).toBeNull()
+    }
+    expect(
+      decodeTerminalFrameV2(encodeTerminalFrameV2({ ...v2, lastRseq: 1, firstRseq: 2 }))
+    ).toBeNull()
   })
 })

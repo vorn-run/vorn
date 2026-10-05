@@ -21,9 +21,10 @@
 //! A session leaves the engine when its program has ended and every record
 //! is applied: the driver then releases it in sessiond. A lost session
 //! leaves it too, and is taken on again from the next connection's Welcome.
-//! No client sees the sessions yet; [`Engine::subscribe`] carries what
-//! happens to them, and they are reported, without their contents, at
-//! [`SESSIONS_PATH`].
+//! [`Engine::subscribe`] carries what happens to them, and they are
+//! reported, without their contents, at [`SESSIONS_PATH`]. Bytes clients
+//! read them through [`Engine::streams`] ([`crate::streams`]), which is fed
+//! every record the actors apply.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -35,11 +36,13 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vorn_engine::{Brief, Config, Effect, EffectId, Fidelity, Input, Open, Out, Pool, Summary};
 use vorn_sessiond_wire::{
-    Ack, Attach, Io, Nonce, Resize, SessionRef, Spawn, SpawnSpec, ToSessiond, ToVornd, Welcome,
-    Write,
+    Ack, Attach, AttachFrom, Io, Nonce, Resize, SessionRef, Spawn, SpawnSpec, ToSessiond, ToVornd,
+    Welcome, Write,
 };
+use vorn_term_proto::Cursor;
 
 use crate::holder::{Conn, Writer};
+use crate::streams::{Action, Snap, Streams};
 
 /// The path the session report is served at.
 pub const SESSIONS_PATH: &str = "/vornd/sessions";
@@ -50,6 +53,14 @@ pub const SESSIONS_PATH: &str = "/vornd/sessions";
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(20);
 
 const PING_EVERY: Duration = Duration::from_secs(15);
+
+/// The default foreground and background a session's terminal answers
+/// colour queries (OSC 10, 11) with: the app's terminal theme, which is what
+/// xterm.js answered with before vornd answered every query.
+pub const DEFAULT_COLORS: ([u8; 3], [u8; 3]) = ([0xd4, 0xd4, 0xd8], [0x14, 0x14, 0x16]);
+
+/// How often attaches waiting on a snapshot or a fetch are checked.
+const EXPIRE_EVERY: Duration = Duration::from_secs(1);
 
 /// How long a clean stop waits for the last checkpoints to be sent.
 const LAST_CHECKPOINTS: Duration = Duration::from_secs(5);
@@ -66,6 +77,10 @@ enum Command {
     CloseStdin(String),
     /// Cut a last checkpoint for every session and send them.
     Flush(oneshot::Sender<()>),
+    /// A client's resize, for sessiond to apply and record.
+    Resize(String, u16, u16),
+    /// Records from this cursor again, for a client continuing from it.
+    Fetch(String, Cursor),
 }
 
 /// What happened to a session, for whoever listens.
@@ -95,6 +110,7 @@ pub struct Engine {
     current: Mutex<Option<Current>>,
     closed: Mutex<VecDeque<Brief>>,
     events: broadcast::Sender<Event>,
+    streams: Arc<Streams>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -116,12 +132,62 @@ impl Engine {
     /// `write_timeout`.
     pub fn with_write_timeout(cfg: Config, write_timeout: Duration) -> Arc<Engine> {
         Arc::new(Engine {
-            cfg,
+            // Every session's records go on to bytes clients.
+            cfg: Config {
+                stream: true,
+                colors: cfg.colors.or(Some(DEFAULT_COLORS)),
+                ..cfg
+            },
             write_timeout,
             current: Mutex::new(None),
             closed: Mutex::new(VecDeque::new()),
             events: broadcast::channel(EVENTS).0,
+            streams: Streams::new(),
         })
+    }
+
+    /// The terminal streams of the sessions this engine holds.
+    pub fn streams(&self) -> &Arc<Streams> {
+        &self.streams
+    }
+
+    /// A client's resize of `session`. sessiond applies it and records it,
+    /// and the terminal and every client resize when they reach the record.
+    pub fn resize(&self, session: &str, cols: u16, rows: u16) -> Result<(), String> {
+        self.command(Command::Resize(session.to_owned(), cols, rows))
+    }
+
+    /// Carries out what the streams asked for. A session that cannot be
+    /// asked answers its client with an error at once.
+    pub fn perform(&self, actions: Vec<Action>) {
+        if actions.is_empty() {
+            return;
+        }
+        let pool = self.current().as_ref().map(|c| Arc::clone(&c.pool));
+        for a in actions {
+            match a {
+                Action::Snapshot { session, token } => {
+                    if !pool.as_ref().is_some_and(|p| p.snapshot(&session, token)) {
+                        self.streams.failed(token);
+                    }
+                }
+                Action::Output {
+                    session,
+                    token,
+                    lines,
+                } => {
+                    if !pool
+                        .as_ref()
+                        .is_some_and(|p| p.output(&session, token, lines))
+                    {
+                        self.streams.failed(token);
+                    }
+                }
+                Action::Fetch { session, from } => {
+                    let _ = self.command(Command::Fetch(session, from));
+                }
+            }
+        }
     }
 
     fn current(&self) -> std::sync::MutexGuard<'_, Option<Current>> {
@@ -242,6 +308,7 @@ impl Engine {
         // with the connection.
         let _clear = Clear(self);
         for info in &welcome.sessions {
+            self.streams.opened(&info.session, info.epoch);
             pool.open(&info.session, Open::from_info(info));
         }
         info!(sessions = welcome.sessions.len(), "recovering sessions");
@@ -257,6 +324,7 @@ impl Engine {
         };
         let mut ping = tokio::time::interval(PING_EVERY);
         ping.tick().await;
+        let mut expire = tokio::time::interval(EXPIRE_EVERY);
         let mut nonce = 0u64;
         let why = loop {
             tokio::select! {
@@ -270,12 +338,14 @@ impl Engine {
                     nonce += 1;
                     d.send(ToSessiond::Ping(Nonce { nonce }));
                 }
+                _ = expire.tick() => self.streams.expire(std::time::Instant::now()),
                 r = &mut writing => break r.unwrap_or_else(|e| e.to_string()),
             }
         };
         for (_, p) in d.spawns.drain() {
             let _ = p.reply.send(Err(why.clone()));
         }
+        self.streams.suspended();
         // The pool stops with the last reference, without last checkpoints:
         // the sessions are sessiond's, and the next connection recovers them.
         why
@@ -405,9 +475,16 @@ impl Driver<'_> {
                 let id = cp.session.clone();
                 self.pool.input(&id, Input::Checkpoint(cp));
             }
+            // A refusal of a client's fetch is the streams', not the actor's:
+            // fetches are made only for live sessions, which ask for nothing.
+            ToVornd::Refused(r) if self.engine.streams.fetching(&r.session) => {
+                let actions = self.engine.streams.fetch_refused(&r.session, r.why);
+                self.engine.perform(actions);
+            }
             ToVornd::Refused(r) => self.pool.input(&r.session, Input::Refused(r.why)),
             ToVornd::Spawned(s) => {
                 if let Some(p) = self.spawns.remove(&s.req) {
+                    self.engine.streams.opened(&s.session, s.start.epoch);
                     self.pool.open(&s.session, Open::spawned(s.start, p.size));
                     let _ = p.reply.send(Ok(s.session));
                 }
@@ -461,6 +538,9 @@ impl Driver<'_> {
                     ?effect,
                     "effect"
                 );
+                if matches!(effect, Effect::Bell) {
+                    self.engine.streams.bell(id);
+                }
                 let _ = self.engine.events.send(Event::Effect(fx, effect));
             }
             Out::Ready(f) => {
@@ -472,6 +552,23 @@ impl Driver<'_> {
             }
             Out::Lost => warn!(session = id, "session lost"),
             Out::Closed(summary) => self.closed(summary),
+            Out::Applied(entries) => self.engine.streams.applied(id, entries),
+            Out::Live(at) => {
+                let actions = self.engine.streams.live(id, at);
+                self.engine.perform(actions);
+            }
+            Out::Snapshot(token, snap) => {
+                let snap = snap.as_deref().map(|s| Snap {
+                    resume: s.resume,
+                    cols: s.cols,
+                    rows: s.rows,
+                    vt: &s.vt,
+                    title: &s.title,
+                    cwd: &s.cwd,
+                });
+                self.engine.streams.snapshot_ready(token, snap);
+            }
+            Out::Output(token, lines) => self.engine.streams.output_ready(token, lines.as_deref()),
         }
     }
 
@@ -496,6 +593,9 @@ impl Driver<'_> {
             }
             closed.push_back(b.clone());
         }
+        self.engine
+            .streams
+            .closed(&b.session, b.exited, &summary.screen);
         let _ = self.engine.events.send(Event::Closed(Arc::from(summary)));
     }
 
@@ -525,6 +625,30 @@ impl Driver<'_> {
             Command::Write(session, bytes) => self.write(session, bytes),
             Command::CloseStdin(session) => {
                 self.send(ToSessiond::CloseStdin(SessionRef { session }));
+            }
+            Command::Resize(session, cols, rows) => {
+                self.next_req += 1;
+                self.send(ToSessiond::Resize(Resize {
+                    session,
+                    req: self.next_req,
+                    cols,
+                    rows,
+                    px_w: 0,
+                    px_h: 0,
+                }));
+            }
+            Command::Fetch(session, from) => {
+                // sessiond sends the records from `from` again, then carries
+                // on live; the actor skips what it has. The ack keeps
+                // sessiond's window open past the records sent again.
+                let delivered = self.engine.streams.head(&session);
+                self.send(ToSessiond::Attach(Attach {
+                    session: session.clone(),
+                    from: AttachFrom::Cursor(from),
+                }));
+                if let Some(delivered) = delivered {
+                    self.send(ToSessiond::Ack(Ack { session, delivered }));
+                }
             }
             Command::Flush(done) => {
                 // The reader keeps draining sessiond meanwhile; what it

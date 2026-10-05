@@ -7,6 +7,11 @@
 //! terminal frames and the server's own requests to the desktop included. Every
 //! other HTTP request is forwarded as it is.
 //!
+//! The one exception: terminal calls for a session vornd itself holds are
+//! answered here and never reach the server ([`crate::terminal`]). What
+//! vornd sends a client and what the server sends it share one ordered
+//! outbox per connection ([`crate::streams::ClientConn`]).
+//!
 //! Headers that describe the client's request go through untouched, `Host` and
 //! `Origin` in particular: the server checks that they match, and both name
 //! vornd's address, which is what the client connected to. vornd listens only on
@@ -44,6 +49,7 @@ use crate::holder::Holder;
 use crate::protocol::{
     inspect_server_frame, method_of, ServerFrame, SERVER_PROTOCOLS, VORND_PROTOCOL,
 };
+use crate::streams::{Forwarder, Streams};
 
 /// The path vornd answers itself. Everything else belongs to the server.
 pub const HEALTH_PATH: &str = "/vornd/health";
@@ -73,6 +79,9 @@ pub struct Daemon {
     served: AtomicU64,
     started: Instant,
     holder: Option<Arc<Holder>>,
+    streams: Arc<Streams>,
+    /// Whether `vornd:spawn` is answered (`--debug-spawn`).
+    spawn: std::sync::atomic::AtomicBool,
 }
 
 impl Daemon {
@@ -86,7 +95,16 @@ impl Daemon {
     }
 
     fn build(upstream: SocketAddr, groups: Groups, holder: Option<Arc<Holder>>) -> Arc<Daemon> {
+        #[cfg(feature = "engine")]
+        let streams = holder
+            .as_ref()
+            .and_then(|h| h.engine())
+            .map(|e| Arc::clone(e.streams()));
+        #[cfg(not(feature = "engine"))]
+        let streams: Option<Arc<Streams>> = None;
         Arc::new(Daemon {
+            streams: streams.unwrap_or_default(),
+            spawn: std::sync::atomic::AtomicBool::new(false),
             upstream,
             groups,
             client: Client::builder(TokioExecutor::new()).build_http(),
@@ -100,6 +118,12 @@ impl Daemon {
 
     pub fn groups(&self) -> &Groups {
         &self.groups
+    }
+
+    /// Answers `vornd:spawn` from now on: sessions started in sessiond
+    /// through vornd, for tests until the app creates sessions this way.
+    pub fn allow_spawn(&self) {
+        self.spawn.store(true, Ordering::Relaxed);
     }
 
     /// Asks the server's own health route, and answers its status if it answered.
@@ -333,6 +357,10 @@ async fn websocket(daemon: Arc<Daemon>, mut req: Request<Incoming>) -> Response<
 
 /// Moves frames both ways until either side closes, then gives the other side a
 /// moment to finish its close.
+///
+/// Frames to the client go through the connection's outbox, which one writer
+/// drains, so the server's frames and what vornd answers itself stay in the
+/// order they were queued.
 async fn pump<C, S>(daemon: &Arc<Daemon>, client: WebSocketStream<C>, server: WebSocketStream<S>)
 where
     C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -340,12 +368,34 @@ where
 {
     let (mut to_client, mut from_client) = client.split();
     let (mut to_server, mut from_server) = server.split();
+    let mut conn = daemon.streams.connect();
+    let conn_id = conn.id();
+    let forward = conn.forwarder();
+
+    let writer = tokio::spawn(async move {
+        while let Some(o) = conn.next().await {
+            let size = o.size();
+            let closing = matches!(o.msg, Message::Close(_));
+            if to_client.send(o.msg).await.is_err() {
+                break;
+            }
+            conn.written(size);
+            if closing {
+                break;
+            }
+        }
+        let _ = to_client.close().await;
+    });
 
     let groups_daemon = daemon.clone();
+    let native = forward.clone();
     let upward = tokio::spawn(async move {
         while let Some(Ok(msg)) = from_client.next().await {
             match &msg {
                 Message::Text(text) => {
+                    if answered_here(&groups_daemon, conn_id, &native, text.as_str()) {
+                        continue;
+                    }
                     if let Some(method) = method_of(text.as_str()) {
                         groups_daemon.groups().route(&method);
                     }
@@ -371,27 +421,31 @@ where
                             ?version,
                             "the server speaks a protocol vornd does not know; closing"
                         );
-                        let _ = to_client
+                        forward
                             .send(Message::Close(Some(CloseFrame {
                                 code: CloseCode::Error,
                                 reason: "vornd does not support this server's protocol version"
                                     .into(),
                             })))
                             .await;
-                        break;
+                        return;
                     }
                 },
                 Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => continue,
                 other => other,
             };
-            if to_client.send(msg).await.is_err() {
-                break;
+            // The writer sends a close after everything queued before it,
+            // and then closes the client's side.
+            let closing = matches!(msg, Message::Close(_));
+            forward.send(msg).await;
+            if closing {
+                return;
             }
         }
-        let _ = to_client.close().await;
+        forward.send(Message::Close(None)).await;
     });
 
-    tokio::pin!(upward, downward);
+    tokio::pin!(upward, downward, writer);
     tokio::select! {
         _ = &mut upward => {
             if tokio::time::timeout(CLOSE_GRACE, &mut downward).await.is_err() {
@@ -404,6 +458,27 @@ where
             }
         }
     }
+    if tokio::time::timeout(CLOSE_GRACE, &mut writer)
+        .await
+        .is_err()
+    {
+        writer.abort();
+    }
+}
+
+/// Whether vornd answered a client's frame itself.
+#[cfg(feature = "engine")]
+fn answered_here(daemon: &Daemon, conn: u64, reply: &Forwarder, text: &str) -> bool {
+    let Some(engine) = daemon.holder.as_ref().and_then(|h| h.engine()) else {
+        return false;
+    };
+    let spawn = daemon.spawn.load(Ordering::Relaxed);
+    crate::terminal::handle(engine, conn, reply, text, spawn)
+}
+
+#[cfg(not(feature = "engine"))]
+fn answered_here(_: &Daemon, _: u64, _: &Forwarder, _: &str) -> bool {
+    false
 }
 
 fn is_websocket_upgrade(headers: &HeaderMap) -> bool {

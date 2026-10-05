@@ -1922,6 +1922,11 @@ export const IPC = {
   TERMINAL_BELL: 'terminal:bell',
   TERMINAL_RESYNC: 'terminal:resync',
   TERMINAL_EXIT: 'terminal:exit',
+  /** A version 2 terminal frame from vornd, passed to the renderer undecoded. */
+  TERMINAL_FRAME: 'terminal:frame',
+  TERMINAL_RESIZED: 'terminal:resized',
+  /** The bridge connected again after losing its socket: attachments are gone. */
+  TERMINAL_RECONNECTED: 'terminal:reconnected',
   SESSION_CREATED: 'session:created',
   SESSION_UPDATED: 'session:updated',
   SESSION_REORDERED: 'session:reordered',

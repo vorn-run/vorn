@@ -4,9 +4,9 @@ import {
   type ServerHello,
   type TerminalData
 } from '@vornrun/shared/protocol'
-import { decodeTerminalFrame } from '@vornrun/shared/terminal-frame'
+import { decodeTerminalFrame, terminalFrameVersion } from '@vornrun/shared/terminal-frame'
 import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
-import type { GitDiffRange, AppConfig } from '@vornrun/shared/types'
+import type { GitDiffRange, AppConfig, RecordCursor } from '@vornrun/shared/types'
 /**
  * WebSocket RPC shim that implements the same surface as the Electron preload `window.api`.
  * Components and stores call window.api.* exactly as they do in Electron,
@@ -66,6 +66,9 @@ function clearStoredToken(): void {
     /* nothing to clear */
   }
 }
+
+/** Events of the client itself, beside the server's notifications. */
+type LocalEvent = 'frame' | 'reconnected'
 
 class RpcClient {
   private ws!: WebSocket
@@ -175,7 +178,13 @@ class RpcClient {
 
     this.ws.onmessage = (event) => {
       if (event.data instanceof ArrayBuffer) {
-        const frame = decodeTerminalFrame(new Uint8Array(event.data))
+        const bytes = new Uint8Array(event.data)
+        // vornd's frames name their records; the terminal registry reads them.
+        if (terminalFrameVersion(bytes) === 2) {
+          this.emitLocal('frame', bytes)
+          return
+        }
+        const frame = decodeTerminalFrame(bytes)
         const cbs = frame && this.listeners.get('terminal:data')
         if (cbs) for (const cb of cbs) cb(frame)
         return
@@ -211,6 +220,10 @@ class RpcClient {
       // so this — not `onopen` — is what settles `_ready`.
       if (msg.method === 'auth:ok') {
         this._resolveReady()
+        // A socket that came back is a new connection, with none of the old
+        // one's terminal streams: they are attached again from their cursors.
+        if (this.admittedBefore) this.emitLocal('reconnected', undefined)
+        this.admittedBefore = true
         // A fresh socket knows only the URL's base topics; the cards on screen
         // would otherwise go quiet after every network change until scrolled.
         const ask = { ...(this.topics ? { topics: this.topics } : {}), ...this.bytesAsk() }
@@ -317,6 +330,9 @@ class RpcClient {
     return this.invoke('subscribe:set', { topics, ...this.bytesAsk() }).then(() => undefined)
   }
 
+  /** Whether a socket was admitted before this one: the next admission is a reconnect. */
+  private admittedBefore = false
+
   /** Frame layout 1 is the one this build reads. */
   private terminalBytes = false
 
@@ -335,6 +351,28 @@ class RpcClient {
     if (this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(msg)
     }
+  }
+
+  /**
+   * What this client itself sees rather than what the server notifies: a
+   * version 2 frame from vornd, and a socket admitted again after a drop.
+   */
+  private local = new Map<LocalEvent, Set<(payload: unknown) => void>>()
+
+  onLocal(event: LocalEvent, callback: (payload: unknown) => void): () => void {
+    let cbs = this.local.get(event)
+    if (!cbs) {
+      cbs = new Set()
+      this.local.set(event, cbs)
+    }
+    cbs.add(callback)
+    return () => {
+      cbs!.delete(callback)
+    }
+  }
+
+  private emitLocal(event: LocalEvent, payload: unknown): void {
+    for (const cb of this.local.get(event) ?? []) cb(payload)
   }
 
   /** Subscribe to server push notifications. Returns unsubscribe function. */
@@ -441,8 +479,14 @@ export function createApiShim(wsUrl: string) {
       rpc.on('terminal:data', callback as (p: unknown) => void),
     onTerminalBell: (callback: (event: { id: string }) => void) =>
       rpc.on('terminal:bell', callback as (p: unknown) => void),
-    onTerminalResync: (callback: (event: { id: string }) => void) =>
+    onTerminalResync: (callback: (event: { id: string; reason?: string }) => void) =>
       rpc.on('terminal:resync', callback as (p: unknown) => void),
+    onTerminalFrame: (callback: (frame: Uint8Array) => void) =>
+      rpc.onLocal('frame', callback as (p: unknown) => void),
+    onTerminalResized: (
+      callback: (event: { id: string; cols: number; rows: number; rseq: number }) => void
+    ) => rpc.on('terminal:resized', callback as (p: unknown) => void),
+    onTerminalReconnected: (callback: () => void) => rpc.onLocal('reconnected', () => callback()),
     onTerminalExit: (callback: (event: { id: string; exitCode: number }) => void) =>
       rpc.on('terminal:exit', callback as (p: unknown) => void),
     onSessionCreated: (callback: (session: unknown) => void) =>
@@ -472,7 +516,8 @@ export function createApiShim(wsUrl: string) {
 
     // ── Sessions ──
     listActiveSessions: () => rpc.invoke('terminal:listActive'),
-    attachTerminal: (id: string) => rpc.invoke('terminal:attach', { id }),
+    attachTerminal: (id: string, cursor?: RecordCursor) =>
+      rpc.invoke('terminal:attach', cursor ? { id, cursor } : { id }),
     getRestoredSessions: () => rpc.invoke('sessions:restored'),
     // The desktop hears this from its own launcher, which is the thing that
     // notices a server has died and starts another. A web client has no

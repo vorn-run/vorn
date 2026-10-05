@@ -31,10 +31,13 @@ tracing = "0.1"
 vorn-sessiond = { path = "../sessiond" }
 vorn-sessiond-wire = { path = "../sessiond-wire" }
 vorn-engine = { path = "../engine", optional = true }
+vorn-term-proto = { path = "../term-proto" }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
 
 [dev-dependencies]
+libghostty-vt = { version = "0.2.2", default-features = false }
 tempfile = "3"
 vorn-pipeline = { path = "../pipeline" }
-vorn-term-proto = { path = "../term-proto" }
+vorn-recovery = { path = "../recovery" }
+vorn-screen = { path = "../screen" }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "io-util"] }
