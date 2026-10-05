@@ -874,6 +874,12 @@ export interface RequestMethods {
   'server:shutdown': { params: void; result: void }
   /** Hand every running terminal to the replacement described, and exit. Unix endpoint only. */
   'server:handoff': { params: HandoffRequest; result: HandoffResult }
+  /**
+   * vornd started, with its channel for this server at `endpoint`: new terminals
+   * start there, and the ones it already holds are taken on. Answers whether
+   * the channel is up.
+   */
+  'server:vorndReady': { params: { endpoint?: string }; result: { connected: boolean } }
 
   // Credential vault (server-side storage)
   'credential:storeKey': {
@@ -1404,6 +1410,11 @@ export interface ServerNotifications {
    * session nobody has open still reaches whoever is meant to be interrupted.
    */
   'terminal:bell': { id: string }
+  /**
+   * A program in a terminal asked for a desktop notification (OSC 9 or 777).
+   * Told once, however often vornd reports it.
+   */
+  'terminal:notify': { id: string; title: string; body: string }
   /**
    * Output for this terminal was withheld while the client was too far behind.
    * Its screen is now stale: re-attach to get the present one.

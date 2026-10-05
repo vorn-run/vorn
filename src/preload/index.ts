@@ -155,6 +155,17 @@ const api = {
     }
   },
 
+  onTerminalNotify: (callback: (event: { id: string; title: string; body: string }) => void) => {
+    const listener = (
+      _: Electron.IpcRendererEvent,
+      event: { id: string; title: string; body: string }
+    ): void => callback(event)
+    ipcRenderer.on(IPC.TERMINAL_NOTIFY, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC.TERMINAL_NOTIFY, listener)
+    }
+  },
+
   /** Output for a terminal was withheld while this window fell behind; re-attach it. */
   onTerminalResync: (callback: (event: { id: string; reason?: string }) => void) => {
     const listener = (_: Electron.IpcRendererEvent, event: { id: string; reason?: string }): void =>

@@ -24,6 +24,7 @@ import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import log from './logger'
 import { holdWorkspace } from './workspace-holds'
 import { isDraining, DRAINING_MESSAGE } from './draining'
+import { vorndSessions, type VorndPty } from './vornd-sessions'
 
 const MAX_OUTPUT_LINES = 1000
 const FORCE_KILL_DELAY_MS = 5000
@@ -40,6 +41,8 @@ function forceKillWin(pid: number): void {
 
 class HeadlessManager extends EventEmitter {
   private processes = new Map<string, ChildProcess>()
+  /** Agents running in vornd, with the Native daemon switch on: they outlive this server. */
+  private inVornd = new Map<string, VorndPty>()
   private sessions = new Map<string, HeadlessSession>()
   private outputBuffers = new Map<string, string[]>()
   private agentCommands: Record<AiAgentType, AgentCommandConfig> = { ...DEFAULT_AGENT_COMMANDS }
@@ -155,6 +158,56 @@ class HeadlessManager extends EventEmitter {
         (spawnArgs.stdin != null ? ` (prompt on stdin, ${spawnArgs.stdin.length} chars)` : '')
     )
 
+    const worktreePath =
+      payload.existingWorktreePath ||
+      (payload.useWorktree && payload.branch ? effectivePath : undefined)
+    const session: HeadlessSession = {
+      id,
+      pid: 0,
+      agentType: payload.agentType,
+      projectName: payload.projectName,
+      projectPath: payload.projectPath,
+      displayName:
+        payload.displayName ||
+        (payload.initialPrompt ? displayNameFromPrompt(payload.initialPrompt) : undefined),
+      branch,
+      worktreePath,
+      worktreeName,
+      isWorktree: !!worktreePath,
+      status: 'running',
+      startedAt: Date.now(),
+      ...(payload.workflowId != null && { workflowId: payload.workflowId }),
+      ...(payload.workflowName != null && { workflowName: payload.workflowName }),
+      ...(agentSessionId ? { agentSessionId } : {}),
+      launchCommand
+    }
+    const output = (data: string): void => {
+      this.appendOutput(id, data)
+      this.emit('client-message', IPC.HEADLESS_DATA, { id, data })
+    }
+
+    if (vorndSessions.inUse()) {
+      // What `shell: true` runs on Windows, spelled out: vornd takes an argv.
+      const argv = useShell
+        ? [process.env.ComSpec || 'cmd.exe', '/d', '/s', '/c', `"${launchCommand}"`]
+        : [command, ...spawnArgList]
+      const agent = vorndSessions.spawn(id, { argv, cwd: effectivePath, env, piped: true }, true)
+      if (spawnArgs.stdin != null) agent.write(spawnArgs.stdin)
+      agent.closeStdin()
+      this.inVornd.set(id, agent)
+      this.outputBuffers.set(id, [])
+      this.sessions.set(id, session)
+      agent.on('started', (pid: number) => {
+        session.pid = pid
+      })
+      agent.onData(output)
+      agent.onExit(({ exitCode, repeated }) => {
+        this.inVornd.delete(id)
+        this.exited(id, exitCode, repeated)
+      })
+      return session
+    }
+
     const child = spawn(command, spawnArgList, {
       cwd: effectivePath,
       env,
@@ -175,90 +228,62 @@ class HeadlessManager extends EventEmitter {
 
     this.processes.set(id, child)
     this.outputBuffers.set(id, [])
-
-    const worktreePath =
-      payload.existingWorktreePath ||
-      (payload.useWorktree && payload.branch ? effectivePath : undefined)
-    const session: HeadlessSession = {
-      id,
-      pid: child.pid || 0,
-      agentType: payload.agentType,
-      projectName: payload.projectName,
-      projectPath: payload.projectPath,
-      displayName:
-        payload.displayName ||
-        (payload.initialPrompt ? displayNameFromPrompt(payload.initialPrompt) : undefined),
-      branch,
-      worktreePath,
-      worktreeName,
-      isWorktree: !!worktreePath,
-      status: 'running',
-      startedAt: Date.now(),
-      ...(payload.workflowId != null && { workflowId: payload.workflowId }),
-      ...(payload.workflowName != null && { workflowName: payload.workflowName }),
-      ...(agentSessionId ? { agentSessionId } : {}),
-      launchCommand
-    }
+    session.pid = child.pid || 0
     this.sessions.set(id, session)
 
-    // Stream stdout
-    child.stdout?.on('data', (chunk: Buffer) => {
-      const data = chunk.toString()
-      this.appendOutput(id, data)
-      this.emit('client-message', IPC.HEADLESS_DATA, { id, data })
-    })
-
-    // Stream stderr
-    child.stderr?.on('data', (chunk: Buffer) => {
-      const data = chunk.toString()
-      this.appendOutput(id, data)
-      this.emit('client-message', IPC.HEADLESS_DATA, { id, data })
-    })
+    child.stdout?.on('data', (chunk: Buffer) => output(chunk.toString()))
+    child.stderr?.on('data', (chunk: Buffer) => output(chunk.toString()))
 
     // Handle exit
     child.on('exit', (exitCode) => {
-      log.info(`[headless] process ${id} exited with code ${exitCode}`)
-      const sess = this.sessions.get(id)
-      if (sess && sess.status === 'running') {
-        sess.status = 'exited'
-        sess.exitCode = exitCode ?? undefined
-        sess.endedAt = Date.now()
-        this.emit('client-message', IPC.HEADLESS_EXIT, { id, exitCode: exitCode ?? 1 })
-      }
       this.processes.delete(id)
-
-      // Clean up output buffer and session after a short delay to allow
-      // final reads from the renderer, preventing unbounded memory growth.
-      setTimeout(() => {
-        this.outputBuffers.delete(id)
-        this.sessions.delete(id)
-      }, 30_000)
+      this.exited(id, exitCode ?? undefined)
     })
 
     child.on('error', (err) => {
       log.error({ err }, `[headless] process ${id} error`)
-      this.appendOutput(id, `Error: ${err.message}\n`)
-      this.emit('client-message', IPC.HEADLESS_DATA, { id, data: `Error: ${err.message}\n` })
-
+      output(`Error: ${err.message}\n`)
       // Mark session as exited so workflow steps detect the failure
-      const sess = this.sessions.get(id)
-      if (sess && sess.status === 'running') {
-        sess.status = 'exited'
-        sess.exitCode = 1
-        sess.endedAt = Date.now()
-        this.processes.delete(id)
-        this.emit('client-message', IPC.HEADLESS_EXIT, { id, exitCode: 1 })
-        setTimeout(() => {
-          this.outputBuffers.delete(id)
-          this.sessions.delete(id)
-        }, 30_000)
-      }
+      this.processes.delete(id)
+      this.exited(id, 1)
     })
 
     return session
   }
 
+  /**
+   * The agent ended. Told once to the windows and the workflow waiting on it;
+   * an exit told again after vornd restarted (`repeated`) was told the first
+   * time, and running the workflow's next step twice is the one thing a
+   * receipt is for.
+   */
+  private exited(id: string, exitCode: number | undefined, repeated = false): void {
+    const sess = this.sessions.get(id)
+    if (!sess || sess.status !== 'running') return
+    log.info(`[headless] process ${id} exited with code ${exitCode}`)
+    sess.status = 'exited'
+    sess.exitCode = exitCode
+    sess.endedAt = Date.now()
+    if (!repeated) {
+      this.emit('client-message', IPC.HEADLESS_EXIT, { id, exitCode: exitCode ?? 1 })
+    }
+    // Clean up output buffer and session after a short delay to allow
+    // final reads from the renderer, preventing unbounded memory growth.
+    setTimeout(() => {
+      this.outputBuffers.delete(id)
+      this.sessions.delete(id)
+    }, 30_000)
+  }
+
   killHeadless(id: string): void {
+    const agent = this.inVornd.get(id)
+    if (agent) {
+      agent.kill('SIGTERM')
+      setTimeout(() => {
+        if (!agent.isEnded) agent.kill('SIGKILL')
+      }, FORCE_KILL_DELAY_MS)
+      return
+    }
     const proc = this.processes.get(id)
     if (!proc) return
     if (process.platform === 'win32') {
@@ -319,6 +344,9 @@ class HeadlessManager extends EventEmitter {
       }
       this.processes.delete(id)
     }
+    // Left running: an agent in vornd outlives this server.
+    for (const id of this.inVornd.keys()) vorndSessions.release(id)
+    this.inVornd.clear()
     this.sessions.clear()
     this.outputBuffers.clear()
   }

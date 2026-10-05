@@ -15,11 +15,16 @@
 //! them, and one rule decides each session's size ([`size`]).
 
 #[cfg(feature = "engine")]
+pub mod control;
+#[cfg(feature = "engine")]
 pub mod engine;
 #[cfg(feature = "engine")]
 pub mod grid;
 pub mod groups;
 pub mod holder;
+#[cfg(feature = "engine")]
+pub mod journal;
+pub mod names;
 pub mod protocol;
 pub mod proxy;
 #[cfg(feature = "engine")]

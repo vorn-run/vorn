@@ -7,7 +7,8 @@
 //!
 //! Prints one line of JSON, `{"port":N,"protocol":P}`, once it is listening, so
 //! whoever started it knows where to connect. With a session holder and the
-//! engine, the line also names the grid endpoint: `"grid":"<socket or pipe>"`.
+//! engine, the line also names the grid endpoint, `"grid":"<socket or pipe>"`,
+//! and the app's, `"app":"<socket or pipe>"`.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -37,8 +38,9 @@ const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT]
                --home (its run/ directory is where running ones are found)
   --home       the data directory, $VORN_HOME
   --debug-spawn
-               answer vornd:spawn, which starts a session in the session holder;
-               for tests, until the app creates its sessions through vornd";
+               answer vornd:spawn from clients too, which starts a session in the
+               session holder; for tests (the app's server sends it on its own
+               channel)";
 
 #[derive(Debug)]
 struct Args {
@@ -210,6 +212,36 @@ fn serve_grid(_: &HolderConfig, _: &Holder) -> Option<String> {
     None
 }
 
+/// Opens the app's channel for the engine's sessions and names it under
+/// `run/`, where the app's server looks. Without it vornd runs on; the
+/// server then starts its terminals itself.
+#[cfg(feature = "engine")]
+fn serve_app(cfg: &HolderConfig, holder: &Holder) -> Option<String> {
+    use vornd::control;
+    let engine = holder.engine()?.clone();
+    let endpoint = control::endpoint(&cfg.home);
+    match vorn_sessiond::os::Listener::bind(&cfg.home, &endpoint) {
+        Ok(listener) => {
+            tokio::spawn(control::serve(listener, engine));
+            if let Err(err) = control::announce(&cfg.home, &endpoint) {
+                error!(%endpoint, %err, "could not name the app's endpoint");
+                return None;
+            }
+            info!(%endpoint, "the app's endpoint");
+            Some(endpoint)
+        }
+        Err(err) => {
+            error!(%endpoint, %err, "no endpoint for the app");
+            None
+        }
+    }
+}
+
+#[cfg(not(feature = "engine"))]
+fn serve_app(_: &HolderConfig, _: &Holder) -> Option<String> {
+    None
+}
+
 /// Where the app passes the desktop's launch token.
 const DESKTOP_TOKEN_VAR: &str = "VORND_DESKTOP_TOKEN";
 
@@ -261,10 +293,12 @@ fn main() -> ExitCode {
         }
         let mut kept = None;
         let mut grid: Option<String> = None;
+        let mut app: Option<(PathBuf, String)> = None;
         let daemon = match args.holder {
             Some(cfg) => {
                 let holder = Arc::new(new_holder(&cfg));
                 grid = serve_grid(&cfg, &holder);
+                app = serve_app(&cfg, &holder).map(|e| (cfg.home.clone(), e));
                 tokio::spawn(holder::keep(cfg, holder.clone()));
                 kept = Some(holder.clone());
                 Daemon::with_holder(args.upstream, args.groups, holder)
@@ -280,10 +314,13 @@ fn main() -> ExitCode {
         proxy::log_upstream(&daemon).await;
         info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
         let mut stdout = std::io::stdout().lock();
-        let ready = match &grid {
-            Some(g) => serde_json::json!({ "port": port, "protocol": VORND_PROTOCOL, "grid": g }),
-            None => serde_json::json!({ "port": port, "protocol": VORND_PROTOCOL }),
-        };
+        let mut ready = serde_json::json!({ "port": port, "protocol": VORND_PROTOCOL });
+        if let Some(g) = &grid {
+            ready["grid"] = g.as_str().into();
+        }
+        if let Some((_, e)) = &app {
+            ready["app"] = e.as_str().into();
+        }
         let _ = writeln!(stdout, "{ready}");
         let _ = stdout.flush();
         drop(stdout);
@@ -309,6 +346,12 @@ fn main() -> ExitCode {
         #[cfg(unix)]
         if let Some(endpoint) = &grid {
             let _ = std::fs::remove_file(endpoint);
+        }
+        #[cfg(feature = "engine")]
+        if let Some((home, _endpoint)) = &app {
+            vornd::control::withdraw(home);
+            #[cfg(unix)]
+            let _ = std::fs::remove_file(_endpoint);
         }
         drop(kept);
         info!("stopped");

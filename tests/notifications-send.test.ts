@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   sendAgentNotification,
+  sendProgramNotification,
   sendWorkflowGateNotification
 } from '../src/renderer/lib/notifications'
 import type { AppConfig, WorkflowDefinition } from '../src/shared/types'
@@ -155,5 +156,20 @@ describe('sendAgentNotification', () => {
     vi.spyOn(document, 'hasFocus').mockReturnValue(true)
     sendAgentNotification(terminal(), 'waiting', makeConfig())
     expect(NotificationMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('sendProgramNotification', () => {
+  it('shows what the program asked, with its title', () => {
+    sendProgramNotification(terminal(), 'Build', 'finished', makeConfig())
+    const [title, opts] = NotificationMock.mock.calls[0]
+    expect(title).toBe('Build')
+    expect((opts as { body: string }).body).toBe('finished')
+  })
+
+  it("falls back to the terminal's name when the program gave no title", () => {
+    sendProgramNotification(terminal(), '', 'done', makeConfig())
+    const [title] = NotificationMock.mock.calls[0]
+    expect(title).toBeTruthy()
   })
 })

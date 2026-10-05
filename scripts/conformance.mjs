@@ -21,7 +21,9 @@ const FILES = [
   'tests/task-write-methods.test.ts',
   'tests/workflow-methods.test.ts',
   'tests/vornd-terminal.test.ts',
-  'tests/vornd-attach.test.ts'
+  'tests/vornd-attach.test.ts',
+  'tests/vornd-app-channel.test.ts',
+  'tests/vornd-app-sessions.test.ts'
 ]
 
 function run(command, args, env = process.env) {

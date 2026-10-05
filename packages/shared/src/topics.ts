@@ -23,6 +23,7 @@ export const PHONE_BASE_TOPICS: readonly string[] = [
   'worktree:*',
   'terminal:exit',
   'terminal:bell',
+  'terminal:notify',
   'terminal:resync',
   'terminal:resized'
 ]

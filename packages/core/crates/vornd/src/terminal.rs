@@ -19,9 +19,12 @@
 //! share one connection, and the size rule counts each pane as its own client.
 //! A lock another client holds is refused, in the answer to the request.
 //!
-//! `vornd:spawn` starts a session in sessiond through the engine. It exists
-//! for tests until the app creates sessions through vornd, and is answered
-//! only when vornd was started with `--debug-spawn`.
+//! `vornd:spawn` starts a session in sessiond through the engine. The app's
+//! server sends it on its own channel ([`crate::control`]), naming each
+//! session with its own id ([`crate::names`]); a client may send it only
+//! when vornd was started with `--debug-spawn`, which tests use. The app's
+//! own calls never count toward the size rule: the server writing to a
+//! session for a workflow is not a person typing into it.
 
 use std::time::Instant;
 
@@ -48,6 +51,15 @@ const NATIVE: [&str; 10] = [
     "\"vornd:spawn\"",
 ];
 
+/// Who a call comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Caller {
+    /// A client: the renderer, the web client, the phone.
+    Client { allow_spawn: bool },
+    /// The app's server, on its own channel.
+    App,
+}
+
 /// Answers `text` from client connection `conn` if it is a terminal call
 /// for a session vornd holds. False when it is for the server.
 pub fn handle(
@@ -56,6 +68,27 @@ pub fn handle(
     reply: &Forwarder,
     text: &str,
     allow_spawn: bool,
+) -> bool {
+    route(engine, conn, reply, text, Caller::Client { allow_spawn })
+}
+
+/// Answers `text` from the app's server on connection `conn` if it is a
+/// terminal call for a session vornd holds, or `vornd:spawn`.
+pub fn handle_for_app(
+    engine: &std::sync::Arc<Engine>,
+    conn: u64,
+    reply: &Forwarder,
+    text: &str,
+) -> bool {
+    route(engine, conn, reply, text, Caller::App)
+}
+
+fn route(
+    engine: &std::sync::Arc<Engine>,
+    conn: u64,
+    reply: &Forwarder,
+    text: &str,
+    caller: Caller,
 ) -> bool {
     if !NATIVE.iter().any(|m| text.contains(m)) {
         return false;
@@ -69,7 +102,7 @@ pub fn handle(
     let rpc = frame.get("id").cloned();
     let params = frame.get("params").cloned().unwrap_or(Value::Null);
     if method == "vornd:spawn" {
-        if !allow_spawn {
+        if caller == (Caller::Client { allow_spawn: false }) {
             return false;
         }
         spawn(engine, reply, rpc, &params);
@@ -83,6 +116,8 @@ pub fn handle(
         return false;
     }
     let sizes = engine.sizes();
+    // The app's calls leave the size rule alone.
+    let counted = matches!(caller, Caller::Client { .. });
     // 0 when the client names no pane: the connection is then one client.
     let pane = params.get("pane").and_then(Value::as_u64).unwrap_or(0);
     let who = Who::Bytes { conn, pane };
@@ -91,11 +126,13 @@ pub fn handle(
         "terminal:attach" => {
             let Some(rpc) = rpc else { return true };
             let cursor = params.get("cursor").and_then(cursor_of);
-            let ev = Ev::Attach {
-                viewport: size_of(&params),
-                presence: Presence::Watching,
-            };
-            sizes.on(session, who, ev, now);
+            if counted {
+                let ev = Ev::Attach {
+                    viewport: size_of(&params),
+                    presence: Presence::Watching,
+                };
+                sizes.on(session, who, ev, now);
+            }
             engine.perform(streams.attach(conn, session, rpc, cursor));
         }
         "terminal:readScrollback" => {
@@ -115,7 +152,7 @@ pub fn handle(
                 Some(data) => {
                     // A person's typing takes the size; focus and scroll
                     // reports do not.
-                    if vorn_size::typed(data.as_bytes()) {
+                    if counted && vorn_size::typed(data.as_bytes()) {
                         sizes.on(session, who, Ev::Input, now);
                     }
                     engine.write(session, data.as_bytes().to_vec())
@@ -126,6 +163,8 @@ pub fn handle(
         }
         "terminal:resize" => {
             let done = match size_of(&params) {
+                // The app's resize is applied as it is, past the rule.
+                Some(size) if !counted => engine.resize(session, size.cols, size.rows),
                 Some(size) => {
                     sizes.on(session, who, Ev::TakeSize(Some(size)), now);
                     Ok(())
@@ -200,7 +239,8 @@ fn cursor_of(v: &Value) -> Option<Cursor> {
     })
 }
 
-/// `vornd:spawn {argv, cwd?, env?, cols?, rows?, piped?}`: answers `{id}`.
+/// `vornd:spawn {argv, cwd?, env?, cols?, rows?, piped?, name?}`: answers
+/// `{id, pid, epoch}`, `id` being the name when one was given.
 fn spawn(engine: &std::sync::Arc<Engine>, reply: &Forwarder, rpc: Option<Value>, p: &Value) {
     let argv: Vec<String> = p
         .get("argv")
@@ -247,16 +287,20 @@ fn spawn(engine: &std::sync::Arc<Engine>, reply: &Forwarder, rpc: Option<Value>,
             .and_then(Value::as_u64)
             .and_then(|n| u32::try_from(n).ok()),
     };
+    let name = p.get("name").and_then(Value::as_str).map(str::to_owned);
     let (engine, reply) = (std::sync::Arc::clone(engine), reply.clone());
     tokio::spawn(async move {
         let done = if spec.argv.is_empty() {
             Err("vornd:spawn needs argv".to_owned())
         } else {
-            engine.spawn(spec).await
+            engine.spawn_as(spec, name).await
         };
         if let Some(rpc) = rpc {
             match done {
-                Ok(id) => reply.send_now(&answer(&rpc, json!({ "id": id }))),
+                Ok(s) => reply.send_now(&answer(
+                    &rpc,
+                    json!({ "id": s.id, "pid": s.pid, "epoch": s.epoch }),
+                )),
                 Err(e) => reply.send_now(&refuse(&rpc, &e)),
             }
         }
