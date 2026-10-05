@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -23,8 +23,6 @@ import { normalizePath } from '../packages/server/src/process-utils'
  * that throws, a listener that throws anyway cannot escape, and the catch cannot
  * make things worse than what it is catching.
  */
-
-vi.mock('node-pty', () => ({ default: { spawn: vi.fn() }, spawn: vi.fn() }))
 
 /**
  * A home directory of its own, because a real `HookServer` writes to one.

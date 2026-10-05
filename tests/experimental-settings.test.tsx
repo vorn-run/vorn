@@ -48,6 +48,7 @@ beforeEach(() => {
   holders = null
   endSessionHolder.mockResolvedValue({ ok: true })
   api.getVorndStatus = () => Promise.resolve(daemon)
+  api.getSessionHolders = () => Promise.resolve(holders)
 })
 
 describe('ExperimentalSettings', () => {
@@ -68,18 +69,18 @@ describe('ExperimentalSettings', () => {
     render(<ExperimentalSettings />)
     expect(
       await screen.findByText(
-        'The native core did not load, so terminals have no screen model, agent status or terminal output for agents: vorn_core.node not found'
+        'The native core did not load, so git runs more slowly and the native store is not available: vorn_core.node not found'
       )
     ).toBeInTheDocument()
     expect(screen.queryByText(/Native core \d/)).not.toBeInTheDocument()
   })
 
   it('names what a core was built without', async () => {
-    status = core({ missing: ['the screen model', 'agent status'] })
+    status = core({ missing: ['git', 'the native store'] })
     render(<ExperimentalSettings />)
     expect(
       await screen.findByText(
-        'This build of the native core was made without the screen model, agent status.'
+        'This build of the native core was made without git, the native store.'
       )
     ).toBeInTheDocument()
   })
@@ -87,58 +88,40 @@ describe('ExperimentalSettings', () => {
   it('says nothing about the core when the server cannot report on it', async () => {
     status = new Error('older server')
     render(<ExperimentalSettings />)
-    await screen.findByRole('switch', { name: 'Native daemon' })
+    await screen.findByRole('switch', { name: 'Native store' })
     expect(screen.queryByText(/Native core/)).not.toBeInTheDocument()
   })
 
-  describe('the native daemon switch', () => {
-    const daemonSwitch = (): HTMLElement => screen.getByRole('switch', { name: 'Native daemon' })
-
-    const findDaemonSwitch = (): Promise<HTMLElement> =>
-      screen.findByRole('switch', { name: 'Native daemon' })
-
-    it('is off by default and saves under defaults.experimental', async () => {
-      render(<ExperimentalSettings />)
-      await findDaemonSwitch()
-      await screen.findByText('Native core 0.2.0')
-      expect(daemonSwitch()).toHaveAttribute('aria-checked', 'false')
-      fireEvent.click(daemonSwitch())
-      expect(saveConfig).toHaveBeenCalledWith(config({ vornd: true }))
-    })
-
-    it('stays usable whatever the native core says', async () => {
-      status = core({ loaded: false, version: null, error: 'vorn_core.node not found' })
-      render(<ExperimentalSettings />)
-      await screen.findByText(/did not load/)
-      await findDaemonSwitch()
-      expect(daemonSwitch()).not.toBeDisabled()
-    })
-
-    it('says the switch applies from the next start', async () => {
-      mockStore.config = config({ vornd: true })
-      render(<ExperimentalSettings />)
-      expect(
-        await screen.findByText('Vorn connects through vornd the next time it starts.')
-      ).toBeInTheDocument()
-    })
-
-    it('says nothing more while vornd is in use as asked', async () => {
-      mockStore.config = config({ vornd: true })
-      daemon = { state: 'on', port: 47001 }
+  describe('vornd', () => {
+    it('has no switch of its own: every terminal runs in it', async () => {
       render(<ExperimentalSettings />)
       await screen.findByText('Native core 0.2.0')
-      expect(screen.queryByText(/next time it starts/)).not.toBeInTheDocument()
+      expect(screen.queryByRole('switch', { name: 'Native daemon' })).not.toBeInTheDocument()
     })
 
-    it('says why the app went to the server directly', async () => {
-      mockStore.config = config({ vornd: true })
+    it('says why terminals cannot run when it is not in use', async () => {
       daemon = { state: 'failed', detail: 'vornd is not in this build' }
       render(<ExperimentalSettings />)
       expect(
         await screen.findByText(
-          'Vorn is connected to the server directly: vornd is not in this build.'
+          'Terminals cannot run, because vornd, the native daemon, is not in use: vornd is not in this build.'
         )
       ).toBeInTheDocument()
+    })
+
+    it('says nothing about it while it is up, and asks for its session holders only then', async () => {
+      const getHolders = vi.fn(() => Promise.resolve(holders))
+      api.getSessionHolders = getHolders
+      const { unmount } = render(<ExperimentalSettings />)
+      await screen.findByText('Native core 0.2.0')
+      expect(screen.queryByText(/Terminals cannot run/)).not.toBeInTheDocument()
+      expect(getHolders).not.toHaveBeenCalled()
+      unmount()
+
+      daemon = { state: 'on', port: 47001 }
+      render(<ExperimentalSettings />)
+      await screen.findByText('Native core 0.2.0')
+      expect(getHolders).toHaveBeenCalled()
     })
 
     describe('with older session holders', () => {
@@ -151,7 +134,6 @@ describe('ExperimentalSettings', () => {
         compatible: true
       }
       beforeEach(() => {
-        mockStore.config = config({ vornd: true })
         daemon = { state: 'on', port: 47001 }
       })
 
@@ -223,13 +205,6 @@ describe('ExperimentalSettings', () => {
         ).toBeInTheDocument()
         expect(screen.queryByRole('button', { name: 'End them' })).not.toBeInTheDocument()
       })
-    })
-
-    it('is not shown where the app cannot run vornd', async () => {
-      daemon = null
-      render(<ExperimentalSettings />)
-      await screen.findByText('Native core 0.2.0')
-      expect(screen.queryByRole('switch', { name: 'Native daemon' })).not.toBeInTheDocument()
     })
   })
 

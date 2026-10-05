@@ -2,37 +2,10 @@ import { describe, it, expect, vi } from 'vitest'
 import path from 'node:path'
 import {
   endOlderHolder,
-  findSessiond,
   readAnnouncement,
   readSessionHolders
 } from '../src/main/server/session-holder'
 import type { SessionHolders } from '@vornrun/shared/types'
-
-describe('finding vorn-sessiond', () => {
-  const where = { packaged: true, resourcesPath: '/app/Resources', repoRoot: '/repo' }
-
-  it('looks next to vornd in the app resources when packaged', () => {
-    expect(findSessiond(where, 'darwin', () => true)).toBe(
-      path.join('/app/Resources', 'vornd', 'vorn-sessiond')
-    )
-    expect(findSessiond(where, 'win32', () => true)).toBe(
-      path.join('/app/Resources', 'vornd', 'vorn-sessiond.exe')
-    )
-  })
-
-  it('looks where build:core copies it in dev, then in cargo’s target directory', () => {
-    const dev = { ...where, packaged: false }
-    const debug = path.join('/repo', 'packages', 'core', 'target', 'debug', 'vorn-sessiond')
-    expect(findSessiond(dev, 'linux', (f) => f === debug)).toBe(debug)
-    expect(findSessiond(dev, 'linux', () => true)).toBe(
-      path.join('/repo', 'packages', 'core', 'vorn-sessiond')
-    )
-  })
-
-  it('answers null when the build has none', () => {
-    expect(findSessiond(where, 'linux', () => false)).toBeNull()
-  })
-})
 
 const holder = {
   pid: 4242,

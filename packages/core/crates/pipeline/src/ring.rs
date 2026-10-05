@@ -2,7 +2,7 @@
 //!
 //! What a client attaching to a live session is given first, so its emulator
 //! draws what is on screen before live output starts. The same rules as the
-//! JavaScript buffer it replaces (`terminal-scrollback.ts`): trimmed from the
+//! JavaScript buffer it replaced (the server's old scrollback): trimmed from the
 //! front at a line boundary, so a client is never handed half an escape
 //! sequence, and compacted only once it has run a quarter past its cap.
 //!
@@ -86,7 +86,7 @@ fn is_continuation(byte: u8) -> bool {
 mod tests {
     use super::*;
 
-    /// The rule as `terminal-scrollback.ts` states it, on the joined text.
+    /// The rule as the JavaScript buffer stated it, on the joined text.
     fn reference(data: &[u8]) -> Vec<u8> {
         if data.len() <= MAX_BYTES {
             return data.to_vec();

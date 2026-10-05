@@ -10,6 +10,7 @@ import type {
   ArtifactVersion,
   ActionResult,
   SessionAnswer,
+  VorndStatus,
   SessionRequest,
   AuthProbeReport,
   CreateTerminalPayload,
@@ -874,12 +875,8 @@ export interface RequestMethods {
   'server:shutdown': { params: void; result: void }
   /** Hand every running terminal to the replacement described, and exit. Unix endpoint only. */
   'server:handoff': { params: HandoffRequest; result: HandoffResult }
-  /**
-   * vornd started, with its channel for this server at `endpoint`: new terminals
-   * start there, and the ones it already holds are taken on. Answers whether
-   * the channel is up.
-   */
-  'server:vorndReady': { params: { endpoint?: string }; result: { connected: boolean } }
+  /** Where clients reach this server through vornd, or why they cannot; waits for a start in flight. */
+  'server:vornd': { params: void; result: VorndStatus }
 
   // Credential vault (server-side storage)
   'credential:storeKey': {

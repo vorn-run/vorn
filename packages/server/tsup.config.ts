@@ -19,7 +19,7 @@ const NATIVE_MODULE_PATCH = `
 // Patch module resolution for Electron's utilityProcess.
 //
 // utilityProcess doesn't have the main process's ASAR require() patching,
-// so bare require('node-pty') and require('libsql') fail. We intercept Module._load to redirect
+// so a bare require('libsql') fails. We intercept Module._load to redirect
 // native module names to their absolute paths in app.asar.unpacked/node_modules/.
 //
 // The parent process passes VORN_NATIVE_MODULES_PATH as an env var
@@ -33,7 +33,7 @@ const NATIVE_MODULE_PATCH = `
   try {
     var Module = require('module');
     var path = require('path');
-    var nativeModules = { 'node-pty': true, 'libsql': true };
+    var nativeModules = { 'libsql': true };
 
     var origLoad = Module._load;
     Module._load = function(request, parent, isMain) {
@@ -65,8 +65,8 @@ export default defineConfig({
   // Bundle ALL JS dependencies so the server runs standalone in Electron's
   // utilityProcess (which cannot access modules inside the asar archive).
   //
-  // Native modules (node-pty, libsql) remain external because they
-  // contain compiled .node binaries loaded at runtime from disk.
-  noExternal: [/^(?!node-pty$|libsql$)/],
-  external: ['node-pty', 'libsql']
+  // libsql, a native module, remains external because it contains compiled
+  // .node binaries loaded at runtime from disk.
+  noExternal: [/^(?!libsql$)/],
+  external: ['libsql']
 })

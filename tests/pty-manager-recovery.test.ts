@@ -2,81 +2,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { setTimeout as realSleep } from 'node:timers/promises'
 import { IPC } from '@vornrun/shared/types'
 import type { CreateTerminalPayload, RemoteHost, TerminalSession } from '@vornrun/shared/types'
+import type { HeldSession } from '../packages/server/src/vornd-sessions'
 
 /**
- * Failure-path coverage for the PTY manager: a spawn that never happens, an
- * agent that dies mid-session, an SSH connection that never comes up, and the
- * idle timer that decides when a quiet session is no longer working.
+ * The PTY manager over sessions held by vornd: what it asks vornd to start,
+ * what it writes to them, how it follows what vornd says about them, and the
+ * failure paths -- a spawn that never happens, an agent that dies mid-session,
+ * an SSH connection that never comes up, and the idle timer that decides when a
+ * quiet session is no longer working.
  */
 
-const { spawnMock, FakePty } = vi.hoisted(() => {
-  type DataHandler = (data: string) => void
-  type ExitHandler = (e: { exitCode: number; signal?: number }) => void
-
-  let nextPid = 1000
-
-  class FakePty {
-    pid = nextPid++
-    written: string[] = []
-    killed = false
-    /** Set to simulate killing a process that the OS already reaped. */
-    killError: Error | null = null
-    resize = vi.fn()
-    private dataHandlers: DataHandler[] = []
-    private exitHandlers: ExitHandler[] = []
-
-    write(data: string): void {
-      this.written.push(data)
-    }
-
-    kill(): void {
-      if (this.killError) throw this.killError
-      this.killed = true
-    }
-
-    onData(cb: DataHandler): { dispose: () => void } {
-      this.dataHandlers.push(cb)
-      return {
-        dispose: () => {
-          this.dataHandlers = this.dataHandlers.filter((h) => h !== cb)
-        }
-      }
-    }
-
-    onExit(cb: ExitHandler): { dispose: () => void } {
-      this.exitHandlers.push(cb)
-      return {
-        dispose: () => {
-          this.exitHandlers = this.exitHandlers.filter((h) => h !== cb)
-        }
-      }
-    }
-
-    emitData(data: string): void {
-      for (const h of [...this.dataHandlers]) h(data)
-    }
-
-    emitExit(exitCode = 0): void {
-      for (const h of [...this.exitHandlers]) h({ exitCode })
-    }
-  }
-
-  return { spawnMock: vi.fn(() => new FakePty()), FakePty }
-})
-
-type FakePtyInstance = InstanceType<typeof FakePty>
-
-// The nested copy by name, not the bare specifier. `packages/server` pins its
-// own node-pty, so mocking 'node-pty' from here patches the root copy and
-// leaves pty-manager's untouched — the spawns would be real. Same reasoning as
-// `pty-session-id.test.ts`, which is where this convention comes from.
-vi.mock('../packages/server/node_modules/node-pty', () => ({
-  default: { spawn: spawnMock },
-  spawn: spawnMock
-}))
+vi.mock('../packages/server/src/vornd-sessions', async () =>
+  (await import('./helpers/fake-vornd-pty')).vorndModule()
+)
 
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
@@ -101,8 +41,7 @@ vi.mock('../packages/server/src/shell-integration', () => ({
   getShellIntegration: vi.fn(() => ({ env: {} }))
 }))
 
-// The real launch line resolver shells out to `which` per agent; the recovery
-// paths under test only care that *some* line is written.
+// The real launch line resolver shells out to `which` per agent.
 vi.mock('../packages/server/src/agent-launch', () => ({
   buildAgentLaunchLine: vi.fn((payload: CreateTerminalPayload) => `${payload.agentType}-launch`)
 }))
@@ -123,9 +62,13 @@ import { ptyManager } from '../packages/server/src/pty-manager'
 import { createWorktree, isGitRepo } from '../packages/server/src/git-utils'
 import { buildAgentLaunchLine } from '../packages/server/src/agent-launch'
 import { isWorkspaceHeld } from '../packages/server/src/workspace-holds'
+import { fakeVornd, type FakeVorndPty } from './helpers/fake-vornd-pty'
 
 const createWorktreeMock = vi.mocked(createWorktree)
 const isGitRepoMock = vi.mocked(isGitRepo)
+
+const RUNNING = 1
+const WAITING = 2
 
 const REMOTE_HOST: RemoteHost = {
   id: 'host-1',
@@ -140,14 +83,9 @@ let messages: { channel: string; payload: Record<string, unknown> }[] = []
 let exited: TerminalSession[] = []
 let created: TerminalSession[] = []
 
-function lastPty(): FakePtyInstance {
-  const results = spawnMock.mock.results
-  return results[results.length - 1].value as FakePtyInstance
-}
-
 async function createAgent(overrides: Partial<CreateTerminalPayload> = {}): Promise<{
   session: TerminalSession
-  fake: FakePtyInstance
+  fake: FakeVorndPty
 }> {
   const session = await ptyManager.createPty({
     agentType: 'claude',
@@ -155,31 +93,8 @@ async function createAgent(overrides: Partial<CreateTerminalPayload> = {}): Prom
     projectPath: '/tmp/vorn-proj',
     ...overrides
   })
-  return { session, fake: lastPty() }
+  return { session, fake: fakeVornd.last() }
 }
-
-it('records the exact Codex resume ID immediately', async () => {
-  const { session } = await createAgent({ agentType: 'codex', resumeSessionId: 'known-id' })
-  expect(session.agentSessionId).toBe('known-id')
-})
-
-it('records a remote Codex resume ID without local discovery', async () => {
-  const { session } = await createAgent({
-    agentType: 'codex',
-    resumeSessionId: 'remote-id',
-    remoteHostId: REMOTE_HOST.id
-  })
-  expect(session.agentSessionId).toBe('remote-id')
-  expect(session.remoteHostId).toBe(REMOTE_HOST.id)
-})
-
-it('rejects invalid model selection before spawning a PTY', async () => {
-  vi.mocked(buildAgentLaunchLine).mockImplementationOnce(() => {
-    throw new Error('Invalid model')
-  })
-  await expect(createAgent({ model: '-invalid' })).rejects.toThrow()
-  expect(spawnMock).not.toHaveBeenCalled()
-})
 
 function messagesOn(channel: string): Record<string, unknown>[] {
   return messages.filter((m) => m.channel === channel).map((m) => m.payload)
@@ -197,8 +112,7 @@ function tempKeyFiles(): string[] {
 
 beforeEach(() => {
   vi.useFakeTimers()
-  spawnMock.mockReset()
-  spawnMock.mockImplementation(() => new FakePty())
+  fakeVornd.reset()
   createWorktreeMock.mockReset()
   isGitRepoMock.mockReset()
   isGitRepoMock.mockResolvedValue(false)
@@ -227,23 +141,91 @@ afterEach(() => {
   ptyManager.removeAllListeners()
 })
 
-describe('pty spawn failures', () => {
+describe('starting a session in vornd', () => {
+  it('starts the shell in the project with the terminal type and its own id', async () => {
+    const { session, fake } = await createAgent()
+
+    expect(fake.id).toBe(session.id)
+    expect(fake.watched).toBe(false)
+    expect(fake.spec).toMatchObject({ argv: ['/bin/zsh', '-l'], cwd: '/tmp/vorn-proj' })
+    expect(fake.spec?.env).toMatchObject({
+      PATH: '/usr/bin',
+      TERM: 'xterm-256color',
+      VORN_SESSION_ID: session.id
+    })
+    expect(created).toEqual([session])
+  })
+
+  it('writes the agent launch line once the shell has had time to start', async () => {
+    const { fake } = await createAgent()
+
+    vi.advanceTimersByTime(299)
+    expect(fake.written).toEqual([])
+
+    vi.advanceTimersByTime(1)
+    expect(fake.written).toEqual(['claude-launch\r'])
+  })
+
+  it('takes the pid from vornd once the spawn is answered', async () => {
+    const { session, fake } = await createAgent()
+    expect(session.pid).toBe(0)
+
+    fake.start(4321)
+
+    expect(session.pid).toBe(4321)
+  })
+
+  it('starts a plain shell where it was asked, with no launch line', () => {
+    const session = ptyManager.createShellPty('/tmp/somewhere')
+    const fake = fakeVornd.last()
+
+    expect(fake.spec?.cwd).toBe('/tmp/somewhere')
+    expect(session.shellCwd).toBe('/tmp/somewhere')
+    vi.advanceTimersByTime(1000)
+    expect(fake.written).toEqual([])
+  })
+
+  it('records the exact Codex resume ID immediately', async () => {
+    const { session } = await createAgent({ agentType: 'codex', resumeSessionId: 'known-id' })
+    expect(session.agentSessionId).toBe('known-id')
+  })
+
+  it('records a remote Codex resume ID without local discovery', async () => {
+    const { session } = await createAgent({
+      agentType: 'codex',
+      resumeSessionId: 'remote-id',
+      remoteHostId: REMOTE_HOST.id
+    })
+    expect(session.agentSessionId).toBe('remote-id')
+    expect(session.remoteHostId).toBe(REMOTE_HOST.id)
+  })
+
+  it('rejects invalid model selection before spawning', async () => {
+    vi.mocked(buildAgentLaunchLine).mockImplementationOnce(() => {
+      throw new Error('Invalid model')
+    })
+    await expect(createAgent({ model: '-invalid' })).rejects.toThrow()
+    expect(fakeVornd.spawn).not.toHaveBeenCalled()
+  })
+})
+
+describe('spawn failures', () => {
   it('propagates the spawn error and registers no session', async () => {
-    spawnMock.mockImplementation(() => {
-      throw new Error('posix_spawnp failed')
+    fakeVornd.spawn.mockImplementation(() => {
+      throw new Error('Terminals cannot start: vornd is not running')
     })
 
-    await expect(createAgent()).rejects.toThrow(/posix_spawnp failed/)
+    await expect(createAgent()).rejects.toThrow(/vornd is not running/)
     expect(ptyManager.getActiveSessions()).toHaveLength(0)
     expect(created).toHaveLength(0)
     expect(messages).toHaveLength(0)
   })
 
   it('recovers so the next session after a failed spawn still works', async () => {
-    spawnMock.mockImplementationOnce(() => {
-      throw new Error('spawn ENOENT')
+    fakeVornd.spawn.mockImplementationOnce(() => {
+      throw new Error('Terminals cannot start: vornd is not running')
     })
-    await expect(createAgent()).rejects.toThrow(/ENOENT/)
+    await expect(createAgent()).rejects.toThrow(/vornd/)
 
     const { session } = await createAgent()
     expect(session.status).toBe('running')
@@ -251,11 +233,11 @@ describe('pty spawn failures', () => {
   })
 
   it('propagates a spawn failure for shell sessions too', () => {
-    spawnMock.mockImplementation(() => {
-      throw new Error('shell not found')
+    fakeVornd.spawn.mockImplementation(() => {
+      throw new Error('Terminals cannot start: vornd is not running')
     })
 
-    expect(() => ptyManager.createShellPty('/tmp')).toThrow(/shell not found/)
+    expect(() => ptyManager.createShellPty('/tmp')).toThrow(/vornd is not running/)
     expect(ptyManager.getActiveSessions()).toHaveLength(0)
   })
 
@@ -266,8 +248,17 @@ describe('pty spawn failures', () => {
     await expect(createAgent({ useWorktree: true, branch: 'feature/x' })).rejects.toThrow(
       /could not create worktree/
     )
-    expect(spawnMock).not.toHaveBeenCalled()
+    expect(fakeVornd.spawn).not.toHaveBeenCalled()
     expect(ptyManager.getActiveSessions()).toHaveLength(0)
+  })
+
+  it('reports a spawn vornd could not carry out as an exit', async () => {
+    const { session, fake } = await createAgent()
+
+    fake.exit(1)
+
+    expect(messagesOn(IPC.TERMINAL_EXIT)).toEqual([{ id: session.id, exitCode: 1 }])
+    expect(ptyManager.hasLivePty(session.id)).toBe(false)
   })
 })
 
@@ -291,8 +282,10 @@ describe('a worktree made for a new session', () => {
     const prepared = await ptyManager.prepareSession(payload)
     expect(heldDuring).toEqual([true])
     expect(isWorkspaceHeld(made)).toBe(true)
-    ptyManager.spawnPty(payload, prepared)
+    const session = ptyManager.spawnPty(payload, prepared)
     expect(isWorkspaceHeld(made)).toBe(false)
+    expect(fakeVornd.last().spec?.cwd).toBe(made)
+    expect(session).toMatchObject({ worktreePath: made, isWorktree: true, branch: 'feature/x' })
   })
 
   it('is let go when preparing fails after git made it', async () => {
@@ -305,57 +298,65 @@ describe('a worktree made for a new session', () => {
     await expect(createAgent({ useWorktree: true, branch: 'feature/x' })).rejects.toThrow()
     expect(isWorkspaceHeld(made)).toBe(false)
   })
+
+  it('is let go when the spawn fails', async () => {
+    isGitRepoMock.mockResolvedValue(true)
+    const made = '/tmp/.vorn-worktrees/vorn-proj/spawn-0000cccc'
+    createWorktreeMock.mockImplementation(async (_project, branch, _name, _remote, onPath) => {
+      onPath?.(made)
+      return { worktreePath: made, branch, name: 'spawn' }
+    })
+    fakeVornd.spawn.mockImplementation(() => {
+      throw new Error('Terminals cannot start: vornd is not running')
+    })
+    await expect(createAgent({ useWorktree: true, branch: 'feature/x' })).rejects.toThrow()
+    expect(isWorkspaceHeld(made)).toBe(false)
+  })
 })
 
 describe('agent crashes mid-session', () => {
   it('reports the crash exit code and parks the session as idle', async () => {
     const { session, fake } = await createAgent()
 
-    fake.emitExit(139)
+    fake.exit(139)
 
     expect(exited).toEqual([session])
     expect(messagesOn(IPC.TERMINAL_EXIT)).toEqual([{ id: session.id, exitCode: 139 }])
     expect(session.status).toBe('idle')
+    expect(ptyManager.hasLivePty(session.id)).toBe(false)
+    expect(ptyManager.getActiveSessions()).toEqual([session])
   })
 
-  it('flushes buffered output before announcing the exit', async () => {
-    const { session, fake } = await createAgent()
+  it('says nothing to clients about an exit vornd tells again', async () => {
+    // Acted on by the server before this one, before vornd restarted.
+    const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-wt-'))
+    try {
+      const { session, fake } = await createAgent({
+        existingWorktreePath: worktree,
+        branch: 'feature/x'
+      })
 
-    fake.emitData('segfault imminent\n')
-    fake.emitExit(1)
-    vi.advanceTimersByTime(50)
+      fake.exit(0, true)
 
-    const channels = messages.map((m) => m.channel)
-    expect(channels.indexOf(IPC.TERMINAL_DATA)).toBeLessThan(channels.indexOf(IPC.TERMINAL_EXIT))
-    // Exactly one flush — the pending timer must not fire a second, empty one.
-    // `seq: 1` says the same thing from the other side: the counter a pane uses
-    // to tell what it already has moved once, so there was one flush.
-    expect(messagesOn(IPC.TERMINAL_DATA)).toEqual([
-      { id: session.id, data: 'segfault imminent\n', seq: 1 }
-    ])
+      expect(messagesOn(IPC.TERMINAL_EXIT)).toEqual([])
+      expect(messagesOn(IPC.WORKTREE_CONFIRM_CLEANUP)).toEqual([])
+      expect(session.status).toBe('idle')
+      expect(ptyManager.hasLivePty(session.id)).toBe(false)
+    } finally {
+      fs.rmSync(worktree, { recursive: true, force: true })
+    }
   })
 
   it('cancels the idle timer so a crashed session is never re-marked', async () => {
     const { session, fake } = await createAgent()
 
-    fake.emitData('still working\n')
-    fake.emitExit(1)
+    fake.activity()
+    fake.exit(1)
     const updatesBefore = statusUpdatesFor(session.id).length
     vi.advanceTimersByTime(60_000)
 
     expect(statusUpdatesFor(session.id)).toHaveLength(updatesBefore)
     expect(session.status).toBe('idle')
-  })
-
-  it('drops the captured output of a crashed session', async () => {
-    const { session, fake } = await createAgent()
-
-    fake.emitData('line one\nline two\n')
-    expect(ptyManager.getOutput(session.id)).toEqual(['line one', 'line two'])
-
-    fake.emitExit(1)
-    // The session is still known (only killPty forgets it) but its scrollback is gone.
-    expect(ptyManager.getOutput(session.id)).toEqual([])
   })
 
   it('asks to clean up the worktree when the last session using it crashes', async () => {
@@ -367,7 +368,7 @@ describe('agent crashes mid-session', () => {
       })
       expect(session.isWorktree).toBe(true)
 
-      fake.emitExit(1)
+      fake.exit(1)
 
       expect(messagesOn(IPC.WORKTREE_CONFIRM_CLEANUP)).toEqual([
         { id: session.id, projectPath: '/tmp/vorn-proj', worktreePath: worktree }
@@ -377,13 +378,13 @@ describe('agent crashes mid-session', () => {
     }
   })
 
-  it('keeps the worktree when another pty session still uses it', async () => {
+  it('keeps the worktree when another session still uses it', async () => {
     const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-wt-'))
     try {
       const first = await createAgent({ existingWorktreePath: worktree, branch: 'feature/x' })
       await createAgent({ existingWorktreePath: worktree, branch: 'feature/x' })
 
-      first.fake.emitExit(1)
+      first.fake.exit(1)
 
       expect(messagesOn(IPC.WORKTREE_CONFIRM_CLEANUP)).toEqual([])
     } finally {
@@ -397,7 +398,7 @@ describe('agent crashes mid-session', () => {
       ptyManager.setHeadlessWorktreeCounter(() => ({ count: 1, sessionIds: ['headless-1'] }))
       const { fake } = await createAgent({ existingWorktreePath: worktree, branch: 'feature/x' })
 
-      fake.emitExit(1)
+      fake.exit(1)
 
       expect(messagesOn(IPC.WORKTREE_CONFIRM_CLEANUP)).toEqual([])
     } finally {
@@ -405,9 +406,9 @@ describe('agent crashes mid-session', () => {
     }
   })
 
-  it('still reports an exit when killing a session whose pty already died', async () => {
+  it('still reports an exit when killing a session whose program already ended', async () => {
     const { session, fake } = await createAgent()
-    fake.emitExit(139)
+    fake.exit(139)
     messages = []
     exited = []
 
@@ -416,10 +417,38 @@ describe('agent crashes mid-session', () => {
     // The renderer still gets an exit so it can finish its close-intent cleanup.
     expect(messagesOn(IPC.TERMINAL_EXIT)).toEqual([{ id: session.id, exitCode: 0 }])
     expect(ptyManager.getActiveSessions()).toHaveLength(0)
-    // A crash leaves the session in the map, so closing the card afterwards
+    // An exit leaves the session in the map, so closing the card afterwards
     // repeats session-exit. Its listeners (hook cleanup, save, broadcast) are
     // idempotent, so the repeat is tolerated rather than suppressed.
     expect(exited).toEqual([session])
+  })
+})
+
+describe('killing a session', () => {
+  it('forgets it at once and signals vornd on the next turn', async () => {
+    const { session, fake } = await createAgent()
+
+    ptyManager.killPty(session.id)
+
+    expect(exited).toEqual([session])
+    expect(ptyManager.getActiveSessions()).toHaveLength(0)
+    expect(ptyManager.hasLivePty(session.id)).toBe(false)
+    expect(fake.kills).toEqual([])
+
+    vi.advanceTimersByTime(1)
+    expect(fake.kills).toEqual(['SIGHUP'])
+  })
+
+  it('does not repeat session-exit when vornd then reports the exit', async () => {
+    const { session, fake } = await createAgent()
+    ptyManager.killPty(session.id)
+    vi.advanceTimersByTime(1)
+    exited = []
+
+    fake.exit(129)
+
+    expect(exited).toEqual([])
+    expect(messagesOn(IPC.TERMINAL_EXIT)).toEqual([{ id: session.id, exitCode: 129 }])
   })
 
   it('swallows a kill that fails because the process is already gone', async () => {
@@ -433,11 +462,58 @@ describe('agent crashes mid-session', () => {
     expect(ptyManager.getActiveSessions()).toHaveLength(0)
   })
 
-  it('clears the idle timer when a session is killed', async () => {
+  it('clears the idle timer', async () => {
     const { session, fake } = await createAgent()
-    fake.emitData('working\n')
+    fake.activity()
 
     ptyManager.killPty(session.id)
+    vi.advanceTimersByTime(60_000)
+
+    expect(statusUpdatesFor(session.id)).toEqual([])
+  })
+
+  it('asks to clean up a worktree nothing else uses', async () => {
+    const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-wt-'))
+    try {
+      const { session } = await createAgent({
+        existingWorktreePath: worktree,
+        branch: 'feature/x'
+      })
+
+      ptyManager.killPty(session.id)
+
+      expect(messagesOn(IPC.WORKTREE_CONFIRM_CLEANUP)).toEqual([
+        { id: session.id, projectPath: '/tmp/vorn-proj', worktreePath: worktree }
+      ])
+    } finally {
+      fs.rmSync(worktree, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('letting go of every session', () => {
+  it('releases each one to vornd without ending it', async () => {
+    const a = await createAgent()
+    const b = ptyManager.createShellPty('/tmp')
+    const shell = fakeVornd.last()
+
+    ptyManager.killAll()
+
+    expect(fakeVornd.release.mock.calls.map(([id]) => id).sort()).toEqual(
+      [a.session.id, b.id].sort()
+    )
+    vi.advanceTimersByTime(1000)
+    expect(a.fake.kills).toEqual([])
+    expect(shell.kills).toEqual([])
+    expect(ptyManager.getActiveSessions()).toEqual([])
+    expect(ptyManager.livePtyCount()).toBe(0)
+  })
+
+  it('stops every idle timer', async () => {
+    const { session, fake } = await createAgent()
+    fake.activity()
+
+    ptyManager.killAll()
     vi.advanceTimersByTime(60_000)
 
     expect(statusUpdatesFor(session.id)).toEqual([])
@@ -457,7 +533,7 @@ describe('SSH connection failures', () => {
 
   async function createRemoteWithStoredKey(): Promise<{
     session: TerminalSession
-    fake: FakePtyInstance
+    fake: FakeVorndPty
     keyPath: string
   }> {
     const before = new Set(tempKeyFiles())
@@ -467,15 +543,29 @@ describe('SSH connection failures', () => {
     )
     const added = tempKeyFiles().filter((f) => !before.has(f))
     expect(added).toHaveLength(1)
-    return { session, fake: lastPty(), keyPath: path.join(os.tmpdir(), added[0]) }
+    return { session, fake: fakeVornd.last(), keyPath: path.join(os.tmpdir(), added[0]) }
   }
+
+  it('reads the output of a remote session, from the home directory', async () => {
+    const session = await ptyManager.createPty(remotePayload())
+    const fake = fakeVornd.last()
+
+    expect(fake.watched).toBe(true)
+    expect(fake.spec?.cwd).toBe(os.homedir())
+    expect(session).toMatchObject({ remoteHostId: REMOTE_HOST.id, remoteHostLabel: 'build-box' })
+
+    vi.advanceTimersByTime(300)
+    expect(fake.written).toEqual([
+      `ssh -t dev@build.example.com 'echo __VORN_READY_${session.id.slice(0, 8)}__ && exec $SHELL -l'\r`
+    ])
+  })
 
   it('stops the remote command and deletes the temp key on an SSH error', async () => {
     const { fake, keyPath } = await createRemoteWithStoredKey()
     vi.advanceTimersByTime(300)
     expect(fake.written.join(' ')).toContain(`-i ${keyPath}`)
 
-    fake.emitData('ssh: connect to host build.example.com port 22: Connection refused\r\n')
+    fake.print('ssh: connect to host build.example.com port 22: Connection refused\r\n')
 
     expect(fs.existsSync(keyPath)).toBe(false)
     // The fallback must be cancelled — a refused connection has no shell to run in.
@@ -489,12 +579,11 @@ describe('SSH connection failures', () => {
     'ssh: Could not resolve hostname build.example.com',
     'Connection timed out'
   ])('treats %j as a connection failure', async (errorOutput) => {
-    ptyManager.setRemoteHosts([REMOTE_HOST])
     await ptyManager.createPty(remotePayload())
-    const fake = lastPty()
+    const fake = fakeVornd.last()
     vi.advanceTimersByTime(300)
 
-    fake.emitData(`${errorOutput}\r\n`)
+    fake.print(`${errorOutput}\r\n`)
     vi.advanceTimersByTime(30_000)
 
     expect(fake.written.some((w) => w.includes('cd /srv/proj'))).toBe(false)
@@ -504,29 +593,29 @@ describe('SSH connection failures', () => {
     const { session, fake, keyPath } = await createRemoteWithStoredKey()
     vi.advanceTimersByTime(300)
 
-    fake.emitData(`__VORN_READY_${session.id.slice(0, 8)}__\r\n`)
+    fake.print(`__VORN_READY_${session.id.slice(0, 8)}__\r\n`)
     expect(fake.written.some((w) => w.includes('cd /srv/proj'))).toBe(false)
 
     vi.advanceTimersByTime(200)
-    expect(fake.written.some((w) => w.includes('cd /srv/proj'))).toBe(true)
+    expect(fake.written).toContain('cd /srv/proj && claude-launch\r')
     expect(fs.existsSync(keyPath)).toBe(false)
   })
 
   it('falls back to sending the remote command when the marker never arrives', async () => {
     await ptyManager.createPty(remotePayload())
-    const fake = lastPty()
+    const fake = fakeVornd.last()
 
     vi.advanceTimersByTime(300)
-    fake.emitData('welcome to a very non-standard shell\r\n')
+    fake.print('welcome to a very non-standard shell\r\n')
     expect(fake.written.some((w) => w.includes('cd /srv/proj'))).toBe(false)
 
     vi.advanceTimersByTime(8000)
-    expect(fake.written.some((w) => w.includes('cd /srv/proj'))).toBe(true)
+    expect(fake.written).toContain('cd /srv/proj && claude-launch\r')
   })
 
-  it('never writes to a pty that was killed before the fallback fired', async () => {
+  it('never writes to a session that was killed before the fallback fired', async () => {
     const session = await ptyManager.createPty(remotePayload())
-    const fake = lastPty()
+    const fake = fakeVornd.last()
 
     ptyManager.killPty(session.id)
     vi.advanceTimersByTime(30_000)
@@ -538,7 +627,7 @@ describe('SSH connection failures', () => {
     const before = new Set(tempKeyFiles())
     ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'key-stored' }])
     await ptyManager.createPty(remotePayload())
-    const fake = lastPty()
+    const fake = fakeVornd.last()
 
     vi.advanceTimersByTime(300)
     expect(fake.written[0]).not.toContain('-i ')
@@ -549,24 +638,33 @@ describe('SSH connection failures', () => {
     const { session, fake, keyPath } = await createRemoteWithStoredKey()
     vi.advanceTimersByTime(300)
 
-    fake.emitExit(255)
+    fake.exit(255)
 
     expect(fs.existsSync(keyPath)).toBe(false)
     expect(messagesOn(IPC.TERMINAL_EXIT)).toEqual([{ id: session.id, exitCode: 255 }])
   })
 
+  it('deletes the temp key when every session is let go', async () => {
+    const { keyPath } = await createRemoteWithStoredKey()
+
+    ptyManager.killAll()
+
+    expect(fs.existsSync(keyPath)).toBe(false)
+  })
+
   it('answers a password prompt once, with the real password', async () => {
     ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'password' }])
     await ptyManager.createPty(remotePayload({ _decryptedPassword: 'hunter2' }))
-    const fake = lastPty()
+    const fake = fakeVornd.last()
     vi.advanceTimersByTime(300)
+    expect(fake.written[0]).toContain('-o PreferredAuthentications=password')
 
-    fake.emitData("dev@build.example.com's password: ")
+    fake.print("dev@build.example.com's password: ")
     vi.advanceTimersByTime(50)
     expect(fake.written).toContain('hunter2\r')
 
     // A second prompt (wrong password re-ask) must not be auto-answered again.
-    fake.emitData("dev@build.example.com's password: ")
+    fake.print("dev@build.example.com's password: ")
     vi.advanceTimersByTime(50)
     expect(fake.written.filter((w) => w === 'hunter2\r')).toHaveLength(1)
   })
@@ -574,10 +672,10 @@ describe('SSH connection failures', () => {
   it('stops answering password prompts after the listener window closes', async () => {
     ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'password' }])
     await ptyManager.createPty(remotePayload({ _decryptedPassword: 'hunter2' }))
-    const fake = lastPty()
+    const fake = fakeVornd.last()
 
     vi.advanceTimersByTime(15_000)
-    fake.emitData("dev@build.example.com's password: ")
+    fake.print("dev@build.example.com's password: ")
     vi.advanceTimersByTime(100)
 
     expect(fake.written).not.toContain('hunter2\r')
@@ -593,11 +691,84 @@ describe('SSH connection failures', () => {
   })
 })
 
-describe('idle timeout', () => {
-  it('marks a silent session idle after the pattern timeout', async () => {
+describe('status from vornd', () => {
+  it('takes an agent session status from what vornd reports', async () => {
     const { session, fake } = await createAgent()
 
-    fake.emitData('thinking about it\n')
+    fake.status(WAITING)
+    expect(session.status).toBe('waiting')
+
+    fake.status(RUNNING)
+    expect(statusUpdatesFor(session.id)).toEqual(['waiting', 'running'])
+  })
+
+  it('ignores a status code it does not know', async () => {
+    const { session, fake } = await createAgent()
+
+    fake.status(0)
+    fake.status(99)
+
+    expect(session.status).toBe('running')
+    expect(statusUpdatesFor(session.id)).toEqual([])
+  })
+
+  it('leaves a hook-backed session to its hooks', async () => {
+    const { session, fake } = await createAgent()
+    ptyManager.promoteToHookStatus(session.id)
+
+    fake.status(WAITING)
+
+    expect(session.status).toBe('running')
+    expect(statusUpdatesFor(session.id)).toEqual([])
+  })
+
+  it('never gives a plain shell a status', () => {
+    const session = ptyManager.createShellPty('/tmp')
+    const fake = fakeVornd.last()
+
+    fake.status(WAITING)
+
+    expect(session.status).toBe('running')
+  })
+
+  it('takes a hook status over the one vornd reported', async () => {
+    const { session, fake } = await createAgent()
+    fake.status(WAITING)
+
+    ptyManager.promoteToHookStatus(session.id)
+    ptyManager.updateSessionStatus(session.id, 'running')
+    fake.status(WAITING)
+
+    expect(session.status).toBe('running')
+  })
+
+  it('follows a shell to the directory vornd says it is in', () => {
+    const session = ptyManager.createShellPty('/tmp')
+    const fake = fakeVornd.last()
+    const moved: [string, string][] = []
+    ptyManager.on('session-cwd', (id: string, cwd: string) => moved.push([id, cwd]))
+
+    fake.cwd('/tmp/deeper')
+    fake.cwd('/tmp/deeper')
+
+    expect(session.shellCwd).toBe('/tmp/deeper')
+    expect(moved).toEqual([[session.id, '/tmp/deeper']])
+  })
+
+  it('keeps no directory for an agent session', async () => {
+    const { session, fake } = await createAgent()
+
+    fake.cwd('/elsewhere')
+
+    expect(session.shellCwd).toBeUndefined()
+  })
+})
+
+describe('idle timeout', () => {
+  it('marks a quiet session idle after the timeout', async () => {
+    const { session, fake } = await createAgent()
+
+    fake.activity()
     vi.advanceTimersByTime(4999)
     expect(session.status).toBe('running')
 
@@ -606,12 +777,12 @@ describe('idle timeout', () => {
     expect(statusUpdatesFor(session.id)).toEqual(['idle'])
   })
 
-  it('restarts the countdown on every chunk of output', async () => {
+  it('restarts the countdown on every activity', async () => {
     const { session, fake } = await createAgent()
 
-    fake.emitData('step one\n')
+    fake.activity()
     vi.advanceTimersByTime(4000)
-    fake.emitData('step two\n')
+    fake.activity()
     vi.advanceTimersByTime(4000)
     expect(session.status).toBe('running')
 
@@ -622,17 +793,41 @@ describe('idle timeout', () => {
   it('leaves a session that is waiting for input alone', async () => {
     const { session, fake } = await createAgent()
 
-    fake.emitData('\x1b[?2004hprompt> ')
+    fake.status(WAITING)
+    fake.activity()
     expect(session.status).toBe('waiting')
 
     vi.advanceTimersByTime(60_000)
     expect(session.status).toBe('waiting')
   })
 
+  it('wakes an idle session that prints again while vornd last said running', async () => {
+    const { session, fake } = await createAgent()
+    fake.status(RUNNING)
+    fake.activity()
+    vi.advanceTimersByTime(5000)
+    expect(session.status).toBe('idle')
+
+    fake.activity()
+
+    expect(session.status).toBe('running')
+    expect(statusUpdatesFor(session.id)).toEqual(['idle', 'running'])
+  })
+
+  it('leaves an idle session idle when vornd last said it was waiting', async () => {
+    const { session, fake } = await createAgent()
+    fake.status(WAITING)
+    ptyManager.updateSessionStatus(session.id, 'idle')
+
+    fake.activity()
+
+    expect(session.status).toBe('idle')
+  })
+
   it('gives hook-backed sessions the longer timeout', async () => {
     const { session, fake } = await createAgent()
 
-    fake.emitData('running a tool\n')
+    fake.activity()
     ptyManager.promoteToHookStatus(session.id)
     expect(session.statusSource).toBe('hooks')
 
@@ -643,9 +838,21 @@ describe('idle timeout', () => {
     expect(session.status).toBe('idle')
   })
 
+  it('arms the longer timeout on activity once a session is hook-backed', async () => {
+    const { session, fake } = await createAgent()
+    ptyManager.promoteToHookStatus(session.id)
+
+    fake.activity()
+    vi.advanceTimersByTime(29_999)
+    expect(session.status).toBe('running')
+
+    vi.advanceTimersByTime(1)
+    expect(session.status).toBe('idle')
+  })
+
   it('re-arms the hook timeout on every hook event', async () => {
     const { session, fake } = await createAgent()
-    fake.emitData('running a tool\n')
+    fake.activity()
 
     ptyManager.promoteToHookStatus(session.id)
     vi.advanceTimersByTime(20_000)
@@ -657,13 +864,13 @@ describe('idle timeout', () => {
     expect(session.status).toBe('idle')
   })
 
-  it('does not arm a timer when promoting a session that has produced no output', async () => {
+  it('does not arm a timer when promoting a session that has shown no activity', async () => {
     const { session } = await createAgent()
 
     ptyManager.promoteToHookStatus(session.id)
     vi.advanceTimersByTime(60_000)
 
-    // Nothing to time out yet — the timer is armed by the first output chunk.
+    // Nothing to time out yet — the timer is armed by the first activity.
     expect(session.status).toBe('running')
   })
 
@@ -673,7 +880,7 @@ describe('idle timeout', () => {
 
   it('revives an idle session when the user types', async () => {
     const { session, fake } = await createAgent()
-    fake.emitData('done\n')
+    fake.activity()
     vi.advanceTimersByTime(5000)
     expect(session.status).toBe('idle')
 
@@ -686,7 +893,7 @@ describe('idle timeout', () => {
 
   it('leaves hook-backed sessions to their hooks when the user types', async () => {
     const { session, fake } = await createAgent()
-    fake.emitData('done\n')
+    fake.activity()
     ptyManager.promoteToHookStatus(session.id)
     vi.advanceTimersByTime(30_000)
     expect(session.status).toBe('idle')
@@ -698,9 +905,9 @@ describe('idle timeout', () => {
 
   it('never arms an idle timer for plain shell sessions', () => {
     const session = ptyManager.createShellPty('/tmp')
-    const fake = lastPty()
+    const fake = fakeVornd.last()
 
-    fake.emitData('$ ls\n')
+    fake.activity()
     vi.advanceTimersByTime(60_000)
 
     expect(session.status).toBe('running')
@@ -709,9 +916,9 @@ describe('idle timeout', () => {
 
   it('records the exit code when a shell session ends', () => {
     const session = ptyManager.createShellPty('/tmp')
-    const fake = lastPty()
+    const fake = fakeVornd.last()
 
-    fake.emitExit(130)
+    fake.exit(130)
 
     expect(session.status).toBe('idle')
     expect(session.shellExitCode).toBe(130)
@@ -724,58 +931,155 @@ describe('idle timeout', () => {
   })
 })
 
-describe('the bell', () => {
-  // Awaited: a terminal on a core thread finds its bell after the flush.
-  it('rings for output that is actually arriving', async () => {
-    const { session, fake } = await createAgent()
+describe('the size a client fitted a session to', () => {
+  it('is recorded on the session', async () => {
+    const { session } = await createAgent()
 
-    fake.emitData('done \x07')
-    vi.advanceTimersByTime(50)
+    ptyManager.resizePty(session.id, 132, 43)
 
-    await vi.waitFor(() => expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([{ id: session.id }]))
+    expect(session).toMatchObject({ cols: 132, rows: 43 })
   })
 
-  it('rings for a plain shell too', async () => {
-    // The status analysis above this returns early for a shell. A bell is not
-    // status -- a shell that rings wants you just as much as an agent does.
-    const session = ptyManager.createShellPty('/tmp/vorn-proj')
-    const fake = lastPty()
+  it.each([
+    [70_000, 40],
+    [0, 0],
+    [-1, 24],
+    [80.5, 24]
+  ])('is ignored when it is %d by %d', async (cols, rows) => {
+    // Arrives as a fire-and-forget notification, so a throw here has no caller.
+    const { session } = await createAgent()
 
-    fake.emitData('\x07')
-    vi.advanceTimersByTime(50)
+    expect(() => ptyManager.resizePty(session.id, cols, rows)).not.toThrow()
 
-    await vi.waitFor(() => expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([{ id: session.id }]))
+    expect(session).toMatchObject({ cols: 80, rows: 24 })
+  })
+})
+
+describe('reading what a session printed', () => {
+  it('asks vornd for it', async () => {
+    const { session } = await createAgent()
+    fakeVornd.readOutput.mockResolvedValueOnce(['line one', 'line two'])
+
+    await expect(ptyManager.readOutput(session.id, 2)).resolves.toEqual(['line one', 'line two'])
+    expect(fakeVornd.readOutput).toHaveBeenCalledWith(session.id, 2)
   })
 
-  /** Long enough for a core thread's bell to have arrived, if it was going to. */
-  const bellsLanded = (): Promise<void> => realSleep(30)
+  it('refuses a session it does not know', async () => {
+    await expect(ptyManager.readOutput('no-such-session')).rejects.toThrow(/not found/)
+    expect(fakeVornd.readOutput).not.toHaveBeenCalled()
+  })
+})
 
-  it('stays quiet for output with no bell in it', async () => {
-    const { fake } = await createAgent()
+describe('taking on a terminal vornd still holds', () => {
+  function saved(overrides: Partial<TerminalSession> = {}): TerminalSession {
+    return {
+      id: 'carried-1',
+      agentType: 'claude',
+      projectName: 'carried',
+      projectPath: '/tmp/carried',
+      status: 'idle',
+      createdAt: Date.now(),
+      cols: 100,
+      rows: 30,
+      pid: 0,
+      ...overrides
+    }
+  }
 
-    fake.emitData('perfectly ordinary output\n')
-    vi.advanceTimersByTime(50)
-    await bellsLanded()
+  function held(id: string, status?: number): HeldSession {
+    return {
+      id,
+      kind: 'pty',
+      pid: 7777,
+      status:
+        status === undefined
+          ? null
+          : { effectId: `${id}/s`, id, epoch: 1, rseq: 0, index: 0, kind: 'status', status },
+      cwd: null,
+      exit: null
+    }
+  }
 
-    expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([])
+  it('makes it an ordinary live session', () => {
+    const session = saved()
+    ptyManager.adoptVornd(session, held(session.id))
+
+    expect(ptyManager.getActiveSessions()).toEqual([session])
+    expect(ptyManager.hasLivePty(session.id)).toBe(true)
+    expect(session).toMatchObject({ pid: 7777, status: 'running' })
+    expect(fakeVornd.adopt.mock.calls[0][1]).toBe(false)
   })
 
-  it('does not ring for a screen that is only being replayed', async () => {
-    // The property this replaces was enforced in the client, which had to know
-    // which bytes were a seed and which were live. Here it holds by
-    // construction: a replay is read from the scrollback and never passes
-    // through the flush that announces one.
-    const { session, fake } = await createAgent()
-    fake.emitData('ding \x07 ding')
-    vi.advanceTimersByTime(50)
-    await bellsLanded()
-    messages.length = 0
+  it('follows what vornd says about it, from the state it was told on adoption', () => {
+    const session = saved()
+    ptyManager.adoptVornd(session, held(session.id, WAITING))
+    expect(session.status).toBe('waiting')
 
-    // Whatever a pane does with the scrollback afterwards, it is not output.
-    ptyManager.getOutput(session.id, 100)
-    vi.advanceTimersByTime(50)
-    await bellsLanded()
+    const pty = fakeVornd.adopt.mock.results[0].value as FakeVorndPty
+    pty.exit(0)
+    expect(messagesOn(IPC.TERMINAL_EXIT)).toEqual([{ id: session.id, exitCode: 0 }])
+    expect(ptyManager.hasLivePty(session.id)).toBe(false)
+  })
 
-    expect(messagesOn(IPC.TERMINAL_BELL)).toEqual([])
+  it('writes through to it', () => {
+    const session = saved()
+    ptyManager.adoptVornd(session, held(session.id))
+
+    ptyManager.writeToPty(session.id, 'hello')
+
+    const pty = fakeVornd.adopt.mock.results[0].value as FakeVorndPty
+    expect(pty.written).toEqual(['hello'])
+  })
+
+  it('reads the output of a remote one', () => {
+    const session = saved({ remoteHostId: REMOTE_HOST.id })
+    ptyManager.adoptVornd(session, held(session.id))
+
+    expect(fakeVornd.adopt.mock.calls[0][1]).toBe(true)
+  })
+
+  it('does not put it in the order twice', () => {
+    const session = saved()
+    ptyManager.adoptVornd(session, held(session.id))
+    ptyManager.adoptVornd(session, held(session.id))
+
+    expect(ptyManager.getActiveSessions()).toEqual([session])
+  })
+})
+
+describe('letting go of a session that is about to come back', () => {
+  it('announces nothing, where killing one announces an exit', async () => {
+    // Resume used to route through `killPty`, which emits `session-exit` for a
+    // session that is returning under the same id and -- when it was the last
+    // one in a worktree -- broadcasts WORKTREE_CONFIRM_CLEANUP. That reaches the
+    // person as an offer to delete the worktree the agent is at that moment
+    // being resumed into.
+    const comingBack = await createAgent()
+    ptyManager.releaseForResume(comingBack.session.id)
+    vi.advanceTimersByTime(1000)
+    expect(exited).toEqual([])
+    expect(messages).toEqual([])
+    expect(comingBack.fake.kills).toEqual([])
+    expect(ptyManager.hasLivePty(comingBack.session.id)).toBe(false)
+    expect(ptyManager.getActiveSessions()).toEqual([])
+
+    // The contrast, so this cannot pass by nothing being emitted at all.
+    const going = await createAgent()
+    ptyManager.killPty(going.session.id)
+    expect(exited).toEqual([going.session])
+  })
+
+  it('can be put back when its spawn then fails', async () => {
+    // Releasing is destructive on purpose -- it is what lets the replacement
+    // take the same id -- but a spawn that throws must not end the session.
+    const { session } = await createAgent()
+    ptyManager.releaseForResume(session.id)
+
+    ptyManager.restoreReleased(session)
+    ptyManager.restoreReleased(session)
+
+    expect(ptyManager.getActiveSessions()).toEqual([session])
+    // Still no process behind it, which is what makes it resumable rather than live.
+    expect(ptyManager.hasLivePty(session.id)).toBe(false)
   })
 })

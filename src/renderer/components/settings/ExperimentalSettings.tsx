@@ -11,24 +11,10 @@ import { SettingsPageHeader } from './SettingsPageHeader'
 import { SettingRow } from './SettingRow'
 import { ToggleSwitch } from './ToggleSwitch'
 
-/**
- * The daemon's switch. The desktop app reads it when it starts, not the
- * server, so it is shown only where vornd can run.
- */
-const VORND_SWITCH = {
-  label: 'Native daemon',
-  description:
-    'Run terminals and agents in vornd, the native daemon, so they keep running when Vorn closes. Applies after restarting Vorn'
-}
-
-/** What vornd is doing, when it differs from what the switch says, or null. */
-function vorndNote(on: boolean, status: VorndStatus | null): string | null {
-  if (!status) return null
-  if (status.state === 'failed')
-    return `Vorn is connected to the server directly: ${status.detail}.`
-  if (on && status.state === 'off') return 'Vorn connects through vornd the next time it starts.'
-  if (!on && status.state === 'on') return 'Vorn stops using vornd the next time it starts.'
-  return null
+/** Why vornd, which runs every terminal, is not in use, or null. */
+function vorndNote(status: VorndStatus | null): string | null {
+  if (status?.state !== 'failed') return null
+  return `Terminals cannot run, because vornd, the native daemon, is not in use: ${status.detail}.`
 }
 
 /** The store's switch. The server reads it when it starts. */
@@ -66,7 +52,7 @@ function olderNote(h: SessionHolder): string {
 function coreNote(status: CoreStatus | null): string | null {
   if (!status) return null
   if (!status.loaded) {
-    return `The native core did not load, so terminals have no screen model, agent status or terminal output for agents${
+    return `The native core did not load, so git runs more slowly and the native store is not available${
       status.error ? `: ${status.error}` : '.'
     }`
   }
@@ -81,8 +67,7 @@ export function ExperimentalSettings() {
   const setConfig = useAppStore((s) => s.setConfig)
   // Null until it arrives, and for a server older than the method.
   const [status, setStatus] = useState<CoreStatus | null>(null)
-  // Null until it arrives, and for good where vornd cannot run (the browser):
-  // the daemon's row is shown only once there is a status to show it with.
+  // Null until it arrives, and for good where vornd's status cannot be asked (the browser).
   const [daemon, setDaemon] = useState<VorndStatus | null>(null)
   const [holders, setHolders] = useState<SessionHolders | null>(null)
   const [endFailure, setEndFailure] = useState<string | null>(null)
@@ -121,7 +106,7 @@ export function ExperimentalSettings() {
 
   const flags = config.defaults.experimental ?? {}
   const note = coreNote(status)
-  const daemonNote = vorndNote(flags.vornd === true, daemon)
+  const daemonNote = vorndNote(daemon)
   const nativeStoreNote = storeNote(flags.nativeStore === true, status?.store)
 
   const endHolder = (h: SessionHolder): void => {
@@ -156,17 +141,6 @@ export function ExperimentalSettings() {
           {note}
         </div>
       )}
-      <div className="space-y-1">
-        {daemon && (
-          <SettingRow label={VORND_SWITCH.label} description={VORND_SWITCH.description}>
-            <ToggleSwitch
-              checked={flags.vornd === true}
-              onChange={(value) => setFlag('vornd', value)}
-              label={VORND_SWITCH.label}
-            />
-          </SettingRow>
-        )}
-      </div>
       {daemonNote && (
         <div className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
           {daemonNote}

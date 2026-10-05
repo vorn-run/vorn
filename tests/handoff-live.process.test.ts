@@ -14,7 +14,7 @@ import { spawnsRealServers } from './helpers/one-at-a-time'
 import { isPidAlive } from '../packages/server/src/published-files'
 
 /**
- * The whole thing, with two real servers and a real shell.
+ * The whole thing, with two real servers, their vornds and a real shell.
  *
  * Every part has its own test; none of them touches the join, which is where it
  * actually goes wrong. What matters here is that a shell marked before the handoff
@@ -60,7 +60,9 @@ afterEach((ctx) => {
       // Same.
     }
   }
-  for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  // The session holder is detached and may still be writing as it goes.
+  for (const dir of dirs.splice(0))
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 })
 
 /** What a server is started with, and what it is handed for its replacement. */
@@ -85,7 +87,9 @@ function serverCommand(dataDir: string): {
       [BOOTSTRAP_ENV_VAR]: CREDENTIAL,
       VORN_BUILD_CHANNEL: 'packaged',
       VORN_APP_VERSION: '9.9.9',
-      NODE_ENV: 'test'
+      NODE_ENV: 'test',
+      // The servers log, for the transcript a failure prints.
+      VITEST: ''
     }
   }
 }
@@ -122,9 +126,11 @@ async function endpointReady(dataDir: string, timeoutMs = 60_000): Promise<strin
   throw new Error('the server never answered on its endpoint')
 }
 
-function open(socket: string): Promise<WebSocket> {
+/** The server's endpoint socket, or vornd in front of it on a loopback port. */
+function open(where: string | number): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws+unix://${socket}:/ws`, {
+    const url = typeof where === 'number' ? `ws://127.0.0.1:${where}/ws` : `ws+unix://${where}:/ws`
+    const ws = new WebSocket(url, {
       headers: { authorization: `Bearer ${CREDENTIAL}` }
     })
     const timer = setTimeout(() => {
@@ -160,9 +166,28 @@ function call<T>(ws: WebSocket, method: string, params?: unknown, timeoutMs = 90
   })
 }
 
+/** vornd, which the server keeps in front of it and which serves every terminal. */
+async function throughVornd(server: WebSocket): Promise<WebSocket> {
+  const status = await call<{ state: string; port?: number }>(server, 'server:vornd')
+  expect(status.state).toBe('on')
+  return open(status.port as number)
+}
+
 /** Keystrokes have no reply, so a frame with an id is answered "method not found". */
 function notify(ws: WebSocket, method: string, params: unknown): void {
   ws.send(JSON.stringify({ jsonrpc: '2.0', method, params }))
+}
+
+async function waitFor(
+  check: () => Promise<boolean>,
+  what: string,
+  timeoutMs = 30_000
+): Promise<void> {
+  const until = Date.now() + timeoutMs
+  while (!(await check())) {
+    if (Date.now() > until) throw new Error(`timed out waiting for ${what}`)
+    await new Promise((r) => setTimeout(r, 250))
+  }
 }
 
 /** A fixed pause is a guess about how fast a shell starts, and wrong under load. */
@@ -183,7 +208,7 @@ async function waitForScreen(
 }
 
 describe('a live handoff between two real servers', () => {
-  it('moves a running shell to a new server without restarting it', async () => {
+  it('hands the endpoint to a new server, and the shell in vornd carries on', async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-handoff-live-'))
     dirs.push(dataDir)
     fs.chmodSync(dataDir, 0o700)
@@ -191,12 +216,18 @@ describe('a live handoff between two real servers', () => {
     const donor = startServerProcess(dataDir)
     const socket = await endpointReady(dataDir)
 
-    const first = await open(socket)
-    const session = await call<{ id: string; pid: number }>(first, 'shell:create', repoRoot)
-    expect(session.pid).toBeGreaterThan(0)
+    const server = await open(socket)
+    const session = await call<{ id: string; pid: number }>(server, 'shell:create', repoRoot)
+    // Answered before vornd has started it; the pid follows.
+    await waitFor(async () => {
+      const sessions = await call<Array<{ id: string; pid: number }>>(server, 'terminal:listActive')
+      session.pid = sessions.find((s) => s.id === session.id)?.pid ?? 0
+      return session.pid > 0
+    }, 'the shell to start')
+    const first = await throughVornd(server)
 
-    // `$$` is the interactive shell's own pid, not the one node-pty reports: a shell
-    // session runs behind an integration wrapper.
+    // `$$` is the interactive shell's own pid: a shell session runs behind an
+    // integration wrapper.
     // A pty accepts keystrokes before the shell reads them, and the line discipline
     // echoes what it never ran. Bracketed paste going on is the readiness signal,
     // not a `$`: shell integration paints the prompt through escape sequences.
@@ -208,7 +239,7 @@ describe('a live handoff between two real servers', () => {
     expect(mark).toBeDefined()
 
     const command = serverCommand(dataDir)
-    const result = await call<HandoffResult>(first, 'server:handoff', {
+    const result = await call<HandoffResult>(server, 'server:handoff', {
       handoffVersion: HANDOFF_PROTOCOL_VERSION,
       exec: command.exec,
       args: command.args,
@@ -219,17 +250,20 @@ describe('a live handoff between two real servers', () => {
 
     expect(result.kind).toBe('handed-over')
     if (result.kind !== 'handed-over') return
-    expect(result.sessions).toBe(1)
+    // Nothing carried across: the shell is in vornd's session holder.
+    expect(result.sessions).toBe(0)
     expect(result.pid).not.toBe(donor.pid)
 
     // The replacement claimed the same name, so the same path reaches it.
     await new Promise((r) => setTimeout(r, 1_000))
-    const second = await open(await endpointReady(dataDir))
+    const heir = await open(await endpointReady(dataDir))
 
     // The session is there, under the same id, with the same process behind it.
-    const sessions = await call<Array<{ id: string; pid: number }>>(second, 'terminal:listActive')
-    expect(sessions.map((s) => s.id)).toContain(session.id)
-    expect(sessions.find((s) => s.id === session.id)?.pid).toBe(session.pid)
+    await waitFor(async () => {
+      const sessions = await call<Array<{ id: string; pid: number }>>(heir, 'terminal:listActive')
+      return sessions.find((s) => s.id === session.id)?.pid === session.pid
+    }, 'the heir to take the session on')
+    const second = await throughVornd(heir)
 
     // `$MARK` was set before the handoff by a shell this server never started, so the
     // same number can only come from the original process.
@@ -237,8 +271,7 @@ describe('a live handoff between two real servers', () => {
     const after = await waitForScreen(second, session.id, new RegExp(`ALIVE_${mark}`))
     const attached = await call<{ live: boolean }>(second, 'terminal:attach', { id: session.id })
     expect(attached.live).toBe(true)
-    // Rebuilt from the checkpoint the outgoing server wrote, so the pane looks
-    // continuous rather than cleared.
+    // vornd kept the screen, so the pane looks continuous rather than cleared.
     expect(after).toContain(`READY_${mark}`)
 
     // The outgoing server left, and took nothing with it.
@@ -246,6 +279,6 @@ describe('a live handoff between two real servers', () => {
     expect(isPidAlive(donor.pid as number)).toBe(false)
     expect(isPidAlive(session.pid)).toBe(true)
 
-    second.close()
+    for (const ws of [first, second, server, heir]) ws.close()
   }, 180_000)
 })

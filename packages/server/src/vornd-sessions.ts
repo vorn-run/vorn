@@ -1,26 +1,22 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import { EventEmitter } from 'node:events'
 import { decodeTerminalFrameV2 } from '@vornrun/shared/terminal-frame'
+import type { VorndStatus } from '@vornrun/shared/types'
 import log from './logger'
-import { configManager } from './config-manager'
-import { claimEffect, getDataDir, pruneEffectReceipts } from './database'
+import { claimEffect, pruneEffectReceipts } from './database'
 import { APP_PROTOCOL, VorndChannel } from './vornd-channel'
-import type { ManagedPty } from './handoff/adopted-pty'
 
 /**
  * Sessions started and held by vornd, the native daemon, instead of by this
  * server.
  *
- * With the Native daemon switch on, the app starts vornd and tells this
- * server where its channel is (`server:vorndReady`). From then on a terminal
- * or headless agent is started in vornd, which keeps it in its session holder,
- * so it outlives this server and the app. This server keeps what it owns, the
- * session's name, group, agent and workflow, and is told what the output
- * meant as effects: the agent's status, the shell's directory, a
- * notification, the exit. It reads the output itself only of the sessions
- * that need it (a remote host's login, a headless agent), by attaching to them
- * as any client does.
+ * This server starts vornd (`vornd-process.ts`) and connects to the channel
+ * it opens. Every terminal and headless agent is started in vornd, which keeps
+ * it in its session holder, so it outlives this server and the app. This
+ * server keeps what it owns, the session's name, group, agent and workflow,
+ * and is told what the output meant as effects: the agent's status, the
+ * shell's directory, a notification, the exit. It reads the output itself only
+ * of the sessions that need it (a remote host's login, a headless agent), by
+ * attaching to them as any client does.
  *
  * An effect may be told twice, after vornd or this server restarts. Status and
  * directory are states and setting one again changes nothing. A notification
@@ -91,18 +87,23 @@ export const NOTICE_RECEIPT_MS = 24 * 60 * 60 * 1000
 /** How long an exit waits for the output before it, on a session being read. */
 const EXIT_WAIT_MS = 3_000
 
+/** How long a spawn waits for vornd's session holder before asking anyway. */
+export const HOLDER_WAIT_MS = 10_000
+
 /**
  * A session vornd holds, as this server's terminals use one.
  *
  * Returned at once, as `spawnPty` must: the spawn is answered later, and what
  * is written before then waits for it.
  */
-export class VorndPty extends EventEmitter implements ManagedPty {
+export class VorndPty extends EventEmitter {
   pid = 0
   /** The record log this server knows of the session: what it reads output from. */
   epoch: number | null = null
   private ready = false
   private queued: string[] = []
+  /** A signal sent before vornd knew the session, sent once it does. */
+  private queuedSignal: string | null = null
   private ended = false
   private readonly dataListeners = new Set<(data: string) => void>()
   private readonly exitListeners = new Set<(event: VorndExit) => void>()
@@ -128,6 +129,8 @@ export class VorndPty extends EventEmitter implements ManagedPty {
     this.ready = true
     this.emit('started', pid)
     for (const data of this.queued.splice(0)) this.owner.write(this.id, data)
+    if (this.queuedSignal) this.owner.kill(this.id, this.queuedSignal)
+    this.queuedSignal = null
     if (this.watched) this.owner.watch(this)
   }
 
@@ -145,6 +148,11 @@ export class VorndPty extends EventEmitter implements ManagedPty {
 
   kill(signal = 'SIGHUP'): void {
     if (this.ended) return
+    // Before the spawn is answered vornd does not know the name yet.
+    if (!this.ready) {
+      this.queuedSignal = signal
+      return
+    }
     this.owner.kill(this.id, signal)
   }
 
@@ -226,12 +234,15 @@ export class VorndPty extends EventEmitter implements ManagedPty {
     this.ended = true
     clearTimeout(this.exitTimer)
     this.queued = []
+    this.queuedSignal = null
     const tail = this.decoder.decode()
     if (tail) for (const listener of this.dataListeners) listener(tail)
     // One exit per run of the session: its effect id names it, and a session
-    // that ended unseen has the run's epoch to go by.
-    const receipt = this.exitSeen?.effectId ?? `${this.id}/${this.epoch ?? 0}/exit`
-    const repeated = !claim(receipt, 'exit')
+    // that ended unseen has the run's epoch to go by. One that never started
+    // has no run to tell twice: a resume reusing its id may fail again.
+    const receipt =
+      this.exitSeen?.effectId ?? (this.epoch === null ? null : `${this.id}/${this.epoch}/exit`)
+    const repeated = receipt !== null && !claim(receipt, 'exit')
     this.owner.forget(this)
     for (const listener of this.exitListeners) listener({ exitCode, repeated })
   }
@@ -258,11 +269,21 @@ function claim(effectId: string, kind: string): boolean {
 export class VorndSessions extends EventEmitter {
   private channel: VorndChannel | null = null
   private connecting: Promise<boolean> | null = null
+  /** Whether vornd last said its session holder is connected. */
+  private holderUp = false
   private readonly ptys = new Map<string, VorndPty>()
 
-  /** Whether new sessions start in vornd: the switch is on and the channel is up. */
+  /** What starts vornd, and says whether it is coming. */
+  private launcher: VorndLauncher | null = null
+
+  /** Whether the channel to vornd is up. */
   inUse(): boolean {
-    return this.channel !== null && !this.channel.isClosed && switchOn()
+    return this.channel !== null && !this.channel.isClosed
+  }
+
+  /** Who starts vornd for this server; a spawn while it starts waits for it. */
+  setLauncher(launcher: VorndLauncher | null): void {
+    this.launcher = launcher
   }
 
   /** The session vornd holds under `id`, if one does. */
@@ -271,17 +292,16 @@ export class VorndSessions extends EventEmitter {
   }
 
   /**
-   * Connect to vornd at `endpoint`, or where its announcement says, and take
-   * stock of what it holds. Answers whether the channel is up.
+   * Connect to vornd's channel at `endpoint` and take stock of what it holds.
+   * Answers whether the channel is up.
    */
-  connect(endpoint?: string): Promise<boolean> {
-    const where = endpoint ?? announcedEndpoint()
-    if (!where) return Promise.resolve(false)
+  connect(endpoint: string): Promise<boolean> {
     const before = this.connecting ?? Promise.resolve(false)
-    const attempt = before.then(() => this.open(where))
-    this.connecting = attempt.finally(() => {
-      if (this.connecting === attempt) this.connecting = null
+    const attempt = before.then(() => this.open(endpoint))
+    const tracked: Promise<boolean> = attempt.finally(() => {
+      if (this.connecting === tracked) this.connecting = null
     })
+    this.connecting = tracked
     return attempt
   }
 
@@ -297,7 +317,7 @@ export class VorndSessions extends EventEmitter {
         )
       }
     } catch (err) {
-      log.warn({ err, endpoint }, '[vornd] could not reach vornd; terminals start here')
+      log.error({ err, endpoint }, '[vornd] could not reach vornd')
       return false
     }
     const old = this.channel
@@ -310,6 +330,7 @@ export class VorndSessions extends EventEmitter {
     channel.on('close', (why: string) => {
       if (this.channel !== channel) return
       this.channel = null
+      this.holderUp = false
       log.warn(`[vornd] the channel to vornd closed (${why}); its sessions carry on there`)
     })
     log.info({ endpoint }, '[vornd] connected to vornd')
@@ -327,6 +348,7 @@ export class VorndSessions extends EventEmitter {
       return
     }
     if (this.channel !== channel) return
+    this.holderTold(state.connected)
     try {
       pruneEffectReceipts('notify', Date.now() - NOTICE_RECEIPT_MS)
     } catch {
@@ -343,6 +365,9 @@ export class VorndSessions extends EventEmitter {
         this.states(now)
         continue
       }
+      // Its spawn waited for this connect and is not answered yet: the
+      // answer says how it went.
+      if (pty.epoch === null) continue
       // Not held: it ended, maybe while nothing here was connected. Without
       // a holder vornd cannot tell, and nothing is said until it can.
       if (!state.connected) continue
@@ -364,21 +389,66 @@ export class VorndSessions extends EventEmitter {
 
   /**
    * Start a session in vornd under `id`. Answered at once; a spawn that fails
-   * ends the session with exit code 1.
+   * ends the session with exit code 1. While vornd is starting the spawn waits
+   * for it; when vornd cannot be used at all, this throws and says why.
    */
   spawn(id: string, spec: VorndSpawn, watched: boolean): VorndPty {
-    const channel = this.channel
-    if (!channel) throw new Error('vornd is not connected')
+    if (!this.inUse() && !this.connecting && !this.launcher?.starting) {
+      const state = this.launcher?.state
+      const why = state?.state === 'failed' ? state.detail : 'vornd is not running'
+      throw new Error(`Terminals cannot start: ${why}`)
+    }
     const pty = new VorndPty(this, id, watched)
     this.ptys.set(id, pty)
-    channel
-      .request<{ id: string; pid: number; epoch: number }>('vornd:spawn', { ...spec, name: id })
-      .then((s) => pty.started(s.pid, s.epoch))
-      .catch((err: Error) => {
-        log.warn({ err, id }, '[vornd] vornd could not start this session')
-        pty.finish(1)
+    const fail = (err: Error): void => {
+      log.warn({ err, id }, '[vornd] vornd could not start this session')
+      pty.finish(1)
+    }
+    this.whenConnected()
+      .then((up) => {
+        if (!up) throw new Error('vornd is not running')
+        return up.request<{ id: string; pid: number; epoch: number }>('vornd:spawn', {
+          ...spec,
+          name: id
+        })
       })
+      .then((s) => pty.started(s.pid, s.epoch))
+      .catch(fail)
     return pty
+  }
+
+  /**
+   * The channel, once a start or connect in flight is done and vornd's
+   * session holder is up; null when there is none. vornd answers before its
+   * holder connects, and a spawn asked of it then would fail.
+   */
+  private async whenConnected(): Promise<VorndChannel | null> {
+    if (!this.inUse()) {
+      await this.launcher?.ready()
+      await this.connecting
+    }
+    if (!this.inUse()) return null
+    if (!this.holderUp) await this.holderWait(HOLDER_WAIT_MS)
+    return this.inUse() ? this.channel : null
+  }
+
+  private holderTold(up: boolean): void {
+    this.holderUp = up
+    if (up) this.emit('holder')
+  }
+
+  /** Until vornd says its holder is up, or `ms` pass: then the spawn is asked anyway. */
+  private holderWait(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const done = (): void => {
+        clearTimeout(timer)
+        this.off('holder', done)
+        resolve()
+      }
+      const timer = setTimeout(done, ms)
+      timer.unref?.()
+      this.on('holder', done)
+    })
   }
 
   /**
@@ -473,6 +543,7 @@ export class VorndSessions extends EventEmitter {
         return
       case 'vornd:connected':
         // The holder came back: what it holds may have changed.
+        if (channel === this.channel) this.holderTold(true)
         void this.subscribe(channel)
         return
       case 'terminal:exit':
@@ -525,26 +596,13 @@ const SIGNALS: Record<string, string> = {
   SIGINT: 'int'
 }
 
-/** The Native daemon switch, read as each session starts. */
-function switchOn(): boolean {
-  try {
-    return configManager.loadConfig().defaults.experimental?.vornd === true
-  } catch {
-    return false
-  }
-}
-
-/** The endpoint vornd named in the data directory, if it named one. */
-export function announcedEndpoint(dataDir: string = getDataDir()): string | null {
-  try {
-    const text = fs.readFileSync(path.join(dataDir, 'run', 'vornd-app'), 'utf8')
-    const said = JSON.parse(text) as { endpoint?: unknown; protocol?: unknown }
-    return typeof said.endpoint === 'string' && said.protocol === APP_PROTOCOL
-      ? said.endpoint
-      : null
-  } catch {
-    return null
-  }
+/** What starts vornd for this server: `VorndKeeper`. */
+export interface VorndLauncher {
+  readonly state: VorndStatus
+  /** Whether a start is in flight. */
+  readonly starting: boolean
+  /** Resolves when a start in flight is done. */
+  ready(): Promise<void>
 }
 
 export const vorndSessions = new VorndSessions()

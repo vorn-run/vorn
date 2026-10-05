@@ -1,7 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import type { TerminalSession } from '@vornrun/shared/types'
 import {
   seedRestored,
@@ -11,22 +8,6 @@ import {
   restoredRecords,
   resetRestored
 } from '../packages/server/src/restored-sessions'
-import {
-  configureHistory,
-  discardHistory,
-  settleHistory,
-  flushHistory,
-  resetHistory
-} from '../packages/server/src/history/writer'
-import { historyDir } from '../packages/server/src/history/checkpoint'
-import { recordText, startRecording } from './helpers/records'
-import { createScreen, feedScreen, resetScreens } from '../packages/server/src/terminal-screen'
-import {
-  resetScrollback,
-  seedScrollback,
-  scrollbackUnitsHeld
-} from '../packages/server/src/terminal-scrollback'
-import { forgetRestored } from '../packages/server/src/register-methods'
 import { buildRestorePayload } from '@vornrun/shared/session-restore'
 
 /**
@@ -40,7 +21,6 @@ import { buildRestorePayload } from '@vornrun/shared/session-restore'
  */
 
 const NOW = 1_700_000_000_000
-let dir: string
 
 function session(over: Partial<TerminalSession> = {}): TerminalSession {
   return {
@@ -57,31 +37,13 @@ function session(over: Partial<TerminalSession> = {}): TerminalSession {
 }
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-resume-'))
   resetRestored()
-  resetScreens()
-  resetScrollback()
-  resetHistory()
-  configureHistory(dir, { tickMs: 5, quiesceMs: 5_000, checkpointMs: 60_000 })
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
   resetRestored()
-  resetScreens()
-  resetScrollback()
-  resetHistory()
-  fs.rmSync(dir, { recursive: true, force: true })
 })
-
-/** Put real files on disk for a session, the way a previous run would have. */
-async function wrote(id: string): Promise<void> {
-  createScreen(id, 80, 24)
-  startRecording(id)
-  feedScreen(id, 'output from the run before')
-  recordText(id, 'output from the run before')
-  await settleHistory()
-}
 
 describe('claiming one', () => {
   it('can be done once, and the second caller is told it is gone', () => {
@@ -116,33 +78,6 @@ describe('claiming one', () => {
     const payload = buildRestorePayload(session({ id: 'one', groupId: 'g1' }), undefined)
 
     expect(payload).not.toHaveProperty('groupId')
-  })
-})
-
-describe('what is on disk when a session is claimed or let go', () => {
-  it('goes, because a live session opens its own rather than appending to it', async () => {
-    await wrote('one')
-    expect(fs.existsSync(historyDir(dir, 'one'))).toBe(true)
-
-    await discardHistory('one')
-
-    expect(fs.existsSync(historyDir(dir, 'one'))).toBe(false)
-  })
-
-  it('is refused while the server is shutting down', async () => {
-    // `shutdown()` writes every terminal's screen and only then kills the PTYs,
-    // and the teardown that follows runs the same paths a dismiss does. Without
-    // this the last act of a clean shutdown is to delete what it just wrote.
-    await wrote('one')
-    await flushHistory()
-
-    await discardHistory('one')
-
-    expect(fs.existsSync(historyDir(dir, 'one'))).toBe(true)
-  })
-
-  it('is quiet about a session that never had any', async () => {
-    await expect(discardHistory('never-recorded')).resolves.toBeUndefined()
   })
 })
 
@@ -195,31 +130,5 @@ describe('a claim whose spawn then fails', () => {
     // And it can be claimed again, once.
     expect(consumeRestored('one')).not.toBeNull()
     expect(consumeRestored('one')).toBeNull()
-  })
-})
-
-describe('letting go of everything held for one', () => {
-  it('frees the scrollback recovery seeded, which nothing else would', async () => {
-    // Recovery gives a restored session a scrollback so a pane can be shown its
-    // last screen. That session has no PTY, so it never reaches the
-    // `clearScrollback` on the kill path, and being claimed or dismissed is the
-    // last thing that happens to it -- so without this the bytes are held for
-    // the life of the server, once per session anyone declines.
-    await wrote('one')
-    seedScrollback('one', 'what the last run had on screen')
-    expect(scrollbackUnitsHeld('one')).toBeGreaterThan(0)
-
-    await forgetRestored('one')
-
-    expect(scrollbackUnitsHeld('one')).toBe(0)
-  })
-
-  it('takes the history with it', async () => {
-    await wrote('two')
-    expect(fs.existsSync(historyDir(dir, 'two'))).toBe(true)
-
-    await forgetRestored('two')
-
-    expect(fs.existsSync(historyDir(dir, 'two'))).toBe(false)
   })
 })

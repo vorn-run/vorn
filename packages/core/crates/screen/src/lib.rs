@@ -368,7 +368,7 @@ fn percent_decode(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// `isPlausiblePath` in terminal-screen.ts.
+/// `isPlausiblePath`, as the JavaScript screen model had it.
 fn is_plausible_path(p: &str) -> bool {
     let b = p.as_bytes();
     let absolute = p.starts_with('/')

@@ -10,12 +10,6 @@ function authOptions(): { headers: Record<string, string> } {
   return { headers: { Authorization: `Bearer ${TEST_CREDENTIAL}` } }
 }
 
-// Mock native modules that require compilation
-vi.mock('node-pty', () => ({
-  default: { spawn: vi.fn() },
-  spawn: vi.fn()
-}))
-
 /**
  * Booting a server probes Tailscale, and the probe is a real process.
  *

@@ -3,15 +3,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-// The same isolation as hook-payload.test.ts: a real HookServer writes to a home.
-vi.mock('node-pty', () => ({ default: { spawn: vi.fn() }, spawn: vi.fn() }))
-
 const holderAlive = { value: true }
 vi.mock('../packages/server/src/hook-ownership', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../packages/server/src/hook-ownership')>()),
   pidIsAlive: (pid: number) => (pid === 4242 ? holderAlive.value : pid === process.pid)
 }))
 
+// The same isolation as hook-payload.test.ts: a real HookServer writes to a home.
 let home: string | null = null
 let realHome: string | undefined
 let realProfile: string | undefined

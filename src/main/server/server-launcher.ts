@@ -35,9 +35,8 @@ import {
   updateEndsSessions
 } from './handoff-request'
 import { askForHandoff } from './handoff-direct'
-import { findVornd, startVornd, upstreamPort, type Vornd } from './vornd'
-import type { AppConfig, SessionHolders, VorndStatus } from '@vornrun/shared/types'
-import { endOlderHolder, findSessiond, readSessionHolders } from './session-holder'
+import type { SessionHolders, VorndStatus } from '@vornrun/shared/types'
+import { endOlderHolder, readSessionHolders } from './session-holder'
 
 /**
  * Thrown when a server is running that this app may not use.
@@ -533,11 +532,11 @@ function onServerExit(detail: string, endpointTaken = false): void {
     void spawnServer()
       .then(async (port) => {
         const url = `ws://127.0.0.1:${port}/ws`
-        if (vorndWanted) {
-          // vornd keeps forwarding to the port it was started with, so it is
-          // kept when the server came back there and replaced when it did not.
-          await routeThroughVornd(port)
-        } else if (bridge && bridge.target() !== url) {
+        if (bridge && directTarget !== null && directTarget !== url) {
+          // A server that came back keeps a vornd of its own, which the bridge
+          // finds when it reconnects.
+          directTarget = url
+        } else if (bridge && directTarget === null && bridge.target() !== url) {
           // Usually a no-op now that the port is remembered across restarts,
           // which is the case the reconnect loop already handles on its own. It
           // matters when the old port was taken in the moment between the two.
@@ -946,43 +945,35 @@ export async function launchServer(): Promise<ServerBridge> {
 }
 
 /**
- * The last step of every local launch, spawned or adopted: put vornd in front
- * of the server if Settings › Experimental asks for it.
- *
- * Read once, here, rather than followed as the setting changes. Moving a
- * running app onto vornd or off it would drop the socket under every pane for
- * nothing the person asked to see, so the switch applies from the next start.
+ * The last step of every local launch, spawned or adopted: talk to the server
+ * through the vornd it keeps in front of itself.
  */
 async function connectedLocally(connected: ServerBridge, dataDir: string): Promise<ServerBridge> {
   bridge = connected
   vorndHome = dataDir
-  const config = (await connected.request('config:load').catch(() => null)) as AppConfig | null
-  vorndWanted = config?.defaults?.experimental?.vornd === true
-  if (vorndWanted) {
-    await routeThroughVornd(upstreamPort(connected.target(), readPortFile(dataDir)?.port ?? null))
-  }
+  await routeThroughVornd()
   return connected
 }
 
-/** Read from the config when the app starts. */
-let vorndWanted = false
 /** The data directory vornd keeps its session holder in. */
 let vorndHome: string | null = null
-let vornd: Vornd | null = null
 let vorndStatus: VorndStatus = { state: 'off' }
+/** Where the bridge reaches the server itself, while it is pointed at vornd. */
+let directTarget: string | null = null
 
-/** How long the bridge has to connect through a vornd that just started. */
+/** How long the bridge has to connect through vornd. */
 const VORND_CONNECT_TIMEOUT_MS = 5_000
+/** How long the server has to say where its vornd is; it may be starting it. */
+const VORND_ASK_TIMEOUT_MS = 10_000
 
-/** Whether the app is talking to its server through vornd, for Settings › Experimental. */
+/** Whether the app is talking to its server through vornd, for Settings. */
 export function getVorndStatus(): VorndStatus {
   return vorndStatus
 }
 
 /** What vornd reports about its session holders, or null when it is not in use. */
 export async function getSessionHolders(): Promise<SessionHolders | null> {
-  const running = vornd
-  return running ? readSessionHolders(running.port) : null
+  return vorndStatus.state === 'on' ? readSessionHolders(vorndStatus.port) : null
 }
 
 /**
@@ -1001,123 +992,76 @@ export async function endOlderSessionHolder(
   return outcome
 }
 
-function stopVornd(): void {
-  const running = vornd
-  vornd = null
-  running?.stop()
+/** Stop following vornd; the server it belongs to keeps it. */
+function forgetVornd(): void {
+  directTarget = null
+  vorndStatus = { state: 'off' }
 }
 
 /**
- * Point the bridge at a vornd forwarding to the server on `upstream`, starting
- * one if none is, or leave it pointed at the server and say why.
+ * Point the bridge at the vornd the server keeps in front of itself, or leave
+ * it on the server and say why.
  *
- * Every failure ends on the server's own port: the switch is an experiment, and
- * the worst it may do is nothing.
+ * vornd forwards everything else to the server, and serves the terminals it
+ * holds itself, so a window that reaches the server directly can start
+ * terminals but not see them. Every failure ends on the server's own address,
+ * so the app is never without a server.
  */
-async function routeThroughVornd(upstream: number | null): Promise<void> {
+async function routeThroughVornd(): Promise<void> {
   const current = bridge
   if (!current) return
-  if (vornd && vornd.upstream === upstream) {
-    await tellServer(current, vornd)
-    return
-  }
-  stopVornd()
-
-  const direct = upstream === null ? null : portUrl(upstream)
+  const direct = directTarget ?? current.target()
   const fallBack = (detail: string): void => {
     vorndStatus = { state: 'failed', detail }
+    directTarget = null
     log.warn(`[launcher] not using vornd: ${detail}. Talking to the server directly.`)
-    if (direct && bridge === current && current.target() !== direct) current.retarget(direct)
+    if (bridge === current && current.target() !== direct) current.retarget(direct)
   }
 
-  if (upstream === null) {
-    fallBack('the server has no port for vornd to forward to')
+  const answer = (await current
+    .request('server:vornd', undefined, VORND_ASK_TIMEOUT_MS)
+    .catch((err: Error) => ({ state: 'failed', detail: err.message }))) as VorndStatus | null
+  if (bridge !== current) return
+  if (!answer || answer.state !== 'on') {
+    fallBack(answer?.state === 'failed' ? answer.detail : 'the server reports no vornd')
     return
   }
-  const where = {
-    packaged: buildChannel() === 'packaged',
-    resourcesPath: process.resourcesPath,
-    repoRoot: devRepoRoot(__dirname)
-  }
-  const binary = findVornd(where)
-  if (!binary) {
-    fallBack('vornd is not in this build')
-    return
-  }
-  // Without a holder vornd still forwards; Settings says why there is none.
-  const sessiond = findSessiond(where)
-  if (!sessiond) log.warn('[launcher] vorn-sessiond is not in this build')
-
-  let started: Vornd
-  try {
-    started = await startVornd(binary, upstream, {
-      sessiond: sessiond && vorndHome ? { binary: sessiond, home: vorndHome } : undefined,
-      // The bridge presents it on every connection, through vornd too.
-      desktopToken: bootstrapToken ?? undefined
+  const through = portUrl(answer.port)
+  if (current.target() !== through) {
+    directTarget = direct
+    current.retarget(through)
+    const connected = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        current.off('connected', done)
+        resolve(false)
+      }, VORND_CONNECT_TIMEOUT_MS)
+      function done(): void {
+        clearTimeout(timer)
+        resolve(true)
+      }
+      current.once('connected', done)
     })
-  } catch (err) {
-    fallBack((err as Error).message)
-    return
-  }
-  // The app began quitting, or another server came up, while it started.
-  if (stoppingDeliberately || bridge !== current || vornd) {
-    started.stop()
-    return
-  }
-  vornd = started
-  started.onExit((detail) => {
-    if (vornd !== started) return
-    vornd = null
-    fallBack(`vornd exited (${detail})`)
-  })
-
-  // Before any window reaches the server through it: the terminals vornd holds
-  // are the server's again by the time anyone asks for the list.
-  await tellServer(current, started)
-  if (vornd !== started) return
-
-  current.retarget(portUrl(started.port))
-  const connected = await new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => {
-      current.off('connected', done)
-      resolve(false)
-    }, VORND_CONNECT_TIMEOUT_MS)
-    function done(): void {
-      clearTimeout(timer)
-      resolve(true)
+    if (bridge !== current) return
+    if (!connected) {
+      fallBack('the server could not be reached through vornd')
+      return
     }
-    current.once('connected', done)
-  })
-  if (vornd !== started) return
-  if (!connected) {
-    stopVornd()
-    fallBack('the server could not be reached through vornd')
-    return
+    // vornd ends with its server, and a server that starts again starts a
+    // new one on a new port: back to the server, then to wherever it is now.
+    current.once('disconnected', () => {
+      if (bridge !== current || current.target() !== through) return
+      log.info('[launcher] lost vornd; asking the server where it is now')
+      const back = directTarget ?? direct
+      directTarget = null
+      vorndStatus = { state: 'failed', detail: 'vornd went away' }
+      current.retarget(back)
+      current.once('connected', () => {
+        if (bridge === current) void routeThroughVornd()
+      })
+    })
   }
-  vorndStatus = { state: 'on', port: started.port }
-  log.info(`[launcher] talking to the server on ${upstream} through vornd on ${started.port}`)
-}
-
-/** How long the server has to take stock of what vornd holds. */
-const VORND_READY_TIMEOUT_MS = 5_000
-
-/**
- * Tell the server where vornd's channel for it is, so it starts terminals
- * there and takes on the ones vornd holds. A server that cannot is left to
- * start them itself.
- */
-async function tellServer(server: ServerBridge, started: Vornd): Promise<void> {
-  if (!started.app) return
-  const told = server.request('server:vorndReady', { endpoint: started.app })
-  const late = new Promise<null>((resolve) =>
-    setTimeout(() => resolve(null), VORND_READY_TIMEOUT_MS).unref()
-  )
-  const answer = (await Promise.race([told, late]).catch((err: Error) => {
-    log.warn(`[launcher] the server could not use vornd's sessions: ${err.message}`)
-    return null
-  })) as { connected?: boolean } | null
-  if (answer?.connected) log.info('[launcher] the server starts its terminals in vornd')
-  else log.warn('[launcher] the server is starting its terminals itself')
+  vorndStatus = answer
+  log.info(`[launcher] talking to the server through vornd on ${answer.port}`)
 }
 
 /**
@@ -1283,7 +1227,7 @@ export function detachFromServer(): void {
 
   bridge?.close()
   bridge = null
-  stopVornd()
+  forgetVornd()
 
   // In dev the child is not detached, and on POSIX nothing kills a plain child
   // when its parent exits -- it is simply reparented. Walking away would leave
@@ -1476,7 +1420,7 @@ export async function stopServer(): Promise<void> {
     bridge.close()
     bridge = null
   }
-  stopVornd()
+  forgetVornd()
 
   if (serverProcess) {
     const child = serverProcess

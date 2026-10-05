@@ -21,7 +21,6 @@ vi.mock('node:child_process', () => ({
   })
 }))
 
-vi.mock('node-pty', () => ({ default: {} }))
 vi.mock('../packages/server/src/git-utils', () => ({
   getGitBranch: vi.fn(),
   checkoutBranch: vi.fn(),

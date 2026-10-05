@@ -6,10 +6,9 @@ import path from 'node:path'
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
 }))
-// The Native daemon switch on, as Settings › Experimental sets it.
 vi.mock('../packages/server/src/config-manager', () => ({
   configManager: {
-    loadConfig: () => ({ defaults: { experimental: { vornd: true } } }),
+    loadConfig: () => ({ defaults: {} }),
     onChange: () => () => {}
   }
 }))
@@ -19,7 +18,7 @@ import { IPC } from '../packages/shared/src/types'
 import { ptyManager } from '../packages/server/src/pty-manager'
 import { headlessManager } from '../packages/server/src/headless-manager'
 import { onHeadlessExit } from '../packages/server/src/workflows/host'
-import { vorndSessions, announcedEndpoint } from '../packages/server/src/vornd-sessions'
+import { vorndSessions } from '../packages/server/src/vornd-sessions'
 import {
   vorndSessionsAvailable,
   upstream,
@@ -27,12 +26,13 @@ import {
   BytesClient,
   until,
   home as testHome,
-  killPid
+  killPid,
+  announcedEndpoint
 } from './helpers/vornd-sessions'
 
 /**
- * The app's terminals and headless agents with the Native daemon switch on:
- * started in vornd's holder rather than here, and outliving vornd.
+ * The app's terminals and headless agents, started in vornd's holder rather
+ * than here, and outliving vornd.
  */
 describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
   let up: Awaited<ReturnType<typeof upstream>>
@@ -49,7 +49,7 @@ describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
     initDatabase(h.dir)
     vornd = await Vornd.start(up.port, h.dir)
     await until('the announcement', () => announcedEndpoint(h.dir) !== null)
-    expect(await vorndSessions.connect()).toBe(true)
+    expect(await vorndSessions.connect(announcedEndpoint(h.dir)!)).toBe(true)
     ptyManager.on('client-message', record)
     headlessManager.on('client-message', record)
   })
@@ -68,7 +68,6 @@ describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
 
   it('starts a shell in vornd, under the session id, and nothing here holds a PTY', async () => {
     const session = ptyManager.createShellPty(os.tmpdir())
-    expect(ptyManager.isInVornd(session.id)).toBe(true)
     await until(
       'its pid',
       () => (ptyManager.getActiveSessions().find((s) => s.id === session.id)?.pid ?? 0) > 0
@@ -144,7 +143,6 @@ describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
     ptyManager.setAgentCommands({ claude: { command: agent, args: [] } })
     const payload = { agentType: 'claude' as const, projectName: 'p', projectPath: h.dir }
     const session = await ptyManager.createPty({ ...payload })
-    expect(ptyManager.isInVornd(session.id)).toBe(true)
     await until('waiting', () =>
       messages.some(
         (m) =>

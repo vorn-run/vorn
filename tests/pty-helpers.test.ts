@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 
-// Mock heavy dependencies so the module loads without node-pty
-vi.mock('node-pty', () => ({ default: {} }))
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process')
   return {

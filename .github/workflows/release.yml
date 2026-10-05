@@ -70,7 +70,7 @@ jobs:
         run: corepack enable
 
       # The native core (vorn_core.node) and vornd ship in every build: the
-      # server's terminals run on the core, and vornd sits behind its switch.
+      # server runs git and its store on the core, and every terminal in vornd.
       # libghostty-vt is built from source with Zig, and its pinned Ghostty commit takes only
       # Zig 0.15.2.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
@@ -195,7 +195,7 @@ jobs:
         run: corepack enable
 
       # The native core (vorn_core.node) and vornd ship in every build: the
-      # server's terminals run on the core, and vornd sits behind its switch.
+      # server runs git and its store on the core, and every terminal in vornd.
       # libghostty-vt is built from source with Zig, and its pinned Ghostty commit takes only
       # Zig 0.15.2.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
@@ -296,7 +296,7 @@ jobs:
         run: corepack enable
 
       # The native core (vorn_core.node) and vornd ship in every build: the
-      # server's terminals run on the core, and vornd sits behind its switch.
+      # server runs git and its store on the core, and every terminal in vornd.
       # libghostty-vt is built from source with Zig, and its pinned Ghostty commit takes only
       # Zig 0.15.2.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1

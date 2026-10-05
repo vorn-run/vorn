@@ -97,14 +97,9 @@ export interface TerminalSession {
    *
    * Held because a program renders against it: wrap points, cursor position and
    * every full-screen repaint are decided by these numbers, so anything that
-   * models the screen has to agree with them exactly. Nothing recorded them
-   * before -- all three spawn sites passed 80x24 to node-pty and `resizePty`
-   * forwarded new values without keeping them.
-   *
-   * Last writer wins between attached clients, because node-pty already works
-   * that way: a phone fitting to 60x20 and a desktop at 200x50 will fight, and
-   * whichever resized last is what the program is drawing against. That is a
-   * pre-existing behaviour, and this records it rather than changing it.
+   * models the screen has to agree with them exactly. The size itself is
+   * vornd's to decide, from the clients watching; this is the last size a
+   * client asked the server for.
    *
    * Optional because not every `TerminalSession` has a PTY behind it -- a
    * workflow builds a synthetic one to describe its source, and inventing a
@@ -1820,13 +1815,6 @@ export interface BranchDeleteResult {
 /** Work in progress that can be tried before it is the default. */
 export interface ExperimentalConfig {
   /**
-   * The desktop app talks to the server through vornd, the native daemon,
-   * instead of directly, and the server starts its terminals and headless
-   * agents in vornd, so they outlive the server and the app. Read by the app
-   * when it starts, and by the server as each session starts.
-   */
-  vornd?: boolean
-  /**
    * The server keeps its database through the Rust store instead of its own,
    * on the same file. Read by the server when it starts.
    */
@@ -1849,11 +1837,11 @@ export interface RecordCursor {
   nextOffset: number
 }
 
-/** Whether the desktop app is talking to its server through vornd. */
+/** Whether vornd is up in front of the server, and where; or why it is not. */
 export type VorndStatus =
   | { state: 'off' }
   | { state: 'on'; port: number }
-  /** The switch is on but vornd could not be used, so the app went straight to the server. */
+  /** vornd could not be started or reached; the app talks to the server directly. */
   | { state: 'failed'; detail: string }
 
 /** One vorn-sessiond, as vornd reports it. */

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createServer } from 'node:http'
@@ -330,5 +330,17 @@ export function killPid(pid: number | null): void {
     process.kill(pid, 'SIGTERM')
   } catch {
     /* already gone */
+  }
+}
+
+/** The channel vornd announced in `dataDir` for its server, if it announced one. */
+export function announcedEndpoint(dataDir: string): string | null {
+  try {
+    const said = JSON.parse(readFileSync(path.join(dataDir, 'run', 'vornd-app'), 'utf8')) as {
+      endpoint?: unknown
+    }
+    return typeof said.endpoint === 'string' ? said.endpoint : null
+  } catch {
+    return null
   }
 }

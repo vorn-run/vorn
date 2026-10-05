@@ -83,8 +83,8 @@ cargo clippy --release --locked --workspace --all-targets -- -D warnings
 # only Node provides and may not link. The adapter is covered from vitest.
 cargo test --release --locked --workspace --exclude vorn-core
 cd ../..
-# The full build. --no-ghostty leaves out TerminalPipeline, so terminals get no
-# screen model and their tests skip; use it only for work that needs no Ghostty.
+# The full build. --no-ghostty builds vornd without its session engine, so it
+# holds no screens; use it only for work that needs no Ghostty.
 yarn build:core
 yarn lint && yarn format:check && yarn typecheck
 
