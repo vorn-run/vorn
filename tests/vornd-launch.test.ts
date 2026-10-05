@@ -156,6 +156,28 @@ describe('starting vornd', () => {
     ])
   })
 
+  it('passes the native server switch with the database vornd reads', async () => {
+    let seen: string[] = []
+    const spawnImpl = ((binary: string, args: string[], options: object) => {
+      seen = args
+      return stubSpawn('ok')(binary, args, options as never)
+    }) as unknown as typeof spawn
+    started.push(
+      await startVornd('vornd', 50091, {
+        spawnImpl,
+        nativeServer: { db: '/Users/x/.vorn/vorn.db' }
+      })
+    )
+    expect(seen).toEqual([
+      '--upstream',
+      '127.0.0.1:50091',
+      '--exit-with-stdin',
+      '--native-server',
+      '--db',
+      '/Users/x/.vorn/vorn.db'
+    ])
+  })
+
   it('stops it by closing its stdin, and does not report that as an exit', async () => {
     const vornd = await startVornd('vornd', 50091, { spawnImpl: stubSpawn('ok') })
     const onExit = vi.fn()

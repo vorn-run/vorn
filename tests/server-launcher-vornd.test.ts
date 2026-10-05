@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'node:events'
+import path from 'node:path'
 import { RUNTIME_PROTOCOL_VERSION, type ServerIdentity } from '@vornrun/shared/protocol'
 
 /**
@@ -11,7 +12,7 @@ import { RUNTIME_PROTOCOL_VERSION, type ServerIdentity } from '@vornrun/shared/p
  */
 
 const published = { port: 50091 as number | null }
-const settings = { vornd: false }
+const settings = { vornd: false, nativeServer: false }
 const daemon = {
   binary: '/app/Resources/vornd/vornd' as string | null,
   failure: null as string | null,
@@ -19,6 +20,8 @@ const daemon = {
   reachable: true,
   /** What vornd was told about its session holder. */
   sessiond: null as { binary: string; home: string } | null,
+  /** What vornd was told about the Native server switch. */
+  nativeServer: null as { db: string } | null,
   holderBinary: '/app/Resources/vornd/vorn-sessiond' as string | null
 }
 
@@ -55,7 +58,12 @@ class FakeBridge extends EventEmitter {
   }
   async request(method: string): Promise<unknown> {
     this.requests.push(method)
-    if (method === 'config:load') return { defaults: { experimental: { vornd: settings.vornd } } }
+    if (method === 'config:load')
+      return {
+        defaults: {
+          experimental: { vornd: settings.vornd, nativeServer: settings.nativeServer }
+        }
+      }
     return {}
   }
   close(): void {
@@ -88,9 +96,13 @@ vi.mock('../src/main/server/vornd', async (importOriginal) => {
     startVornd: async (
       _binary: string,
       upstream: number,
-      options: { sessiond?: { binary: string; home: string } } = {}
+      options: {
+        sessiond?: { binary: string; home: string }
+        nativeServer?: { db: string }
+      } = {}
     ) => {
       daemon.sessiond = options.sessiond ?? null
+      daemon.nativeServer = options.nativeServer ?? null
       if (daemon.failure) throw new Error(daemon.failure)
       let listener: ((detail: string) => void) | null = null
       const vornd: FakeVornd = {
@@ -144,6 +156,9 @@ beforeEach(() => {
   started.length = 0
   published.port = 50091
   settings.vornd = false
+  settings.nativeServer = false
+  delete process.env.VORN_NATIVE_SERVER
+  daemon.nativeServer = null
   daemon.binary = '/app/Resources/vornd/vornd'
   daemon.failure = null
   daemon.reachable = true
@@ -171,7 +186,35 @@ describe('vornd in front of the server', () => {
     expect(started.map((v) => v.upstream)).toEqual([50091])
     expect(bridge.url).toBe('ws://127.0.0.1:47001/ws')
     expect(bridge.isConnected).toBe(true)
-    expect(getVorndStatus()).toEqual({ state: 'on', port: 47001 })
+    expect(getVorndStatus()).toEqual({ state: 'on', port: 47001, nativeServer: false })
+    expect(daemon.nativeServer).toBeNull()
+  })
+
+  it('has vornd answer natively, reading the server database, with the native server switch on', async () => {
+    settings.vornd = true
+    settings.nativeServer = true
+    const { getVorndStatus } = await launch()
+    expect(daemon.nativeServer).toEqual({ db: path.join('/Users/x/.vorn', 'vorn.db') })
+    expect(getVorndStatus()).toEqual({ state: 'on', port: 47001, nativeServer: true })
+  })
+
+  it('leaves the native server switch to the daemon switch', async () => {
+    settings.nativeServer = true
+    const { getVorndStatus } = await launch()
+    expect(started).toEqual([])
+    expect(getVorndStatus()).toEqual({ state: 'off' })
+  })
+
+  it('lets VORN_NATIVE_SERVER decide over the setting, both ways', async () => {
+    settings.vornd = true
+    process.env.VORN_NATIVE_SERVER = '1'
+    await launch()
+    expect(daemon.nativeServer).not.toBeNull()
+    vi.resetModules()
+    settings.nativeServer = true
+    process.env.VORN_NATIVE_SERVER = '0'
+    await launch()
+    expect(daemon.nativeServer).toBeNull()
   })
 
   it('has vornd keep the session holder in the data directory', async () => {

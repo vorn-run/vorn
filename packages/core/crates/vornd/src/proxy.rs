@@ -7,8 +7,9 @@
 //! terminal frames and the server's own requests to the desktop included. Every
 //! other HTTP request is forwarded as it is.
 //!
-//! The one exception: terminal calls for a session vornd itself holds are
-//! answered here and never reach the server ([`crate::terminal`]). What
+//! The exceptions: terminal calls for a session vornd itself holds are
+//! answered here and never reach the server ([`crate::terminal`]), and so
+//! are the calls of the groups vornd has taken over ([`crate::native`]). What
 //! vornd sends a client and what the server sends it share one ordered
 //! outbox per connection ([`crate::streams::ClientConn`]). A connection that
 //! opens with the desktop's launch token in its `Authorization` is the
@@ -49,6 +50,7 @@ use tracing::{debug, info, warn};
 
 use crate::groups::Groups;
 use crate::holder::Holder;
+use crate::native::{Conn, Native, Offer};
 use crate::protocol::{
     inspect_server_frame, method_of, ServerFrame, SERVER_PROTOCOLS, VORND_PROTOCOL,
 };
@@ -72,10 +74,15 @@ const UPSTREAM_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
 type Body = BoxBody<Bytes, hyper::Error>;
 
+/// Frames from a client waiting to be written to the server.
+const UPSTREAM_QUEUE: usize = 64;
+
 /// One vornd: where the server is, the group switches and what it has seen.
 pub struct Daemon {
     upstream: SocketAddr,
-    groups: Groups,
+    groups: Arc<Groups>,
+    /// What answers the native groups' calls, when any group is not forwarded.
+    native: Option<Arc<Native>>,
     client: Client<HttpConnector, Incoming>,
     probe: Client<HttpConnector, Full<Bytes>>,
     open: AtomicU64,
@@ -109,12 +116,18 @@ impl Daemon {
             .unwrap_or_default();
         #[cfg(not(feature = "engine"))]
         let streams = Streams::new();
+        let native = groups.any_native().then(|| {
+            let native = Native::new();
+            native.prepare();
+            native
+        });
         Arc::new(Daemon {
+            native,
             streams,
             spawn: std::sync::atomic::AtomicBool::new(false),
             desktop_token: std::sync::OnceLock::new(),
             upstream,
-            groups,
+            groups: Arc::new(groups),
             client: Client::builder(TokioExecutor::new()).build_http(),
             probe: Client::builder(TokioExecutor::new()).build_http(),
             open: AtomicU64::new(0),
@@ -126,6 +139,15 @@ impl Daemon {
 
     pub fn groups(&self) -> &Groups {
         &self.groups
+    }
+
+    /// The server's database, `vorn.db`, which the native groups read to tell
+    /// a project on this machine from one on a remote host. Without it, every
+    /// call naming a project goes to the server.
+    pub fn set_database(&self, db: std::path::PathBuf) {
+        if let Some(native) = &self.native {
+            native.set_database(db);
+        }
     }
 
     /// Answers `vornd:spawn` from now on: sessions started in sessiond
@@ -226,6 +248,9 @@ async fn health(daemon: &Daemon) -> Response<Body> {
             .entry(group.clone())
             .or_insert_with(|| json!({ "mode": daemon.groups.mode(group).name() }));
         entry["forwarded"] = json!(c.forwarded);
+        entry["native"] = json!(c.native);
+        entry["shadowMatched"] = json!(c.shadow_matched);
+        entry["shadowMismatched"] = json!(c.shadow_mismatched);
         entry["shadowUnported"] = json!(c.shadow_unported);
     }
     let body = json!({
@@ -434,28 +459,60 @@ async fn pump<C, S>(
         let _ = to_client.close().await;
     });
 
+    // Everything for the server goes through one queue, so a call vornd
+    // took and then found to be the server's joins the client's other frames
+    // there. The writer closes the server's side once the client's frames
+    // have stopped and no such call is still running.
+    let (up_tx, mut up_rx) = tokio::sync::mpsc::channel::<Message>(UPSTREAM_QUEUE);
+    tokio::spawn(async move {
+        while let Some(msg) = up_rx.recv().await {
+            if to_server.send(msg).await.is_err() {
+                break;
+            }
+        }
+        let _ = to_server.close().await;
+    });
+    let native = daemon.native.as_ref().map(|n| {
+        Conn::new(
+            Arc::clone(n),
+            Arc::clone(&daemon.groups),
+            forward.clone(),
+            &up_tx,
+            desktop,
+        )
+    });
+
     let groups_daemon = daemon.clone();
-    let native = forward.clone();
+    let reply = forward.clone();
+    let offered = native.clone();
     let upward = tokio::spawn(async move {
         while let Some(Ok(msg)) = from_client.next().await {
             match &msg {
                 Message::Text(text) => {
-                    if answered_here(&groups_daemon, conn_id, &native, text.as_str()) {
+                    if answered_here(&groups_daemon, conn_id, &reply, text.as_str()) {
                         continue;
                     }
                     if let Some(method) = method_of(text.as_str()) {
-                        groups_daemon.groups().route(&method);
+                        match &offered {
+                            Some(native) => {
+                                if native.offer(&method, text.as_str()) == Offer::Taken {
+                                    continue;
+                                }
+                            }
+                            None => groups_daemon
+                                .groups()
+                                .count(&method, crate::groups::Counted::Forwarded),
+                        }
                     }
                 }
                 // Each side answers its own pings.
                 Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => continue,
                 _ => {}
             }
-            if to_server.send(msg).await.is_err() {
+            if up_tx.send(msg).await.is_err() {
                 break;
             }
         }
-        let _ = to_server.close().await;
     });
 
     let streams = Arc::clone(&daemon.streams);
@@ -463,23 +520,28 @@ async fn pump<C, S>(
         while let Some(Ok(msg)) = from_server.next().await {
             let msg = match msg {
                 Message::Text(text) if told_here(&streams, text.as_str()) => continue,
-                Message::Text(text) => match inspect_server_frame(text.as_str()) {
-                    ServerFrame::Pass => Message::Text(text),
-                    ServerFrame::Unsupported(version) => {
-                        warn!(
-                            ?version,
-                            "the server speaks a protocol vornd does not know; closing"
-                        );
-                        forward
-                            .send(Message::Close(Some(CloseFrame {
-                                code: CloseCode::Error,
-                                reason: "vornd does not support this server's protocol version"
-                                    .into(),
-                            })))
-                            .await;
-                        return;
+                Message::Text(text) => {
+                    if let Some(native) = &native {
+                        native.on_server_text(text.as_str());
                     }
-                },
+                    match inspect_server_frame(text.as_str()) {
+                        ServerFrame::Pass => Message::Text(text),
+                        ServerFrame::Unsupported(version) => {
+                            warn!(
+                                ?version,
+                                "the server speaks a protocol vornd does not know; closing"
+                            );
+                            forward
+                                .send(Message::Close(Some(CloseFrame {
+                                    code: CloseCode::Error,
+                                    reason: "vornd does not support this server's protocol version"
+                                        .into(),
+                                })))
+                                .await;
+                            return;
+                        }
+                    }
+                }
                 Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => continue,
                 other => other,
             };

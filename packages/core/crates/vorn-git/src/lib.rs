@@ -7,6 +7,9 @@
 //! differently; everything else, and every failure, runs git itself. Either
 //! way the call blocks the thread it runs on, which is the point: the caller is
 //! a worker thread, never Node's.
+//!
+//! [`repo`] builds the server's repository calls (branches, worktrees, diffs,
+//! commits) on top of [`run`], for a host that answers them itself.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -14,6 +17,7 @@ use std::time::Duration;
 
 mod exec;
 mod fast;
+pub mod repo;
 
 /// One git command, as the server would have run it with `execFileSync`.
 #[derive(Clone, Debug)]
@@ -63,6 +67,13 @@ pub enum Error {
         bin: String,
         limit: usize,
     },
+    /// A file system call around git failed, such as making the directory a
+    /// worktree goes in.
+    Fs {
+        syscall: &'static str,
+        path: String,
+        error: std::io::Error,
+    },
 }
 
 /// Worded as `execFileSync` words its errors, which the server shows as they are.
@@ -79,6 +90,11 @@ impl fmt::Display for Error {
             },
             Error::TimedOut { bin, .. } => write!(f, "spawnSync {bin} ETIMEDOUT"),
             Error::TooLarge { bin, .. } => write!(f, "spawnSync {bin} ENOBUFS"),
+            Error::Fs {
+                syscall,
+                path,
+                error,
+            } => f.write_str(&fs_message(syscall, path, error)),
         }
     }
 }
@@ -100,6 +116,36 @@ fn errno_name(error: &std::io::Error) -> Option<&'static str> {
 }
 
 impl std::error::Error for Error {}
+
+/// A file system error worded as Node words one, `CODE: description,
+/// syscall 'path'`, which the server passes to the client as it is.
+pub fn fs_message(syscall: &str, path: &str, error: &std::io::Error) -> String {
+    match uv_error(error) {
+        Some((code, text)) => format!("{code}: {text}, {syscall} '{path}'"),
+        None => format!("{error}, {syscall} '{path}'"),
+    }
+}
+
+/// libuv's name and description for the errors a file call usually meets.
+fn uv_error(error: &std::io::Error) -> Option<(&'static str, &'static str)> {
+    use std::io::ErrorKind::*;
+    // EPERM and EACCES are both PermissionDenied; EPERM is 1 on every Unix.
+    if cfg!(unix) && error.raw_os_error() == Some(1) {
+        return Some(("EPERM", "operation not permitted"));
+    }
+    Some(match error.kind() {
+        NotFound => ("ENOENT", "no such file or directory"),
+        PermissionDenied => ("EACCES", "permission denied"),
+        AlreadyExists => ("EEXIST", "file already exists"),
+        IsADirectory => ("EISDIR", "illegal operation on a directory"),
+        NotADirectory => ("ENOTDIR", "not a directory"),
+        ReadOnlyFilesystem => ("EROFS", "read-only file system"),
+        StorageFull => ("ENOSPC", "no space left on device"),
+        InvalidFilename => ("ENAMETOOLONG", "name too long"),
+        ResourceBusy => ("EBUSY", "resource busy or locked"),
+        _ => return None,
+    })
+}
 
 /// Answers `req` as git would, from gix when that is exact, else from git.
 pub fn run(req: &Request) -> Result<Reply, Error> {

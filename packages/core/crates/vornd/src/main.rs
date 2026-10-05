@@ -1,4 +1,4 @@
-//! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--groups git=shadow] [--log-file PATH] [--sessiond PATH --home DIR] [--debug-spawn]`
+//! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--native-server] [--groups git=shadow] [--db PATH] [--log-file PATH] [--sessiond PATH --home DIR] [--debug-spawn]`
 //!
 //! The app passes the desktop's launch token in `VORND_DESKTOP_TOKEN`: a
 //! WebSocket that opens with it is the desktop's (TP §10). It is read once
@@ -24,12 +24,17 @@ use vornd::holder::{self, Holder, HolderConfig};
 use vornd::protocol::VORND_PROTOCOL;
 use vornd::{proxy, Daemon, Groups};
 
-const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--groups group=mode,...] [--log-file PATH] [--exit-with-stdin] [--sessiond PATH --home DIR] [--debug-spawn]
+const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--native-server] [--groups group=mode,...] [--db PATH] [--log-file PATH] [--exit-with-stdin] [--sessiond PATH --home DIR] [--debug-spawn]
 
   --upstream   the Node server to forward to
   --listen     where to listen; loopback only (default 127.0.0.1:0)
-  --groups     per-group switches, forward | shadow | native (default: all forward;
-               also read from VORND_GROUPS)
+  --native-server
+               answer every group that has joined the Native server switch
+               (also VORND_NATIVE_SERVER=1)
+  --groups     per-group switches, forward | shadow | native, over the switch
+               (default: all forward; also read from VORND_GROUPS)
+  --db         the server's vorn.db, read to tell a local project from a remote
+               one; without it those calls go to the server
   --log-file   append the log here instead of stderr; VORND_LOG sets the level
   --exit-with-stdin
                stop when stdin closes, so vornd ends with whoever started it,
@@ -47,6 +52,7 @@ struct Args {
     upstream: SocketAddr,
     listen: SocketAddr,
     groups: Groups,
+    db: Option<PathBuf>,
     log_file: Option<String>,
     exit_with_stdin: bool,
     holder: Option<HolderConfig>,
@@ -57,6 +63,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut upstream = None;
     let mut listen: SocketAddr = ([127, 0, 0, 1], 0).into();
     let mut groups = std::env::var("VORND_GROUPS").ok();
+    let mut native_server = std::env::var("VORND_NATIVE_SERVER").is_ok_and(|v| v == "1");
+    let mut db = None;
     let mut log_file = None;
     let mut exit_with_stdin = false;
     let mut sessiond = None;
@@ -78,6 +86,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
                     .map_err(|e| format!("--listen: {e}"))?
             }
             "--groups" => groups = Some(value("--groups")?),
+            "--native-server" => native_server = true,
+            "--db" => db = Some(PathBuf::from(value("--db")?)),
             "--log-file" => log_file = Some(value("--log-file")?),
             "--exit-with-stdin" => exit_with_stdin = true,
             "--sessiond" => sessiond = Some(PathBuf::from(value("--sessiond")?)),
@@ -96,10 +106,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             listen.ip()
         ));
     }
-    let groups = match groups {
-        Some(spec) => Groups::parse(&spec).map_err(|e| format!("--groups: {e}"))?,
-        None => Groups::all_forward(),
-    };
+    let groups =
+        Groups::new(native_server, groups.as_deref()).map_err(|e| format!("--groups: {e}"))?;
     let holder = match (sessiond, home) {
         (Some(bundled), Some(home)) => Some(HolderConfig { home, bundled }),
         (None, None) => None,
@@ -109,6 +117,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         upstream,
         listen,
         groups,
+        db,
         log_file,
         exit_with_stdin,
         holder,
@@ -308,6 +317,9 @@ fn main() -> ExitCode {
         if args.debug_spawn {
             daemon.allow_spawn();
         }
+        if let Some(db) = args.db {
+            daemon.set_database(db);
+        }
         if let Some(token) = desktop_token {
             daemon.set_desktop_token(token);
         }
@@ -419,8 +431,30 @@ mod tests {
     }
 
     #[test]
+    fn the_native_server_switch_and_a_group_setting_combine() {
+        use vornd::Mode;
+        let off = parse(&["--upstream", "127.0.0.1:1"]).unwrap();
+        assert_eq!(off.groups.mode("git"), Mode::Forward);
+        let on = parse(&["--upstream", "127.0.0.1:1", "--native-server"]).unwrap();
+        assert_eq!(on.groups.mode("git"), Mode::Native);
+        let shadowed = parse(&[
+            "--upstream",
+            "127.0.0.1:1",
+            "--native-server",
+            "--groups",
+            "git=shadow",
+            "--db",
+            "/h/vorn.db",
+        ])
+        .unwrap();
+        assert_eq!(shadowed.groups.mode("git"), Mode::Shadow);
+        assert_eq!(shadowed.groups.mode("file"), Mode::Native);
+        assert_eq!(shadowed.db, Some(PathBuf::from("/h/vorn.db")));
+    }
+
+    #[test]
     fn passes_group_errors_on() {
-        let err = parse(&["--upstream", "127.0.0.1:1", "--groups", "git=native"]).unwrap_err();
+        let err = parse(&["--upstream", "127.0.0.1:1", "--groups", "worktree=native"]).unwrap_err();
         assert!(err.starts_with("--groups"), "{err}");
     }
 }

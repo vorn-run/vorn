@@ -8,8 +8,10 @@ import log from '../logger'
  * vornd, the native daemon, run in front of the server when its Experimental
  * switch is on.
  *
- * It only forwards for now, so the app works the same through it as without
- * it. Everything here is about starting it, knowing it is there, and getting
+ * It forwards to the server everything it has not taken over, so the app
+ * works the same through it as without it; with the Native server switch on
+ * too, it answers the groups of calls that joined that switch itself.
+ * Everything here is about starting it, knowing it is there, and getting
  * out of its way when it is not: a vornd that is missing, will not start or
  * goes away leaves the app talking to the server directly, never without one.
  */
@@ -103,6 +105,12 @@ export function startVornd(
     sessiond?: { binary: string; home: string }
     /** The credential this app's own connection presents, so vornd can tell it is the desktop. */
     desktopToken?: string
+    /**
+     * Answer the groups of calls that have joined the Native server switch,
+     * reading the server's database at `db` to tell a local project from a
+     * remote one.
+     */
+    nativeServer?: { db: string }
   } = {}
 ): Promise<Vornd> {
   const run = options.spawnImpl ?? spawn
@@ -114,6 +122,7 @@ export function startVornd(
       if (options.sessiond) {
         args.push('--sessiond', options.sessiond.binary, '--home', options.sessiond.home)
       }
+      if (options.nativeServer) args.push('--native-server', '--db', options.nativeServer.db)
       child = run(binary, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,

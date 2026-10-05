@@ -31,6 +31,29 @@ function vorndNote(on: boolean, status: VorndStatus | null): string | null {
   return null
 }
 
+/**
+ * The native server's switch. The desktop app reads it when it starts and
+ * passes it to vornd, so it does something only with the daemon's on too.
+ */
+const SERVER_SWITCH = {
+  label: 'Native server',
+  description:
+    'Answer git, file explorer and editor calls in vornd instead of the server. Needs Native daemon. Applies after restarting Vorn'
+}
+
+/** What the native server is doing, when it differs from what the switch says, or null. */
+function serverNote(on: boolean, daemonOn: boolean, status: VorndStatus | null): string | null {
+  if (on && !daemonOn)
+    return 'Native server needs Native daemon, so the server answers these calls itself.'
+  if (!status) return null
+  const answering = status.state === 'on' && status.nativeServer
+  if (on && status.state === 'failed')
+    return 'The server answers these calls itself while Vorn is connected to it directly.'
+  if (on && !answering) return 'vornd answers these calls the next time Vorn starts.'
+  if (!on && answering) return 'The server answers these calls again the next time Vorn starts.'
+  return null
+}
+
 /** The store's switch. The server reads it when it starts. */
 const STORE_SWITCH = {
   label: 'Native store',
@@ -122,6 +145,7 @@ export function ExperimentalSettings() {
   const flags = config.defaults.experimental ?? {}
   const note = coreNote(status)
   const daemonNote = vorndNote(flags.vornd === true, daemon)
+  const nativeServerNote = serverNote(flags.nativeServer === true, flags.vornd === true, daemon)
   const nativeStoreNote = storeNote(flags.nativeStore === true, status?.store)
 
   const endHolder = (h: SessionHolder): void => {
@@ -195,6 +219,22 @@ export function ExperimentalSettings() {
           </div>
         ))}
       {endFailure && <div className="mt-2 text-xs text-red-400">{endFailure}</div>}
+      {daemon && (
+        <div className="mt-1 space-y-1">
+          <SettingRow label={SERVER_SWITCH.label} description={SERVER_SWITCH.description}>
+            <ToggleSwitch
+              checked={flags.nativeServer === true}
+              onChange={(value) => setFlag('nativeServer', value)}
+              label={SERVER_SWITCH.label}
+            />
+          </SettingRow>
+        </div>
+      )}
+      {daemon && nativeServerNote && (
+        <div className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
+          {nativeServerNote}
+        </div>
+      )}
       <div className="mt-1 space-y-1">
         <SettingRow label={STORE_SWITCH.label} description={STORE_SWITCH.description}>
           <ToggleSwitch

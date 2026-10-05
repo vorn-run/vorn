@@ -1831,6 +1831,12 @@ export interface ExperimentalConfig {
    * on the same file. Read by the server when it starts.
    */
   nativeStore?: boolean
+  /**
+   * vornd answers the groups of calls it has taken over from the server (git,
+   * the file explorer, editors) itself. It needs vornd, so with `vornd` off it
+   * does nothing. Read by the app when it starts, and passed to vornd.
+   */
+  nativeServer?: boolean
 }
 
 /**
@@ -1852,7 +1858,8 @@ export interface RecordCursor {
 /** Whether the desktop app is talking to its server through vornd. */
 export type VorndStatus =
   | { state: 'off' }
-  | { state: 'on'; port: number }
+  /** `nativeServer`: whether vornd was started answering the groups it has taken over. */
+  | { state: 'on'; port: number; nativeServer: boolean }
   /** The switch is on but vornd could not be used, so the app went straight to the server. */
   | { state: 'failed'; detail: string }
 

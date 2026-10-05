@@ -958,6 +958,7 @@ async function connectedLocally(connected: ServerBridge, dataDir: string): Promi
   vorndHome = dataDir
   const config = (await connected.request('config:load').catch(() => null)) as AppConfig | null
   vorndWanted = config?.defaults?.experimental?.vornd === true
+  nativeServerWanted = nativeServerSwitch(config)
   if (vorndWanted) {
     await routeThroughVornd(upstreamPort(connected.target(), readPortFile(dataDir)?.port ?? null))
   }
@@ -966,6 +967,20 @@ async function connectedLocally(connected: ServerBridge, dataDir: string): Promi
 
 /** Read from the config when the app starts. */
 let vorndWanted = false
+/** Read with it: vornd answers the groups that joined the Native server switch. */
+let nativeServerWanted = false
+
+/**
+ * Settings › Experimental › Native server. `VORN_NATIVE_SERVER` overrides it
+ * (1 or 0), so a test run can put vornd on either path. It only has an effect
+ * through vornd, so the Native daemon switch decides first.
+ */
+export function nativeServerSwitch(config: AppConfig | null): boolean {
+  const forced = process.env.VORN_NATIVE_SERVER
+  if (forced === '1') return true
+  if (forced === '0') return false
+  return config?.defaults?.experimental?.nativeServer === true
+}
 /** The data directory vornd keeps its session holder in. */
 let vorndHome: string | null = null
 let vornd: Vornd | null = null
@@ -1052,6 +1067,9 @@ async function routeThroughVornd(upstream: number | null): Promise<void> {
   try {
     started = await startVornd(binary, upstream, {
       sessiond: sessiond && vorndHome ? { binary: sessiond, home: vorndHome } : undefined,
+      // vornd reads which projects are remote from the server's database.
+      nativeServer:
+        nativeServerWanted && vorndHome ? { db: join(vorndHome, 'vorn.db') } : undefined,
       // The bridge presents it on every connection, through vornd too.
       desktopToken: bootstrapToken ?? undefined
     })
@@ -1094,7 +1112,7 @@ async function routeThroughVornd(upstream: number | null): Promise<void> {
     fallBack('the server could not be reached through vornd')
     return
   }
-  vorndStatus = { state: 'on', port: started.port }
+  vorndStatus = { state: 'on', port: started.port, nativeServer: nativeServerWanted }
   log.info(`[launcher] talking to the server on ${upstream} through vornd on ${started.port}`)
 }
 

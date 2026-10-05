@@ -124,7 +124,7 @@ describe('ExperimentalSettings', () => {
 
     it('says nothing more while vornd is in use as asked', async () => {
       mockStore.config = config({ vornd: true })
-      daemon = { state: 'on', port: 47001 }
+      daemon = { state: 'on', port: 47001, nativeServer: false }
       render(<ExperimentalSettings />)
       await screen.findByText('Native core 0.2.0')
       expect(screen.queryByText(/next time it starts/)).not.toBeInTheDocument()
@@ -152,7 +152,7 @@ describe('ExperimentalSettings', () => {
       }
       beforeEach(() => {
         mockStore.config = config({ vornd: true })
-        daemon = { state: 'on', port: 47001 }
+        daemon = { state: 'on', port: 47001, nativeServer: false }
       })
 
       it('says how many sessions are still on one and that it exits after them', async () => {
@@ -230,6 +230,73 @@ describe('ExperimentalSettings', () => {
       render(<ExperimentalSettings />)
       await screen.findByText('Native core 0.2.0')
       expect(screen.queryByRole('switch', { name: 'Native daemon' })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('the native server switch', () => {
+    const findServerSwitch = (): Promise<HTMLElement> =>
+      screen.findByRole('switch', { name: 'Native server' })
+
+    it('is off by default and saves under defaults.experimental', async () => {
+      render(<ExperimentalSettings />)
+      const toggle = await findServerSwitch()
+      expect(toggle).toHaveAttribute('aria-checked', 'false')
+      fireEvent.click(toggle)
+      expect(saveConfig).toHaveBeenCalledWith(config({ nativeServer: true }))
+    })
+
+    it('says it does nothing without the native daemon', async () => {
+      mockStore.config = config({ nativeServer: true })
+      render(<ExperimentalSettings />)
+      expect(
+        await screen.findByText(
+          'Native server needs Native daemon, so the server answers these calls itself.'
+        )
+      ).toBeInTheDocument()
+    })
+
+    it('says the switch applies from the next start, both ways', async () => {
+      mockStore.config = config({ vornd: true, nativeServer: true })
+      daemon = { state: 'on', port: 47001, nativeServer: false }
+      const { unmount } = render(<ExperimentalSettings />)
+      expect(
+        await screen.findByText('vornd answers these calls the next time Vorn starts.')
+      ).toBeInTheDocument()
+      unmount()
+
+      mockStore.config = config({ vornd: true, nativeServer: false })
+      daemon = { state: 'on', port: 47001, nativeServer: true }
+      render(<ExperimentalSettings />)
+      expect(
+        await screen.findByText('The server answers these calls again the next time Vorn starts.')
+      ).toBeInTheDocument()
+    })
+
+    it('says the server answers while the app is connected to it directly', async () => {
+      mockStore.config = config({ vornd: true, nativeServer: true })
+      daemon = { state: 'failed', detail: 'vornd is not in this build' }
+      render(<ExperimentalSettings />)
+      expect(
+        await screen.findByText(
+          'The server answers these calls itself while Vorn is connected to it directly.'
+        )
+      ).toBeInTheDocument()
+    })
+
+    it('says nothing more while vornd answers as asked', async () => {
+      mockStore.config = config({ vornd: true, nativeServer: true })
+      daemon = { state: 'on', port: 47001, nativeServer: true }
+      render(<ExperimentalSettings />)
+      await findServerSwitch()
+      await screen.findByText('Native core 0.2.0')
+      expect(screen.queryByText(/these calls/)).not.toBeInTheDocument()
+    })
+
+    it('is not shown where the app cannot run vornd', async () => {
+      daemon = null
+      render(<ExperimentalSettings />)
+      await screen.findByText('Native core 0.2.0')
+      expect(screen.queryByRole('switch', { name: 'Native server' })).not.toBeInTheDocument()
     })
   })
 
