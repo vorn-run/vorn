@@ -256,7 +256,11 @@ impl Worker {
     fn run(mut self, rx: Receiver<Job>) {
         let mut last_tick = Instant::now();
         loop {
-            let job = match rx.recv_timeout(TICK) {
+            // Wake for the earliest grid frame due, or the tick.
+            let wait = self.next_frame().map_or(TICK, |d| {
+                d.saturating_duration_since(Instant::now()).min(TICK)
+            });
+            let job = match rx.recv_timeout(wait) {
                 Ok(job) => Some(job),
                 Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => return,
@@ -305,6 +309,7 @@ impl Worker {
                 }
                 None => {}
             }
+            self.frames(Instant::now());
             if now.duration_since(last_tick) >= TICK {
                 last_tick = now;
                 let ids: Vec<String> = self.sessions.keys().cloned().collect();
@@ -317,6 +322,30 @@ impl Worker {
                             self.lost(&id);
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// When the earliest grid frame on this worker is due.
+    fn next_frame(&self) -> Option<Instant> {
+        self.sessions.values().filter_map(Session::due).min()
+    }
+
+    /// Cuts the grid frames due by `now`.
+    fn frames(&mut self, now: Instant) {
+        let due: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|(_, s)| s.due().is_some_and(|d| d <= now))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in due {
+            if let Some(mut s) = self.sessions.remove(&id) {
+                if self.guarded(&id, |out| s.frame(now, out)).is_some() {
+                    self.sessions.insert(id.clone(), s);
+                } else {
+                    self.lost(&id);
                 }
             }
         }

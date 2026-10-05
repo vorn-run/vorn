@@ -2329,11 +2329,14 @@ dependencies = [
  "postcard",
  "tempfile",
  "vorn-analysis",
+ "vorn-grid",
+ "vorn-grid-client",
  "vorn-pipeline",
  "vorn-recovery",
  "vorn-screen",
  "vorn-sessiond",
  "vorn-sessiond-wire",
+ "vorn-term-mirror",
  "vorn-term-proto",
 ]
 
@@ -2343,6 +2346,26 @@ version = "0.0.0"
 dependencies = [
  "gix",
  "tempfile",
+]
+
+[[package]]
+name = "vorn-grid"
+version = "0.7.5"
+dependencies = [
+ "criterion",
+ "libghostty-vt",
+ "regex",
+ "vorn-recovery",
+ "vorn-screen",
+ "vorn-term-proto",
+]
+
+[[package]]
+name = "vorn-grid-client"
+version = "0.7.5"
+dependencies = [
+ "vorn-term-mirror",
+ "vorn-term-proto",
 ]
 
 [[package]]
@@ -2434,6 +2457,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vorn-engine",
+ "vorn-grid-client",
  "vorn-pipeline",
  "vorn-sessiond",
  "vorn-sessiond-wire",

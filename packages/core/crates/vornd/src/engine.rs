@@ -21,9 +21,11 @@
 //! A session leaves the engine when its program has ended and every record
 //! is applied: the driver then releases it in sessiond. A lost session
 //! leaves it too, and is taken on again from the next connection's Welcome.
-//! No client sees the sessions yet; [`Engine::subscribe`] carries what
-//! happens to them, and they are reported, without their contents, at
-//! [`SESSIONS_PATH`].
+//! [`Engine::subscribe`] carries what happens to sessions, and they are
+//! reported, without their contents, at [`SESSIONS_PATH`]. Grid clients
+//! ([`crate::grid`]) reach them through [`Engine::grid_open`] and
+//! [`Engine::grid_input`]: their requests go to the session's actor, and
+//! what it answers comes back on the connection's queue.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -33,11 +35,15 @@ use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
-use vorn_engine::{Brief, Config, Effect, EffectId, Fidelity, Input, Open, Out, Pool, Summary};
+use vorn_engine::{
+    Brief, Config, Effect, EffectId, Fidelity, GridIn, HubOut, Input, Open, Out, Peer, Pool,
+    Summary,
+};
 use vorn_sessiond_wire::{
     Ack, Attach, Io, Nonce, Resize, SessionRef, Spawn, SpawnSpec, ToSessiond, ToVornd, Welcome,
     Write,
 };
+use vorn_term_proto::msg::ServerMsg;
 
 use crate::holder::{Conn, Writer};
 
@@ -82,6 +88,22 @@ pub enum Event {
     Closed(Arc<Summary>),
 }
 
+/// Messages queued for one grid connection before it drops behind. A
+/// client holds two frames in flight at most, so this many means it stopped
+/// reading; it is disconnected and resumes with a snapshot (TP §11).
+pub const GRID_QUEUE: usize = 256;
+
+/// The grid connections and the input they are waiting to have written.
+#[derive(Default)]
+struct GridConns {
+    next: u64,
+    conns: HashMap<u64, mpsc::Sender<ServerMsg>>,
+    /// The write each grid input became, by the driver's `input_seq`, and
+    /// the event it answers: its InputAck goes out when sessiond says the
+    /// bytes were written.
+    inputs: HashMap<u64, (Peer, u64)>,
+}
+
 /// The connection the engine is running on, while there is one.
 struct Current {
     pool: Arc<Pool>,
@@ -95,6 +117,7 @@ pub struct Engine {
     current: Mutex<Option<Current>>,
     closed: Mutex<VecDeque<Brief>>,
     events: broadcast::Sender<Event>,
+    grid: Mutex<GridConns>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -121,6 +144,7 @@ impl Engine {
             current: Mutex::new(None),
             closed: Mutex::new(VecDeque::new()),
             events: broadcast::channel(EVENTS).0,
+            grid: Mutex::new(GridConns::default()),
         })
     }
 
@@ -130,6 +154,62 @@ impl Engine {
 
     fn closed(&self) -> std::sync::MutexGuard<'_, VecDeque<Brief>> {
         self.closed.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn grid_conns(&self) -> std::sync::MutexGuard<'_, GridConns> {
+        self.grid.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A new grid connection: its id, and the queue of what sessions send
+    /// it. The queue closes when the connection falls too far behind.
+    pub fn grid_open(&self) -> (u64, mpsc::Receiver<ServerMsg>) {
+        let (tx, rx) = mpsc::channel(GRID_QUEUE);
+        let mut g = self.grid_conns();
+        g.next += 1;
+        let conn = g.next;
+        g.conns.insert(conn, tx);
+        (conn, rx)
+    }
+
+    /// A grid connection ended: its attachments on `sessions` go.
+    pub fn grid_close(&self, conn: u64, sessions: impl IntoIterator<Item = String>) {
+        {
+            let mut g = self.grid_conns();
+            g.conns.remove(&conn);
+            g.inputs.retain(|_, (peer, _)| peer.conn != conn);
+        }
+        for s in sessions {
+            let _ = self.grid_input(&s, GridIn::Gone { conn });
+        }
+    }
+
+    /// Whether the engine runs session `id` now.
+    pub fn has_session(&self, id: &str) -> bool {
+        self.current()
+            .as_ref()
+            .is_some_and(|c| c.pool.briefs().iter().any(|b| b.session == id))
+    }
+
+    /// A grid client's request for session `id`, for its actor.
+    pub fn grid_input(&self, id: &str, m: GridIn) -> Result<(), String> {
+        let current = self.current();
+        let c = current
+            .as_ref()
+            .ok_or_else(|| "no session holder connected".to_owned())?;
+        c.pool.input(id, Input::Grid(m));
+        Ok(())
+    }
+
+    /// A message for grid connection `conn`. One that cannot take it now is
+    /// let go.
+    fn grid_send(&self, conn: u64, msg: ServerMsg) {
+        let mut g = self.grid_conns();
+        if let Some(tx) = g.conns.get(&conn) {
+            if tx.try_send(msg).is_err() {
+                warn!(conn, "grid client fell behind; disconnecting it");
+                g.conns.remove(&conn);
+            }
+        }
     }
 
     fn command(&self, c: Command) -> Result<(), String> {
@@ -417,7 +497,19 @@ impl Driver<'_> {
                     let _ = p.reply.send(Err(f.error));
                 }
             }
-            ToVornd::InputDone(_) | ToVornd::Pong(_) | ToVornd::Welcome(_) => {}
+            ToVornd::InputDone(done) => {
+                let acked = self.engine.grid_conns().inputs.remove(&done.input_seq);
+                if let Some((peer, input_seq)) = acked {
+                    self.engine.grid_send(
+                        peer.conn,
+                        ServerMsg::InputAck {
+                            sid: peer.sid,
+                            input_seq,
+                        },
+                    );
+                }
+            }
+            ToVornd::Pong(_) | ToVornd::Welcome(_) => {}
         }
     }
 
@@ -472,6 +564,13 @@ impl Driver<'_> {
             }
             Out::Lost => warn!(session = id, "session lost"),
             Out::Closed(summary) => self.closed(summary),
+            Out::Grid(HubOut::Send { conn, msg }) => self.engine.grid_send(conn, msg),
+            Out::Grid(HubOut::Write { bytes, ack }) => {
+                self.write(session, bytes);
+                if let Some(ack) = ack {
+                    self.engine.grid_conns().inputs.insert(self.input_seq, ack);
+                }
+            }
         }
     }
 

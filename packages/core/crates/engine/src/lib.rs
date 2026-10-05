@@ -9,7 +9,8 @@
 //!
 //! - [`session`]: one session's actor, a state machine with no I/O: restore
 //!   base selection, replay mode, effects and their ids, checkpoint cadence.
-//! - [`pool`]: the fixed worker threads the actors run on.
+//! - [`pool`]: the fixed worker threads the actors run on, which also keep
+//!   each session's grid render clock.
 //! - the checkpoint blob, [`FORMAT`]: the terminal, the analyzer and the
 //!   state between them.
 //!
@@ -26,3 +27,4 @@ pub use session::{
     PIPED_SIZE,
 };
 pub use term::{Fidelity, Rejected, FORMAT};
+pub use vorn_grid::{GridIn, HubConfig, HubOut, Peer};

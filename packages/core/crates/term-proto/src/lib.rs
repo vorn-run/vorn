@@ -5,10 +5,13 @@
 //!   docs use (Session Recovery Contract §4, Terminal State Protocol §5).
 //! - [`screen`]: the mirror a grid client keeps instead of a VT parser (TP §6).
 //! - [`row`]: the row cell encoding, `row_fmt` 1.
+//! - [`msg`]: grid mode's messages and framing (TP §7), over [`cbor`].
 //!
 //! No dependencies and no Ghostty: a client links this without a terminal.
 //! The `serde` feature adds the derives a wire encoding needs.
 
+pub mod cbor;
+pub mod msg;
 pub mod position;
 pub mod row;
 pub mod screen;

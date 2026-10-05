@@ -2,8 +2,7 @@
 //! sends a grid client in place of bytes. libghostty-vt's types never appear
 //! here, so a Ghostty upgrade cannot change the wire.
 //!
-//! Types only for now. The CBOR framing (§7) lands with vornd, when there is
-//! a second side to agree with.
+//! Their CBOR form, and the messages that carry them, are in [`crate::msg`].
 
 use crate::position::Cursor;
 

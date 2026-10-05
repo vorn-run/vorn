@@ -377,6 +377,13 @@ pub struct Emulator {
     /// depends on its width in Ghostty's own tables; found by asking a
     /// scratch terminal once per codepoint.
     counted: HashMap<u32, bool>,
+    /// Output bytes handed to Ghostty's parser by [`Emulator::feed`].
+    pub(crate) parsed: u64,
+    /// Scrollback clears (ED 3) and full resets (RIS) parsed.
+    pub(crate) history_clears: u64,
+    /// Feeds that printed a zero-width codepoint (see
+    /// [`Emulator::joiners_printed`]).
+    joiners: u64,
 }
 
 impl Emulator {
@@ -455,6 +462,9 @@ impl Emulator {
             title: String::new(),
             cwd: String::new(),
             counted: HashMap::new(),
+            parsed: 0,
+            history_clears: 0,
+            joiners: 0,
         })
     }
 
@@ -486,6 +496,33 @@ impl Emulator {
         &self.cwd
     }
 
+    /// How many bytes of output [`Emulator::feed`] has passed to Ghostty's
+    /// parser, carried across checkpoint cuts: the one-parse counter (TP-T1).
+    /// Each byte fed is passed exactly once, so it equals the bytes fed.
+    pub fn parsed_bytes(&self) -> u64 {
+        self.parsed
+    }
+
+    /// How many feeds printed a codepoint that joined the cell before it
+    /// rather than taking its own. Ghostty does not mark a row dirty when a
+    /// codepoint joins a cell outside grapheme clustering mode (2027), so a
+    /// renderer that trusts dirty rows re-reads every row when this moved.
+    pub fn joiners_printed(&self) -> u64 {
+        self.joiners
+    }
+
+    /// How many times the output cleared the scrollback (ED 3) or reset the
+    /// terminal (RIS): a renderer numbering history lines starts again when
+    /// this moves.
+    pub fn history_clears(&self) -> u64 {
+        self.history_clears
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.parsed += bytes.len() as u64;
+        self.term.vt_write(bytes);
+    }
+
     /// Ghostty's parser is in its ground state with no UTF-8 sequence open.
     pub fn at_ground(&self) -> bool {
         self.parser.at_ground()
@@ -499,7 +536,12 @@ impl Emulator {
             let step = self.parser.step(&bytes[pos..]);
             let end = pos + step.consumed;
             let hook = match step.event {
-                Some(e) => hook_of(&e),
+                Some(e) => {
+                    if clears_history(&e) {
+                        self.history_clears += 1;
+                    }
+                    hook_of(&e)
+                }
                 None => Hook::None,
             };
             pos = end;
@@ -509,30 +551,51 @@ impl Emulator {
             match hook.needs() {
                 Needs::Model => self.model(hook),
                 Needs::After => {
-                    self.term.vt_write(&bytes[flushed..end]);
+                    self.write(&bytes[flushed..end]);
                     flushed = end;
                     self.after(hook);
                 }
                 Needs::Moved => {
-                    self.term.vt_write(&bytes[flushed..end - 1]);
+                    self.write(&bytes[flushed..end - 1]);
                     let before = self.term.cursor_x().ok();
-                    self.term.vt_write(&bytes[end - 1..end]);
+                    self.write(&bytes[end - 1..end]);
                     flushed = end;
                     if before.is_none() || before != self.term.cursor_x().ok() {
                         self.model(Hook::Index);
                     }
                 }
                 Needs::Around => {
-                    self.term.vt_write(&bytes[flushed..end - 1]);
+                    self.write(&bytes[flushed..end - 1]);
                     let before = self.before(&hook);
-                    self.term.vt_write(&bytes[end - 1..end]);
+                    self.write(&bytes[end - 1..end]);
                     flushed = end;
                     self.switched(hook, before);
                 }
             }
         }
-        self.term.vt_write(&bytes[flushed..]);
+        self.write(&bytes[flushed..]);
         out.append(&mut self.effects.borrow_mut());
+        self.count_joiners();
+    }
+
+    /// Whether this feed printed a codepoint Ghostty gives no width, which
+    /// joins the cell before it. Each candidate is asked of Ghostty's own
+    /// tables once ([`Emulator::counted`]); too many distinct ones in one
+    /// feed count as a join without asking.
+    fn count_joiners(&mut self) {
+        if self.parser.join_candidates.is_empty() && !self.parser.join_overflow {
+            return;
+        }
+        let candidates = std::mem::take(&mut self.parser.join_candidates);
+        let joined = std::mem::take(&mut self.parser.join_overflow)
+            || candidates.iter().any(|&cp| !self.counted(cp));
+        if joined {
+            self.joiners += 1;
+        }
+        // Keep the allocation for the next feed.
+        let mut candidates = candidates;
+        candidates.clear();
+        self.parser.join_candidates = candidates;
     }
 
     /// Resizes, appending any in-band size report to `out`.
@@ -891,6 +954,17 @@ fn probe_counted(cp: u32) -> Option<bool> {
 }
 
 /// What a dispatched sequence means to the emulator.
+/// ED 3, which erases the scrollback, or RIS.
+fn clears_history(e: &Event<'_>) -> bool {
+    match *e {
+        Event::Esc { inter, fin } => inter.is_empty() && fin == b'c',
+        Event::Csi { inter, params, fin } => {
+            fin == b'J' && inter.is_empty() && params.first() == Some(&3)
+        }
+        _ => false,
+    }
+}
+
 fn hook_of(e: &Event<'_>) -> Hook {
     match *e {
         Event::Execute(c) => match c {

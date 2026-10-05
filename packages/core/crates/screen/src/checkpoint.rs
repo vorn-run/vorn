@@ -127,7 +127,10 @@ impl Emulator {
     /// the same memory as any other rebuild of the same checkpoint, so a
     /// session recovered from it and one that never died stay the same.
     pub fn checkpoint(&mut self) -> std::result::Result<Checkpoint, Uncut> {
-        let (cp, rebuilt) = self.cut()?;
+        let (cp, mut rebuilt) = self.cut()?;
+        // Counters of the output, not of the VT that rebuilt it.
+        rebuilt.parsed = self.parsed;
+        rebuilt.history_clears = self.history_clears;
         *self = rebuilt;
         Ok(cp)
     }
@@ -167,6 +170,8 @@ impl Emulator {
         }
         em.title.clone_from(&cp.title);
         em.cwd.clone_from(&cp.cwd);
+        // What rebuilt it was checkpoint VT, not output.
+        em.parsed = 0;
         Ok(em)
     }
 
