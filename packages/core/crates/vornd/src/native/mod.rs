@@ -31,6 +31,7 @@
 //! ([`secrets`]): the desktop's pushes as they go, a rotated secret or a
 //! deleted connection once the server's answer says it was done.
 
+pub mod agent;
 pub mod connection;
 pub mod env;
 pub mod file;
@@ -38,6 +39,7 @@ pub mod git;
 pub mod ide;
 pub mod mcp;
 pub mod secrets;
+pub mod shell;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -66,8 +68,9 @@ pub enum Effect {
 }
 
 /// Every call vornd answers, and its effect. `git:listRemoteBranches`
-/// fetches, `ide:open` starts an editor, and the two connection calls that
-/// start a child run its tools, so none of them runs twice.
+/// fetches, `ide:open` starts an editor, `agent:listModels` starts the
+/// agent's CLI, and the two connection calls that start a child run its
+/// tools, so none of them runs twice.
 pub const METHODS: &[(&str, Effect)] = &[
     ("git:isGitRepo", Effect::Read),
     ("git:listBranches", Effect::Read),
@@ -97,6 +100,11 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("connection:refreshMcpTools", Effect::Change),
     ("connection:executeAction", Effect::Change),
     ("connector:detectRepo", Effect::Read),
+    ("agent:detectInstalled", Effect::Read),
+    ("agent:listModels", Effect::Change),
+    ("sessions:getRecent", Effect::Read),
+    ("shell:listExecutables", Effect::Read),
+    ("shell:listInstalled", Effect::Read),
 ];
 
 /// Calls in a native group that the server keeps answering, and why.
@@ -212,6 +220,22 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
     (
         "connector:probeAuth",
         "asks a connector in the server's registry whether it is signed in",
+    ),
+    (
+        "sessions:restored",
+        "lists the sessions the server carried over from its last run",
+    ),
+    (
+        "sessions:resume",
+        "starts a session in the server's registry, under the id it had",
+    ),
+    (
+        "sessions:clear",
+        "declines the server's carried-over sessions and saves the registry",
+    ),
+    (
+        "shell:create",
+        "starts a shell session in the server's registry and tells clients",
     ),
 ];
 
@@ -346,8 +370,8 @@ impl Turns {
 pub struct Native {
     env: Arc<env::SafeEnv>,
     /// `vorn.db`, read to tell a project on this machine from one on a
-    /// remote host. Without it every call that names a project goes to the
-    /// server, which can tell.
+    /// remote host, and for how the agents are configured. Without it every
+    /// call that needs either goes to the server, which can tell.
     db: OnceLock<PathBuf>,
     slots: Semaphore,
     turns: Turns,
@@ -355,6 +379,9 @@ pub struct Native {
     ides: ide::Ides,
     secrets: secrets::Secrets,
     mcp: mcp::McpClients,
+    /// The agents' model lists, kept as the server keeps them.
+    catalog: vorn_agents::models::Catalog,
+    shells: shell::Shells,
 }
 
 impl Native {
@@ -372,6 +399,8 @@ impl Native {
             ides: ide::Ides::default(),
             secrets,
             mcp: mcp::McpClients::default(),
+            catalog: vorn_agents::models::Catalog::default(),
+            shells: shell::Shells::default(),
         })
     }
 
@@ -396,6 +425,12 @@ impl Native {
             Some("connection" | "connector") if !connection::is_async(method) => {
                 connection::read(self, method, params)
             }
+            Some("agent" | "sessions") => agent::call(self, method, params),
+            Some("shell") => match method {
+                "shell:listExecutables" => Answer::Result(self.shells.executables(&self.env)),
+                "shell:listInstalled" => Answer::Result(self.shells.installed()),
+                _ => Answer::Forward,
+            },
             _ => Answer::Forward,
         }
     }

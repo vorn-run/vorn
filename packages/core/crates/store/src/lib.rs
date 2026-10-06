@@ -9,8 +9,9 @@
 //!
 //! [`Store::call`] answers a call by its TypeScript name with JSON arguments,
 //! which is how a host that speaks JSON (the server, through napi) drives it.
-//! [`ProjectHosts`] is the one read a second process makes without opening
-//! the store: which projects are on a remote host.
+//! [`ProjectHosts`] and [`AgentSettings`] are the reads a second process
+//! makes without opening the store: which projects are on a remote host, and
+//! how the agents are configured.
 
 use std::path::{Path, PathBuf};
 
@@ -18,6 +19,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde_json::{Map, Value};
 use vorn_protocol::WorkspaceConfig;
 
+mod agents;
 mod artifacts;
 mod catalog;
 mod config;
@@ -30,6 +32,7 @@ mod sessions;
 mod sql;
 mod tasks;
 
+pub use agents::AgentSettings;
 pub use connectors::MAX_INBOX_ATTEMPTS;
 pub use hosts::{Placement, ProjectHost, ProjectHosts};
 

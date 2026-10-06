@@ -1,9 +1,13 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { WebSocketServer, type WebSocket as WsSocket } from 'ws'
 import { ServerBridge } from '../src/main/server/server-bridge'
 import { encodeTerminalFrame, encodeTerminalFrameV2 } from '../packages/shared/src/terminal-frame'
 
 // The bridge asks for bytes per connection, of a server that can send them, and hands a frame on as the notification it stands for.
+
+// The bridge logs its disconnect after a test closes it; a log still on its
+// way to the runner when the file ends fails the whole run.
+vi.mock('../src/main/logger', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
 
 const servers: WebSocketServer[] = []
 const bridges: ServerBridge[] = []

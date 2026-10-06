@@ -26,6 +26,7 @@ const FILES = [
   'tests/vornd-app-sessions.test.ts',
   'tests/js-reference.test.ts',
   'tests/native-server-git.test.ts',
+  'tests/native-server-agents.test.ts',
   'tests/native-server-connectors.test.ts'
 ]
 
