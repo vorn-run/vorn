@@ -19,15 +19,24 @@
 //! toward the size rule and its `terminal:resize` is applied as it is, and
 //! `vornd:spawn` is always answered. Beside them:
 //!
-//! - `vornd:hello` answers `{protocol, build}`.
+//! - `vornd:hello` answers `{protocol, build, native}`; `native` says vornd
+//!   runs native work and keeps a copy of the server's session records
+//!   ([`crate::registry`]), which the server then feeds.
 //! - `vornd:subscribe` answers `{connected, sessions, ended, notices}`: every
 //!   session held with its latest states, the sessions that ended lately and
-//!   the notifications kept. From then on the connection is sent each
+//!   the notifications kept, and with `native` also `registry`, the copy of
+//!   the server's records. From then on the connection is sent each
 //!   effect as `vornd:effect`, `vornd:activity {id}` while a session prints,
-//!   and `vornd:connected` when the engine (re)connects to sessiond, after
-//!   which the server subscribes again. Anything may arrive twice: states
+//!   `vornd:connected` when the engine (re)connects to sessiond, after
+//!   which the server subscribes again, and each change to the copy as
+//!   `vornd:session {gen, rev, op, ...}`. Anything may arrive twice: states
 //!   carry the record they reflect, and the server drops notifications and
 //!   exits it has already acted on by their `effectId`.
+//! - `vornd:record {op, ...}`, a notification, is the server telling the
+//!   copy what it changed: `snapshot` when it connects, then `upsert`,
+//!   `remove`, `order` and `holds`.
+//! - `vornd:registry` answers the copy whole, for a subscriber that missed
+//!   a change.
 //! - `vornd:kill {id, signal}` signals the session's program (`hup`,
 //!   `term`, `kill` or `int`).
 //! - `vornd:closeStdin {id}` ends a piped session's input.
@@ -179,6 +188,25 @@ where
         }
         "the connection closed".to_owned()
     });
+    // Each change to the copy of the server's records, once subscribed. A
+    // subscriber left behind sees a gap in the revisions and asks again.
+    let mut notes = engine.registry().subscribe();
+    let noter = {
+        let (fwd, subscribed) = (fwd.clone(), Arc::clone(&subscribed));
+        tokio::spawn(async move {
+            loop {
+                match notes.recv().await {
+                    Ok(params) => {
+                        if subscribed.load(Ordering::Acquire) {
+                            fwd.send_now(&note("vornd:session", params));
+                        }
+                    }
+                    Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => return,
+                }
+            }
+        })
+    };
     let notifier = {
         let (fwd, subscribed) = (fwd.clone(), Arc::clone(&subscribed));
         tokio::spawn(async move {
@@ -227,7 +255,9 @@ where
         }
     };
     notifier.abort();
+    noter.abort();
     writer.abort();
+    engine.registry().left(id);
     why
 }
 
@@ -290,12 +320,23 @@ fn call(engine: &Arc<Engine>, conn: u64, fwd: &Forwarder, subscribed: &AtomicBoo
         "vornd:hello" => Ok(json!({
             "protocol": APP_PROTOCOL,
             "build": env!("CARGO_PKG_VERSION"),
+            "native": engine.registry().wanted(),
         })),
         "vornd:subscribe" => {
             let state = state(engine);
             subscribed.store(true, Ordering::Release);
             Ok(state)
         }
+        "vornd:record" => match engine.registry().feed(conn, &params) {
+            Ok(()) => Ok(Value::Null),
+            Err(e) => {
+                // A note is fire-and-forget: the shadow comparison is what
+                // shows the copy went wrong.
+                warn!(%e, "a session record vornd could not take");
+                Err(e.to_string())
+            }
+        },
+        "vornd:registry" => Ok(engine.registry().snapshot()),
         "vornd:kill" => match (session, signal_of(&params)) {
             (Some(s), Some(sig)) => engine.signal(s, sig).map(|()| Value::Null),
             _ => Err("vornd:kill needs an id and a signal: hup, term, kill or int".to_owned()),
@@ -340,12 +381,18 @@ fn state(engine: &Engine) -> Value {
         .iter()
         .filter_map(|(id, e)| effect_json(id, e))
         .collect();
-    json!({
+    let mut state = json!({
         "connected": engine.connected(),
         "sessions": journal.held().iter().map(held_json).collect::<Vec<_>>(),
         "ended": journal.ended().iter().map(held_json).collect::<Vec<_>>(),
         "notices": notices,
-    })
+    });
+    // Only to a server asked for its records: one that was not sees the
+    // answer it always had.
+    if engine.registry().wanted() {
+        state["registry"] = engine.registry().snapshot();
+    }
+    state
 }
 
 fn held_json(h: &Held) -> Value {
@@ -484,6 +531,157 @@ mod tests {
             (n["kind"].as_str(), n["title"].as_str()),
             (Some("notify"), Some("Build"))
         );
+    }
+
+    /// One end of an app channel to `engine`, speaking JSON frames.
+    struct App {
+        io: tokio::io::DuplexStream,
+        frames: Frames,
+        next: u64,
+    }
+
+    impl App {
+        fn open(engine: &Arc<Engine>) -> App {
+            let (ours, theirs) = tokio::io::duplex(1 << 20);
+            tokio::spawn(serve_conn(theirs, Arc::clone(engine)));
+            App {
+                io: ours,
+                frames: Frames::default(),
+                next: 0,
+            }
+        }
+
+        async fn send(&mut self, frame: Value) {
+            write_frame(&mut self.io, KIND_TEXT, frame.to_string().as_bytes())
+                .await
+                .unwrap();
+        }
+
+        async fn notify(&mut self, method: &str, params: Value) {
+            self.send(json!({ "jsonrpc": "2.0", "method": method, "params": params }))
+                .await;
+        }
+
+        async fn next_frame(&mut self) -> Value {
+            let mut buf = [0u8; 4096];
+            loop {
+                if let Some((_, payload)) = self.frames.take().unwrap() {
+                    return serde_json::from_slice(&payload).unwrap();
+                }
+                let n =
+                    tokio::time::timeout(std::time::Duration::from_secs(5), self.io.read(&mut buf))
+                        .await
+                        .expect("a frame within 5s")
+                        .unwrap();
+                assert!(n > 0, "the channel closed");
+                self.frames.push(&buf[..n]);
+            }
+        }
+
+        /// The answer to a call, and the notes that came before it.
+        async fn call(&mut self, method: &str, params: Value) -> (Value, Vec<Value>) {
+            self.next += 1;
+            let rpc = self.next;
+            self.send(json!({ "jsonrpc": "2.0", "id": rpc, "method": method, "params": params }))
+                .await;
+            let mut notes = Vec::new();
+            loop {
+                let frame = self.next_frame().await;
+                if frame["id"] == rpc {
+                    return (frame["result"].clone(), notes);
+                }
+                notes.push(frame);
+            }
+        }
+    }
+
+    fn shell(id: &str, name: &str) -> Value {
+        json!({
+            "id": id, "agentType": "shell", "projectName": "p", "projectPath": "/p",
+            "status": "running", "createdAt": 1, "pid": 3, "displayName": name,
+        })
+    }
+
+    #[tokio::test]
+    async fn the_server_feeds_the_copy_of_its_records_only_when_asked() {
+        let engine = Engine::new(vorn_engine::Config::default());
+        let mut app = App::open(&engine);
+        let (hello, _) = app.call("vornd:hello", Value::Null).await;
+        assert_eq!(hello["native"], false);
+        let (state, _) = app.call("vornd:subscribe", Value::Null).await;
+        assert!(state.get("registry").is_none());
+
+        engine.registry().want();
+        let mut app = App::open(&engine);
+        assert_eq!(app.call("vornd:hello", Value::Null).await.0["native"], true);
+        app.notify(
+            "vornd:record",
+            json!({ "op": "snapshot", "terminals": [shell("a", "Shell 1")], "headless": [] }),
+        )
+        .await;
+        let (state, _) = app.call("vornd:subscribe", Value::Null).await;
+        let gen = state["registry"]["gen"].clone();
+        assert_eq!(state["registry"]["rev"], 1);
+        assert_eq!(state["registry"]["terminals"][0]["displayName"], "Shell 1");
+        assert_eq!(engine.registry().read(|r| r.terminals().len()), Some(1));
+
+        // Each change is told, in order. They go out beside the answers, not
+        // ahead of them: a subscriber orders by revision, and drops a change
+        // made before its subscription that is told again after it.
+        app.notify(
+            "vornd:record",
+            json!({ "op": "upsert", "kind": "terminal", "record": shell("a", "renamed") }),
+        )
+        .await;
+        app.notify("vornd:record", json!({ "op": "order", "order": ["a"] }))
+            .await;
+        let (snapshot, mut notes) = app.call("vornd:registry", Value::Null).await;
+        assert_eq!(snapshot["rev"], 3);
+        assert_eq!(snapshot["terminals"][0]["rev"], 2);
+        let told = |notes: &[Value]| -> Vec<(Value, Value)> {
+            notes
+                .iter()
+                .filter(|n| n["method"] == "vornd:session" && n["params"]["rev"].as_u64() > Some(1))
+                .map(|n| (n["params"]["rev"].clone(), n["params"]["op"].clone()))
+                .collect()
+        };
+        while told(&notes).len() < 2 {
+            notes.push(app.next_frame().await);
+        }
+        assert_eq!(
+            told(&notes),
+            [(json!(2), json!("upsert")), (json!(3), json!("order"))]
+        );
+        assert!(notes.iter().all(|n| n["params"]["gen"] == gen));
+
+        // A note it cannot read is refused when asked, and changes nothing.
+        let refused = {
+            app.next += 1;
+            let rpc = app.next;
+            app.send(json!({ "jsonrpc": "2.0", "id": rpc, "method": "vornd:record", "params": { "op": "x" } }))
+                .await;
+            loop {
+                let f = app.next_frame().await;
+                if f["id"] == rpc {
+                    break f;
+                }
+            }
+        };
+        assert!(refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown op"));
+        assert_eq!(engine.registry().snapshot()["rev"], 3);
+
+        // The server that fed it went: nothing is answered from the copy.
+        drop(app);
+        for _ in 0..100 {
+            if engine.registry().read(|_| ()).is_none() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("the copy still answers after its server left");
     }
 
     #[test]

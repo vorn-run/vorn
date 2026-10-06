@@ -66,6 +66,11 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "connector",
 ];
 
+/// Groups whose reads vornd can answer from its copy of the server's
+/// session records ([`crate::registry`]), to compare with the server's in
+/// shadow mode, while the server still owns them: `native` is refused.
+pub const SHADOW_GROUPS: &[&str] = &["terminal", "headless", "worktree"];
+
 /// Groups the Native server switch runs natively: the one place a group
 /// joins the switch. Each is also in [`NATIVE_GROUPS`].
 pub const NATIVE_SERVER_GROUPS: &[&str] = &[
@@ -251,6 +256,21 @@ mod tests {
     fn only_groups_with_an_implementation_join_the_switch() {
         for group in NATIVE_SERVER_GROUPS {
             assert!(NATIVE_GROUPS.contains(group), "{group}");
+        }
+    }
+
+    #[test]
+    fn a_group_vornd_only_compares_may_be_shadowed_and_not_answered() {
+        for group in SHADOW_GROUPS {
+            assert!(!NATIVE_GROUPS.contains(group), "{group}");
+            assert!(!NATIVE_SERVER_GROUPS.contains(group), "{group}");
+            assert_eq!(
+                Groups::parse(&format!("{group}=shadow"))
+                    .unwrap()
+                    .mode(group),
+                Mode::Shadow
+            );
+            assert!(Groups::parse(&format!("{group}=native")).is_err());
         }
     }
 

@@ -32,6 +32,7 @@ pub mod names;
 pub mod native;
 pub mod protocol;
 pub mod proxy;
+pub mod registry;
 #[cfg(feature = "engine")]
 pub mod size;
 pub mod streams;

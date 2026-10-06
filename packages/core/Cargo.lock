@@ -2937,6 +2937,7 @@ dependencies = [
  "keyring-core",
  "libghostty-vt",
  "rmcp",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

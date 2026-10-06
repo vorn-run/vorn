@@ -53,6 +53,7 @@ use tracing::{debug, warn};
 use vorn_store::{Placement, ProjectHosts, Store};
 
 use crate::groups::{Counted, Groups, Mode};
+use crate::registry::SessionRegistry;
 use crate::streams::Forwarder;
 
 /// Native calls running at once; the rest wait their turn. A board
@@ -104,6 +105,11 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("sessions:getRecent", Effect::Read),
     ("shell:listExecutables", Effect::Read),
     ("shell:listInstalled", Effect::Read),
+    // Answered from the copy of the server's records, in shadow mode only
+    // ([`crate::groups::SHADOW_GROUPS`]).
+    ("terminal:listActive", Effect::Read),
+    ("headless:list", Effect::Read),
+    ("worktree:activeSessions", Effect::Read),
 ];
 
 /// Calls in a native group that the server keeps answering, and why.
@@ -385,6 +391,8 @@ pub struct Native {
     /// The agents' model lists, kept as the server keeps them.
     catalog: vorn_agents::models::Catalog,
     shells: shell::Shells,
+    /// The copy of the server's session records, when vornd holds sessions.
+    registry: OnceLock<Arc<SessionRegistry>>,
 }
 
 impl Native {
@@ -404,7 +412,15 @@ impl Native {
             mcp: mcp::McpClients::default(),
             catalog: vorn_agents::models::Catalog::default(),
             shells: shell::Shells::default(),
+            registry: OnceLock::new(),
         })
+    }
+
+    /// The copy of the server's session records to answer from, which this
+    /// asks the server to feed. Only the first one given is kept.
+    pub fn set_registry(&self, registry: Arc<SessionRegistry>) {
+        registry.want();
+        let _ = self.registry.set(registry);
     }
 
     /// Where the server's database is. Only the first one given is kept.
@@ -429,6 +445,7 @@ impl Native {
                 connection::read(self, method, params)
             }
             Some("agent" | "sessions") => agent::call(self, method, params),
+            Some("terminal" | "headless" | "worktree") => self.sessions(method, params),
             Some("shell") => match method {
                 "shell:listExecutables" => Answer::Result(self.shells.executables(&self.env)),
                 "shell:listInstalled" => Answer::Result(self.shells.installed()),
@@ -578,6 +595,29 @@ impl Native {
         }
     }
 
+    /// The calls that read the server's session registry, from vornd's copy
+    /// of it. Forwarded while there is no copy to trust.
+    fn sessions(&self, method: &str, params: &Value) -> Answer {
+        let Some(registry) = self.registry.get() else {
+            return Answer::Forward;
+        };
+        let records = |list: Vec<Value>| Answer::Result(Value::Array(list));
+        registry
+            .read(|r| match method {
+                "terminal:listActive" => records(r.terminals().into_iter().map(json_of).collect()),
+                "headless:list" => records(r.headless().map(json_of).collect()),
+                "worktree:activeSessions" => match params.as_str() {
+                    Some(path) => {
+                        let ids = r.active_in_worktree(path);
+                        Answer::Result(json!({ "count": ids.len(), "sessionIds": ids }))
+                    }
+                    None => Answer::Forward,
+                },
+                _ => Answer::Forward,
+            })
+            .unwrap_or(Answer::Forward)
+    }
+
     fn ide(&self, method: &str, params: &Value) -> Answer {
         match method {
             "ide:detect" => Answer::Result(self.ides.detect_json(&self.env)),
@@ -620,6 +660,12 @@ impl Native {
         self.hosts()
             .is_some_and(|h| h.for_path(path) == Placement::Local)
     }
+}
+
+/// A record as the server's handler returns it. Serializing a plain struct
+/// of strings and numbers does not fail.
+fn json_of<T: serde::Serialize>(record: T) -> Value {
+    serde_json::to_value(record).unwrap_or(Value::Null)
 }
 
 /// A string param that is an absolute path. A relative one would resolve
@@ -1032,12 +1078,60 @@ mod tests {
             assert!(!why.is_empty());
             assert!(crate::groups::NATIVE_GROUPS.contains(&crate::groups::group_of(method)));
         }
-        for (method, _) in METHODS {
+        for (method, effect) in METHODS {
+            let group = crate::groups::group_of(method);
+            let shadow_only = crate::groups::SHADOW_GROUPS.contains(&group);
             assert!(
-                crate::groups::NATIVE_GROUPS.contains(&crate::groups::group_of(method)),
+                crate::groups::NATIVE_GROUPS.contains(&group) || shadow_only,
                 "{method}"
             );
+            // Only reads are run in shadow mode, so only reads are worth
+            // listing for a group vornd never answers.
+            assert!(!shadow_only || *effect == Effect::Read, "{method}");
         }
+    }
+
+    #[test]
+    fn reads_the_session_registry_once_the_server_has_fed_it() {
+        let native = Native::new();
+        assert_eq!(
+            native.call("terminal:listActive", &Value::Null),
+            Answer::Forward
+        );
+        let registry = SessionRegistry::new();
+        native.set_registry(Arc::clone(&registry));
+        assert!(registry.wanted());
+        // Not fed yet: vornd cannot tell what the server holds.
+        assert_eq!(native.call("headless:list", &Value::Null), Answer::Forward);
+
+        let terminal = json!({
+            "id": "t", "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "status": "running", "createdAt": 5, "pid": 9, "worktreePath": "/w",
+        });
+        registry
+            .feed(
+                1,
+                &json!({ "op": "snapshot", "terminals": [terminal.clone()], "headless": [] }),
+            )
+            .unwrap();
+        assert_eq!(
+            native.call("terminal:listActive", &Value::Null),
+            Answer::Result(json!([terminal]))
+        );
+        assert_eq!(
+            native.call("headless:list", &Value::Null),
+            Answer::Result(json!([]))
+        );
+        assert_eq!(
+            native.call("worktree:activeSessions", &json!("/w")),
+            Answer::Result(json!({ "count": 1, "sessionIds": ["t"] }))
+        );
+        // Params the server's handler would not expect: the server says so.
+        assert_eq!(
+            native.call("worktree:activeSessions", &json!({ "path": "/w" })),
+            Answer::Forward
+        );
+        assert_eq!(native.call("terminal:create", &json!({})), Answer::Forward);
     }
 
     #[test]

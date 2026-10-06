@@ -119,6 +119,12 @@ impl Daemon {
         let native = groups.any_native().then(|| {
             let native = Native::new();
             native.prepare();
+            // The session reads answer from the engine's copy of the
+            // server's records, which the server feeds only when asked.
+            #[cfg(feature = "engine")]
+            if let Some(engine) = holder.as_ref().and_then(|h| h.engine()) {
+                native.set_registry(Arc::clone(engine.registry()));
+            }
             native
         });
         Arc::new(Daemon {
@@ -269,6 +275,7 @@ async fn health(daemon: &Daemon) -> Response<Body> {
         "uptimeSeconds": daemon.started.elapsed().as_secs(),
         "groups": groups,
         "sessiond": daemon.holder.as_ref().map(|h| h.report()),
+        "registry": registry_report(daemon),
     });
     let status = if reachable {
         StatusCode::OK
@@ -284,6 +291,19 @@ async fn health(daemon: &Daemon) -> Response<Body> {
     res.headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     res
+}
+
+/// Where the copy of the server's session records stands, when vornd keeps
+/// one.
+#[cfg(feature = "engine")]
+fn registry_report(daemon: &Daemon) -> Option<serde_json::Value> {
+    let registry = daemon.holder.as_ref()?.engine()?.registry();
+    registry.wanted().then(|| registry.report())
+}
+
+#[cfg(not(feature = "engine"))]
+fn registry_report(_: &Daemon) -> Option<serde_json::Value> {
+    None
 }
 
 /// The session engine's report: where each session is and how it was
