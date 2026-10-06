@@ -134,6 +134,11 @@ impl Daemon {
                 if groups.native_server() {
                     engine.decide_statuses();
                 }
+                // The terminals vornd creates are started in the engine.
+                if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                    let host = crate::engine::EngineHost::new(Arc::clone(engine), runtime);
+                    native.set_host(Arc::new(host));
+                }
             }
             native
         });
@@ -194,6 +199,9 @@ impl Daemon {
         };
         native.set_link(Arc::clone(&link));
         native.set_server_port(self.upstream.port());
+        if self.groups.mode("terminal") == Mode::Native {
+            link.set_creates_terminals();
+        }
         let native = Arc::clone(native);
         tokio::spawn(async move {
             loop {

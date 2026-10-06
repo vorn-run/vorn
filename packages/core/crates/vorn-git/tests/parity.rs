@@ -340,3 +340,43 @@ fn a_git_wrapper_on_path_is_run_not_bypassed() {
         assert_eq!(reply.engine, Engine::Git);
     }
 }
+
+#[test]
+fn checks_out_a_branch_reads_head_and_names_a_worktree_before_making_it() {
+    use vorn_git::repo::{Done, Git};
+    let t = tmp();
+    let dir = repo(t.path(), "checkout");
+    git(&dir, &["branch", "side"]);
+    let g = Git {
+        bin: "git".into(),
+        env: std::env::vars().collect(),
+    };
+    let head = git(&dir, &["rev-parse", "HEAD"]);
+    assert_eq!(g.head(&dir).as_deref(), Some(head.trim()));
+    assert_eq!(g.head(t.path()), None);
+
+    assert_eq!(g.checkout(&dir, "side"), Done::Ok);
+    assert_eq!(g.branch(&dir).as_deref(), Some("side"));
+    assert!(matches!(
+        g.checkout(&dir, "no-such-branch"),
+        Done::Failed(_)
+    ));
+
+    let mut told = None;
+    let made = g
+        .create_worktree_at(dir.to_str().unwrap(), "fresh", Some("my tree"), |p| {
+            // Told before git has made anything there.
+            assert!(!Path::new(p).exists());
+            told = Some(p.to_owned());
+        })
+        .unwrap();
+    assert_eq!(told.as_deref(), Some(made.worktree_path.as_str()));
+    assert_eq!(
+        (made.branch.as_str(), made.name.as_str()),
+        ("fresh", "my-tree")
+    );
+    assert_eq!(
+        g.branch(Path::new(&made.worktree_path)).as_deref(),
+        Some("fresh")
+    );
+}

@@ -191,6 +191,23 @@ impl Git {
             .unwrap_or_default()
     }
 
+    /// The commit checked out in `cwd`, or `None` when git cannot say
+    /// (`getGitHead`).
+    pub fn head(&self, cwd: &Path) -> Option<String> {
+        self.exec_default(&["rev-parse", "HEAD"], cwd, 3000)
+            .ok()
+            .filter(|out| !out.is_empty())
+    }
+
+    /// Checks out `branch` in `cwd` (`checkoutBranch`), with git's refusal
+    /// when it refuses.
+    pub fn checkout(&self, cwd: &Path, branch: &str) -> Done {
+        match self.exec_default(&["checkout", branch], cwd, 10_000) {
+            Ok(_) => Done::Ok,
+            Err(err) => Done::Failed(err.to_string()),
+        }
+    }
+
     /// Makes a worktree for `branch` at
     /// `<parent>/.vorn-worktrees/<project>/<name>-<id>`. A branch that exists
     /// is checked out there, or, when it is checked out elsewhere already, a
@@ -202,6 +219,20 @@ impl Git {
         branch: &str,
         worktree_name: Option<&str>,
     ) -> Result<CreatedWorktree, Error> {
+        self.create_worktree_at(project, branch, worktree_name, |_| {})
+    }
+
+    /// [`Git::create_worktree`], telling `on_path` the new worktree's path
+    /// before anything is made there, so the caller can hold it: a cleanup
+    /// running while git adds it must not take the half-made directory for
+    /// an orphan.
+    pub fn create_worktree_at(
+        &self,
+        project: &str,
+        branch: &str,
+        worktree_name: Option<&str>,
+        on_path: impl FnOnce(&str),
+    ) -> Result<CreatedWorktree, Error> {
         let short_id = short_id();
         let raw = match worktree_name {
             Some(name) if !name.is_empty() => name.to_owned(),
@@ -210,6 +241,7 @@ impl Git {
         let name = sanitize_name(&raw);
         let base_dir = worktree_base_dir(project);
         let worktree_dir = format!("{base_dir}{SEP}{name}-{short_id}");
+        on_path(&worktree_dir);
         std::fs::create_dir_all(&base_dir).map_err(|error| Error::Fs {
             syscall: "mkdir",
             path: base_dir.clone(),

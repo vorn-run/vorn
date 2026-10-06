@@ -63,10 +63,21 @@ export const HANDOVER_MESSAGE =
   'Vorn is moving your terminals to the updated server. Try again in a moment.'
 
 let inFlight = false
+const listeners = new Set<() => void>()
 
 /** Whether a handoff is running. Session creation is refused while one is. */
 export function isHandingOver(): boolean {
   return inFlight
+}
+
+/** Calls `listener` when a handoff starts and when it ends; vornd, which creates sessions too, is told. */
+export function onHandover(listener: () => void): void {
+  listeners.add(listener)
+}
+
+function handingOver(running: boolean): void {
+  inFlight = running
+  for (const listener of listeners) listener()
 }
 
 /** Test-only, mirroring the other module-level state in this package. */
@@ -114,7 +125,7 @@ export async function handOver(
     return declined(`there is nothing to run at ${request.exec}`)
   }
 
-  inFlight = true
+  handingOver(true)
   try {
     return await run(request, host, declined, spawnHeir)
   } catch (err) {
@@ -123,7 +134,7 @@ export async function handOver(
     host.resumeAll()
     return declined(err instanceof Error ? err.message : String(err))
   } finally {
-    inFlight = false
+    handingOver(false)
   }
 }
 

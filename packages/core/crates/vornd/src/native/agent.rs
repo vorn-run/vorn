@@ -32,7 +32,7 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
 }
 
 /// The settings, or why vornd cannot answer without them.
-fn settings(native: &Native) -> Option<AgentSettings> {
+pub(super) fn settings(native: &Native) -> Option<AgentSettings> {
     let db = native.db.get()?;
     match AgentSettings::read(db) {
         Ok(settings) => Some(settings.unwrap_or_default()),
@@ -45,7 +45,7 @@ fn settings(native: &Native) -> Option<AgentSettings> {
 
 /// The configured command for `agent`, or its default when none is stored.
 /// `None` for a stored one of a shape the server's code would not expect.
-fn command_of(settings: &AgentSettings, agent: Agent) -> Option<AgentCommand> {
+pub(super) fn command_of(settings: &AgentSettings, agent: Agent) -> Option<AgentCommand> {
     let Some(stored) = settings.commands.get(agent.id()) else {
         return Some(agent.default_command());
     };
@@ -234,7 +234,7 @@ mod tests {
     fn settings_with(commands: Value) -> AgentSettings {
         AgentSettings {
             commands: commands.as_object().cloned().unwrap_or_default(),
-            env_passthrough: Vec::new(),
+            ..AgentSettings::default()
         }
     }
 

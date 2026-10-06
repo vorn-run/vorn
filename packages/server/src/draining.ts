@@ -26,6 +26,12 @@
 
 let draining = false
 let stillHoldsEndpoint: (() => boolean) | null = null
+const listeners = new Set<() => void>()
+
+/** Calls `listener` once draining begins; vornd, which creates sessions too, is told. */
+export function onDraining(listener: () => void): void {
+  listeners.add(listener)
+}
 
 /**
  * Teach this module how to check, rather than waiting to be told.
@@ -44,7 +50,9 @@ export function watchEndpoint(holds: () => boolean): void {
 
 /** Irreversible on purpose. Nothing gives an endpoint back once it is lost. */
 export function beginDraining(): void {
+  if (draining) return
   draining = true
+  for (const listener of listeners) listener()
 }
 
 export function isDraining(): boolean {

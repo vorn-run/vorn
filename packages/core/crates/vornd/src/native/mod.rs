@@ -19,7 +19,10 @@
 //!   and calls that change nothing ([`Effect::Read`]) are also run here; the
 //!   two answers are compared when both are in ([`Conn::on_server_text`]),
 //!   and a difference is logged with the method and counted. The client
-//!   never sees vornd's answer.
+//!   never sees vornd's answer. A create (`terminal:create`,
+//!   `shell:create`) is not run twice either; what vornd would start for
+//!   it is worked out instead ([`sessions::plan`]) and compared with the
+//!   spawn the server asks for and the record it answers.
 //!
 //! The work runs on blocking threads, at most [`MAX_CONCURRENT`] at a time,
 //! and the calls that change a repository take turns per repository
@@ -40,9 +43,10 @@ pub mod ide;
 pub mod mcp;
 pub mod reach;
 pub mod secrets;
+pub mod sessions;
 pub mod shell;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -55,8 +59,12 @@ use vorn_store::{Placement, ProjectHosts, Store};
 
 use crate::applink::AppLink;
 use crate::groups::{Counted, Groups, Mode};
-use crate::registry::SessionRegistry;
+use crate::registry::{Registry, SessionRegistry};
 use crate::streams::Forwarder;
+
+/// How long the comparison of a create's plan waits for the spawn the
+/// server asks for after it answers.
+const SPAWN_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Native calls running at once; the rest wait their turn. A board
 /// refreshing thirty diff panels would otherwise start thirty gits together.
@@ -119,9 +127,17 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("sessions:getRecent", Effect::Read),
     ("shell:listExecutables", Effect::Read),
     ("shell:listInstalled", Effect::Read),
-    // Answered from the copy of the server's records, in shadow mode only
+    // Answered from the copy of the server's records ([`crate::registry`]),
+    // which vornd changes itself for the calls that change a terminal
+    // ([`sessions`]); the headless and worktree reads in shadow mode only
     // ([`crate::groups::SHADOW_GROUPS`]).
     ("terminal:listActive", Effect::Read),
+    ("terminal:create", Effect::Change),
+    ("terminal:kill", Effect::Change),
+    ("terminal:rename", Effect::Change),
+    ("terminal:setGroup", Effect::Change),
+    ("terminal:reorder", Effect::Change),
+    ("shell:create", Effect::Change),
     ("headless:list", Effect::Read),
     ("worktree:activeSessions", Effect::Read),
 ];
@@ -268,10 +284,6 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
     (
         "sessions:clear",
         "declines the server's carried-over sessions and saves the registry",
-    ),
-    (
-        "shell:create",
-        "starts a shell session in the server's registry and tells clients",
     ),
 ];
 
@@ -425,6 +437,9 @@ pub struct Native {
     shells: shell::Shells,
     /// The copy of the server's session records, when vornd holds sessions.
     registry: OnceLock<Arc<SessionRegistry>>,
+    /// What starts the sessions vornd creates: the engine, when it runs one.
+    host: OnceLock<Arc<dyn sessions::Host>>,
+    sessions: Arc<sessions::Sessions>,
 }
 
 impl Native {
@@ -448,7 +463,15 @@ impl Native {
             catalog: vorn_agents::models::Catalog::default(),
             shells: shell::Shells::default(),
             registry: OnceLock::new(),
+            host: OnceLock::new(),
+            sessions: Arc::default(),
         })
+    }
+
+    /// What starts the sessions vornd creates. Only the first one given is
+    /// kept; without one, the server creates them.
+    pub fn set_host(&self, host: Arc<dyn sessions::Host>) {
+        let _ = self.host.set(host);
     }
 
     /// The copy of the server's session records to answer from, which this
@@ -507,10 +530,14 @@ impl Native {
                 connection::read(self, method, params)
             }
             Some("agent" | "sessions") => agent::call(self, method, params),
+            Some("terminal") if method != "terminal:listActive" => {
+                sessions::call(self, method, params)
+            }
             Some("terminal" | "headless" | "worktree") => self.sessions(method, params),
             Some("shell") => match method {
                 "shell:listExecutables" => Answer::Result(self.shells.executables(&self.env)),
                 "shell:listInstalled" => Answer::Result(self.shells.installed()),
+                "shell:create" => sessions::call(self, method, params),
                 _ => Answer::Forward,
             },
             _ => Answer::Forward,
@@ -814,6 +841,15 @@ impl Shadows {
     fn waiting(&self) -> bool {
         self.open.load(Ordering::Acquire) > 0
     }
+
+    /// The method of the request out under `key`.
+    fn method(&self, key: &str) -> Option<String> {
+        self.pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .map(|p| p.method.clone())
+    }
 }
 
 /// The group of the credential and Origin checks.
@@ -851,6 +887,8 @@ pub struct Conn {
     /// there, by request id: applied here once the server answers them.
     pending: Mutex<HashMap<String, AfterOk>>,
     waiting: AtomicUsize,
+    /// Shadowed creates whose plan is compared, by request id.
+    plans: Mutex<HashSet<String>>,
 }
 
 /// What a call the server answers changes in what vornd knows.
@@ -885,6 +923,7 @@ impl Conn {
             shadows: Arc::default(),
             pending: Mutex::default(),
             waiting: AtomicUsize::new(0),
+            plans: Mutex::default(),
         })
     }
 
@@ -983,6 +1022,16 @@ impl Conn {
                 self.shadow(method.to_owned(), id, params);
                 Offer::Pass
             }
+            (Mode::Shadow, Some((Effect::Change, id, params))) if sessions::plans(method) => {
+                self.groups.count(method, Counted::Forwarded);
+                self.plan(method.to_owned(), id, params);
+                Offer::Pass
+            }
+            (Mode::Shadow, Some((Effect::Change, id, params))) if sessions::foresees(method) => {
+                self.groups.count(method, Counted::Forwarded);
+                self.foresee(method, &id, &params);
+                Offer::Pass
+            }
             (Mode::Shadow, _) => {
                 self.groups.count(method, Counted::Forwarded);
                 self.groups.count(method, Counted::ShadowUnported);
@@ -1068,10 +1117,92 @@ impl Conn {
         self.native.answer(method, params).await
     }
 
+    /// Works out what vornd would start for a create the server answers,
+    /// to compare with what the server starts. The shells there are now are
+    /// read before the server's answer can add one.
+    fn plan(self: &Arc<Self>, method: String, id: Value, params: Value) {
+        let key = id.to_string();
+        self.shadows.begin(key.clone(), &method);
+        self.lock_plans().insert(key.clone());
+        let shells = self
+            .native
+            .registry
+            .get()
+            .and_then(|r| r.read(Registry::shells));
+        let conn = Arc::clone(self);
+        tokio::spawn(async move {
+            let native = Arc::clone(&conn.native);
+            let m = method.clone();
+            let planned = tokio::task::spawn_blocking(move || {
+                shells.and_then(|n| sessions::plan(&native, &m, &params, n))
+            })
+            .await
+            .ok()
+            .flatten();
+            match planned {
+                Some(plan) => conn.shadows.settle(&key, Side::Native, plan, &conn.groups),
+                None => conn.unported(&key, &method),
+            }
+        });
+    }
+
+    /// Files what vornd would answer a call that changes a terminal, read
+    /// without making the change, for the comparison with the server's
+    /// answer when it comes.
+    fn foresee(&self, method: &str, id: &Value, params: &Value) {
+        let frame = sessions::foresee(&self.native, method, params).and_then(|a| a.frame(id));
+        let Some(frame) = frame else {
+            return self.groups.count(method, Counted::ShadowUnported);
+        };
+        let key = id.to_string();
+        self.shadows.begin(key.clone(), method);
+        self.shadows
+            .settle(&key, Side::Native, comparable(&frame), &self.groups);
+    }
+
+    /// A shadowed call with nothing native to compare: counted so.
+    fn unported(&self, key: &str, method: &str) {
+        self.lock_plans().remove(key);
+        if self.shadows.cancel(key).is_some() {
+            self.groups.count(method, Counted::ShadowUnported);
+        }
+    }
+
+    fn lock_plans(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
+        self.plans.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The server answered a create whose plan is being compared: its side
+    /// is the spawn it asked vornd for under the record's id, with the
+    /// record.
+    fn planned_answer(self: &Arc<Self>, key: String, frame: &serde_json::Map<String, Value>) {
+        let method = self.shadows.method(&key).unwrap_or_default();
+        let record = frame.get("result").cloned();
+        let name = record
+            .as_ref()
+            .and_then(|r| r.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let (Some(record), Some(name), Some(link)) = (record, name, self.native.link.get()) else {
+            return self.unported(&key, &method);
+        };
+        let (conn, link) = (Arc::clone(self), Arc::clone(link));
+        tokio::spawn(async move {
+            match link.spawned(&name, SPAWN_WAIT).await {
+                Some(spawn) => {
+                    let theirs = sessions::spawn_plan(&spawn, &record);
+                    conn.shadows
+                        .settle(&key, Side::Server, theirs, &conn.groups);
+                }
+                None => conn.unported(&key, &method),
+            }
+        });
+    }
+
     /// Reads a frame the server sent this client: whether it admits the
     /// connection, and whether it answers a shadowed call. The frame itself
     /// goes to the client unchanged whatever this finds.
-    pub fn on_server_text(&self, text: &str) {
+    pub fn on_server_text(self: &Arc<Self>, text: &str) {
         let admitting =
             !self.admitted() && (text.contains("\"result\"") || text.contains("\"auth:ok\""));
         let shadowed = self.shadows.waiting() && text.contains("\"id\"");
@@ -1100,6 +1231,13 @@ impl Conn {
             }
         }
         if shadowed && method.is_none() {
+            if let Some(key) = id
+                .map(Value::to_string)
+                .filter(|k| self.lock_plans().remove(k))
+            {
+                self.planned_answer(key, &frame);
+                return;
+            }
             if let Some(id) = id {
                 let frame = Value::Object(frame.clone());
                 self.shadows.settle(

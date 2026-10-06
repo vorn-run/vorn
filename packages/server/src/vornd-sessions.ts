@@ -43,6 +43,16 @@ import {
  * what is written to it and what the agent's hooks report. This server then
  * tells vornd what only it sees (`hookStatus`, `input`, `patch`) and takes each
  * status from the copy's changes (`mirrored`); the rest of the records stay its own.
+ *
+ * vornd then also answers the clients' calls that create, close, rename,
+ * regroup and reorder terminals (`createsTerminals`), in its copy, and says so
+ * in the changes it tells (`native`): a terminal it created and whether its
+ * program started, one it closed, the order a client set. This server follows
+ * them as it follows its own calls, telling clients, saving the records and
+ * running what hangs off a session. The conversations being started are then
+ * claimed in vornd (`claim`), so its creates and this server's own starts (a
+ * resume, a create for a remote host) check one set of claims, and vornd is told
+ * when this server winds down (`tellClosing`), when it creates nothing new.
  */
 
 /** A session as vornd reports it. */
@@ -69,6 +79,23 @@ export interface EffectNote {
   title?: string
   body?: string
 }
+
+/** What `vornd:hello` says. */
+interface Hello {
+  protocol?: number
+  native?: boolean
+  statuses?: boolean
+  terminals?: boolean
+}
+
+/** Whether this server is winding down, as vornd is told it. */
+export interface Closing {
+  draining: boolean
+  handingOver: boolean
+}
+
+/** How often whether this server is winding down is looked at again while vornd creates terminals. */
+const CLOSING_CHECK_MS = 5_000
 
 interface AttachAnswer {
   live?: boolean
@@ -312,6 +339,14 @@ export class VorndSessions extends EventEmitter {
   /** Whether vornd's copy decides the terminals' statuses, as its `vornd:hello` said. */
   private statusWork = false
 
+  /** Whether vornd creates and changes terminals for the clients, as its `vornd:hello` said. */
+  private terminalWork = false
+
+  /** Whether this server is winding down, as vornd needs to know while it creates terminals. */
+  private closingSource: (() => Closing) | null = null
+  private toldClosing = ''
+  private closingTimer: ReturnType<typeof setInterval> | undefined
+
   /** Where `sessionFeed` sends this server's session records: this channel, when vornd wants them. */
   readonly recordSink: RecordSink = {
     wants: () => this.nativeWork && this.inUse(),
@@ -334,7 +369,8 @@ export class VorndSessions extends EventEmitter {
    */
   readonly mirror = new SessionMirror(
     () => this.resyncMirror(),
-    (record) => this.emit('mirrored', record)
+    (record, how) => this.emit('mirrored', record, how),
+    (note) => this.emit('native', note)
   )
 
   /**
@@ -352,6 +388,82 @@ export class VorndSessions extends EventEmitter {
    */
   decidesStatus(): boolean {
     return this.statusWork && this.nativeWork && this.inUse()
+  }
+
+  /**
+   * Whether vornd answers the clients' calls that create, close and change
+   * terminals: it says so, and decides the statuses. Its changes then come
+   * marked `native` (`SessionMirror`), and the conversations being started are
+   * claimed there.
+   */
+  createsTerminals(): boolean {
+    return this.terminalWork && this.decidesStatus()
+  }
+
+  /**
+   * Claim `transcriptId` for session `sessionId` in vornd. Answers the session
+   * already starting on it, or undefined when the claim is taken; a channel
+   * that fails takes it, as a claim here would.
+   */
+  async claim(transcriptId: string, sessionId: string): Promise<string | undefined> {
+    const channel = this.channel
+    if (!channel) return undefined
+    try {
+      const answer = await channel.request<{ holder?: string | null }>('vornd:claim', {
+        transcriptId,
+        sessionId
+      })
+      return answer?.holder ?? undefined
+    } catch (err) {
+      log.warn({ err, transcriptId }, '[vornd] could not claim a conversation in vornd')
+      return undefined
+    }
+  }
+
+  /** Let go of a claim, or with no transcript every claim `sessionId` holds. */
+  unclaim(sessionId: string, transcriptId?: string): void {
+    if (!this.createsTerminals()) return
+    this.channel?.notify('vornd:unclaim', { sessionId, ...(transcriptId ? { transcriptId } : {}) })
+  }
+
+  /** `sessionId`'s workspace is being prepared: its claims do not lapse meanwhile. */
+  preparing(sessionId: string): boolean {
+    if (!this.createsTerminals()) return false
+    this.channel?.notify('vornd:preparing', { sessionId })
+    return true
+  }
+
+  prepared(sessionId: string): void {
+    this.channel?.notify('vornd:prepared', { sessionId })
+  }
+
+  /** Where whether this server is winding down is read, for vornd. */
+  setClosingSource(source: () => Closing): void {
+    this.closingSource = source
+  }
+
+  /** Tell vornd whether this server is winding down, if that changed since it was told. */
+  tellClosing(): void {
+    const source = this.closingSource
+    if (!source || !this.createsTerminals()) return
+    const closing = source()
+    const json = JSON.stringify(closing)
+    if (json === this.toldClosing) return
+    this.toldClosing = json
+    this.channel?.notify('vornd:draining', closing)
+  }
+
+  /**
+   * Tells vornd whether this server is winding down on every subscription,
+   * and looks again every few seconds: losing the endpoint is noticed by
+   * looking, and vornd creates terminals without asking this server first.
+   */
+  private watchClosing(): void {
+    this.toldClosing = ''
+    this.tellClosing()
+    if (this.closingTimer || !this.createsTerminals()) return
+    this.closingTimer = setInterval(() => this.tellClosing(), CLOSING_CHECK_MS)
+    this.closingTimer.unref?.()
   }
 
   /** A status an agent's hook reported, and whether its hooks report the status from now on. */
@@ -405,12 +517,10 @@ export class VorndSessions extends EventEmitter {
 
   private async open(endpoint: string): Promise<boolean> {
     let channel: VorndChannel
-    let hello: { protocol?: number; native?: boolean; statuses?: boolean }
+    let hello: Hello
     try {
       channel = await VorndChannel.connect(endpoint)
-      hello = await channel.request<{ protocol?: number; native?: boolean; statuses?: boolean }>(
-        'vornd:hello'
-      )
+      hello = await channel.request<Hello>('vornd:hello')
       if (hello?.protocol !== APP_PROTOCOL) {
         channel.close()
         throw new Error(
@@ -425,6 +535,7 @@ export class VorndSessions extends EventEmitter {
     this.channel = channel
     this.nativeWork = hello?.native === true
     this.statusWork = hello?.statuses === true
+    this.terminalWork = hello?.terminals === true
     old?.close()
     channel.on('notification', (method: string, params: unknown) =>
       this.notified(channel, method, params)
@@ -456,6 +567,7 @@ export class VorndSessions extends EventEmitter {
     this.emit('subscribed')
     this.holderTold(state.connected)
     if (this.nativeWork && state.registry) this.mirror.load(state.registry)
+    this.watchClosing()
     try {
       pruneEffectReceipts('notify', Date.now() - NOTICE_RECEIPT_MS)
     } catch {
@@ -521,6 +633,16 @@ export class VorndSessions extends EventEmitter {
       })
       .then((s) => pty.started(s.pid, s.epoch))
       .catch(fail)
+    return pty
+  }
+
+  /**
+   * A session vornd is starting itself, for a client's create: followed here
+   * as one this server asked for, and started when vornd says its program is up.
+   */
+  follow(id: string): VorndPty {
+    const pty = new VorndPty(this, id, false)
+    this.ptys.set(id, pty)
     return pty
   }
 
@@ -731,6 +853,8 @@ export class VorndSessions extends EventEmitter {
   close(): void {
     const channel = this.channel
     this.channel = null
+    clearInterval(this.closingTimer)
+    this.closingTimer = undefined
     channel?.close()
     this.ptys.clear()
   }
@@ -761,6 +885,8 @@ export interface RegistrySnapshot {
   headless: HeadlessSession[]
   order: string[]
   holds: Record<string, number>
+  /** The workspaces vornd holds itself while it prepares a session, when it holds any. */
+  nativeHolds?: Record<string, number>
 }
 
 /** The fields of a terminal's record `vornd:patch` may set. */
@@ -784,7 +910,24 @@ export interface SessionNote {
   holds?: Record<string, number>
   terminals?: TerminalSession[]
   headless?: HeadlessSession[]
+  nativeHolds?: Record<string, number>
+  /** A change vornd made itself, for a client's call, rather than one this server told it. */
+  native?: boolean
+  /** With `native`: the terminal vornd created. */
+  created?: boolean
+  /** With `native`: its program is up. */
+  started?: { pid: number; epoch: number }
+  /** With `native`: its program could not be started, and why. */
+  failed?: string
+  /** With `native`: the order a client set. */
+  reordered?: boolean
 }
+
+/**
+ * How a terminal record reached the mirror: whole in a snapshot (`load`), as a
+ * change vornd made to its fields for a client (`native`), or any other way.
+ */
+export type MirroredHow = 'load' | 'native' | 'note'
 
 /** What `SessionMirror.apply` did with a note. */
 export type MirrorOutcome = 'applied' | 'stale' | 'resync' | 'waiting'
@@ -808,16 +951,20 @@ export class SessionMirror {
   private readonly headlessRecords = new Map<string, HeadlessSession>()
   private terminalOrder: string[] = []
   private heldDirs: Record<string, number> = {}
+  private nativeDirs: Record<string, number> = {}
   /** Notes waiting for a snapshot; null once one has been loaded and nothing is missing. */
   private waiting: SessionNote[] | null = []
 
   /**
    * @param resync Asks for the copy whole, after a note was missed.
    * @param took Each terminal record taken, from a note or a snapshot, once it is in.
+   * @param native Each change vornd made itself, and every change to the
+   *   workspaces it holds, once it is in.
    */
   constructor(
     private readonly resync: () => void,
-    private readonly took: (record: TerminalSession) => void = () => {}
+    private readonly took: (record: TerminalSession, how: MirroredHow) => void = () => {},
+    private readonly native: (note: SessionNote) => void = () => {}
   ) {}
 
   /** Where the mirror stands: null until it has loaded a snapshot. */
@@ -835,11 +982,19 @@ export class SessionMirror {
     for (const r of snapshot.headless) this.headlessRecords.set(r.id, freeze(r))
     this.terminalOrder = [...snapshot.order]
     this.heldDirs = { ...snapshot.holds }
+    this.nativeDirs = { ...snapshot.nativeHolds }
     const waited = (this.waiting ?? [])
       .filter((n) => n.gen === snapshot.gen && n.rev > snapshot.rev)
       .sort((a, b) => a.rev - b.rev)
     this.waiting = null
-    for (const r of this.terminalRecords.values()) this.took(r)
+    for (const r of this.terminalRecords.values()) this.took(r, 'load')
+    this.native({
+      gen: snapshot.gen,
+      rev: snapshot.rev,
+      op: 'holds',
+      holds: this.heldDirs,
+      nativeHolds: this.nativeDirs
+    })
     for (const note of waited) this.apply(note)
   }
 
@@ -856,7 +1011,8 @@ export class SessionMirror {
         terminals: note.terminals,
         headless: note.headless,
         order: note.order ?? [],
-        holds: note.holds ?? {}
+        holds: note.holds ?? {},
+        nativeHolds: note.nativeHolds
       })
       return 'applied'
     }
@@ -883,12 +1039,14 @@ export class SessionMirror {
         break
       case 'holds':
         this.heldDirs = { ...(note.holds ?? {}) }
+        this.nativeDirs = { ...note.nativeHolds }
         break
       default:
         return this.missed(note)
     }
     this.rev = note.rev
-    if (took) this.took(took)
+    if (took) this.took(took, fieldsSet(note) ? 'native' : 'note')
+    if (note.native || note.op === 'holds') this.native(note)
     return 'applied'
   }
 
@@ -930,11 +1088,27 @@ export class SessionMirror {
     return this.heldDirs
   }
 
+  /** The workspaces vornd holds itself while it prepares a session. */
+  nativeHolds(): Readonly<Record<string, number>> {
+    return this.nativeDirs
+  }
+
   private missed(note: SessionNote): MirrorOutcome {
     this.waiting = [note]
     this.resync()
     return 'resync'
   }
+}
+
+/** Whether a note is vornd setting a terminal's fields for a client: a rename, a group. */
+function fieldsSet(note: SessionNote): boolean {
+  return (
+    note.native === true &&
+    note.op === 'upsert' &&
+    !note.created &&
+    note.started === undefined &&
+    note.failed === undefined
+  )
 }
 
 /** Frozen outside production: a record from the mirror is vornd's, not this server's to edit. */

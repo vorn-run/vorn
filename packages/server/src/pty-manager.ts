@@ -3,7 +3,7 @@ import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
-import { holdWorkspace } from './workspace-holds'
+import { holdWorkspace, setVorndHolds } from './workspace-holds'
 import { HeadRefresh } from './head-commit'
 import log from './logger'
 import {
@@ -42,7 +42,14 @@ import { configManager } from './config-manager'
 import { NATIVE_STATUS } from './native-core'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 import { isHandingOver, HANDOVER_MESSAGE } from './handoff/donor'
-import { vorndSessions, VorndPty, type HeldSession, type VorndExit } from './vornd-sessions'
+import {
+  vorndSessions,
+  VorndPty,
+  type HeldSession,
+  type MirroredHow,
+  type SessionNote,
+  type VorndExit
+} from './vornd-sessions'
 import { sessionFeed, type Stamp } from './session-feed'
 
 /**
@@ -89,6 +96,28 @@ function refuseWhileClosing(): void {
   // A pane created now would be in neither the manifest nor the replacement.
   if (isHandingOver()) throw new Error(HANDOVER_MESSAGE)
 }
+
+/**
+ * The fields of a terminal's record that vornd keeps while it decides the
+ * statuses, whatever this server's upserts say: set here only through a patch
+ * (`setRecordFields`), and taken from what vornd tells.
+ */
+const PATCHED_FIELDS = ['displayName', 'renamedByPerson', 'groupId', 'agentSessionId'] as const
+
+type PatchedKey = (typeof PATCHED_FIELDS)[number]
+
+/** Sets one of `PATCHED_FIELDS` on a record held here; null or undefined takes it away. */
+function setPatched(session: TerminalSession, key: PatchedKey, value: unknown): void {
+  if (value === null || value === undefined) delete session[key]
+  else Object.assign(session, { [key]: value })
+}
+
+type PatchedFields = Partial<{
+  displayName: string
+  renamedByPerson: boolean
+  groupId: string | null
+  agentSessionId: string
+}>
 
 type WorktreeSessionCounter = (
   worktreePath: string,
@@ -141,7 +170,15 @@ class PtyManager extends EventEmitter {
       order: () => this.sessionOrder,
       ended: () => this.getActiveSessions().flatMap((s) => (this.ptys.has(s.id) ? [] : [s.id]))
     })
-    vorndSessions.on('mirrored', (record: TerminalSession) => this.fromMirror(record))
+    vorndSessions.on('mirrored', (record: TerminalSession, how: MirroredHow) =>
+      this.fromMirror(record, how)
+    )
+    vorndSessions.on('native', (note: SessionNote) => this.fromVornd(note))
+    vorndSessions.on('ask', (method: string, params: unknown) => {
+      // The last terminal in a worktree vornd closed: offered as `killPty` offers it.
+      if (method === 'vornd:cleanupOffer' && vorndSessions.createsTerminals())
+        this.emit('client-message', IPC.WORKTREE_CONFIRM_CLEANUP, params)
+    })
   }
 
   /**
@@ -165,29 +202,134 @@ class PtyManager extends EventEmitter {
    * changes arrive in the order it made them, so the record is always the
    * newer word. A session whose program ended keeps the status it ended with:
    * a change told before vornd heard of the end is older than it.
+   *
+   * The fields only vornd sets while it decides (`PATCHED_FIELDS`) are taken
+   * from a snapshot and from a change vornd made for a client (a rename, a
+   * group), ended or not, and told as `renameSession` and `setSessionGroup` tell
+   * them. Changes this server asked for itself it has already made.
    */
-  private fromMirror(record: TerminalSession): void {
+  private fromMirror(record: TerminalSession, how: MirroredHow = 'note'): void {
     if (!vorndSessions.decidesStatus()) return
     const session = this.sessions.get(record.id)
-    if (!session || this.extensionPtys.has(record.id) || !this.ptys.has(record.id)) return
+    if (!session || this.extensionPtys.has(record.id)) return
+    let updated = false
     let linked = false
-    if (record.hookSessionId !== session.hookSessionId) {
-      if (record.hookSessionId) session.hookSessionId = record.hookSessionId
-      else delete session.hookSessionId
-      linked = true
+    let renamed = false
+    if (how !== 'note') {
+      for (const key of PATCHED_FIELDS) {
+        if (record[key] === session[key]) continue
+        setPatched(session, key, record[key])
+        if (key === 'agentSessionId') linked = true
+        else updated = true
+        if (key === 'displayName') renamed = true
+      }
     }
-    if (record.statusSource !== session.statusSource) {
-      if (record.statusSource) session.statusSource = record.statusSource
-      else delete session.statusSource
-      linked = true
+    if (this.ptys.has(record.id)) {
+      if (record.hookSessionId !== session.hookSessionId) {
+        if (record.hookSessionId) session.hookSessionId = record.hookSessionId
+        else delete session.hookSessionId
+        linked = true
+      }
+      if (record.statusSource !== session.statusSource) {
+        if (record.statusSource) session.statusSource = record.statusSource
+        else delete session.statusSource
+        linked = true
+      }
+      if (record.status !== session.status) {
+        session.status = record.status
+        updated = true
+      }
     }
-    if (record.status !== session.status) {
-      session.status = record.status
+    if (updated) {
       this.recordChanged(record.id)
       this.emit('client-message', IPC.SESSION_UPDATED, session)
     } else if (linked) {
       this.recordChanged(record.id)
     }
+    if (how === 'note') return
+    if (renamed && session.displayName !== undefined)
+      this.emit('session-renamed', session.id, session.displayName)
+    if (updated || linked) this.emit('records-changed')
+  }
+
+  /**
+   * A change vornd made itself, for a client's call: a terminal it created,
+   * whose program started or could not, one it closed, the order a client set,
+   * and the workspaces it holds while it prepares a session. Followed as this
+   * server's own calls are, so clients are told and the records saved alike.
+   */
+  private fromVornd(note: SessionNote): void {
+    if (note.op === 'holds') {
+      setVorndHolds(note.nativeHolds ?? {})
+      return
+    }
+    if (!vorndSessions.createsTerminals()) return
+    if (note.op === 'upsert' && note.kind === 'terminal' && note.record) {
+      const id = note.record.id
+      if (note.created) this.adoptCreated(note.record as TerminalSession)
+      if (note.started) this.ptys.get(id)?.started(note.started.pid, note.started.epoch)
+      if (note.failed !== undefined) {
+        log.warn({ id, why: note.failed }, '[pty] vornd could not start this session')
+        this.ptys.get(id)?.finish(1)
+      }
+    } else if (note.op === 'remove' && note.kind === 'terminal' && note.id) {
+      this.closedByVornd(note.id)
+    } else if (note.op === 'order' && note.reordered && note.order) {
+      this.sessionOrder = [...note.order]
+      this.orderChanged()
+      this.emit('client-message', IPC.SESSION_REORDERED, [...note.order])
+      this.emit('records-changed')
+    }
+  }
+
+  /**
+   * A terminal vornd created for a client, taken on as `spawnPty` takes on one
+   * this server starts: its program is followed, its record held and listed
+   * last, and `session-created` runs what hangs off a new session.
+   */
+  private adoptCreated(record: TerminalSession): void {
+    if (this.sessions.has(record.id)) return
+    // vornd's revision and stamps are its copy's, not this server's record.
+    const session: TerminalSession & { statusAt?: unknown; exitAt?: unknown } = { ...record }
+    delete session.rev
+    delete session.statusAt
+    delete session.exitAt
+    const id = session.id
+    const program = vorndSessions.follow(id)
+    this.setupVorndEvents(id, program)
+    this.ptys.set(id, program)
+    this.sessions.set(id, session)
+    if (!this.sessionOrder.includes(id)) this.sessionOrder.push(id)
+    this.normalizedPaths.set(id, normalizePath(session.worktreePath || session.projectPath))
+    this.recordChanged(id)
+    this.orderChanged()
+    const payload = {
+      agentType: session.agentType,
+      projectName: session.projectName,
+      projectPath: session.projectPath
+    } as CreateTerminalPayload
+    this.emit('session-created', session, payload)
+  }
+
+  /**
+   * A terminal vornd closed for a client: let go of here as `killPty` lets go of
+   * one, but vornd hangs its program up and offers to clean up its worktree.
+   * Its program is still followed until it ends, which tells clients as the
+   * exit of one `killPty` hung up does.
+   */
+  private closedByVornd(id: string): void {
+    const live = this.ptys.has(id)
+    const session = this.sessions.get(id)
+    this.sessions.delete(id)
+    this.heads.forget(id)
+    this.normalizedPaths.delete(id)
+    this.clearSessionTracking(id)
+    this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
+    this.ptys.delete(id)
+    this.recordRemoved(id)
+    this.orderChanged()
+    if (session) this.emit('session-exit', session)
+    if (!live) this.emit('client-message', IPC.TERMINAL_EXIT, { id, exitCode: 0 })
   }
 
   /** `sessionOrder` changed. */
@@ -1182,13 +1324,39 @@ class PtyManager extends EventEmitter {
     }
   }
 
+  /**
+   * Set fields of a terminal's record that vornd keeps while it decides the
+   * statuses (`PATCHED_FIELDS`); null or undefined takes one away. Set here as
+   * any change is, and while vornd decides also told to it as a patch, without
+   * which its copy would keep what it had.
+   */
+  setRecordFields(id: string, fields: PatchedFields): void {
+    const session = this.sessions.get(id)
+    if (!session) return
+    const keys = PATCHED_FIELDS.filter((key) => key in fields)
+    for (const key of keys) setPatched(session, key, fields[key])
+    this.recordChanged(id)
+    if (vorndSessions.decidesStatus()) this.tellPatched(id, keys)
+  }
+
+  /**
+   * Tell vornd the fields of a record it keeps (`PATCHED_FIELDS`), as they
+   * are here: for a record whose fields were set in place, as a resume sets
+   * those it carries over.
+   */
+  tellPatched(id: string, keys: readonly PatchedKey[] = PATCHED_FIELDS): void {
+    const session = this.sessions.get(id)
+    if (!session || !vorndSessions.decidesStatus()) return
+    const fields: Partial<Record<PatchedKey, string | boolean | null>> = {}
+    for (const key of keys) fields[key] = session[key] ?? null
+    vorndSessions.patch(id, fields)
+  }
+
   /** `byPerson` records who chose the name, which is what an extension may not overrule. */
   renameSession(id: string, displayName: string, byPerson = true): void {
     const session = this.sessions.get(id)
     if (!session) throw new Error(`Session not found: ${id}`)
-    session.displayName = displayName
-    if (byPerson) session.renamedByPerson = true
-    this.recordChanged(id)
+    this.setRecordFields(id, { displayName, ...(byPerson ? { renamedByPerson: true } : {}) })
     this.emit('client-message', IPC.SESSION_UPDATED, session)
   }
 
@@ -1196,9 +1364,7 @@ class PtyManager extends EventEmitter {
   setSessionGroup(id: string, groupId: string | null): void {
     const session = this.sessions.get(id)
     if (!session) throw new Error(`Session not found: ${id}`)
-    if (groupId) session.groupId = groupId
-    else delete session.groupId
-    this.recordChanged(id)
+    this.setRecordFields(id, { groupId: groupId || null })
     this.emit('client-message', IPC.SESSION_UPDATED, session)
   }
 

@@ -3,22 +3,62 @@
 //!
 //! vornd tells the server what only the server can act on: a broadcast to
 //! every client (the server holds the registry of them, and some clients
-//! connect to it directly) and a device token just revoked (the server
-//! closes the sockets holding it). The server tells vornd where it is bound,
-//! which decides the addresses a browser on the network can use.
+//! connect to it directly), a device token just revoked (the server closes
+//! the sockets holding it) and the offer to clean up a worktree whose last
+//! terminal vornd closed. The server tells vornd where it is bound, which
+//! decides the addresses a browser on the network can use; whether it is
+//! winding down, when vornd may start no new terminal ([`Closing`]); the
+//! conversations its own starts claim ([`Claims`]); and the spawns it asks
+//! for, which the comparison of vornd's plans reads ([`AppLink::spawned`]).
 //!
 //! Notes travel on the app's channel ([`crate::control`]) to every
 //! connection that has subscribed; with none subscribed, [`AppLink::tell`]
 //! says so and the caller leaves the call to the server.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, Notify};
 
+use crate::claims::Claims;
+
 /// Notes queued for slow subscribers before the oldest are dropped.
 const BACKLOG: usize = 256;
+
+/// Spawns kept for the comparison of vornd's plans with them: more than
+/// are ever asked for at once.
+const SPAWNS_KEPT: usize = 64;
+
+/// The server's refusals while it winds down, word for word.
+pub const DRAINING_MESSAGE: &str = "This server no longer holds the local endpoint and is finishing its remaining sessions. Reopen Vorn to start new ones.";
+pub const HANDOVER_MESSAGE: &str =
+    "Vorn is moving your terminals to the updated server. Try again in a moment.";
+
+/// Whether the server is winding down, as `vornd:draining` last said.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Closing {
+    #[default]
+    Open,
+    /// It lost its endpoint and is finishing what it has.
+    Draining,
+    /// It is handing its sessions to a server taking over.
+    HandingOver,
+}
+
+impl Closing {
+    /// The refusal for a new session, while there is one. Draining is
+    /// asked first, as the server asks it.
+    pub fn refusal(self) -> Option<&'static str> {
+        match self {
+            Closing::Open => None,
+            Closing::Draining => Some(DRAINING_MESSAGE),
+            Closing::HandingOver => Some(HANDOVER_MESSAGE),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct AppLink {
@@ -26,6 +66,16 @@ pub struct AppLink {
     listening: AtomicUsize,
     server_host: Mutex<Option<String>>,
     reached: Notify,
+    /// Whether vornd answers the clients' `terminal:create` and the rest
+    /// itself, which `vornd:hello` tells the server.
+    terminals: AtomicBool,
+    closing: Mutex<Closing>,
+    /// The conversations being started, by vornd's creates and the
+    /// server's own starts alike.
+    claims: Claims,
+    /// The latest spawns the server asked for, by the name it gave each.
+    spawns: Mutex<VecDeque<(String, Value)>>,
+    spawned: Notify,
 }
 
 impl Default for AppLink {
@@ -35,6 +85,11 @@ impl Default for AppLink {
             listening: AtomicUsize::new(0),
             server_host: Mutex::new(None),
             reached: Notify::new(),
+            terminals: AtomicBool::new(false),
+            closing: Mutex::new(Closing::Open),
+            claims: Claims::default(),
+            spawns: Mutex::new(VecDeque::new()),
+            spawned: Notify::new(),
         }
     }
 }
@@ -83,6 +138,66 @@ impl AppLink {
     pub async fn reached(&self) {
         self.reached.notified().await;
     }
+
+    /// vornd answers the terminal calls that create and change sessions.
+    pub fn set_creates_terminals(&self) {
+        self.terminals.store(true, Ordering::Release);
+    }
+
+    pub fn creates_terminals(&self) -> bool {
+        self.terminals.load(Ordering::Acquire)
+    }
+
+    /// What the server said of its winding down.
+    pub fn set_closing(&self, closing: Closing) {
+        *self.closing.lock().unwrap_or_else(|e| e.into_inner()) = closing;
+    }
+
+    pub fn closing(&self) -> Closing {
+        *self.closing.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The conversations being started.
+    pub fn claims(&self) -> &Claims {
+        &self.claims
+    }
+
+    /// The server asked vornd to spawn `params` under `name`.
+    pub fn record_spawn(&self, name: &str, params: &Value) {
+        let mut spawns = self.spawns.lock().unwrap_or_else(|e| e.into_inner());
+        if spawns.len() == SPAWNS_KEPT {
+            spawns.pop_front();
+        }
+        spawns.push_back((name.to_owned(), params.clone()));
+        drop(spawns);
+        self.spawned.notify_waiters();
+    }
+
+    /// The spawn the server asked for under `name`, waiting up to `wait`
+    /// for it: the server answers a create before it asks for the spawn.
+    pub async fn spawned(&self, name: &str, wait: Duration) -> Option<Value> {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            // Listening before looking, so a spawn recorded in between wakes it.
+            let next = self.spawned.notified();
+            tokio::pin!(next);
+            next.as_mut().enable();
+            let found = self
+                .spawns
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .rev()
+                .find(|(n, _)| n == name)
+                .map(|(_, p)| p.clone());
+            if found.is_some() {
+                return found;
+            }
+            if tokio::time::timeout_at(deadline, next).await.is_err() {
+                return None;
+            }
+        }
+    }
 }
 
 /// A subscribed connection, counted while it lives.
@@ -111,5 +226,23 @@ mod tests {
         );
         drop(guard);
         assert!(!link.listening());
+    }
+
+    #[tokio::test]
+    async fn finds_a_spawn_asked_for_before_or_after_it_looks() {
+        let link = Arc::new(AppLink::default());
+        link.record_spawn("a", &json!({ "argv": ["sh"] }));
+        assert_eq!(
+            link.spawned("a", Duration::from_millis(1)).await,
+            Some(json!({ "argv": ["sh"] }))
+        );
+        let later = {
+            let link = Arc::clone(&link);
+            tokio::spawn(async move { link.spawned("b", Duration::from_secs(5)).await })
+        };
+        tokio::task::yield_now().await;
+        link.record_spawn("b", &json!(1));
+        assert_eq!(later.await.unwrap(), Some(json!(1)));
+        assert_eq!(link.spawned("c", Duration::from_millis(5)).await, None);
     }
 }

@@ -5,7 +5,8 @@
 //! on the variables passed through to what an agent runs. It reads them from
 //! the server's file as [`crate::ProjectHosts`] reads the projects: read-only,
 //! fresh on every call, creating and migrating nothing, so a save the server
-//! has just made is what the next call sees.
+//! has just made is what the next call sees. A session vornd starts reads the
+//! shell it runs in from here too.
 
 use std::path::Path;
 
@@ -23,6 +24,10 @@ pub struct AgentSettings {
     pub commands: Map<String, Value>,
     /// `defaults.envPassthrough`, the names kept: strings only, as stored.
     pub env_passthrough: Vec<String>,
+    /// `defaults.shell`, the shell sessions run in; `None` for the default.
+    pub shell: Option<String>,
+    /// `defaults.minimalShellPrompt`: a shell's own prompt is left out.
+    pub minimal_shell_prompt: bool,
 }
 
 impl AgentSettings {
@@ -47,31 +52,42 @@ impl AgentSettings {
             return Ok(None);
         }
         let commands = load_agent_commands(&conn)?;
-        let stored: Option<String> = conn
-            .query_row(
-                "SELECT value FROM defaults WHERE key = 'envPassthrough'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let env_passthrough = match stored {
-            Some(text) => match serde_json::from_str::<Value>(&text)? {
-                Value::Array(items) => items
-                    .into_iter()
-                    .filter_map(|v| match v {
-                        Value::String(s) => Some(s),
-                        _ => None,
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            },
-            None => Vec::new(),
+        let env_passthrough = match default_value(&conn, "envPassthrough")? {
+            Some(Value::Array(items)) => items
+                .into_iter()
+                .filter_map(|v| match v {
+                    Value::String(s) => Some(s),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
         };
+        let shell = match default_value(&conn, "shell")? {
+            Some(Value::String(s)) => Some(s),
+            _ => None,
+        };
+        let minimal_shell_prompt =
+            default_value(&conn, "minimalShellPrompt")? == Some(Value::Bool(true));
         Ok(Some(AgentSettings {
             commands,
             env_passthrough,
+            shell,
+            minimal_shell_prompt,
         }))
     }
+}
+
+/// One stored default, as the JSON it is kept as.
+fn default_value(conn: &Connection, key: &str) -> Result<Option<Value>> {
+    let stored: Option<String> = conn
+        .query_row("SELECT value FROM defaults WHERE key = ?1", [key], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    Ok(match stored {
+        Some(text) => Some(serde_json::from_str::<Value>(&text)?),
+        None => None,
+    })
 }
 
 #[cfg(test)]
@@ -97,6 +113,17 @@ mod tests {
         .unwrap();
         let read = AgentSettings::read(&db).unwrap().unwrap();
         assert_eq!(read.env_passthrough, ["ANTHROPIC_API_KEY"]);
+        assert_eq!((read.shell, read.minimal_shell_prompt), (None, false));
+        conn.execute_batch(
+            r#"INSERT INTO defaults VALUES ('shell', '"/bin/sh"');
+               INSERT INTO defaults VALUES ('minimalShellPrompt', 'true');"#,
+        )
+        .unwrap();
+        let read = AgentSettings::read(&db).unwrap().unwrap();
+        assert_eq!(
+            (read.shell.as_deref(), read.minimal_shell_prompt),
+            (Some("/bin/sh"), true)
+        );
         assert_eq!(
             read.commands["gemini"],
             serde_json::json!({ "command": "gem", "args": ["--x"], "fallbackCommand": "gem2" })

@@ -120,10 +120,20 @@ export function claimTranscriptFor(
   headless: HeadlessSession[],
   scope: ProjectScope | undefined
 ): string | undefined {
-  const held = new Set([...heldTranscripts(live, headless), ...spawningTranscripts()])
-  const transcriptId = resolveTranscriptId(session, held, scope)
+  const transcriptId = freeTranscriptFor(session, live, headless, scope)
   if (!transcriptId) return undefined
   // Taken between resolving and claiming: let the agent choose rather than double up.
   const taken = claimSpawningTranscript(transcriptId, sessionId)
   return taken === undefined ? transcriptId : undefined
+}
+
+/** The conversation a resume should continue, among those nothing here holds; not claimed. */
+export function freeTranscriptFor(
+  session: TerminalSession,
+  live: TerminalSession[],
+  headless: HeadlessSession[],
+  scope: ProjectScope | undefined
+): string | undefined {
+  const held = new Set([...heldTranscripts(live, headless), ...spawningTranscripts()])
+  return resolveTranscriptId(session, held, scope)
 }

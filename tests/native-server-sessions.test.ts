@@ -1,5 +1,7 @@
 /**
- * vornd's copy of the server's session registry, against the registry itself.
+ * vornd's copy of the server's session registry, against the registry itself;
+ * then the terminals vornd creates and changes with the Native server switch
+ * on, against the server's with it off.
  *
  * One server is started on a real database, and the vornd it keeps in front of
  * it shadows the calls that read the registry
@@ -15,14 +17,18 @@
  * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix: the agents are shell
  * scripts.
  */
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import WebSocket from 'ws'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '../packages/shared/src/protocol'
 import type { HeadlessSession, TerminalSession } from '../packages/shared/src/types'
 import type { SessionMirror as Mirror } from '../packages/server/src/vornd-sessions'
+import { spawnsRealServers } from './helpers/one-at-a-time'
+import { normalizeRun, withoutHookLinks, type RunDirs } from './helpers/sessions-parity'
 
 const TEST_CREDENTIAL = 'native-server-sessions-credential'
 const GROUPS = 'terminal=shadow,headless=shadow,worktree=shadow'
@@ -436,4 +442,426 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
       async () => (await counts()).terminal?.shadowMismatched === 1
     )
   }, 120_000)
+})
+
+spawnsRealServers()
+
+const AGENTS = ['claude', 'codex', 'copilot', 'gemini', 'opencode'] as const
+
+/** A stub agent: it says what it was started with, and waits. */
+const ARGV_AGENT = `#!/bin/sh
+printf 'ARGV:%s\\n' "$*"
+exec sleep 600
+`
+
+/** A client of one server that keeps every notification it is told. */
+class Watcher {
+  private next = 1
+  readonly told: Array<{ method: string; params: unknown }> = []
+
+  private constructor(private ws: WebSocket) {
+    ws.on('message', (raw) => {
+      const frame = JSON.parse(String(raw)) as { method?: string; params?: unknown }
+      if (frame.method) this.told.push({ method: frame.method, params: frame.params })
+    })
+  }
+
+  static open(port: number): Promise<Watcher> {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+      headers: { authorization: `Bearer ${TEST_CREDENTIAL}` }
+    })
+    return new Promise((resolve, reject) => {
+      ws.once('open', () => resolve(new Watcher(ws)))
+      ws.once('error', reject)
+    })
+  }
+
+  call(method: string, params?: unknown): Promise<Frame> {
+    const id = this.next++
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timeout: ${method}`)), 30_000)
+      const onMessage = (raw: WebSocket.RawData): void => {
+        const frame = JSON.parse(String(raw)) as Frame
+        if (frame.id !== id) return
+        this.ws.off('message', onMessage)
+        clearTimeout(timer)
+        resolve(frame)
+      }
+      this.ws.on('message', onMessage)
+      this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+    })
+  }
+
+  async result<T = unknown>(method: string, params?: unknown): Promise<T> {
+    const frame = await this.call(method, params)
+    if (frame.error) throw new Error(`${method}: ${JSON.stringify(frame.error)}`)
+    return frame.result as T
+  }
+
+  /** What every client was told by `method`. */
+  toldBy(method: string): unknown[] {
+    return this.told.filter((t) => t.method === method).map((t) => t.params)
+  }
+
+  close(): void {
+    this.ws.close()
+  }
+}
+
+interface RealServer {
+  child: ChildProcess
+  dirs: RunDirs
+  port: number
+  vornd: number
+  log: string[]
+}
+
+const realServers: RealServer[] = []
+
+async function startRealServer(nativeServer: boolean): Promise<RealServer> {
+  const made = (name: string): string =>
+    fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `vorn-parity-${name}-`)))
+  // Its own home: the agents' hook settings and the hook endpoint are there.
+  const dirs = { home: made('home'), data: made('data'), work: made('work') }
+  const log: string[] = []
+  const child = spawn(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      path.join(__dirname, '..', 'packages', 'server', 'src', 'index.ts'),
+      '--data-dir',
+      dirs.data,
+      '--port',
+      '0'
+    ],
+    {
+      cwd: path.join(__dirname, '..'),
+      env: {
+        ...process.env,
+        HOME: dirs.home,
+        [BOOTSTRAP_ENV_VAR]: TEST_CREDENTIAL,
+        VORN_VORND_PATH: vornd!,
+        VORN_NATIVE_SERVER: nativeServer ? '1' : '0',
+        VORND_NATIVE_SERVER: '',
+        VORND_GROUPS: '',
+        NODE_ENV: 'test',
+        VITEST: ''
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    }
+  )
+  child.stdout?.on('data', (d) => log.push(String(d)))
+  child.stderr?.on('data', (d) => log.push(String(d)))
+  const server: RealServer = { child, dirs, port: 0, vornd: 0, log }
+  realServers.push(server)
+  await until('the server to listen', () => {
+    try {
+      const record = JSON.parse(fs.readFileSync(path.join(dirs.data, WS_PORT_FILENAME), 'utf-8'))
+      server.port = typeof record.port === 'number' ? (record.port as number) : 0
+    } catch {
+      server.port = 0
+    }
+    return server.port > 0
+  })
+  const direct = await Watcher.open(server.port)
+  await until('vornd to start', async () => {
+    const s = await direct.result<{ state: string; port?: number; nativeServer?: boolean }>(
+      'server:vornd'
+    )
+    if (s.state !== 'on' || !s.port) return false
+    expect(s.nativeServer).toBe(nativeServer)
+    server.vornd = s.port
+    return true
+  })
+  await until('the session holder, and with the switch the copy deciding', async () => {
+    const res = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
+    const health = (await res.json()) as {
+      sessiond?: { current?: { pid?: number } }
+      registry?: { fed?: boolean; decides?: boolean }
+    }
+    if (!health.sessiond?.current?.pid) return false
+    return !nativeServer || (health.registry?.fed === true && health.registry.decides === true)
+  })
+  direct.close()
+  return server
+}
+
+async function stopRealServer(server: RealServer): Promise<void> {
+  const holder = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
+    .then((r) => r.json() as Promise<{ sessiond?: { current?: { pid?: number } } }>)
+    .then((h) => h.sessiond?.current?.pid)
+    .catch(() => undefined)
+  if (server.child.exitCode === null) {
+    const exited = new Promise((r) => server.child.once('exit', r))
+    server.child.kill()
+    await exited
+  }
+  // The session holder outlives the server, by design, and its sessions with it.
+  if (holder) {
+    try {
+      process.kill(holder, 'SIGTERM')
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/** A repository with one commit, the same commit on every run. */
+function repository(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'README'), 'parity\n')
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'Vorn',
+    GIT_AUTHOR_EMAIL: 'vorn@example.invalid',
+    GIT_COMMITTER_NAME: 'Vorn',
+    GIT_COMMITTER_EMAIL: 'vorn@example.invalid',
+    GIT_AUTHOR_DATE: '2026-01-01T00:00:00Z',
+    GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z'
+  }
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: dir, env, stdio: 'ignore' })
+  }
+  git('init', '-q', '-b', 'main')
+  git('add', 'README')
+  git('commit', '-q', '-m', 'first')
+}
+
+/** A call's answer as the transcript keeps it: its result, or its error's message. */
+function answered(frame: Frame): unknown {
+  if (frame.error) return { error: (frame.error as { message?: string }).message }
+  return 'result' in frame ? { result: frame.result } : { void: true }
+}
+
+/** The same calls, on one server, through its vornd; answers the transcript. */
+async function scenario(server: RealServer): Promise<Record<string, unknown>> {
+  const { work } = server.dirs
+  const stub = path.join(work, 'bin', 'argv-agent')
+  fs.mkdirSync(path.dirname(stub))
+  fs.writeFileSync(stub, ARGV_AGENT, { mode: 0o755 })
+  const repo = path.join(work, 'repo')
+  repository(repo)
+
+  const direct = await Watcher.open(server.port)
+  const through = await Watcher.open(server.vornd)
+  const replies: Record<string, unknown> = {}
+  const call = async (step: string, method: string, params?: unknown): Promise<Frame> => {
+    const frame = await through.call(method, params)
+    replies[step] = answered(frame)
+    return frame
+  }
+  const created = async (step: string, method: string, params?: unknown): Promise<string> => {
+    const frame = await call(step, method, params)
+    if (frame.error) throw new Error(`${step}: ${JSON.stringify(frame.error)}`)
+    return (frame.result as TerminalSession).id
+  }
+  const listed = (): Promise<TerminalSession[]> =>
+    direct.result<TerminalSession[]>('terminal:listActive')
+  const live = async (ids: string[]): Promise<void> => {
+    await until('the sessions to start', async () => {
+      const all = await listed()
+      return ids.every((id) => (all.find((s) => s.id === id)?.pid ?? 0) > 0)
+    })
+  }
+  try {
+    const config = await direct.result<Record<string, unknown>>('config:load')
+    await direct.result('config:save', {
+      ...config,
+      defaults: { ...(config.defaults as object), shell: '/bin/sh' },
+      agentCommands: Object.fromEntries(AGENTS.map((a) => [a, { command: stub, args: [] }]))
+    })
+
+    // An agent of every kind, each in a project of its own.
+    const agents: Record<string, string> = {}
+    for (const agent of AGENTS) {
+      const project = path.join(work, agent)
+      fs.mkdirSync(project)
+      agents[agent] = await created(`create ${agent}`, 'terminal:create', {
+        agentType: agent,
+        projectName: agent,
+        projectPath: project,
+        displayName: agent === 'gemini' ? 'Named' : undefined,
+        initialPrompt: agent === 'opencode' ? 'write the parity test' : undefined
+      })
+    }
+    await live(Object.values(agents))
+    const argv: Record<string, string> = {}
+    const shown: Record<string, string[]> = {}
+    await until('every agent to say what it was started with', async () => {
+      for (const agent of AGENTS) {
+        const out = await through.result<string[]>('terminal:readOutput', { id: agents[agent] })
+        shown[agent] = out
+        // After the shell's prompt, when the agent was started before the shell drew it.
+        const line = out.find((l) => l.includes('ARGV:'))
+        if (!line) return false
+        argv[agent] = line.slice(line.indexOf('ARGV:')).trimEnd()
+      }
+      return true
+    }).catch((err: Error) => {
+      throw new Error(`${err.message}; their screens: ${JSON.stringify(shown)}`)
+    })
+
+    // Shells: in a project, and in the home directory.
+    const shellA = await created('shell in a project', 'shell:create', path.join(work, 'claude'))
+    await live([shellA])
+    const shellB = await created('shell at home', 'shell:create')
+    await live([shellB])
+
+    // An agent in a new worktree, which is the only session there.
+    const inWorktree = await created('create in a worktree', 'terminal:create', {
+      agentType: 'claude',
+      projectName: 'repo',
+      projectPath: repo,
+      useWorktree: true,
+      branch: 'feature',
+      worktreeName: 'wt-one'
+    })
+    await live([inWorktree])
+
+    // One conversation asked for twice at once: one session, both answered with it.
+    const named = {
+      agentType: 'codex',
+      projectName: 'codex',
+      projectPath: path.join(work, 'codex'),
+      resumeSessionId: 'conversation-twice'
+    }
+    const [first, second] = await Promise.all([
+      through.call('terminal:create', named),
+      through.call('terminal:create', named)
+    ])
+    const once = (first.result as TerminalSession).id
+    replies['one conversation twice at once'] = {
+      same: once === (second.result as TerminalSession).id
+    }
+    await live([once])
+    const third = await through.result<TerminalSession>('terminal:create', named)
+    replies['one conversation again'] = { same: third.id === once }
+
+    // What a person does to the cards, and what is refused.
+    await call('rename', 'terminal:rename', { id: shellA, displayName: 'Build' })
+    await call('group', 'terminal:setGroup', { id: shellB, groupId: 'group-1' })
+    const order = [shellB, ...Object.values(agents), inWorktree, once, shellA]
+    await call('reorder', 'terminal:reorder', order)
+    await call('ungroup', 'terminal:setGroup', { id: shellB, groupId: '' })
+    await call('rename a card that is not there', 'terminal:rename', {
+      id: 'no-such-card',
+      displayName: 'x'
+    })
+    await call('reorder twice over', 'terminal:reorder', [shellA, shellA])
+    await call('reorder with one missing', 'terminal:reorder', [shellA, 'no-such-card'])
+
+    // The last session in the worktree closed: one offer to clean it up.
+    await call('close the worktree agent', 'terminal:kill', inWorktree)
+    await until('its exit', () =>
+      direct.toldBy('terminal:exit').some((p) => (p as { id?: string }).id === inWorktree)
+    )
+    await call('close a shell', 'terminal:kill', shellB)
+    await until('the shell to go', async () => !(await listed()).some((s) => s.id === shellB))
+    await until('its exit', () =>
+      direct.toldBy('terminal:exit').some((p) => (p as { id?: string }).id === shellB)
+    )
+    // A card that is not there: the server tells its exit anyway.
+    await call('close a card that is not there', 'terminal:kill', 'no-such-card')
+    await until('every exit', () => direct.toldBy('terminal:exit').length >= 3)
+
+    // Settled: the registry stops changing.
+    let last = ''
+    let since = Date.now()
+    await until('the registry to settle', async () => {
+      const now = JSON.stringify(await listed())
+      if (now !== last) {
+        last = now
+        since = Date.now()
+      }
+      return Date.now() - since > 500
+    })
+    const toldOf = (method: string): unknown[] => direct.toldBy(method)
+    const health = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
+    const groups = (
+      (await health.json()) as { groups: Counts & Record<string, { native?: number }> }
+    ).groups
+    const by = (group: string): { native?: number; forwarded?: number } => ({
+      native: groups[group]?.native,
+      forwarded: groups[group]?.forwarded
+    })
+    return {
+      answeredBy: { terminal: by('terminal'), shell: by('shell') },
+      replies: withoutHookLinks(replies),
+      argv,
+      listed: await listed(),
+      told: {
+        created: toldOf('session:created'),
+        reordered: toldOf('session:reordered'),
+        cleanup: toldOf('worktree:confirmCleanup'),
+        // In the order they were closed: each waited for the one before.
+        exits: toldOf('terminal:exit').map((p) => (p as { id: string }).id),
+        renamed: toldOf('session:updated')
+          .map((p) => p as TerminalSession)
+          .filter((s) => s.displayName === 'Build' || s.groupId === 'group-1')
+          .map((s) => ({ id: s.id, displayName: s.displayName, groupId: s.groupId }))
+      }
+    }
+  } finally {
+    direct.close()
+    through.close()
+  }
+}
+
+describe.skipIf(!runnable)('the terminals vornd creates and changes, against the server', () => {
+  const runs: Partial<Record<'off' | 'on', Record<string, unknown>>> = {}
+
+  beforeAll(async () => {
+    for (const [mode, on] of [
+      ['off', false],
+      ['on', true]
+    ] as const) {
+      const server = await startRealServer(on)
+      try {
+        runs[mode] = normalizeRun(await scenario(server), server.dirs)
+      } catch (err) {
+        throw new Error(`${mode}: ${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
+          cause: err
+        })
+      } finally {
+        await stopRealServer(server)
+      }
+    }
+  }, 240_000)
+
+  afterAll(() => {
+    for (const s of realServers) {
+      for (const dir of Object.values(s.dirs)) {
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+      }
+    }
+  })
+
+  it('creates, starts and changes terminals as the server does with the switch off', () => {
+    const off = runs.off as { replies: Record<string, unknown>; told: { cleanup: unknown[] } }
+    // What the switch must not change, read off the server's own run.
+    expect(off.replies['one conversation twice at once']).toEqual({ same: true })
+    expect(off.replies['one conversation again']).toEqual({ same: true })
+    expect(off.told.cleanup).toHaveLength(1)
+    expect(runs.off?.answeredBy).toEqual({
+      terminal: { native: 0, forwarded: 19 },
+      shell: { native: 0, forwarded: 2 }
+    })
+  })
+
+  it('has vornd answer them with the switch on, and the server what is its own', () => {
+    // Refused by the server in its words: a card that is not there, a
+    // duplicate in an order, one missing from it; and a close of a card that
+    // is not there, which the server tells clients of anyway.
+    expect(runs.on?.answeredBy).toEqual({
+      terminal: { native: 15, forwarded: 4 },
+      shell: { native: 2, forwarded: 0 }
+    })
+  })
+
+  it('answers, starts, tells and lists the same with the switch on', () => {
+    for (const part of ['replies', 'argv', 'told', 'listed'] as const) {
+      expect([part, runs.on?.[part]]).toEqual([part, runs.off?.[part]])
+    }
+  })
 })

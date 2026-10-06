@@ -32,9 +32,21 @@
 //! screen status the effect's, anything else the session's head at the moment
 //! it arrives ([`Stamp::at_head`]), so a hook's word is never undone by an
 //! older screen status told again. Once the server says a terminal's program
-//! ended, its record is the server's again, whole.
+//! ended, its record is the server's again, whole, but for the fields only
+//! `vornd:patch` and vornd's own calls set (a name, a group, the agent's
+//! conversation), which stay the registry's whatever an upsert says.
+//!
+//! With the Native server switch on, vornd also creates, renames, regroups,
+//! reorders and closes terminals itself ([`crate::native::sessions`]). Those
+//! changes are told with `native: true`, so the server knows they are not the
+//! echo of its own: a terminal vornd created (`created`, then `started` once
+//! its program is up, or `failed`), one it closed, and the order it set. A
+//! terminal vornd closed is remembered until the server lets go of it too,
+//! so an upsert the server sent before it heard does not bring it back. The
+//! workspaces vornd holds while it prepares a session are told beside the
+//! server's own, as `nativeHolds`.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -316,6 +328,9 @@ trait Record: Clone + PartialEq + Serialize {
     /// Takes from `held` what the registry decides while it decides the
     /// statuses, rather than what the server sent.
     fn keep_decided(&mut self, held: &Self);
+    /// Takes from `held` the fields only a patch or vornd's own calls set
+    /// while it decides, whether or not the program still runs.
+    fn keep_patched(&mut self, held: &Self);
     /// Marks the record as subscribers are told it.
     fn tell(&mut self, rev: Rev, status_at: Option<Stamp>, exit_at: Option<Stamp>);
 }
@@ -334,6 +349,12 @@ impl Record for TerminalSession {
         self.status = held.status;
         self.status_source = held.status_source;
         self.hook_session_id.clone_from(&held.hook_session_id);
+    }
+    fn keep_patched(&mut self, held: &Self) {
+        self.display_name.clone_from(&held.display_name);
+        self.renamed_by_person = held.renamed_by_person;
+        self.group_id.clone_from(&held.group_id);
+        self.agent_session_id.clone_from(&held.agent_session_id);
     }
     fn tell(&mut self, rev: Rev, status_at: Option<Stamp>, exit_at: Option<Stamp>) {
         self.rev = Some(rev.0);
@@ -356,6 +377,8 @@ impl Record for HeadlessSession {
     }
     // Its status is the server's: running until it exits.
     fn keep_decided(&mut self, _: &Self) {}
+    // Nothing patches one.
+    fn keep_patched(&mut self, _: &Self) {}
     fn tell(&mut self, rev: Rev, _: Option<Stamp>, exit_at: Option<Stamp>) {
         self.rev = Some(rev.0);
         self.exit_at = exit_at;
@@ -451,6 +474,9 @@ impl<R: Record> Table<R> {
         };
         // The server's records stop moving what the registry decides, until
         // it says the program ended: from then on the record is its own.
+        if decided {
+            record.keep_patched(&row.record);
+        }
         if decided && !ended && !row.ended {
             record.keep_decided(&row.record);
             status_at = row.status_at;
@@ -507,7 +533,12 @@ impl<R: Record> Table<R> {
                 let held = old.iter().find(|r| r.record.id() == record.id());
                 let ended = ended.iter().any(|id| id == record.id());
                 match held {
-                    Some(h) if decided && !ended && !h.ended => record.keep_decided(&h.record),
+                    Some(h) if decided => {
+                        record.keep_patched(&h.record);
+                        if !ended && !h.ended {
+                            record.keep_decided(&h.record);
+                        }
+                    }
                     Some(_) => {}
                     None => fresh.push(record.id().to_owned()),
                 }
@@ -589,6 +620,8 @@ pub enum RegistryError {
     NoTerminal { call: &'static str, id: String },
     /// A patch read from a record the id no longer names.
     Replaced { id: String },
+    /// A call a client made, refused in the words the server refuses it.
+    Refused(String),
 }
 
 impl fmt::Display for RegistryError {
@@ -602,6 +635,7 @@ impl fmt::Display for RegistryError {
             }
             RegistryError::BadCall { call, why } => write!(f, "{call}: {why}"),
             RegistryError::NoTerminal { call, id } => write!(f, "{call}: no terminal {id}"),
+            RegistryError::Refused(why) => f.write_str(why),
             RegistryError::Replaced { id } => {
                 write!(
                     f,
@@ -788,6 +822,12 @@ pub struct Registry {
     headless: Table<HeadlessSession>,
     order: Vec<String>,
     holds: BTreeMap<String, u32>,
+    /// The workspaces vornd holds itself while it prepares a session, by
+    /// path, with how many preparations hold each.
+    own_holds: BTreeMap<String, u32>,
+    /// Terminals vornd closed that the server has not let go of yet: an
+    /// upsert it sent before it heard is not a new terminal.
+    closed: HashSet<String>,
     /// Set while the registry decides the terminals' statuses.
     statuses: Option<Statuses>,
 }
@@ -802,6 +842,8 @@ impl Registry {
             headless: Table::default(),
             order: Vec::new(),
             holds: BTreeMap::new(),
+            own_holds: BTreeMap::new(),
+            closed: HashSet::new(),
             statuses: None,
         }
     }
@@ -840,6 +882,8 @@ impl Registry {
             } => {
                 let at = Stamps { status_at, exit_at };
                 match *record {
+                    // Closed here, and the server has not heard yet.
+                    Session::Terminal(r) if self.closed.contains(&r.id) => return None,
                     Session::Terminal(r) => {
                         let id = r.id.clone();
                         match self.terminals.upsert(r, at, ended, decided, next) {
@@ -864,6 +908,10 @@ impl Registry {
                 }
             }
             Change::Remove { kind, id } => {
+                // The server letting go of a terminal vornd closed: it heard.
+                if kind == Kind::Terminal && self.closed.remove(&id) {
+                    return None;
+                }
                 let gone = match kind {
                     Kind::Terminal => self.terminals.remove(&id),
                     Kind::Headless => self.headless.remove(&id),
@@ -888,9 +936,19 @@ impl Registry {
                     return None;
                 }
                 self.holds = holds;
-                json!({ "op": "holds", "holds": self.holds })
+                self.holds_fields()
             }
-            Change::Snapshot(s) => {
+            Change::Snapshot(mut s) => {
+                // A terminal vornd closed stays closed; one the server no
+                // longer has, it has let go of.
+                let still: HashSet<String> = s
+                    .terminals
+                    .iter()
+                    .filter(|t| self.closed.contains(&t.id))
+                    .map(|t| t.id.clone())
+                    .collect();
+                s.terminals.retain(|t| !still.contains(&t.id));
+                self.closed = still;
                 let fresh = self.terminals.replace(s.terminals, &s.ended, decided, next);
                 self.headless.replace(s.headless, &[], false, next);
                 for id in &fresh {
@@ -1084,10 +1142,21 @@ impl Registry {
 
     /// Sets fields of [`PATCHABLE`] on a terminal's record.
     pub fn patch(&mut self, call: &Patch) -> Result<Option<Value>, RegistryError> {
-        const CALL: &str = "vornd:patch";
         if !self.decides() {
-            return Err(RegistryError::NotDeciding { call: CALL });
+            return Err(RegistryError::NotDeciding {
+                call: "vornd:patch",
+            });
         }
+        Ok(if self.patch_record(call)? {
+            self.decided(&call.id)
+        } else {
+            None
+        })
+    }
+
+    /// Sets a patch's fields on its record; answers whether it changed.
+    fn patch_record(&mut self, call: &Patch) -> Result<bool, RegistryError> {
+        const CALL: &str = "vornd:patch";
         let id = call.id.as_str();
         let row = self
             .terminals
@@ -1119,10 +1188,10 @@ impl Registry {
             why: e.to_string(),
         })?;
         if patched == row.record {
-            return Ok(None);
+            return Ok(false);
         }
         row.record = patched;
-        Ok(self.decided(id))
+        Ok(true)
     }
 
     /// The engine let go of session `id`: what its screen showed goes with
@@ -1170,14 +1239,28 @@ impl Registry {
     /// subscriber starts from or resyncs to. Each record carries the
     /// revision it last changed at.
     pub fn snapshot(&self) -> Value {
-        json!({
+        let mut snapshot = json!({
             "gen": self.gen,
             "rev": self.rev,
             "terminals": self.terminals.rows.iter().map(Row::told).collect::<Vec<_>>(),
             "headless": self.headless.rows.iter().map(Row::told).collect::<Vec<_>>(),
             "order": self.order,
             "holds": self.holds,
-        })
+        });
+        if !self.own_holds.is_empty() {
+            snapshot["nativeHolds"] = json!(self.own_holds);
+        }
+        snapshot
+    }
+
+    /// A `holds` note's fields: the server's holds, and vornd's own beside
+    /// them while it has any.
+    fn holds_fields(&self) -> Value {
+        let mut fields = json!({ "op": "holds", "holds": self.holds });
+        if !self.own_holds.is_empty() {
+            fields["nativeHolds"] = json!(self.own_holds);
+        }
+        fields
     }
 
     /// The terminals as `terminal:listActive` lists them: those the order
@@ -1227,6 +1310,218 @@ impl Registry {
     /// The workspaces held while a session is prepared.
     pub fn holds(&self) -> &BTreeMap<String, u32> {
         &self.holds
+    }
+
+    /// The workspaces vornd holds itself while it prepares a session.
+    pub fn own_holds(&self) -> &BTreeMap<String, u32> {
+        &self.own_holds
+    }
+
+    /// Terminal `id`'s record, and whether its program ended.
+    pub fn terminal(&self, id: &str) -> Option<(&TerminalSession, bool)> {
+        self.terminals.get(id).map(|r| (&r.record, r.ended))
+    }
+
+    /// The terminals whose programs still run (`getLiveSessions`).
+    pub fn live_terminals(&self) -> impl Iterator<Item = &TerminalSession> {
+        self.terminals
+            .rows
+            .iter()
+            .filter(|r| !r.ended)
+            .map(|r| &r.record)
+    }
+
+    /// How many terminals run a shell, live or not (`createShellPty`
+    /// numbers a new shell after them).
+    pub fn shells(&self) -> usize {
+        self.terminals
+            .records()
+            .filter(|t| t.agent_type == "shell")
+            .count()
+    }
+}
+
+/// The changes vornd makes to the terminals itself, with the Native server
+/// switch on. Each answers the notes to tell, marked `native`; each needs
+/// the registry to decide the statuses, which is what makes the patched
+/// fields its own.
+impl Registry {
+    /// A note at the next revision for a change vornd made, marked so.
+    fn native_note(&mut self, mut fields: Value) -> Value {
+        self.rev = Rev(self.rev.0 + 1);
+        fields["native"] = Value::Bool(true);
+        self.note(fields)
+    }
+
+    /// Terminal `id`'s row, told whole at the next revision with `extra`.
+    fn native_upsert(&mut self, id: &str, extra: Value) -> Option<Value> {
+        let next = Rev(self.rev.0 + 1);
+        let row = self.terminals.get_mut(id)?;
+        row.rev = next;
+        let mut fields = json!({ "op": "upsert", "kind": Kind::Terminal, "record": row.told() });
+        if let (Value::Object(fields), Value::Object(extra)) = (&mut fields, extra) {
+            fields.extend(extra);
+        }
+        Some(self.native_note(fields))
+    }
+
+    /// Puts in a terminal vornd is creating, last in the order. Its program
+    /// is not up yet: [`Registry::started`] or [`Registry::failed`] says how
+    /// that went.
+    pub fn create(&mut self, record: TerminalSession) -> Result<Vec<Value>, RegistryError> {
+        const CALL: &str = "terminal:create";
+        if !self.decides() {
+            return Err(RegistryError::NotDeciding { call: CALL });
+        }
+        let id = record.id.clone();
+        if self.terminals.get(&id).is_some() {
+            return Err(RegistryError::BadCall {
+                call: CALL,
+                why: format!("terminal {id} exists already"),
+            });
+        }
+        self.closed.remove(&id);
+        let next = Rev(self.rev.0 + 1);
+        self.terminals
+            .upsert(record, Stamps::default(), false, true, next);
+        self.seed(&id);
+        let mut notes = Vec::with_capacity(2);
+        notes.extend(self.native_upsert(&id, json!({ "created": true })));
+        self.order.push(id);
+        let order = json!({ "op": "order", "order": self.order });
+        notes.push(self.native_note(order));
+        Ok(notes)
+    }
+
+    /// Terminal `id`'s program is up as `pid`, its records in `epoch`.
+    pub fn started(&mut self, id: &str, pid: u32, epoch: u32) -> Option<Value> {
+        let row = self.terminals.get_mut(id)?;
+        row.record.pid = pid;
+        self.native_upsert(id, json!({ "started": { "pid": pid, "epoch": epoch } }))
+    }
+
+    /// Terminal `id`'s program could not be started, and why: the server
+    /// ends it as it ends one whose spawn failed.
+    pub fn failed(&mut self, id: &str, why: &str) -> Option<Value> {
+        self.terminals.get(id)?;
+        self.native_upsert(id, json!({ "failed": why }))
+    }
+
+    /// Closes terminal `id`: its record and its place in the order go, and
+    /// an upsert the server sent before it hears is not taken. Answers the
+    /// record as it was, whether its program still ran, and the notes.
+    pub fn close(
+        &mut self,
+        id: &str,
+    ) -> Result<(TerminalSession, bool, Vec<Value>), RegistryError> {
+        const CALL: &str = "terminal:kill";
+        if !self.decides() {
+            return Err(RegistryError::NotDeciding { call: CALL });
+        }
+        let Some((record, ended)) = self.terminal(id).map(|(r, e)| (r.clone(), e)) else {
+            return Err(RegistryError::NoTerminal {
+                call: CALL,
+                id: id.to_owned(),
+            });
+        };
+        self.terminals.remove(id);
+        self.quiet(id);
+        self.closed.insert(id.to_owned());
+        let mut notes = Vec::with_capacity(2);
+        let removed = json!({ "op": "remove", "kind": Kind::Terminal, "id": id });
+        notes.push(self.native_note(removed));
+        if self.order.iter().any(|o| o == id) {
+            self.order.retain(|o| o != id);
+            let order = json!({ "op": "order", "order": self.order });
+            notes.push(self.native_note(order));
+        }
+        Ok((record, !ended, notes))
+    }
+
+    /// Sets the order the terminals are listed in (`reorderSessions`): every
+    /// id once, each a terminal the registry holds. Told even when it is the
+    /// order there was, as the server tells clients, and marked
+    /// `reordered`, so the server takes it as a client's order rather than
+    /// one that follows a create or a close.
+    pub fn reorder(&mut self, ids: Vec<String>) -> Result<Value, RegistryError> {
+        const CALL: &str = "terminal:reorder";
+        if !self.decides() {
+            return Err(RegistryError::NotDeciding { call: CALL });
+        }
+        self.check_order(&ids)?;
+        self.order = ids;
+        let order = json!({ "op": "order", "order": self.order, "reordered": true });
+        Ok(self.native_note(order))
+    }
+
+    /// Whether `ids` is an order the server would take (`reorderSessions`):
+    /// every id once, each a terminal held. Refused in the server's words.
+    pub fn check_order(&self, ids: &[String]) -> Result<(), RegistryError> {
+        let distinct: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        if distinct.len() != ids.len() {
+            return Err(RegistryError::Refused("Duplicate session IDs".to_owned()));
+        }
+        if let Some(missing) = ids.iter().find(|id| self.terminals.get(id).is_none()) {
+            return Err(RegistryError::Refused(format!(
+                "Session not found: {missing}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Whether terminal `id` is one the server would rename or regroup
+    /// (`renameSession`, `setSessionGroup`). Refused in the server's words.
+    pub fn check_terminal(&self, id: &str) -> Result<(), RegistryError> {
+        if self.terminals.get(id).is_none() {
+            return Err(RegistryError::Refused(format!("Session not found: {id}")));
+        }
+        Ok(())
+    }
+
+    /// Sets fields of [`PATCHABLE`] on terminal `id` for a call a client
+    /// made (`renameSession`, `setSessionGroup`), refused as the server
+    /// refuses it when there is no such terminal. Answers the note when the
+    /// record changed.
+    pub fn set_fields(
+        &mut self,
+        id: &str,
+        fields: Map<String, Value>,
+    ) -> Result<Option<Value>, RegistryError> {
+        if !self.decides() {
+            return Err(RegistryError::NotDeciding {
+                call: "vornd:patch",
+            });
+        }
+        self.check_terminal(id)?;
+        let call = Patch {
+            id: id.to_owned(),
+            fields,
+            base_rev: None,
+        };
+        if !self.patch_record(&call)? {
+            return Ok(None);
+        }
+        Ok(self.native_upsert(id, json!({})))
+    }
+
+    /// Holds the workspace at `dir` (already normalized) while a session is
+    /// prepared in it. Answers the note.
+    pub fn hold(&mut self, dir: &str) -> Value {
+        *self.own_holds.entry(dir.to_owned()).or_default() += 1;
+        let fields = self.holds_fields();
+        self.native_note(fields)
+    }
+
+    /// Lets go of one hold on `dir`. Answers the note, or `None` when it
+    /// was not held.
+    pub fn release(&mut self, dir: &str) -> Option<Value> {
+        let left = self.own_holds.get_mut(dir)?;
+        *left -= 1;
+        if *left == 0 {
+            self.own_holds.remove(dir);
+        }
+        let fields = self.holds_fields();
+        Some(self.native_note(fields))
     }
 }
 
@@ -1399,6 +1694,20 @@ impl SessionRegistry {
     /// The whole registry ([`Registry::snapshot`]).
     pub fn snapshot(&self) -> Value {
         self.lock().registry.snapshot()
+    }
+
+    /// Makes a change of vornd's own ([`Registry::create`] and the rest)
+    /// and tells subscribers its notes, while the registry holds the
+    /// server's records and decides the statuses; `None` otherwise, when the
+    /// call is the server's to make.
+    pub fn change<T>(&self, f: impl FnOnce(&mut Registry) -> (T, Vec<Value>)) -> Option<T> {
+        let mut fed = self.lock();
+        if fed.feeder.is_none() || !fed.registry.decides() {
+            return None;
+        }
+        let (answer, notes) = f(&mut fed.registry);
+        self.tell(notes);
+        Some(answer)
     }
 
     /// Reads the registry, while it holds the server's records; `None`
@@ -1981,6 +2290,175 @@ mod tests {
             r.patch(&old),
             Err(RegistryError::Replaced { id: "a".into() })
         );
+    }
+
+    fn record(id: &str) -> TerminalSession {
+        serde_json::from_value(agent(id)).unwrap()
+    }
+
+    #[test]
+    fn a_terminal_vornd_creates_is_told_as_its_own_then_started_or_failed() {
+        let mut r = deciding();
+        let notes = r.create(record("n")).unwrap();
+        assert_eq!(notes.len(), 2);
+        assert_eq!(
+            (notes[0]["op"].as_str(), notes[0]["created"].as_bool()),
+            (Some("upsert"), Some(true))
+        );
+        assert_eq!(notes[0]["native"], true);
+        assert_eq!(notes[1]["order"], json!(["n"]));
+        assert_eq!(
+            notes[1]["rev"].as_u64(),
+            notes[0]["rev"].as_u64().map(|r| r + 1)
+        );
+        // Twice under one id is refused.
+        assert!(r.create(record("n")).is_err());
+
+        let note = r.started("n", 42, 3).unwrap();
+        assert_eq!(note["record"]["pid"], 42);
+        assert_eq!(note["started"], json!({ "pid": 42, "epoch": 3 }));
+        let note = r.failed("n", "no shell").unwrap();
+        assert_eq!(note["failed"], "no shell");
+        assert!(r.started("gone", 1, 1).is_none());
+
+        // The server's echo of what it was told changes nothing.
+        let mut echo = agent("n");
+        echo["pid"] = json!(42);
+        assert!(r.apply(upsert(echo)).is_none());
+        // Not deciding: the server creates its own.
+        assert!(Registry::new(Gen(1)).create(record("x")).is_err());
+    }
+
+    #[test]
+    fn a_terminal_vornd_closed_stays_closed_until_the_server_lets_go_of_it() {
+        let mut r = deciding();
+        r.apply(change(json!({ "op": "order", "order": ["a", "sh"] })))
+            .unwrap();
+        let (closed, live, notes) = r.close("a").unwrap();
+        assert_eq!((closed.id.as_str(), live), ("a", true));
+        assert_eq!(notes[0]["op"], "remove");
+        assert_eq!(notes[1]["order"], json!(["sh"]));
+        assert!(notes.iter().all(|n| n["native"] == true));
+        assert!(matches!(
+            r.close("a"),
+            Err(RegistryError::NoTerminal { .. })
+        ));
+        // An upsert the server sent before it heard is not taken.
+        assert!(r.apply(upsert(agent("a"))).is_none());
+        // Nor kept by a snapshot sent meanwhile.
+        r.apply(change(json!({
+            "op": "snapshot", "terminals": [agent("a"), terminal("sh")], "headless": [],
+        })))
+        .unwrap();
+        assert!(r.terminal("a").is_none());
+        // The server lets go of it: it heard, and the id is free again.
+        assert!(r
+            .apply(change(
+                json!({ "op": "remove", "kind": "terminal", "id": "a" })
+            ))
+            .is_none());
+        assert!(r.apply(upsert(agent("a"))).is_some());
+
+        // A terminal whose program ended is closed without a signal.
+        let mut ended = terminal("sh");
+        ended["status"] = json!("idle");
+        r.apply(change(
+            json!({ "op": "upsert", "kind": "terminal", "record": ended, "ended": true }),
+        ))
+        .unwrap();
+        let (_, live, notes) = r.close("sh").unwrap();
+        assert!(!live);
+        // It was not in the order any more: no order note.
+        assert_eq!(notes.len(), 1);
+    }
+
+    #[test]
+    fn a_reorder_is_checked_as_the_server_checks_it_and_always_told() {
+        let mut r = deciding();
+        let ids = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            r.reorder(ids(&["a", "a"])).unwrap_err().to_string(),
+            "Duplicate session IDs"
+        );
+        assert_eq!(
+            r.reorder(ids(&["a", "x"])).unwrap_err().to_string(),
+            "Session not found: x"
+        );
+        let note = r.reorder(ids(&["sh", "a"])).unwrap();
+        assert_eq!(
+            (note["order"].clone(), note["reordered"].clone()),
+            (json!(["sh", "a"]), json!(true))
+        );
+        // The same order again is told again.
+        let again = r.reorder(ids(&["sh", "a"])).unwrap();
+        assert_eq!(again["rev"].as_u64(), note["rev"].as_u64().map(|r| r + 1));
+        assert_eq!(
+            r.terminals()
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect::<Vec<_>>(),
+            ["sh", "a"]
+        );
+    }
+
+    #[test]
+    fn fields_vornd_sets_stay_whatever_the_server_sends_until_it_sets_them() {
+        let mut r = deciding();
+        let mut fields = Map::new();
+        fields.insert("displayName".into(), json!("mine"));
+        fields.insert("renamedByPerson".into(), json!(true));
+        let note = r.set_fields("a", fields.clone()).unwrap().unwrap();
+        assert_eq!(note["record"]["displayName"], "mine");
+        assert_eq!(note["native"], true);
+        // The same fields again change nothing.
+        assert!(r.set_fields("a", fields).unwrap().is_none());
+        assert_eq!(
+            r.set_fields("x", Map::new()).unwrap_err().to_string(),
+            "Session not found: x"
+        );
+        // An upsert the server sent with the old name, and a snapshot, and
+        // one after the program ended: the name stays.
+        let mut stale = agent("a");
+        stale["displayName"] = json!("old");
+        stale["cols"] = json!(99);
+        let note = r.apply(upsert(stale.clone())).unwrap();
+        assert_eq!(note["record"]["displayName"], "mine");
+        assert_eq!(note["record"]["cols"], 99);
+        r.apply(change(json!({
+            "op": "snapshot", "terminals": [stale.clone(), terminal("sh")], "headless": [],
+        })))
+        .unwrap();
+        assert_eq!(
+            r.terminal("a").unwrap().0.display_name.as_deref(),
+            Some("mine")
+        );
+        r.apply(change(
+            json!({ "op": "upsert", "kind": "terminal", "record": stale, "ended": true }),
+        ))
+        .unwrap();
+        let (a, ended) = r.terminal("a").unwrap();
+        assert!(ended);
+        assert_eq!(a.display_name.as_deref(), Some("mine"));
+        assert_eq!(a.renamed_by_person, Some(true));
+    }
+
+    #[test]
+    fn vornds_own_holds_are_told_beside_the_servers() {
+        let mut r = deciding();
+        r.apply(change(json!({ "op": "holds", "holds": { "/s": 1 } })))
+            .unwrap();
+        let note = r.hold("/w");
+        assert_eq!(
+            (note["holds"].clone(), note["nativeHolds"].clone()),
+            (json!({ "/s": 1 }), json!({ "/w": 1 }))
+        );
+        r.hold("/w");
+        assert_eq!(r.snapshot()["nativeHolds"], json!({ "/w": 2 }));
+        assert_eq!(r.release("/w").unwrap()["nativeHolds"], json!({ "/w": 1 }));
+        let note = r.release("/w").unwrap();
+        assert!(note.get("nativeHolds").is_none());
+        assert!(r.release("/w").is_none());
+        assert!(r.snapshot().get("nativeHolds").is_none());
     }
 
     #[test]

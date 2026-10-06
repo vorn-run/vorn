@@ -3005,6 +3005,7 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "vorn-agents",
  "vorn-engine",
  "vorn-git",

@@ -40,10 +40,10 @@ import { abandonSelections } from './extensions/selection'
 import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
 import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
-import { handOver, type HandoffHost } from './handoff/donor'
+import { handOver, isHandingOver, onHandover, type HandoffHost } from './handoff/donor'
 import { receiveHandoff, announceServing } from './handoff/heir'
 import { releaseListener, retakeListener } from './server-rebind'
-import { beginDraining, isDraining, watchEndpoint } from './draining'
+import { beginDraining, isDraining, onDraining, watchEndpoint } from './draining'
 import {
   initBootstrapSecret,
   publishLocalCredential,
@@ -164,6 +164,11 @@ const vorndKeeper = new VorndKeeper({
   nativeServer: () => nativeServerSwitch(configManager.loadConfig().defaults?.experimental)
 })
 vorndSessions.setLauncher(vorndKeeper)
+// vornd creates terminals for the clients with the Native server switch on, and
+// refuses them as this server does while it winds down.
+vorndSessions.setClosingSource(() => ({ draining: isDraining(), handingOver: isHandingOver() }))
+onDraining(() => vorndSessions.tellClosing())
+onHandover(() => vorndSessions.tellClosing())
 const vorndReach = linkReach({
   channel: vorndSessions,
   broadcast: (method, params) => clientRegistry.broadcast(method, params),
