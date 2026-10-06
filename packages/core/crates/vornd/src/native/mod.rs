@@ -66,7 +66,6 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("git:listBranches", Effect::Read),
     ("git:listRemoteBranches", Effect::Change),
     ("git:createWorktree", Effect::Change),
-    ("git:removeWorktree", Effect::Change),
     ("git:getWorktreeBranch", Effect::Read),
     ("git:worktreeDirty", Effect::Read),
     ("git:listWorktrees", Effect::Read),
@@ -91,6 +90,10 @@ pub const METHODS: &[(&str, Effect)] = &[
 
 /// Calls in a native group that the server keeps answering, and why.
 pub const SERVER_ONLY: &[(&str, &str)] = &[
+    (
+        "git:removeWorktree",
+        "drops the server's cached size of the worktree it removes",
+    ),
     (
         "git:checkoutBranch",
         "moves the server's sessions on that worktree to the new branch and tells clients",

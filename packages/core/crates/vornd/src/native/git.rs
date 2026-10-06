@@ -56,7 +56,6 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
         }),
         "git:diffFull" => diff_full(native, params, &git),
         "git:createWorktree" => return create_worktree(native, params, &git),
-        "git:removeWorktree" => remove_worktree(native, params, &git),
         "git:deleteBranches" => delete_branches(native, params, &git),
         "git:commit" => commit(native, params, &git),
         "git:push" => local_path(native, params).map(|p| done_json(git().push(Path::new(p)))),
@@ -176,21 +175,6 @@ fn create_worktree(native: &Native, params: &Value, git: &dyn Fn() -> Git) -> An
         })),
         Err(err) => Answer::Error(err.to_string()),
     }
-}
-
-/// `git:removeWorktree {projectPath, worktreePath, force?, deleteBranch?}`.
-fn remove_worktree(native: &Native, params: &Value, git: &dyn Fn() -> Git) -> Option<Value> {
-    let project = path_field(params, "projectPath")?;
-    let worktree = params.get("worktreePath")?.as_str()?;
-    let force = flag(params, "force")?;
-    let delete_branch = flag(params, "deleteBranch")?;
-    if !native.local_project(project) {
-        return None;
-    }
-    let removed = native.turns.take(Path::new(project), || {
-        git().remove_worktree(Path::new(project), worktree, force, delete_branch)
-    });
-    Some(json!(removed))
 }
 
 /// `git:deleteBranches {projectPath, branches, force?}`.
