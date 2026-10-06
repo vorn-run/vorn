@@ -64,6 +64,7 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "token",
     "pairing",
     "auth",
+    "mcp",
 ];
 
 /// Groups the Native server switch runs natively: the one place a group
@@ -77,6 +78,7 @@ pub const NATIVE_SERVER_GROUPS: &[&str] = &[
     "token",
     "pairing",
     "auth",
+    "mcp",
 ];
 
 /// The group a method belongs to: everything before the first colon.

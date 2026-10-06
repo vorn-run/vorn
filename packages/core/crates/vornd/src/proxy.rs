@@ -95,6 +95,10 @@ pub struct Daemon {
     spawn: std::sync::atomic::AtomicBool,
     /// The desktop's launch token, when the app that started vornd gave it.
     desktop_token: std::sync::OnceLock<Vec<u8>>,
+    /// Where vornd itself listens, which its MCP tools call back to.
+    listen: std::sync::OnceLock<SocketAddr>,
+    /// The MCP server, made on the first request it may answer.
+    mcp: std::sync::OnceLock<Arc<crate::mcp::Mcp>>,
 }
 
 impl Daemon {
@@ -127,6 +131,8 @@ impl Daemon {
             streams,
             spawn: std::sync::atomic::AtomicBool::new(false),
             desktop_token: std::sync::OnceLock::new(),
+            listen: std::sync::OnceLock::new(),
+            mcp: std::sync::OnceLock::new(),
             upstream,
             groups: Arc::new(groups),
             client: Client::builder(TokioExecutor::new()).build_http(),
@@ -185,6 +191,12 @@ impl Daemon {
                 link.reached().await;
             }
         });
+    }
+
+    /// Where vornd listens. Its MCP tools reach the server through it, so
+    /// their calls are routed as any client's are.
+    pub fn set_listen_addr(&self, addr: SocketAddr) {
+        let _ = self.listen.set(addr);
     }
 
     /// Whether a WebSocket that opened with these headers is the desktop's.
@@ -269,7 +281,43 @@ async fn handle(
             return Ok(crate::pair::answer(&daemon, &native, req, peer).await);
         }
     }
+    if req.uri().path() == crate::mcp::PATH {
+        match daemon.groups.mode(crate::mcp::GROUP) {
+            Mode::Native => return Ok(mcp(&daemon, req).await),
+            // A relay talks to the TypeScript tools or to these, never both,
+            // so there is nothing to compare.
+            Mode::Shadow => {
+                daemon
+                    .groups
+                    .count(crate::mcp::COUNTED_AS, Counted::Forwarded);
+                daemon
+                    .groups
+                    .count(crate::mcp::COUNTED_AS, Counted::ShadowUnported);
+            }
+            Mode::Forward => daemon
+                .groups
+                .count(crate::mcp::COUNTED_AS, Counted::Forwarded),
+        }
+    }
     Ok(forward_http(&daemon, req).await)
+}
+
+/// `/mcp` answered here ([`crate::mcp`]), for a caller it lets in.
+async fn mcp(daemon: &Daemon, req: Request<Incoming>) -> Response<Body> {
+    let token = daemon.desktop_token.get().map(Vec::as_slice);
+    if let Some(refused) = crate::mcp::refusal(req.headers(), token) {
+        return refused;
+    }
+    let (Some(token), Some(addr)) = (token, daemon.listen.get()) else {
+        return plain(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "vornd is not ready to serve MCP",
+        );
+    };
+    let mcp = daemon
+        .mcp
+        .get_or_init(|| Arc::new(crate::mcp::Mcp::new(*addr, token)));
+    crate::mcp::answer(&daemon.groups, mcp, req).await
 }
 
 async fn health(daemon: &Daemon) -> Response<Body> {
@@ -289,6 +337,9 @@ async fn health(daemon: &Daemon) -> Response<Body> {
         entry["shadowMatched"] = json!(c.shadow_matched);
         entry["shadowMismatched"] = json!(c.shadow_mismatched);
         entry["shadowUnported"] = json!(c.shadow_unported);
+    }
+    if let (Some(mcp), Some(entry)) = (daemon.mcp.get(), groups.get_mut(crate::mcp::GROUP)) {
+        entry["sessions"] = json!(mcp.sessions());
     }
     let body = json!({
         "ok": reachable,

@@ -35,6 +35,7 @@ vorn-engine = { path = "../engine", optional = true }
 vorn-size = { path = "../size" }
 vorn-git = { path = "../vorn-git" }
 vorn-store = { path = "../store" }
+vorn-mcp = { path = "../mcp" }
 vorn-protocol = { path = "../protocol" }
 vorn-reach = { path = "../reach" }
 vorn-term-proto = { path = "../term-proto" }

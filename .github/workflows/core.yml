@@ -35,6 +35,10 @@ on:
       - 'packages/shared/src/types.ts'
       - 'scripts/gen-store-schema.mjs'
       - 'tests/native-store.test.ts'
+      - 'packages/mcp/src/**'
+      - 'scripts/gen-mcp-tools.mjs'
+      - 'tests/native-server-mcp.test.ts'
+      - 'tests/helpers/mcp-parity.ts'
       - 'tests/helpers/store-parity.ts'
       - 'tests/database-*.test.ts'
       - 'tests/artifact-*.test.ts'
@@ -145,6 +149,12 @@ jobs:
       - name: Store schema is current
         if: runner.os == 'Linux'
         run: node scripts/gen-store-schema.mjs --check
+
+      # vornd's MCP tools and their argument schemas are generated from
+      # packages/mcp the same way.
+      - name: MCP tool definitions are current
+        if: runner.os == 'Linux'
+        run: node scripts/gen-mcp-tools.mjs --check
 
       - name: Build vorn_core.node
         run: yarn build:core

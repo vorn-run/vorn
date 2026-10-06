@@ -326,6 +326,9 @@ fn main() -> ExitCode {
         if let Some(token) = desktop_token {
             daemon.set_desktop_token(token);
         }
+        if let Ok(addr) = listener.local_addr() {
+            daemon.set_listen_addr(addr);
+        }
         daemon.set_app_link(link);
         proxy::log_upstream(&daemon).await;
         info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
