@@ -555,15 +555,34 @@ mod tests {
         );
     }
 
+    fn root_with(platform: Platform, vars: &'static [(&'static str, &'static str)]) -> String {
+        shim_root(platform, move |n| {
+            vars.iter()
+                .find(|(k, _)| *k == n)
+                .map(|(_, v)| (*v).to_owned())
+        })
+    }
+
+    // The directory is joined as Node's `path.join` joins on the host, so
+    // each platform's rules are checked on that platform.
+    #[cfg(windows)]
     #[test]
     fn finds_the_temporary_directory_as_node_does() {
-        let posix = |vars: &'static [(&'static str, &'static str)]| {
-            shim_root(Platform::Posix, move |n| {
-                vars.iter()
-                    .find(|(k, _)| *k == n)
-                    .map(|(_, v)| (*v).to_owned())
-            })
-        };
+        let windows = |vars| root_with(Platform::Windows, vars);
+        assert_eq!(
+            windows(&[("TEMP", "C:\\Users\\a\\Temp\\"), ("TMP", "D:\\x")]),
+            "C:\\Users\\a\\Temp\\vorn-shell-integration"
+        );
+        assert_eq!(
+            windows(&[("SystemRoot", "C:\\Windows")]),
+            "C:\\Windows\\temp\\vorn-shell-integration"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn finds_the_temporary_directory_as_node_does() {
+        let posix = |vars| root_with(Platform::Posix, vars);
         assert_eq!(posix(&[]), "/tmp/vorn-shell-integration");
         assert_eq!(
             posix(&[("TMPDIR", "/var/t/"), ("TMP", "/x")]),
