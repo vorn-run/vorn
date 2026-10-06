@@ -761,14 +761,19 @@ mod tests {
         assert_eq!(list[0].activity_count, 1.0);
         assert_eq!(list[0].timestamp, 200_000.0);
         // The SQL filter matches either spelling; the kept rows are the ones
-        // whose path normalizes to the project's.
+        // whose path normalizes to the project's, which ignores case on
+        // Windows.
         let scoped = recent_sessions_for(
             Agent::Codex,
             &homes(dir.path()),
             Some(&ProjectScope::new("/proj", [])),
             20,
         );
-        assert_eq!(ids(&scoped), ["c1"]);
+        if cfg!(windows) {
+            assert_eq!(ids(&scoped), ["c2", "c1"]);
+        } else {
+            assert_eq!(ids(&scoped), ["c1"]);
+        }
     }
 
     #[test]

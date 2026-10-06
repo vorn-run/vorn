@@ -143,7 +143,12 @@ mod tests {
         assert_eq!(normalize("/no/such/./dir//x/../y/"), "/no/such/dir/y");
         assert_eq!(normalize("/../no-such"), "/no-such");
         assert_eq!(normalize("rel/../../up"), "../up");
-        assert_eq!(normalize("/"), "/");
+        // `/` exists, so it resolves; on Windows to the current drive.
+        if cfg!(windows) {
+            assert!(windows_style(&normalize("/")));
+        } else {
+            assert_eq!(normalize("/"), "/");
+        }
         // Lexically: `.` exists, and resolves to the working directory.
         assert_eq!(normalize_lexically(""), ".");
         assert_eq!(normalize_lexically("./"), ".");
