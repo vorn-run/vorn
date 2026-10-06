@@ -1,0 +1,2769 @@
+{
+  "about": "Inputs and expected answers shared by the TypeScript launch builders and vorn_agents::launch. {bin} is a directory of executables the case lists, {shims} the directory the server writes shell shims to. Regenerate the expectations from the TypeScript with VORN_WRITE_LAUNCH_CORPUS=1 yarn vitest run tests/launch-parity.test.ts.",
+  "launch": [
+    {
+      "name": "claude fresh",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude"
+      },
+      "line": "claude",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "-p", ""]
+      }
+    },
+    {
+      "name": "claude pinned",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "sessionId": "pin-1"
+      },
+      "line": "claude --session-id pin-1",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "--session-id", "pin-1", "-p", ""]
+      }
+    },
+    {
+      "name": "claude resume",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "old-1"
+      },
+      "line": "claude --resume old-1",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "--resume", "old-1", "-p", ""]
+      }
+    },
+    {
+      "name": "claude resume beats pin",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "old-1",
+        "sessionId": "pin-1"
+      },
+      "line": "claude --resume old-1",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "--resume", "old-1", "-p", ""]
+      }
+    },
+    {
+      "name": "claude prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "initialPrompt": "fix it's bug"
+      },
+      "line": "claude 'fix it'\\''s bug'",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "-p"],
+        "stdin": "fix it's bug"
+      }
+    },
+    {
+      "name": "claude model",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "model": "opus[1m]"
+      },
+      "line": "claude --model 'opus[1m]'",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "--model", "opus[1m]", "-p", ""]
+      }
+    },
+    {
+      "name": "claude model replacing configured",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "model": "provider/model",
+        "args": ["--model=old", "-m", "x", "--verbose"],
+        "initialPrompt": "hello world"
+      },
+      "line": "claude -m x --verbose --model provider/model 'hello world'",
+      "headless": {
+        "command": "claude",
+        "args": ["-m", "x", "--verbose", "--model", "provider/model", "-p"],
+        "stdin": "hello world"
+      }
+    },
+    {
+      "name": "claude resume with model and prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "old 2",
+        "model": "m1",
+        "initialPrompt": "go on"
+      },
+      "line": "claude --model m1 --resume 'old 2' 'go on'",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "--model", "m1", "--resume", "old 2", "-p"],
+        "stdin": "go on"
+      }
+    },
+    {
+      "name": "claude pinned with prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "sessionId": "pin-1",
+        "initialPrompt": "line one\nline two"
+      },
+      "line": "claude --session-id pin-1 'line one\nline two'",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "--session-id", "pin-1", "-p"],
+        "stdin": "line one\nline two"
+      }
+    },
+    {
+      "name": "claude on windows cmd",
+      "platform": "win32",
+      "shell": "C:\\Windows\\System32\\cmd.exe",
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "id with space",
+        "initialPrompt": "50% \"done\" ^x"
+      },
+      "line": "claude --resume \"id with space\" \"50^% ^\"done^\" ^^x\"",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "--resume", "id with space", "-p"],
+        "stdin": "50% \"done\" ^x"
+      }
+    },
+    {
+      "name": "claude on windows powershell",
+      "platform": "win32",
+      "shell": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "payload": {
+        "agentType": "claude",
+        "sessionId": "p 1",
+        "initialPrompt": "it's 50%"
+      },
+      "line": "claude --session-id 'p 1' 'it''s 50%'",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "--session-id", "p 1", "-p"],
+        "stdin": "it's 50%"
+      }
+    },
+    {
+      "name": "claude remote from windows",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "payload": {
+        "agentType": "claude",
+        "remoteHostId": "host",
+        "resumeSessionId": "r 1",
+        "initialPrompt": "it's"
+      },
+      "line": "claude --resume 'r 1' 'it'\\''s'",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "--resume", "r 1", "-p"],
+        "stdin": "it's"
+      }
+    },
+    {
+      "name": "claude found on PATH",
+      "platform": "posix",
+      "bin": ["claude"],
+      "payload": {
+        "agentType": "claude",
+        "initialPrompt": "p"
+      },
+      "line": "claude p",
+      "headless": {
+        "command": "{bin}/claude",
+        "args": ["--dangerously-skip-permissions", "-p"],
+        "stdin": "p"
+      }
+    },
+    {
+      "name": "claude found on windows PATH",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "bin": ["claude.cmd"],
+      "path": "{bin};/nonexistent",
+      "payload": {
+        "agentType": "claude",
+        "initialPrompt": "p"
+      },
+      "line": "claude p",
+      "headless": {
+        "command": "{bin}/claude.cmd",
+        "args": ["--dangerously-skip-permissions", "-p"],
+        "stdin": "p"
+      }
+    },
+    {
+      "name": "copilot fresh",
+      "platform": "posix",
+      "payload": {
+        "agentType": "copilot"
+      },
+      "line": "copilot",
+      "headless": {
+        "command": "copilot",
+        "args": ["--allow-all", "-p", ""]
+      }
+    },
+    {
+      "name": "copilot pinned",
+      "platform": "posix",
+      "payload": {
+        "agentType": "copilot",
+        "sessionId": "pin-1"
+      },
+      "line": "copilot --session-id pin-1",
+      "headless": {
+        "command": "copilot",
+        "args": ["--allow-all", "--session-id", "pin-1", "-p", ""]
+      }
+    },
+    {
+      "name": "copilot resume",
+      "platform": "posix",
+      "payload": {
+        "agentType": "copilot",
+        "resumeSessionId": "old-1"
+      },
+      "line": "copilot --resume old-1",
+      "headless": {
+        "command": "copilot",
+        "args": ["--allow-all", "--resume", "old-1", "-p", ""]
+      }
+    },
+    {
+      "name": "copilot resume beats pin",
+      "platform": "posix",
+      "payload": {
+        "agentType": "copilot",
+        "resumeSessionId": "old-1",
+        "sessionId": "pin-1"
+      },
+      "line": "copilot --resume old-1",
+      "headless": {
+        "command": "copilot",
+        "args": ["--allow-all", "--resume", "old-1", "-p", ""]
+      }
+    },
+    {
+      "name": "copilot prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "copilot",
+        "initialPrompt": "fix it's bug"
+      },
+      "line": "copilot -i 'fix it'\\''s bug'",
+      "headless": {
+        "command": "copilot",
+        "args": ["--allow-all"],
+        "stdin": "fix it's bug"
+      }
+    },
+    {
+      "name": "copilot model",
+      "platform": "posix",
+      "payload": {
+        "agentType": "copilot",
+        "model": "opus[1m]"
+      },
+      "line": "copilot --model 'opus[1m]'",
+      "headless": {
+        "command": "copilot",
+        "args": ["--allow-all", "--model", "opus[1m]", "-p", ""]
+      }
+    },
+    {
+      "name": "copilot model replacing configured",
+      "platform": "posix",
+      "payload": {
+        "agentType": "copilot",
+        "model": "provider/model",
+        "args": ["--model=old", "-m", "x", "--verbose"],
+        "initialPrompt": "hello world"
+      },
+      "line": "copilot --verbose --model provider/model -i 'hello world'",
+      "headless": {
+        "command": "copilot",
+        "args": ["--verbose", "--model", "provider/model"],
+        "stdin": "hello world"
+      }
+    },
+    {
+      "name": "copilot resume with model and prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "copilot",
+        "resumeSessionId": "old 2",
+        "model": "m1",
+        "initialPrompt": "go on"
+      },
+      "line": "copilot --model m1 --resume 'old 2' -i 'go on'",
+      "headless": {
+        "command": "copilot",
+        "args": ["--allow-all", "--model", "m1", "--resume", "old 2"],
+        "stdin": "go on"
+      }
+    },
+    {
+      "name": "copilot pinned with prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "copilot",
+        "sessionId": "pin-1",
+        "initialPrompt": "line one\nline two"
+      },
+      "line": "copilot --session-id pin-1 -i 'line one\nline two'",
+      "headless": {
+        "command": "copilot",
+        "args": ["--allow-all", "--session-id", "pin-1"],
+        "stdin": "line one\nline two"
+      }
+    },
+    {
+      "name": "copilot on windows cmd",
+      "platform": "win32",
+      "shell": "C:\\Windows\\System32\\cmd.exe",
+      "payload": {
+        "agentType": "copilot",
+        "resumeSessionId": "id with space",
+        "initialPrompt": "50% \"done\" ^x"
+      },
+      "line": "copilot --resume \"id with space\" -i \"50^% ^\"done^\" ^^x\"",
+      "headless": {
+        "command": "copilot",
+        "args": ["--allow-all", "--resume", "id with space"],
+        "stdin": "50% \"done\" ^x"
+      }
+    },
+    {
+      "name": "copilot on windows powershell",
+      "platform": "win32",
+      "shell": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "payload": {
+        "agentType": "copilot",
+        "sessionId": "p 1",
+        "initialPrompt": "it's 50%"
+      },
+      "line": "copilot --session-id 'p 1' -i 'it''s 50%'",
+      "headless": {
+        "command": "copilot",
+        "args": ["--allow-all", "--session-id", "p 1"],
+        "stdin": "it's 50%"
+      }
+    },
+    {
+      "name": "copilot remote from windows",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "payload": {
+        "agentType": "copilot",
+        "remoteHostId": "host",
+        "resumeSessionId": "r 1",
+        "initialPrompt": "it's"
+      },
+      "line": "copilot --resume 'r 1' -i 'it'\\''s'",
+      "headless": {
+        "command": "copilot",
+        "args": ["--allow-all", "--resume", "r 1"],
+        "stdin": "it's"
+      }
+    },
+    {
+      "name": "copilot found on PATH",
+      "platform": "posix",
+      "bin": ["copilot"],
+      "payload": {
+        "agentType": "copilot",
+        "initialPrompt": "p"
+      },
+      "line": "copilot -i p",
+      "headless": {
+        "command": "{bin}/copilot",
+        "args": ["--allow-all"],
+        "stdin": "p"
+      }
+    },
+    {
+      "name": "copilot found on windows PATH",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "bin": ["copilot.cmd"],
+      "path": "{bin};/nonexistent",
+      "payload": {
+        "agentType": "copilot",
+        "initialPrompt": "p"
+      },
+      "line": "copilot -i p",
+      "headless": {
+        "command": "{bin}/copilot.cmd",
+        "args": ["--allow-all"],
+        "stdin": "p"
+      }
+    },
+    {
+      "name": "codex fresh",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex"
+      },
+      "line": "codex",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "exec", ""]
+      }
+    },
+    {
+      "name": "codex pinned",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "sessionId": "pin-1"
+      },
+      "line": "codex",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "exec", ""]
+      }
+    },
+    {
+      "name": "codex resume",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "resumeSessionId": "old-1"
+      },
+      "line": "codex resume old-1",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "exec", "resume", "old-1", "-"],
+        "stdin": ""
+      }
+    },
+    {
+      "name": "codex resume beats pin",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "resumeSessionId": "old-1",
+        "sessionId": "pin-1"
+      },
+      "line": "codex resume old-1",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "exec", "resume", "old-1", "-"],
+        "stdin": ""
+      }
+    },
+    {
+      "name": "codex prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "initialPrompt": "fix it's bug"
+      },
+      "line": "codex 'fix it'\\''s bug'",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "exec"],
+        "stdin": "fix it's bug"
+      }
+    },
+    {
+      "name": "codex model",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "model": "opus[1m]"
+      },
+      "line": "codex --model 'opus[1m]'",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "--model", "opus[1m]", "exec", ""]
+      }
+    },
+    {
+      "name": "codex model replacing configured",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "model": "provider/model",
+        "args": ["--model=old", "-m", "x", "--verbose"],
+        "initialPrompt": "hello world"
+      },
+      "line": "codex --verbose --model provider/model 'hello world'",
+      "headless": {
+        "command": "codex",
+        "args": ["--verbose", "--model", "provider/model", "exec"],
+        "stdin": "hello world"
+      }
+    },
+    {
+      "name": "codex resume with model and prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "resumeSessionId": "old 2",
+        "model": "m1",
+        "initialPrompt": "go on"
+      },
+      "line": "codex resume 'old 2' --model m1 'go on'",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "--model", "m1", "exec", "resume", "old 2", "-"],
+        "stdin": "go on"
+      }
+    },
+    {
+      "name": "codex pinned with prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "sessionId": "pin-1",
+        "initialPrompt": "line one\nline two"
+      },
+      "line": "codex 'line one\nline two'",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "exec"],
+        "stdin": "line one\nline two"
+      }
+    },
+    {
+      "name": "codex on windows cmd",
+      "platform": "win32",
+      "shell": "C:\\Windows\\System32\\cmd.exe",
+      "payload": {
+        "agentType": "codex",
+        "resumeSessionId": "id with space",
+        "initialPrompt": "50% \"done\" ^x"
+      },
+      "line": "codex resume \"id with space\" \"50^% ^\"done^\" ^^x\"",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "exec", "resume", "id with space", "-"],
+        "stdin": "50% \"done\" ^x"
+      }
+    },
+    {
+      "name": "codex on windows powershell",
+      "platform": "win32",
+      "shell": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "payload": {
+        "agentType": "codex",
+        "sessionId": "p 1",
+        "initialPrompt": "it's 50%"
+      },
+      "line": "codex 'it''s 50%'",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "exec"],
+        "stdin": "it's 50%"
+      }
+    },
+    {
+      "name": "codex remote from windows",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "payload": {
+        "agentType": "codex",
+        "remoteHostId": "host",
+        "resumeSessionId": "r 1",
+        "initialPrompt": "it's"
+      },
+      "line": "codex resume 'r 1' 'it'\\''s'",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "exec", "resume", "r 1", "-"],
+        "stdin": "it's"
+      }
+    },
+    {
+      "name": "codex found on PATH",
+      "platform": "posix",
+      "bin": ["codex"],
+      "payload": {
+        "agentType": "codex",
+        "initialPrompt": "p"
+      },
+      "line": "codex p",
+      "headless": {
+        "command": "{bin}/codex",
+        "args": ["-a", "never", "exec"],
+        "stdin": "p"
+      }
+    },
+    {
+      "name": "codex found on windows PATH",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "bin": ["codex.cmd"],
+      "path": "{bin};/nonexistent",
+      "payload": {
+        "agentType": "codex",
+        "initialPrompt": "p"
+      },
+      "line": "codex p",
+      "headless": {
+        "command": "{bin}/codex.cmd",
+        "args": ["-a", "never", "exec"],
+        "stdin": "p"
+      }
+    },
+    {
+      "name": "opencode fresh",
+      "platform": "posix",
+      "payload": {
+        "agentType": "opencode"
+      },
+      "line": "opencode",
+      "headless": {
+        "command": "opencode",
+        "args": ["run", ""]
+      }
+    },
+    {
+      "name": "opencode pinned",
+      "platform": "posix",
+      "payload": {
+        "agentType": "opencode",
+        "sessionId": "pin-1"
+      },
+      "line": "opencode",
+      "headless": {
+        "command": "opencode",
+        "args": ["run", ""]
+      }
+    },
+    {
+      "name": "opencode resume",
+      "platform": "posix",
+      "payload": {
+        "agentType": "opencode",
+        "resumeSessionId": "old-1"
+      },
+      "line": "opencode --session old-1",
+      "headless": {
+        "command": "opencode",
+        "args": ["run", ""]
+      }
+    },
+    {
+      "name": "opencode resume beats pin",
+      "platform": "posix",
+      "payload": {
+        "agentType": "opencode",
+        "resumeSessionId": "old-1",
+        "sessionId": "pin-1"
+      },
+      "line": "opencode --session old-1",
+      "headless": {
+        "command": "opencode",
+        "args": ["run", ""]
+      }
+    },
+    {
+      "name": "opencode prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "opencode",
+        "initialPrompt": "fix it's bug"
+      },
+      "line": "opencode --prompt 'fix it'\\''s bug'",
+      "headless": {
+        "command": "opencode",
+        "args": ["run"],
+        "stdin": "fix it's bug"
+      }
+    },
+    {
+      "name": "opencode model",
+      "platform": "posix",
+      "payload": {
+        "agentType": "opencode",
+        "model": "opus[1m]"
+      },
+      "line": "opencode --model 'opus[1m]'",
+      "headless": {
+        "command": "opencode",
+        "args": ["--model", "opus[1m]", "run", ""]
+      }
+    },
+    {
+      "name": "opencode model replacing configured",
+      "platform": "posix",
+      "payload": {
+        "agentType": "opencode",
+        "model": "provider/model",
+        "args": ["--model=old", "-m", "x", "--verbose"],
+        "initialPrompt": "hello world"
+      },
+      "line": "opencode --verbose --model provider/model --prompt 'hello world'",
+      "headless": {
+        "command": "opencode",
+        "args": ["--verbose", "--model", "provider/model", "run"],
+        "stdin": "hello world"
+      }
+    },
+    {
+      "name": "opencode resume with model and prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "opencode",
+        "resumeSessionId": "old 2",
+        "model": "m1",
+        "initialPrompt": "go on"
+      },
+      "line": "opencode --model m1 --session 'old 2' --prompt 'go on'",
+      "headless": {
+        "command": "opencode",
+        "args": ["--model", "m1", "run"],
+        "stdin": "go on"
+      }
+    },
+    {
+      "name": "opencode pinned with prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "opencode",
+        "sessionId": "pin-1",
+        "initialPrompt": "line one\nline two"
+      },
+      "line": "opencode --prompt 'line one\nline two'",
+      "headless": {
+        "command": "opencode",
+        "args": ["run"],
+        "stdin": "line one\nline two"
+      }
+    },
+    {
+      "name": "opencode on windows cmd",
+      "platform": "win32",
+      "shell": "C:\\Windows\\System32\\cmd.exe",
+      "payload": {
+        "agentType": "opencode",
+        "resumeSessionId": "id with space",
+        "initialPrompt": "50% \"done\" ^x"
+      },
+      "line": "opencode --session \"id with space\" --prompt \"50^% ^\"done^\" ^^x\"",
+      "headless": {
+        "command": "opencode",
+        "args": ["run"],
+        "stdin": "50% \"done\" ^x"
+      }
+    },
+    {
+      "name": "opencode on windows powershell",
+      "platform": "win32",
+      "shell": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "payload": {
+        "agentType": "opencode",
+        "sessionId": "p 1",
+        "initialPrompt": "it's 50%"
+      },
+      "line": "opencode --prompt 'it''s 50%'",
+      "headless": {
+        "command": "opencode",
+        "args": ["run"],
+        "stdin": "it's 50%"
+      }
+    },
+    {
+      "name": "opencode remote from windows",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "payload": {
+        "agentType": "opencode",
+        "remoteHostId": "host",
+        "resumeSessionId": "r 1",
+        "initialPrompt": "it's"
+      },
+      "line": "opencode --session 'r 1' --prompt 'it'\\''s'",
+      "headless": {
+        "command": "opencode",
+        "args": ["run"],
+        "stdin": "it's"
+      }
+    },
+    {
+      "name": "opencode found on PATH",
+      "platform": "posix",
+      "bin": ["opencode"],
+      "payload": {
+        "agentType": "opencode",
+        "initialPrompt": "p"
+      },
+      "line": "opencode --prompt p",
+      "headless": {
+        "command": "{bin}/opencode",
+        "args": ["run"],
+        "stdin": "p"
+      }
+    },
+    {
+      "name": "opencode found on windows PATH",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "bin": ["opencode.cmd"],
+      "path": "{bin};/nonexistent",
+      "payload": {
+        "agentType": "opencode",
+        "initialPrompt": "p"
+      },
+      "line": "opencode --prompt p",
+      "headless": {
+        "command": "{bin}/opencode.cmd",
+        "args": ["run"],
+        "stdin": "p"
+      }
+    },
+    {
+      "name": "gemini fresh",
+      "platform": "posix",
+      "payload": {
+        "agentType": "gemini"
+      },
+      "line": "gemini",
+      "headless": {
+        "command": "gemini",
+        "args": ["-y", "-p", ""]
+      }
+    },
+    {
+      "name": "gemini pinned",
+      "platform": "posix",
+      "payload": {
+        "agentType": "gemini",
+        "sessionId": "pin-1"
+      },
+      "line": "gemini",
+      "headless": {
+        "command": "gemini",
+        "args": ["-y", "-p", ""]
+      }
+    },
+    {
+      "name": "gemini resume",
+      "platform": "posix",
+      "payload": {
+        "agentType": "gemini",
+        "resumeSessionId": "old-1"
+      },
+      "line": "gemini",
+      "headless": {
+        "command": "gemini",
+        "args": ["-y", "-p", ""]
+      }
+    },
+    {
+      "name": "gemini resume beats pin",
+      "platform": "posix",
+      "payload": {
+        "agentType": "gemini",
+        "resumeSessionId": "old-1",
+        "sessionId": "pin-1"
+      },
+      "line": "gemini",
+      "headless": {
+        "command": "gemini",
+        "args": ["-y", "-p", ""]
+      }
+    },
+    {
+      "name": "gemini prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "gemini",
+        "initialPrompt": "fix it's bug"
+      },
+      "line": "gemini -i 'fix it'\\''s bug'",
+      "headless": {
+        "command": "gemini",
+        "args": ["-y"],
+        "stdin": "fix it's bug"
+      }
+    },
+    {
+      "name": "gemini model",
+      "platform": "posix",
+      "payload": {
+        "agentType": "gemini",
+        "model": "opus[1m]"
+      },
+      "line": {
+        "error": "Model selection is not supported for gemini."
+      },
+      "headless": {
+        "error": "Model selection is not supported for gemini."
+      }
+    },
+    {
+      "name": "gemini model replacing configured",
+      "platform": "posix",
+      "payload": {
+        "agentType": "gemini",
+        "model": "provider/model",
+        "args": ["--model=old", "-m", "x", "--verbose"],
+        "initialPrompt": "hello world"
+      },
+      "line": {
+        "error": "Model selection is not supported for gemini."
+      },
+      "headless": {
+        "error": "Model selection is not supported for gemini."
+      }
+    },
+    {
+      "name": "gemini resume with model and prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "gemini",
+        "resumeSessionId": "old 2",
+        "model": "m1",
+        "initialPrompt": "go on"
+      },
+      "line": {
+        "error": "Model selection is not supported for gemini."
+      },
+      "headless": {
+        "error": "Model selection is not supported for gemini."
+      }
+    },
+    {
+      "name": "gemini pinned with prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "gemini",
+        "sessionId": "pin-1",
+        "initialPrompt": "line one\nline two"
+      },
+      "line": "gemini -i 'line one\nline two'",
+      "headless": {
+        "command": "gemini",
+        "args": ["-y"],
+        "stdin": "line one\nline two"
+      }
+    },
+    {
+      "name": "gemini on windows cmd",
+      "platform": "win32",
+      "shell": "C:\\Windows\\System32\\cmd.exe",
+      "payload": {
+        "agentType": "gemini",
+        "resumeSessionId": "id with space",
+        "initialPrompt": "50% \"done\" ^x"
+      },
+      "line": "gemini -i \"50^% ^\"done^\" ^^x\"",
+      "headless": {
+        "command": "gemini",
+        "args": ["-y"],
+        "stdin": "50% \"done\" ^x"
+      }
+    },
+    {
+      "name": "gemini on windows powershell",
+      "platform": "win32",
+      "shell": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "payload": {
+        "agentType": "gemini",
+        "sessionId": "p 1",
+        "initialPrompt": "it's 50%"
+      },
+      "line": "gemini -i 'it''s 50%'",
+      "headless": {
+        "command": "gemini",
+        "args": ["-y"],
+        "stdin": "it's 50%"
+      }
+    },
+    {
+      "name": "gemini remote from windows",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "payload": {
+        "agentType": "gemini",
+        "remoteHostId": "host",
+        "resumeSessionId": "r 1",
+        "initialPrompt": "it's"
+      },
+      "line": "gemini -i 'it'\\''s'",
+      "headless": {
+        "command": "gemini",
+        "args": ["-y"],
+        "stdin": "it's"
+      }
+    },
+    {
+      "name": "gemini found on PATH",
+      "platform": "posix",
+      "bin": ["gemini"],
+      "payload": {
+        "agentType": "gemini",
+        "initialPrompt": "p"
+      },
+      "line": "gemini -i p",
+      "headless": {
+        "command": "{bin}/gemini",
+        "args": ["-y"],
+        "stdin": "p"
+      }
+    },
+    {
+      "name": "gemini found on windows PATH",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "bin": ["gemini.cmd"],
+      "path": "{bin};/nonexistent",
+      "payload": {
+        "agentType": "gemini",
+        "initialPrompt": "p"
+      },
+      "line": "gemini -i p",
+      "headless": {
+        "command": "{bin}/gemini.cmd",
+        "args": ["-y"],
+        "stdin": "p"
+      }
+    },
+    {
+      "name": "model id refused",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "model": "-x"
+      },
+      "line": {
+        "error": "Enter a model id without spaces, control characters, or a leading dash."
+      },
+      "headless": {
+        "error": "Enter a model id without spaces, control characters, or a leading dash."
+      }
+    },
+    {
+      "name": "empty model refused",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "model": ""
+      },
+      "line": {
+        "error": "Enter a model id without spaces, control characters, or a leading dash."
+      },
+      "headless": {
+        "error": "Enter a model id without spaces, control characters, or a leading dash."
+      }
+    },
+    {
+      "name": "model id with space refused",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "model": "a b"
+      },
+      "line": {
+        "error": "Enter a model id without spaces, control characters, or a leading dash."
+      },
+      "headless": {
+        "error": "Enter a model id without spaces, control characters, or a leading dash."
+      }
+    },
+    {
+      "name": "incomplete model flag",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "model": "m",
+        "args": ["--model", "--sandbox"]
+      },
+      "line": {
+        "error": "Fix the incomplete model flag in agent arguments."
+      },
+      "headless": {
+        "error": "Fix the incomplete model flag in agent arguments."
+      }
+    },
+    {
+      "name": "codex model config overrides",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "model": "new",
+        "args": ["-mold", "-c", "model=\"old\"", "--config=model=\"other\"", "-a", "never"]
+      },
+      "line": "codex -a never --model new",
+      "headless": {
+        "command": "codex",
+        "args": ["-a", "never", "--model", "new", "exec", ""]
+      }
+    },
+    {
+      "name": "model past the double dash",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "model": "new",
+        "args": ["--", "--model", "prompt"]
+      },
+      "line": "codex --model new -- --model prompt",
+      "headless": {
+        "command": "codex",
+        "args": ["--model", "new", "--", "--model", "prompt", "exec", ""]
+      }
+    },
+    {
+      "name": "wrapper refuses a model",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "npx -y @anthropic-ai/claude-code",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "model": "m"
+      },
+      "line": {
+        "error": "A model needs a command that is one executable. Move the wrapper and its flags into agent arguments, or use the configured default."
+      },
+      "headless": {
+        "error": "A model needs a command that is one executable. Move the wrapper and its flags into agent arguments, or use the configured default."
+      }
+    },
+    {
+      "name": "wrapper with resume",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "npx -y @anthropic-ai/claude-code",
+          "args": ["--resume", "old"]
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "new"
+      },
+      "line": "npx -y @anthropic-ai/claude-code --resume new",
+      "headless": {
+        "command": "npx -y @anthropic-ai/claude-code",
+        "args": ["--resume", "old", "--resume", "new", "-p", ""]
+      }
+    },
+    {
+      "name": "configured selector replaced",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude",
+          "args": ["--resume", "old", "--verbose"]
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "new"
+      },
+      "line": "claude --verbose --resume new",
+      "headless": {
+        "command": "claude",
+        "args": ["--resume", "old", "--verbose", "--resume", "new", "-p", ""]
+      }
+    },
+    {
+      "name": "configured continue before a pin",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude --continue",
+          "args": ["fix"]
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "sessionId": "pin"
+      },
+      "line": "claude --continue fix --session-id pin",
+      "headless": {
+        "command": "claude --continue",
+        "args": ["fix", "--session-id", "pin", "-p", ""]
+      }
+    },
+    {
+      "name": "configured joined selector",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude",
+          "args": ["--resume=old", "-c"]
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "new"
+      },
+      "line": "claude --resume new",
+      "headless": {
+        "command": "claude",
+        "args": ["--resume=old", "-c", "--resume", "new", "-p", ""]
+      }
+    },
+    {
+      "name": "configured short joined kept",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude -rold",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "new"
+      },
+      "line": "claude -rold --resume new",
+      "headless": {
+        "command": "claude -rold",
+        "args": ["--resume", "new", "-p", ""]
+      }
+    },
+    {
+      "name": "configured cluster kept",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude -ir",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "new"
+      },
+      "line": "claude -ir --resume new",
+      "headless": {
+        "command": "claude -ir",
+        "args": ["--resume", "new", "-p", ""]
+      }
+    },
+    {
+      "name": "selector after double dash kept",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude",
+          "args": ["--", "--resume", "x"]
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "new"
+      },
+      "line": "claude -- --resume x --resume new",
+      "headless": {
+        "command": "claude",
+        "args": ["--", "--resume", "x", "--resume", "new", "-p", ""]
+      }
+    },
+    {
+      "name": "refused conjunction",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "foo && claude --resume x",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "new"
+      },
+      "line": "foo && claude --resume x --resume new",
+      "headless": {
+        "command": "foo && claude --resume x",
+        "args": ["--resume", "new", "-p", ""]
+      }
+    },
+    {
+      "name": "refused pipe",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude --resume x | tee log",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "sessionId": "p"
+      },
+      "line": "claude --resume x | tee log --session-id p",
+      "headless": {
+        "command": "claude --resume x | tee log",
+        "args": ["--session-id", "p", "-p", ""]
+      }
+    },
+    {
+      "name": "refused substitution",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude --resume $(cat id)",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "n"
+      },
+      "line": "claude --resume $(cat id) --resume n",
+      "headless": {
+        "command": "claude --resume $(cat id)",
+        "args": ["--resume", "n", "-p", ""]
+      }
+    },
+    {
+      "name": "refused backtick",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude --resume `cat id`",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "n"
+      },
+      "line": "claude --resume `cat id` --resume n",
+      "headless": {
+        "command": "claude --resume `cat id`",
+        "args": ["--resume", "n", "-p", ""]
+      }
+    },
+    {
+      "name": "refused unterminated quote",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude --resume 'old",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "n"
+      },
+      "line": "claude --resume 'old --resume n",
+      "headless": {
+        "command": "claude --resume 'old",
+        "args": ["--resume", "n", "-p", ""]
+      }
+    },
+    {
+      "name": "refused continuation",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude --resume old \\",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "n"
+      },
+      "line": "claude --resume old \\ --resume n",
+      "headless": {
+        "command": "claude --resume old \\",
+        "args": ["--resume", "n", "-p", ""]
+      }
+    },
+    {
+      "name": "refused redirect",
+      "platform": "posix",
+      "commands": {
+        "opencode": {
+          "command": "opencode -s old > out",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "opencode",
+        "resumeSessionId": "n"
+      },
+      "line": "opencode -s old > out --session n",
+      "headless": {
+        "command": "opencode -s old > out",
+        "args": ["run", ""]
+      }
+    },
+    {
+      "name": "refused subshell",
+      "platform": "posix",
+      "commands": {
+        "copilot": {
+          "command": "(copilot --resume old)",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "copilot",
+        "resumeSessionId": "n"
+      },
+      "line": "(copilot --resume old) --resume n",
+      "headless": {
+        "command": "(copilot --resume old)",
+        "args": ["--resume", "n", "-p", ""]
+      }
+    },
+    {
+      "name": "quoted command words",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude --model 'gpt 4' --resume old --dir \"$HOME/dev\"",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "n"
+      },
+      "line": "claude --model 'gpt 4' --resume old --dir \"$HOME/dev\" --resume n",
+      "headless": {
+        "command": "claude --model 'gpt 4' --resume old --dir \"$HOME/dev\"",
+        "args": ["--resume", "n", "-p", ""]
+      }
+    },
+    {
+      "name": "codex configured resume subcommand",
+      "platform": "posix",
+      "commands": {
+        "codex": {
+          "command": "codex",
+          "args": ["resume", "--last", "--model", "o3"]
+        }
+      },
+      "payload": {
+        "agentType": "codex",
+        "resumeSessionId": "new"
+      },
+      "line": "codex resume new --model o3",
+      "headless": {
+        "command": "codex",
+        "args": ["resume", "--last", "--model", "o3", "exec", "resume", "new", "-"],
+        "stdin": ""
+      }
+    },
+    {
+      "name": "codex splice keeps arguments",
+      "platform": "posix",
+      "commands": {
+        "codex": {
+          "command": "npx codex",
+          "args": ["--model", "o3"]
+        }
+      },
+      "payload": {
+        "agentType": "codex",
+        "resumeSessionId": "new"
+      },
+      "line": "npx codex resume new --model o3",
+      "headless": {
+        "command": "npx codex",
+        "args": ["--model", "o3", "exec", "resume", "new", "-"],
+        "stdin": ""
+      }
+    },
+    {
+      "name": "codex resume as a value kept",
+      "platform": "posix",
+      "commands": {
+        "codex": {
+          "command": "codex",
+          "args": ["--note", "resume"]
+        }
+      },
+      "payload": {
+        "agentType": "codex",
+        "resumeSessionId": "new"
+      },
+      "line": "codex resume new --note resume",
+      "headless": {
+        "command": "codex",
+        "args": ["--note", "resume", "exec", "resume", "new", "-"],
+        "stdin": ""
+      }
+    },
+    {
+      "name": "codex splice past lost blanks",
+      "platform": "posix",
+      "commands": {
+        "codex": {
+          "command": "npx codex  ",
+          "args": ["resume", "old"]
+        }
+      },
+      "payload": {
+        "agentType": "codex",
+        "resumeSessionId": "new"
+      },
+      "line": "npx codex resume new",
+      "headless": {
+        "command": "npx codex  ",
+        "args": ["resume", "old", "exec", "resume", "new", "-"],
+        "stdin": ""
+      }
+    },
+    {
+      "name": "opencode short session",
+      "platform": "posix",
+      "commands": {
+        "opencode": {
+          "command": "opencode",
+          "args": ["-s", "old", "-m", "x"]
+        }
+      },
+      "payload": {
+        "agentType": "opencode",
+        "resumeSessionId": "new"
+      },
+      "line": "opencode -m x --session new",
+      "headless": {
+        "command": "opencode",
+        "args": ["-s", "old", "-m", "x", "run", ""]
+      }
+    },
+    {
+      "name": "copilot keeps claude-only flags",
+      "platform": "posix",
+      "commands": {
+        "copilot": {
+          "command": "copilot",
+          "args": ["-c", "--session-id", "old"]
+        }
+      },
+      "payload": {
+        "agentType": "copilot",
+        "resumeSessionId": "new"
+      },
+      "line": "copilot -c --resume new",
+      "headless": {
+        "command": "copilot",
+        "args": ["-c", "--session-id", "old", "--resume", "new", "-p", ""]
+      }
+    },
+    {
+      "name": "per-step args",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "args": ["--verbose", "two words"]
+      },
+      "line": "claude --verbose 'two words'",
+      "headless": {
+        "command": "claude",
+        "args": ["--verbose", "two words", "-p", ""]
+      }
+    },
+    {
+      "name": "per-step empty args",
+      "platform": "posix",
+      "payload": {
+        "agentType": "codex",
+        "args": []
+      },
+      "line": "codex",
+      "headless": {
+        "command": "codex",
+        "args": ["exec", ""]
+      }
+    },
+    {
+      "name": "configured headless args",
+      "platform": "posix",
+      "commands": {
+        "opencode": {
+          "command": "opencode",
+          "args": ["--a"],
+          "headlessArgs": ["--h"]
+        }
+      },
+      "payload": {
+        "agentType": "opencode",
+        "initialPrompt": "x"
+      },
+      "line": "opencode --a --prompt x",
+      "headless": {
+        "command": "opencode",
+        "args": ["--h", "run"],
+        "stdin": "x"
+      }
+    },
+    {
+      "name": "fallback command",
+      "platform": "posix",
+      "bin": ["claude-code"],
+      "commands": {
+        "claude": {
+          "command": "claude",
+          "args": ["--a"],
+          "fallbackCommand": "claude-code",
+          "fallbackArgs": ["--fb"]
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "initialPrompt": "x"
+      },
+      "line": "claude-code --fb x",
+      "headless": {
+        "command": "{bin}/claude-code",
+        "args": ["--fb", "-p"],
+        "stdin": "x"
+      }
+    },
+    {
+      "name": "fallback without arguments",
+      "platform": "posix",
+      "bin": ["claude-code"],
+      "commands": {
+        "claude": {
+          "command": "claude",
+          "args": ["--a"],
+          "fallbackCommand": "claude-code"
+        }
+      },
+      "payload": {
+        "agentType": "claude"
+      },
+      "line": "claude-code",
+      "headless": {
+        "command": "{bin}/claude-code",
+        "args": ["-p", ""]
+      }
+    },
+    {
+      "name": "fallback not found",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "claude",
+          "args": ["--a"],
+          "fallbackCommand": "claude-code",
+          "fallbackArgs": ["--fb"]
+        }
+      },
+      "payload": {
+        "agentType": "claude"
+      },
+      "line": "claude --a",
+      "headless": {
+        "command": "claude",
+        "args": ["--a", "-p", ""]
+      }
+    },
+    {
+      "name": "spaced path that exists",
+      "platform": "posix",
+      "bin": ["my tools/claude"],
+      "commands": {
+        "claude": {
+          "command": "{bin}/my tools/claude",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "initialPrompt": "x"
+      },
+      "line": "'{bin}/my tools/claude' x",
+      "headless": {
+        "command": "{bin}/my tools/claude",
+        "args": ["-p"],
+        "stdin": "x"
+      }
+    },
+    {
+      "name": "spaced path that exists with a model",
+      "platform": "posix",
+      "bin": ["my tools/claude"],
+      "commands": {
+        "claude": {
+          "command": "{bin}/my tools/claude",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "model": "m"
+      },
+      "line": "'{bin}/my tools/claude' --model m",
+      "headless": {
+        "command": "{bin}/my tools/claude",
+        "args": ["--model", "m", "-p", ""]
+      }
+    },
+    {
+      "name": "spaced path on a remote host",
+      "platform": "posix",
+      "bin": ["my tools/claude"],
+      "commands": {
+        "claude": {
+          "command": "{bin}/my tools/claude",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "remoteHostId": "h",
+        "model": "m"
+      },
+      "line": {
+        "error": "A model needs a command that is one executable. Move the wrapper and its flags into agent arguments, or use the configured default."
+      },
+      "headless": {
+        "error": "A model needs a command that is one executable. Move the wrapper and its flags into agent arguments, or use the configured default."
+      }
+    },
+    {
+      "name": "spaced path that does not exist",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "/no such/claude",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude"
+      },
+      "line": "/no such/claude",
+      "headless": {
+        "command": "/no such/claude",
+        "args": ["-p", ""]
+      }
+    },
+    {
+      "name": "tilde command",
+      "platform": "posix",
+      "commands": {
+        "claude": {
+          "command": "~/bin/claude",
+          "args": []
+        }
+      },
+      "payload": {
+        "agentType": "claude",
+        "initialPrompt": "x"
+      },
+      "line": "~/bin/claude x",
+      "headless": {
+        "command": "~/bin/claude",
+        "args": ["-p"],
+        "stdin": "x"
+      }
+    },
+    {
+      "name": "path spelled Path",
+      "platform": "posix",
+      "bin": ["claude"],
+      "env": {
+        "Path": "{bin}"
+      },
+      "payload": {
+        "agentType": "claude"
+      },
+      "line": "claude",
+      "headless": {
+        "command": "{bin}/claude",
+        "args": ["--dangerously-skip-permissions", "-p", ""]
+      }
+    },
+    {
+      "name": "path with trailing separator",
+      "platform": "posix",
+      "bin": ["claude"],
+      "path": "/nonexistent: {bin}/ ",
+      "payload": {
+        "agentType": "claude"
+      },
+      "line": "claude",
+      "headless": {
+        "command": "{bin}/claude",
+        "args": ["--dangerously-skip-permissions", "-p", ""]
+      }
+    },
+    {
+      "name": "empty ids are none",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "resumeSessionId": "",
+        "sessionId": "pin",
+        "initialPrompt": ""
+      },
+      "line": "claude --session-id pin",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "--session-id", "pin", "-p", ""]
+      }
+    },
+    {
+      "name": "empty remote host is local",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "payload": {
+        "agentType": "claude",
+        "remoteHostId": "",
+        "initialPrompt": "a b"
+      },
+      "line": "claude \"a b\"",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "-p"],
+        "stdin": "a b"
+      }
+    },
+    {
+      "name": "unicode prompt",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "initialPrompt": "héllo wörld 😀"
+      },
+      "line": "claude 'héllo wörld 😀'",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "-p"],
+        "stdin": "héllo wörld 😀"
+      }
+    },
+    {
+      "name": "safe prompt unquoted",
+      "platform": "posix",
+      "payload": {
+        "agentType": "claude",
+        "initialPrompt": "a-b/c:d=e@f+g,h%"
+      },
+      "line": "claude a-b/c:d=e@f+g,h%",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "-p"],
+        "stdin": "a-b/c:d=e@f+g,h%"
+      }
+    },
+    {
+      "name": "safe prompt percent on windows",
+      "platform": "win32",
+      "shell": "cmd.exe",
+      "payload": {
+        "agentType": "claude",
+        "initialPrompt": "a%b"
+      },
+      "line": "claude \"a^%b\"",
+      "headless": {
+        "command": "claude",
+        "args": ["--dangerously-skip-permissions", "-p"],
+        "stdin": "a%b"
+      }
+    },
+    {
+      "name": "a shell is not an agent",
+      "platform": "posix",
+      "payload": {
+        "agentType": "shell"
+      },
+      "line": {
+        "error": "buildAgentLaunchLine called for shell session — use createShellPty instead"
+      },
+      "headless": {
+        "error": "buildHeadlessSpawnArgs called for shell session"
+      }
+    }
+  ],
+  "tokens": [
+    {
+      "line": "claude --model \"gpt 4\"",
+      "tokens": [
+        {
+          "raw": "claude",
+          "value": "claude"
+        },
+        {
+          "raw": "--model",
+          "value": "--model"
+        },
+        {
+          "raw": "\"gpt 4\"",
+          "value": "gpt 4"
+        }
+      ]
+    },
+    {
+      "line": "claude --model 'gpt 4' --resume old --dir \"$HOME/dev\"",
+      "tokens": [
+        {
+          "raw": "claude",
+          "value": "claude"
+        },
+        {
+          "raw": "--model",
+          "value": "--model"
+        },
+        {
+          "raw": "'gpt 4'",
+          "value": "gpt 4"
+        },
+        {
+          "raw": "--resume",
+          "value": "--resume"
+        },
+        {
+          "raw": "old",
+          "value": "old"
+        },
+        {
+          "raw": "--dir",
+          "value": "--dir"
+        },
+        {
+          "raw": "\"$HOME/dev\"",
+          "value": "$HOME/dev"
+        }
+      ]
+    },
+    {
+      "line": "  leading\tand trailing  ",
+      "tokens": [
+        {
+          "raw": "leading",
+          "value": "leading"
+        },
+        {
+          "raw": "and",
+          "value": "and"
+        },
+        {
+          "raw": "trailing",
+          "value": "trailing"
+        }
+      ]
+    },
+    {
+      "line": "",
+      "tokens": []
+    },
+    {
+      "line": "a\\ b c\\\"d",
+      "tokens": [
+        {
+          "raw": "a\\ b",
+          "value": "a b"
+        },
+        {
+          "raw": "c\\\"d",
+          "value": "c\"d"
+        }
+      ]
+    },
+    {
+      "line": "\"a\\\"b\\\\c\\$d\\`e\\xf\"",
+      "tokens": [
+        {
+          "raw": "\"a\\\"b\\\\c\\$d\\`e\\xf\"",
+          "value": "a\"b\\c$d`e\\xf"
+        }
+      ]
+    },
+    {
+      "line": "'a\\b'",
+      "tokens": [
+        {
+          "raw": "'a\\b'",
+          "value": "a\\b"
+        }
+      ]
+    },
+    {
+      "line": "é \\é \"😀\" x",
+      "tokens": [
+        {
+          "raw": "é",
+          "value": "é"
+        },
+        {
+          "raw": "\\é",
+          "value": "é"
+        },
+        {
+          "raw": "\"😀\"",
+          "value": "😀"
+        },
+        {
+          "raw": "x",
+          "value": "x"
+        }
+      ]
+    },
+    {
+      "line": "$HOME $ a$b",
+      "tokens": [
+        {
+          "raw": "$HOME",
+          "value": "$HOME"
+        },
+        {
+          "raw": "$",
+          "value": "$"
+        },
+        {
+          "raw": "a$b",
+          "value": "a$b"
+        }
+      ]
+    },
+    {
+      "line": "a\rb",
+      "tokens": [
+        {
+          "raw": "a\rb",
+          "value": "a\rb"
+        }
+      ]
+    },
+    {
+      "line": "claude | tee log",
+      "tokens": null
+    },
+    {
+      "line": "foo && claude --resume x",
+      "tokens": null
+    },
+    {
+      "line": "claude; echo done",
+      "tokens": null
+    },
+    {
+      "line": "claude > out.txt",
+      "tokens": null
+    },
+    {
+      "line": "claude < in.txt",
+      "tokens": null
+    },
+    {
+      "line": "a(b)",
+      "tokens": null
+    },
+    {
+      "line": "claude $(cat id)",
+      "tokens": null
+    },
+    {
+      "line": "\"$(cat id)\"",
+      "tokens": null
+    },
+    {
+      "line": "claude `cat id`",
+      "tokens": null
+    },
+    {
+      "line": "\"`x`\"",
+      "tokens": null
+    },
+    {
+      "line": "claude --model 'gpt",
+      "tokens": null
+    },
+    {
+      "line": "claude --model \"gpt",
+      "tokens": null
+    },
+    {
+      "line": "claude --model \\",
+      "tokens": null
+    },
+    {
+      "line": "\"a\\",
+      "tokens": null
+    },
+    {
+      "line": "line\nbreak",
+      "tokens": null
+    }
+  ],
+  "strip": [
+    {
+      "line": "claude --resume old-id",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude"
+    },
+    {
+      "line": "claude --resume=old-id",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude"
+    },
+    {
+      "line": "claude -r old-id",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude"
+    },
+    {
+      "line": "claude --continue",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude"
+    },
+    {
+      "line": "claude -c",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude"
+    },
+    {
+      "line": "claude --session-id old-id",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude"
+    },
+    {
+      "line": "claude --resume old --model x",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude --model x"
+    },
+    {
+      "line": "claude --model x --resume",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude --model x"
+    },
+    {
+      "line": "claude --resume --verbose",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude --verbose"
+    },
+    {
+      "line": "claude --model 'gpt 4' --resume old --dir \"$HOME/dev\"",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude --model 'gpt 4' --dir \"$HOME/dev\""
+    },
+    {
+      "line": "claude --wrapper /usr/local/bin/claude --resume old",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude --wrapper /usr/local/bin/claude"
+    },
+    {
+      "line": "npx -y @anthropic-ai/claude-code --resume old",
+      "agent": "claude",
+      "command": "npx -y @anthropic-ai/claude-code",
+      "expected": "npx -y @anthropic-ai/claude-code"
+    },
+    {
+      "line": "claude --continue 'fix the failing test'",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude 'fix the failing test'"
+    },
+    {
+      "line": "claude -c my-prompt",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude my-prompt"
+    },
+    {
+      "line": "claude --resume old-id rest",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude rest"
+    },
+    {
+      "line": "claude -- --resume looks-like-a-flag",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude -- --resume looks-like-a-flag"
+    },
+    {
+      "line": "claude --resume old -- --resume text",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude -- --resume text"
+    },
+    {
+      "line": "claude -rold-id",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude -rold-id"
+    },
+    {
+      "line": "claude -ir",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude -ir"
+    },
+    {
+      "line": "foo && claude --resume old",
+      "agent": "claude",
+      "command": "foo",
+      "expected": "foo && claude --resume old"
+    },
+    {
+      "line": "gemini --resume old",
+      "agent": "gemini",
+      "command": "gemini",
+      "expected": "gemini --resume old"
+    },
+    {
+      "line": "copilot --resume old -c",
+      "agent": "copilot",
+      "command": "copilot",
+      "expected": "copilot -c"
+    },
+    {
+      "line": "opencode --session old",
+      "agent": "opencode",
+      "command": "opencode",
+      "expected": "opencode"
+    },
+    {
+      "line": "opencode -s old",
+      "agent": "opencode",
+      "command": "opencode",
+      "expected": "opencode"
+    },
+    {
+      "line": "opencode --session=old\t-x",
+      "agent": "opencode",
+      "command": "opencode",
+      "expected": "opencode\t-x"
+    },
+    {
+      "line": "codex resume old-id --model o3",
+      "agent": "codex",
+      "command": "codex",
+      "expected": "codex --model o3"
+    },
+    {
+      "line": "codex resume --last",
+      "agent": "codex",
+      "command": "codex",
+      "expected": "codex"
+    },
+    {
+      "line": "codex resume -x",
+      "agent": "codex",
+      "command": "codex",
+      "expected": "codex -x"
+    },
+    {
+      "line": "codex --note resume",
+      "agent": "codex",
+      "command": "codex",
+      "expected": "codex --note resume"
+    },
+    {
+      "line": "claude --resume claude --resume",
+      "agent": "claude",
+      "command": "claude --resume",
+      "expected": "claude --resume claude"
+    },
+    {
+      "line": "é --resume x",
+      "agent": "claude",
+      "command": "é",
+      "expected": "é"
+    },
+    {
+      "line": "claude\t\t--resume x\t--y",
+      "agent": "claude",
+      "command": "claude",
+      "expected": "claude\t--y"
+    }
+  ],
+  "displayNames": [
+    {
+      "prompt": "Fix the login bug",
+      "name": "Fix the login bug"
+    },
+    {
+      "prompt": "Refactor the authentication module to use JWT tokens instead of session cookies for better scalability",
+      "name": "Refactor the authentication module to use JWT tokens…"
+    },
+    {
+      "prompt": "\n\n  Fix the bug",
+      "name": "Fix the bug"
+    },
+    {
+      "prompt": "Fix   the\n\nbug",
+      "name": "Fix the bug"
+    },
+    {
+      "prompt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "prompt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "prompt": "   \n\t ",
+      "name": null
+    },
+    {
+      "prompt": "",
+      "name": null
+    },
+    {
+      "prompt": " ﻿nbsp and　ideographicnext",
+      "name": "nbsp and ideographicnext"
+    },
+    {
+      "prompt": "aaaa bbbb cccc",
+      "maxLen": 7,
+      "name": "aaaa…"
+    },
+    {
+      "prompt": " xyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "name": "xyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…"
+    },
+    {
+      "prompt": "héllo wörld éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "name": "héllo wörld…"
+    },
+    {
+      "prompt": "ab 😀😀😀",
+      "maxLen": 6,
+      "name": "ab…"
+    }
+  ],
+  "resumeCwd": [
+    {
+      "session": {
+        "projectPath": "/repo",
+        "worktreePath": "/repo/.wt/f"
+      },
+      "dirs": ["/repo", "/repo/.wt/f"],
+      "result": {
+        "cwd": "/repo/.wt/f"
+      }
+    },
+    {
+      "session": {
+        "projectPath": "/repo",
+        "worktreePath": "/repo/.wt/f",
+        "shellCwd": "/repo/.wt/f/src"
+      },
+      "dirs": ["/repo", "/repo/.wt/f", "/repo/.wt/f/src"],
+      "result": {
+        "cwd": "/repo/.wt/f/src"
+      }
+    },
+    {
+      "session": {
+        "projectPath": "/repo",
+        "worktreePath": "/repo/.wt/f",
+        "shellCwd": "/repo/.wt/f/src"
+      },
+      "dirs": ["/repo", "/repo/.wt/f"],
+      "result": {
+        "cwd": "/repo/.wt/f",
+        "fellBackFrom": "/repo/.wt/f/src"
+      }
+    },
+    {
+      "session": {
+        "projectPath": "/repo",
+        "worktreePath": "/repo/.wt/f"
+      },
+      "dirs": ["/repo"],
+      "result": {
+        "cwd": "/repo",
+        "fellBackFrom": "/repo/.wt/f"
+      }
+    },
+    {
+      "session": {
+        "projectPath": "/repo"
+      },
+      "dirs": ["/repo"],
+      "result": {
+        "cwd": "/repo"
+      }
+    },
+    {
+      "session": {
+        "projectPath": "/repo",
+        "worktreePath": "/repo/.wt/f"
+      },
+      "dirs": [],
+      "result": null
+    },
+    {
+      "session": {
+        "projectPath": "",
+        "shellCwd": "/s"
+      },
+      "dirs": [""],
+      "result": {
+        "cwd": "",
+        "fellBackFrom": "/s"
+      }
+    }
+  ],
+  "env": [
+    {
+      "source": [
+        ["PATH", "/bin"],
+        ["HOME", "/h"],
+        ["GITHUB_TOKEN", "x"],
+        ["github_token_extra", "x"],
+        ["SECRET_VORN_BOOTSTRAP_TOKEN", "x"],
+        ["ClaudeCode", "1"],
+        ["CLAUDE_CODE_SSE_PORT", "1"],
+        ["ANTHROPIC_BASE_URL", "u"],
+        ["ANTHROPIC_API_KEY", "k"]
+      ],
+      "passthrough": [" anthropic_api_key ", "claudecode", "", "secret_vorn_bootstrap_token"],
+      "dataDir": "/data",
+      "safe": [
+        ["PATH", "/bin"],
+        ["HOME", "/h"],
+        ["ANTHROPIC_BASE_URL", "u"]
+      ],
+      "launch": [
+        ["PATH", "/bin"],
+        ["HOME", "/h"],
+        ["ANTHROPIC_BASE_URL", "u"],
+        ["ANTHROPIC_API_KEY", "k"],
+        ["VORN_DATA_DIR", "/data"]
+      ]
+    },
+    {
+      "source": [
+        ["VORN_DATA_DIR", "old"],
+        ["NPM_TOKEN", "n"],
+        ["A", "1"]
+      ],
+      "passthrough": ["npm_token"],
+      "dataDir": "/d",
+      "safe": [
+        ["VORN_DATA_DIR", "old"],
+        ["A", "1"]
+      ],
+      "launch": [
+        ["VORN_DATA_DIR", "/d"],
+        ["NPM_TOKEN", "n"],
+        ["A", "1"]
+      ]
+    },
+    {
+      "source": [["A", "1"]],
+      "passthrough": [],
+      "dataDir": null,
+      "safe": [["A", "1"]],
+      "launch": [["A", "1"]]
+    }
+  ],
+  "shell": [
+    {
+      "shell": "/bin/zsh",
+      "minimalPrompt": true,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "ZDOTDIR": "{shims}/zsh",
+          "VORN_USER_ZDOTDIR": "/home/corpus",
+          "VORN_MINIMAL_PROMPT": "1",
+          "VORN_BLOCK_GAP": "1"
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "/usr/bin/zsh",
+      "minimalPrompt": true,
+      "env": {
+        "ZDOTDIR": "/home/corpus/.config/zsh"
+      },
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "ZDOTDIR": "{shims}/zsh",
+          "VORN_USER_ZDOTDIR": "/home/corpus/.config/zsh",
+          "VORN_MINIMAL_PROMPT": "1",
+          "VORN_BLOCK_GAP": "1"
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "/bin/bash",
+      "minimalPrompt": true,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "VORN_MINIMAL_PROMPT": "1"
+        },
+        "args": ["--rcfile", "{shims}/bash/vorn-bashrc", "-i"]
+      }
+    },
+    {
+      "shell": "fish",
+      "minimalPrompt": true,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "XDG_DATA_DIRS": "{shims}/fish:/usr/local/share:/usr/share",
+          "VORN_MINIMAL_PROMPT": "1"
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "/opt/fish",
+      "minimalPrompt": true,
+      "env": {
+        "XDG_DATA_DIRS": "/a:/b"
+      },
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "XDG_DATA_DIRS": "{shims}/fish:/a:/b",
+          "VORN_MINIMAL_PROMPT": "1"
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "minimalPrompt": true,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "VORN_MINIMAL_PROMPT": "1"
+        },
+        "args": [
+          "-NoExit",
+          "-EncodedCommand",
+          "CgAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATABhAHMAdABIAGkAcwB0AG8AcgB5AEkAZAAgAD0AIAAtADEACgAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATwByAGkAZwBpAG4AYQBsAFAAcgBvAG0AcAB0ACAAPQAgACQAZgB1AG4AYwB0AGkAbwBuADoAcAByAG8AbQBwAHQACgAKAGYAdQBuAGMAdABpAG8AbgAgAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ARQB4AGkAdABDAG8AZABlACAAewAKACAAIABpAGYAIAAoACQAPwAgAC0AZQBxACAAJABUAHIAdQBlACkAIAB7ACAAcgBlAHQAdQByAG4AIAAwACAAfQAKACAAIAAkAGgAIAA9ACAARwBlAHQALQBIAGkAcwB0AG8AcgB5ACAALQBDAG8AdQBuAHQAIAAxAAoAIAAgAGkAZgAgACgAJABFAHIAcgBvAHIAWwAwAF0ALgBJAG4AdgBvAGMAYQB0AGkAbwBuAEkAbgBmAG8ALgBIAGkAcwB0AG8AcgB5AEkAZAAgAC0AZQBxACAAJABoAC4ASQBkACkAIAB7ACAAcgBlAHQAdQByAG4AIAAtADEAIAB9AAoAIAAgAGkAZgAgACgAJABuAHUAbABsACAALQBlAHEAIAAkAEwAYQBzAHQARQB4AGkAdABDAG8AZABlACkAIAB7ACAAcgBlAHQAdQByAG4AIAAxACAAfQAKACAAIAByAGUAdAB1AHIAbgAgACQATABhAHMAdABFAHgAaQB0AEMAbwBkAGUACgB9AAoACgBmAHUAbgBjAHQAaQBvAG4AIABHAGwAbwBiAGEAbAA6AHAAcgBvAG0AcAB0ACAAewAKACAAIAAkAGMAbwBkAGUAIAA9ACAAXwBfAFYAbwByAG4ARQB4AGkAdABDAG8AZABlAAoAIAAgACQAaAAgAD0AIABHAGUAdAAtAEgAaQBzAHQAbwByAHkAIAAtAEMAbwB1AG4AdAAgADEACgAgACAAJABvAHUAdAAgAD0AIAAnACcACgAgACAAaQBmACAAKAAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATABhAHMAdABIAGkAcwB0AG8AcgB5AEkAZAAgAC0AbgBlACAALQAxACAALQBhAG4AZAAgACQAaAAgAC0AYQBuAGQAIAAkAGgALgBJAGQAIAAtAG4AZQAgACQARwBsAG8AYgBhAGwAOgBfAF8AVgBvAHIAbgBMAGEAcwB0AEgAaQBzAHQAbwByAHkASQBkACkAIAB7AAoAIAAgACAAIAAkAGIAeQB0AGUAcwAgAD0AIABbAFQAZQB4AHQALgBFAG4AYwBvAGQAaQBuAGcAXQA6ADoAVQBUAEYAOAAuAEcAZQB0AEIAeQB0AGUAcwAoACQAaAAuAEMAbwBtAG0AYQBuAGQATABpAG4AZQApAAoAIAAgACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBgAGUAXQA1ADUAMgAyADsAYwBtAGQAOwAkACgAWwBDAG8AbgB2AGUAcgB0AF0AOgA6AFQAbwBCAGEAcwBlADYANABTAHQAcgBpAG4AZwAoACQAYgB5AHQAZQBzACkAKQBgAGEAIgAKACAAIAAgACAAJABtAHMAIAA9ACAAWwBpAG4AdABdACgAJABoAC4ARQBuAGQARQB4AGUAYwB1AHQAaQBvAG4AVABpAG0AZQAgAC0AIAAkAGgALgBTAHQAYQByAHQARQB4AGUAYwB1AHQAaQBvAG4AVABpAG0AZQApAC4AVABvAHQAYQBsAE0AaQBsAGwAaQBzAGUAYwBvAG4AZABzAAoAIAAgACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBgAGUAXQA1ADUAMgAyADsAZAB1AHIAOwAkAG0AcwBgAGEAIgAKACAAIAAgACAAJABvAHUAdAAgACsAPQAgACIAYABlAF0AMQAzADMAOwBEADsAJABjAG8AZABlAGAAYQAiAAoAIAAgACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBcAG4AIgAKACAAIAB9AAoAIAAgACQAbwB1AHQAIAArAD0AIAAiAGAAZQBdADUANQAyADIAOwBjAHcAZAA7ACQAKAAkAGUAeABlAGMAdQB0AGkAbwBuAEMAbwBuAHQAZQB4AHQALgBTAGUAcwBzAGkAbwBuAFMAdABhAHQAZQAuAFAAYQB0AGgALgBDAHUAcgByAGUAbgB0AEwAbwBjAGEAdABpAG8AbgApAGAAYQAiAAoAIAAgACQAbwB1AHQAIAArAD0AIAAiAGAAZQBdADEAMwAzADsAQQBgAGEAIgAKACAAIAAjACAATgBvAHQAaABpAG4AZwAgAGkAbgAgAHAAbABhAGMAZQAgAG8AZgAgAHQAaABlACAAcAByAG8AbQBwAHQAOgAgAHQAaABlACAAaQBuAHAAdQB0ACAAYgBhAHIAIABhAGwAcgBlAGEAZAB5ACAAcwBoAG8AdwBzACAAYQAgAGMAYQByAGUAdAAgAGEAbgBkAAoAIAAgACMAIABlAGEAYwBoACAAYwBvAG0AbQBhAG4AZAAgAGkAcwAgAGkAdABzACAAbwB3AG4AIABiAGwAbwBjAGsAIABoAGUAYQBkAGkAbgBnAC4AIABUAGgAZQAgAHMAdAByAGkAbgBnACAAaQBzACAAcwB0AGkAbABsACAAbgBvAG4ALQBlAG0AcAB0AHkACgAgACAAIwAgAGIAZQBjAGEAdQBzAGUAIABvAGYAIAB0AGgAZQAgAHMAZQBxAHUAZQBuAGMAZQBzACwAIABzAG8AIABQAG8AdwBlAHIAUwBoAGUAbABsACAAZABvAGUAcwAgAG4AbwB0ACAAZgBhAGwAbAAgAGIAYQBjAGsAIAB0AG8AIAAiAFAAUwA+ACIALgAKACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBgAGUAXQAxADMAMwA7AEIAYABhACIACgAgACAAaQBmACAAKAAkAGgAKQAgAHsAIAAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATABhAHMAdABIAGkAcwB0AG8AcgB5AEkAZAAgAD0AIAAkAGgALgBJAGQAIAB9AAoAIAAgAHIAZQB0AHUAcgBuACAAJABvAHUAdAAKAH0ACgA="
+        ]
+      }
+    },
+    {
+      "shell": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "minimalPrompt": true,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "VORN_MINIMAL_PROMPT": "1"
+        },
+        "args": [
+          "-NoExit",
+          "-EncodedCommand",
+          "CgAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATABhAHMAdABIAGkAcwB0AG8AcgB5AEkAZAAgAD0AIAAtADEACgAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATwByAGkAZwBpAG4AYQBsAFAAcgBvAG0AcAB0ACAAPQAgACQAZgB1AG4AYwB0AGkAbwBuADoAcAByAG8AbQBwAHQACgAKAGYAdQBuAGMAdABpAG8AbgAgAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ARQB4AGkAdABDAG8AZABlACAAewAKACAAIABpAGYAIAAoACQAPwAgAC0AZQBxACAAJABUAHIAdQBlACkAIAB7ACAAcgBlAHQAdQByAG4AIAAwACAAfQAKACAAIAAkAGgAIAA9ACAARwBlAHQALQBIAGkAcwB0AG8AcgB5ACAALQBDAG8AdQBuAHQAIAAxAAoAIAAgAGkAZgAgACgAJABFAHIAcgBvAHIAWwAwAF0ALgBJAG4AdgBvAGMAYQB0AGkAbwBuAEkAbgBmAG8ALgBIAGkAcwB0AG8AcgB5AEkAZAAgAC0AZQBxACAAJABoAC4ASQBkACkAIAB7ACAAcgBlAHQAdQByAG4AIAAtADEAIAB9AAoAIAAgAGkAZgAgACgAJABuAHUAbABsACAALQBlAHEAIAAkAEwAYQBzAHQARQB4AGkAdABDAG8AZABlACkAIAB7ACAAcgBlAHQAdQByAG4AIAAxACAAfQAKACAAIAByAGUAdAB1AHIAbgAgACQATABhAHMAdABFAHgAaQB0AEMAbwBkAGUACgB9AAoACgBmAHUAbgBjAHQAaQBvAG4AIABHAGwAbwBiAGEAbAA6AHAAcgBvAG0AcAB0ACAAewAKACAAIAAkAGMAbwBkAGUAIAA9ACAAXwBfAFYAbwByAG4ARQB4AGkAdABDAG8AZABlAAoAIAAgACQAaAAgAD0AIABHAGUAdAAtAEgAaQBzAHQAbwByAHkAIAAtAEMAbwB1AG4AdAAgADEACgAgACAAJABvAHUAdAAgAD0AIAAnACcACgAgACAAaQBmACAAKAAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATABhAHMAdABIAGkAcwB0AG8AcgB5AEkAZAAgAC0AbgBlACAALQAxACAALQBhAG4AZAAgACQAaAAgAC0AYQBuAGQAIAAkAGgALgBJAGQAIAAtAG4AZQAgACQARwBsAG8AYgBhAGwAOgBfAF8AVgBvAHIAbgBMAGEAcwB0AEgAaQBzAHQAbwByAHkASQBkACkAIAB7AAoAIAAgACAAIAAkAGIAeQB0AGUAcwAgAD0AIABbAFQAZQB4AHQALgBFAG4AYwBvAGQAaQBuAGcAXQA6ADoAVQBUAEYAOAAuAEcAZQB0AEIAeQB0AGUAcwAoACQAaAAuAEMAbwBtAG0AYQBuAGQATABpAG4AZQApAAoAIAAgACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBgAGUAXQA1ADUAMgAyADsAYwBtAGQAOwAkACgAWwBDAG8AbgB2AGUAcgB0AF0AOgA6AFQAbwBCAGEAcwBlADYANABTAHQAcgBpAG4AZwAoACQAYgB5AHQAZQBzACkAKQBgAGEAIgAKACAAIAAgACAAJABtAHMAIAA9ACAAWwBpAG4AdABdACgAJABoAC4ARQBuAGQARQB4AGUAYwB1AHQAaQBvAG4AVABpAG0AZQAgAC0AIAAkAGgALgBTAHQAYQByAHQARQB4AGUAYwB1AHQAaQBvAG4AVABpAG0AZQApAC4AVABvAHQAYQBsAE0AaQBsAGwAaQBzAGUAYwBvAG4AZABzAAoAIAAgACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBgAGUAXQA1ADUAMgAyADsAZAB1AHIAOwAkAG0AcwBgAGEAIgAKACAAIAAgACAAJABvAHUAdAAgACsAPQAgACIAYABlAF0AMQAzADMAOwBEADsAJABjAG8AZABlAGAAYQAiAAoAIAAgACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBcAG4AIgAKACAAIAB9AAoAIAAgACQAbwB1AHQAIAArAD0AIAAiAGAAZQBdADUANQAyADIAOwBjAHcAZAA7ACQAKAAkAGUAeABlAGMAdQB0AGkAbwBuAEMAbwBuAHQAZQB4AHQALgBTAGUAcwBzAGkAbwBuAFMAdABhAHQAZQAuAFAAYQB0AGgALgBDAHUAcgByAGUAbgB0AEwAbwBjAGEAdABpAG8AbgApAGAAYQAiAAoAIAAgACQAbwB1AHQAIAArAD0AIAAiAGAAZQBdADEAMwAzADsAQQBgAGEAIgAKACAAIAAjACAATgBvAHQAaABpAG4AZwAgAGkAbgAgAHAAbABhAGMAZQAgAG8AZgAgAHQAaABlACAAcAByAG8AbQBwAHQAOgAgAHQAaABlACAAaQBuAHAAdQB0ACAAYgBhAHIAIABhAGwAcgBlAGEAZAB5ACAAcwBoAG8AdwBzACAAYQAgAGMAYQByAGUAdAAgAGEAbgBkAAoAIAAgACMAIABlAGEAYwBoACAAYwBvAG0AbQBhAG4AZAAgAGkAcwAgAGkAdABzACAAbwB3AG4AIABiAGwAbwBjAGsAIABoAGUAYQBkAGkAbgBnAC4AIABUAGgAZQAgAHMAdAByAGkAbgBnACAAaQBzACAAcwB0AGkAbABsACAAbgBvAG4ALQBlAG0AcAB0AHkACgAgACAAIwAgAGIAZQBjAGEAdQBzAGUAIABvAGYAIAB0AGgAZQAgAHMAZQBxAHUAZQBuAGMAZQBzACwAIABzAG8AIABQAG8AdwBlAHIAUwBoAGUAbABsACAAZABvAGUAcwAgAG4AbwB0ACAAZgBhAGwAbAAgAGIAYQBjAGsAIAB0AG8AIAAiAFAAUwA+ACIALgAKACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBgAGUAXQAxADMAMwA7AEIAYABhACIACgAgACAAaQBmACAAKAAkAGgAKQAgAHsAIAAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATABhAHMAdABIAGkAcwB0AG8AcgB5AEkAZAAgAD0AIAAkAGgALgBJAGQAIAB9AAoAIAAgAHIAZQB0AHUAcgBuACAAJABvAHUAdAAKAH0ACgA="
+        ]
+      }
+    },
+    {
+      "shell": "cmd.exe",
+      "minimalPrompt": true,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "PROMPT": "$e]133;D$e\\$e]5522;cwd;$P$e\\$e]133;A$e\\$e]133;B$e\\"
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "C:\\Windows\\System32\\CMD.EXE",
+      "minimalPrompt": true,
+      "env": {
+        "PROMPT": "$N$G"
+      },
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "PROMPT": "$e]133;D$e\\$e]5522;cwd;$P$e\\$e]133;A$e\\$e]133;B$e\\"
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "/bin/sh",
+      "minimalPrompt": true,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {},
+        "args": null
+      }
+    },
+    {
+      "shell": "/bin/zsh",
+      "minimalPrompt": false,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "ZDOTDIR": "{shims}/zsh",
+          "VORN_USER_ZDOTDIR": "/home/corpus",
+          "VORN_MINIMAL_PROMPT": "0",
+          "VORN_BLOCK_GAP": ""
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "/usr/bin/zsh",
+      "minimalPrompt": false,
+      "env": {
+        "ZDOTDIR": "/home/corpus/.config/zsh"
+      },
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "ZDOTDIR": "{shims}/zsh",
+          "VORN_USER_ZDOTDIR": "/home/corpus/.config/zsh",
+          "VORN_MINIMAL_PROMPT": "0",
+          "VORN_BLOCK_GAP": ""
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "/bin/bash",
+      "minimalPrompt": false,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "VORN_MINIMAL_PROMPT": "0"
+        },
+        "args": ["--rcfile", "{shims}/bash/vorn-bashrc", "-i"]
+      }
+    },
+    {
+      "shell": "fish",
+      "minimalPrompt": false,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "XDG_DATA_DIRS": "{shims}/fish:/usr/local/share:/usr/share",
+          "VORN_MINIMAL_PROMPT": "0"
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "/opt/fish",
+      "minimalPrompt": false,
+      "env": {
+        "XDG_DATA_DIRS": "/a:/b"
+      },
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "XDG_DATA_DIRS": "{shims}/fish:/a:/b",
+          "VORN_MINIMAL_PROMPT": "0"
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "minimalPrompt": false,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "VORN_MINIMAL_PROMPT": "0"
+        },
+        "args": [
+          "-NoExit",
+          "-EncodedCommand",
+          "CgAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATABhAHMAdABIAGkAcwB0AG8AcgB5AEkAZAAgAD0AIAAtADEACgAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATwByAGkAZwBpAG4AYQBsAFAAcgBvAG0AcAB0ACAAPQAgACQAZgB1AG4AYwB0AGkAbwBuADoAcAByAG8AbQBwAHQACgAKAGYAdQBuAGMAdABpAG8AbgAgAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ARQB4AGkAdABDAG8AZABlACAAewAKACAAIABpAGYAIAAoACQAPwAgAC0AZQBxACAAJABUAHIAdQBlACkAIAB7ACAAcgBlAHQAdQByAG4AIAAwACAAfQAKACAAIAAkAGgAIAA9ACAARwBlAHQALQBIAGkAcwB0AG8AcgB5ACAALQBDAG8AdQBuAHQAIAAxAAoAIAAgAGkAZgAgACgAJABFAHIAcgBvAHIAWwAwAF0ALgBJAG4AdgBvAGMAYQB0AGkAbwBuAEkAbgBmAG8ALgBIAGkAcwB0AG8AcgB5AEkAZAAgAC0AZQBxACAAJABoAC4ASQBkACkAIAB7ACAAcgBlAHQAdQByAG4AIAAtADEAIAB9AAoAIAAgAGkAZgAgACgAJABuAHUAbABsACAALQBlAHEAIAAkAEwAYQBzAHQARQB4AGkAdABDAG8AZABlACkAIAB7ACAAcgBlAHQAdQByAG4AIAAxACAAfQAKACAAIAByAGUAdAB1AHIAbgAgACQATABhAHMAdABFAHgAaQB0AEMAbwBkAGUACgB9AAoACgBmAHUAbgBjAHQAaQBvAG4AIABHAGwAbwBiAGEAbAA6AHAAcgBvAG0AcAB0ACAAewAKACAAIAAkAGMAbwBkAGUAIAA9ACAAXwBfAFYAbwByAG4ARQB4AGkAdABDAG8AZABlAAoAIAAgACQAaAAgAD0AIABHAGUAdAAtAEgAaQBzAHQAbwByAHkAIAAtAEMAbwB1AG4AdAAgADEACgAgACAAJABvAHUAdAAgAD0AIAAnACcACgAgACAAaQBmACAAKAAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATABhAHMAdABIAGkAcwB0AG8AcgB5AEkAZAAgAC0AbgBlACAALQAxACAALQBhAG4AZAAgACQAaAAgAC0AYQBuAGQAIAAkAGgALgBJAGQAIAAtAG4AZQAgACQARwBsAG8AYgBhAGwAOgBfAF8AVgBvAHIAbgBMAGEAcwB0AEgAaQBzAHQAbwByAHkASQBkACkAIAB7AAoAIAAgACAAIAAkAGIAeQB0AGUAcwAgAD0AIABbAFQAZQB4AHQALgBFAG4AYwBvAGQAaQBuAGcAXQA6ADoAVQBUAEYAOAAuAEcAZQB0AEIAeQB0AGUAcwAoACQAaAAuAEMAbwBtAG0AYQBuAGQATABpAG4AZQApAAoAIAAgACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBgAGUAXQA1ADUAMgAyADsAYwBtAGQAOwAkACgAWwBDAG8AbgB2AGUAcgB0AF0AOgA6AFQAbwBCAGEAcwBlADYANABTAHQAcgBpAG4AZwAoACQAYgB5AHQAZQBzACkAKQBgAGEAIgAKACAAIAAgACAAJABtAHMAIAA9ACAAWwBpAG4AdABdACgAJABoAC4ARQBuAGQARQB4AGUAYwB1AHQAaQBvAG4AVABpAG0AZQAgAC0AIAAkAGgALgBTAHQAYQByAHQARQB4AGUAYwB1AHQAaQBvAG4AVABpAG0AZQApAC4AVABvAHQAYQBsAE0AaQBsAGwAaQBzAGUAYwBvAG4AZABzAAoAIAAgACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBgAGUAXQA1ADUAMgAyADsAZAB1AHIAOwAkAG0AcwBgAGEAIgAKACAAIAAgACAAJABvAHUAdAAgACsAPQAgACIAYABlAF0AMQAzADMAOwBEADsAJABjAG8AZABlAGAAYQAiAAoAIAAgAH0ACgAgACAAJABvAHUAdAAgACsAPQAgACIAYABlAF0ANQA1ADIAMgA7AGMAdwBkADsAJAAoACQAZQB4AGUAYwB1AHQAaQBvAG4AQwBvAG4AdABlAHgAdAAuAFMAZQBzAHMAaQBvAG4AUwB0AGEAdABlAC4AUABhAHQAaAAuAEMAdQByAHIAZQBuAHQATABvAGMAYQB0AGkAbwBuACkAYABhACIACgAgACAAJABvAHUAdAAgACsAPQAgACIAYABlAF0AMQAzADMAOwBBAGAAYQAiAAoAIAAgACQAbwB1AHQAIAArAD0AIABbAHMAdAByAGkAbgBnAF0AKAAmACAAJABHAGwAbwBiAGEAbAA6AF8AXwBWAG8AcgBuAE8AcgBpAGcAaQBuAGEAbABQAHIAbwBtAHAAdAApAAoAIAAgACQAbwB1AHQAIAArAD0AIAAiAGAAZQBdADEAMwAzADsAQgBgAGEAIgAKACAAIABpAGYAIAAoACQAaAApACAAewAgACQARwBsAG8AYgBhAGwAOgBfAF8AVgBvAHIAbgBMAGEAcwB0AEgAaQBzAHQAbwByAHkASQBkACAAPQAgACQAaAAuAEkAZAAgAH0ACgAgACAAcgBlAHQAdQByAG4AIAAkAG8AdQB0AAoAfQAKAA=="
+        ]
+      }
+    },
+    {
+      "shell": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "minimalPrompt": false,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "VORN_MINIMAL_PROMPT": "0"
+        },
+        "args": [
+          "-NoExit",
+          "-EncodedCommand",
+          "CgAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATABhAHMAdABIAGkAcwB0AG8AcgB5AEkAZAAgAD0AIAAtADEACgAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATwByAGkAZwBpAG4AYQBsAFAAcgBvAG0AcAB0ACAAPQAgACQAZgB1AG4AYwB0AGkAbwBuADoAcAByAG8AbQBwAHQACgAKAGYAdQBuAGMAdABpAG8AbgAgAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ARQB4AGkAdABDAG8AZABlACAAewAKACAAIABpAGYAIAAoACQAPwAgAC0AZQBxACAAJABUAHIAdQBlACkAIAB7ACAAcgBlAHQAdQByAG4AIAAwACAAfQAKACAAIAAkAGgAIAA9ACAARwBlAHQALQBIAGkAcwB0AG8AcgB5ACAALQBDAG8AdQBuAHQAIAAxAAoAIAAgAGkAZgAgACgAJABFAHIAcgBvAHIAWwAwAF0ALgBJAG4AdgBvAGMAYQB0AGkAbwBuAEkAbgBmAG8ALgBIAGkAcwB0AG8AcgB5AEkAZAAgAC0AZQBxACAAJABoAC4ASQBkACkAIAB7ACAAcgBlAHQAdQByAG4AIAAtADEAIAB9AAoAIAAgAGkAZgAgACgAJABuAHUAbABsACAALQBlAHEAIAAkAEwAYQBzAHQARQB4AGkAdABDAG8AZABlACkAIAB7ACAAcgBlAHQAdQByAG4AIAAxACAAfQAKACAAIAByAGUAdAB1AHIAbgAgACQATABhAHMAdABFAHgAaQB0AEMAbwBkAGUACgB9AAoACgBmAHUAbgBjAHQAaQBvAG4AIABHAGwAbwBiAGEAbAA6AHAAcgBvAG0AcAB0ACAAewAKACAAIAAkAGMAbwBkAGUAIAA9ACAAXwBfAFYAbwByAG4ARQB4AGkAdABDAG8AZABlAAoAIAAgACQAaAAgAD0AIABHAGUAdAAtAEgAaQBzAHQAbwByAHkAIAAtAEMAbwB1AG4AdAAgADEACgAgACAAJABvAHUAdAAgAD0AIAAnACcACgAgACAAaQBmACAAKAAkAEcAbABvAGIAYQBsADoAXwBfAFYAbwByAG4ATABhAHMAdABIAGkAcwB0AG8AcgB5AEkAZAAgAC0AbgBlACAALQAxACAALQBhAG4AZAAgACQAaAAgAC0AYQBuAGQAIAAkAGgALgBJAGQAIAAtAG4AZQAgACQARwBsAG8AYgBhAGwAOgBfAF8AVgBvAHIAbgBMAGEAcwB0AEgAaQBzAHQAbwByAHkASQBkACkAIAB7AAoAIAAgACAAIAAkAGIAeQB0AGUAcwAgAD0AIABbAFQAZQB4AHQALgBFAG4AYwBvAGQAaQBuAGcAXQA6ADoAVQBUAEYAOAAuAEcAZQB0AEIAeQB0AGUAcwAoACQAaAAuAEMAbwBtAG0AYQBuAGQATABpAG4AZQApAAoAIAAgACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBgAGUAXQA1ADUAMgAyADsAYwBtAGQAOwAkACgAWwBDAG8AbgB2AGUAcgB0AF0AOgA6AFQAbwBCAGEAcwBlADYANABTAHQAcgBpAG4AZwAoACQAYgB5AHQAZQBzACkAKQBgAGEAIgAKACAAIAAgACAAJABtAHMAIAA9ACAAWwBpAG4AdABdACgAJABoAC4ARQBuAGQARQB4AGUAYwB1AHQAaQBvAG4AVABpAG0AZQAgAC0AIAAkAGgALgBTAHQAYQByAHQARQB4AGUAYwB1AHQAaQBvAG4AVABpAG0AZQApAC4AVABvAHQAYQBsAE0AaQBsAGwAaQBzAGUAYwBvAG4AZABzAAoAIAAgACAAIAAkAG8AdQB0ACAAKwA9ACAAIgBgAGUAXQA1ADUAMgAyADsAZAB1AHIAOwAkAG0AcwBgAGEAIgAKACAAIAAgACAAJABvAHUAdAAgACsAPQAgACIAYABlAF0AMQAzADMAOwBEADsAJABjAG8AZABlAGAAYQAiAAoAIAAgAH0ACgAgACAAJABvAHUAdAAgACsAPQAgACIAYABlAF0ANQA1ADIAMgA7AGMAdwBkADsAJAAoACQAZQB4AGUAYwB1AHQAaQBvAG4AQwBvAG4AdABlAHgAdAAuAFMAZQBzAHMAaQBvAG4AUwB0AGEAdABlAC4AUABhAHQAaAAuAEMAdQByAHIAZQBuAHQATABvAGMAYQB0AGkAbwBuACkAYABhACIACgAgACAAJABvAHUAdAAgACsAPQAgACIAYABlAF0AMQAzADMAOwBBAGAAYQAiAAoAIAAgACQAbwB1AHQAIAArAD0AIABbAHMAdAByAGkAbgBnAF0AKAAmACAAJABHAGwAbwBiAGEAbAA6AF8AXwBWAG8AcgBuAE8AcgBpAGcAaQBuAGEAbABQAHIAbwBtAHAAdAApAAoAIAAgACQAbwB1AHQAIAArAD0AIAAiAGAAZQBdADEAMwAzADsAQgBgAGEAIgAKACAAIABpAGYAIAAoACQAaAApACAAewAgACQARwBsAG8AYgBhAGwAOgBfAF8AVgBvAHIAbgBMAGEAcwB0AEgAaQBzAHQAbwByAHkASQBkACAAPQAgACQAaAAuAEkAZAAgAH0ACgAgACAAcgBlAHQAdQByAG4AIAAkAG8AdQB0AAoAfQAKAA=="
+        ]
+      }
+    },
+    {
+      "shell": "cmd.exe",
+      "minimalPrompt": false,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "PROMPT": "$e]133;D$e\\$e]5522;cwd;$P$e\\$e]133;A$e\\$P$G$e]133;B$e\\"
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "C:\\Windows\\System32\\CMD.EXE",
+      "minimalPrompt": false,
+      "env": {
+        "PROMPT": "$N$G"
+      },
+      "home": "/home/corpus",
+      "setup": {
+        "env": {
+          "PROMPT": "$e]133;D$e\\$e]5522;cwd;$P$e\\$e]133;A$e\\$N$G$e]133;B$e\\"
+        },
+        "args": null
+      }
+    },
+    {
+      "shell": "/bin/sh",
+      "minimalPrompt": false,
+      "env": {},
+      "home": "/home/corpus",
+      "setup": {
+        "env": {},
+        "args": null
+      }
+    }
+  ]
+}

@@ -9,12 +9,16 @@
 //! (`agent-detector`, `agent-history`, `agent-model-catalog`); where a module
 //! departs from it on input no agent writes, its docs say so.
 //!
+//! How each is launched, and a shell with it, is worked out in [`launch`],
+//! which starts nothing.
+//!
 //! Everything here blocks the thread it runs on: file reads, SQLite queries,
 //! and for the model catalog a child process of up to fifteen seconds.
 
 pub mod detect;
 pub mod history;
 mod js;
+pub mod launch;
 pub mod models;
 pub mod paths;
 mod probe;
@@ -62,6 +66,12 @@ impl Agent {
     /// (`supportsExactSessionResume`).
     pub fn resumes_exactly(self) -> bool {
         self != Agent::Gemini
+    }
+
+    /// Whether a fresh session can be pinned to an id chosen beforehand, with
+    /// `--session-id`, to resume it by later (`supportsSessionIdPinning`).
+    pub fn pins_session_ids(self) -> bool {
+        matches!(self, Agent::Claude | Agent::Copilot)
     }
 
     /// What one unit of a session's activity is called

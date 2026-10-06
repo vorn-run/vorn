@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -233,67 +233,7 @@ pub fn discovery_arguments(agent: Agent, configured: &[String]) -> Vec<String> {
 /// (`assertModelCommand`). A command of several words is still one when it
 /// is the path of a file, spaces and all.
 pub fn check_model_command(command: &str) -> Result<(), DiscoveryError> {
-    let wrapper = command
-        .chars()
-        .any(|c| matches!(c, ';' | '&' | '|' | '<' | '>' | '`' | '\n' | '\r'))
-        || command.contains("$(");
-    match (wrapper, word_count(command)) {
-        (false, Some(1)) => Ok(()),
-        (false, Some(_)) if Path::new(command).exists() => Ok(()),
-        _ => Err(DiscoveryError::Wrapper),
-    }
-}
-
-/// How many words a shell would split `line` into, or `None` for a line that
-/// is more than one simple command or cannot be read (`tokenize`).
-fn word_count(line: &str) -> Option<usize> {
-    let chars: Vec<char> = line.chars().collect();
-    let mut i = 0;
-    let mut words = 0;
-    let blank = |c: char| c == ' ' || c == '\t';
-    while i < chars.len() {
-        while i < chars.len() && blank(chars[i]) {
-            i += 1;
-        }
-        if i >= chars.len() {
-            break;
-        }
-        while i < chars.len() && !blank(chars[i]) {
-            match chars[i] {
-                '|' | '&' | ';' | '<' | '>' | '(' | ')' | '\n' | '`' => return None,
-                '$' if chars.get(i + 1) == Some(&'(') => return None,
-                '\'' => {
-                    let close = chars[i + 1..].iter().position(|&c| c == '\'')?;
-                    i += close + 2;
-                }
-                '"' => {
-                    i += 1;
-                    loop {
-                        match *chars.get(i)? {
-                            '"' => {
-                                i += 1;
-                                break;
-                            }
-                            '`' => return None,
-                            '$' if chars.get(i + 1) == Some(&'(') => return None,
-                            '\\' if matches!(chars.get(i + 1), Some('"' | '\\' | '$' | '`')) => {
-                                i += 2;
-                            }
-                            _ => i += 1,
-                        }
-                    }
-                }
-                '\\' => {
-                    // A trailing backslash continues the line elsewhere.
-                    chars.get(i + 1)?;
-                    i += 2;
-                }
-                _ => i += 1,
-            }
-        }
-        words += 1;
-    }
-    Some(words)
+    crate::launch::model::check_model_command(command, true).map_err(|_| DiscoveryError::Wrapper)
 }
 
 /// What the picker asked for (`AgentModelRequest`), read by the host.
