@@ -55,11 +55,29 @@ impl fmt::Display for Mode {
 
 /// Groups vornd has a native implementation of, which a per-group setting
 /// may put in native mode.
-pub const NATIVE_GROUPS: &[&str] = &["git", "file", "ide"];
+pub const NATIVE_GROUPS: &[&str] = &[
+    "git",
+    "file",
+    "ide",
+    "server",
+    "tailscale",
+    "token",
+    "pairing",
+    "auth",
+];
 
 /// Groups the Native server switch runs natively: the one place a group
 /// joins the switch. Each is also in [`NATIVE_GROUPS`].
-pub const NATIVE_SERVER_GROUPS: &[&str] = &["git", "file", "ide"];
+pub const NATIVE_SERVER_GROUPS: &[&str] = &[
+    "git",
+    "file",
+    "ide",
+    "server",
+    "tailscale",
+    "token",
+    "pairing",
+    "auth",
+];
 
 /// The group a method belongs to: everything before the first colon.
 pub fn group_of(method: &str) -> &str {

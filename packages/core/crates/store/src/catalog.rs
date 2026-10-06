@@ -3,11 +3,11 @@
 //! `saveConfig` read the same rows through the row mappers here.
 
 use rusqlite::types::{Value as SqlValue, ValueRef};
-use rusqlite::{params, params_from_iter, OptionalExtension, Row};
+use rusqlite::{params, params_from_iter, Row};
 use serde_json::{Map, Value};
 use vorn_protocol::{
     DeviceToken, DeviceTokenSecret, NewDeviceToken, ProjectConfig, SessionGroupConfig, SshKey,
-    SshKeyMeta, User, UserRole, WorkflowDefinition, WorkspaceConfig,
+    SshKeyMeta, User, WorkflowDefinition, WorkspaceConfig,
 };
 
 use crate::sql::{
@@ -15,7 +15,7 @@ use crate::sql::{
     parse_json, truthy,
 };
 use crate::tasks::bind;
-use crate::{Result, Store};
+use crate::{tokens, Result, Store};
 
 /// A `projects` row as `rowToProject` maps it: `preferredAgents` and
 /// `hostIds` are parsed (and throw on bad JSON, as `JSON.parse` does), and a
@@ -141,17 +141,6 @@ fn query_one<T>(
     let mut stmt = store.conn().prepare(sql)?;
     let mut rows = stmt.query(params)?;
     rows.next()?.map(map).transpose()
-}
-
-fn row_to_device_token(row: &Row<'_>) -> Result<DeviceToken> {
-    Ok(DeviceToken {
-        id: get_text(row, "id")?,
-        user_id: get_text(row, "user_id")?,
-        name: get_text(row, "name")?,
-        created_at: get_text(row, "created_at")?,
-        last_seen_at: get_opt_text(row, "last_seen_at")?,
-        revoked_at: get_opt_text(row, "revoked_at")?,
-    })
 }
 
 // Projects
@@ -315,92 +304,40 @@ impl Store {
     }
 }
 
-// Identity and device tokens
+// Identity and device tokens: the SQL is in `tokens`, which a second
+// process uses too.
 
 impl Store {
     /// The seeded owner, present on any database past migration 14.
     pub fn db_get_owner_user(&self) -> Result<Option<User>> {
-        query_one(
-            self,
-            "SELECT * FROM users WHERE role = 'owner' ORDER BY created_at LIMIT 1",
-            [],
-            |row| {
-                Ok(User {
-                    id: get_text(row, "id")?,
-                    name: get_text(row, "name")?,
-                    role: UserRole(get_text(row, "role")?),
-                    created_at: get_text(row, "created_at")?,
-                })
-            },
-        )
+        tokens::owner_user(self.conn())
     }
 
     pub fn db_insert_device_token(&self, token: &NewDeviceToken) -> Result<()> {
-        self.conn().execute(
-            "INSERT INTO device_tokens (id, user_id, name, token_hash, created_at)
-       VALUES (?, ?, ?, ?, ?)",
-            params![
-                token.id,
-                token.user_id,
-                token.name,
-                token.token_hash,
-                token.created_at
-            ],
-        )?;
-        Ok(())
+        tokens::insert(self.conn(), token)
     }
 
     /// Carries the hash, for verification only; [`DeviceToken`] never does.
     pub fn db_get_device_token_secret(&self, id: &str) -> Result<Option<DeviceTokenSecret>> {
-        query_one(
-            self,
-            "SELECT id, user_id, token_hash, revoked_at FROM device_tokens WHERE id = ?",
-            [id],
-            |row| {
-                Ok(DeviceTokenSecret {
-                    id: get_text(row, "id")?,
-                    user_id: get_text(row, "user_id")?,
-                    token_hash: get_text(row, "token_hash")?,
-                    revoked_at: get_opt_text(row, "revoked_at")?,
-                })
-            },
-        )
+        tokens::secret(self.conn(), id)
     }
 
     /// Columns are named rather than `*`, so the hash never leaves the store.
     pub fn db_list_device_tokens(&self) -> Result<Vec<DeviceToken>> {
-        query_all(
-            self,
-            "SELECT id, user_id, name, created_at, last_seen_at, revoked_at
-       FROM device_tokens ORDER BY created_at",
-            [],
-            row_to_device_token,
-        )
+        tokens::list(self.conn())
     }
 
     pub fn db_has_device_tokens(&self) -> Result<bool> {
-        let found: Option<i64> = self
-            .conn()
-            .query_row("SELECT 1 FROM device_tokens LIMIT 1", [], |row| row.get(0))
-            .optional()?;
-        Ok(found.is_some())
+        tokens::any(self.conn())
     }
 
     /// False when the id is unknown or the token was already revoked.
     pub fn db_revoke_device_token(&self, id: &str, revoked_at: &str) -> Result<bool> {
-        let changed = self.conn().execute(
-            "UPDATE device_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
-            params![revoked_at, id],
-        )?;
-        Ok(changed > 0)
+        tokens::revoke(self.conn(), id, revoked_at)
     }
 
     pub fn db_touch_device_token(&self, id: &str, seen_at: &str) -> Result<()> {
-        self.conn().execute(
-            "UPDATE device_tokens SET last_seen_at = ? WHERE id = ?",
-            params![seen_at, id],
-        )?;
-        Ok(())
+        tokens::touch(self.conn(), id, seen_at)
     }
 }
 
