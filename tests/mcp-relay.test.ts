@@ -340,6 +340,23 @@ describe('relay across a vornd restart', () => {
     await vornd.stop()
   })
 
+  it('fails what vornd keeps turning away after a bounded number of resends', async () => {
+    const vornd = await new FakeVornd('tok', 's1', { 'resources/list': 10 }).listen(0)
+    const { agent, done, ask } = await connect(vornd.upstream, async () => vornd.upstream)
+    await handshake(agent, ask)
+    const started = Date.now()
+    ask(1, 'resources/list')
+    await expect.poll(() => agent.received.length).toBe(2)
+    expect(answers(agent)[1].error?.message).toMatch(/kept turning the request away/)
+    expect(vornd.posted('resources/list')).toHaveLength(4)
+    expect(vornd.posted('initialize')).toHaveLength(1 + 3)
+    expect(Date.now() - started).toBeLessThan(FAST.giveUpAfterMs / 2)
+
+    await agent.close()
+    await done
+    await vornd.stop()
+  })
+
   it('says at once when the credential was never taken', async () => {
     const vornd = await FakeVornd.start('tok', 's1')
     const wrong = { ...vornd.upstream, headers: relayHeaders('another-token', '/', {}) }

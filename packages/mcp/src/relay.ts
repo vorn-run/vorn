@@ -297,7 +297,7 @@ export async function relay(
   /** Relays `message`, reconnecting and sending it again while vornd has not taken it. */
   const deliver = async (message: JSONRPCMessage): Promise<string | null> => {
     const method = methodOf(message)
-    for (let resends = 0; resends <= MAX_RESENDS; resends++) {
+    for (let resends = 0; ; resends++) {
       if (reconnecting) await reconnecting
       const seen = epoch
       const failure = await exchange(message)
@@ -309,11 +309,13 @@ export async function relay(
       if (failure.kind === 'final') return failure.reason
       if (failure.kind === 'broken' && method === 'tools/call') return failure.reason
       if (closing) return failure.reason
+      if (resends === MAX_RESENDS) {
+        return `vornd kept turning the request away after reconnecting: ${failure.reason}`
+      }
       console.error(`${failure.reason}; waiting for vornd`)
       const gaveUp = await reconnect(seen)
       if (gaveUp) return gaveUp
     }
-    return 'vornd kept turning the request away after reconnecting'
   }
 
   const closed = new Promise<void>((resolve) => {

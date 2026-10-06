@@ -597,7 +597,8 @@ async fn relay_until_answered(
     line: &str,
     outgoing: &Outgoing,
 ) -> Result<(), String> {
-    for _ in 0..=MAX_RESENDS {
+    let mut resends = 0;
+    loop {
         let link = shared.link();
         let reason = match relay_exchange(shared, &link, line, outgoing.initialize).await {
             Ok(()) => {
@@ -621,10 +622,15 @@ async fn relay_until_answered(
             Err(Failure::Broken(message)) if !outgoing.resendable => return Err(message),
             Err(Failure::Unsent(reason) | Failure::Broken(reason)) => reason,
         };
+        if resends == MAX_RESENDS {
+            return Err(format!(
+                "vornd kept turning the request away after reconnecting: {reason}"
+            ));
+        }
+        resends += 1;
         eprintln!("vorn: {reason}; waiting for vornd");
         shared.reconnect(link.epoch).await?;
     }
-    Err("vornd kept turning the request away after reconnecting".to_owned())
 }
 
 async fn relay_exchange(

@@ -460,9 +460,13 @@ async fn never_sends_a_tool_call_twice() {
     assert_eq!(count.load(Ordering::SeqCst), 1);
 
     // What vornd may act on twice is sent again, a bounded number of times.
+    let started = std::time::Instant::now();
     let failed = agent.ask(10, "tools/list").await;
     assert_eq!(failed["id"], 10);
-    assert!(count.load(Ordering::SeqCst) > 2);
+    let message = failed["error"]["message"].as_str().unwrap();
+    assert!(message.contains("kept turning"), "{message}");
+    assert_eq!(count.load(Ordering::SeqCst), 1 + 4);
+    assert!(started.elapsed() < FAST.give_up_after / 2);
     let (outcome, _) = agent.close().await;
     outcome.unwrap();
 }
