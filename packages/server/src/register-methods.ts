@@ -2343,8 +2343,7 @@ export function registerAllMethods(): void {
       const installation = installCopilotHooks(cwd, port)
       copilotInstallations.set(session.id, installation)
       hookStatusMapper.forceLink(installation.sessionId, session.id)
-      session.hookSessionId = installation.sessionId
-      ptyManager.recordChanged(session.id)
+      ptyManager.linkHookSession(session.id, installation.sessionId)
       // Don't set statusSource = 'hooks' eagerly — it disables the pattern-based
       // fallback. If hooks actually fire, promoteToHookStatus is called on the
       // first event. This fixes status stuck on 'waiting' when hooks don't work
@@ -2443,8 +2442,7 @@ export function registerAllMethods(): void {
         log.info(`[hooks] ${event.hook_event_name}: session=${event.session_id} cwd=${event.cwd}`)
         const result = hookStatusMapper.mapEventToStatus(event)
         if (result) {
-          ptyManager.updateSessionStatus(result.terminalId, result.status)
-          ptyManager.promoteToHookStatus(result.terminalId)
+          ptyManager.hookStatus(result.terminalId, result.status, true)
           broadcastWidgetUpdate()
 
           // Persist after hookSessionId is set (SessionStart links the session)
@@ -2493,7 +2491,7 @@ export function registerAllMethods(): void {
           return
         }
 
-        ptyManager.promoteToHookStatus(terminalId)
+        ptyManager.hookStatus(terminalId, null, true)
 
         const session = ptyManager.getActiveSessions().find((s) => s.id === terminalId)
 
@@ -2521,7 +2519,7 @@ export function registerAllMethods(): void {
         }
 
         clientRegistry.broadcast(IPC.WIDGET_PERMISSION_REQUEST, permReq)
-        ptyManager.updateSessionStatus(terminalId, 'waiting')
+        ptyManager.hookStatus(terminalId, 'waiting', false)
         broadcastWidgetUpdate()
       })
     })

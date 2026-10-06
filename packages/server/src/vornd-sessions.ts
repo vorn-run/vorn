@@ -1,6 +1,11 @@
 import { EventEmitter } from 'node:events'
 import { decodeTerminalFrameV2 } from '@vornrun/shared/terminal-frame'
-import type { HeadlessSession, TerminalSession, VorndStatus } from '@vornrun/shared/types'
+import type {
+  AgentStatus,
+  HeadlessSession,
+  TerminalSession,
+  VorndStatus
+} from '@vornrun/shared/types'
 import log from './logger'
 import { claimEffect, pruneEffectReceipts } from './database'
 import { APP_PROTOCOL, VorndChannel } from './vornd-channel'
@@ -32,7 +37,12 @@ import {
  * While vornd runs native work (Settings › Experimental › Native server, or a
  * per-group setting), it keeps a copy of this server's session records: this
  * server feeds it (`session-feed.ts`) and follows the copy's changes (`SessionMirror`).
- * The records stay this server's; nothing reads the copy here yet.
+ *
+ * With the Native server switch on, the copy also decides each terminal's
+ * status (`decidesStatus`): from what its screen shows, its output going quiet,
+ * what is written to it and what the agent's hooks report. This server then
+ * tells vornd what only it sees (`hookStatus`, `input`, `patch`) and takes each
+ * status from the copy's changes (`mirrored`); the rest of the records stay its own.
  */
 
 /** A session as vornd reports it. */
@@ -299,6 +309,9 @@ export class VorndSessions extends EventEmitter {
   /** Whether vornd runs native work and keeps a copy of the session records. */
   private nativeWork = false
 
+  /** Whether vornd's copy decides the terminals' statuses, as its `vornd:hello` said. */
+  private statusWork = false
+
   /** Where `sessionFeed` sends this server's session records: this channel, when vornd wants them. */
   readonly recordSink: RecordSink = {
     wants: () => this.nativeWork && this.inUse(),
@@ -314,8 +327,15 @@ export class VorndSessions extends EventEmitter {
     feed.attach(this.recordSink)
   }
 
-  /** vornd's copy of the session records, as its changes are told. */
-  readonly mirror = new SessionMirror(() => this.resyncMirror())
+  /**
+   * vornd's copy of the session records, as its changes are told. Each
+   * terminal record it takes is emitted as `mirrored`, for the pty manager to
+   * take the statuses from while vornd decides them.
+   */
+  readonly mirror = new SessionMirror(
+    () => this.resyncMirror(),
+    (record) => this.emit('mirrored', record)
+  )
 
   /**
    * Whether vornd runs native work, as its `vornd:hello` said: it then keeps a
@@ -323,6 +343,35 @@ export class VorndSessions extends EventEmitter {
    */
   isNative(): boolean {
     return this.nativeWork && this.inUse()
+  }
+
+  /**
+   * Whether vornd decides the terminals' statuses: the Native server switch is
+   * on and the channel is up. While the channel is down this server decides
+   * them itself, as it does with the switch off.
+   */
+  decidesStatus(): boolean {
+    return this.statusWork && this.nativeWork && this.inUse()
+  }
+
+  /** A status an agent's hook reported, and whether its hooks report the status from now on. */
+  hookStatus(id: string, status: AgentStatus | null, promote: boolean): void {
+    this.channel?.notify('vornd:hookStatus', { id, ...(status ? { status } : {}), promote })
+  }
+
+  /** Something was written to a terminal: an idle or waiting one runs again. */
+  input(id: string): void {
+    this.channel?.notify('vornd:input', { id })
+  }
+
+  /** Set fields vornd decides of a terminal's record (`hookSessionId`); null takes one away. */
+  patch(id: string, fields: Partial<Record<PatchField, string | boolean | null>>): void {
+    const baseRev = this.mirror.terminal(id)?.rev
+    this.channel?.notify('vornd:patch', {
+      id,
+      fields,
+      ...(baseRev === undefined ? {} : { baseRev })
+    })
   }
 
   /** Whether the channel to vornd is up. */
@@ -356,10 +405,12 @@ export class VorndSessions extends EventEmitter {
 
   private async open(endpoint: string): Promise<boolean> {
     let channel: VorndChannel
-    let hello: { protocol?: number; native?: boolean }
+    let hello: { protocol?: number; native?: boolean; statuses?: boolean }
     try {
       channel = await VorndChannel.connect(endpoint)
-      hello = await channel.request<{ protocol?: number; native?: boolean }>('vornd:hello')
+      hello = await channel.request<{ protocol?: number; native?: boolean; statuses?: boolean }>(
+        'vornd:hello'
+      )
       if (hello?.protocol !== APP_PROTOCOL) {
         channel.close()
         throw new Error(
@@ -373,6 +424,7 @@ export class VorndSessions extends EventEmitter {
     const old = this.channel
     this.channel = channel
     this.nativeWork = hello?.native === true
+    this.statusWork = hello?.statuses === true
     old?.close()
     channel.on('notification', (method: string, params: unknown) =>
       this.notified(channel, method, params)
@@ -711,6 +763,15 @@ export interface RegistrySnapshot {
   holds: Record<string, number>
 }
 
+/** The fields of a terminal's record `vornd:patch` may set. */
+export type PatchField =
+  | 'displayName'
+  | 'renamedByPerson'
+  | 'groupId'
+  | 'hookSessionId'
+  | 'agentSessionId'
+  | 'statusSource'
+
 /** One change to vornd's copy, as `vornd:session` tells it. */
 export interface SessionNote {
   gen: string
@@ -750,7 +811,14 @@ export class SessionMirror {
   /** Notes waiting for a snapshot; null once one has been loaded and nothing is missing. */
   private waiting: SessionNote[] | null = []
 
-  constructor(private readonly resync: () => void) {}
+  /**
+   * @param resync Asks for the copy whole, after a note was missed.
+   * @param took Each terminal record taken, from a note or a snapshot, once it is in.
+   */
+  constructor(
+    private readonly resync: () => void,
+    private readonly took: (record: TerminalSession) => void = () => {}
+  ) {}
 
   /** Where the mirror stands: null until it has loaded a snapshot. */
   get revision(): { gen: string; rev: number } | null {
@@ -771,6 +839,7 @@ export class SessionMirror {
       .filter((n) => n.gen === snapshot.gen && n.rev > snapshot.rev)
       .sort((a, b) => a.rev - b.rev)
     this.waiting = null
+    for (const r of this.terminalRecords.values()) this.took(r)
     for (const note of waited) this.apply(note)
   }
 
@@ -794,11 +863,13 @@ export class SessionMirror {
     if (note.gen !== this.gen) return this.missed(note)
     if (note.rev <= this.rev) return 'stale'
     if (note.rev !== this.rev + 1) return this.missed(note)
+    let took: TerminalSession | undefined
     switch (note.op) {
       case 'upsert':
-        if (note.kind === 'terminal' && note.record)
-          this.terminalRecords.set(note.record.id, freeze(note.record as TerminalSession))
-        else if (note.kind === 'headless' && note.record)
+        if (note.kind === 'terminal' && note.record) {
+          took = freeze(note.record as TerminalSession)
+          this.terminalRecords.set(took.id, took)
+        } else if (note.kind === 'headless' && note.record)
           this.headlessRecords.set(note.record.id, freeze(note.record as HeadlessSession))
         else return this.missed(note)
         break
@@ -817,6 +888,7 @@ export class SessionMirror {
         return this.missed(note)
     }
     this.rev = note.rev
+    if (took) this.took(took)
     return 'applied'
   }
 

@@ -105,6 +105,9 @@ export class FakeVorndPty extends EventEmitter {
 
 const spawned: FakeVorndPty[] = []
 
+/** What the fake tells its listeners: `mirrored`, a terminal record from vornd's copy. */
+const told = new EventEmitter()
+
 function spawnFake(id: string, spec: VorndSpawn, watched: boolean): FakeVorndPty {
   const pty = new FakeVorndPty(id, spec, watched)
   spawned.push(pty)
@@ -131,6 +134,20 @@ export const fakeVornd = {
   release: vi.fn((_id: string): void => {}),
   readOutput: vi.fn(async (_id: string, _lines?: number): Promise<string[]> => []),
   inUse: vi.fn(() => true),
+  /** Whether vornd decides the statuses: off unless a test turns it on. */
+  decidesStatus: vi.fn(() => false),
+  hookStatus: vi.fn((_id: string, _status: string | null, _promote: boolean): void => {}),
+  input: vi.fn((_id: string): void => {}),
+  patch: vi.fn((_id: string, _fields: Record<string, unknown>): void => {}),
+  on(event: string, listener: (...args: never[]) => void): unknown {
+    told.on(event, listener as (...args: unknown[]) => void)
+    return fakeVornd
+  },
+
+  /** A terminal record as vornd's copy tells it. */
+  mirrored(record: unknown): void {
+    told.emit('mirrored', record)
+  },
 
   /** The session spawned last. */
   last(): FakeVorndPty {
@@ -147,6 +164,10 @@ export const fakeVornd = {
     fakeVornd.release.mockClear()
     fakeVornd.readOutput.mockReset().mockResolvedValue([])
     fakeVornd.inUse.mockReset().mockReturnValue(true)
+    fakeVornd.decidesStatus.mockReset().mockReturnValue(false)
+    fakeVornd.hookStatus.mockClear()
+    fakeVornd.input.mockClear()
+    fakeVornd.patch.mockClear()
   }
 }
 

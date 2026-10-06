@@ -129,6 +129,11 @@ impl Daemon {
             #[cfg(feature = "engine")]
             if let Some(engine) = holder.as_ref().and_then(|h| h.engine()) {
                 native.set_registry(Arc::clone(engine.registry()));
+                // With the switch on, the copy decides the terminals'
+                // statuses too, and the server takes them from it.
+                if groups.native_server() {
+                    engine.decide_statuses();
+                }
             }
             native
         });
