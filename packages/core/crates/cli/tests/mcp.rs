@@ -331,10 +331,14 @@ async fn reopens_the_session_when_vornd_restarts_on_the_same_port() {
     let note = posted(&log, "notifications/initialized");
     assert_eq!(note.len(), 1);
     assert_eq!(note[0].session.as_deref(), Some("s2"));
-    for asked in posted(&log, "tools/list") {
-        assert_eq!(asked.session.as_deref(), Some("s2"));
-        assert_eq!(asked.protocol.as_deref(), Some("2025-06-18"));
-    }
+    // Where connecting to a closed port is slow to fail, a request may first reach the new vornd with the old session.
+    let listed = posted(&log, "tools/list");
+    let last = listed.last().unwrap();
+    assert_eq!(last.session.as_deref(), Some("s2"));
+    assert_eq!(last.protocol.as_deref(), Some("2025-06-18"));
+    assert!(listed
+        .iter()
+        .all(|asked| matches!(asked.session.as_deref(), Some("s1" | "s2"))));
     let last = log.last().unwrap();
     assert_eq!(
         (last.method.as_str(), last.session.as_deref()),
