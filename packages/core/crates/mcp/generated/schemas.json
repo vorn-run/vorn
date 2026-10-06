@@ -11,7 +11,10 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["active", "recent"]
+              "values": [
+                "active",
+                "recent"
+              ]
             }
           }
         ],
@@ -77,7 +80,13 @@
           "agent_type",
           {
             "t": "enum",
-            "values": ["claude", "copilot", "codex", "opencode", "gemini"]
+            "values": [
+              "claude",
+              "copilot",
+              "codex",
+              "opencode",
+              "gemini"
+            ]
           }
         ],
         [
@@ -461,7 +470,11 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["created", "exited", "renamed"]
+              "values": [
+                "created",
+                "exited",
+                "renamed"
+              ]
             }
           }
         ],
@@ -508,7 +521,10 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["connector", "extension"]
+              "values": [
+                "connector",
+                "extension"
+              ]
             }
           }
         ]
@@ -832,7 +848,10 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["interactive", "all"]
+              "values": [
+                "interactive",
+                "all"
+              ]
             }
           }
         ],
@@ -1018,7 +1037,13 @@
           "action",
           {
             "t": "enum",
-            "values": ["click", "hover", "type", "key", "scroll"]
+            "values": [
+              "click",
+              "hover",
+              "type",
+              "key",
+              "scroll"
+            ]
           }
         ],
         [
@@ -1117,7 +1142,12 @@
           "action",
           {
             "t": "enum",
-            "values": ["list", "add", "close", "select"]
+            "values": [
+              "list",
+              "add",
+              "close",
+              "select"
+            ]
           }
         ],
         [
@@ -1193,7 +1223,10 @@
           "direction",
           {
             "t": "enum",
-            "values": ["back", "forward"]
+            "values": [
+              "back",
+              "forward"
+            ]
           }
         ]
       ]
@@ -1242,7 +1275,10 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["interactive", "all"]
+              "values": [
+                "interactive",
+                "all"
+              ]
             }
           }
         ],
@@ -1340,7 +1376,14 @@
           "action",
           {
             "t": "enum",
-            "values": ["tap", "swipe", "type", "button", "press", "rotate"]
+            "values": [
+              "tap",
+              "swipe",
+              "type",
+              "button",
+              "press",
+              "rotate"
+            ]
           }
         ],
         [
@@ -1422,7 +1465,12 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["portrait", "portrait-upside-down", "landscape-left", "landscape-right"]
+              "values": [
+                "portrait",
+                "portrait-upside-down",
+                "landscape-left",
+                "landscape-right"
+              ]
             }
           }
         ],
@@ -1648,7 +1696,11 @@
           "kind",
           {
             "t": "enum",
-            "values": ["page", "doc", "design"]
+            "values": [
+              "page",
+              "doc",
+              "design"
+            ]
           }
         ],
         [
@@ -1931,7 +1983,13 @@
               "t": "array",
               "item": {
                 "t": "enum",
-                "values": ["claude", "copilot", "codex", "opencode", "gemini"]
+                "values": [
+                  "claude",
+                  "copilot",
+                  "codex",
+                  "opencode",
+                  "gemini"
+                ]
               }
             }
           }
@@ -2032,7 +2090,13 @@
               "t": "array",
               "item": {
                 "t": "enum",
-                "values": ["claude", "copilot", "codex", "opencode", "gemini"]
+                "values": [
+                  "claude",
+                  "copilot",
+                  "codex",
+                  "opencode",
+                  "gemini"
+                ]
               }
             }
           }
@@ -2137,7 +2201,13 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["todo", "in_progress", "in_review", "done", "cancelled"]
+              "values": [
+                "todo",
+                "in_progress",
+                "in_review",
+                "done",
+                "cancelled"
+              ]
             }
           }
         ],
@@ -2147,7 +2217,13 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["claude", "copilot", "codex", "opencode", "gemini"]
+              "values": [
+                "claude",
+                "copilot",
+                "codex",
+                "opencode",
+                "gemini"
+              ]
             }
           }
         ],
@@ -2250,7 +2326,13 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["todo", "in_progress", "in_review", "done", "cancelled"]
+              "values": [
+                "todo",
+                "in_progress",
+                "in_review",
+                "done",
+                "cancelled"
+              ]
             }
           }
         ],
@@ -2285,7 +2367,13 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["claude", "copilot", "codex", "opencode", "gemini"]
+              "values": [
+                "claude",
+                "copilot",
+                "codex",
+                "opencode",
+                "gemini"
+              ]
             }
           }
         ]
@@ -2380,7 +2468,13 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["todo", "in_progress", "in_review", "done", "cancelled"]
+              "values": [
+                "todo",
+                "in_progress",
+                "in_review",
+                "done",
+                "cancelled"
+              ]
             }
           }
         ],
@@ -2415,7 +2509,13 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["claude", "copilot", "codex", "opencode", "gemini"]
+              "values": [
+                "claude",
+                "copilot",
+                "codex",
+                "opencode",
+                "gemini"
+              ]
             }
           }
         ],
@@ -2628,7 +2728,13 @@
                     "agentType",
                     {
                       "t": "enum",
-                      "values": ["claude", "copilot", "codex", "opencode", "gemini"]
+                      "values": [
+                        "claude",
+                        "copilot",
+                        "codex",
+                        "opencode",
+                        "gemini"
+                      ]
                     }
                   ],
                   [
@@ -2740,7 +2846,9 @@
                           },
                           {
                             "t": "literal",
-                            "values": ["fromContext"]
+                            "values": [
+                              "fromContext"
+                            ]
                           }
                         ]
                       }
@@ -2849,7 +2957,9 @@
                     "k": "custom",
                     "name": "outputSchemaNeedsHeadless",
                     "message": "outputSchema requires headless: true",
-                    "path": ["outputSchema"]
+                    "path": [
+                      "outputSchema"
+                    ]
                   }
                 ]
               }
@@ -3249,7 +3359,11 @@
           "decision",
           {
             "t": "enum",
-            "values": ["approve", "reject", "changes"]
+            "values": [
+              "approve",
+              "reject",
+              "changes"
+            ]
           }
         ],
         [
@@ -3388,7 +3502,10 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["log", "next_run"]
+              "values": [
+                "log",
+                "next_run"
+              ]
             }
           }
         ]
@@ -3839,7 +3956,10 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["true", "false"]
+              "values": [
+                "true",
+                "false"
+              ]
             }
           }
         ]
@@ -3949,7 +4069,10 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["stop", "continue"]
+              "values": [
+                "stop",
+                "continue"
+              ]
             }
           }
         ]
@@ -4092,7 +4215,9 @@
             "t": "optional",
             "inner": {
               "t": "literal",
-              "values": ["callConnectorAction"]
+              "values": [
+                "callConnectorAction"
+              ]
             }
           }
         ],
@@ -4195,7 +4320,14 @@
           "operator",
           {
             "t": "enum",
-            "values": ["equals", "notEquals", "contains", "notContains", "isEmpty", "isNotEmpty"]
+            "values": [
+              "equals",
+              "notEquals",
+              "contains",
+              "notContains",
+              "isEmpty",
+              "isNotEmpty"
+            ]
           }
         ],
         [
@@ -4226,7 +4358,9 @@
             "t": "optional",
             "inner": {
               "t": "literal",
-              "values": ["createTaskFromItem"]
+              "values": [
+                "createTaskFromItem"
+              ]
             }
           }
         ],
@@ -4246,7 +4380,13 @@
           "initialStatus",
           {
             "t": "enum",
-            "values": ["todo", "in_progress", "in_review", "done", "cancelled"]
+            "values": [
+              "todo",
+              "in_progress",
+              "in_review",
+              "done",
+              "cancelled"
+            ]
           }
         ]
       ]
@@ -4261,7 +4401,9 @@
             "t": "optional",
             "inner": {
               "t": "literal",
-              "values": ["httpRequest"]
+              "values": [
+                "httpRequest"
+              ]
             }
           }
         ],
@@ -4269,7 +4411,13 @@
           "method",
           {
             "t": "enum",
-            "values": ["GET", "POST", "PUT", "PATCH", "DELETE"]
+            "values": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ]
           }
         ],
         [
@@ -4350,7 +4498,14 @@
           "agentType",
           {
             "t": "enum",
-            "values": ["claude", "copilot", "codex", "opencode", "gemini", "fromTask"]
+            "values": [
+              "claude",
+              "copilot",
+              "codex",
+              "opencode",
+              "gemini",
+              "fromTask"
+            ]
           }
         ],
         [
@@ -4454,7 +4609,12 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["none", "new", "fromStep", "existing"]
+              "values": [
+                "none",
+                "new",
+                "fromStep",
+                "existing"
+              ]
             }
           }
         ],
@@ -4501,7 +4661,9 @@
                 },
                 {
                   "t": "literal",
-                  "values": ["fromContext"]
+                  "values": [
+                    "fromContext"
+                  ]
                 }
               ]
             }
@@ -4630,7 +4792,9 @@
           "k": "custom",
           "name": "outputSchemaNeedsHeadless",
           "message": "outputSchema requires headless: true",
-          "path": ["outputSchema"]
+          "path": [
+            "outputSchema"
+          ]
         }
       ]
     },
@@ -4644,7 +4808,9 @@
             "t": "optional",
             "inner": {
               "t": "literal",
-              "values": ["loop"]
+              "values": [
+                "loop"
+              ]
             }
           }
         ],
@@ -4654,7 +4820,10 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["repeat", "forEach"]
+              "values": [
+                "repeat",
+                "forEach"
+              ]
             }
           }
         ],
@@ -4736,7 +4905,12 @@
           "scriptType",
           {
             "t": "enum",
-            "values": ["bash", "powershell", "python", "node"]
+            "values": [
+              "bash",
+              "powershell",
+              "python",
+              "node"
+            ]
           }
         ],
         [
@@ -4865,7 +5039,9 @@
       "key": "triggerType",
       "options": [
         {
-          "values": ["manual"],
+          "values": [
+            "manual"
+          ],
           "schema": {
             "t": "object",
             "mode": "loose",
@@ -4874,7 +5050,9 @@
                 "triggerType",
                 {
                   "t": "literal",
-                  "values": ["manual"]
+                  "values": [
+                    "manual"
+                  ]
                 }
               ],
               [
@@ -4900,7 +5078,9 @@
           }
         },
         {
-          "values": ["once"],
+          "values": [
+            "once"
+          ],
           "schema": {
             "t": "object",
             "mode": "loose",
@@ -4909,7 +5089,9 @@
                 "triggerType",
                 {
                   "t": "literal",
-                  "values": ["once"]
+                  "values": [
+                    "once"
+                  ]
                 }
               ],
               [
@@ -4929,7 +5111,9 @@
           }
         },
         {
-          "values": ["recurring"],
+          "values": [
+            "recurring"
+          ],
           "schema": {
             "t": "object",
             "mode": "loose",
@@ -4938,7 +5122,9 @@
                 "triggerType",
                 {
                   "t": "literal",
-                  "values": ["recurring"]
+                  "values": [
+                    "recurring"
+                  ]
                 }
               ],
               [
@@ -4974,7 +5160,9 @@
           }
         },
         {
-          "values": ["taskCreated"],
+          "values": [
+            "taskCreated"
+          ],
           "schema": {
             "t": "object",
             "mode": "loose",
@@ -4983,7 +5171,9 @@
                 "triggerType",
                 {
                   "t": "literal",
-                  "values": ["taskCreated"]
+                  "values": [
+                    "taskCreated"
+                  ]
                 }
               ],
               [
@@ -5016,7 +5206,9 @@
           }
         },
         {
-          "values": ["taskStatusChanged"],
+          "values": [
+            "taskStatusChanged"
+          ],
           "schema": {
             "t": "object",
             "mode": "loose",
@@ -5025,7 +5217,9 @@
                 "triggerType",
                 {
                   "t": "literal",
-                  "values": ["taskStatusChanged"]
+                  "values": [
+                    "taskStatusChanged"
+                  ]
                 }
               ],
               [
@@ -5060,7 +5254,13 @@
                   "t": "optional",
                   "inner": {
                     "t": "enum",
-                    "values": ["todo", "in_progress", "in_review", "done", "cancelled"]
+                    "values": [
+                      "todo",
+                      "in_progress",
+                      "in_review",
+                      "done",
+                      "cancelled"
+                    ]
                   }
                 }
               ],
@@ -5070,7 +5270,13 @@
                   "t": "optional",
                   "inner": {
                     "t": "enum",
-                    "values": ["todo", "in_progress", "in_review", "done", "cancelled"]
+                    "values": [
+                      "todo",
+                      "in_progress",
+                      "in_review",
+                      "done",
+                      "cancelled"
+                    ]
                   }
                 }
               ]
@@ -5078,7 +5284,9 @@
           }
         },
         {
-          "values": ["sessionRestored"],
+          "values": [
+            "sessionRestored"
+          ],
           "schema": {
             "t": "object",
             "mode": "loose",
@@ -5087,7 +5295,9 @@
                 "triggerType",
                 {
                   "t": "literal",
-                  "values": ["sessionRestored"]
+                  "values": [
+                    "sessionRestored"
+                  ]
                 }
               ],
               [
@@ -5122,7 +5332,10 @@
                   "t": "optional",
                   "inner": {
                     "t": "enum",
-                    "values": ["cold", "any"]
+                    "values": [
+                      "cold",
+                      "any"
+                    ]
                   }
                 }
               ],
@@ -5132,7 +5345,10 @@
                   "t": "optional",
                   "inner": {
                     "t": "enum",
-                    "values": ["perProject", "unbounded"]
+                    "values": [
+                      "perProject",
+                      "unbounded"
+                    ]
                   }
                 }
               ]
@@ -5140,7 +5356,9 @@
           }
         },
         {
-          "values": ["connectorPoll"],
+          "values": [
+            "connectorPoll"
+          ],
           "schema": {
             "t": "object",
             "mode": "loose",
@@ -5149,7 +5367,9 @@
                 "triggerType",
                 {
                   "t": "literal",
-                  "values": ["connectorPoll"]
+                  "values": [
+                    "connectorPoll"
+                  ]
                 }
               ],
               [
@@ -5216,7 +5436,9 @@
           }
         },
         {
-          "values": ["webhook"],
+          "values": [
+            "webhook"
+          ],
           "schema": {
             "t": "object",
             "mode": "loose",
@@ -5225,14 +5447,19 @@
                 "triggerType",
                 {
                   "t": "literal",
-                  "values": ["webhook"]
+                  "values": [
+                    "webhook"
+                  ]
                 }
               ],
               [
                 "method",
                 {
                   "t": "enum",
-                  "values": ["POST", "GET"]
+                  "values": [
+                    "POST",
+                    "GET"
+                  ]
                 }
               ],
               [
@@ -5357,7 +5584,10 @@
             "t": "optional",
             "inner": {
               "t": "enum",
-              "values": ["stop", "continue"]
+              "values": [
+                "stop",
+                "continue"
+              ]
             }
           }
         ]
@@ -5402,7 +5632,15 @@
           "type",
           {
             "t": "enum",
-            "values": ["text", "textarea", "number", "select", "boolean", "project", "branch"]
+            "values": [
+              "text",
+              "textarea",
+              "number",
+              "select",
+              "boolean",
+              "project",
+              "branch"
+            ]
           }
         ],
         [

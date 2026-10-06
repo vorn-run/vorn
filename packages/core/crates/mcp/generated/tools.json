@@ -20,7 +20,10 @@
         "filter": {
           "description": "Session filter (default: active)",
           "type": "string",
-          "enum": ["active", "recent"]
+          "enum": [
+            "active",
+            "recent"
+          ]
         },
         "project_name": {
           "description": "Filter by project name",
@@ -49,7 +52,13 @@
       "properties": {
         "agent_type": {
           "type": "string",
-          "enum": ["claude", "copilot", "codex", "opencode", "gemini"],
+          "enum": [
+            "claude",
+            "copilot",
+            "codex",
+            "opencode",
+            "gemini"
+          ],
           "description": "Agent type to launch"
         },
         "project_name": {
@@ -88,7 +97,11 @@
           "type": "boolean"
         }
       },
-      "required": ["agent_type", "project_name", "project_path"]
+      "required": [
+        "agent_type",
+        "project_name",
+        "project_path"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -112,7 +125,9 @@
           "type": "boolean"
         }
       },
-      "required": ["id"]
+      "required": [
+        "id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -137,7 +152,10 @@
           "description": "New display name"
         }
       },
-      "required": ["id", "display_name"]
+      "required": [
+        "id",
+        "display_name"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -161,7 +179,9 @@
           "description": "Session IDs in desired order"
         }
       },
-      "required": ["session_ids"]
+      "required": [
+        "session_ids"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -187,7 +207,9 @@
           "maximum": 1000
         }
       },
-      "required": ["id"]
+      "required": [
+        "id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -216,7 +238,10 @@
           "type": "boolean"
         }
       },
-      "required": ["id", "data"]
+      "required": [
+        "id",
+        "data"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -242,7 +267,10 @@
           "description": "Key to send: single char (1, y, n), named key (enter, escape, tab, up, down, left, right, backspace, delete, home, end), or combo (ctrl+c, ctrl+d, ctrl+x, ctrl+z, shift+tab)"
         }
       },
-      "required": ["id", "key"]
+      "required": [
+        "id",
+        "key"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -264,7 +292,11 @@
         "event_type": {
           "description": "Filter by event type",
           "type": "string",
-          "enum": ["created", "exited", "renamed"]
+          "enum": [
+            "created",
+            "exited",
+            "renamed"
+          ]
         },
         "limit": {
           "description": "Max events to return (default: 50)",
@@ -292,7 +324,10 @@
         "kind": {
           "description": "Only one kind: what polls a service, or what shows on a card",
           "type": "string",
-          "enum": ["connector", "extension"]
+          "enum": [
+            "connector",
+            "extension"
+          ]
         }
       }
     },
@@ -337,7 +372,9 @@
           "description": "Connection ID"
         }
       },
-      "required": ["connection_id"]
+      "required": [
+        "connection_id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -356,7 +393,9 @@
           "description": "npm package name, or a command to run a local build (e.g. \"node /path/to/dist/index.js\")"
         }
       },
-      "required": ["package"]
+      "required": [
+        "package"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -450,7 +489,10 @@
           "additionalProperties": {}
         }
       },
-      "required": ["connection_id", "action"]
+      "required": [
+        "connection_id",
+        "action"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -470,7 +512,9 @@
           "description": "Connection ID"
         }
       },
-      "required": ["connection_id"]
+      "required": [
+        "connection_id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -486,7 +530,10 @@
         "filter": {
           "description": "\"interactive\" (default) returns only actionable elements; \"all\" adds text",
           "type": "string",
-          "enum": ["interactive", "all"]
+          "enum": [
+            "interactive",
+            "all"
+          ]
         },
         "cursor": {
           "description": "nextCursor from a previous read_page result",
@@ -597,7 +644,9 @@
           "maximum": 50
         }
       },
-      "required": ["text"]
+      "required": [
+        "text"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -612,7 +661,13 @@
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["click", "hover", "type", "key", "scroll"],
+          "enum": [
+            "click",
+            "hover",
+            "type",
+            "key",
+            "scroll"
+          ],
           "description": "What to do. \"type\" clicks the target first when one is given."
         },
         "ref": {
@@ -638,7 +693,9 @@
           "type": "number"
         }
       },
-      "required": ["action"]
+      "required": [
+        "action"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -672,7 +729,12 @@
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["list", "add", "close", "select"],
+          "enum": [
+            "list",
+            "add",
+            "close",
+            "select"
+          ],
           "description": "What to do with tabs"
         },
         "url": {
@@ -688,7 +750,9 @@
           "maximum": 9007199254740991
         }
       },
-      "required": ["action"]
+      "required": [
+        "action"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -708,7 +772,9 @@
           "description": "URL to open"
         }
       },
-      "required": ["url"]
+      "required": [
+        "url"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -723,11 +789,16 @@
       "properties": {
         "direction": {
           "type": "string",
-          "enum": ["back", "forward"],
+          "enum": [
+            "back",
+            "forward"
+          ],
           "description": "Which way to step"
         }
       },
-      "required": ["direction"]
+      "required": [
+        "direction"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -759,7 +830,9 @@
           "description": "Simulator UDID from device_list"
         }
       },
-      "required": ["udid"]
+      "required": [
+        "udid"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -787,7 +860,10 @@
         "filter": {
           "description": "\"interactive\" (default) returns only actionable elements; \"all\" adds text",
           "type": "string",
-          "enum": ["interactive", "all"]
+          "enum": [
+            "interactive",
+            "all"
+          ]
         },
         "cursor": {
           "description": "nextCursor from a previous read_screen result",
@@ -826,7 +902,9 @@
           "maximum": 50
         }
       },
-      "required": ["text"]
+      "required": [
+        "text"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -841,7 +919,14 @@
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["tap", "swipe", "type", "button", "press", "rotate"],
+          "enum": [
+            "tap",
+            "swipe",
+            "type",
+            "button",
+            "press",
+            "rotate"
+          ],
           "description": "\"press\" is a long press; \"button\" takes a name in `text`; \"rotate\" takes `orientation`"
         },
         "ref": {
@@ -874,7 +959,12 @@
         "orientation": {
           "description": "Which way up to turn the device, for \"rotate\"",
           "type": "string",
-          "enum": ["portrait", "portrait-upside-down", "landscape-left", "landscape-right"]
+          "enum": [
+            "portrait",
+            "portrait-upside-down",
+            "landscape-left",
+            "landscape-right"
+          ]
         },
         "duration": {
           "description": "Seconds to hold, for \"press\"",
@@ -887,7 +977,9 @@
           "type": "boolean"
         }
       },
-      "required": ["action"]
+      "required": [
+        "action"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -926,7 +1018,9 @@
           "description": "e.g. com.apple.Preferences"
         }
       },
-      "required": ["bundle_id"]
+      "required": [
+        "bundle_id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -946,7 +1040,9 @@
           "description": "e.g. com.apple.Preferences"
         }
       },
-      "required": ["bundle_id"]
+      "required": [
+        "bundle_id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -966,7 +1062,9 @@
           "description": "Absolute path to a .app bundle"
         }
       },
-      "required": ["path"]
+      "required": [
+        "path"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -986,7 +1084,9 @@
           "description": "URL or custom-scheme link to open"
         }
       },
-      "required": ["url"]
+      "required": [
+        "url"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1039,7 +1139,11 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["page", "doc", "design"],
+          "enum": [
+            "page",
+            "doc",
+            "design"
+          ],
           "description": "page: any HTML; doc: Markdown; design: HTML with a design manifest"
         },
         "title": {
@@ -1070,7 +1174,10 @@
           "type": "boolean"
         }
       },
-      "required": ["kind", "title"]
+      "required": [
+        "kind",
+        "title"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1113,7 +1220,9 @@
           "maximum": 9007199254740991
         }
       },
-      "required": ["artifactId"]
+      "required": [
+        "artifactId"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1138,7 +1247,9 @@
           "maximum": 9007199254740991
         }
       },
-      "required": ["artifactId"]
+      "required": [
+        "artifactId"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1187,7 +1298,13 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["claude", "copilot", "codex", "opencode", "gemini"]
+            "enum": [
+              "claude",
+              "copilot",
+              "codex",
+              "opencode",
+              "gemini"
+            ]
           }
         },
         "icon": {
@@ -1201,7 +1318,10 @@
           "pattern": "^#[0-9a-fA-F]{3,8}$"
         }
       },
-      "required": ["name", "path"]
+      "required": [
+        "name",
+        "path"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1231,7 +1351,13 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["claude", "copilot", "codex", "opencode", "gemini"]
+            "enum": [
+              "claude",
+              "copilot",
+              "codex",
+              "opencode",
+              "gemini"
+            ]
           }
         },
         "icon": {
@@ -1245,7 +1371,9 @@
           "pattern": "^#[0-9a-fA-F]{3,8}$"
         }
       },
-      "required": ["name"]
+      "required": [
+        "name"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1265,7 +1393,9 @@
           "description": "Project name"
         }
       },
-      "required": ["name"]
+      "required": [
+        "name"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1287,12 +1417,24 @@
         "status": {
           "description": "Filter by status",
           "type": "string",
-          "enum": ["todo", "in_progress", "in_review", "done", "cancelled"]
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "cancelled"
+          ]
         },
         "assigned_agent": {
           "description": "Filter by assigned agent type",
           "type": "string",
-          "enum": ["claude", "copilot", "codex", "opencode", "gemini"]
+          "enum": [
+            "claude",
+            "copilot",
+            "codex",
+            "opencode",
+            "gemini"
+          ]
         },
         "workspace_id": {
           "description": "Filter by workspace ID (returns tasks from all projects in that workspace)",
@@ -1337,7 +1479,13 @@
         "status": {
           "description": "Task status (default: todo)",
           "type": "string",
-          "enum": ["todo", "in_progress", "in_review", "done", "cancelled"]
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "cancelled"
+          ]
         },
         "branch": {
           "description": "Git branch for this task",
@@ -1351,10 +1499,19 @@
         "assigned_agent": {
           "description": "Assign to an agent type",
           "type": "string",
-          "enum": ["claude", "copilot", "codex", "opencode", "gemini"]
+          "enum": [
+            "claude",
+            "copilot",
+            "codex",
+            "opencode",
+            "gemini"
+          ]
         }
       },
-      "required": ["project_name", "title"]
+      "required": [
+        "project_name",
+        "title"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1374,7 +1531,9 @@
           "description": "Task ID"
         }
       },
-      "required": ["id"]
+      "required": [
+        "id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1407,7 +1566,13 @@
         "status": {
           "description": "New status",
           "type": "string",
-          "enum": ["todo", "in_progress", "in_review", "done", "cancelled"]
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "cancelled"
+          ]
         },
         "branch": {
           "description": "Git branch",
@@ -1421,14 +1586,22 @@
         "assigned_agent": {
           "description": "Assigned agent type",
           "type": "string",
-          "enum": ["claude", "copilot", "codex", "opencode", "gemini"]
+          "enum": [
+            "claude",
+            "copilot",
+            "codex",
+            "opencode",
+            "gemini"
+          ]
         },
         "order": {
           "description": "Queue order",
           "type": "number"
         }
       },
-      "required": ["id"]
+      "required": [
+        "id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1448,7 +1621,9 @@
           "description": "Task ID"
         }
       },
-      "required": ["id"]
+      "required": [
+        "id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1468,7 +1643,9 @@
           "description": "Task ID"
         }
       },
-      "required": ["id"]
+      "required": [
+        "id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1488,7 +1665,9 @@
           "description": "Task ID"
         }
       },
-      "required": ["id"]
+      "required": [
+        "id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -1622,7 +1801,10 @@
                               "description": "What the dialog shows"
                             }
                           },
-                          "required": ["value", "label"],
+                          "required": [
+                            "value",
+                            "label"
+                          ],
                           "additionalProperties": {}
                         }
                       },
@@ -1637,12 +1819,18 @@
                         "maxLength": 200
                       }
                     },
-                    "required": ["key", "label", "type"],
+                    "required": [
+                      "key",
+                      "label",
+                      "type"
+                    ],
                     "additionalProperties": {}
                   }
                 }
               },
-              "required": ["triggerType"],
+              "required": [
+                "triggerType"
+              ],
               "additionalProperties": {}
             },
             {
@@ -1659,7 +1847,10 @@
                   "description": "When to run, as an ISO 8601 date-time"
                 }
               },
-              "required": ["triggerType", "runAt"],
+              "required": [
+                "triggerType",
+                "runAt"
+              ],
               "additionalProperties": {}
             },
             {
@@ -1681,7 +1872,10 @@
                   "maxLength": 200
                 }
               },
-              "required": ["triggerType", "cron"],
+              "required": [
+                "triggerType",
+                "cron"
+              ],
               "additionalProperties": {}
             },
             {
@@ -1699,7 +1893,9 @@
                   "maxLength": 200
                 }
               },
-              "required": ["triggerType"],
+              "required": [
+                "triggerType"
+              ],
               "additionalProperties": {}
             },
             {
@@ -1719,15 +1915,29 @@
                 "fromStatus": {
                   "description": "Only when it leaves this status",
                   "type": "string",
-                  "enum": ["todo", "in_progress", "in_review", "done", "cancelled"]
+                  "enum": [
+                    "todo",
+                    "in_progress",
+                    "in_review",
+                    "done",
+                    "cancelled"
+                  ]
                 },
                 "toStatus": {
                   "description": "Only when it enters this status",
                   "type": "string",
-                  "enum": ["todo", "in_progress", "in_review", "done", "cancelled"]
+                  "enum": [
+                    "todo",
+                    "in_progress",
+                    "in_review",
+                    "done",
+                    "cancelled"
+                  ]
                 }
               },
-              "required": ["triggerType"],
+              "required": [
+                "triggerType"
+              ],
               "additionalProperties": {}
             },
             {
@@ -1747,15 +1957,23 @@
                 "restore": {
                   "description": "cold (default): only when a process starts again. any: also when a pane reattaches to one still running",
                   "type": "string",
-                  "enum": ["cold", "any"]
+                  "enum": [
+                    "cold",
+                    "any"
+                  ]
                 },
                 "concurrency": {
                   "description": "perProject (default) runs one at a time per project, so restored sessions do not race for one port",
                   "type": "string",
-                  "enum": ["perProject", "unbounded"]
+                  "enum": [
+                    "perProject",
+                    "unbounded"
+                  ]
                 }
               },
-              "required": ["triggerType"],
+              "required": [
+                "triggerType"
+              ],
               "additionalProperties": {}
             },
             {
@@ -1788,7 +2006,12 @@
                   "maxLength": 200
                 }
               },
-              "required": ["triggerType", "connectionId", "event", "cron"],
+              "required": [
+                "triggerType",
+                "connectionId",
+                "event",
+                "cron"
+              ],
               "additionalProperties": {}
             },
             {
@@ -1801,7 +2024,10 @@
                 },
                 "method": {
                   "type": "string",
-                  "enum": ["POST", "GET"],
+                  "enum": [
+                    "POST",
+                    "GET"
+                  ],
                   "description": "HTTP method the route answers"
                 },
                 "token": {
@@ -1810,7 +2036,11 @@
                   "description": "Secret path segment; a request without it is refused. Use a long random string"
                 }
               },
-              "required": ["triggerType", "method", "token"],
+              "required": [
+                "triggerType",
+                "method",
+                "token"
+              ],
               "additionalProperties": {}
             }
           ]
@@ -1823,7 +2053,13 @@
             "properties": {
               "agentType": {
                 "type": "string",
-                "enum": ["claude", "copilot", "codex", "opencode", "gemini"]
+                "enum": [
+                  "claude",
+                  "copilot",
+                  "codex",
+                  "opencode",
+                  "gemini"
+                ]
               },
               "projectName": {
                 "type": "string",
@@ -1892,7 +2128,11 @@
                 "additionalProperties": {}
               }
             },
-            "required": ["agentType", "projectName", "projectPath"]
+            "required": [
+              "agentType",
+              "projectName",
+              "projectPath"
+            ]
           }
         },
         "nodes": {
@@ -1950,16 +2190,28 @@
                     "type": "number"
                   }
                 },
-                "required": ["x", "y"],
+                "required": [
+                  "x",
+                  "y"
+                ],
                 "description": "Where the node sits on the canvas"
               },
               "onError": {
                 "description": "stop (default) ends the run when this step fails; continue carries on past it",
                 "type": "string",
-                "enum": ["stop", "continue"]
+                "enum": [
+                  "stop",
+                  "continue"
+                ]
               }
             },
-            "required": ["id", "type", "label", "config", "position"]
+            "required": [
+              "id",
+              "type",
+              "label",
+              "config",
+              "position"
+            ]
           }
         },
         "edges": {
@@ -1989,10 +2241,17 @@
               "conditionBranch": {
                 "description": "On an edge leaving a condition: which outcome takes it. Wire both. Omit on every other edge",
                 "type": "string",
-                "enum": ["true", "false"]
+                "enum": [
+                  "true",
+                  "false"
+                ]
               }
             },
-            "required": ["id", "source", "target"]
+            "required": [
+              "id",
+              "source",
+              "target"
+            ]
           }
         },
         "icon": {
@@ -2014,7 +2273,9 @@
           "type": "number"
         }
       },
-      "required": ["name"]
+      "required": [
+        "name"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -2100,16 +2361,28 @@
                     "type": "number"
                   }
                 },
-                "required": ["x", "y"],
+                "required": [
+                  "x",
+                  "y"
+                ],
                 "description": "Where the node sits on the canvas"
               },
               "onError": {
                 "description": "stop (default) ends the run when this step fails; continue carries on past it",
                 "type": "string",
-                "enum": ["stop", "continue"]
+                "enum": [
+                  "stop",
+                  "continue"
+                ]
               }
             },
-            "required": ["id", "type", "label", "config", "position"]
+            "required": [
+              "id",
+              "type",
+              "label",
+              "config",
+              "position"
+            ]
           }
         },
         "edges": {
@@ -2139,10 +2412,17 @@
               "conditionBranch": {
                 "description": "On an edge leaving a condition: which outcome takes it. Wire both. Omit on every other edge",
                 "type": "string",
-                "enum": ["true", "false"]
+                "enum": [
+                  "true",
+                  "false"
+                ]
               }
             },
-            "required": ["id", "source", "target"]
+            "required": [
+              "id",
+              "source",
+              "target"
+            ]
           }
         },
         "icon": {
@@ -2239,7 +2519,9 @@
           "description": "Run ID (from list_workflow_runs)"
         }
       },
-      "required": ["run_id"]
+      "required": [
+        "run_id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -2260,7 +2542,11 @@
         },
         "decision": {
           "type": "string",
-          "enum": ["approve", "reject", "changes"],
+          "enum": [
+            "approve",
+            "reject",
+            "changes"
+          ],
           "description": "approve lets the run go on; reject ends it; changes sends the work back to the step the gate redoes from, with your comment, and the gate asks again"
         },
         "comment": {
@@ -2291,7 +2577,9 @@
                 "maxLength": 4000
               }
             },
-            "required": ["comment"]
+            "required": [
+              "comment"
+            ]
           }
         },
         "node_id": {
@@ -2301,7 +2589,10 @@
           "maxLength": 100
         }
       },
-      "required": ["run_id", "decision"]
+      "required": [
+        "run_id",
+        "decision"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -2323,7 +2614,10 @@
         "info": {
           "description": "What to retrieve (default: log)",
           "type": "string",
-          "enum": ["log", "next_run"]
+          "enum": [
+            "log",
+            "next_run"
+          ]
         }
       }
     },
@@ -2351,11 +2645,17 @@
             "type": "string"
           },
           "additionalProperties": {
-            "type": ["string", "number", "boolean"]
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
           }
         }
       },
-      "required": ["workflow_id"]
+      "required": [
+        "workflow_id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -2411,7 +2711,10 @@
           "maxLength": 200
         }
       },
-      "required": ["workflow", "project_name"]
+      "required": [
+        "workflow",
+        "project_name"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -2483,7 +2786,9 @@
           "pattern": "^#[0-9a-fA-F]{3,8}$"
         }
       },
-      "required": ["name"]
+      "required": [
+        "name"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -2525,7 +2830,9 @@
           "maximum": 9007199254740991
         }
       },
-      "required": ["id"]
+      "required": [
+        "id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"
@@ -2545,7 +2852,9 @@
           "description": "Workspace ID"
         }
       },
-      "required": ["id"]
+      "required": [
+        "id"
+      ]
     },
     "execution": {
       "taskSupport": "forbidden"

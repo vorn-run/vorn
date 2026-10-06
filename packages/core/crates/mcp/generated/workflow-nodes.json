@@ -73,7 +73,10 @@
                             "description": "What the dialog shows"
                           }
                         },
-                        "required": ["value", "label"],
+                        "required": [
+                          "value",
+                          "label"
+                        ],
                         "additionalProperties": {}
                       }
                     },
@@ -88,12 +91,18 @@
                       "maxLength": 200
                     }
                   },
-                  "required": ["key", "label", "type"],
+                  "required": [
+                    "key",
+                    "label",
+                    "type"
+                  ],
                   "additionalProperties": {}
                 }
               }
             },
-            "required": ["triggerType"],
+            "required": [
+              "triggerType"
+            ],
             "additionalProperties": {}
           },
           {
@@ -110,7 +119,10 @@
                 "description": "When to run, as an ISO 8601 date-time"
               }
             },
-            "required": ["triggerType", "runAt"],
+            "required": [
+              "triggerType",
+              "runAt"
+            ],
             "additionalProperties": {}
           },
           {
@@ -132,7 +144,10 @@
                 "maxLength": 200
               }
             },
-            "required": ["triggerType", "cron"],
+            "required": [
+              "triggerType",
+              "cron"
+            ],
             "additionalProperties": {}
           },
           {
@@ -150,7 +165,9 @@
                 "maxLength": 200
               }
             },
-            "required": ["triggerType"],
+            "required": [
+              "triggerType"
+            ],
             "additionalProperties": {}
           },
           {
@@ -170,15 +187,29 @@
               "fromStatus": {
                 "description": "Only when it leaves this status",
                 "type": "string",
-                "enum": ["todo", "in_progress", "in_review", "done", "cancelled"]
+                "enum": [
+                  "todo",
+                  "in_progress",
+                  "in_review",
+                  "done",
+                  "cancelled"
+                ]
               },
               "toStatus": {
                 "description": "Only when it enters this status",
                 "type": "string",
-                "enum": ["todo", "in_progress", "in_review", "done", "cancelled"]
+                "enum": [
+                  "todo",
+                  "in_progress",
+                  "in_review",
+                  "done",
+                  "cancelled"
+                ]
               }
             },
-            "required": ["triggerType"],
+            "required": [
+              "triggerType"
+            ],
             "additionalProperties": {}
           },
           {
@@ -198,15 +229,23 @@
               "restore": {
                 "description": "cold (default): only when a process starts again. any: also when a pane reattaches to one still running",
                 "type": "string",
-                "enum": ["cold", "any"]
+                "enum": [
+                  "cold",
+                  "any"
+                ]
               },
               "concurrency": {
                 "description": "perProject (default) runs one at a time per project, so restored sessions do not race for one port",
                 "type": "string",
-                "enum": ["perProject", "unbounded"]
+                "enum": [
+                  "perProject",
+                  "unbounded"
+                ]
               }
             },
-            "required": ["triggerType"],
+            "required": [
+              "triggerType"
+            ],
             "additionalProperties": {}
           },
           {
@@ -239,7 +278,12 @@
                 "maxLength": 200
               }
             },
-            "required": ["triggerType", "connectionId", "event", "cron"],
+            "required": [
+              "triggerType",
+              "connectionId",
+              "event",
+              "cron"
+            ],
             "additionalProperties": {}
           },
           {
@@ -252,7 +296,10 @@
               },
               "method": {
                 "type": "string",
-                "enum": ["POST", "GET"],
+                "enum": [
+                  "POST",
+                  "GET"
+                ],
                 "description": "HTTP method the route answers"
               },
               "token": {
@@ -261,7 +308,11 @@
                 "description": "Secret path segment; a request without it is refused. Use a long random string"
               }
             },
-            "required": ["triggerType", "method", "token"],
+            "required": [
+              "triggerType",
+              "method",
+              "token"
+            ],
             "additionalProperties": {}
           }
         ]
@@ -281,7 +332,14 @@
         "properties": {
           "agentType": {
             "type": "string",
-            "enum": ["claude", "copilot", "codex", "opencode", "gemini", "fromTask"],
+            "enum": [
+              "claude",
+              "copilot",
+              "codex",
+              "opencode",
+              "gemini",
+              "fromTask"
+            ],
             "description": "Which agent CLI runs. fromTask uses the task's assigned agent, so it needs a task in scope (a task trigger, taskId or taskFromQueue)"
           },
           "model": {
@@ -325,7 +383,12 @@
           "worktreeMode": {
             "description": "Where it works: none (the project folder), new (a fresh git worktree), fromStep (the worktree an earlier step made), existing (existingWorktreePath)",
             "type": "string",
-            "enum": ["none", "new", "fromStep", "existing"]
+            "enum": [
+              "none",
+              "new",
+              "fromStep",
+              "existing"
+            ]
           },
           "worktreeFromStepSlug": {
             "description": "For worktreeMode fromStep: slug of the earlier agent step whose worktree to reuse",
@@ -389,7 +452,11 @@
             "type": "boolean"
           }
         },
-        "required": ["agentType", "projectName", "projectPath"],
+        "required": [
+          "agentType",
+          "projectName",
+          "projectPath"
+        ],
         "additionalProperties": {}
       },
       "outputs": [
@@ -429,7 +496,12 @@
         "properties": {
           "scriptType": {
             "type": "string",
-            "enum": ["bash", "powershell", "python", "node"],
+            "enum": [
+              "bash",
+              "powershell",
+              "python",
+              "node"
+            ],
             "description": "Interpreter the script runs under"
           },
           "scriptContent": {
@@ -473,7 +545,10 @@
             "maxLength": 100
           }
         },
-        "required": ["scriptType", "scriptContent"],
+        "required": [
+          "scriptType",
+          "scriptContent"
+        ],
         "additionalProperties": {}
       },
       "outputs": [
@@ -509,7 +584,14 @@
           },
           "operator": {
             "type": "string",
-            "enum": ["equals", "notEquals", "contains", "notContains", "isEmpty", "isNotEmpty"],
+            "enum": [
+              "equals",
+              "notEquals",
+              "contains",
+              "notContains",
+              "isEmpty",
+              "isNotEmpty"
+            ],
             "description": "How variable is compared with value. Comparisons are on text"
           },
           "value": {
@@ -518,7 +600,10 @@
             "maxLength": 200000
           }
         },
-        "required": ["variable", "operator"],
+        "required": [
+          "variable",
+          "operator"
+        ],
         "additionalProperties": {}
       },
       "outputs": [
@@ -585,7 +670,10 @@
                 "description": "How many times the gate may ask, the first included (2 to 10)"
               }
             },
-            "required": ["from", "maxRounds"],
+            "required": [
+              "from",
+              "maxRounds"
+            ],
             "additionalProperties": {}
           }
         },
@@ -650,11 +738,20 @@
           },
           "initialStatus": {
             "type": "string",
-            "enum": ["todo", "in_progress", "in_review", "done", "cancelled"],
+            "enum": [
+              "todo",
+              "in_progress",
+              "in_review",
+              "done",
+              "cancelled"
+            ],
             "description": "Status of a newly created task. Re-syncing an existing one never changes its status"
           }
         },
-        "required": ["project", "initialStatus"],
+        "required": [
+          "project",
+          "initialStatus"
+        ],
         "additionalProperties": {}
       },
       "outputs": [
@@ -719,7 +816,10 @@
             }
           }
         },
-        "required": ["connectionId", "action"],
+        "required": [
+          "connectionId",
+          "action"
+        ],
         "additionalProperties": {}
       },
       "outputs": [
@@ -758,7 +858,13 @@
           },
           "method": {
             "type": "string",
-            "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ],
             "description": "HTTP method"
           },
           "url": {
@@ -789,7 +895,10 @@
             "maxLength": 100
           }
         },
-        "required": ["method", "url"],
+        "required": [
+          "method",
+          "url"
+        ],
         "additionalProperties": {}
       },
       "outputs": [
@@ -833,7 +942,10 @@
           "mode": {
             "description": "repeat (default) runs the body up to maxIterations times; forEach runs it once for each item of items, with no cap on how many",
             "type": "string",
-            "enum": ["repeat", "forEach"]
+            "enum": [
+              "repeat",
+              "forEach"
+            ]
           },
           "items": {
             "description": "For forEach: the list to walk, as a template naming it, e.g. {{steps.gate.items}}. JSON text of a list works too, and so does an object holding exactly one list. Each pass reads its item as {{loop.item}} or {{loop.item.<field>}}",
@@ -865,7 +977,14 @@
               },
               "operator": {
                 "type": "string",
-                "enum": ["equals", "notEquals", "contains", "notContains", "isEmpty", "isNotEmpty"],
+                "enum": [
+                  "equals",
+                  "notEquals",
+                  "contains",
+                  "notContains",
+                  "isEmpty",
+                  "isNotEmpty"
+                ],
                 "description": "How variable is compared with value. Comparisons are on text"
               },
               "value": {
@@ -874,11 +993,16 @@
                 "maxLength": 200000
               }
             },
-            "required": ["variable", "operator"],
+            "required": [
+              "variable",
+              "operator"
+            ],
             "additionalProperties": {}
           }
         },
-        "required": ["bodyNodeIds"],
+        "required": [
+          "bodyNodeIds"
+        ],
         "additionalProperties": {}
       },
       "outputs": [
@@ -947,10 +1071,17 @@
       "conditionBranch": {
         "description": "On an edge leaving a condition: which outcome takes it. Wire both. Omit on every other edge",
         "type": "string",
-        "enum": ["true", "false"]
+        "enum": [
+          "true",
+          "false"
+        ]
       }
     },
-    "required": ["id", "source", "target"]
+    "required": [
+      "id",
+      "source",
+      "target"
+    ]
   },
   "limits": {
     "repeatMaxIterations": 10,
@@ -1042,7 +1173,11 @@
           "nodeType": "loop",
           "mode": "forEach",
           "items": "{{steps.gate.items}}",
-          "bodyNodeIds": ["severe", "comment", "skip"]
+          "bodyNodeIds": [
+            "severe",
+            "comment",
+            "skip"
+          ]
         },
         "position": {
           "x": 0,
