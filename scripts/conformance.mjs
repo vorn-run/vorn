@@ -26,7 +26,8 @@ const FILES = [
   'tests/vornd-app-sessions.test.ts',
   'tests/js-reference.test.ts',
   'tests/native-server-git.test.ts',
-  'tests/native-server-mcp.test.ts'
+  'tests/native-server-mcp.test.ts',
+  'tests/native-cli.test.ts'
 ]
 
 function run(command, args, env = process.env) {

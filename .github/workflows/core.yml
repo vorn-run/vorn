@@ -41,6 +41,13 @@ on:
       - 'tests/helpers/mcp-parity.ts'
       - 'tests/mcp-relay.test.ts'
       - 'tests/helpers/store-parity.ts'
+      - 'packages/server/src/cli.ts'
+      - 'packages/server/src/cli/**'
+      - 'packages/server/src/client-args.ts'
+      - 'packages/server/src/server-args.ts'
+      - 'packages/server/src/rpc-client.ts'
+      - 'tests/native-cli.test.ts'
+      - 'tests/helpers/cli-parity.ts'
       - 'tests/database-*.test.ts'
       - 'tests/artifact-*.test.ts'
       - 'THIRD_PARTY_NOTICES.md'
@@ -173,6 +180,10 @@ jobs:
       - name: Native call
         run: yarn vitest run tests/native-core.test.ts tests/git-native-parity.test.ts
 
+      # The Rust vorn against the TypeScript one, on each platform.
+      - name: Native CLI
+        run: yarn vitest run tests/native-cli.test.ts
+
       # Both stores answering the same calls, on each platform.
       - name: Native store
         run: yarn vitest run tests/native-store.test.ts
@@ -271,6 +282,14 @@ jobs:
           fi
           echo "found $sessiond"
           "$sessiond" --version
+          # Exact, or with .exe: vornd/vorn is a prefix of vornd/vornd.
+          cli=$(find dist \( -ipath '*/resources/vornd/vorn' -o -ipath '*/resources/vornd/vorn.exe' \) -type f -print -quit)
+          if [ -z "$cli" ]; then
+            echo "ERROR: vorn is not in the packaged resources"
+            exit 1
+          fi
+          echo "found $cli"
+          "$cli" --version
           if [ "$RUNNER_OS" = Windows ]; then
             for name in conpty.dll x64/OpenConsole.exe; do
               file=$(find dist -ipath "*/resources/vornd/$name" -type f -print -quit)

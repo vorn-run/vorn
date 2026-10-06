@@ -2576,6 +2576,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-cli"
+version = "0.8.0-beta.3"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "futures-util",
+ "getrandom 0.4.3",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
+ "vorn-protocol",
+ "vorn-store",
+]
+
+[[package]]
 name = "vorn-core"
 version = "0.8.0-beta.3"
 dependencies = [
