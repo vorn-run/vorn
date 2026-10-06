@@ -12,12 +12,16 @@ import { releaseFromPanels, saveTerminalPanels } from './ui-slice'
 import { clearDirty } from '../lib/editor-dirty'
 import { forgetExtensionHydration, hydrateExtensions } from '../lib/extension-hydration'
 import { destroyTerminal } from '../lib/terminal-registry'
+import { staleRev } from '../lib/session-rev'
 
 export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice> = (set, get) => ({
   terminals: new Map(),
 
   addTerminal: (session, ended) =>
     set((state) => {
+      // The answer to a create and its broadcast can arrive in either order:
+      // the newer revision of the record stays.
+      if (staleRev(state.terminals.get(session.id)?.session, session)) return state
       const next = new Map(state.terminals)
       next.set(session.id, {
         id: session.id,
@@ -267,6 +271,15 @@ export const createTerminalsSlice: StateCreator<AppStore, [], [], TerminalsSlice
 
   // Ungrouping deletes the key rather than setting a falsy one, so this takes
   // undefined as a real value and cannot use a truthiness check.
+  noteSessionRev: (id, rev) =>
+    set((state) => {
+      const term = state.terminals.get(id)
+      if (!term || (term.session.rev !== undefined && term.session.rev >= rev)) return state
+      const next = new Map(state.terminals)
+      next.set(id, { ...term, session: { ...term.session, rev } })
+      return { terminals: next }
+    }),
+
   updateSessionGroupId: (id, groupId) =>
     set((state) => {
       const term = state.terminals.get(id)
