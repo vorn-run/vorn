@@ -2566,6 +2566,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vorn-agents"
+version = "0.0.0"
+dependencies = [
+ "jiff",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "vorn-analysis"
 version = "0.7.5"
 dependencies = [
@@ -2803,6 +2813,7 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+ "vorn-agents",
  "vorn-engine",
  "vorn-git",
  "vorn-grid-client",

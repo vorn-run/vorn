@@ -15,7 +15,7 @@ export interface NativeCore {
    * thread. Resolves with stdout; rejects as `execFileSync` throws.
    */
   gitRun?(request: NativeGitRequest): Promise<string>
-  /** The store on rusqlite, which `database.ts` uses with the Native store switch on. */
+  /** The store on rusqlite, which keeps the server's database (`database.ts`). */
   NativeStore?: NativeStoreClass
 }
 
@@ -23,8 +23,6 @@ export interface NativeCore {
 export interface NativeStoreClass {
   open(path: string, options: string): NativeStore
   openInMemory(options: string): NativeStore
-  /** A `defaults` row of the file as stored, or null, without creating or migrating it. */
-  readDefault(path: string, key: string): string | null
 }
 
 /** One open database in the Rust store. */
@@ -112,9 +110,9 @@ export function loadNativeCore(
  * Loads the core this process will use.
  *
  * Never throws. Every build ships the binary, so a server without one is a
- * checkout that has not run `yarn build:core`, or a broken install: it keeps
- * running, with git on a child process and no native store, and says why in
- * the log and on the settings page.
+ * checkout that has not run `yarn build:core`, or a broken install. Without it
+ * git runs on a child process and the database cannot open (`initDatabase`
+ * throws, saying why).
  */
 export function selectCore(
   options: {

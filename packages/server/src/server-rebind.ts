@@ -17,12 +17,20 @@ export function getCurrentHost(): string {
   return currentHost
 }
 
-/** Reversible, unlike closing fastify: the replacement is about to bind this port. */
+/**
+ * Reversible, unlike closing fastify: the replacement is about to bind this port.
+ *
+ * Done once the port is free, not once every connection has ended. An upgraded
+ * WebSocket is not an HTTP connection, so `closeAllConnections` leaves it open
+ * and `close`'s callback waits for it: with vornd or a phone connected, a
+ * handoff never committed. `close` stops listening at once, and the open
+ * sockets carry on until this server exits or rolls back.
+ */
 export async function releaseListener(): Promise<void> {
   const server = httpServer
   if (!server) return
   if (typeof server.closeAllConnections === 'function') server.closeAllConnections()
-  await new Promise<void>((resolve) => server.close(() => resolve()))
+  server.close()
 }
 
 /** Listen on `host`, answering whether it worked rather than throwing. */

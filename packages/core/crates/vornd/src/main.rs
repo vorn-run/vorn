@@ -36,7 +36,8 @@ const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT]
   --groups     per-group switches, forward | shadow | native, over the switch
                (default: all forward; also read from VORND_GROUPS)
   --db         the server's vorn.db, read to tell a local project from a remote
-               one; without it those calls go to the server
+               one and to see how the agents are configured; without it those
+               calls go to the server
   --log-file   append the log here instead of stderr; VORND_LOG sets the level
   --exit-with-stdin
                stop when stdin closes, so vornd ends with whoever started it,

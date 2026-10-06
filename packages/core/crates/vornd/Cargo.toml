@@ -33,6 +33,7 @@ vorn-sessiond = { path = "../sessiond" }
 vorn-sessiond-wire = { path = "../sessiond-wire" }
 vorn-engine = { path = "../engine", optional = true }
 vorn-size = { path = "../size" }
+vorn-agents = { path = "../agents" }
 vorn-git = { path = "../vorn-git" }
 vorn-store = { path = "../store" }
 vorn-mcp = { path = "../mcp" }
