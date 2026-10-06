@@ -94,6 +94,18 @@ impl<'a> Context<'a> {
     ) -> Result<serde_json::Value, CallError> {
         self.rpc.call(method, params).await
     }
+
+    /// Two calls at once, as `Promise.all` makes them. When both fail, the
+    /// first one's error is the one reported: they time out at the same
+    /// moment, and Node's timers fire in the order they were set.
+    pub async fn call_both(
+        &self,
+        first: &str,
+        second: &str,
+    ) -> Result<(serde_json::Value, serde_json::Value), CallError> {
+        let (a, b) = tokio::join!(self.call(first, None), self.call(second, None));
+        Ok((a?, b?))
+    }
 }
 
 /// Why a command could not do what it was asked, after the arguments parsed.

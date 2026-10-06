@@ -215,10 +215,9 @@ async fn start_run(ctx: &mut Context<'_>, given: &str) -> Result<ExitCode, Comma
 /// fifty of everything: a run parked on a gate for a day is exactly the one
 /// worth stopping, and it falls off the end of that listing.
 async fn resolve_run_id(ctx: &Context<'_>, given: &str) -> Result<String, CommandError> {
-    let (running, waiting) = tokio::try_join!(
-        ctx.call("workflowRun:listRunning", None),
-        ctx.call("workflowRun:listWaiting", None)
-    )?;
+    let (running, waiting) = ctx
+        .call_both("workflowRun:listRunning", "workflowRun:listWaiting")
+        .await?;
     let mut seen = HashSet::new();
     let runs: Vec<String> = items(running)
         .iter()

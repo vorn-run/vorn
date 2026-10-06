@@ -129,10 +129,9 @@ struct Addressed {
 /// Every list prints eight characters, so those eight have to be enough to
 /// act on afterwards, in either half of the server.
 async fn resolve_session(ctx: &Context<'_>, given: &str) -> Result<Addressed, CommandError> {
-    let (terminals, headless) = tokio::try_join!(
-        ctx.call("terminal:listActive", None),
-        ctx.call("headless:list", None)
-    )?;
+    let (terminals, headless) = ctx
+        .call_both("terminal:listActive", "headless:list")
+        .await?;
     let candidates: Vec<Addressed> = items(terminals)
         .iter()
         .map(|s| Addressed {
@@ -304,10 +303,9 @@ async fn list_sessions(ctx: &mut Context<'_>) -> Result<ExitCode, CommandError> 
         return Ok(ExitCode::Ok);
     }
 
-    let (terminals, headless) = tokio::try_join!(
-        ctx.call("terminal:listActive", None),
-        ctx.call("headless:list", None)
-    )?;
+    let (terminals, headless) = ctx
+        .call_both("terminal:listActive", "headless:list")
+        .await?;
     let wanted = ctx.args.project.as_deref().filter(|p| !p.is_empty());
     let sessions: Vec<Value> = items(terminals)
         .into_iter()
