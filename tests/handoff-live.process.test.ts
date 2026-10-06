@@ -60,9 +60,15 @@ afterEach((ctx) => {
       // Same.
     }
   }
-  // The session holder is detached and may still be writing as it goes.
-  for (const dir of dirs.splice(0))
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  // The session holder is detached and may still be writing as it goes, so a
+  // directory it keeps filling is left for the OS rather than failing the test.
+  for (const dir of dirs.splice(0)) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    } catch (err) {
+      process.stderr.write(`left ${dir}: ${(err as Error).message}\n`)
+    }
+  }
 })
 
 /** What a server is started with, and what it is handed for its replacement. */
