@@ -2773,7 +2773,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-cli"
-version = "0.8.0-beta.3"
+version = "0.8.0-beta.4"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -2795,7 +2795,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-core"
-version = "0.8.0-beta.3"
+version = "0.8.0-beta.4"
 dependencies = [
  "napi",
  "napi-build",
