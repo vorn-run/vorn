@@ -118,6 +118,11 @@ jobs:
             echo "Set version to $VERSION"
           fi
 
+      # The crates' versions and Cargo.lock follow package.json, so every binary reports the tag.
+      - name: Sync crate versions
+        shell: bash
+        run: bash scripts/sync-versions.sh
+
       - name: Build native core
         run: yarn build:core
 
@@ -231,6 +236,11 @@ jobs:
             Write-Output "Set version to $version"
           }
 
+      # The crates' versions and Cargo.lock follow package.json, so every binary reports the tag.
+      - name: Sync crate versions
+        shell: bash
+        run: bash scripts/sync-versions.sh
+
       - name: Build native core
         run: yarn build:core
 
@@ -332,6 +342,11 @@ jobs:
             npm pkg set version="$VERSION"
             echo "Set version to $VERSION"
           fi
+
+      # The crates' versions and Cargo.lock follow package.json, so every binary reports the tag.
+      - name: Sync crate versions
+        shell: bash
+        run: bash scripts/sync-versions.sh
 
       - name: Build native core
         run: yarn build:core

@@ -2930,7 +2930,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-sessiond"
-version = "0.7.5"
+version = "0.8.0-beta.4"
 dependencies = [
  "crc32fast",
  "libc",
@@ -2986,7 +2986,7 @@ dependencies = [
 
 [[package]]
 name = "vornd"
-version = "0.0.0"
+version = "0.8.0-beta.4"
 dependencies = [
  "apple-native-keyring-store",
  "bytes",
