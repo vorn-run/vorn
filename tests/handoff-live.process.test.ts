@@ -154,7 +154,13 @@ function call<T>(ws: WebSocket, method: string, params?: unknown, timeoutMs = 90
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${method} timed out`)), timeoutMs)
     const onMessage = (raw: WebSocket.RawData): void => {
-      const frame = JSON.parse(String(raw))
+      // Terminal output shares the socket and is not JSON; a throw here would stall it.
+      let frame: { id?: number; result?: unknown; error?: { message: string } }
+      try {
+        frame = JSON.parse(String(raw))
+      } catch {
+        return
+      }
       if (frame.id !== id) return
       clearTimeout(timer)
       ws.off('message', onMessage)
