@@ -292,10 +292,15 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     })
     vorndPort = state.port!
     await until('vornd to ask for the records', () => server.vorndSessions.isNative())
-    await until('the copy to be fed', async () => {
+    // The holder too: the server asks for a spawn once it is up, and a
+    // create's comparison waits for that spawn.
+    await until('the copy to be fed and the session holder up', async () => {
       const res = await fetch(`http://127.0.0.1:${vorndPort}/vornd/health`)
-      const health = (await res.json()) as { registry?: { fed?: boolean } }
-      return health.registry?.fed === true
+      const health = (await res.json()) as {
+        registry?: { fed?: boolean }
+        sessiond?: { current?: { pid?: number } }
+      }
+      return health.registry?.fed === true && !!health.sessiond?.current?.pid
     })
     expect((await counts()).terminal?.mode).toBe('shadow')
     through = await Client.open(vorndPort)
@@ -766,23 +771,21 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     await call('reorder with one missing', 'terminal:reorder', [shellA, 'no-such-card'])
 
     // The last session in the worktree closed: one offer to clean it up.
+    // Each close waits for its exit, as the server tells it and as a client
+    // through vornd hears it (from whoever tells it, so in an order of its own).
+    const exited = async (id: string): Promise<void> => {
+      const told = (w: Watcher): boolean =>
+        w.toldBy('terminal:exit').some((p) => (p as { id?: string }).id === id)
+      await until(`the exit of ${id}`, () => told(direct) && told(through))
+    }
     await call('close the worktree agent', 'terminal:kill', inWorktree)
-    await until('its exit', () =>
-      direct.toldBy('terminal:exit').some((p) => (p as { id?: string }).id === inWorktree)
-    )
+    await exited(inWorktree)
     await call('close a shell', 'terminal:kill', shellB)
     await until('the shell to go', async () => !(await listed()).some((s) => s.id === shellB))
-    await until('its exit', () =>
-      direct.toldBy('terminal:exit').some((p) => (p as { id?: string }).id === shellB)
-    )
+    await exited(shellB)
     // A card that is not there: the server tells its exit anyway.
     await call('close a card that is not there', 'terminal:kill', 'no-such-card')
-    await until('every exit', () => direct.toldBy('terminal:exit').length >= 3)
-    // Clients through vornd hear each exit once, from whoever tells it.
-    await until(
-      'every exit through vornd',
-      () => new Set(through.toldBy('terminal:exit').map((p) => (p as { id: string }).id)).size >= 3
-    )
+    await exited('no-such-card')
 
     // A shell opened again after the closes is numbered after the ones left.
     const shellC = await created('shell after a close', 'shell:create', path.join(work, 'claude'))

@@ -63,8 +63,9 @@ use crate::registry::{Registry, SessionRegistry};
 use crate::streams::Forwarder;
 
 /// How long the comparison of a create's plan waits for the spawn the
-/// server asks for after it answers.
-const SPAWN_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+/// server asks for after it answers: it asks once the session holder is up,
+/// which a cold start can take seconds over.
+const SPAWN_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Native calls running at once; the rest wait their turn. A board
 /// refreshing thirty diff panels would otherwise start thirty gits together.
