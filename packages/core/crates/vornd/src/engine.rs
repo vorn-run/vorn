@@ -30,6 +30,11 @@
 //! connection's queue. Each session's size is decided by [`Engine::sizes`]
 //! ([`crate::size`]); the driver sends what it decides to sessiond, and
 //! tells every client who asked for each resize when its record comes back.
+//!
+//! With the Native server switch on, [`Engine::decide_statuses`] has the
+//! copy of the server's session records ([`crate::registry`]) decide each
+//! terminal's status from what its session does: its screen's status, its
+//! output and its going quiet.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -53,7 +58,7 @@ use vorn_term_proto::{Cursor, Entry, Record};
 use crate::holder::{Conn, Writer};
 use crate::journal::{Journal, Kind};
 use crate::names::Names;
-use crate::registry::SessionRegistry;
+use crate::registry::{SessionRegistry, Stamp};
 use crate::size::{Sizes, Who};
 use crate::streams::{Action, Snap, Streams};
 
@@ -241,6 +246,27 @@ impl Engine {
     /// The app's session records, as the app's channel told them.
     pub fn registry(&self) -> &Arc<SessionRegistry> {
         &self.registry
+    }
+
+    /// Has the registry decide the server's terminals' statuses from now on
+    /// ([`crate::registry::Registry::decide_statuses`]), following what
+    /// every session does on a task of its own. Needs a runtime; a second
+    /// call does nothing.
+    pub fn decide_statuses(self: &Arc<Self>) {
+        if self.registry.decides() {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            warn!("no runtime to follow the sessions on; the server keeps deciding their statuses");
+            return;
+        };
+        self.registry.decide_statuses();
+        runtime.spawn(follow_statuses(Arc::clone(self), self.subscribe()));
+    }
+
+    /// The stamp of a state told for `session` now ([`Stamp::at_head`]).
+    pub fn head_stamp(&self, session: &str) -> Option<Stamp> {
+        self.streams.head(session).map(|c| Stamp::at_head(&c))
     }
 
     /// A resize of `session`, past the size rule. sessiond applies it and
@@ -1163,5 +1189,145 @@ impl Driver<'_> {
                 let _ = self.to_send.send(Queued::Written(done));
             }
         }
+    }
+}
+
+impl From<&EffectId> for Stamp {
+    fn from(id: &EffectId) -> Stamp {
+        Stamp {
+            epoch: u64::from(id.epoch),
+            rseq: id.rseq,
+            index: u64::from(id.index),
+        }
+    }
+}
+
+/// Tells the registry what each session does, for the statuses it decides,
+/// and turns terminals idle as their timers run out. Runs as long as the
+/// engine does.
+async fn follow_statuses(engine: Arc<Engine>, mut events: broadcast::Receiver<Event>) {
+    let registry = Arc::clone(engine.registry());
+    loop {
+        let wake = registry.next_idle();
+        tokio::select! {
+            ev = events.recv() => match ev {
+                Ok(Event::Effect(fx, Effect::Status(code))) => {
+                    registry.screen_status(&fx.session, code, Stamp::from(&fx));
+                }
+                Ok(Event::Activity(session)) => {
+                    let head = engine.head_stamp(&session);
+                    registry.activity(&session, head, tokio::time::Instant::now());
+                }
+                Ok(Event::Closed(summary)) => registry.session_closed(&summary.brief.session),
+                Ok(_) => {}
+                // Fell behind: each session's latest screen status again,
+                // which changes nothing the registry already took.
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    warn!(n, "the statuses fell behind the sessions");
+                    let held = engine.journal().held();
+                    for h in held {
+                        if let Some(s) = h.status {
+                            registry.screen_status(&h.session, s.value, Stamp::from(&s.id));
+                        }
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => return,
+            },
+            () = sleep_until(wake), if wake.is_some() => {
+                registry.tick(tokio::time::Instant::now(), |id| engine.head_stamp(id));
+            }
+        }
+    }
+}
+
+/// Sleeps until `at`; never resolves for `None`.
+async fn sleep_until(at: Option<tokio::time::Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::registry::{AgentStatus, HookStatus};
+
+    fn agent(id: &str) -> Value {
+        json!({
+            "id": id, "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "status": "running", "createdAt": 1, "pid": 3,
+        })
+    }
+
+    fn status_of(engine: &Engine, id: &str) -> Option<AgentStatus> {
+        engine.registry().read(|r| {
+            r.terminals()
+                .into_iter()
+                .find(|t| t.id == id)
+                .map(|t| t.status)
+        })?
+    }
+
+    /// Lets the follower take what was sent, on the paused clock.
+    async fn settle() {
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_terminal_that_goes_quiet_turns_idle_on_the_paused_clock() {
+        let engine = Engine::new(Config::default());
+        engine
+            .registry()
+            .feed(
+                1,
+                &json!({ "op": "snapshot", "terminals": [agent("a")], "headless": [] }),
+            )
+            .unwrap();
+        engine.decide_statuses();
+        assert!(engine.registry().decides());
+
+        let _ = engine.events.send(Event::Activity("a".into()));
+        settle().await;
+        tokio::time::advance(Duration::from_millis(4_900)).await;
+        settle().await;
+        assert_eq!(status_of(&engine, "a"), Some(AgentStatus::Running));
+        tokio::time::advance(Duration::from_millis(200)).await;
+        settle().await;
+        assert_eq!(status_of(&engine, "a"), Some(AgentStatus::Idle));
+
+        // Its screen says waiting: it is, at the effect's stamp.
+        let fx = EffectId {
+            session: "a".into(),
+            epoch: 1,
+            rseq: 7,
+            index: 0,
+        };
+        let _ = engine.events.send(Event::Effect(fx, Effect::Status(2)));
+        settle().await;
+        assert_eq!(status_of(&engine, "a"), Some(AgentStatus::Waiting));
+
+        // Promoted to hooks, its timer runs 30s.
+        let hook = HookStatus {
+            id: "a".into(),
+            status: Some(AgentStatus::Running),
+            promote: true,
+        };
+        engine
+            .registry()
+            .hook_status(&hook, None, tokio::time::Instant::now())
+            .unwrap();
+        let _ = engine.events.send(Event::Activity("a".into()));
+        settle().await;
+        tokio::time::advance(Duration::from_secs(29)).await;
+        settle().await;
+        assert_eq!(status_of(&engine, "a"), Some(AgentStatus::Running));
+        tokio::time::advance(Duration::from_secs(2)).await;
+        settle().await;
+        assert_eq!(status_of(&engine, "a"), Some(AgentStatus::Idle));
     }
 }

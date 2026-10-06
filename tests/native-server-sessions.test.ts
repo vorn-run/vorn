@@ -111,10 +111,15 @@ function wire<T>(records: T): T {
   return JSON.parse(JSON.stringify(records)) as T
 }
 
-/** A record as the server answers it: without the registry's revision. */
+/** A record as the server answers it: without the registry's revision and stamps. */
 function plain<T extends object>(records: readonly T[]): T[] {
   return records.map((r) => {
-    const { rev: _rev, ...rest } = r as T & { rev?: number }
+    const {
+      rev: _rev,
+      statusAt: _statusAt,
+      exitAt: _exitAt,
+      ...rest
+    } = r as T & { rev?: number; statusAt?: unknown; exitAt?: unknown }
     return rest as T
   })
 }

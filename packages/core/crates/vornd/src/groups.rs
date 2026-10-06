@@ -121,6 +121,9 @@ pub enum Counted {
 #[derive(Debug, Default)]
 pub struct Groups {
     modes: BTreeMap<String, Mode>,
+    /// Whether the Native server switch is on, whatever the per-group
+    /// settings say: it also has vornd decide the sessions' statuses.
+    native_server: bool,
     seen: Mutex<BTreeMap<String, GroupCounts>>,
 }
 
@@ -181,6 +184,7 @@ impl Groups {
         }
         Ok(Groups {
             modes,
+            native_server,
             seen: Mutex::default(),
         })
     }
@@ -216,6 +220,11 @@ impl Groups {
     /// The groups with a switch set, and their modes.
     pub fn modes(&self) -> impl Iterator<Item = (&str, Mode)> {
         self.modes.iter().map(|(g, m)| (g.as_str(), *m))
+    }
+
+    /// Whether vornd was started with the Native server switch on.
+    pub fn native_server(&self) -> bool {
+        self.native_server
     }
 
     /// Whether any group is native or shadowed, so vornd has native work to

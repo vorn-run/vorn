@@ -142,3 +142,79 @@ describe('the records vornd is told', () => {
     expect(sent.slice(told).filter((s) => s.op !== 'order')).toEqual([])
   })
 })
+
+describe('while vornd decides the statuses', () => {
+  it('tells vornd what only the server sees, and takes each status from its copy', async () => {
+    const agent = await ptyManager.createPty({
+      agentType: 'claude',
+      projectName: 'p',
+      projectPath: '/tmp'
+    } as never)
+    opened.push(agent.id)
+    const program = fakeVornd.last()
+    program.start(77)
+    const updated: Array<{ id: string; status: string }> = []
+    const onMessage = (channel: string, payload: { id: string; status: string }): void => {
+      if (channel === 'session:updated') updated.push({ id: payload.id, status: payload.status })
+    }
+    ptyManager.on('client-message', onMessage)
+    fakeVornd.decidesStatus.mockReturnValue(true)
+    try {
+      const record = (): Record<string, unknown> =>
+        ptyManager.getActiveSessions().find((s) => s.id === agent.id) as never
+      const copy = (fields: Record<string, unknown>): void =>
+        fakeVornd.mirrored(Object.freeze({ ...record(), rev: 9, ...fields }))
+
+      // What the session prints is vornd's to read.
+      program.status(2, { epoch: 1, rseq: 4, index: 0 })
+      program.activity()
+      expect(record().status).toBe('running')
+
+      // A hook's link and status go to vornd, and change nothing here yet.
+      ptyManager.linkHookSession(agent.id, 'conversation')
+      ptyManager.hookStatus(agent.id, 'waiting', true)
+      expect(fakeVornd.patch).toHaveBeenCalledWith(agent.id, { hookSessionId: 'conversation' })
+      expect(fakeVornd.hookStatus).toHaveBeenCalledWith(agent.id, 'waiting', true)
+      expect(record()).not.toHaveProperty('hookSessionId')
+      expect(updated).toEqual([])
+
+      // They come back as the copy's changes, in its order: the link without
+      // a broadcast, then the status with one, as `setStatus` broadcast it.
+      copy({ hookSessionId: 'conversation' })
+      expect(record().hookSessionId).toBe('conversation')
+      expect(lastRecord(agent.id).hookSessionId).toBe('conversation')
+      expect(updated).toEqual([])
+      copy({ status: 'waiting' })
+      copy({ status: 'waiting', statusSource: 'hooks' })
+      expect(record()).toMatchObject({ status: 'waiting', statusSource: 'hooks' })
+      expect(updated).toEqual([{ id: agent.id, status: 'waiting' }])
+      // The copy's own fields stay vornd's.
+      expect(record()).not.toHaveProperty('rev')
+
+      // Input to a terminal that is waiting is told to vornd, which decides.
+      copy({ status: 'idle', statusSource: undefined })
+      ptyManager.writeToPty(agent.id, 'y')
+      expect(fakeVornd.input).toHaveBeenCalledWith(agent.id)
+      expect(record().status).toBe('idle')
+
+      // Once its program ended, a change told before vornd heard is older.
+      program.exit(0)
+      expect(record().status).toBe('idle')
+      const told = updated.length
+      copy({ status: 'running' })
+      expect(record().status).toBe('idle')
+      expect(updated).toHaveLength(told)
+    } finally {
+      fakeVornd.decidesStatus.mockReturnValue(false)
+      ptyManager.off('client-message', onMessage)
+    }
+  })
+
+  it('takes nothing from the copy while the server decides', () => {
+    const shell = ptyManager.createShellPty('/tmp')
+    opened.push(shell.id)
+    fakeVornd.mirrored({ ...shell, status: 'error' })
+    expect(ptyManager.getActiveSessions().find((s) => s.id === shell.id)?.status).toBe('running')
+    expect(fakeVornd.patch).not.toHaveBeenCalled()
+  })
+})

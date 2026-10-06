@@ -19,9 +19,11 @@
 //! toward the size rule and its `terminal:resize` is applied as it is, and
 //! `vornd:spawn` is always answered. Beside them:
 //!
-//! - `vornd:hello` answers `{protocol, build, native}`; `native` says vornd
-//!   runs native work and keeps a copy of the server's session records
-//!   ([`crate::registry`]), which the server then feeds.
+//! - `vornd:hello` answers `{protocol, build, native, statuses}`; `native`
+//!   says vornd runs native work and keeps a copy of the server's session
+//!   records ([`crate::registry`]), which the server then feeds, and
+//!   `statuses` that the copy decides the terminals' statuses, which the
+//!   server then takes from it.
 //! - `vornd:subscribe` answers `{connected, sessions, ended, notices}`: every
 //!   session held with its latest states, the sessions that ended lately and
 //!   the notifications kept, and with `native` also `registry`, the copy of
@@ -37,6 +39,12 @@
 //!   `remove`, `order` and `holds`.
 //! - `vornd:registry` answers the copy whole, for a subscriber that missed
 //!   a change.
+//! - While the copy decides the statuses, the server tells it what only the
+//!   server sees, as notifications: `vornd:hookStatus {id, status?, promote}`,
+//!   the status an agent's hook reported and whether its hooks report the
+//!   status from now on; `vornd:input {id}`, the server wrote to the
+//!   terminal; and `vornd:patch {id, fields, baseRev?}`, fields of the
+//!   record the server no longer sets itself (a hook session linked).
 //! - `vornd:kill {id, signal}` signals the session's program (`hup`,
 //!   `term`, `kill` or `int`).
 //! - `vornd:closeStdin {id}` ends a piped session's input.
@@ -65,6 +73,7 @@ use vorn_sessiond_wire::Sig;
 use crate::applink::AppLink;
 use crate::engine::{Engine, Event};
 use crate::journal::{Held, Stamped};
+use crate::registry::{HookStatus, Patch};
 use crate::streams::{answer, exit_code, refuse, Forwarder};
 
 /// The version of this channel, which `vornd:hello` reports.
@@ -378,6 +387,7 @@ fn call(app: App<'_>, text: &str) {
             "protocol": APP_PROTOCOL,
             "build": env!("CARGO_PKG_VERSION"),
             "native": engine.registry().wanted(),
+            "statuses": engine.registry().decides(),
         })),
         "vornd:subscribe" => {
             let state = state(engine);
@@ -397,6 +407,26 @@ fn call(app: App<'_>, text: &str) {
             }
         },
         "vornd:registry" => Ok(engine.registry().snapshot()),
+        "vornd:hookStatus" => HookStatus::try_from(&params)
+            .and_then(|call| {
+                let head = engine.head_stamp(&call.id);
+                let now = tokio::time::Instant::now();
+                engine.registry().hook_status(&call, head, now)
+            })
+            .map(|()| Value::Null)
+            .map_err(|e| told_wrong(&e)),
+        "vornd:input" => match session {
+            Some(s) => engine
+                .registry()
+                .input(s, engine.head_stamp(s))
+                .map(|()| Value::Null)
+                .map_err(|e| told_wrong(&e)),
+            None => Err("vornd:input needs an id".to_owned()),
+        },
+        "vornd:patch" => Patch::try_from(&params)
+            .and_then(|call| engine.registry().patch(&call))
+            .map(|()| Value::Null)
+            .map_err(|e| told_wrong(&e)),
         "vornd:reach" => match params.get("host").and_then(Value::as_str) {
             Some(host) => {
                 link.set_server_host(host.to_owned());
@@ -428,6 +458,13 @@ fn call(app: App<'_>, text: &str) {
             Err(e) => fwd.send_now(&refuse(&rpc, &e)),
         }
     }
+}
+
+/// A note the registry could not take, logged: the server sends them
+/// without waiting for an answer.
+fn told_wrong(e: &crate::registry::RegistryError) -> String {
+    warn!(%e, "a session change vornd could not take");
+    e.to_string()
 }
 
 fn signal_of(params: &Value) -> Option<Sig> {
@@ -679,6 +716,7 @@ mod tests {
         let mut app = App::open(&engine);
         let (hello, _) = app.call("vornd:hello", Value::Null).await;
         assert_eq!(hello["native"], false);
+        assert_eq!(hello["statuses"], false);
         let (state, _) = app.call("vornd:subscribe", Value::Null).await;
         assert!(state.get("registry").is_none());
 
@@ -753,6 +791,79 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         panic!("the copy still answers after its server left");
+    }
+
+    #[tokio::test]
+    async fn a_server_told_vornd_decides_the_statuses_sends_it_what_only_it_sees() {
+        let engine = Engine::new(vorn_engine::Config::default());
+        engine.registry().want();
+        engine.decide_statuses();
+        let mut app = App::open(&engine);
+        assert_eq!(
+            app.call("vornd:hello", Value::Null).await.0["statuses"],
+            true
+        );
+        let mut agent = shell("a", "Claude");
+        agent["agentType"] = json!("claude");
+        app.notify(
+            "vornd:record",
+            json!({ "op": "snapshot", "terminals": [agent], "headless": [] }),
+        )
+        .await;
+        app.call("vornd:subscribe", Value::Null).await;
+        app.notify(
+            "vornd:patch",
+            json!({ "id": "a", "fields": { "hookSessionId": "conv" } }),
+        )
+        .await;
+        app.notify(
+            "vornd:hookStatus",
+            json!({ "id": "a", "status": "waiting", "promote": true }),
+        )
+        .await;
+        app.notify("vornd:input", json!({ "id": "a" })).await;
+        // The answer comes after every note the calls before it made.
+        let (snapshot, mut notes) = app.call("vornd:registry", Value::Null).await;
+        let record = &snapshot["terminals"][0];
+        assert_eq!(
+            (
+                record["hookSessionId"].as_str(),
+                record["status"].as_str(),
+                record["statusSource"].as_str()
+            ),
+            (Some("conv"), Some("waiting"), Some("hooks"))
+        );
+        while notes
+            .iter()
+            .filter(|n| n["method"] == "vornd:session")
+            .count()
+            < 4
+        {
+            notes.push(app.next_frame().await);
+        }
+        let told: Vec<_> = notes
+            .iter()
+            .filter(|n| n["method"] == "vornd:session" && n["params"]["op"] == "upsert")
+            .map(|n| n["params"]["record"]["status"].clone())
+            .collect();
+        // Linked, waiting, then promoted; input to a terminal on hooks wakes nothing.
+        assert_eq!(told, [json!("running"), json!("waiting"), json!("waiting")]);
+
+        // A call it cannot take is refused when asked.
+        app.next += 1;
+        let rpc = app.next;
+        app.send(json!({ "jsonrpc": "2.0", "id": rpc, "method": "vornd:hookStatus", "params": { "id": "nope", "status": "idle" } }))
+            .await;
+        let refused = loop {
+            let f = app.next_frame().await;
+            if f["id"] == rpc {
+                break f;
+            }
+        };
+        assert_eq!(
+            refused["error"]["message"],
+            "vornd:hookStatus: no terminal nope"
+        );
     }
 
     #[test]

@@ -64,4 +64,4 @@ vorn-grid-client = { path = "../grid-client" }
 vorn-pipeline = { path = "../pipeline" }
 vorn-recovery = { path = "../recovery" }
 vorn-screen = { path = "../screen" }
-tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "io-util", "test-util"] }

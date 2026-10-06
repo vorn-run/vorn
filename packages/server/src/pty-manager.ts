@@ -138,8 +138,10 @@ class PtyManager extends EventEmitter {
     setImmediate(() => this.cleanStaleTempKeys())
     sessionFeed.setTerminalSource({
       terminals: () => this.getActiveSessions(),
-      order: () => this.sessionOrder
+      order: () => this.sessionOrder,
+      ended: () => this.getActiveSessions().flatMap((s) => (this.ptys.has(s.id) ? [] : [s.id]))
     })
+    vorndSessions.on('mirrored', (record: TerminalSession) => this.fromMirror(record))
   }
 
   /**
@@ -153,7 +155,39 @@ class PtyManager extends EventEmitter {
   recordChanged(id: string): void {
     const session = this.sessions.get(id)
     if (!session || this.extensionPtys.has(id)) return
-    sessionFeed.terminal(session)
+    sessionFeed.terminal(session, !this.ptys.has(id))
+  }
+
+  /**
+   * A terminal record as vornd's copy holds it, while vornd decides the
+   * statuses (`vorndSessions.decidesStatus`): what it decided is taken here,
+   * and a status that changed is broadcast as `setStatus` did. The copy's
+   * changes arrive in the order it made them, so the record is always the
+   * newer word. A session whose program ended keeps the status it ended with:
+   * a change told before vornd heard of the end is older than it.
+   */
+  private fromMirror(record: TerminalSession): void {
+    if (!vorndSessions.decidesStatus()) return
+    const session = this.sessions.get(record.id)
+    if (!session || this.extensionPtys.has(record.id) || !this.ptys.has(record.id)) return
+    let linked = false
+    if (record.hookSessionId !== session.hookSessionId) {
+      if (record.hookSessionId) session.hookSessionId = record.hookSessionId
+      else delete session.hookSessionId
+      linked = true
+    }
+    if (record.statusSource !== session.statusSource) {
+      if (record.statusSource) session.statusSource = record.statusSource
+      else delete session.statusSource
+      linked = true
+    }
+    if (record.status !== session.status) {
+      session.status = record.status
+      this.recordChanged(record.id)
+      this.emit('client-message', IPC.SESSION_UPDATED, session)
+    } else if (linked) {
+      this.recordChanged(record.id)
+    }
   }
 
   /** `sessionOrder` changed. */
@@ -761,6 +795,8 @@ class PtyManager extends EventEmitter {
       this.recordChanged(id)
     })
     held.on('status', (code: number, note?: Stamp) => {
+      // vornd's copy decides it, and says so in its changes (`fromMirror`).
+      if (vorndSessions.decidesStatus()) return
       const session = this.sessions.get(id)
       const status = NATIVE_STATUS[code]
       if (!session || !status) return
@@ -774,6 +810,7 @@ class PtyManager extends EventEmitter {
     })
     held.on('cwd', (cwd: string) => this.noteShellCwd(id, cwd))
     held.on('activity', () => {
+      if (vorndSessions.decidesStatus()) return
       const session = this.sessions.get(id)
       if (!session || session.agentType === 'shell') return
       // Printing again after going idle, with nothing new to say: running.
@@ -873,17 +910,19 @@ class PtyManager extends EventEmitter {
   }
 
   writeToPty(id: string, data: string): void {
-    this.ptys.get(id)?.write(data)
     // For non-hook sessions, user input means the session is active.
     // Hook sessions rely on hooks to transition to running (e.g. PreToolUse).
     const session = this.sessions.get(id)
-    if (
-      session &&
+    const wakes =
+      !!session &&
       session.statusSource !== 'hooks' &&
       (session.status === 'idle' || session.status === 'waiting')
-    ) {
-      this.updateSessionStatus(id, 'running')
-    }
+    // Told before the write, on the same channel, so vornd has it running
+    // before anything the write makes the program print.
+    const decides = wakes && vorndSessions.decidesStatus()
+    if (decides) vorndSessions.input(id)
+    this.ptys.get(id)?.write(data)
+    if (wakes && !decides) this.updateSessionStatus(id, 'running')
   }
 
   /**
@@ -1064,7 +1103,39 @@ class PtyManager extends EventEmitter {
 
   /** A status from outside the output (a hook, a permission request). */
   updateSessionStatus(id: string, status: AgentStatus): void {
-    this.setStatus(id, status)
+    if (vorndSessions.decidesStatus()) vorndSessions.hookStatus(id, status, false)
+    else this.setStatus(id, status)
+  }
+
+  /**
+   * What an agent's hook said: its status, if it named one, and then the
+   * session's status taken from its hooks from now on (`promoteToHookStatus`).
+   * While vornd decides the statuses both go to it as one call, applied in
+   * that order, and come back as its changes.
+   */
+  hookStatus(id: string, status: AgentStatus | null, promote: boolean): void {
+    if (vorndSessions.decidesStatus()) {
+      if (this.sessions.has(id)) vorndSessions.hookStatus(id, status, promote)
+      return
+    }
+    if (status) this.setStatus(id, status)
+    if (promote) this.promoteToHookStatus(id)
+  }
+
+  /**
+   * Link a session to the conversation an agent's hooks name it by. While
+   * vornd decides the statuses the link is its to set, and arrives back with
+   * its changes.
+   */
+  linkHookSession(id: string, hookSessionId: string): void {
+    const session = this.sessions.get(id)
+    if (!session) return
+    if (vorndSessions.decidesStatus()) {
+      vorndSessions.patch(id, { hookSessionId })
+      return
+    }
+    session.hookSessionId = hookSessionId
+    this.recordChanged(id)
   }
 
   /** @param at The effect that told it, when vornd did; null for a hook, a timer or input. */
@@ -1082,6 +1153,10 @@ class PtyManager extends EventEmitter {
   promoteToHookStatus(id: string): void {
     const session = this.sessions.get(id)
     if (!session) return
+    if (vorndSessions.decidesStatus()) {
+      vorndSessions.hookStatus(id, null, true)
+      return
+    }
 
     if (session.statusSource !== 'hooks') {
       session.statusSource = 'hooks'

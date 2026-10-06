@@ -27,6 +27,8 @@ export interface RecordSource {
   terminals(): TerminalSession[]
   /** The order the terminals are listed in. */
   order(): string[]
+  /** The terminals whose programs ended: their records are this server's whole again. */
+  ended?(): string[]
 }
 
 /** The channel a `RecordFeed` writes to: vornd's, through `VorndSessions`. */
@@ -49,6 +51,10 @@ export interface RecordSink {
  * cursor (`statusAt`, `exitAt`), so vornd keeps the newer of two states told
  * out of order. One set any other way (a hook, a timer, the person typing)
  * clears it: it is the newest word on the session.
+ *
+ * A terminal whose program ended is sent with `ended`: while vornd decides the
+ * statuses (`vornd-sessions.ts`), that is what gives the record back to this
+ * server, status included.
  */
 export class RecordFeed {
   private terminalSource: RecordSource | null = null
@@ -98,9 +104,9 @@ export class RecordFeed {
     this.stamp(`${kind}/${id}`, 'exitAt', at)
   }
 
-  /** A terminal record was created or changed. */
-  terminal(session: TerminalSession): void {
-    this.upsert('terminal', session)
+  /** A terminal record was created or changed; `ended` once its program has. */
+  terminal(session: TerminalSession, ended = false): void {
+    this.upsert('terminal', session, ended)
   }
 
   /** A headless agent's record was created or changed. */
@@ -142,13 +148,24 @@ export class RecordFeed {
     const terminals = this.terminalSource?.terminals() ?? []
     const headless = this.headlessSource?.() ?? []
     const order = this.terminalSource?.order() ?? []
+    const ended = this.terminalSource?.ended?.() ?? []
     const holds = heldWorkspaces()
     this.told.clear()
-    for (const s of terminals) this.told.set(`terminal/${s.id}`, this.fingerprint('terminal', s))
+    for (const s of terminals) {
+      const key = `terminal/${s.id}`
+      this.told.set(key, this.fingerprint('terminal', s, ended.includes(s.id)))
+    }
     for (const s of headless) this.told.set(`headless/${s.id}`, this.fingerprint('headless', s))
     this.toldOrder = JSON.stringify(order)
     this.toldHolds = JSON.stringify(holds)
-    this.send({ op: 'snapshot', terminals, headless, order, holds })
+    this.send({
+      op: 'snapshot',
+      terminals,
+      headless,
+      order,
+      holds,
+      ...(ended.length ? { ended } : {})
+    })
   }
 
   private stamp(key: string, field: 'statusAt' | 'exitAt', at: Stamp | null): void {
@@ -160,18 +177,18 @@ export class RecordFeed {
     else this.stamps.delete(key)
   }
 
-  private fingerprint(kind: RecordKind, record: object): string {
+  private fingerprint(kind: RecordKind, record: object, ended = false): string {
     const stamps = this.stamps.get(`${kind}/${(record as { id: string }).id}`)
-    return JSON.stringify(record) + (stamps ? JSON.stringify(stamps) : '')
+    return JSON.stringify(record) + (stamps ? JSON.stringify(stamps) : '') + (ended ? '/ended' : '')
   }
 
-  private upsert(kind: RecordKind, record: TerminalSession | HeadlessSession): void {
+  private upsert(kind: RecordKind, record: TerminalSession | HeadlessSession, ended = false): void {
     if (!this.wants()) return
     const key = `${kind}/${record.id}`
-    const fingerprint = this.fingerprint(kind, record)
+    const fingerprint = this.fingerprint(kind, record, ended)
     if (this.told.get(key) === fingerprint) return
     this.told.set(key, fingerprint)
-    this.send({ op: 'upsert', kind, record, ...this.stamps.get(key) })
+    this.send({ op: 'upsert', kind, record, ...this.stamps.get(key), ...(ended ? { ended } : {}) })
   }
 }
 
