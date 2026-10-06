@@ -2640,6 +2640,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-mcp"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "regex",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "vorn-pipeline"
 version = "0.7.5"
 dependencies = [

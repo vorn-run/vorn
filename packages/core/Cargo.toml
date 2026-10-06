@@ -17,6 +17,7 @@ members = [
   "crates/size",
   "crates/protocol",
   "crates/store",
+  "crates/mcp",
   "crates/reach",
 ]
 
