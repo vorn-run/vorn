@@ -46,6 +46,10 @@ which serves MCP when Settings > Experimental > Native server is on.
 /// The header Streamable HTTP keeps a session in.
 const SESSION_HEADER: &str = "mcp-session-id";
 const PROTOCOL_HEADER: &str = "mcp-protocol-version";
+/// The agent's working directory, percent-encoded, and its Vorn session:
+/// what vornd's tools would otherwise read from their own process.
+const CWD_HEADER: &str = "vorn-cwd";
+const VORN_SESSION_HEADER: &str = "vorn-session-id";
 /// How long requests already sent may still answer once stdin has closed.
 const DRAIN_GRACE: Duration = Duration::from_secs(30);
 /// How long ending the session may take.
@@ -217,9 +221,32 @@ fn request(
     if let Some(protocol) = shared.protocol() {
         builder = builder.header(PROTOCOL_HEADER, protocol);
     }
+    if let Ok(cwd) = std::env::current_dir() {
+        builder = builder.header(CWD_HEADER, encode_uri_component(&cwd.to_string_lossy()));
+    }
+    if let Some(session) = std::env::var("VORN_SESSION_ID")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
+        builder = builder.header(VORN_SESSION_HEADER, session);
+    }
     builder
         .body(Full::new(body))
         .map_err(|err| format!("could not build the request: {err}"))
+}
+
+/// `encodeURIComponent`: every byte but the unreserved ones escaped, so any
+/// path fits in a header.
+fn encode_uri_component(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte) {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 /// Writes one message from the server, remembering the protocol version an
@@ -538,6 +565,18 @@ pub fn serving(status: &Value) -> Result<Endpoint, String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_directory_is_encoded_as_encode_uri_component_encodes_it() {
+        assert_eq!(
+            encode_uri_component("/home/me/my app"),
+            "%2Fhome%2Fme%2Fmy%20app"
+        );
+        assert_eq!(
+            encode_uri_component("/café/a-b_c.d"),
+            "%2Fcaf%C3%A9%2Fa-b_c.d"
+        );
+    }
 
     #[test]
     fn makes_one_line_of_a_message_and_drops_what_is_not_json() {
