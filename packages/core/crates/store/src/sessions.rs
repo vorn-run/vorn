@@ -71,6 +71,7 @@ fn row_to_session(row: &Row<'_>) -> Result<TerminalSession> {
         cols: None,
         rows: None,
         shell_exit_code: None,
+        rev: None,
     })
 }
 

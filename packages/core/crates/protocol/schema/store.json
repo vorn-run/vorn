@@ -1097,6 +1097,9 @@
         },
         "savedAt": {
           "type": "number"
+        },
+        "rev": {
+          "type": "number"
         }
       },
       "required": [
