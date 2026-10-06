@@ -6,13 +6,18 @@
 //! behind. A packaged app has only the system directories on its PATH, so
 //! without the shell's answer git would be whatever `/usr/bin/git` is, not
 //! the one the person uses in their terminal. vornd asks the shell the same
-//! question in the background when it starts, and filters by the same lists.
+//! question in the background when it starts, and filters by the same lists
+//! (`vorn_agents::launch::env`).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use tracing::{info, warn};
+// Which names are dropped, and how PATH is searched, are the launch
+// builders' rules, shared with them.
+use vorn_agents::launch::env::{launch_env, safe_env};
+use vorn_agents::launch::{find_on_path as find_launchable, Platform};
 
 /// How long the login shell has to print its environment.
 const SHELL_TIMEOUT: Duration = Duration::from_secs(15);
@@ -22,29 +27,6 @@ const SHELL_RETRY: Duration = Duration::from_secs(30);
 
 /// The most the shell may print; past it the answer is not kept.
 const SHELL_MAX_OUTPUT: usize = 4 * 1024 * 1024;
-
-/// Names stripped whatever the configuration says (`NEVER_BORROWED_ENV` and
-/// the desktop's launch credential, `BOOTSTRAP_ENV_VAR`).
-const STRIP_KEYS: &[&str] = &["CLAUDECODE"];
-const STRIP_PREFIXES: &[&str] = &["CLAUDE_CODE_", "SECRET_VORN_BOOTSTRAP_TOKEN"];
-
-/// Credential-shaped names (`SENSITIVE_ENV_PREFIXES`), never handed to git.
-const SENSITIVE_PREFIXES: &[&str] = &[
-    "AWS_SECRET",
-    "AWS_SESSION",
-    "GITHUB_TOKEN",
-    "GH_TOKEN",
-    "OPENAI_API",
-    "ANTHROPIC_API",
-    "GOOGLE_API",
-    "STRIPE_",
-    "DATABASE_URL",
-    "DB_PASSWORD",
-    "SECRET_",
-    "PRIVATE_KEY",
-    "NPM_TOKEN",
-    "NODE_AUTH_TOKEN",
-];
 
 /// An environment, as name and value pairs.
 pub type Env = Vec<(String, String)>;
@@ -84,32 +66,20 @@ impl SafeEnv {
     /// this process's until then, filtered either way. Asks the shell again
     /// when it is time to.
     pub fn get(self: &Arc<Self>) -> Env {
-        self.filtered(&[])
+        safe_env(self.source())
     }
 
     /// The server's `getLaunchEnv`, for what an agent runs: [`SafeEnv::get`]
     /// but for the names the person passed through (`envPassthrough`), and
     /// with `VORN_DATA_DIR` naming the server's data directory.
     pub fn launch(self: &Arc<Self>, passthrough: &[String], data_dir: Option<&Path>) -> Env {
-        let names: Vec<String> = passthrough
-            .iter()
-            .map(|k| k.trim().to_uppercase())
-            .filter(|k| !k.is_empty())
-            .collect();
-        let mut env = self.filtered(&names);
-        if let Some(dir) = data_dir {
-            let dir = dir.to_string_lossy().into_owned();
-            match env.iter_mut().find(|(k, _)| k == "VORN_DATA_DIR") {
-                Some(slot) => slot.1 = dir,
-                None => env.push(("VORN_DATA_DIR".to_owned(), dir)),
-            }
-        }
-        env
+        let dir = data_dir.map(|d| d.to_string_lossy().into_owned());
+        launch_env(self.source(), passthrough, dir.as_deref())
     }
 
     /// The shell's environment once it answered, this process's until then,
-    /// filtered with `passthrough`.
-    fn filtered(self: &Arc<Self>, passthrough: &[String]) -> Env {
+    /// unfiltered. Asks the shell again when it is time to.
+    fn source(self: &Arc<Self>) -> Env {
         let (answered, ask) = {
             let mut shell = self.shell();
             match &*shell {
@@ -127,8 +97,8 @@ impl SafeEnv {
             self.ask();
         }
         match answered {
-            Some(env) => filter_with(env.iter().cloned(), passthrough),
-            None => filter_with(std::env::vars(), passthrough),
+            Some(env) => env.as_ref().clone(),
+            None => std::env::vars().collect(),
         }
     }
 
@@ -259,60 +229,19 @@ fn parse_env_output(output: &str) -> Env {
 
 /// The server's `filterEnv` with nothing passed through.
 pub fn filter(source: impl Iterator<Item = (String, String)>) -> Env {
-    filter_with(source, &[])
-}
-
-/// The server's `filterEnv`: `passthrough`, uppercased names, lets those
-/// credential-shaped names through, but never the ones stripped whatever
-/// the configuration says.
-fn filter_with(source: impl Iterator<Item = (String, String)>, passthrough: &[String]) -> Env {
-    source
-        .filter(|(key, _)| {
-            let upper = key.to_uppercase();
-            let stripped = STRIP_KEYS.contains(&upper.as_str())
-                || STRIP_PREFIXES.iter().any(|p| upper.starts_with(p));
-            let sensitive = !passthrough.contains(&upper)
-                && SENSITIVE_PREFIXES.iter().any(|p| upper.starts_with(p));
-            !(stripped || sensitive)
-        })
-        .collect()
+    safe_env(source)
 }
 
 /// The first entry of `path_env` holding `name` that can be run
 /// (`findOnPath`).
 pub fn find_on_path(name: &str, path_env: &str) -> Option<PathBuf> {
-    let sep = if cfg!(windows) { ';' } else { ':' };
-    let candidates: Vec<String> = if cfg!(windows) {
-        vec![
-            format!("{name}.exe"),
-            format!("{name}.cmd"),
-            name.to_owned(),
-        ]
-    } else {
-        vec![name.to_owned()]
-    };
-    path_env
-        .split(sep)
-        .map(str::trim)
-        .filter(|dir| !dir.is_empty())
-        .flat_map(|dir| candidates.iter().map(move |c| Path::new(dir).join(c)))
-        .find(|full| runnable(full))
-}
-
-#[cfg(unix)]
-fn runnable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path).is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn runnable(path: &Path) -> bool {
-    path.exists()
+    find_launchable(name, Some(path_env), Platform::HOST).map(PathBuf::from)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vorn_agents::launch::env::filter_env;
 
     fn pairs(list: &[(&str, &str)]) -> impl Iterator<Item = (String, String)> {
         list.iter()
@@ -341,7 +270,7 @@ mod tests {
     #[test]
     fn passes_through_only_what_was_named_and_never_the_stripped() {
         let passthrough = vec!["ANTHROPIC_API_KEY".to_owned(), "CLAUDECODE".to_owned()];
-        let kept = filter_with(
+        let kept = filter_env(
             pairs(&[
                 ("anthropic_api_key", "k"),
                 ("GITHUB_TOKEN", "x"),

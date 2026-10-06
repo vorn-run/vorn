@@ -2,14 +2,16 @@
 //!
 //! Only adapters live here: `gitRun` over `vorn-git` and `NativeStore` over
 //! `vorn-store`, plus the small exports the server uses to check the binary
-//! loaded. Terminals do not pass through this library; they run in vornd,
-//! which owns each session's screen and output analysis. The logic is in
+//! loaded, and the test-only launch exports over `vorn-agents` ([`launch`]).
+//! Terminals do not pass through this library; they run in vornd, which owns
+//! each session's screen and output analysis. The logic is in
 //! plain crates under `crates/` with no napi in them, so its tests and
 //! benchmarks link as ordinary Rust.
 
 use napi_derive::napi;
 
 pub mod git;
+pub mod launch;
 pub mod store;
 
 // Every exported function uses `#[napi(catch_unwind)]`: napi-rs only turns a

@@ -2752,9 +2752,12 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vorn-agents"
 version = "0.0.0"
 dependencies = [
+ "data-encoding",
  "jiff",
+ "libc",
  "rusqlite",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 
@@ -2800,6 +2803,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "vorn-agents",
  "vorn-git",
  "vorn-protocol",
  "vorn-store",

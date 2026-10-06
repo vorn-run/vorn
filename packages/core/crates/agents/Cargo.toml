@@ -14,6 +14,14 @@ jiff = "0.2"
 # The agents keep their sessions in SQLite files of their own, read here read-only.
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+# Shim files are known by the SHA-256 of their contents; PowerShell's
+# integration rides its command line in base64.
+sha2 = { version = "0.10", default-features = false }
+data-encoding = "2"
+
+[target.'cfg(unix)'.dependencies]
+# getuid, for the shim directory's owner.
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

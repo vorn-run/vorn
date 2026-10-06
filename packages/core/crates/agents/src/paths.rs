@@ -47,6 +47,26 @@ pub fn comparable(p: &str) -> String {
     normalize(p).replace('\\', "/").to_lowercase()
 }
 
+/// `path.join(dir, file)` on this host: joined with the host's separator and
+/// normalized, so `/usr//bin/` and `claude` give `/usr/bin/claude`.
+pub(crate) fn join(dir: &str, file: &str) -> String {
+    // `path.join` skips an empty segment rather than rooting what follows.
+    // Callers never pass one with a file that needs normalizing.
+    if dir.is_empty() {
+        return file.to_owned();
+    }
+    if cfg!(windows) {
+        let joined = format!("{dir}\\{file}");
+        if windows_style(&joined) {
+            normalize_win32(&joined).1
+        } else {
+            joined.replace('/', "\\")
+        }
+    } else {
+        normalize_posix(&format!("{dir}/{file}")).1
+    }
+}
+
 /// `path.posix.normalize`, and its root (`/` or nothing).
 fn normalize_posix(p: &str) -> (String, String) {
     if p.is_empty() {

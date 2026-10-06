@@ -1,7 +1,9 @@
 //! The `shell:*` calls that look at the machine rather than a session: the
 //! programs on PATH, for the intent bar to complete a command with
 //! (`listShellExecutables`), and the shells installed, with what each can
-//! report as command blocks (`listInstalledShells`).
+//! report as command blocks (`listInstalledShells`). Also what a local
+//! shell session is launched with ([`Shells::setup`]), from the shim files
+//! the server writes.
 //!
 //! Both are kept as the server keeps them: the programs for a minute, the
 //! shells for as long as vornd runs. Finding the shells runs each one's
@@ -15,6 +17,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
+
+use vorn_agents::launch::shell::{
+    self as launch_shell, ShellContext, ShellFamily, ShellSetup, ShimError,
+};
+use vorn_agents::launch::Platform;
 
 use super::env::SafeEnv;
 
@@ -53,6 +60,35 @@ impl Shells {
         ));
         *kept = Some((Instant::now(), Arc::clone(&names)));
         names.as_ref().clone()
+    }
+
+    /// What a local shell session runs and is launched with
+    /// (`getShellIntegration`): `shell`, else the default shell, with its
+    /// integration's environment and arguments over the safe environment.
+    /// An error means the server's shims are not a version this build
+    /// knows, or not written yet, and the launch is the server's to make.
+    pub fn setup(
+        &self,
+        env: &Arc<SafeEnv>,
+        shell: Option<&str>,
+        minimal_prompt: bool,
+    ) -> Result<(String, ShellSetup), ShimError> {
+        let var = |name: &str| std::env::var(name).ok();
+        let shell = shell.map_or_else(
+            || launch_shell::default_shell(None, Platform::HOST, var),
+            str::to_owned,
+        );
+        let safe = env.get();
+        let home = home_dir();
+        let root = launch_shell::shim_root(Platform::HOST, var);
+        let cx = ShellContext {
+            minimal_prompt,
+            env: &safe,
+            home: &home,
+            shim_root: &root,
+        };
+        let setup = launch_shell::shell_setup(&shell, &cx)?;
+        Ok((shell, setup))
     }
 
     /// The shells on this machine, best first, found once.
@@ -154,16 +190,13 @@ impl Family {
 
     /// The family a shell's path names (`detectShellFamily`).
     fn of(path: &str) -> Option<Family> {
-        let name = path.replace('\\', "/");
-        let name = name.rsplit('/').next().unwrap_or("").to_lowercase();
-        match name.strip_suffix(".exe").unwrap_or(&name) {
-            "zsh" => Some(Family::Zsh),
-            "bash" => Some(Family::Bash),
-            "fish" => Some(Family::Fish),
-            "pwsh" | "powershell" => Some(Family::PowerShell),
-            "cmd" => Some(Family::Cmd),
-            _ => None,
-        }
+        ShellFamily::of(path).map(|family| match family {
+            ShellFamily::Zsh => Family::Zsh,
+            ShellFamily::Bash => Family::Bash,
+            ShellFamily::Fish => Family::Fish,
+            ShellFamily::PowerShell => Family::PowerShell,
+            ShellFamily::Cmd => Family::Cmd,
+        })
     }
 
     /// Places it can be without being on PATH.
@@ -199,6 +232,12 @@ impl Family {
             _ => Vec::new(),
         }
     }
+}
+
+/// Node's `os.homedir()`: `HOME`, or on Windows `USERPROFILE`.
+fn home_dir() -> String {
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var(var).unwrap_or_default()
 }
 
 fn is_file(path: &str) -> bool {
@@ -369,6 +408,17 @@ mod tests {
         );
         assert_eq!(Family::of("/opt/bin/pwsh"), Some(Family::PowerShell));
         assert_eq!(Family::of("/bin/sh"), None);
+    }
+
+    #[test]
+    fn sets_up_a_shell_that_needs_no_shims() {
+        let shells = Shells::default();
+        let env = SafeEnv::new();
+        let (shell, setup) = shells.setup(&env, Some("/bin/sh"), true).unwrap();
+        assert_eq!((shell.as_str(), setup), ("/bin/sh", ShellSetup::default()));
+        let (_, setup) = shells.setup(&env, Some("cmd.exe"), true).unwrap();
+        assert_eq!(setup.env[0].0, "PROMPT");
+        assert_eq!(setup.args, None);
     }
 
     #[test]
