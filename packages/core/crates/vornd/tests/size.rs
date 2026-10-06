@@ -593,11 +593,10 @@ async fn a_lock_holds_against_typing_until_its_client_leaves() {
         desk.read_for(Duration::from_millis(100)).await;
     }
     assert!(t.elapsed() >= Duration::from_secs(9), "{:?}", t.elapsed());
-    let last = *desk.resized().last().unwrap();
-    assert_eq!(
-        last,
-        (DESKTOP, Some(desk.sid), Some(ResizeReason::Returned))
-    );
+    // The engine can change size a moment before the desktop reads the resize.
+    let home = (DESKTOP, Some(desk.sid), Some(ResizeReason::Returned));
+    desk.until("the resize home", |d| d.resized().last() == Some(&home))
+        .await;
     rig.task.abort();
 }
 
