@@ -60,9 +60,15 @@ afterEach((ctx) => {
       // Same.
     }
   }
-  // The session holder is detached and may still be writing as it goes.
-  for (const dir of dirs.splice(0))
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  // The session holder is detached and may still be writing as it goes, so a
+  // directory it keeps filling is left for the OS rather than failing the test.
+  for (const dir of dirs.splice(0)) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    } catch (err) {
+      process.stderr.write(`left ${dir}: ${(err as Error).message}\n`)
+    }
+  }
 })
 
 /** What a server is started with, and what it is handed for its replacement. */
@@ -154,7 +160,13 @@ function call<T>(ws: WebSocket, method: string, params?: unknown, timeoutMs = 90
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${method} timed out`)), timeoutMs)
     const onMessage = (raw: WebSocket.RawData): void => {
-      const frame = JSON.parse(String(raw))
+      // Terminal output shares the socket and is not JSON; a throw here would stall it.
+      let frame: { id?: number; result?: unknown; error?: { message: string } }
+      try {
+        frame = JSON.parse(String(raw))
+      } catch {
+        return
+      }
       if (frame.id !== id) return
       clearTimeout(timer)
       ws.off('message', onMessage)
