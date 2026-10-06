@@ -1,12 +1,10 @@
-import Database from 'libsql'
 import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs'
-import { randomUUID } from 'node:crypto'
 import log from './logger'
 import { getDefaultShell } from './process-utils'
 import { removeGateViews } from './workflows/gate-views'
-import { nativeCore, type NativeStore, type NativeStoreClass } from './native-core'
+import { activeCore, nativeCore, type NativeStore, type NativeStoreClass } from './native-core'
 import type {
   ArtifactCommentChange,
   ArtifactCommentFilter,
@@ -31,31 +29,20 @@ export type {
 } from './store-types'
 import type {
   Artifact,
-  ArtifactAnchor,
   ArtifactAuthor,
   ArtifactComment,
-  ArtifactKind,
-  ArtifactVersion,
-  GateFeedbackEntry
+  ArtifactVersion
 } from '@vornrun/shared/types'
 import {
   AppConfig,
-  ExperimentalConfig,
   ProjectConfig,
   WorkflowDefinition,
   WorkflowExecution,
-  workflowRunId,
-  NodeExecutionState,
-  AgentCommandConfig,
-  RemoteHost,
-  AuthMethod,
   SSHKey,
   SSHKeyMeta,
   TaskConfig,
   TerminalSession,
   ScheduleLogEntry,
-  AgentType,
-  AiAgentType,
   WorkspaceConfig,
   SessionGroupConfig,
   DEFAULT_WORKSPACE,
@@ -63,18 +50,11 @@ import {
   SessionEventType,
   SourceConnection,
   TaskSourceLink,
-  ConnectorItemContext,
   User,
-  UserRole,
   DeviceToken
 } from '@vornrun/shared/types'
 import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
-import {
-  DEFAULT_TASK_WORKFLOW_ID,
-  DEV_SERVER_WORKFLOW_ID,
-  buildDefaultTaskWorkflow,
-  buildDevServerWorkflow
-} from './default-workflows'
+import { buildDefaultTaskWorkflow, buildDevServerWorkflow } from './default-workflows'
 
 /** Where the data directory lands when nothing overrides it. */
 const DEFAULT_DATA_DIR = path.join(os.homedir(), '.vorn')
@@ -93,37 +73,17 @@ function dbPath(): string {
   return path.join(getDataDir(), 'vorn.db')
 }
 
-const MAX_LOG_ENTRIES = 200
-
-let db: Database.Database | null = null
-
-/**
- * The Rust store, when the Native store switch put the database there. Every
- * exported call below goes to it first and to libsql only when it is null, so
- * one process never writes the file through both.
- */
-let native: NativeStore | null = null
-
-/** Why the Native store switch is on but the TypeScript store is answering. */
-let nativeError: string | null = null
-
-function getDb(): Database.Database {
-  if (!db) throw new Error('Database not initialized. Call initDatabase() first.')
-  return db
-}
+/** The open database: the Rust store (`vorn-store`) in `vorn_core.node`. */
+let store: NativeStore | null = null
 
 /**
  * One call into the Rust store: the function's name and its arguments, as
  * JSON both ways. `undefined` crosses as null, which every call treats as
- * absent, as the TypeScript does.
+ * absent.
  */
-function nativeCall<T>(store: NativeStore, call: string, ...args: unknown[]): T {
+function nativeCall<T>(call: string, ...args: unknown[]): T {
+  if (!store) throw new Error('Database not initialized. Call initDatabase() first.')
   return JSON.parse(store.call(call, JSON.stringify(args))) as T
-}
-
-/** Which store answers, for Settings › Experimental. */
-export function storeStatus(): { native: boolean; error: string | null } {
-  return { native: native !== null, error: native ? null : nativeError }
 }
 
 /**
@@ -141,6 +101,10 @@ export function getDataDir(): string {
   return resolvedDataDir
 }
 
+/**
+ * Opens, migrates and seeds the database. A corrupt file is copied aside and
+ * replaced by a fresh one, and where the copy went is logged.
+ */
 export function initDatabase(dataDir?: string): void {
   resolvedDataDir = dataDir ?? DEFAULT_DATA_DIR
 
@@ -148,127 +112,25 @@ export function initDatabase(dataDir?: string): void {
     fs.mkdirSync(getDataDir(), { recursive: true, mode: 0o700 })
   }
 
-  // With the Native store switch on, the Rust store opens, migrates and seeds
-  // the file, and libsql never opens it in this process: two SQLite libraries
-  // holding one file in one process drop each other's locks, and either one's
-  // last close can remove the -wal and -shm files the other still uses.
-  if (nativeStoreWanted()) {
-    openNativeStore((store) => store.open(dbPath(), nativeOptions()))
-    requireForcedNativeStore()
-    if (native) return
-  }
-
-  try {
-    db = new Database(dbPath())
-    db.pragma('journal_mode = WAL')
-    db.pragma('foreign_keys = ON')
-    createSchema()
-    seedSystemDefaults()
-  } catch (err) {
-    log.error({ err }, '[database] Failed to open database:')
-
-    // Detect corruption: libsql throws on open or pragma for corrupt files
-    const message = err instanceof Error ? err.message : String(err)
-    const isCorrupt = /corrupt|notadb|malformed|not a database|file is not a database/i.test(
-      message
+  closeDatabase()
+  store = openStore((Store) => Store.open(dbPath(), nativeOptions()))
+  if (store.recovered) {
+    log.warn(
+      `[database] Database was corrupted and has been reset. Backup saved to: ${store.recovered}`
     )
-
-    if (isCorrupt) {
-      log.warn('[database] Database appears corrupt, attempting recovery...')
-      recoverCorruptDatabase()
-    } else {
-      throw err
-    }
-  }
-
-  // Without the binary the switch cannot be read before opening; say why it
-  // did nothing once libsql can read it.
-  if (!nativeStoreClass() && nativeStoreFlag(readDefault('experimental'))) {
-    nativeError = NO_NATIVE_STORE
-    log.warn(`[database] Native store is on, but ${nativeError}; using the TypeScript store`)
   }
 }
 
-/** `VORN_NATIVE_STORE=1` is for test runs, where falling back would hide the failure. */
-function requireForcedNativeStore(): void {
-  if (process.env.VORN_NATIVE_STORE === '1' && !native)
-    throw new Error(`VORN_NATIVE_STORE=1 but the native store did not open: ${nativeError}`)
-}
-
-const NO_NATIVE_STORE = 'the native core is not loaded, or was built without the store'
-
-/**
- * Settings › Experimental › Native store, read from the file before either
- * store opens it. `VORN_NATIVE_STORE` overrides it (1 or 0), so a test run
- * can put every database on either store.
- */
-function nativeStoreWanted(): boolean {
-  const forced = process.env.VORN_NATIVE_STORE
-  if (forced === '1') return true
-  if (forced === '0') return false
-  const NativeStoreClass = nativeStoreClass()
-  if (!NativeStoreClass) return false
-  try {
-    return nativeStoreFlag(NativeStoreClass.readDefault(dbPath(), 'experimental'))
-  } catch (err) {
-    // A file the Rust store cannot read is libsql's to recover.
-    log.warn({ err }, '[database] could not read the Native store switch')
-    return false
+function openStore(open: (Store: NativeStoreClass) => NativeStore): NativeStore {
+  const Store = nativeCore()?.NativeStore
+  if (typeof Store !== 'function') {
+    throw new Error(
+      `The database cannot open: the native core is not loaded, or was built without the store (${
+        activeCore().error ?? 'no error reported'
+      })`
+    )
   }
-}
-
-function nativeStoreFlag(experimental: string | null): boolean {
-  try {
-    const flags = experimental ? (JSON.parse(experimental) as unknown) : null
-    return isPlainObject(flags) && flags.nativeStore === true
-  } catch {
-    return false
-  }
-}
-
-/** A `defaults` row as stored, through libsql. */
-function readDefault(key: string): string | null {
-  try {
-    const row = getDb().prepare('SELECT value FROM defaults WHERE key = ?').get(key) as
-      | { value: string }
-      | undefined
-    return row?.value ?? null
-  } catch {
-    return null
-  }
-}
-
-/**
- * Hands the database to the Rust store. When the binary is missing or the
- * store does not open, libsql opens it instead, and the reason is logged and
- * shown on the settings page.
- */
-function openNativeStore(open: (store: NativeStoreClass) => NativeStore): void {
-  const NativeStoreClass = nativeStoreClass()
-  if (!NativeStoreClass) {
-    nativeError = NO_NATIVE_STORE
-    log.warn(`[database] Native store is on, but ${nativeError}; using the TypeScript store`)
-    return
-  }
-  try {
-    native = open(NativeStoreClass)
-    if (native.recovered) {
-      log.warn(
-        `[database] the native store replaced a corrupt database; backup at ${native.recovered}`
-      )
-    }
-    nativeError = null
-    log.info('[database] using the native store')
-  } catch (err) {
-    native = null
-    nativeError = err instanceof Error ? err.message : String(err)
-    log.error({ err }, '[database] the native store did not open; using the TypeScript store')
-  }
-}
-
-function nativeStoreClass(): NativeStoreClass | null {
-  const NativeStoreClass = nativeCore()?.NativeStore
-  return typeof NativeStoreClass === 'function' ? NativeStoreClass : null
+  return open(Store)
 }
 
 /** What the Rust store needs that only the server knows. */
@@ -301,106 +163,7 @@ function nativeOptions(): string {
  * database via `initTestDatabase` without spinning up the full init path.
  */
 export function seedSystemDefaults(): void {
-  if (native) return nativeCall(native, 'seedSystemDefaults')
-  seedWorkflowOnce(
-    'hasSeededDefaultTaskWorkflow',
-    DEFAULT_TASK_WORKFLOW_ID,
-    buildDefaultTaskWorkflow
-  )
-  seedWorkflowOnce('hasSeededDevServerWorkflow', DEV_SERVER_WORKFLOW_ID, buildDevServerWorkflow)
-}
-
-/** Once per flag: a deleted seed stays deleted, and an upgrade gets it exactly once. */
-function seedWorkflowOnce(flag: string, id: string, build: () => WorkflowDefinition): void {
-  const d = getDb()
-
-  const flagRow = d.prepare('SELECT value FROM defaults WHERE key = ?').get(flag) as
-    | { value: string }
-    | undefined
-  if (flagRow) {
-    try {
-      if (JSON.parse(flagRow.value) === true) return
-    } catch {
-      // corrupted value — fall through and re-seed
-    }
-  }
-
-  // Safety net: skip if a workflow with the stable id already exists from a
-  // manual import or partial upgrade. Still set the flag so we don't retry.
-  const existing = d.prepare('SELECT id FROM workflows WHERE id = ?').get(id) as
-    | { id: string }
-    | undefined
-  if (!existing) {
-    const w = build()
-    d.prepare(
-      `INSERT INTO workflows (id, name, icon, icon_color, nodes, edges, enabled, last_run_at, last_run_status, stagger_delay_ms, workspace_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      w.id,
-      w.name,
-      w.icon,
-      w.iconColor,
-      JSON.stringify(w.nodes),
-      JSON.stringify(w.edges),
-      w.enabled ? 1 : 0,
-      w.lastRunAt ?? null,
-      w.lastRunStatus ?? null,
-      w.staggerDelayMs ?? null,
-      w.workspaceId ?? 'personal'
-    )
-    log.info(`[database] Seeded workflow ${id}`)
-  }
-
-  d.prepare('INSERT OR REPLACE INTO defaults (key, value) VALUES (?, ?)').run(
-    flag,
-    JSON.stringify(true)
-  )
-}
-
-/**
- * Backs up the corrupt database file, creates a fresh one, and shows
- * a dialog informing the user that their settings were reset.
- */
-function recoverCorruptDatabase(): void {
-  // Close any partially-opened handle
-  try {
-    db?.close()
-  } catch {
-    /* ignore */
-  }
-  db = null
-
-  // Back up the corrupt file
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const backupPath = `${dbPath()}.corrupt-${timestamp}`
-  try {
-    if (fs.existsSync(dbPath())) {
-      fs.copyFileSync(dbPath(), backupPath)
-      log.info(`[database] Backed up corrupt database to ${backupPath}`)
-    }
-    // Remove corrupt DB + WAL/SHM files
-    for (const suffix of ['', '-wal', '-shm']) {
-      const file = dbPath() + suffix
-      if (fs.existsSync(file)) fs.unlinkSync(file)
-    }
-  } catch (backupErr) {
-    log.error({ backupErr }, '[database] Failed to back up corrupt database:')
-  }
-
-  // Create a fresh database
-  try {
-    db = new Database(dbPath())
-    db.pragma('journal_mode = WAL')
-    db.pragma('foreign_keys = ON')
-    createSchema()
-    seedSystemDefaults()
-    log.info('[database] Successfully created fresh database after corruption recovery')
-  } catch (freshErr) {
-    log.error({ freshErr }, '[database] Failed to create fresh database after corruption:')
-    throw freshErr
-  }
-
-  log.warn(`[database] Database was corrupted and has been reset. Backup saved to: ${backupPath}`)
+  return nativeCall('seedSystemDefaults')
 }
 
 /**
@@ -417,1254 +180,19 @@ export function dbSignalChange(): void {
 }
 
 export function closeDatabase(): void {
-  if (native) {
-    native.close()
-    native = null
-  }
-  if (db) {
-    db.close()
-    db = null
-  }
+  store?.close()
+  store = null
 }
 
 /** Initialize an in-memory database for tests. Returns teardown function. */
 export function initTestDatabase(): () => void {
-  if (db) closeDatabase()
+  closeDatabase()
   // The database is in memory, but anything deriving a path from the data dir
   // (dbSignalChange, task images) still needs one resolved. Point it at the temp
   // directory so tests cannot write into the developer's real ~/.vorn.
   resolvedDataDir = os.tmpdir()
-  if (process.env.VORN_NATIVE_STORE === '1') {
-    openNativeStore((store) => store.openInMemory(nativeOptions()))
-    requireForcedNativeStore()
-    return () => closeDatabase()
-  }
-  db = new Database(':memory:')
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
-  createSchema()
+  store = openStore((Store) => Store.openInMemory(nativeOptions()))
   return () => closeDatabase()
-}
-
-function createSchema(): void {
-  const d = getDb()
-
-  // Migrate: if old-format workflows table exists (had 'actions' column),
-  // back it up before dropping so we don't silently destroy user data.
-  const cols = d.prepare('PRAGMA table_info(workflows)').all() as Array<{ name: string }>
-  if (cols.some((c) => c.name === 'actions')) {
-    d.exec('ALTER TABLE workflows RENAME TO workflows_backup_old_format')
-    log.warn('[database] migrated old-format workflows table to workflows_backup_old_format')
-  }
-  d.exec(`
-    CREATE TABLE IF NOT EXISTS schema_meta (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS defaults (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'owner',
-      created_at TEXT NOT NULL
-    );
-
-    -- Only the hash is stored. The plaintext is shown once at creation and is
-    -- not recoverable afterwards, so a leaked database yields no usable
-    -- credential.
-    CREATE TABLE IF NOT EXISTS device_tokens (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      token_hash TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      last_seen_at TEXT,
-      revoked_at TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_device_tokens_user
-      ON device_tokens(user_id);
-
-    CREATE TABLE IF NOT EXISTS projects (
-      name TEXT PRIMARY KEY,
-      path TEXT NOT NULL,
-      preferred_agents TEXT NOT NULL DEFAULT '[]',
-      icon TEXT,
-      icon_color TEXT,
-      host_ids TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS workflows (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      icon TEXT NOT NULL,
-      icon_color TEXT NOT NULL,
-      nodes TEXT NOT NULL DEFAULT '[]',
-      edges TEXT NOT NULL DEFAULT '[]',
-      enabled INTEGER NOT NULL DEFAULT 1,
-      last_run_at TEXT,
-      last_run_status TEXT,
-      stagger_delay_ms INTEGER
-    );
-
-    CREATE TABLE IF NOT EXISTS agent_commands (
-      agent_type TEXT PRIMARY KEY,
-      command TEXT NOT NULL,
-      args TEXT NOT NULL DEFAULT '[]',
-      headless_args TEXT,
-      fallback_command TEXT,
-      fallback_args TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS remote_hosts (
-      id TEXT PRIMARY KEY,
-      label TEXT NOT NULL,
-      hostname TEXT NOT NULL,
-      user TEXT NOT NULL,
-      port INTEGER NOT NULL DEFAULT 22,
-      auth_method TEXT DEFAULT 'agent',
-      ssh_key_path TEXT,
-      credential_id TEXT,
-      encrypted_password TEXT,
-      ssh_options TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS ssh_keys (
-      id TEXT PRIMARY KEY,
-      label TEXT NOT NULL,
-      encrypted_private_key TEXT NOT NULL,
-      public_key TEXT,
-      certificate TEXT,
-      key_type TEXT,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS tasks (
-      id TEXT PRIMARY KEY,
-      project_name TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'todo',
-      "order" INTEGER NOT NULL DEFAULT 0,
-      assigned_session_id TEXT,
-      assigned_agent TEXT,
-      agent_session_id TEXT,
-      branch TEXT,
-      use_worktree INTEGER DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      completed_at TEXT,
-      archived_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      agent_type TEXT NOT NULL,
-      project_name TEXT NOT NULL,
-      project_path TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      pid INTEGER NOT NULL,
-      display_name TEXT,
-      branch TEXT,
-      worktree_path TEXT,
-      is_worktree INTEGER DEFAULT 0,
-      remote_host_id TEXT,
-      remote_host_label TEXT,
-      hook_session_id TEXT,
-      status_source TEXT,
-      saved_at INTEGER,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      worktree_name TEXT,
-      agent_session_id TEXT,
-      renamed_by_person INTEGER
-    );
-
-    CREATE TABLE IF NOT EXISTS schedule_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      workflow_id TEXT NOT NULL,
-      workflow_name TEXT NOT NULL,
-      executed_at TEXT NOT NULL,
-      status TEXT NOT NULL,
-      sessions_launched INTEGER NOT NULL DEFAULT 0,
-      error TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_schedule_log_workflow_id ON schedule_log(workflow_id);
-    CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_name, status);
-
-    CREATE TABLE IF NOT EXISTS workspaces (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      icon TEXT,
-      icon_color TEXT,
-      "order" INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS session_groups (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      icon TEXT,
-      icon_color TEXT,
-      "order" INTEGER NOT NULL DEFAULT 0,
-      workspace_id TEXT NOT NULL DEFAULT 'personal',
-      row_revision INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS workflow_runs (
-      id TEXT PRIMARY KEY,
-      workflow_id TEXT NOT NULL,
-      started_at TEXT NOT NULL,
-      completed_at TEXT,
-      status TEXT NOT NULL DEFAULT 'running',
-      trigger_task_id TEXT,
-      inputs TEXT,
-      connector_item TEXT,
-      connector_inbox_id INTEGER,
-      connector_inbox_lease_token TEXT,
-      connector_inbox_disposition TEXT,
-      definition TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS workflow_run_nodes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      started_at TEXT,
-      completed_at TEXT,
-      session_id TEXT,
-      error TEXT,
-      logs TEXT,
-      task_id TEXT,
-      agent_session_id TEXT,
-      agent_type TEXT,
-      project_name TEXT,
-      project_path TEXT,
-      approved_at TEXT,
-      diagnostics TEXT,
-      output TEXT,
-      structured_output TEXT,
-      iteration INTEGER,
-      worktree_path TEXT,
-      worktree_name TEXT,
-      worktree_origin TEXT,
-      waiting_for TEXT,
-      message TEXT,
-      view_token TEXT,
-      round INTEGER,
-      feedback TEXT,
-      rejected_at TEXT,
-      editable_text TEXT,
-      edited_text TEXT,
-      FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
-    CREATE INDEX IF NOT EXISTS idx_workflow_runs_task ON workflow_runs(trigger_task_id);
-    CREATE INDEX IF NOT EXISTS idx_workflow_run_nodes_run ON workflow_run_nodes(run_id);
-    CREATE INDEX IF NOT EXISTS idx_workflow_run_nodes_task ON workflow_run_nodes(task_id);
-
-    CREATE TABLE IF NOT EXISTS session_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL,
-      event_type TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
-      metadata TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_session_events_session ON session_events(session_id, timestamp DESC);
-    CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(event_type, timestamp DESC);
-
-    CREATE TABLE IF NOT EXISTS connector_poll_state (
-      workflow_id TEXT PRIMARY KEY REFERENCES workflows(id) ON DELETE CASCADE,
-      connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
-      cursor TEXT,
-      last_polled_at TEXT,
-      last_error TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS connector_inbox (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-      connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
-      connector_id TEXT NOT NULL,
-      event_id TEXT NOT NULL,
-      event_type TEXT NOT NULL,
-      event_timestamp TEXT NOT NULL,
-      payload TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      attempts INTEGER NOT NULL DEFAULT 0,
-      available_at TEXT NOT NULL,
-      lease_until TEXT,
-      lease_token TEXT,
-      last_error TEXT,
-      created_at TEXT NOT NULL,
-      processed_at TEXT,
-      UNIQUE (workflow_id, connection_id, event_type, event_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_connector_inbox_ready
-      ON connector_inbox(status, available_at, lease_until);
-    CREATE INDEX IF NOT EXISTS idx_connector_inbox_connection
-      ON connector_inbox(connection_id, created_at);
-  `)
-  d.exec(ARTIFACT_DDL)
-  d.exec(EFFECT_RECEIPTS_DDL)
-
-  migrateSchema(d)
-  verifySchema(d)
-  seedLegacyConnectorPollState(d)
-}
-
-function seedLegacyConnectorPollState(d: Database.Database): void {
-  const workflows = d.prepare('SELECT id, nodes FROM workflows').all() as Array<{
-    id: string
-    nodes: string
-  }>
-  const readConnection = d.prepare(
-    'SELECT sync_cursor, last_sync_at FROM source_connections WHERE id = ?'
-  )
-  const insertState = d.prepare(
-    `INSERT OR IGNORE INTO connector_poll_state (
-       workflow_id, connection_id, cursor, last_polled_at, last_error
-     ) VALUES (?, ?, ?, ?, NULL)`
-  )
-  for (const workflow of workflows) {
-    let nodes: Array<{
-      type?: string
-      config?: { triggerType?: string; connectionId?: string }
-    }>
-    try {
-      nodes = JSON.parse(workflow.nodes) as typeof nodes
-    } catch {
-      continue
-    }
-    const trigger = nodes.find(
-      (node) => node.type === 'trigger' && node.config?.triggerType === 'connectorPoll'
-    )
-    const connectionId = trigger?.config?.connectionId
-    if (!connectionId) continue
-    const connection = readConnection.get(connectionId) as
-      | { sync_cursor: string | null; last_sync_at: string | null }
-      | undefined
-    if (!connection) continue
-    insertState.run(workflow.id, connectionId, connection.sync_cursor, connection.last_sync_at)
-  }
-}
-
-function migrateSchema(d: Database.Database): void {
-  const row = d.prepare("SELECT value FROM schema_meta WHERE key = 'schema_version'").get() as
-    | { value: string }
-    | undefined
-  const version = row ? parseInt(row.value, 10) : 0
-
-  if (version < 1) {
-    d.transaction(() => {
-      // Add workspace_id to projects and workflows
-      const projectCols = d.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>
-      if (!projectCols.some((c) => c.name === 'workspace_id')) {
-        d.exec("ALTER TABLE projects ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'personal'")
-      }
-
-      const workflowCols = d.prepare('PRAGMA table_info(workflows)').all() as Array<{
-        name: string
-      }>
-      if (!workflowCols.some((c) => c.name === 'workspace_id')) {
-        d.exec("ALTER TABLE workflows ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'personal'")
-      }
-
-      // Seed default workspace
-      d.prepare(
-        `INSERT OR IGNORE INTO workspaces (id, name, icon, icon_color, "order") VALUES (?, ?, ?, ?, ?)`
-      ).run(
-        DEFAULT_WORKSPACE.id,
-        DEFAULT_WORKSPACE.name,
-        DEFAULT_WORKSPACE.icon ?? null,
-        DEFAULT_WORKSPACE.iconColor ?? null,
-        DEFAULT_WORKSPACE.order
-      )
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '1')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 1 (workspaces)')
-  }
-
-  if (version < 2) {
-    d.transaction(() => {
-      // Add new columns to remote_hosts for credential support
-      const hostCols = d.prepare('PRAGMA table_info(remote_hosts)').all() as Array<{ name: string }>
-      if (!hostCols.some((c) => c.name === 'auth_method')) {
-        d.exec('ALTER TABLE remote_hosts ADD COLUMN auth_method TEXT')
-        d.exec('ALTER TABLE remote_hosts ADD COLUMN credential_id TEXT')
-        d.exec('ALTER TABLE remote_hosts ADD COLUMN encrypted_password TEXT')
-
-        // Migrate: key-file if sshKeyPath set, otherwise agent
-        d.exec(
-          "UPDATE remote_hosts SET auth_method = CASE WHEN ssh_key_path IS NOT NULL AND ssh_key_path != '' THEN 'key-file' ELSE 'agent' END"
-        )
-      }
-
-      // Create ssh_keys table
-      d.exec(`
-        CREATE TABLE IF NOT EXISTS ssh_keys (
-          id TEXT PRIMARY KEY,
-          label TEXT NOT NULL,
-          encrypted_private_key TEXT NOT NULL,
-          public_key TEXT,
-          certificate TEXT,
-          key_type TEXT,
-          created_at TEXT NOT NULL
-        )
-      `)
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '2')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 2 (ssh credential vault)')
-  }
-
-  if (version < 3) {
-    d.transaction(() => {
-      const sessionCols = d.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
-      if (!sessionCols.some((c) => c.name === 'sort_order')) {
-        d.exec('ALTER TABLE sessions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0')
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '3')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 3 (session sort order)')
-  }
-
-  if (version < 4) {
-    d.transaction(() => {
-      const sessionCols = d.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
-      if (!sessionCols.some((c) => c.name === 'worktree_name')) {
-        d.exec('ALTER TABLE sessions ADD COLUMN worktree_name TEXT')
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '4')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 4 (worktree name)')
-  }
-
-  if (version < 5) {
-    d.transaction(() => {
-      const agentCols = d.prepare('PRAGMA table_info(agent_commands)').all() as Array<{
-        name: string
-      }>
-      if (!agentCols.some((c) => c.name === 'headless_args')) {
-        d.exec('ALTER TABLE agent_commands ADD COLUMN headless_args TEXT')
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '5')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 5 (headless args)')
-  }
-
-  if (version < 6) {
-    d.transaction(() => {
-      const sessionCols = d.prepare('PRAGMA table_info(sessions)').all() as Array<{
-        name: string
-      }>
-      // Skip adding claude_session_id if agent_session_id already exists
-      // (fresh DBs create agent_session_id directly via createSchema)
-      if (
-        !sessionCols.some((c) => c.name === 'claude_session_id') &&
-        !sessionCols.some((c) => c.name === 'agent_session_id')
-      ) {
-        d.exec('ALTER TABLE sessions ADD COLUMN claude_session_id TEXT')
-      }
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '6')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 6 (claude session id)')
-  }
-
-  if (version < 7) {
-    d.transaction(() => {
-      const sessionCols = d.prepare('PRAGMA table_info(sessions)').all() as Array<{
-        name: string
-      }>
-      const hasOld = sessionCols.some((c) => c.name === 'claude_session_id')
-      const hasNew = sessionCols.some((c) => c.name === 'agent_session_id')
-      if (hasOld && !hasNew) {
-        try {
-          d.exec('ALTER TABLE sessions RENAME COLUMN claude_session_id TO agent_session_id')
-        } catch {
-          // SQLite < 3.25 fallback: add new column and copy data
-          d.exec('ALTER TABLE sessions ADD COLUMN agent_session_id TEXT')
-          d.exec('UPDATE sessions SET agent_session_id = claude_session_id')
-        }
-      } else if (hasOld && hasNew) {
-        // Both columns exist (e.g. fresh DB ran v6 before v7) — backfill any
-        // data from claude_session_id into agent_session_id so resume IDs
-        // aren't stranded, then drop the redundant column.
-        d.exec(
-          'UPDATE sessions SET agent_session_id = claude_session_id WHERE agent_session_id IS NULL AND claude_session_id IS NOT NULL'
-        )
-      } else if (!hasNew) {
-        d.exec('ALTER TABLE sessions ADD COLUMN agent_session_id TEXT')
-      }
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '7')"
-      ).run()
-    })()
-    log.info(
-      '[database] migrated schema to version 7 (rename claude_session_id → agent_session_id)'
-    )
-  }
-
-  if (version < 8) {
-    d.transaction(() => {
-      const cols = d.prepare('PRAGMA table_info(workflow_run_nodes)').all() as Array<{
-        name: string
-      }>
-      if (!cols.some((c) => c.name === 'approved_at')) {
-        d.exec('ALTER TABLE workflow_run_nodes ADD COLUMN approved_at TEXT')
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '8')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 8 (approval gate timestamp)')
-  }
-
-  if (version < 9) {
-    d.transaction(() => {
-      d.exec(`
-        CREATE TABLE IF NOT EXISTS source_connections (
-          id TEXT PRIMARY KEY,
-          connector_id TEXT NOT NULL,
-          name TEXT NOT NULL,
-          filters TEXT NOT NULL DEFAULT '{}',
-          sync_interval_minutes INTEGER NOT NULL DEFAULT 5,
-          status_mapping TEXT NOT NULL DEFAULT '{}',
-          execution_project TEXT,
-          last_sync_at TEXT,
-          last_sync_error TEXT,
-          sync_cursor TEXT,
-          created_at TEXT NOT NULL,
-          signed_in_as TEXT,
-          signed_in_at TEXT
-        )
-      `)
-
-      d.exec(`
-        CREATE TABLE IF NOT EXISTS task_source_links (
-          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-          connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
-          connector_id TEXT NOT NULL,
-          external_id TEXT NOT NULL,
-          external_url TEXT NOT NULL,
-          source_status_raw TEXT NOT NULL,
-          source_updated_at TEXT NOT NULL,
-          last_synced_at TEXT NOT NULL,
-          conflict_state TEXT NOT NULL DEFAULT 'none',
-          PRIMARY KEY (task_id),
-          UNIQUE (connection_id, external_id)
-        )
-      `)
-
-      // Add source columns to tasks table
-      const taskCols = d.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>
-      if (!taskCols.some((c) => c.name === 'source_connector_id')) {
-        d.exec('ALTER TABLE tasks ADD COLUMN source_connector_id TEXT')
-      }
-      if (!taskCols.some((c) => c.name === 'source_external_url')) {
-        d.exec('ALTER TABLE tasks ADD COLUMN source_external_url TEXT')
-      }
-      if (!taskCols.some((c) => c.name === 'source_external_id')) {
-        d.exec('ALTER TABLE tasks ADD COLUMN source_external_id TEXT')
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '9')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 9 (connector source connections)')
-  }
-
-  if (version < 10) {
-    d.transaction(() => {
-      d.exec('DROP TABLE IF EXISTS session_logs')
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '10')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 10 (drop session_logs)')
-  }
-
-  if (version < 11) {
-    d.transaction(() => {
-      const runCols = d.prepare('PRAGMA table_info(workflow_runs)').all() as Array<{ name: string }>
-      if (!runCols.some((c) => c.name === 'inputs')) {
-        d.exec('ALTER TABLE workflow_runs ADD COLUMN inputs TEXT')
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '11')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 11 (workflow run inputs)')
-  }
-
-  // Version 11 is reserved by the workflow-run inputs change (PR #403).
-  // Keeping connector ingestion at 12 makes either merge order safe; every
-  // migration-added column is also covered by verifySchema.
-  if (version < 12) {
-    d.transaction(() => {
-      const runCols = d.prepare('PRAGMA table_info(workflow_runs)').all() as Array<{
-        name: string
-      }>
-      if (!runCols.some((column) => column.name === 'connector_inbox_id')) {
-        d.exec('ALTER TABLE workflow_runs ADD COLUMN connector_inbox_id INTEGER')
-      }
-      if (!runCols.some((column) => column.name === 'connector_item')) {
-        d.exec('ALTER TABLE workflow_runs ADD COLUMN connector_item TEXT')
-      }
-      if (!runCols.some((column) => column.name === 'connector_inbox_lease_token')) {
-        d.exec('ALTER TABLE workflow_runs ADD COLUMN connector_inbox_lease_token TEXT')
-      }
-      if (!runCols.some((column) => column.name === 'connector_inbox_disposition')) {
-        d.exec('ALTER TABLE workflow_runs ADD COLUMN connector_inbox_disposition TEXT')
-      }
-      d.exec(`
-        CREATE TABLE IF NOT EXISTS connector_poll_state (
-          workflow_id TEXT PRIMARY KEY REFERENCES workflows(id) ON DELETE CASCADE,
-          connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
-          cursor TEXT,
-          last_polled_at TEXT,
-          last_error TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS connector_inbox (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-          connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
-          connector_id TEXT NOT NULL,
-          event_id TEXT NOT NULL,
-          event_type TEXT NOT NULL,
-          event_timestamp TEXT NOT NULL,
-          payload TEXT NOT NULL,
-          status TEXT NOT NULL DEFAULT 'pending',
-          attempts INTEGER NOT NULL DEFAULT 0,
-          available_at TEXT NOT NULL,
-          lease_until TEXT,
-          lease_token TEXT,
-          last_error TEXT,
-          created_at TEXT NOT NULL,
-          processed_at TEXT,
-          UNIQUE (workflow_id, event_type, event_id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_connector_inbox_ready
-          ON connector_inbox(status, available_at, lease_until);
-        CREATE INDEX IF NOT EXISTS idx_connector_inbox_connection
-          ON connector_inbox(connection_id, created_at);
-      `)
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '12')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 12 (durable connector ingestion)')
-  }
-
-  if (version < 13) {
-    d.transaction(() => {
-      const inboxCols = d.prepare('PRAGMA table_info(connector_inbox)').all() as Array<{
-        name: string
-      }>
-      if (!inboxCols.some((column) => column.name === 'lease_token')) {
-        d.exec('ALTER TABLE connector_inbox ADD COLUMN lease_token TEXT')
-      }
-      d.exec(`
-        ALTER TABLE connector_inbox RENAME TO connector_inbox_v12;
-
-        CREATE TABLE connector_inbox (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-          connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
-          connector_id TEXT NOT NULL,
-          event_id TEXT NOT NULL,
-          event_type TEXT NOT NULL,
-          event_timestamp TEXT NOT NULL,
-          payload TEXT NOT NULL,
-          status TEXT NOT NULL DEFAULT 'pending',
-          attempts INTEGER NOT NULL DEFAULT 0,
-          available_at TEXT NOT NULL,
-          lease_until TEXT,
-          lease_token TEXT,
-          last_error TEXT,
-          created_at TEXT NOT NULL,
-          processed_at TEXT,
-          UNIQUE (workflow_id, connection_id, event_type, event_id)
-        );
-
-        INSERT INTO connector_inbox (
-          id, workflow_id, connection_id, connector_id, event_id, event_type,
-          event_timestamp, payload, status, attempts, available_at, lease_until,
-          lease_token, last_error, created_at, processed_at
-        )
-        SELECT
-          id, workflow_id, connection_id, connector_id, event_id, event_type,
-          event_timestamp, payload, status, attempts, available_at, lease_until,
-          lease_token, last_error, created_at, processed_at
-        FROM connector_inbox_v12;
-
-        DROP TABLE connector_inbox_v12;
-
-        CREATE INDEX idx_connector_inbox_ready
-          ON connector_inbox(status, available_at, lease_until);
-        CREATE INDEX idx_connector_inbox_connection
-          ON connector_inbox(connection_id, created_at);
-      `)
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '13')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 13 (connection-scoped inbox)')
-  }
-
-  if (version < 14) {
-    // The tables themselves are created in createSchema(), which runs before
-    // this and uses IF NOT EXISTS, so it already covered both a fresh database
-    // and an existing one. What is left is seeding the single owner — the same
-    // shape as version 1 seeding the default workspace.
-    d.transaction(() => {
-      const existing = d.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }
-      if (existing.n === 0) {
-        let name = 'owner'
-        try {
-          name = os.userInfo().username || name
-        } catch {
-          // No OS user available (some sandboxes) — the fallback is fine.
-        }
-        d.prepare("INSERT INTO users (id, name, role, created_at) VALUES (?, ?, 'owner', ?)").run(
-          randomUUID(),
-          name,
-          new Date().toISOString()
-        )
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '14')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 14 (identity and device tokens)')
-  }
-
-  if (version < 15) {
-    // Every row in the config blob learns which save wrote it.
-    //
-    // `saveConfig` receives a whole snapshot and prunes anything absent from it,
-    // which is correct for a deletion and destructive for a row that simply did
-    // not exist when the saving client last loaded. Two clients is now ordinary,
-    // so that difference has to be visible: a row stamped after the client's base
-    // revision is one it could not have known about, and is not its to remove.
-    d.transaction(() => {
-      for (const table of REVISIONED_TABLES) {
-        // Guarded the way every other ALTER here is: the column can already exist
-        // when a database has been rewound, or repaired by verifySchema on an
-        // earlier boot, and an unguarded ALTER aborts the whole transaction.
-        const columns = d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
-        if (columns.some((c) => c.name === 'row_revision')) continue
-        d.exec(`ALTER TABLE ${table} ADD COLUMN row_revision INTEGER NOT NULL DEFAULT 0`)
-      }
-      // Existing rows keep revision 0, below any future base, so the first saves
-      // after upgrading prune exactly as they did before.
-      d.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)').run(
-        CONFIG_REVISION_KEY,
-        '0'
-      )
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '15')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 15 (config row revisions)')
-  }
-
-  if (version < 16) {
-    // Where a shell actually is, rather than where it was started. The column
-    // never existed, so `shellCwd` round-tripped to nothing and a restored shell
-    // always fell back to its project directory -- which for anybody who had
-    // navigated somewhere, which is most shell use, was the wrong place.
-    d.transaction(() => {
-      const cols = d.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
-      if (!cols.some((c) => c.name === 'shell_cwd')) {
-        d.exec('ALTER TABLE sessions ADD COLUMN shell_cwd TEXT')
-      }
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '16')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 16 (shell working directory)')
-  }
-
-  if (version < 17) {
-    // Tasks from a packaged connector recorded `mcp`, the connection's storage
-    // type, rather than the connector that actually produced them. The board
-    // then filtered them into their own chip and drew the generic mark. The
-    // real id is on the connection the task's source link points at; a row
-    // whose connection is gone has nothing to derive from and is left alone.
-    d.transaction(() => {
-      const derived = `(
-        SELECT json_extract(sc.filters, '$.sdkConnectorId')
-          FROM task_source_links tsl
-          JOIN source_connections sc ON sc.id = tsl.connection_id
-         WHERE tsl.task_id = tasks.id
-      )`
-      d.exec(`
-        UPDATE tasks
-           SET source_connector_id = ${derived}
-         WHERE source_connector_id = 'mcp' AND ${derived} IS NOT NULL
-      `)
-      d.exec(`
-        UPDATE task_source_links
-           SET connector_id = (
-             SELECT json_extract(sc.filters, '$.sdkConnectorId')
-               FROM source_connections sc
-              WHERE sc.id = task_source_links.connection_id
-           )
-         WHERE connector_id = 'mcp'
-           AND (
-             SELECT json_extract(sc.filters, '$.sdkConnectorId')
-               FROM source_connections sc
-              WHERE sc.id = task_source_links.connection_id
-           ) IS NOT NULL
-      `)
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '17')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 17 (packaged connector task ids)')
-  }
-
-  if (version < 18) {
-    d.transaction(() => {
-      const sessionCols = d.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
-      if (!sessionCols.some((c) => c.name === 'group_id')) {
-        d.exec('ALTER TABLE sessions ADD COLUMN group_id TEXT')
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '18')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 18 (session groups)')
-  }
-
-  if (version < 19) {
-    d.transaction(() => {
-      const cols = d.prepare('PRAGMA table_info(workflow_run_nodes)').all() as Array<{
-        name: string
-      }>
-      for (const column of ['worktree_path', 'worktree_name', 'worktree_origin']) {
-        if (!cols.some((c) => c.name === column)) {
-          d.exec(`ALTER TABLE workflow_run_nodes ADD COLUMN ${column} TEXT`)
-        }
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '19')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 19 (worktrees on run steps)')
-  }
-
-  if (version < 20) {
-    d.transaction(() => {
-      const cols = d.prepare('PRAGMA table_info(source_connections)').all() as Array<{
-        name: string
-      }>
-      for (const column of ['signed_in_as', 'signed_in_at']) {
-        if (!cols.some((c) => c.name === column)) {
-          d.exec(`ALTER TABLE source_connections ADD COLUMN ${column} TEXT`)
-        }
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '20')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 20 (who a connection is signed in as)')
-  }
-
-  if (version < 21) {
-    // A package's connections move to `sdk` under the same ids; a catalog MCP server never records `sdkVersion`, so it stays.
-    const packaged = `connector_id = 'mcp'
-       AND coalesce(json_extract(filters, '$.sdkConnectorId'), '') <> ''
-       AND coalesce(json_extract(filters, '$.sdkVersion'), '') <> ''`
-    d.transaction(() => {
-      d.prepare(
-        `UPDATE source_connections
-            SET filters = json_set(filters, '$.sdkTrigger', substr(json_extract(filters, '$.pollTool'), 6))
-          WHERE ${packaged}
-            AND json_extract(filters, '$.pollTool') LIKE 'poll\\_%' ESCAPE '\\'`
-      ).run()
-      d.prepare(
-        `UPDATE source_connections
-            SET connector_id = 'sdk',
-                filters = json_remove(filters, '$.discoveredTools', '$.pollTool', '$.pollArgs',
-                  '$.itemsPath', '$.idField', '$.timestampField', '$.titleField', '$.urlField',
-                  '$.cursorArg', '$.cursorPath')
-          WHERE ${packaged}`
-      ).run()
-      d.prepare(
-        `UPDATE connector_inbox SET connector_id = 'sdk'
-          WHERE connector_id = 'mcp'
-            AND connection_id IN (SELECT id FROM source_connections WHERE connector_id = 'sdk')`
-      ).run()
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '21')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 21 (package connections belong to sdk)')
-  }
-
-  if (version < 22) {
-    d.transaction(() => {
-      const runCols = d.prepare('PRAGMA table_info(workflow_runs)').all() as Array<{ name: string }>
-      if (!runCols.some((c) => c.name === 'definition')) {
-        d.exec('ALTER TABLE workflow_runs ADD COLUMN definition TEXT')
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '22')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 22 (the definition a run started with)')
-  }
-
-  if (version < 23) {
-    d.transaction(() => {
-      const nodeCols = d.prepare('PRAGMA table_info(workflow_run_nodes)').all() as Array<{
-        name: string
-      }>
-      for (const [column, type] of GATE_COLUMNS) {
-        if (!nodeCols.some((c) => c.name === column)) {
-          d.exec(`ALTER TABLE workflow_run_nodes ADD COLUMN ${column} ${type}`)
-        }
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '23')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 23 (what an approval gate asked and heard)')
-  }
-
-  if (version < 24) {
-    d.transaction(() => {
-      const nodeCols = d.prepare('PRAGMA table_info(workflow_run_nodes)').all() as Array<{
-        name: string
-      }>
-      for (const [column, type] of GATE_EDIT_COLUMNS) {
-        if (!nodeCols.some((c) => c.name === column)) {
-          d.exec(`ALTER TABLE workflow_run_nodes ADD COLUMN ${column} ${type}`)
-        }
-      }
-
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '24')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 24 (the text a reviewer edited at a gate)')
-  }
-
-  if (version < 25) {
-    d.transaction(() => {
-      d.exec(ARTIFACT_DDL)
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '25')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 25 (published artifacts and their comments)')
-  }
-
-  if (version < 26) {
-    d.transaction(() => {
-      d.exec(EFFECT_RECEIPTS_DDL)
-      d.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('schema_version', '26')"
-      ).run()
-    })()
-    log.info('[database] migrated schema to version 26 (receipts for session effects)')
-  }
-}
-
-/**
- * The effects of a session's output this server has acted on, by the id the
- * native daemon gives each one. An effect can be delivered more than once (a
- * replay after the daemon restarted, a reconnect after this server did), and
- * the id is the same every time, so a receipt is what makes a workflow step
- * start once and a notification show once.
- */
-const EFFECT_RECEIPTS_DDL = `
-  CREATE TABLE IF NOT EXISTS effect_receipts (
-    effect_id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL,
-    received_at INTEGER NOT NULL
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_effect_receipts_received ON effect_receipts(received_at);
-`
-
-/** Published artifacts, every version they have had, and the comments written on them. */
-const ARTIFACT_DDL = `
-  CREATE TABLE IF NOT EXISTS artifacts (
-    id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL,
-    title TEXT NOT NULL,
-    session_id TEXT,
-    project_name TEXT,
-    token TEXT NOT NULL,
-    latest_version INTEGER NOT NULL DEFAULT 0,
-    gate_run_id TEXT,
-    gate_node_id TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_artifacts_session ON artifacts(session_id, updated_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_name, updated_at DESC);
-
-  CREATE TABLE IF NOT EXISTS artifact_versions (
-    artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
-    version INTEGER NOT NULL,
-    author TEXT NOT NULL,
-    answers_batch_id TEXT,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (artifact_id, version)
-  );
-
-  CREATE TABLE IF NOT EXISTS artifact_comments (
-    id TEXT PRIMARY KEY,
-    artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
-    version INTEGER NOT NULL,
-    anchor TEXT,
-    body TEXT NOT NULL,
-    state TEXT NOT NULL DEFAULT 'draft',
-    batch_id TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    sent_at TEXT
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_artifact_comments_artifact
-    ON artifact_comments(artifact_id, created_at);
-`
-
-/** What a gate asked, its review page token, which round it is on, what the reviewer wrote, and when a person rejected it. */
-const GATE_COLUMNS = [
-  ['message', 'TEXT'],
-  ['view_token', 'TEXT'],
-  ['round', 'INTEGER'],
-  ['feedback', 'TEXT'],
-  ['rejected_at', 'TEXT']
-] as const
-
-/** A gate's editable text as the steps produced it, and the reviewer's rewrite of it. */
-const GATE_EDIT_COLUMNS = [
-  ['editable_text', 'TEXT'],
-  ['edited_text', 'TEXT']
-] as const
-
-/** The config-blob tables `saveConfig` rewrites, and so the ones that need stamping. */
-const REVISIONED_TABLES = [
-  'projects',
-  'tasks',
-  'workspaces',
-  'session_groups',
-  'remote_hosts',
-  'agent_commands'
-] as const
-
-const CONFIG_REVISION_KEY = 'config_revision'
-
-/** Monotonic counter, bumped once per `saveConfig`. */
-function readConfigRevision(d: Database.Database): number {
-  const row = d.prepare('SELECT value FROM schema_meta WHERE key = ?').get(CONFIG_REVISION_KEY) as
-    | { value: string }
-    | undefined
-  const parsed = Number(row?.value)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-/**
- * Self-healing schema check — runs after migrations to repair columns that
- * migrations may have failed to add (e.g. version bumped but ALTER TABLE
- * didn't stick). Only touches migration-added columns; logs repairs, stays
- * silent when everything is healthy.
- */
-function verifySchema(d: Database.Database): void {
-  // Grouped by table to avoid redundant PRAGMA calls
-  const expectedByTable: Record<string, { column: string; ddl: string }[]> = {
-    projects: [
-      {
-        column: 'workspace_id',
-        ddl: "ALTER TABLE projects ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'personal'"
-      }
-    ],
-    workflows: [
-      {
-        column: 'workspace_id',
-        ddl: "ALTER TABLE workflows ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'personal'"
-      }
-    ],
-    remote_hosts: [
-      { column: 'auth_method', ddl: 'ALTER TABLE remote_hosts ADD COLUMN auth_method TEXT' },
-      { column: 'credential_id', ddl: 'ALTER TABLE remote_hosts ADD COLUMN credential_id TEXT' },
-      {
-        column: 'encrypted_password',
-        ddl: 'ALTER TABLE remote_hosts ADD COLUMN encrypted_password TEXT'
-      }
-    ],
-    sessions: [
-      {
-        column: 'sort_order',
-        ddl: 'ALTER TABLE sessions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0'
-      },
-      { column: 'group_id', ddl: 'ALTER TABLE sessions ADD COLUMN group_id TEXT' },
-      { column: 'worktree_name', ddl: 'ALTER TABLE sessions ADD COLUMN worktree_name TEXT' },
-      { column: 'agent_session_id', ddl: 'ALTER TABLE sessions ADD COLUMN agent_session_id TEXT' },
-      { column: 'shell_cwd', ddl: 'ALTER TABLE sessions ADD COLUMN shell_cwd TEXT' },
-      { column: 'head_commit', ddl: 'ALTER TABLE sessions ADD COLUMN head_commit TEXT' },
-      {
-        column: 'renamed_by_person',
-        ddl: 'ALTER TABLE sessions ADD COLUMN renamed_by_person INTEGER'
-      }
-    ],
-    agent_commands: [
-      {
-        column: 'headless_args',
-        ddl: 'ALTER TABLE agent_commands ADD COLUMN headless_args TEXT'
-      }
-    ],
-    workflow_runs: [
-      { column: 'inputs', ddl: 'ALTER TABLE workflow_runs ADD COLUMN inputs TEXT' },
-      {
-        column: 'connector_item',
-        ddl: 'ALTER TABLE workflow_runs ADD COLUMN connector_item TEXT'
-      },
-      {
-        column: 'connector_inbox_id',
-        ddl: 'ALTER TABLE workflow_runs ADD COLUMN connector_inbox_id INTEGER'
-      },
-      {
-        column: 'connector_inbox_lease_token',
-        ddl: 'ALTER TABLE workflow_runs ADD COLUMN connector_inbox_lease_token TEXT'
-      },
-      {
-        column: 'connector_inbox_disposition',
-        ddl: 'ALTER TABLE workflow_runs ADD COLUMN connector_inbox_disposition TEXT'
-      },
-      { column: 'definition', ddl: 'ALTER TABLE workflow_runs ADD COLUMN definition TEXT' }
-    ],
-    connector_inbox: [
-      {
-        column: 'lease_token',
-        ddl: 'ALTER TABLE connector_inbox ADD COLUMN lease_token TEXT'
-      }
-    ],
-    workflow_run_nodes: [
-      { column: 'waiting_for', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN waiting_for TEXT' },
-      { column: 'agent_type', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN agent_type TEXT' },
-      {
-        column: 'project_name',
-        ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN project_name TEXT'
-      },
-      {
-        column: 'project_path',
-        ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN project_path TEXT'
-      },
-      { column: 'approved_at', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN approved_at TEXT' },
-      {
-        column: 'diagnostics',
-        ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN diagnostics TEXT'
-      },
-      // A step's result was held only in renderer memory. After a reload the
-      // typed verdict was gone, {{steps.<slug>.<field>}} silently fell back to
-      // raw logs, and verdictOf reported "completed" for a run whose agent had
-      // said otherwise — worst on a run parked at an approval gate, which is
-      // exactly the case that outlives a restart.
-      { column: 'output', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN output TEXT' },
-      {
-        column: 'structured_output',
-        ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN structured_output TEXT'
-      },
-      // Which pass of a loop produced this row.
-      { column: 'iteration', ddl: 'ALTER TABLE workflow_run_nodes ADD COLUMN iteration INTEGER' },
-      ...[...GATE_COLUMNS, ...GATE_EDIT_COLUMNS].map(([column, type]) => ({
-        column,
-        ddl: `ALTER TABLE workflow_run_nodes ADD COLUMN ${column} ${type}`
-      }))
-    ],
-    tasks: [
-      {
-        column: 'source_connector_id',
-        ddl: 'ALTER TABLE tasks ADD COLUMN source_connector_id TEXT'
-      },
-      {
-        column: 'source_external_url',
-        ddl: 'ALTER TABLE tasks ADD COLUMN source_external_url TEXT'
-      },
-      {
-        column: 'source_external_id',
-        ddl: 'ALTER TABLE tasks ADD COLUMN source_external_id TEXT'
-      },
-      {
-        column: 'archived_at',
-        ddl: 'ALTER TABLE tasks ADD COLUMN archived_at TEXT'
-      }
-    ]
-  }
-
-  // Migration 15, appended rather than written into the literal above so it cannot
-  // be shadowed by a table that already has an entry there. Repaired at all because
-  // a version bump whose ALTER did not stick leaves `pruneMissing` selecting a
-  // column that is not there — and that runs on every config save.
-  for (const table of REVISIONED_TABLES) {
-    expectedByTable[table] = [
-      ...(expectedByTable[table] ?? []),
-      {
-        column: 'row_revision',
-        ddl: `ALTER TABLE ${table} ADD COLUMN row_revision INTEGER NOT NULL DEFAULT 0`
-      }
-    ]
-  }
-
-  for (const [table, columns] of Object.entries(expectedByTable)) {
-    const existing = new Set(
-      (d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name)
-    )
-    for (const { column, ddl } of columns) {
-      if (existing.has(column)) continue
-      try {
-        d.exec(ddl)
-        log.warn(`[database] self-heal: added missing column ${table}.${column}`)
-      } catch (err) {
-        log.error({ err }, `[database] self-heal: failed to add ${table}.${column}:`)
-      }
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1672,321 +200,7 @@ function verifySchema(d: Database.Database): void {
 // ---------------------------------------------------------------------------
 
 export function loadConfig(): AppConfig {
-  if (native) return nativeCall(native, 'loadConfig')
-  const d = getDb()
-
-  const defaults = loadDefaults(d)
-  const projects = loadProjects(d)
-  const agentCommands = loadAgentCommands(d)
-  const workflows = loadWorkflows(d)
-  const remoteHosts = loadRemoteHosts(d)
-  const tasks = loadTasks(d)
-  const workspaces = loadWorkspaces(d)
-  const sessionGroups = loadSessionGroups(d)
-
-  return {
-    version: 1,
-    revision: readConfigRevision(d),
-    defaults,
-    projects,
-    agentCommands:
-      Object.keys(agentCommands).length > 0 ? agentCommands : { ...DEFAULT_AGENT_COMMANDS },
-    workflows,
-    remoteHosts,
-    tasks,
-    workspaces,
-    sessionGroups
-  }
-}
-
-function loadDefaults(d: Database.Database): AppConfig['defaults'] {
-  const rows = d.prepare('SELECT key, value FROM defaults').all() as {
-    key: string
-    value: string
-  }[]
-  const map: Record<string, unknown> = {}
-  for (const row of rows) {
-    map[row.key] = JSON.parse(row.value)
-  }
-
-  return {
-    shell:
-      // Not COMSPEC on Windows: that names the .bat interpreter, is always
-      // cmd.exe, and seeding it here handed every Windows user the one shell
-      // that can report neither exit status nor command text.
-      (map.shell as string) ?? getDefaultShell(),
-    fontSize: (map.fontSize as number) ?? 13,
-    theme: (map.theme as 'dark' | 'light') ?? 'dark',
-    ...(map.rowHeight !== undefined && { rowHeight: map.rowHeight as number }),
-    ...(map.defaultAgent !== undefined && { defaultAgent: map.defaultAgent as AiAgentType }),
-    ...(map.notifications !== undefined && {
-      notifications: map.notifications as AppConfig['defaults']['notifications']
-    }),
-    ...(map.hasSeenOnboarding !== undefined && {
-      hasSeenOnboarding: map.hasSeenOnboarding as boolean | number
-    }),
-    // Default on, and that changed meaning rather than merely flipping. It used
-    // to decide whether every saved session was relaunched at start-up, which
-    // spends tokens and starts processes -- worth asking about, so it was off.
-    // Bringing a pane back no longer does either: it shows the last screen its
-    // terminal drew and waits. There is nothing to ask, and leaving it off made
-    // the whole thing invisible unless somebody went looking for a toggle.
-    reopenSessions: (map.reopenSessions as boolean) ?? true,
-    // Off by default: nothing starts itself because someone installed an app.
-    startAtLogin: (map.startAtLogin as boolean) ?? false,
-    // Saving iterates over every key in defaults, but loading is this explicit
-    // list — so a key missing here round-trips to nothing and its feature is
-    // silently inert.
-    // Array-checked rather than cast: the value came from JSON.parse of a row a
-    // user can edit, and broadcasting a non-array under a string[] type would
-    // break any consumer that trusts the declaration.
-    ...(Array.isArray(map.envPassthrough) && {
-      envPassthrough: map.envPassthrough.filter((k): k is string => typeof k === 'string')
-    }),
-    // Terminal block rendering. Default on; the key only appears once the
-    // user has toggled it, so absence means "not yet decided", not "off".
-    domBlockRendering: (map.domBlockRendering as boolean) ?? true,
-    minimalShellPrompt: (map.minimalShellPrompt as boolean) ?? true,
-    // Sessions outlive the window. Default on, same reasoning as above: the key
-    // only appears once the user has turned it off, so absence is "not yet
-    // decided". Read by the main process at quit, not by the renderer.
-    keepSessionsRunning: (map.keepSessionsRunning as boolean) ?? true,
-    ...(map.widgetEnabled !== undefined && { widgetEnabled: map.widgetEnabled as boolean }),
-    ...(map.taskViewMode !== undefined && {
-      taskViewMode: map.taskViewMode as AppConfig['defaults']['taskViewMode']
-    }),
-    ...(map.activeWorkspace !== undefined && {
-      activeWorkspace: map.activeWorkspace as string
-    }),
-    ...(map.mainViewMode !== undefined && {
-      mainViewMode: map.mainViewMode as AppConfig['defaults']['mainViewMode']
-    }),
-    ...(map.layoutMode !== undefined && {
-      layoutMode: map.layoutMode as AppConfig['defaults']['layoutMode']
-    }),
-    ...(map.minimizedPlacement !== undefined && {
-      minimizedPlacement: map.minimizedPlacement as AppConfig['defaults']['minimizedPlacement']
-    }),
-    ...(map.updateChannel !== undefined && {
-      updateChannel: map.updateChannel as AppConfig['defaults']['updateChannel']
-    }),
-    ...(map.webAccessEnabled !== undefined && {
-      webAccessEnabled: map.webAccessEnabled as boolean
-    }),
-    ...(map.mobileAccessEnabled !== undefined && {
-      mobileAccessEnabled: map.mobileAccessEnabled as boolean
-    }),
-    ...(map.serverPort !== undefined && { serverPort: map.serverPort as number }),
-    ...(map.networkAccessEnabled !== undefined && {
-      networkAccessEnabled: map.networkAccessEnabled as boolean
-    }),
-    ...(map.showHeadlessAgents !== undefined && {
-      showHeadlessAgents: map.showHeadlessAgents as boolean
-    }),
-    ...(map.headlessRetentionMinutes !== undefined && {
-      headlessRetentionMinutes: map.headlessRetentionMinutes as number
-    }),
-    ...(map.hasSeededDevServerWorkflow !== undefined && {
-      hasSeededDevServerWorkflow: map.hasSeededDevServerWorkflow as boolean
-    }),
-    ...(map.hasSeededDefaultTaskWorkflow !== undefined && {
-      hasSeededDefaultTaskWorkflow: map.hasSeededDefaultTaskWorkflow as boolean
-    }),
-    // The four below were declared in AppConfig and consumed, but never listed
-    // here — exactly the failure the comment above describes. Each was written on
-    // save and dropped on the next load, so the setting appeared to work until a
-    // reload. `worktreeRetention` is the worst of them: it is read server-side
-    // (register-methods.ts) and so always resolved to undefined.
-    ...(map.updateAutoDownload !== undefined && {
-      updateAutoDownload: map.updateAutoDownload as boolean
-    }),
-    ...(map.headlessStepTimeoutMinutes !== undefined && {
-      headlessStepTimeoutMinutes: map.headlessStepTimeoutMinutes as number
-    }),
-    ...(map.enableHoverPreview !== undefined && {
-      enableHoverPreview: map.enableHoverPreview as boolean
-    }),
-    ...(map.worktreeRetention !== undefined && {
-      worktreeRetention: map.worktreeRetention as AppConfig['defaults']['worktreeRetention']
-    }),
-    ...(isPlainObject(map.experimental) && { experimental: experimentalFlags(map.experimental) })
-  }
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/**
- * Settings › Experimental, kept to booleans: a value someone edited into the
- * row must not read as a switch that is on.
- */
-function experimentalFlags(raw: Record<string, unknown>): ExperimentalConfig {
-  const flags: Record<string, boolean> = {}
-  for (const [key, value] of Object.entries(raw)) if (typeof value === 'boolean') flags[key] = value
-  return flags as ExperimentalConfig
-}
-
-function loadProjects(d: Database.Database): ProjectConfig[] {
-  const rows = d.prepare('SELECT * FROM projects').all() as Array<{
-    name: string
-    path: string
-    preferred_agents: string
-    icon: string | null
-    icon_color: string | null
-    host_ids: string | null
-    workspace_id: string | null
-  }>
-  return rows.map(rowToProject)
-}
-
-function loadWorkflows(d: Database.Database): WorkflowDefinition[] {
-  const rows = d.prepare('SELECT * FROM workflows').all() as Array<{
-    id: string
-    name: string
-    icon: string
-    icon_color: string
-    nodes: string
-    edges: string
-    enabled: number
-    last_run_at: string | null
-    last_run_status: string | null
-    stagger_delay_ms: number | null
-    workspace_id: string | null
-  }>
-  return rows.map(rowToWorkflow)
-}
-
-function loadAgentCommands(d: Database.Database): Partial<Record<AiAgentType, AgentCommandConfig>> {
-  const rows = d.prepare('SELECT * FROM agent_commands').all() as Array<{
-    agent_type: string
-    command: string
-    args: string
-    headless_args: string | null
-    fallback_command: string | null
-    fallback_args: string | null
-  }>
-  const result: Partial<Record<AiAgentType, AgentCommandConfig>> = {}
-  for (const r of rows) {
-    result[r.agent_type as AiAgentType] = {
-      command: r.command,
-      args: JSON.parse(r.args),
-      ...(r.headless_args != null && { headlessArgs: JSON.parse(r.headless_args) }),
-      ...(r.fallback_command != null && { fallbackCommand: r.fallback_command }),
-      ...(r.fallback_args != null && { fallbackArgs: JSON.parse(r.fallback_args) })
-    }
-  }
-  return result
-}
-
-function loadRemoteHosts(d: Database.Database): RemoteHost[] {
-  const rows = d.prepare('SELECT * FROM remote_hosts').all() as Array<{
-    id: string
-    label: string
-    hostname: string
-    user: string
-    port: number
-    auth_method: string | null
-    ssh_key_path: string | null
-    credential_id: string | null
-    encrypted_password: string | null
-    ssh_options: string | null
-  }>
-  return rows.map((r) => ({
-    id: r.id,
-    label: r.label,
-    hostname: r.hostname,
-    user: r.user,
-    port: r.port,
-    ...(r.auth_method != null && { authMethod: r.auth_method as AuthMethod }),
-    ...(r.ssh_key_path != null && { sshKeyPath: r.ssh_key_path }),
-    ...(r.credential_id != null && { credentialId: r.credential_id }),
-    ...(r.encrypted_password != null && { encryptedPassword: r.encrypted_password }),
-    ...(r.ssh_options != null && { sshOptions: r.ssh_options })
-  }))
-}
-
-function loadTasks(d: Database.Database): TaskConfig[] {
-  const rows = d.prepare('SELECT * FROM tasks ORDER BY "order"').all() as Array<{
-    id: string
-    project_name: string
-    title: string
-    description: string
-    status: string
-    order: number
-    assigned_session_id: string | null
-    assigned_agent: string | null
-    agent_session_id: string | null
-    branch: string | null
-    use_worktree: number | null
-    created_at: string
-    updated_at: string
-    completed_at: string | null
-    archived_at: string | null
-  }>
-  return rows.map(rowToTask)
-}
-
-function loadSessionGroups(d: Database.Database): SessionGroupConfig[] {
-  const rows = d.prepare('SELECT * FROM session_groups ORDER BY "order"').all() as Array<{
-    id: string
-    name: string
-    icon: string | null
-    icon_color: string | null
-    order: number
-    workspace_id: string | null
-  }>
-  return rows.map(rowToSessionGroup)
-}
-
-function loadWorkspaces(d: Database.Database): WorkspaceConfig[] {
-  const rows = d.prepare('SELECT * FROM workspaces ORDER BY "order"').all() as Array<{
-    id: string
-    name: string
-    icon: string | null
-    icon_color: string | null
-    order: number
-  }>
-  return rows.map(rowToWorkspace)
-}
-
-// ---------------------------------------------------------------------------
-// Config: save inside a transaction
-// ---------------------------------------------------------------------------
-
-/**
- * Delete the rows of `table` whose key is not in `keep`.
- *
- * The counterpart to an upsert loop, and the half that has to be deliberate: the
- * naive `DELETE FROM table` that used to precede these loops takes out every row
- * the saving client did not happen to carry, and fires every foreign-key cascade
- * hanging off them on the way.
- *
- * Identifiers are interpolated because SQLite cannot parameterise them; both
- * arguments are literals at every call site below, never user input.
- */
-function pruneMissing(
-  d: Database.Database,
-  table: string,
-  keyColumn: string,
-  keep: Array<string | null | undefined>,
-  baseRevision: number
-): void {
-  const wanted = new Set(keep.filter((k): k is string => typeof k === 'string'))
-  const existing = d
-    .prepare(`SELECT ${keyColumn} AS key, row_revision AS revision FROM ${table}`)
-    .all() as Array<{ key: string; revision: number }>
-  const remove = d.prepare(`DELETE FROM ${table} WHERE ${keyColumn} = ?`)
-  for (const { key, revision } of existing) {
-    if (wanted.has(key)) continue
-    // Absent from the snapshot means one of two things, and the revision is what
-    // separates them: a row the client deleted, or a row it never saw because
-    // another client added it after this one last loaded. Only the first is a
-    // deletion. Without this, Vorn open on a laptop and a phone meant whichever
-    // saved second quietly removed the other's tasks.
-    if (revision > baseRevision) continue
-    remove.run(key)
-  }
+  return nativeCall('loadConfig')
 }
 
 /**
@@ -2006,310 +220,7 @@ function nativeConfig(config: AppConfig): [AppConfig, string[]] {
 }
 
 export function saveConfig(config: AppConfig): void {
-  if (native) return nativeCall(native, 'saveConfig', ...nativeConfig(config))
-  const d = getDb()
-
-  const run = d.transaction(() => {
-    // What the saving client last saw. Absent means a caller that does not track
-    // revisions — the CLI, a test, the server persisting its own port — and those
-    // keep the old behaviour of pruning everything their snapshot omits.
-    const baseRevision = config.revision ?? Number.MAX_SAFE_INTEGER
-    const revision = readConfigRevision(d) + 1
-    // Defaults are upserted key by key, never wiped.
-    //
-    // A client sends whatever object its build happens to hold, so deleting the
-    // difference destroys every key that client does not know about. That is not
-    // hypothetical: it silently reverted `serverPort`, which exists so the web
-    // client's origin — and therefore its stored token — survives a restart. An
-    // ordinary settings save undid it.
-    //
-    // It is also what keeps an older client safe against a newer host, where the
-    // gap between the two is a whole release rather than one key.
-    //
-    // An explicit `undefined` still deletes, which is how a setting is cleared;
-    // absent means untouched.
-    const upsertDefault = d.prepare(
-      `INSERT INTO defaults (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-    )
-    const deleteDefault = d.prepare('DELETE FROM defaults WHERE key = ?')
-    for (const [key, value] of Object.entries(config.defaults)) {
-      if (value === undefined) deleteDefault.run(key)
-      else upsertDefault.run(key, JSON.stringify(value))
-    }
-
-    // Projects
-    //
-    // Diff-and-upsert rather than wipe-and-rewrite, the same treatment the
-    // workflows block below already gets and for the same underlying reason: a row
-    // deleted and reinserted is a *different* row to anything referencing it, and
-    // in the meantime every FK cascade fires. Tasks reference projects by name.
-    pruneMissing(
-      d,
-      'projects',
-      'name',
-      config.projects.map((p) => p.name),
-      baseRevision
-    )
-    const insertProject = d.prepare(
-      `INSERT INTO projects (name, path, preferred_agents, icon, icon_color, host_ids, workspace_id, row_revision)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(name) DO UPDATE SET
-         row_revision = excluded.row_revision,
-         path = excluded.path,
-         preferred_agents = excluded.preferred_agents,
-         icon = excluded.icon,
-         icon_color = excluded.icon_color,
-         host_ids = excluded.host_ids,
-         workspace_id = excluded.workspace_id`
-    )
-    for (const p of config.projects) {
-      insertProject.run(
-        p.name,
-        p.path,
-        JSON.stringify(p.preferredAgents),
-        p.icon ?? null,
-        p.iconColor ?? null,
-        p.hostIds ? JSON.stringify(p.hostIds) : null,
-        p.workspaceId ?? 'personal',
-        revision
-      )
-    }
-
-    // Preserve existing workflow rows so foreign-key cascades do not erase
-    // connector inbox entries and poll cursors during ordinary config saves.
-    const workflows = config.workflows ?? []
-    const workflowIds = new Set(workflows.map((workflow) => workflow.id))
-    const existingWorkflowIds = d.prepare('SELECT id FROM workflows').all() as Array<{
-      id: string
-    }>
-    const deleteWorkflow = d.prepare('DELETE FROM workflows WHERE id = ?')
-    for (const { id } of existingWorkflowIds) {
-      if (!workflowIds.has(id)) deleteWorkflow.run(id)
-    }
-    const upsertWorkflow = d.prepare(
-      `INSERT INTO workflows (id, name, icon, icon_color, nodes, edges, enabled, last_run_at, last_run_status, stagger_delay_ms, workspace_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         icon = excluded.icon,
-         icon_color = excluded.icon_color,
-         nodes = excluded.nodes,
-         edges = excluded.edges,
-         enabled = excluded.enabled,
-         last_run_at = excluded.last_run_at,
-         last_run_status = excluded.last_run_status,
-         stagger_delay_ms = excluded.stagger_delay_ms,
-         workspace_id = excluded.workspace_id`
-    )
-    for (const w of workflows) {
-      upsertWorkflow.run(
-        w.id,
-        w.name,
-        w.icon,
-        w.iconColor,
-        JSON.stringify(w.nodes),
-        JSON.stringify(w.edges),
-        w.enabled ? 1 : 0,
-        w.lastRunAt ?? null,
-        w.lastRunStatus ?? null,
-        w.staggerDelayMs ?? null,
-        w.workspaceId ?? 'personal'
-      )
-    }
-
-    // Agent commands
-    pruneMissing(
-      d,
-      'agent_commands',
-      'agent_type',
-      Object.keys(config.agentCommands ?? {}),
-      baseRevision
-    )
-    const insertAgent = d.prepare(
-      `INSERT INTO agent_commands (agent_type, command, args, headless_args, fallback_command, fallback_args, row_revision)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(agent_type) DO UPDATE SET
-         row_revision = excluded.row_revision,
-         command = excluded.command,
-         args = excluded.args,
-         headless_args = excluded.headless_args,
-         fallback_command = excluded.fallback_command,
-         fallback_args = excluded.fallback_args`
-    )
-    if (config.agentCommands) {
-      for (const [agentType, cmd] of Object.entries(config.agentCommands)) {
-        if (cmd) {
-          insertAgent.run(
-            agentType,
-            cmd.command,
-            JSON.stringify(cmd.args),
-            cmd.headlessArgs ? JSON.stringify(cmd.headlessArgs) : null,
-            cmd.fallbackCommand ?? null,
-            cmd.fallbackArgs ? JSON.stringify(cmd.fallbackArgs) : null,
-            revision
-          )
-        }
-      }
-    }
-
-    // Remote hosts
-    pruneMissing(
-      d,
-      'remote_hosts',
-      'id',
-      (config.remoteHosts ?? []).map((h) => h.id),
-      baseRevision
-    )
-    const insertHost = d.prepare(
-      `INSERT INTO remote_hosts (id, label, hostname, user, port, auth_method, ssh_key_path, credential_id, encrypted_password, ssh_options, row_revision)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         row_revision = excluded.row_revision,
-         label = excluded.label,
-         hostname = excluded.hostname,
-         user = excluded.user,
-         port = excluded.port,
-         auth_method = excluded.auth_method,
-         ssh_key_path = excluded.ssh_key_path,
-         credential_id = excluded.credential_id,
-         encrypted_password = excluded.encrypted_password,
-         ssh_options = excluded.ssh_options`
-    )
-    for (const h of config.remoteHosts ?? []) {
-      insertHost.run(
-        h.id,
-        h.label,
-        h.hostname,
-        h.user,
-        h.port,
-        h.authMethod ?? 'agent',
-        h.sshKeyPath ?? null,
-        h.credentialId ?? null,
-        h.encryptedPassword ?? null,
-        h.sshOptions ?? null,
-        revision
-      )
-    }
-
-    // Tasks — the highest-churn collection here, and the one where a wipe hurt
-    // most: task_source_links cascades off it, so a rewrite orphaned the link
-    // between a task and the external issue it came from.
-    pruneMissing(
-      d,
-      'tasks',
-      'id',
-      (config.tasks ?? []).map((t) => t.id),
-      baseRevision
-    )
-    const insertTask = d.prepare(
-      `INSERT INTO tasks (id, project_name, title, description, status, "order", assigned_session_id, assigned_agent, agent_session_id, branch, use_worktree, created_at, updated_at, completed_at, archived_at, source_connector_id, source_external_url, source_external_id, row_revision)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         row_revision = excluded.row_revision,
-         project_name = excluded.project_name,
-         title = excluded.title,
-         description = excluded.description,
-         status = excluded.status,
-         "order" = excluded."order",
-         assigned_session_id = excluded.assigned_session_id,
-         assigned_agent = excluded.assigned_agent,
-         agent_session_id = excluded.agent_session_id,
-         branch = excluded.branch,
-         use_worktree = excluded.use_worktree,
-         created_at = excluded.created_at,
-         updated_at = excluded.updated_at,
-         completed_at = excluded.completed_at,
-         archived_at = excluded.archived_at,
-         source_connector_id = excluded.source_connector_id,
-         source_external_url = excluded.source_external_url,
-         source_external_id = excluded.source_external_id`
-    )
-    for (const t of config.tasks ?? []) {
-      insertTask.run(
-        t.id,
-        t.projectName,
-        t.title,
-        t.description,
-        t.status,
-        t.order,
-        t.assignedSessionId ?? null,
-        t.assignedAgent ?? null,
-        t.agentSessionId ?? null,
-        t.branch ?? null,
-        t.useWorktree ? 1 : 0,
-        t.createdAt,
-        t.updatedAt,
-        t.completedAt ?? null,
-        t.archivedAt ?? null,
-        t.sourceConnectorId ?? null,
-        t.sourceExternalUrl ?? null,
-        t.sourceExternalId ?? null,
-        revision
-      )
-    }
-
-    // Workspaces
-    const workspaces = config.workspaces ?? [DEFAULT_WORKSPACE]
-    pruneMissing(
-      d,
-      'workspaces',
-      'id',
-      workspaces.map((ws) => ws.id),
-      baseRevision
-    )
-    const insertWorkspace = d.prepare(
-      `INSERT INTO workspaces (id, name, icon, icon_color, "order", row_revision) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         row_revision = excluded.row_revision,
-         name = excluded.name,
-         icon = excluded.icon,
-         icon_color = excluded.icon_color,
-         "order" = excluded."order"`
-    )
-    for (const ws of workspaces) {
-      insertWorkspace.run(ws.id, ws.name, ws.icon ?? null, ws.iconColor ?? null, ws.order, revision)
-    }
-
-    // Session groups
-    const sessionGroups = config.sessionGroups ?? []
-    pruneMissing(
-      d,
-      'session_groups',
-      'id',
-      sessionGroups.map((g) => g.id),
-      baseRevision
-    )
-    const insertSessionGroup = d.prepare(
-      `INSERT INTO session_groups (id, name, icon, icon_color, "order", workspace_id, row_revision)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         row_revision = excluded.row_revision,
-         name = excluded.name,
-         icon = excluded.icon,
-         icon_color = excluded.icon_color,
-         "order" = excluded."order",
-         workspace_id = excluded.workspace_id`
-    )
-    for (const g of sessionGroups) {
-      insertSessionGroup.run(
-        g.id,
-        g.name,
-        g.icon ?? null,
-        g.iconColor ?? null,
-        g.order,
-        g.workspaceId,
-        revision
-      )
-    }
-
-    d.prepare('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)').run(
-      CONFIG_REVISION_KEY,
-      String(revision)
-    )
-  })
-
-  run()
+  return nativeCall('saveConfig', ...nativeConfig(config))
 }
 
 // ---------------------------------------------------------------------------
@@ -2317,307 +228,43 @@ export function saveConfig(config: AppConfig): void {
 // ---------------------------------------------------------------------------
 
 export function dbListTasks(projectName?: string, status?: string): TaskConfig[] {
-  if (native) return nativeCall(native, 'dbListTasks', projectName, status)
-  const d = getDb()
-  let sql = 'SELECT * FROM tasks'
-  const params: string[] = []
-  const clauses: string[] = []
-  if (projectName) {
-    clauses.push('project_name = ?')
-    params.push(projectName)
-  }
-  if (status) {
-    clauses.push('status = ?')
-    params.push(status)
-  }
-  if (clauses.length) sql += ' WHERE ' + clauses.join(' AND ')
-  sql += ' ORDER BY "order"'
-  const rows = d.prepare(sql).all(...params) as Array<{
-    id: string
-    project_name: string
-    title: string
-    description: string
-    status: string
-    order: number
-    assigned_session_id: string | null
-    assigned_agent: string | null
-    agent_session_id: string | null
-    branch: string | null
-    use_worktree: number | null
-    created_at: string
-    updated_at: string
-    completed_at: string | null
-    archived_at: string | null
-  }>
-  return rows.map(rowToTask)
+  return nativeCall('dbListTasks', projectName, status)
 }
 
 export function dbGetTask(id: string): TaskConfig | null {
-  if (native) return nativeCall(native, 'dbGetTask', id)
-  const row = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id) as
-    | {
-        id: string
-        project_name: string
-        title: string
-        description: string
-        status: string
-        order: number
-        assigned_session_id: string | null
-        assigned_agent: string | null
-        agent_session_id: string | null
-        branch: string | null
-        use_worktree: number | null
-        created_at: string
-        updated_at: string
-        completed_at: string | null
-        archived_at: string | null
-      }
-    | undefined
-  return row ? rowToTask(row) : null
+  return nativeCall('dbGetTask', id)
 }
 
 export function dbInsertTask(task: TaskConfig): void {
-  if (native) return nativeCall(native, 'dbInsertTask', task)
-  getDb()
-    .prepare(
-      `INSERT INTO tasks (id, project_name, title, description, status, "order", assigned_session_id, assigned_agent, agent_session_id, branch, use_worktree, created_at, updated_at, completed_at, archived_at, source_connector_id, source_external_url, source_external_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      task.id,
-      task.projectName,
-      task.title,
-      task.description,
-      task.status,
-      task.order,
-      task.assignedSessionId ?? null,
-      task.assignedAgent ?? null,
-      task.agentSessionId ?? null,
-      task.branch ?? null,
-      task.useWorktree ? 1 : 0,
-      task.createdAt,
-      task.updatedAt,
-      task.completedAt ?? null,
-      task.archivedAt ?? null,
-      task.sourceConnectorId ?? null,
-      task.sourceExternalUrl ?? null,
-      task.sourceExternalId ?? null
-    )
+  return nativeCall('dbInsertTask', task)
 }
 
 export function dbUpdateTask(id: string, updates: Partial<TaskConfig>): void {
-  if (native) return nativeCall(native, 'dbUpdateTask', id, updates, Object.keys(updates))
-  const sets: string[] = []
-  const params: unknown[] = []
-  if (updates.projectName !== undefined) {
-    sets.push('project_name = ?')
-    params.push(updates.projectName)
-  }
-  if (updates.title !== undefined) {
-    sets.push('title = ?')
-    params.push(updates.title)
-  }
-  if (updates.description !== undefined) {
-    sets.push('description = ?')
-    params.push(updates.description)
-  }
-  if (updates.status !== undefined) {
-    sets.push('status = ?')
-    params.push(updates.status)
-  }
-  if (updates.order !== undefined) {
-    sets.push('"order" = ?')
-    params.push(updates.order)
-  }
-  if (updates.branch !== undefined) {
-    sets.push('branch = ?')
-    params.push(updates.branch)
-  }
-  if (updates.useWorktree !== undefined) {
-    sets.push('use_worktree = ?')
-    params.push(updates.useWorktree ? 1 : 0)
-  }
-  if (updates.assignedAgent !== undefined) {
-    sets.push('assigned_agent = ?')
-    params.push(updates.assignedAgent)
-  }
-  if (updates.assignedSessionId !== undefined) {
-    sets.push('assigned_session_id = ?')
-    params.push(updates.assignedSessionId)
-  }
-  if (updates.agentSessionId !== undefined) {
-    sets.push('agent_session_id = ?')
-    params.push(updates.agentSessionId)
-  }
-  if (updates.updatedAt !== undefined) {
-    sets.push('updated_at = ?')
-    params.push(updates.updatedAt)
-  }
-  if ('completedAt' in updates) {
-    sets.push('completed_at = ?')
-    params.push(updates.completedAt ?? null)
-  }
-  if ('archivedAt' in updates) {
-    sets.push('archived_at = ?')
-    params.push(updates.archivedAt ?? null)
-  }
-  if (updates.sourceConnectorId !== undefined) {
-    sets.push('source_connector_id = ?')
-    params.push(updates.sourceConnectorId)
-  }
-  if (updates.sourceExternalUrl !== undefined) {
-    sets.push('source_external_url = ?')
-    params.push(updates.sourceExternalUrl)
-  }
-  if (updates.sourceExternalId !== undefined) {
-    sets.push('source_external_id = ?')
-    params.push(updates.sourceExternalId)
-  }
-  if (sets.length === 0) return
-  params.push(id)
-  getDb()
-    .prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`)
-    .run(...params)
+  return nativeCall('dbUpdateTask', id, updates, Object.keys(updates))
 }
 
 export function dbDeleteTask(id: string): void {
-  if (native) return nativeCall(native, 'dbDeleteTask', id)
-  getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id)
+  return nativeCall('dbDeleteTask', id)
 }
 
 export function dbGetMaxTaskOrder(projectName: string): number {
-  if (native) return nativeCall(native, 'dbGetMaxTaskOrder', projectName)
-  const row = getDb()
-    .prepare('SELECT MAX("order") as m FROM tasks WHERE project_name = ?')
-    .get(projectName) as { m: number | null }
-  return row.m ?? -1
-}
-
-// ---------------------------------------------------------------------------
-// Targeted CRUD: Source Connections
-// ---------------------------------------------------------------------------
-
-interface SourceConnectionRow {
-  id: string
-  connector_id: string
-  name: string
-  filters: string
-  sync_interval_minutes: number
-  status_mapping: string
-  execution_project: string | null
-  last_sync_at: string | null
-  last_sync_error: string | null
-  sync_cursor: string | null
-  created_at: string
-  signed_in_as: string | null
-  signed_in_at: string | null
-}
-
-function rowToSourceConnection(r: SourceConnectionRow): SourceConnection {
-  return {
-    id: r.id,
-    connectorId: r.connector_id,
-    name: r.name,
-    filters: JSON.parse(r.filters),
-    syncIntervalMinutes: r.sync_interval_minutes,
-    statusMapping: JSON.parse(r.status_mapping),
-    ...(r.execution_project != null && { executionProject: r.execution_project }),
-    ...(r.last_sync_at != null && { lastSyncAt: r.last_sync_at }),
-    ...(r.last_sync_error != null && { lastSyncError: r.last_sync_error }),
-    ...(r.sync_cursor != null && { syncCursor: r.sync_cursor }),
-    createdAt: r.created_at,
-    ...(r.signed_in_as != null && { signedInAs: r.signed_in_as }),
-    ...(r.signed_in_at != null && { signedInAt: r.signed_in_at })
-  }
+  return nativeCall('dbGetMaxTaskOrder', projectName)
 }
 
 export function dbListSourceConnections(connectorId?: string): SourceConnection[] {
-  if (native) return nativeCall(native, 'dbListSourceConnections', connectorId)
-  const d = getDb()
-  if (connectorId) {
-    const rows = d
-      .prepare('SELECT * FROM source_connections WHERE connector_id = ?')
-      .all(connectorId) as SourceConnectionRow[]
-    return rows.map(rowToSourceConnection)
-  }
-  const rows = d.prepare('SELECT * FROM source_connections').all() as SourceConnectionRow[]
-  return rows.map(rowToSourceConnection)
+  return nativeCall('dbListSourceConnections', connectorId)
 }
 
 export function dbGetSourceConnection(id: string): SourceConnection | null {
-  if (native) return nativeCall(native, 'dbGetSourceConnection', id)
-  const row = getDb().prepare('SELECT * FROM source_connections WHERE id = ?').get(id) as
-    | SourceConnectionRow
-    | undefined
-  return row ? rowToSourceConnection(row) : null
+  return nativeCall('dbGetSourceConnection', id)
 }
 
 export function dbInsertSourceConnection(conn: SourceConnection): void {
-  if (native) return nativeCall(native, 'dbInsertSourceConnection', conn)
-  getDb()
-    .prepare(
-      `INSERT INTO source_connections (id, connector_id, name, filters, sync_interval_minutes, status_mapping, execution_project, last_sync_at, last_sync_error, sync_cursor, created_at, signed_in_as, signed_in_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      conn.id,
-      conn.connectorId,
-      conn.name,
-      JSON.stringify(conn.filters),
-      conn.syncIntervalMinutes,
-      JSON.stringify(conn.statusMapping),
-      conn.executionProject ?? null,
-      conn.lastSyncAt ?? null,
-      conn.lastSyncError ?? null,
-      conn.syncCursor ?? null,
-      conn.createdAt,
-      conn.signedInAs ?? null,
-      conn.signedInAt ?? null
-    )
+  return nativeCall('dbInsertSourceConnection', conn)
 }
 
 export function dbUpdateSourceConnection(id: string, updates: Partial<SourceConnection>): void {
-  if (native)
-    return nativeCall(native, 'dbUpdateSourceConnection', id, updates, Object.keys(updates))
-  const sets: string[] = []
-  const params: unknown[] = []
-  if (updates.name !== undefined) {
-    sets.push('name = ?')
-    params.push(updates.name)
-  }
-  if (updates.filters !== undefined) {
-    sets.push('filters = ?')
-    params.push(JSON.stringify(updates.filters))
-  }
-  if (updates.syncIntervalMinutes !== undefined) {
-    sets.push('sync_interval_minutes = ?')
-    params.push(updates.syncIntervalMinutes)
-  }
-  if (updates.statusMapping !== undefined) {
-    sets.push('status_mapping = ?')
-    params.push(JSON.stringify(updates.statusMapping))
-  }
-  if (updates.executionProject !== undefined) {
-    sets.push('execution_project = ?')
-    params.push(updates.executionProject)
-  }
-  if ('lastSyncAt' in updates) {
-    sets.push('last_sync_at = ?')
-    params.push(updates.lastSyncAt ?? null)
-  }
-  if ('lastSyncError' in updates) {
-    sets.push('last_sync_error = ?')
-    params.push(updates.lastSyncError ?? null)
-  }
-  if ('syncCursor' in updates) {
-    sets.push('sync_cursor = ?')
-    params.push(updates.syncCursor ?? null)
-  }
-  if (sets.length === 0) return
-  params.push(id)
-  getDb()
-    .prepare(`UPDATE source_connections SET ${sets.join(', ')} WHERE id = ?`)
-    .run(...params)
+  return nativeCall('dbUpdateSourceConnection', id, updates, Object.keys(updates))
 }
 
 /** Who a connection's window is signed in as; both null once it is signed out. */
@@ -2626,75 +273,24 @@ export function dbSetConnectionSignIn(
   signedInAs: string | null,
   signedInAt: string | null
 ): void {
-  if (native) return nativeCall(native, 'dbSetConnectionSignIn', id, signedInAs, signedInAt)
-  getDb()
-    .prepare('UPDATE source_connections SET signed_in_as = ?, signed_in_at = ? WHERE id = ?')
-    .run(signedInAs, signedInAt, id)
+  return nativeCall('dbSetConnectionSignIn', id, signedInAs, signedInAt)
 }
 
 export function dbDeleteSourceConnection(id: string): void {
-  if (native) return nativeCall(native, 'dbDeleteSourceConnection', id)
-  getDb().prepare('DELETE FROM source_connections WHERE id = ?').run(id)
-}
-
-// ---------------------------------------------------------------------------
-// Durable connector ingestion
-// ---------------------------------------------------------------------------
-
-interface ConnectorInboxRow {
-  id: number
-  lease_token: string
-  workflow_id: string
-  connection_id: string
-  connector_id: string
-  event_id: string
-  event_type: string
-  event_timestamp: string
-  payload: string
-  attempts: number
-}
-
-function rowToConnectorInboxItem(row: ConnectorInboxRow): ConnectorInboxItem {
-  return {
-    id: row.id,
-    leaseToken: row.lease_token,
-    workflowId: row.workflow_id,
-    connectionId: row.connection_id,
-    connectorId: row.connector_id,
-    eventId: row.event_id,
-    eventType: row.event_type,
-    eventTimestamp: row.event_timestamp,
-    connectorItem: JSON.parse(row.payload) as ConnectorItemContext,
-    attempts: row.attempts
-  }
+  return nativeCall('dbDeleteSourceConnection', id)
 }
 
 export function dbGetConnectorPollCursor(
   workflowId: string,
   connectionId: string
 ): string | undefined {
-  if (native) {
-    return (
-      nativeCall<string | null>(native, 'dbGetConnectorPollCursor', workflowId, connectionId) ??
-      undefined
-    )
-  }
-  const row = getDb()
-    .prepare('SELECT cursor FROM connector_poll_state WHERE workflow_id = ? AND connection_id = ?')
-    .get(workflowId, connectionId) as { cursor: string | null } | undefined
-  return row?.cursor ?? undefined
+  return (
+    nativeCall<string | null>('dbGetConnectorPollCursor', workflowId, connectionId) ?? undefined
+  )
 }
 
 export function dbCountActiveConnectorInboxLeases(now: string): number {
-  if (native) return nativeCall(native, 'dbCountActiveConnectorInboxLeases', now)
-  const row = getDb()
-    .prepare(
-      `SELECT COUNT(*) AS count
-       FROM connector_inbox
-       WHERE status = 'leased' AND lease_until > ?`
-    )
-    .get(now) as { count: number }
-  return row.count
+  return nativeCall('dbCountActiveConnectorInboxLeases', now)
 }
 
 /**
@@ -2704,99 +300,15 @@ export function dbCountActiveConnectorInboxLeases(now: string): number {
  */
 /** One webhook request becomes one durable inbox row. */
 export function dbEnqueueWebhookEvent(args: WebhookEvent): void {
-  if (native) return nativeCall(native, 'dbEnqueueWebhookEvent', args)
-  const d = getDb()
-  // The inbox requires a connection row; webhook events share one internal one.
-  d.prepare(
-    `INSERT OR IGNORE INTO source_connections (id, connector_id, name, created_at)
-     VALUES ('webhook', 'webhook', 'Webhook', ?)`
-  ).run(args.receivedAt)
-  d.prepare(
-    `INSERT OR IGNORE INTO connector_inbox (
-      workflow_id, connection_id, connector_id, event_id, event_type,
-      event_timestamp, payload, status, attempts, available_at, created_at
-    ) VALUES (?, 'webhook', 'webhook', ?, 'webhook', ?, ?, 'pending', 0, ?, ?)`
-  ).run(
-    args.workflowId,
-    args.eventId,
-    args.receivedAt,
-    JSON.stringify(args.item),
-    args.receivedAt,
-    args.receivedAt
-  )
+  return nativeCall('dbEnqueueWebhookEvent', args)
 }
 
 export function dbRecordConnectorPollPage(args: ConnectorPollPage): number {
-  if (native) return nativeCall(native, 'dbRecordConnectorPollPage', args)
-  const d = getDb()
-  return d.transaction(() => {
-    let inserted = 0
-    const insert = d.prepare(`
-      INSERT OR IGNORE INTO connector_inbox (
-        workflow_id, connection_id, connector_id, event_id, event_type,
-        event_timestamp, payload, status, attempts, available_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
-    `)
-    for (const event of args.events) {
-      const result = insert.run(
-        args.workflowId,
-        args.connectionId,
-        args.connectorId,
-        event.eventId,
-        event.eventType,
-        event.eventTimestamp,
-        JSON.stringify(event.connectorItem),
-        args.polledAt,
-        args.polledAt
-      )
-      inserted += result.changes
-    }
-
-    d.prepare(
-      `INSERT INTO connector_poll_state (
-         workflow_id, connection_id, cursor, last_polled_at, last_error
-       ) VALUES (?, ?, ?, ?, NULL)
-       ON CONFLICT(workflow_id) DO UPDATE SET
-         connection_id = excluded.connection_id,
-         cursor = excluded.cursor,
-         last_polled_at = excluded.last_polled_at,
-         last_error = NULL`
-    ).run(args.workflowId, args.connectionId, args.cursor ?? null, args.polledAt)
-
-    // Keep the connection-level fields current for the existing settings UI
-    // and as a one-time fallback for workflows created before per-poll state.
-    d.prepare(
-      `UPDATE source_connections
-       SET sync_cursor = ?, last_sync_at = ?, last_sync_error = NULL
-       WHERE id = ?`
-    ).run(args.cursor ?? null, args.polledAt, args.connectionId)
-
-    return inserted
-  })()
+  return nativeCall('dbRecordConnectorPollPage', args)
 }
 
 export function dbRecordConnectorPollError(args: ConnectorPollError): void {
-  if (native) return nativeCall(native, 'dbRecordConnectorPollError', args)
-  const d = getDb()
-  d.transaction(() => {
-    d.prepare(
-      `INSERT INTO connector_poll_state (
-         workflow_id, connection_id, cursor, last_polled_at, last_error
-       ) VALUES (?, ?, NULL, ?, ?)
-       ON CONFLICT(workflow_id) DO UPDATE SET
-         connection_id = excluded.connection_id,
-         cursor = CASE
-           WHEN connector_poll_state.connection_id = excluded.connection_id
-             THEN connector_poll_state.cursor
-           ELSE NULL
-         END,
-         last_polled_at = excluded.last_polled_at,
-         last_error = excluded.last_error`
-    ).run(args.workflowId, args.connectionId, args.polledAt, args.error)
-    d.prepare(
-      'UPDATE source_connections SET last_sync_at = ?, last_sync_error = ? WHERE id = ?'
-    ).run(args.polledAt, args.error, args.connectionId)
-  })()
+  return nativeCall('dbRecordConnectorPollError', args)
 }
 
 /**
@@ -2805,42 +317,7 @@ export function dbRecordConnectorPollError(args: ConnectorPollError): void {
  * but rows remain pending until they succeed or the user removes their source.
  */
 export function dbClaimConnectorInbox(args: ConnectorInboxClaim): ConnectorInboxItem[] {
-  if (native) return nativeCall(native, 'dbClaimConnectorInbox', args)
-  const d = getDb()
-  return d.transaction(() => {
-    const rows = d
-      .prepare(
-        `SELECT id
-         FROM connector_inbox
-         WHERE (status = 'pending' AND available_at <= ?)
-            OR (status = 'leased' AND lease_until <= ?)
-         ORDER BY created_at, id
-         LIMIT ?`
-      )
-      .all(args.now, args.now, args.limit) as Array<{ id: number }>
-
-    // Re-check claimability inside the UPDATE so a concurrent claimer cannot
-    // steal a lease it lost the race for and inflate that row's attempts.
-    const claim = d.prepare(
-      `UPDATE connector_inbox
-       SET status = 'leased', attempts = attempts + 1, lease_until = ?, lease_token = ?
-       WHERE id = ?
-         AND ((status = 'pending' AND available_at <= ?)
-           OR (status = 'leased' AND lease_until <= ?))`
-    )
-    const read = d.prepare(
-      `SELECT id, workflow_id, connection_id, connector_id, event_id,
-              event_type, event_timestamp, payload, attempts, lease_token
-       FROM connector_inbox WHERE id = ?`
-    )
-    const claimed: ConnectorInboxItem[] = []
-    for (const { id } of rows) {
-      const result = claim.run(args.leaseUntil, randomUUID(), id, args.now, args.now)
-      if (result.changes !== 1) continue
-      claimed.push(rowToConnectorInboxItem(read.get(id) as ConnectorInboxRow))
-    }
-    return claimed
-  })()
+  return nativeCall('dbClaimConnectorInbox', args)
 }
 
 export function dbCompleteConnectorInbox(
@@ -2848,67 +325,14 @@ export function dbCompleteConnectorInbox(
   leaseToken: string,
   processedAt: string
 ): boolean {
-  if (native) return nativeCall(native, 'dbCompleteConnectorInbox', id, leaseToken, processedAt)
-  const result = getDb()
-    .prepare(
-      `UPDATE connector_inbox
-       SET status = 'processed', processed_at = ?, lease_until = NULL,
-           lease_token = NULL, last_error = NULL
-       WHERE id = ? AND status = 'leased' AND lease_token = ?`
-    )
-    .run(processedAt, id, leaseToken)
-  return result.changes === 1
+  return nativeCall('dbCompleteConnectorInbox', id, leaseToken, processedAt)
 }
 
 /** Retries stop here: a row this old is failing for a reason a retry won't fix. */
 export const MAX_INBOX_ATTEMPTS = 8
 
 export function dbRetryConnectorInbox(args: ConnectorInboxRetry): boolean {
-  if (native) return nativeCall(native, 'dbRetryConnectorInbox', args)
-  const d = getDb()
-  const row = d
-    .prepare(
-      `SELECT attempts, workflow_id FROM connector_inbox
-       WHERE id = ? AND status = 'leased' AND lease_token = ?`
-    )
-    .get(args.id, args.leaseToken) as { attempts: number; workflow_id: string } | undefined
-  if (!row) return false
-  // Attributed to the workflow, since webhook rows share one connection row.
-  const attributed = `Workflow ${row.workflow_id}: ${args.error}`
-  if (row.attempts >= MAX_INBOX_ATTEMPTS) {
-    const dead = d
-      .prepare(
-        `UPDATE connector_inbox
-         SET status = 'dead', lease_until = NULL, lease_token = NULL,
-             last_error = ?, processed_at = ?
-         WHERE id = ? AND status = 'leased' AND lease_token = ?`
-      )
-      .run(args.error, args.now, args.id, args.leaseToken)
-    if (dead.changes !== 1) return false
-    d.prepare(
-      `UPDATE source_connections
-       SET last_sync_error = ?
-       WHERE id = (SELECT connection_id FROM connector_inbox WHERE id = ?)`
-    ).run(`${attributed} (gave up after ${MAX_INBOX_ATTEMPTS} attempts)`, args.id)
-    return true
-  }
-  const delayMs = Math.min(60_000 * 2 ** Math.max(0, row.attempts - 1), 60 * 60_000)
-  const availableAt = new Date(Date.parse(args.now) + delayMs).toISOString()
-  const result = d
-    .prepare(
-      `UPDATE connector_inbox
-       SET status = 'pending', available_at = ?, lease_until = NULL,
-           lease_token = NULL, last_error = ?
-       WHERE id = ? AND status = 'leased' AND lease_token = ?`
-    )
-    .run(availableAt, args.error, args.id, args.leaseToken)
-  if (result.changes !== 1) return false
-  d.prepare(
-    `UPDATE source_connections
-     SET last_sync_error = ?
-     WHERE id = (SELECT connection_id FROM connector_inbox WHERE id = ?)`
-  ).run(attributed, args.id)
-  return true
+  return nativeCall('dbRetryConnectorInbox', args)
 }
 
 /** The renderer could not accept this event yet (for example, another run is
@@ -2918,19 +342,7 @@ export function dbDeferConnectorInbox(
   leaseToken: string,
   availableAt: string
 ): boolean {
-  if (native) return nativeCall(native, 'dbDeferConnectorInbox', id, leaseToken, availableAt)
-  const result = getDb()
-    .prepare(
-      `UPDATE connector_inbox
-       SET status = 'pending',
-           attempts = MAX(0, attempts - 1),
-           available_at = ?,
-           lease_until = NULL,
-           lease_token = NULL
-       WHERE id = ? AND status = 'leased' AND lease_token = ?`
-    )
-    .run(availableAt, id, leaseToken)
-  return result.changes === 1
+  return nativeCall('dbDeferConnectorInbox', id, leaseToken, availableAt)
 }
 
 export function dbRenewConnectorInboxLease(
@@ -2938,77 +350,24 @@ export function dbRenewConnectorInboxLease(
   leaseToken: string,
   leaseUntil: string
 ): boolean {
-  if (native) return nativeCall(native, 'dbRenewConnectorInboxLease', id, leaseToken, leaseUntil)
-  const result = getDb()
-    .prepare(
-      `UPDATE connector_inbox
-       SET lease_until = ?
-       WHERE id = ? AND status = 'leased' AND lease_token = ?`
-    )
-    .run(leaseUntil, id, leaseToken)
-  return result.changes === 1
+  return nativeCall('dbRenewConnectorInboxLease', id, leaseToken, leaseUntil)
 }
 
 /** Server restarts invalidate every in-memory workflow owner, so leases from
  * the previous process must be immediately reclaimable. */
 export function dbReleaseConnectorInboxLeases(now: string): void {
-  if (native) return nativeCall(native, 'dbReleaseConnectorInboxLeases', now)
-  getDb()
-    .prepare(
-      `UPDATE connector_inbox
-       SET status = 'pending', available_at = ?, lease_until = NULL, lease_token = NULL
-       WHERE status = 'leased'`
-    )
-    .run(now)
-}
-
-// ---------------------------------------------------------------------------
-// Targeted CRUD: Task Source Links
-// ---------------------------------------------------------------------------
-
-interface TaskSourceLinkRow {
-  task_id: string
-  connection_id: string
-  connector_id: string
-  external_id: string
-  external_url: string
-  source_status_raw: string
-  source_updated_at: string
-  last_synced_at: string
-  conflict_state: string
-}
-
-function rowToTaskSourceLink(r: TaskSourceLinkRow): TaskSourceLink {
-  return {
-    taskId: r.task_id,
-    connectionId: r.connection_id,
-    connectorId: r.connector_id,
-    externalId: r.external_id,
-    externalUrl: r.external_url,
-    sourceStatusRaw: r.source_status_raw,
-    sourceUpdatedAt: r.source_updated_at,
-    lastSyncedAt: r.last_synced_at,
-    conflictState: r.conflict_state as TaskSourceLink['conflictState']
-  }
+  return nativeCall('dbReleaseConnectorInboxLeases', now)
 }
 
 export function dbGetTaskSourceLink(taskId: string): TaskSourceLink | null {
-  if (native) return nativeCall(native, 'dbGetTaskSourceLink', taskId)
-  const row = getDb().prepare('SELECT * FROM task_source_links WHERE task_id = ?').get(taskId) as
-    | TaskSourceLinkRow
-    | undefined
-  return row ? rowToTaskSourceLink(row) : null
+  return nativeCall('dbGetTaskSourceLink', taskId)
 }
 
 export function dbGetTaskSourceLinkByExternalId(
   connectionId: string,
   externalId: string
 ): TaskSourceLink | null {
-  if (native) return nativeCall(native, 'dbGetTaskSourceLinkByExternalId', connectionId, externalId)
-  const row = getDb()
-    .prepare('SELECT * FROM task_source_links WHERE connection_id = ? AND external_id = ?')
-    .get(connectionId, externalId) as TaskSourceLinkRow | undefined
-  return row ? rowToTaskSourceLink(row) : null
+  return nativeCall('dbGetTaskSourceLinkByExternalId', connectionId, externalId)
 }
 
 /**
@@ -3022,172 +381,43 @@ export function dbFindTaskByConnectorExternalId(
   connectorId: string,
   externalId: string
 ): TaskConfig | null {
-  if (native) return nativeCall(native, 'dbFindTaskByConnectorExternalId', connectorId, externalId)
-  const row = getDb()
-    .prepare('SELECT * FROM tasks WHERE source_connector_id = ? AND source_external_id = ? LIMIT 1')
-    .get(connectorId, externalId) as
-    | {
-        id: string
-        project_name: string
-        title: string
-        description: string
-        status: string
-        [k: string]: unknown
-      }
-    | undefined
-  if (!row) return null
-  return dbGetTask(row.id)
+  return nativeCall('dbFindTaskByConnectorExternalId', connectorId, externalId)
 }
 
 export function dbListTaskSourceLinks(connectionId: string): TaskSourceLink[] {
-  if (native) return nativeCall(native, 'dbListTaskSourceLinks', connectionId)
-  const rows = getDb()
-    .prepare('SELECT * FROM task_source_links WHERE connection_id = ?')
-    .all(connectionId) as TaskSourceLinkRow[]
-  return rows.map(rowToTaskSourceLink)
+  return nativeCall('dbListTaskSourceLinks', connectionId)
 }
 
 export function dbInsertTaskSourceLink(link: TaskSourceLink): void {
-  if (native) return nativeCall(native, 'dbInsertTaskSourceLink', link)
-  getDb()
-    .prepare(
-      `INSERT INTO task_source_links (task_id, connection_id, connector_id, external_id, external_url, source_status_raw, source_updated_at, last_synced_at, conflict_state)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      link.taskId,
-      link.connectionId,
-      link.connectorId,
-      link.externalId,
-      link.externalUrl,
-      link.sourceStatusRaw,
-      link.sourceUpdatedAt,
-      link.lastSyncedAt,
-      link.conflictState
-    )
+  return nativeCall('dbInsertTaskSourceLink', link)
 }
 
 export function dbUpdateTaskSourceLink(taskId: string, updates: Partial<TaskSourceLink>): void {
-  if (native) return nativeCall(native, 'dbUpdateTaskSourceLink', taskId, updates)
-  const sets: string[] = []
-  const params: unknown[] = []
-  if (updates.sourceStatusRaw !== undefined) {
-    sets.push('source_status_raw = ?')
-    params.push(updates.sourceStatusRaw)
-  }
-  if (updates.sourceUpdatedAt !== undefined) {
-    sets.push('source_updated_at = ?')
-    params.push(updates.sourceUpdatedAt)
-  }
-  if (updates.lastSyncedAt !== undefined) {
-    sets.push('last_synced_at = ?')
-    params.push(updates.lastSyncedAt)
-  }
-  if (updates.conflictState !== undefined) {
-    sets.push('conflict_state = ?')
-    params.push(updates.conflictState)
-  }
-  if (sets.length === 0) return
-  params.push(taskId)
-  getDb()
-    .prepare(`UPDATE task_source_links SET ${sets.join(', ')} WHERE task_id = ?`)
-    .run(...params)
+  return nativeCall('dbUpdateTaskSourceLink', taskId, updates)
 }
 
 export function dbDeleteTaskSourceLink(taskId: string): void {
-  if (native) return nativeCall(native, 'dbDeleteTaskSourceLink', taskId)
-  getDb().prepare('DELETE FROM task_source_links WHERE task_id = ?').run(taskId)
+  return nativeCall('dbDeleteTaskSourceLink', taskId)
 }
 
 export function dbListProjects(): ProjectConfig[] {
-  if (native) return nativeCall(native, 'dbListProjects')
-  const rows = getDb().prepare('SELECT * FROM projects').all() as Array<{
-    name: string
-    path: string
-    preferred_agents: string
-    icon: string | null
-    icon_color: string | null
-    host_ids: string | null
-    workspace_id: string | null
-  }>
-  return rows.map(rowToProject)
+  return nativeCall('dbListProjects')
 }
 
 export function dbGetProject(name: string): ProjectConfig | null {
-  if (native) return nativeCall(native, 'dbGetProject', name)
-  const row = getDb().prepare('SELECT * FROM projects WHERE name = ?').get(name) as
-    | {
-        name: string
-        path: string
-        preferred_agents: string
-        icon: string | null
-        icon_color: string | null
-        host_ids: string | null
-        workspace_id: string | null
-      }
-    | undefined
-  return row ? rowToProject(row) : null
+  return nativeCall('dbGetProject', name)
 }
 
 export function dbInsertProject(project: ProjectConfig): void {
-  if (native) return nativeCall(native, 'dbInsertProject', project)
-  getDb()
-    .prepare(
-      'INSERT INTO projects (name, path, preferred_agents, icon, icon_color, host_ids, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    )
-    .run(
-      project.name,
-      project.path,
-      JSON.stringify(project.preferredAgents),
-      project.icon ?? null,
-      project.iconColor ?? null,
-      project.hostIds ? JSON.stringify(project.hostIds) : null,
-      project.workspaceId ?? 'personal'
-    )
+  return nativeCall('dbInsertProject', project)
 }
 
 export function dbUpdateProject(name: string, updates: Partial<ProjectConfig>): void {
-  if (native) return nativeCall(native, 'dbUpdateProject', name, updates)
-  const sets: string[] = []
-  const params: unknown[] = []
-  if (updates.path !== undefined) {
-    sets.push('path = ?')
-    params.push(updates.path)
-  }
-  if (updates.preferredAgents !== undefined) {
-    sets.push('preferred_agents = ?')
-    params.push(JSON.stringify(updates.preferredAgents))
-  }
-  if (updates.icon !== undefined) {
-    sets.push('icon = ?')
-    params.push(updates.icon)
-  }
-  if (updates.iconColor !== undefined) {
-    sets.push('icon_color = ?')
-    params.push(updates.iconColor)
-  }
-  if (updates.hostIds !== undefined) {
-    sets.push('host_ids = ?')
-    params.push(JSON.stringify(updates.hostIds))
-  }
-  if (updates.workspaceId !== undefined) {
-    sets.push('workspace_id = ?')
-    params.push(updates.workspaceId)
-  }
-  if (sets.length === 0) return
-  params.push(name)
-  getDb()
-    .prepare(`UPDATE projects SET ${sets.join(', ')} WHERE name = ?`)
-    .run(...params)
+  return nativeCall('dbUpdateProject', name, updates)
 }
 
 export function dbDeleteProject(name: string): void {
-  if (native) return nativeCall(native, 'dbDeleteProject', name)
-  const d = getDb()
-  d.transaction(() => {
-    d.prepare('DELETE FROM tasks WHERE project_name = ?').run(name)
-    d.prepare('DELETE FROM projects WHERE name = ?').run(name)
-  })()
+  return nativeCall('dbDeleteProject', name)
 }
 
 // ---------------------------------------------------------------------------
@@ -3195,63 +425,15 @@ export function dbDeleteProject(name: string): void {
 // ---------------------------------------------------------------------------
 
 export function dbListWorkflows(): WorkflowDefinition[] {
-  if (native) return nativeCall(native, 'dbListWorkflows')
-  const rows = getDb().prepare('SELECT * FROM workflows').all() as Array<{
-    id: string
-    name: string
-    icon: string
-    icon_color: string
-    nodes: string
-    edges: string
-    enabled: number
-    last_run_at: string | null
-    last_run_status: string | null
-    stagger_delay_ms: number | null
-    workspace_id: string | null
-  }>
-  return rows.map(rowToWorkflow)
+  return nativeCall('dbListWorkflows')
 }
 
 export function dbGetWorkflow(id: string): WorkflowDefinition | null {
-  if (native) return nativeCall(native, 'dbGetWorkflow', id)
-  const row = getDb().prepare('SELECT * FROM workflows WHERE id = ?').get(id) as
-    | {
-        id: string
-        name: string
-        icon: string
-        icon_color: string
-        nodes: string
-        edges: string
-        enabled: number
-        last_run_at: string | null
-        last_run_status: string | null
-        stagger_delay_ms: number | null
-        workspace_id: string | null
-      }
-    | undefined
-  return row ? rowToWorkflow(row) : null
+  return nativeCall('dbGetWorkflow', id)
 }
 
 export function dbInsertWorkflow(workflow: WorkflowDefinition): void {
-  if (native) return nativeCall(native, 'dbInsertWorkflow', workflow)
-  getDb()
-    .prepare(
-      `INSERT INTO workflows (id, name, icon, icon_color, nodes, edges, enabled, last_run_at, last_run_status, stagger_delay_ms, workspace_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      workflow.id,
-      workflow.name,
-      workflow.icon,
-      workflow.iconColor,
-      JSON.stringify(workflow.nodes),
-      JSON.stringify(workflow.edges),
-      workflow.enabled ? 1 : 0,
-      workflow.lastRunAt ?? null,
-      workflow.lastRunStatus ?? null,
-      workflow.staggerDelayMs ?? null,
-      workflow.workspaceId ?? 'personal'
-    )
+  return nativeCall('dbInsertWorkflow', workflow)
 }
 
 /**
@@ -3269,112 +451,25 @@ export function dbInsertWorkflow(workflow: WorkflowDefinition): void {
  * for the row to disappear in.
  */
 export function dbUpdateWorkflow(id: string, updates: Partial<WorkflowDefinition>): number {
-  if (native) return nativeCall(native, 'dbUpdateWorkflow', id, updates)
-  const sets: string[] = []
-  const params: unknown[] = []
-  if (updates.name !== undefined) {
-    sets.push('name = ?')
-    params.push(updates.name)
-  }
-  if (updates.nodes !== undefined) {
-    sets.push('nodes = ?')
-    params.push(JSON.stringify(updates.nodes))
-  }
-  if (updates.edges !== undefined) {
-    sets.push('edges = ?')
-    params.push(JSON.stringify(updates.edges))
-  }
-  if (updates.icon !== undefined) {
-    sets.push('icon = ?')
-    params.push(updates.icon)
-  }
-  if (updates.iconColor !== undefined) {
-    sets.push('icon_color = ?')
-    params.push(updates.iconColor)
-  }
-  if (updates.enabled !== undefined) {
-    sets.push('enabled = ?')
-    params.push(updates.enabled ? 1 : 0)
-  }
-  if (updates.staggerDelayMs !== undefined) {
-    sets.push('stagger_delay_ms = ?')
-    params.push(updates.staggerDelayMs)
-  }
-  if (updates.workspaceId !== undefined) {
-    sets.push('workspace_id = ?')
-    params.push(updates.workspaceId)
-  }
-  if (sets.length === 0) return 0
-  params.push(id)
-  const result = getDb()
-    .prepare(`UPDATE workflows SET ${sets.join(', ')} WHERE id = ?`)
-    .run(...params)
-  return Number(result.changes ?? 0)
+  return nativeCall('dbUpdateWorkflow', id, updates)
 }
 
 export function dbDeleteWorkflow(id: string): void {
-  if (native) return nativeCall(native, 'dbDeleteWorkflow', id)
-  getDb().prepare('DELETE FROM workflows WHERE id = ?').run(id)
-}
-
-// ---------------------------------------------------------------------------
-// Targeted CRUD: Identity and device tokens
-// ---------------------------------------------------------------------------
-
-interface DeviceTokenRow {
-  id: string
-  user_id: string
-  name: string
-  token_hash: string
-  created_at: string
-  last_seen_at: string | null
-  revoked_at: string | null
-}
-
-function rowToDeviceToken(row: Omit<DeviceTokenRow, 'token_hash'>): DeviceToken {
-  return {
-    id: row.id,
-    userId: row.user_id,
-    name: row.name,
-    createdAt: row.created_at,
-    lastSeenAt: row.last_seen_at,
-    revokedAt: row.revoked_at
-  }
+  return nativeCall('dbDeleteWorkflow', id)
 }
 
 /** The seeded owner. Present after migration 14 on any initialized database. */
 export function dbGetOwnerUser(): User | null {
-  if (native) return nativeCall(native, 'dbGetOwnerUser')
-  const row = getDb()
-    .prepare("SELECT * FROM users WHERE role = 'owner' ORDER BY created_at LIMIT 1")
-    .get() as { id: string; name: string; role: UserRole; created_at: string } | undefined
-  if (!row) return null
-  return { id: row.id, name: row.name, role: row.role, createdAt: row.created_at }
+  return nativeCall('dbGetOwnerUser')
 }
 
 export function dbInsertDeviceToken(token: NewDeviceToken): void {
-  if (native) return nativeCall(native, 'dbInsertDeviceToken', token)
-  getDb()
-    .prepare(
-      `INSERT INTO device_tokens (id, user_id, name, token_hash, created_at)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(token.id, token.userId, token.name, token.tokenHash, token.createdAt)
+  return nativeCall('dbInsertDeviceToken', token)
 }
 
 /** Carries the hash — for verification only. */
 export function dbGetDeviceTokenSecret(id: string): DeviceTokenSecret | null {
-  if (native) return nativeCall(native, 'dbGetDeviceTokenSecret', id)
-  const row = getDb()
-    .prepare('SELECT id, user_id, token_hash, revoked_at FROM device_tokens WHERE id = ?')
-    .get(id) as Pick<DeviceTokenRow, 'id' | 'user_id' | 'token_hash' | 'revoked_at'> | undefined
-  if (!row) return null
-  return {
-    id: row.id,
-    userId: row.user_id,
-    tokenHash: row.token_hash,
-    revokedAt: row.revoked_at
-  }
+  return nativeCall('dbGetDeviceTokenSecret', id)
 }
 
 /**
@@ -3382,34 +477,21 @@ export function dbGetDeviceTokenSecret(id: string): DeviceTokenSecret | null {
  * hash never leaves the data layer even if a later `...row` spread is careless.
  */
 export function dbListDeviceTokens(): DeviceToken[] {
-  if (native) return nativeCall(native, 'dbListDeviceTokens')
-  const rows = getDb()
-    .prepare(
-      `SELECT id, user_id, name, created_at, last_seen_at, revoked_at
-       FROM device_tokens ORDER BY created_at`
-    )
-    .all() as Omit<DeviceTokenRow, 'token_hash'>[]
-  return rows.map(rowToDeviceToken)
+  return nativeCall('dbListDeviceTokens')
 }
 
 /** Cheaper than listing when the caller only wants to know whether any exist. */
 export function dbHasDeviceTokens(): boolean {
-  if (native) return nativeCall(native, 'dbHasDeviceTokens')
-  return getDb().prepare('SELECT 1 FROM device_tokens LIMIT 1').get() !== undefined
+  return nativeCall('dbHasDeviceTokens')
 }
 
 /** Returns false when the id is unknown or the token was already revoked. */
 export function dbRevokeDeviceToken(id: string, revokedAt: string): boolean {
-  if (native) return nativeCall(native, 'dbRevokeDeviceToken', id, revokedAt)
-  const result = getDb()
-    .prepare('UPDATE device_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL')
-    .run(revokedAt, id)
-  return result.changes > 0
+  return nativeCall('dbRevokeDeviceToken', id, revokedAt)
 }
 
 export function dbTouchDeviceToken(id: string, seenAt: string): void {
-  if (native) return nativeCall(native, 'dbTouchDeviceToken', id, seenAt)
-  getDb().prepare('UPDATE device_tokens SET last_seen_at = ? WHERE id = ?').run(seenAt, id)
+  return nativeCall('dbTouchDeviceToken', id, seenAt)
 }
 
 // ---------------------------------------------------------------------------
@@ -3417,71 +499,19 @@ export function dbTouchDeviceToken(id: string, seenAt: string): void {
 // ---------------------------------------------------------------------------
 
 export function dbListWorkspaces(): WorkspaceConfig[] {
-  if (native) return nativeCall(native, 'dbListWorkspaces')
-  const rows = getDb().prepare('SELECT * FROM workspaces ORDER BY "order"').all() as Array<{
-    id: string
-    name: string
-    icon: string | null
-    icon_color: string | null
-    order: number
-  }>
-  return rows.map(rowToWorkspace)
+  return nativeCall('dbListWorkspaces')
 }
 
 export function dbInsertWorkspace(workspace: WorkspaceConfig): void {
-  if (native) return nativeCall(native, 'dbInsertWorkspace', workspace)
-  getDb()
-    .prepare(`INSERT INTO workspaces (id, name, icon, icon_color, "order") VALUES (?, ?, ?, ?, ?)`)
-    .run(
-      workspace.id,
-      workspace.name,
-      workspace.icon ?? null,
-      workspace.iconColor ?? null,
-      workspace.order
-    )
+  return nativeCall('dbInsertWorkspace', workspace)
 }
 
 export function dbUpdateWorkspace(id: string, updates: Partial<WorkspaceConfig>): void {
-  if (native) return nativeCall(native, 'dbUpdateWorkspace', id, updates)
-  const sets: string[] = []
-  const params: unknown[] = []
-  if (updates.name !== undefined) {
-    sets.push('name = ?')
-    params.push(updates.name)
-  }
-  if (updates.icon !== undefined) {
-    sets.push('icon = ?')
-    params.push(updates.icon)
-  }
-  if (updates.iconColor !== undefined) {
-    sets.push('icon_color = ?')
-    params.push(updates.iconColor)
-  }
-  if (updates.order !== undefined) {
-    sets.push('"order" = ?')
-    params.push(updates.order)
-  }
-  if (sets.length === 0) return
-  params.push(id)
-  getDb()
-    .prepare(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = ?`)
-    .run(...params)
+  return nativeCall('dbUpdateWorkspace', id, updates)
 }
 
 export function dbDeleteWorkspace(id: string): void {
-  if (native) return nativeCall(native, 'dbDeleteWorkspace', id)
-  const d = getDb()
-  d.transaction(() => {
-    // Move projects and workflows to 'personal' before deleting. A group belongs
-    // to one workspace, so it dies with it and its sessions come back ungrouped.
-    d.prepare(
-      'UPDATE sessions SET group_id = NULL WHERE group_id IN (SELECT id FROM session_groups WHERE workspace_id = ?)'
-    ).run(id)
-    d.prepare('DELETE FROM session_groups WHERE workspace_id = ?').run(id)
-    d.prepare("UPDATE projects SET workspace_id = 'personal' WHERE workspace_id = ?").run(id)
-    d.prepare("UPDATE workflows SET workspace_id = 'personal' WHERE workspace_id = ?").run(id)
-    d.prepare('DELETE FROM workspaces WHERE id = ?').run(id)
-  })()
+  return nativeCall('dbDeleteWorkspace', id)
 }
 
 // ---------------------------------------------------------------------------
@@ -3489,73 +519,19 @@ export function dbDeleteWorkspace(id: string): void {
 // ---------------------------------------------------------------------------
 
 export function dbListSessionGroups(): SessionGroupConfig[] {
-  if (native) return nativeCall(native, 'dbListSessionGroups')
-  const rows = getDb().prepare('SELECT * FROM session_groups ORDER BY "order"').all() as Array<{
-    id: string
-    name: string
-    icon: string | null
-    icon_color: string | null
-    order: number
-    workspace_id: string | null
-  }>
-  return rows.map(rowToSessionGroup)
+  return nativeCall('dbListSessionGroups')
 }
 
 export function dbInsertSessionGroup(group: SessionGroupConfig): void {
-  if (native) return nativeCall(native, 'dbInsertSessionGroup', group)
-  getDb()
-    .prepare(
-      `INSERT INTO session_groups (id, name, icon, icon_color, "order", workspace_id) VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      group.id,
-      group.name,
-      group.icon ?? null,
-      group.iconColor ?? null,
-      group.order,
-      group.workspaceId
-    )
+  return nativeCall('dbInsertSessionGroup', group)
 }
 
 export function dbUpdateSessionGroup(id: string, updates: Partial<SessionGroupConfig>): void {
-  if (native) return nativeCall(native, 'dbUpdateSessionGroup', id, updates)
-  const sets: string[] = []
-  const params: unknown[] = []
-  if (updates.name !== undefined) {
-    sets.push('name = ?')
-    params.push(updates.name)
-  }
-  if (updates.icon !== undefined) {
-    sets.push('icon = ?')
-    params.push(updates.icon)
-  }
-  if (updates.iconColor !== undefined) {
-    sets.push('icon_color = ?')
-    params.push(updates.iconColor)
-  }
-  if (updates.order !== undefined) {
-    sets.push('"order" = ?')
-    params.push(updates.order)
-  }
-  if (updates.workspaceId !== undefined) {
-    sets.push('workspace_id = ?')
-    params.push(updates.workspaceId)
-  }
-  if (sets.length === 0) return
-  params.push(id)
-  getDb()
-    .prepare(`UPDATE session_groups SET ${sets.join(', ')} WHERE id = ?`)
-    .run(...params)
+  return nativeCall('dbUpdateSessionGroup', id, updates)
 }
 
 export function dbDeleteSessionGroup(id: string): void {
-  if (native) return nativeCall(native, 'dbDeleteSessionGroup', id)
-  const d = getDb()
-  d.transaction(() => {
-    // Let the sessions go first; deleting a group never kills one.
-    d.prepare('UPDATE sessions SET group_id = NULL WHERE group_id = ?').run(id)
-    d.prepare('DELETE FROM session_groups WHERE id = ?').run(id)
-  })()
+  return nativeCall('dbDeleteSessionGroup', id)
 }
 
 // ---------------------------------------------------------------------------
@@ -3563,200 +539,19 @@ export function dbDeleteSessionGroup(id: string): void {
 // ---------------------------------------------------------------------------
 
 export function dbSaveSSHKey(key: SSHKey): void {
-  if (native) return nativeCall(native, 'dbSaveSSHKey', key)
-  getDb()
-    .prepare(
-      'INSERT INTO ssh_keys (id, label, encrypted_private_key, public_key, certificate, key_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    )
-    .run(
-      key.id,
-      key.label,
-      key.encryptedPrivateKey,
-      key.publicKey ?? null,
-      key.certificate ?? null,
-      key.keyType ?? null,
-      key.createdAt
-    )
+  return nativeCall('dbSaveSSHKey', key)
 }
 
 export function dbListSSHKeys(): SSHKeyMeta[] {
-  if (native) return nativeCall(native, 'dbListSSHKeys')
-  const rows = getDb()
-    .prepare('SELECT id, label, key_type, public_key, created_at FROM ssh_keys')
-    .all() as Array<{
-    id: string
-    label: string
-    key_type: string | null
-    public_key: string | null
-    created_at: string
-  }>
-  return rows.map((r) => ({
-    id: r.id,
-    label: r.label,
-    ...(r.key_type != null && { keyType: r.key_type }),
-    ...(r.public_key != null && { publicKey: r.public_key }),
-    createdAt: r.created_at
-  }))
+  return nativeCall('dbListSSHKeys')
 }
 
 export function dbGetSSHKey(id: string): SSHKey | null {
-  if (native) return nativeCall(native, 'dbGetSSHKey', id)
-  const row = getDb().prepare('SELECT * FROM ssh_keys WHERE id = ?').get(id) as
-    | {
-        id: string
-        label: string
-        encrypted_private_key: string
-        public_key: string | null
-        certificate: string | null
-        key_type: string | null
-        created_at: string
-      }
-    | undefined
-  if (!row) return null
-  return {
-    id: row.id,
-    label: row.label,
-    encryptedPrivateKey: row.encrypted_private_key,
-    ...(row.public_key != null && { publicKey: row.public_key }),
-    ...(row.certificate != null && { certificate: row.certificate }),
-    ...(row.key_type != null && { keyType: row.key_type }),
-    createdAt: row.created_at
-  }
+  return nativeCall('dbGetSSHKey', id)
 }
 
 export function dbDeleteSSHKey(id: string): void {
-  if (native) return nativeCall(native, 'dbDeleteSSHKey', id)
-  getDb().prepare('DELETE FROM ssh_keys WHERE id = ?').run(id)
-}
-
-// ---------------------------------------------------------------------------
-// Row mappers (shared between loadConfig and targeted queries)
-// ---------------------------------------------------------------------------
-
-function rowToTask(r: {
-  id: string
-  project_name: string
-  title: string
-  description: string
-  status: string
-  order: number
-  assigned_session_id: string | null
-  assigned_agent: string | null
-  agent_session_id: string | null
-  branch: string | null
-  use_worktree: number | null
-  created_at: string
-  updated_at: string
-  completed_at: string | null
-  archived_at?: string | null
-  source_connector_id?: string | null
-  source_external_url?: string | null
-  source_external_id?: string | null
-}): TaskConfig {
-  return {
-    id: r.id,
-    projectName: r.project_name,
-    title: r.title,
-    description: r.description,
-    status: r.status as TaskConfig['status'],
-    order: r.order,
-    ...(r.assigned_session_id != null && { assignedSessionId: r.assigned_session_id }),
-    ...(r.assigned_agent != null && { assignedAgent: r.assigned_agent as AiAgentType }),
-    ...(r.agent_session_id != null && { agentSessionId: r.agent_session_id }),
-    ...(r.branch != null && { branch: r.branch }),
-    ...(r.use_worktree != null && r.use_worktree !== 0 && { useWorktree: true }),
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-    ...(r.completed_at != null && { completedAt: r.completed_at }),
-    ...(r.archived_at != null && { archivedAt: r.archived_at }),
-    ...(r.source_connector_id != null && { sourceConnectorId: r.source_connector_id }),
-    ...(r.source_external_url != null && { sourceExternalUrl: r.source_external_url }),
-    ...(r.source_external_id != null && {
-      sourceExternalId: r.source_external_id
-    })
-  }
-}
-
-function rowToProject(r: {
-  name: string
-  path: string
-  preferred_agents: string
-  icon: string | null
-  icon_color: string | null
-  host_ids: string | null
-  workspace_id?: string | null
-}): ProjectConfig {
-  return {
-    name: r.name,
-    path: r.path,
-    preferredAgents: JSON.parse(r.preferred_agents) as AiAgentType[],
-    ...(r.icon != null && { icon: r.icon }),
-    ...(r.icon_color != null && { iconColor: r.icon_color }),
-    ...(r.host_ids != null && { hostIds: JSON.parse(r.host_ids) as string[] }),
-    workspaceId: r.workspace_id ?? 'personal'
-  }
-}
-
-function rowToWorkflow(r: {
-  id: string
-  name: string
-  icon: string
-  icon_color: string
-  nodes: string
-  edges: string
-  enabled: number
-  last_run_at: string | null
-  last_run_status: string | null
-  stagger_delay_ms: number | null
-  workspace_id?: string | null
-}): WorkflowDefinition {
-  return {
-    id: r.id,
-    name: r.name,
-    icon: r.icon,
-    iconColor: r.icon_color,
-    nodes: JSON.parse(r.nodes),
-    edges: JSON.parse(r.edges),
-    enabled: r.enabled === 1,
-    ...(r.last_run_at != null && { lastRunAt: r.last_run_at }),
-    ...(r.last_run_status != null && { lastRunStatus: r.last_run_status as 'success' | 'error' }),
-    ...(r.stagger_delay_ms != null && { staggerDelayMs: r.stagger_delay_ms }),
-    workspaceId: r.workspace_id ?? 'personal'
-  }
-}
-
-function rowToSessionGroup(r: {
-  id: string
-  name: string
-  icon: string | null
-  icon_color: string | null
-  order: number
-  workspace_id?: string | null
-}): SessionGroupConfig {
-  return {
-    id: r.id,
-    name: r.name,
-    ...(r.icon != null && { icon: r.icon }),
-    ...(r.icon_color != null && { iconColor: r.icon_color }),
-    order: r.order,
-    workspaceId: r.workspace_id ?? 'personal'
-  }
-}
-
-function rowToWorkspace(r: {
-  id: string
-  name: string
-  icon: string | null
-  icon_color: string | null
-  order: number
-}): WorkspaceConfig {
-  return {
-    id: r.id,
-    name: r.name,
-    ...(r.icon != null && { icon: r.icon }),
-    ...(r.icon_color != null && { iconColor: r.icon_color }),
-    order: r.order
-  }
+  return nativeCall('dbDeleteSSHKey', id)
 }
 
 // ---------------------------------------------------------------------------
@@ -3768,10 +563,7 @@ export function updateWorkflowRunStatus(
   lastRunAt: string,
   lastRunStatus: string
 ): void {
-  if (native) return nativeCall(native, 'updateWorkflowRunStatus', id, lastRunAt, lastRunStatus)
-  getDb()
-    .prepare('UPDATE workflows SET last_run_at = ?, last_run_status = ? WHERE id = ?')
-    .run(lastRunAt, lastRunStatus, id)
+  return nativeCall('updateWorkflowRunStatus', id, lastRunAt, lastRunStatus)
 }
 
 // ---------------------------------------------------------------------------
@@ -3779,113 +571,15 @@ export function updateWorkflowRunStatus(
 // ---------------------------------------------------------------------------
 
 export function saveSessions(sessions: TerminalSession[]): void {
-  if (native) return nativeCall(native, 'saveSessions', sessions)
-  const d = getDb()
-  const savedAt = Date.now()
-
-  const run = d.transaction(() => {
-    d.prepare('DELETE FROM sessions').run()
-    const insert = d.prepare(
-      `INSERT INTO sessions (id, agent_type, project_name, project_path, status, created_at, pid, display_name, branch, worktree_path, is_worktree, remote_host_id, remote_host_label, hook_session_id, status_source, saved_at, sort_order, worktree_name, agent_session_id, shell_cwd, head_commit, renamed_by_person, group_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    for (let i = 0; i < sessions.length; i++) {
-      const s = sessions[i]
-      insert.run(
-        s.id,
-        s.agentType,
-        s.projectName,
-        s.projectPath,
-        s.status,
-        s.createdAt,
-        s.pid,
-        s.displayName ?? null,
-        s.branch ?? null,
-        s.worktreePath ?? null,
-        s.isWorktree ? 1 : 0,
-        s.remoteHostId ?? null,
-        s.remoteHostLabel ?? null,
-        s.hookSessionId ?? null,
-        s.statusSource ?? null,
-        // A record's own stamp wins. Held sessions from a previous run are
-        // persisted beside the live ones, and re-stamping them with now made
-        // their age reset on every save -- so the window they are supposed to
-        // age out of never elapsed, and the pane reported them as having ended
-        // moments ago however long they had really been gone.
-        s.savedAt ?? savedAt,
-        i,
-        s.worktreeName ?? null,
-        s.agentSessionId ?? null,
-        s.shellCwd ?? null,
-        s.headCommit ?? null,
-        s.renamedByPerson ? 1 : 0,
-        s.groupId ?? null
-      )
-    }
-  })
-
-  run()
+  return nativeCall('saveSessions', sessions)
 }
 
 export function getPreviousSessions(): TerminalSession[] {
-  if (native) return nativeCall(native, 'getPreviousSessions')
-  const rows = getDb().prepare('SELECT * FROM sessions ORDER BY sort_order ASC').all() as Array<{
-    id: string
-    agent_type: string
-    project_name: string
-    project_path: string
-    status: string
-    created_at: number
-    pid: number
-    display_name: string | null
-    branch: string | null
-    worktree_path: string | null
-    is_worktree: number | null
-    remote_host_id: string | null
-    remote_host_label: string | null
-    hook_session_id: string | null
-    status_source: string | null
-    saved_at: number | null
-    shell_cwd: string | null
-    head_commit: string | null
-    group_id: string | null
-    worktree_name: string | null
-    agent_session_id: string | null
-    renamed_by_person: number | null
-  }>
-  return rows.map((r) => ({
-    id: r.id,
-    agentType: r.agent_type as AgentType,
-    projectName: r.project_name,
-    projectPath: r.project_path,
-    status: r.status as TerminalSession['status'],
-    createdAt: r.created_at,
-    pid: r.pid,
-    ...(r.display_name != null && { displayName: r.display_name }),
-    ...(r.branch != null && { branch: r.branch }),
-    ...(r.worktree_path != null && { worktreePath: r.worktree_path }),
-    ...(r.is_worktree != null && r.is_worktree !== 0 && { isWorktree: true }),
-    ...(r.remote_host_id != null && { remoteHostId: r.remote_host_id }),
-    ...(r.remote_host_label != null && { remoteHostLabel: r.remote_host_label }),
-    ...(r.hook_session_id != null && { hookSessionId: r.hook_session_id }),
-    ...(r.status_source != null && {
-      statusSource: r.status_source as TerminalSession['statusSource']
-    }),
-    ...(r.worktree_name != null && { worktreeName: r.worktree_name }),
-    ...(r.agent_session_id != null && { agentSessionId: r.agent_session_id }),
-    // Selected since this table was written and dropped on the floor until now.
-    // It is the only record of when a run ended.
-    ...(r.saved_at != null && { savedAt: r.saved_at }),
-    ...(r.shell_cwd != null && { shellCwd: r.shell_cwd }),
-    ...(r.head_commit != null && { headCommit: r.head_commit }),
-    ...(r.renamed_by_person != null && r.renamed_by_person !== 0 && { renamedByPerson: true }),
-    ...(r.group_id != null && { groupId: r.group_id })
-  }))
+  return nativeCall('getPreviousSessions')
 }
 
 export function clearSessions(): void {
-  if (native) return nativeCall(native, 'clearSessions')
-  getDb().prepare('DELETE FROM sessions').run()
+  return nativeCall('clearSessions')
 }
 
 // ---------------------------------------------------------------------------
@@ -3893,377 +587,26 @@ export function clearSessions(): void {
 // ---------------------------------------------------------------------------
 
 export function addScheduleLogEntry(entry: ScheduleLogEntry): void {
-  if (native) return nativeCall(native, 'addScheduleLogEntry', entry)
-  const d = getDb()
-  d.prepare(
-    `INSERT INTO schedule_log (workflow_id, workflow_name, executed_at, status, sessions_launched, error)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(
-    entry.workflowId,
-    entry.workflowName,
-    entry.executedAt,
-    entry.status,
-    entry.sessionsLaunched,
-    entry.error ?? null
-  )
-
-  // Trim to max entries
-  const count = (d.prepare('SELECT COUNT(*) as c FROM schedule_log').get() as { c: number }).c
-  if (count > MAX_LOG_ENTRIES) {
-    d.prepare(
-      `DELETE FROM schedule_log WHERE id IN (
-        SELECT id FROM schedule_log ORDER BY id ASC LIMIT ?
-      )`
-    ).run(count - MAX_LOG_ENTRIES)
-  }
+  return nativeCall('addScheduleLogEntry', entry)
 }
 
 export function getScheduleLogEntries(workflowId?: string): ScheduleLogEntry[] {
-  if (native) return nativeCall(native, 'getScheduleLogEntries', workflowId)
-  const d = getDb()
-  let rows: Array<{
-    workflow_id: string
-    workflow_name: string
-    executed_at: string
-    status: string
-    sessions_launched: number
-    error: string | null
-  }>
-
-  if (workflowId) {
-    rows = d
-      .prepare('SELECT * FROM schedule_log WHERE workflow_id = ? ORDER BY id')
-      .all(workflowId) as typeof rows
-  } else {
-    rows = d.prepare('SELECT * FROM schedule_log ORDER BY id').all() as typeof rows
-  }
-
-  return rows.map((r) => ({
-    workflowId: r.workflow_id,
-    workflowName: r.workflow_name,
-    executedAt: r.executed_at,
-    status: r.status as ScheduleLogEntry['status'],
-    sessionsLaunched: r.sessions_launched,
-    ...(r.error != null && { error: r.error })
-  }))
+  return nativeCall('getScheduleLogEntries', workflowId)
 }
 
 export function clearScheduleLog(): void {
-  if (native) return nativeCall(native, 'clearScheduleLog')
-  getDb().prepare('DELETE FROM schedule_log').run()
+  return nativeCall('clearScheduleLog')
 }
 
-// ---------------------------------------------------------------------------
-// Workflow runs
-// ---------------------------------------------------------------------------
-
-const MAX_WORKFLOW_RUNS = 50
-
 export function saveWorkflowRun(execution: WorkflowExecution): void {
-  if (native) {
-    const trimmed = nativeCall<string[]>(native, 'saveWorkflowRun', execution)
-    for (const id of trimmed) removeGateViews(getDataDir(), id)
-    return
-  }
-  const d = getDb()
-
-  const runId = workflowRunId(execution)
-
-  const run = d.transaction(() => {
-    d.prepare(
-      `INSERT OR REPLACE INTO workflow_runs (
-         id, workflow_id, started_at, completed_at, status, trigger_task_id,
-         inputs, connector_item, connector_inbox_id, connector_inbox_lease_token,
-         connector_inbox_disposition, definition
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      runId,
-      execution.workflowId,
-      execution.startedAt,
-      execution.completedAt ?? null,
-      execution.status,
-      execution.triggerTaskId ?? null,
-      execution.inputs ? JSON.stringify(execution.inputs) : null,
-      execution.connectorItem ? JSON.stringify(execution.connectorItem) : null,
-      execution.connectorInboxId ?? null,
-      execution.connectorInboxLeaseToken ?? null,
-      execution.connectorInboxDisposition ?? null,
-      execution.definition ? JSON.stringify(execution.definition) : null
-    )
-
-    // Delete existing nodes for this run (for upsert behavior)
-    d.prepare('DELETE FROM workflow_run_nodes WHERE run_id = ?').run(runId)
-
-    const insertNode = d.prepare(
-      `INSERT INTO workflow_run_nodes (run_id, node_id, status, started_at, completed_at, session_id, error, logs, task_id, agent_session_id, agent_type, project_name, project_path, approved_at, diagnostics, output, structured_output, iteration, worktree_path, worktree_name, worktree_origin, waiting_for, message, view_token, round, feedback, rejected_at, editable_text, edited_text)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    for (const ns of execution.nodeStates) {
-      insertNode.run(
-        runId,
-        ns.nodeId,
-        ns.status,
-        ns.startedAt ?? null,
-        ns.completedAt ?? null,
-        ns.sessionId ?? null,
-        ns.error ?? null,
-        ns.logs ?? null,
-        ns.taskId ?? null,
-        ns.agentSessionId ?? null,
-        ns.agentType ?? null,
-        ns.projectName ?? null,
-        ns.projectPath ?? null,
-        ns.approvedAt ?? null,
-        ns.diagnostics ?? null,
-        ns.output ?? null,
-        // Stored as JSON text: the parsed shape is whatever the step's
-        // outputSchema declared, so there is nothing narrower to store it as.
-        ns.structuredOutput ? JSON.stringify(ns.structuredOutput) : null,
-        ns.iteration ?? null,
-        ns.worktreePath ?? null,
-        ns.worktreeName ?? null,
-        ns.worktreeOrigin ?? null,
-        ns.waitingFor ?? null,
-        ns.message ?? null,
-        ns.viewToken ?? null,
-        ns.round ?? null,
-        ns.feedback?.length ? JSON.stringify(ns.feedback) : null,
-        ns.rejectedAt ?? null,
-        ns.editableText ?? null,
-        ns.editedText ?? null
-      )
-    }
-
-    // Keep active and unacknowledged connector runs available for restart
-    // recovery; terminal history whose inbox work is done — or whose inbox row
-    // is already gone — is safe to trim.
-    const count = (
-      d
-        .prepare('SELECT COUNT(*) as c FROM workflow_runs WHERE workflow_id = ?')
-        .get(execution.workflowId) as { c: number }
-    ).c
-    if (count > MAX_WORKFLOW_RUNS) {
-      const stale = d
-        .prepare(
-          `SELECT id FROM workflow_runs
-            WHERE workflow_id = ?
-              AND status != 'running'
-              AND (
-                connector_inbox_id IS NULL
-                OR NOT EXISTS (
-                  SELECT 1 FROM connector_inbox
-                  WHERE connector_inbox.id = workflow_runs.connector_inbox_id
-                    AND connector_inbox.status != 'processed'
-                )
-              )
-            ORDER BY started_at ASC
-            LIMIT ?`
-        )
-        .all(execution.workflowId, count - MAX_WORKFLOW_RUNS) as Array<{ id: string }>
-      const remove = d.prepare('DELETE FROM workflow_runs WHERE id = ?')
-      for (const { id } of stale) {
-        remove.run(id)
-        trimmed.push(id)
-      }
-    }
-  })
-
-  const trimmed: string[] = []
-  run()
+  const trimmed = nativeCall<string[]>('saveWorkflowRun', execution)
   for (const id of trimmed) removeGateViews(getDataDir(), id)
+  return
 }
 
 /** Every run id kept, so review pages of runs trimmed while the server was down can go too. */
 export function listWorkflowRunIds(): string[] {
-  if (native) return nativeCall(native, 'listWorkflowRunIds')
-  return (getDb().prepare('SELECT id FROM workflow_runs').all() as Array<{ id: string }>).map(
-    (r) => r.id
-  )
-}
-
-type WorkflowRunNodeRow = {
-  run_id: string
-  node_id: string
-  status: string
-  started_at: string | null
-  completed_at: string | null
-  session_id: string | null
-  error: string | null
-  logs: string | null
-  task_id: string | null
-  agent_session_id: string | null
-  agent_type: string | null
-  project_name: string | null
-  project_path: string | null
-  approved_at: string | null
-  diagnostics: string | null
-  output: string | null
-  structured_output: string | null
-  iteration: number | null
-  worktree_path: string | null
-  worktree_name: string | null
-  worktree_origin: string | null
-  waiting_for: string | null
-  message: string | null
-  view_token: string | null
-  round: number | null
-  feedback: string | null
-  rejected_at: string | null
-  editable_text: string | null
-  edited_text: string | null
-}
-
-function mapNodeRow(n: WorkflowRunNodeRow): NodeExecutionState {
-  // Computed before the spread: `{ x: undefined }` still creates the key, so
-  // spreading the parse result directly would leave a present-but-undefined
-  // structuredOutput on exactly the corrupt rows this is supposed to degrade.
-  const structured =
-    n.structured_output != null ? parseStructuredOutput(n.structured_output) : undefined
-  const feedback = parseGateFeedback(n.feedback)
-
-  return {
-    nodeId: n.node_id,
-    status: n.status as NodeExecutionState['status'],
-    ...(n.started_at != null && { startedAt: n.started_at }),
-    ...(n.completed_at != null && { completedAt: n.completed_at }),
-    ...(n.session_id != null && { sessionId: n.session_id }),
-    ...(n.error != null && { error: n.error }),
-    ...(n.logs != null && { logs: n.logs }),
-    ...(n.task_id != null && { taskId: n.task_id }),
-    ...(n.agent_session_id != null && { agentSessionId: n.agent_session_id }),
-    ...(n.agent_type != null && { agentType: n.agent_type as NodeExecutionState['agentType'] }),
-    ...(n.project_name != null && { projectName: n.project_name }),
-    ...(n.project_path != null && { projectPath: n.project_path }),
-    ...(n.approved_at != null && { approvedAt: n.approved_at }),
-    ...(n.diagnostics != null && { diagnostics: n.diagnostics }),
-    ...(n.output != null && { output: n.output }),
-    ...(structured !== undefined && { structuredOutput: structured }),
-    ...(n.iteration != null && { iteration: n.iteration }),
-    ...(n.worktree_path != null && { worktreePath: n.worktree_path }),
-    ...(n.worktree_name != null && { worktreeName: n.worktree_name }),
-    ...((n.worktree_origin === 'created' || n.worktree_origin === 'inherited') && {
-      worktreeOrigin: n.worktree_origin
-    }),
-    ...(n.waiting_for === 'signIn' && { waitingFor: 'signIn' as const }),
-    ...(n.message != null && { message: n.message }),
-    ...(n.view_token != null && { viewToken: n.view_token }),
-    ...(n.round != null && { round: n.round }),
-    ...(feedback && { feedback }),
-    ...(n.rejected_at != null && { rejectedAt: n.rejected_at }),
-    ...(n.editable_text != null && { editableText: n.editable_text }),
-    ...(n.edited_text != null && { editedText: n.edited_text })
-  }
-}
-
-/** A gate's comments, back out of storage; a corrupt row reads as none rather than breaking the run. */
-function parseGateFeedback(raw: string | null): GateFeedbackEntry[] | undefined {
-  if (raw == null) return undefined
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : undefined
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * A step's typed result, back out of storage.
- *
- * Tolerant on purpose: this column is JSON we wrote ourselves, but a row
- * predating a schema change — or written by a build that serialised something
- * unexpected — should degrade to "no typed output" rather than break loading
- * an entire run's history.
- */
-function parseStructuredOutput(raw: string): Record<string, unknown> | undefined {
-  try {
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function fetchNodesByRunIds(
-  d: Database.Database,
-  runIds: string[]
-): Map<string, NodeExecutionState[]> {
-  if (runIds.length === 0) return new Map()
-  const placeholders = runIds.map(() => '?').join(',')
-  const rows = d
-    .prepare(`SELECT * FROM workflow_run_nodes WHERE run_id IN (${placeholders})`)
-    .all(...runIds) as WorkflowRunNodeRow[]
-  const out = new Map<string, NodeExecutionState[]>()
-  for (const r of rows) {
-    const bucket = out.get(r.run_id)
-    const node = mapNodeRow(r)
-    if (bucket) bucket.push(node)
-    else out.set(r.run_id, [node])
-  }
-  return out
-}
-
-type RunRow = {
-  id: string
-  workflow_id: string
-  started_at: string
-  completed_at: string | null
-  status: string
-  trigger_task_id: string | null
-  inputs: string | null
-  connector_item: string | null
-  connector_inbox_id: number | null
-  connector_inbox_lease_token: string | null
-  connector_inbox_disposition: string | null
-  definition: string | null
-  workflow_name?: string | null
-}
-
-/** Run inputs are stored as a JSON blob. A row written before the column
- *  existed — or by a build that wrote something unparseable — must not take
- *  the whole run's history down with it. */
-function parseRunInputs(raw: string | null): Record<string, unknown> | undefined {
-  if (!raw) return undefined
-  try {
-    const parsed = JSON.parse(raw)
-    // Arrays are `typeof 'object'` but would surface as numeric-keyed rows in
-    // run history, so they're rejected alongside scalars and null.
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function mapRunRows(
-  rows: RunRow[],
-  nodesByRun: Map<string, NodeExecutionState[]>
-): (WorkflowExecution & { workflowName?: string })[] {
-  return rows.map((r) => {
-    const inputs = parseRunInputs(r.inputs)
-    const connectorItem = parseRunInputs(r.connector_item) as ConnectorItemContext | undefined
-    const definition = parseRunInputs(r.definition) as WorkflowDefinition | undefined
-    return {
-      runId: r.id,
-      workflowId: r.workflow_id,
-      startedAt: r.started_at,
-      ...(r.completed_at != null && { completedAt: r.completed_at }),
-      status: r.status as WorkflowExecution['status'],
-      ...(r.trigger_task_id != null && { triggerTaskId: r.trigger_task_id }),
-      ...(inputs && { inputs }),
-      ...(connectorItem && { connectorItem }),
-      ...(r.connector_inbox_id != null && { connectorInboxId: r.connector_inbox_id }),
-      ...(r.connector_inbox_lease_token != null && {
-        connectorInboxLeaseToken: r.connector_inbox_lease_token
-      }),
-      ...(r.connector_inbox_disposition === 'processed' || r.connector_inbox_disposition === 'retry'
-        ? { connectorInboxDisposition: r.connector_inbox_disposition }
-        : {}),
-      ...(r.workflow_name != null && { workflowName: r.workflow_name }),
-      ...(definition && { definition }),
-      nodeStates: nodesByRun.get(r.id) ?? []
-    }
-  })
+  return nativeCall('listWorkflowRunIds')
 }
 
 /** A run as clients get it: the definition snapshot is the engine's, and heavy on every update. */
@@ -4275,68 +618,23 @@ export function withoutDefinition<T extends WorkflowExecution>(run: T): Omit<T, 
 export function dbGetWorkflowRunByConnectorInboxId(
   connectorInboxId: number
 ): WorkflowExecution | null {
-  if (native) return nativeCall(native, 'dbGetWorkflowRunByConnectorInboxId', connectorInboxId)
-  const d = getDb()
-  const row = d
-    .prepare(
-      `SELECT * FROM workflow_runs
-       WHERE connector_inbox_id = ?
-       ORDER BY started_at DESC
-       LIMIT 1`
-    )
-    .get(connectorInboxId) as RunRow | undefined
-  if (!row) return null
-  return mapRunRows([row], fetchNodesByRunIds(d, [row.id]))[0] ?? null
+  return nativeCall('dbGetWorkflowRunByConnectorInboxId', connectorInboxId)
 }
 
 /** One run by its id — what the engine reads when a gate is answered after a restart. */
 export function getWorkflowRun(runId: string): WorkflowExecution | null {
-  if (native) return nativeCall(native, 'getWorkflowRun', runId)
-  const d = getDb()
-  const row = d.prepare('SELECT * FROM workflow_runs WHERE id = ?').get(runId) as RunRow | undefined
-  if (!row) return null
-  return mapRunRows([row], fetchNodesByRunIds(d, [row.id]))[0] ?? null
+  return nativeCall('getWorkflowRun', runId)
 }
 
 export function listWorkflowRuns(workflowId: string, limit = 20): WorkflowExecution[] {
-  if (native) return nativeCall(native, 'listWorkflowRuns', workflowId, limit)
-  const d = getDb()
-  const rows = d
-    .prepare('SELECT * FROM workflow_runs WHERE workflow_id = ? ORDER BY started_at DESC LIMIT ?')
-    .all(workflowId, limit) as RunRow[]
-  return mapRunRows(
-    rows,
-    fetchNodesByRunIds(
-      d,
-      rows.map((r) => r.id)
-    )
-  )
+  return nativeCall('listWorkflowRuns', workflowId, limit)
 }
 
 export function listWorkflowRunsByTask(
   taskId: string,
   limit = 20
 ): (WorkflowExecution & { workflowName?: string })[] {
-  if (native) return nativeCall(native, 'listWorkflowRunsByTask', taskId, limit)
-  const d = getDb()
-  const rows = d
-    .prepare(
-      `SELECT DISTINCT wr.*, w.name as workflow_name
-       FROM workflow_runs wr
-       LEFT JOIN workflows w ON w.id = wr.workflow_id
-       WHERE wr.trigger_task_id = ?
-          OR wr.id IN (SELECT run_id FROM workflow_run_nodes WHERE task_id = ?)
-       ORDER BY wr.started_at DESC
-       LIMIT ?`
-    )
-    .all(taskId, taskId, limit) as RunRow[]
-  return mapRunRows(
-    rows,
-    fetchNodesByRunIds(
-      d,
-      rows.map((r) => r.id)
-    )
-  )
+  return nativeCall('listWorkflowRunsByTask', taskId, limit)
 }
 
 /**
@@ -4346,22 +644,7 @@ export function listWorkflowRunsByTask(
  * stuck. The reconciler closes these out against `session_events`.
  */
 export function listRunningRuns(): WorkflowExecution[] {
-  if (native) return nativeCall(native, 'listRunningRuns')
-  const d = getDb()
-  const rows = d
-    .prepare(
-      `SELECT * FROM workflow_runs
-       WHERE status = 'running'
-       ORDER BY started_at DESC`
-    )
-    .all() as RunRow[]
-  return mapRunRows(
-    rows,
-    fetchNodesByRunIds(
-      d,
-      rows.map((r) => r.id)
-    )
-  )
+  return nativeCall('listRunningRuns')
 }
 
 // Surfaces every run that has at least one waiting node — small in practice
@@ -4369,24 +652,7 @@ export function listRunningRuns(): WorkflowExecution[] {
 // matches the real backlog. If this ever grows, cap with a LIMIT here and
 // chunk `fetchNodesByRunIds` to stay under SQLite's IN-clause variable cap.
 export function listRunsWithWaitingGates(kind?: 'signIn'): WorkflowExecution[] {
-  if (native) return nativeCall(native, 'listRunsWithWaitingGates', kind)
-  const d = getDb()
-  const rows = d
-    .prepare(
-      `SELECT DISTINCT wr.*
-       FROM workflow_runs wr
-       JOIN workflow_run_nodes wrn ON wrn.run_id = wr.id
-       WHERE wrn.status = 'waiting'${kind === 'signIn' ? " AND wrn.waiting_for = 'signIn'" : ''}
-       ORDER BY wr.started_at DESC`
-    )
-    .all() as RunRow[]
-  return mapRunRows(
-    rows,
-    fetchNodesByRunIds(
-      d,
-      rows.map((r) => r.id)
-    )
-  )
+  return nativeCall('listRunsWithWaitingGates', kind)
 }
 
 /**
@@ -4399,197 +665,61 @@ export function listAllWorkflowRuns(
   workspaceId?: string,
   limit = 50
 ): (WorkflowExecution & { workflowName?: string })[] {
-  if (native) return nativeCall(native, 'listAllWorkflowRuns', workspaceId, limit)
-  const d = getDb()
-  // Clamp to keep the IN-clause below SQLite's default 999-variable cap
-  // when fetching node rows for each run.
-  const cappedLimit = Math.max(1, Math.min(limit, 500))
-
-  // When filtering by workspace, exclude orphaned runs (workflow deleted, the
-  // LEFT JOIN nulls everything on `w`). Without `w.id IS NOT NULL`, the
-  // COALESCE would silently bucket every orphan into 'personal'.
-  const where = workspaceId
-    ? `WHERE w.id IS NOT NULL AND COALESCE(w.workspace_id, 'personal') = ?`
-    : ''
-  const sql = `SELECT wr.*, w.name as workflow_name
-               FROM workflow_runs wr
-               LEFT JOIN workflows w ON w.id = wr.workflow_id
-               ${where}
-               ORDER BY wr.started_at DESC
-               LIMIT ?`
-  const params = workspaceId ? [workspaceId, cappedLimit] : [cappedLimit]
-  const rows = d.prepare(sql).all(...params) as RunRow[]
-  return mapRunRows(
-    rows,
-    fetchNodesByRunIds(
-      d,
-      rows.map((r) => r.id)
-    )
-  )
+  return nativeCall('listAllWorkflowRuns', workspaceId, limit)
 }
-
-// ─── Session Events ───────────────────────────────────────────────
-
-const MAX_SESSION_EVENTS_PER_SESSION = 200
 
 /**
  * Records that the effect `effectId` was acted on. True the first time, false
  * for every delivery after: the caller acts only on true.
  */
 export function claimEffect(effectId: string, kind: string, now = Date.now()): boolean {
-  if (native) return nativeCall(native, 'claimEffect', effectId, kind, now)
-  return (
-    getDb()
-      .prepare(
-        'INSERT OR IGNORE INTO effect_receipts (effect_id, kind, received_at) VALUES (?, ?, ?)'
-      )
-      .run(effectId, kind, now).changes === 1
-  )
+  return nativeCall('claimEffect', effectId, kind, now)
 }
 
 /** Forgets receipts of `kind` older than `before`, and answers how many went. */
 export function pruneEffectReceipts(kind: string, before: number): number {
-  if (native) return nativeCall(native, 'pruneEffectReceipts', kind, before)
-  return getDb()
-    .prepare('DELETE FROM effect_receipts WHERE kind = ? AND received_at < ?')
-    .run(kind, before).changes
+  return nativeCall('pruneEffectReceipts', kind, before)
 }
 
 export function insertSessionEvent(event: SessionEvent): void {
-  if (native) return nativeCall(native, 'insertSessionEvent', event)
-  const d = getDb()
-  d.prepare(
-    `INSERT INTO session_events (session_id, event_type, timestamp, metadata)
-     VALUES (?, ?, ?, ?)`
-  ).run(
-    event.sessionId,
-    event.eventType,
-    event.timestamp,
-    event.metadata ? JSON.stringify(event.metadata) : null
-  )
-
-  // Prune old events — keep only the most recent N per session
-  d.prepare(
-    `DELETE FROM session_events WHERE session_id = ? AND id NOT IN (
-       SELECT id FROM session_events WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?
-     )`
-  ).run(event.sessionId, event.sessionId, MAX_SESSION_EVENTS_PER_SESSION)
+  return nativeCall('insertSessionEvent', event)
 }
 
 export function listSessionEvents(eventType?: SessionEventType, limit = 100): SessionEvent[] {
-  if (native) return nativeCall(native, 'listSessionEvents', eventType, limit)
-  const d = getDb()
-  let rows: Array<Record<string, unknown>>
-  if (eventType) {
-    rows = d
-      .prepare('SELECT * FROM session_events WHERE event_type = ? ORDER BY timestamp DESC LIMIT ?')
-      .all(eventType, limit) as Array<Record<string, unknown>>
-  } else {
-    rows = d
-      .prepare('SELECT * FROM session_events ORDER BY timestamp DESC LIMIT ?')
-      .all(limit) as Array<Record<string, unknown>>
-  }
-  return rows.map(mapSessionEventRow)
+  return nativeCall('listSessionEvents', eventType, limit)
 }
 
 export function listSessionEventsBySession(sessionId: string, limit = 100): SessionEvent[] {
-  if (native) return nativeCall(native, 'listSessionEventsBySession', sessionId, limit)
-  const d = getDb()
-  const rows = d
-    .prepare('SELECT * FROM session_events WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?')
-    .all(sessionId, limit) as Array<Record<string, unknown>>
-  return rows.map(mapSessionEventRow)
-}
-
-function mapSessionEventRow(r: Record<string, unknown>): SessionEvent {
-  const meta = r.metadata as string | null
-  return {
-    id: r.id as number,
-    sessionId: r.session_id as string,
-    eventType: r.event_type as SessionEvent['eventType'],
-    timestamp: r.timestamp as string,
-    ...(meta != null && { metadata: JSON.parse(meta) })
-  }
+  return nativeCall('listSessionEventsBySession', sessionId, limit)
 }
 
 // ─── Artifacts ────────────────────────────────────────────────────
 
 /** Create an artifact with no versions yet, and the token that unlocks its pages. */
 export function insertArtifact(fields: NewArtifact): { artifact: Artifact; token: string } {
-  if (native) return nativeCall(native, 'insertArtifact', fields)
-  const now = new Date().toISOString()
-  const id = randomUUID()
-  const token = randomUUID().replace(/-/g, '')
-  getDb()
-    .prepare(
-      `INSERT INTO artifacts (id, kind, title, session_id, project_name, token, latest_version,
-         gate_run_id, gate_node_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
-    )
-    .run(
-      id,
-      fields.kind,
-      fields.title,
-      fields.sessionId,
-      fields.projectName,
-      token,
-      fields.gateRunId ?? null,
-      fields.gateNodeId ?? null,
-      now,
-      now
-    )
-  return { artifact: getArtifact(id)!, token }
+  return nativeCall('insertArtifact', fields)
 }
 
 export function getArtifact(id: string): Artifact | null {
-  if (native) return nativeCall(native, 'getArtifact', id)
-  const row = getDb().prepare('SELECT * FROM artifacts WHERE id = ?').get(id) as
-    | Record<string, unknown>
-    | undefined
-  return row ? mapArtifactRow(row) : null
+  return nativeCall('getArtifact', id)
 }
 
 export function getArtifactToken(id: string): string | null {
-  if (native) return nativeCall(native, 'getArtifactToken', id)
-  const row = getDb().prepare('SELECT token FROM artifacts WHERE id = ?').get(id) as
-    | { token: string }
-    | undefined
-  return row?.token ?? null
+  return nativeCall('getArtifactToken', id)
 }
 
 /** The newest first, narrowed to one session or one project when asked. */
 export function listArtifacts(filter: ArtifactFilter = {}, limit = 50): Artifact[] {
-  if (native) return nativeCall(native, 'listArtifacts', filter, limit)
-  const where: string[] = []
-  const params: unknown[] = []
-  if (filter.sessionId) {
-    where.push('session_id = ?')
-    params.push(filter.sessionId)
-  }
-  if (filter.projectName) {
-    where.push('project_name = ?')
-    params.push(filter.projectName)
-  }
-  const sql = `SELECT * FROM artifacts ${where.length ? `WHERE ${where.join(' OR ')}` : ''}
-               ORDER BY updated_at DESC LIMIT ?`
-  const rows = getDb()
-    .prepare(sql)
-    .all(...params, limit) as Array<Record<string, unknown>>
-  return rows.map(mapArtifactRow)
+  return nativeCall('listArtifacts', filter, limit)
 }
 
 /** The artifact a gate's review pages are kept as, one version per round. */
 export function findGateArtifact(runId: string, nodeId: string): Artifact | null {
-  if (native) return nativeCall(native, 'findGateArtifact', runId, nodeId)
-  const row = getDb()
-    .prepare('SELECT * FROM artifacts WHERE gate_run_id = ? AND gate_node_id = ?')
-    .get(runId, nodeId) as Record<string, unknown> | undefined
-  return row ? mapArtifactRow(row) : null
+  return nativeCall('findGateArtifact', runId, nodeId)
 }
 
 export function renameArtifact(id: string, title: string): void {
-  if (native) return nativeCall(native, 'renameArtifact', id, title)
-  getDb().prepare('UPDATE artifacts SET title = ? WHERE id = ?').run(title, id)
+  return nativeCall('renameArtifact', id, title)
 }
 
 /** Number the next version and make it the latest, in one step so two publishes cannot share a number. */
@@ -4598,111 +728,31 @@ export function addArtifactVersion(
   author: ArtifactAuthor,
   answersBatchId?: string
 ): ArtifactVersion {
-  if (native) return nativeCall(native, 'addArtifactVersion', artifactId, author, answersBatchId)
-  const d = getDb()
-  return d.transaction(() => {
-    const row = d.prepare('SELECT latest_version FROM artifacts WHERE id = ?').get(artifactId) as
-      | { latest_version: number }
-      | undefined
-    if (!row) throw new Error(`Artifact not found: ${artifactId}`)
-    const version = row.latest_version + 1
-    const now = new Date().toISOString()
-    d.prepare(
-      `INSERT INTO artifact_versions (artifact_id, version, author, answers_batch_id, created_at)
-       VALUES (?, ?, ?, ?, ?)`
-    ).run(artifactId, version, author, answersBatchId ?? null, now)
-    d.prepare('UPDATE artifacts SET latest_version = ?, updated_at = ? WHERE id = ?').run(
-      version,
-      now,
-      artifactId
-    )
-    return { artifactId, version, author, answersBatchId, createdAt: now }
-  })()
+  return nativeCall('addArtifactVersion', artifactId, author, answersBatchId)
 }
 
 export function listArtifactVersions(artifactId: string): ArtifactVersion[] {
-  if (native) return nativeCall(native, 'listArtifactVersions', artifactId)
-  const rows = getDb()
-    .prepare('SELECT * FROM artifact_versions WHERE artifact_id = ? ORDER BY version')
-    .all(artifactId) as Array<Record<string, unknown>>
-  return rows.map((r) => ({
-    artifactId: r.artifact_id as string,
-    version: r.version as number,
-    author: r.author as ArtifactAuthor,
-    ...(r.answers_batch_id != null && { answersBatchId: r.answers_batch_id as string }),
-    createdAt: r.created_at as string
-  }))
+  return nativeCall('listArtifactVersions', artifactId)
 }
 
 /** The latest batch sent on this artifact that no version has answered yet. */
 export function unansweredBatchId(artifactId: string): string | undefined {
-  if (native) return nativeCall<string | null>(native, 'unansweredBatchId', artifactId) ?? undefined
-  const row = getDb()
-    .prepare(
-      `SELECT batch_id FROM artifact_comments
-       WHERE artifact_id = ? AND state = 'sent' AND batch_id IS NOT NULL
-         AND batch_id NOT IN (
-           SELECT answers_batch_id FROM artifact_versions
-           WHERE artifact_id = ? AND answers_batch_id IS NOT NULL
-         )
-       ORDER BY sent_at DESC LIMIT 1`
-    )
-    .get(artifactId, artifactId) as { batch_id: string } | undefined
-  return row?.batch_id
+  return nativeCall<string | null>('unansweredBatchId', artifactId) ?? undefined
 }
 
 export function listArtifactComments(
   artifactId: string,
   filter: ArtifactCommentFilter = {}
 ): ArtifactComment[] {
-  if (native) return nativeCall(native, 'listArtifactComments', artifactId, filter)
-  const where = ['artifact_id = ?']
-  const params: unknown[] = [artifactId]
-  if (filter.version !== undefined) {
-    where.push('version = ?')
-    params.push(filter.version)
-  }
-  if (filter.state) {
-    where.push('state = ?')
-    params.push(filter.state)
-  }
-  if (filter.batchId) {
-    where.push('batch_id = ?')
-    params.push(filter.batchId)
-  }
-  const rows = getDb()
-    .prepare(`SELECT * FROM artifact_comments WHERE ${where.join(' AND ')} ORDER BY created_at`)
-    .all(...params) as Array<Record<string, unknown>>
-  return rows.map(mapArtifactCommentRow)
+  return nativeCall('listArtifactComments', artifactId, filter)
 }
 
 export function getArtifactComment(id: string): ArtifactComment | null {
-  if (native) return nativeCall(native, 'getArtifactComment', id)
-  const row = getDb().prepare('SELECT * FROM artifact_comments WHERE id = ?').get(id) as
-    | Record<string, unknown>
-    | undefined
-  return row ? mapArtifactCommentRow(row) : null
+  return nativeCall('getArtifactComment', id)
 }
 
 export function insertArtifactComment(fields: NewArtifactComment): ArtifactComment {
-  if (native) return nativeCall(native, 'insertArtifactComment', fields)
-  const now = new Date().toISOString()
-  const id = randomUUID()
-  getDb()
-    .prepare(
-      `INSERT INTO artifact_comments (id, artifact_id, version, anchor, body, state, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)`
-    )
-    .run(
-      id,
-      fields.artifactId,
-      fields.version,
-      fields.anchor ? JSON.stringify(fields.anchor) : null,
-      fields.body,
-      now,
-      now
-    )
-  return getArtifactComment(id)!
+  return nativeCall('insertArtifactComment', fields)
 }
 
 /** Change a draft's words or anchor; a sent comment is part of the record and stays as it was. */
@@ -4710,93 +760,26 @@ export function updateArtifactComment(
   id: string,
   change: ArtifactCommentChange
 ): ArtifactComment | null {
-  if (native) return nativeCall(native, 'updateArtifactComment', id, change)
-  const current = getArtifactComment(id)
-  if (!current || current.state !== 'draft') return null
-  const anchor = change.anchor === undefined ? current.anchor : change.anchor
-  getDb()
-    .prepare('UPDATE artifact_comments SET body = ?, anchor = ?, updated_at = ? WHERE id = ?')
-    .run(
-      change.body ?? current.body,
-      anchor ? JSON.stringify(anchor) : null,
-      new Date().toISOString(),
-      id
-    )
-  return getArtifactComment(id)
+  return nativeCall('updateArtifactComment', id, change)
 }
 
 /** Drop a draft. Returns false when there was no draft by that id. */
 export function deleteArtifactComment(id: string): boolean {
-  if (native) return nativeCall(native, 'deleteArtifactComment', id)
-  const result = getDb()
-    .prepare("DELETE FROM artifact_comments WHERE id = ? AND state = 'draft'")
-    .run(id)
-  return result.changes > 0
+  return nativeCall('deleteArtifactComment', id)
 }
 
 /** Seal every draft on the artifact into one batch. Null when there were none. */
 export function sendArtifactDrafts(
   artifactId: string
 ): { batchId: string; comments: ArtifactComment[] } | null {
-  if (native) return nativeCall(native, 'sendArtifactDrafts', artifactId)
-  const d = getDb()
-  return d.transaction(() => {
-    const batchId = randomUUID()
-    const result = d
-      .prepare(
-        `UPDATE artifact_comments SET state = 'sent', batch_id = ?, sent_at = ?
-         WHERE artifact_id = ? AND state = 'draft'`
-      )
-      .run(batchId, new Date().toISOString(), artifactId)
-    if (result.changes === 0) return null
-    return { batchId, comments: listArtifactComments(artifactId, { batchId }) }
-  })()
+  return nativeCall('sendArtifactDrafts', artifactId)
 }
 
 /** Remove artifacts untouched since `cutoff`, returning their ids so their pages can go too. */
 export function deleteArtifactsUpdatedBefore(cutoff: string): string[] {
-  if (native) return nativeCall(native, 'deleteArtifactsUpdatedBefore', cutoff)
-  const d = getDb()
-  const rows = d.prepare('SELECT id FROM artifacts WHERE updated_at < ?').all(cutoff) as Array<{
-    id: string
-  }>
-  d.prepare('DELETE FROM artifacts WHERE updated_at < ?').run(cutoff)
-  return rows.map((r) => r.id)
+  return nativeCall('deleteArtifactsUpdatedBefore', cutoff)
 }
 
 export function listArtifactIds(): string[] {
-  if (native) return nativeCall(native, 'listArtifactIds')
-  const rows = getDb().prepare('SELECT id FROM artifacts').all() as Array<{ id: string }>
-  return rows.map((r) => r.id)
-}
-
-function mapArtifactRow(r: Record<string, unknown>): Artifact {
-  return {
-    id: r.id as string,
-    kind: r.kind as ArtifactKind,
-    title: r.title as string,
-    sessionId: (r.session_id as string | null) ?? null,
-    projectName: (r.project_name as string | null) ?? null,
-    latestVersion: r.latest_version as number,
-    ...(r.gate_run_id != null && { gateRunId: r.gate_run_id as string }),
-    ...(r.gate_node_id != null && { gateNodeId: r.gate_node_id as string }),
-    createdAt: r.created_at as string,
-    updatedAt: r.updated_at as string
-  }
-}
-
-function mapArtifactCommentRow(r: Record<string, unknown>): ArtifactComment {
-  const anchor = r.anchor as string | null
-  return {
-    id: r.id as string,
-    artifactId: r.artifact_id as string,
-    version: r.version as number,
-    anchor: anchor ? (JSON.parse(anchor) as ArtifactAnchor) : null,
-    body: r.body as string,
-    state: r.state as ArtifactComment['state'],
-    ...(r.batch_id != null && { batchId: r.batch_id as string }),
-    createdAt: r.created_at as string,
-    updatedAt: r.updated_at as string,
-    ...(r.sent_at != null && { sentAt: r.sent_at as string })
-  }
+  return nativeCall('listArtifactIds')
 }

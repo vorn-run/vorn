@@ -222,7 +222,7 @@ impl Store {
 
 /// A JSON value bound as libsql binds the JavaScript value: strings as text,
 /// numbers as numbers, booleans as 1 or 0, null as NULL. Objects and arrays
-/// never reach a column unserialized in the TypeScript store; they bind as
+/// never reached a column unserialized in the TypeScript store; they bind as
 /// their JSON text here.
 pub(crate) fn bind(value: &Value) -> SqlValue {
     match value {

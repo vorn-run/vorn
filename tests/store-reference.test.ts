@@ -1,14 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
 }))
 
 import * as store from '../packages/server/src/database'
-import { nativeCore } from '../packages/server/src/native-core'
 import type {
   AppConfig,
   ConnectorItemContext,
@@ -18,15 +14,11 @@ import type {
   WorkflowDefinition,
   WorkflowExecution
 } from '@vornrun/shared/types'
-import { normalizeStoreOutput } from './helpers/store-parity'
+import { normalizeStoreOutput, withoutMachineValues } from './helpers/store-parity'
+import storeReference from './fixtures/js-reference/store.json'
 
-const available = typeof nativeCore()?.NativeStore === 'function'
-
-const forced = process.env.VORN_NATIVE_STORE
 afterEach(() => {
   store.closeDatabase()
-  if (forced === undefined) delete process.env.VORN_NATIVE_STORE
-  else process.env.VORN_NATIVE_STORE = forced
 })
 
 const project: ProjectConfig = {
@@ -104,7 +96,7 @@ function scenario(): Array<[string, unknown]> {
   step('loadConfig fresh', loaded)
   const config: AppConfig = {
     ...loaded,
-    defaults: { ...loaded.defaults, fontSize: 15, experimental: { nativeStore: true } },
+    defaults: { ...loaded.defaults, fontSize: 15, experimental: { nativeServer: true } },
     projects: [project]
   }
   store.saveConfig(config)
@@ -384,78 +376,22 @@ function scenario(): Array<[string, unknown]> {
   return out
 }
 
-function runOn(nativeStore: boolean): Array<[string, unknown]> {
-  if (nativeStore) process.env.VORN_NATIVE_STORE = '1'
-  else delete process.env.VORN_NATIVE_STORE
-  const teardown = store.initTestDatabase()
-  try {
-    expect(store.storeStatus().native).toBe(nativeStore)
-    return scenario().map(([label, value]) => [label, normalizeStoreOutput(value)])
-  } finally {
-    teardown()
-  }
-}
-
-describe.skipIf(!available)('native store', () => {
-  it('answers every call as the TypeScript store does', () => {
-    const js = runOn(false)
-    const rust = runOn(true)
-    expect(rust.map(([label]) => label)).toEqual(js.map(([label]) => label))
-    for (let i = 0; i < js.length; i++) {
-      expect({ [rust[i][0]]: rust[i][1] }).toEqual({ [js[i][0]]: js[i][1] })
-    }
-  })
-
-  it('opens an existing database when the switch is on, and either store reads what the other wrote', () => {
-    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-native-store-'))
+describe('store', () => {
+  it('answers every call as the TypeScript store it replaced did', () => {
+    const teardown = store.initTestDatabase()
+    let actual: Array<[string, unknown]>
     try {
-      process.env.VORN_NATIVE_STORE = '0'
-      store.initDatabase(dataDir)
-      expect(store.storeStatus().native).toBe(false)
-      store.dbInsertProject(project)
-      store.dbInsertTask(task('t1', 0))
-      store.dbInsertWorkflow(workflow('wf-1'))
-      store.saveWorkflowRun(run('wf-1:r1', 'success'))
-      const config = store.loadConfig()
-      // The switch as Settings saves it, and nothing forcing either store.
-      store.saveConfig({
-        ...config,
-        defaults: { ...config.defaults, fontSize: 17, experimental: { nativeStore: true } }
-      })
-      const written = store.loadConfig()
-      const runs = store.listWorkflowRuns('wf-1')
-      store.closeDatabase()
-
-      delete process.env.VORN_NATIVE_STORE
-      store.initDatabase(dataDir)
-      expect(store.storeStatus()).toEqual({ native: true, error: null })
-      expect(store.loadConfig()).toEqual(written)
-      expect(normalizeStoreOutput(store.listWorkflowRuns('wf-1'))).toEqual(
-        normalizeStoreOutput(runs)
-      )
-      store.dbInsertTask(task('t2', 1))
-      store.dbUpdateTask('t1', { status: 'done' })
-      const nativeConfig = store.loadConfig()
-      store.saveConfig({ ...nativeConfig, defaults: { ...nativeConfig.defaults, fontSize: 18 } })
-      const afterNative = store.loadConfig()
-      store.closeDatabase()
-
-      process.env.VORN_NATIVE_STORE = '0'
-      store.initDatabase(dataDir)
-      expect(store.storeStatus().native).toBe(false)
-      expect(store.loadConfig()).toEqual(afterNative)
-      expect(store.dbListTasks('proj').map((t) => [t.id, t.status])).toEqual([
-        ['t1', 'done'],
-        ['t2', 'todo']
+      actual = scenario().map(([label, value]) => [
+        label,
+        normalizeStoreOutput(withoutMachineValues(value))
       ])
     } finally {
-      store.closeDatabase()
-      try {
-        fs.rmSync(dataDir, { recursive: true, force: true })
-      } catch {
-        // Windows refuses while libsql still holds the file: its close() leaves
-        // the handle open until the process exits. The temp dir can stay.
-      }
+      teardown()
+    }
+    const reference = storeReference as Array<[string, unknown]>
+    expect(actual.map(([label]) => label)).toEqual(reference.map(([label]) => label))
+    for (let i = 0; i < reference.length; i++) {
+      expect({ [actual[i][0]]: actual[i][1] }).toEqual({ [reference[i][0]]: reference[i][1] })
     }
   })
 })
