@@ -359,6 +359,97 @@ impl Git {
             Err(err) => Done::Failed(err.to_string()),
         }
     }
+
+    /// The GitHub repository `cwd`'s `origin` points at, as the server's
+    /// `detectRepoSlug` reads it: `None` for no repository, no origin, no git
+    /// or a remote that is not on GitHub.
+    pub fn github_origin(&self, cwd: &Path) -> Option<GitHubRepo> {
+        let url = self
+            .exec_default(&["remote", "get-url", "origin"], cwd, 3000)
+            .ok()?;
+        parse_github_remote(&url)
+    }
+}
+
+/// A repository on GitHub.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GitHubRepo {
+    pub owner: String,
+    pub repo: String,
+}
+
+/// The server's `parseGitHubRemote`: the regular expression
+/// `^(?:https?://|ssh://)?(?:[^@/]+@)?github\.com[:/]+([^/]+)/(.+?)(?:\.git)?/?$`,
+/// ignoring ASCII case, on the trimmed URL, and then no nested path in the
+/// repository. Each alternative is tried in the order the expression's
+/// backtracking tries it, and the first that matches is the answer.
+pub fn parse_github_remote(url: &str) -> Option<GitHubRepo> {
+    let url = js_trim(url);
+    if url.is_empty() {
+        return None;
+    }
+    for scheme in ["https://", "http://", "ssh://", ""] {
+        let Some(rest) = strip_prefix_ascii_ci(url, scheme) else {
+            continue;
+        };
+        // `(?:[^@/]+@)?`: up to the first `@`, when nothing before it is a
+        // `/`, tried before going without.
+        let user = rest
+            .find('@')
+            .filter(|&at| at > 0 && !rest[..at].contains('/'))
+            .map(|at| &rest[at + 1..]);
+        for host in user.into_iter().chain([rest]) {
+            if let Some(found) = after_host(host) {
+                return found;
+            }
+        }
+    }
+    None
+}
+
+/// The match from `github.com` on, when there is one: `Some(None)` for a
+/// match the nested-path rule refuses.
+fn after_host(s: &str) -> Option<Option<GitHubRepo>> {
+    let rest = strip_prefix_ascii_ci(s, "github.com")?;
+    // `[:/]+` takes all it can, then gives back one at a time: a `:` given
+    // back can start the owner.
+    let run = rest.len() - rest.trim_start_matches([':', '/']).len();
+    (1..=run).rev().find_map(|k| owner_and_repo(&rest[k..]))
+}
+
+/// `([^/]+)/(.+?)(?:\.git)?/?$` at the start of `rest`, then the
+/// nested-path rule.
+fn owner_and_repo(rest: &str) -> Option<Option<GitHubRepo>> {
+    let slash = rest.find('/')?;
+    let (owner, rest) = (&rest[..slash], &rest[slash + 1..]);
+    if owner.is_empty() {
+        return None;
+    }
+    // `(.+?)` is the shortest run, without line terminators (`.` takes
+    // none), that leaves `.git/`, `.git`, `/` or nothing.
+    let repo = (1..=rest.len())
+        .filter(|&k| rest.is_char_boundary(k))
+        .find(|&k| {
+            let tail = &rest[k..];
+            tail.is_empty()
+                || tail == "/"
+                || tail.eq_ignore_ascii_case(".git")
+                || tail.eq_ignore_ascii_case(".git/")
+        })
+        .map(|k| &rest[..k])?;
+    if repo.contains(['\n', '\r', '\u{2028}', '\u{2029}']) {
+        return None;
+    }
+    Some((!repo.contains('/')).then(|| GitHubRepo {
+        owner: owner.to_owned(),
+        repo: repo.to_owned(),
+    }))
+}
+
+fn strip_prefix_ascii_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = s.get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix)
+        .then(|| &s[prefix.len()..])
 }
 
 /// The separator the server joins worktree paths with on this platform.
@@ -1004,5 +1095,58 @@ mod tests {
             None
         );
         assert_eq!(vorn_worktree_project(Path::new("/src/app")), None);
+    }
+
+    fn gh(owner: &str, repo: &str) -> Option<GitHubRepo> {
+        Some(GitHubRepo {
+            owner: owner.into(),
+            repo: repo.into(),
+        })
+    }
+
+    #[test]
+    fn reads_github_remotes_as_the_server_does() {
+        assert_eq!(
+            parse_github_remote("git@github.com:vorn-run/vorn.git"),
+            gh("vorn-run", "vorn")
+        );
+        assert_eq!(
+            parse_github_remote("https://github.com/vorn-run/connectors.git"),
+            gh("vorn-run", "connectors")
+        );
+        assert_eq!(
+            parse_github_remote("ssh://git@github.com/vorn-run/vorn"),
+            gh("vorn-run", "vorn")
+        );
+        assert_eq!(
+            parse_github_remote("  https://github.com/a/b/  "),
+            gh("a", "b")
+        );
+        assert_eq!(
+            parse_github_remote("git@github.com:owner/my.repo.git"),
+            gh("owner", "my.repo")
+        );
+        assert_eq!(
+            parse_github_remote("HTTPS://GitHub.COM/a/b.GIT"),
+            gh("a", "b")
+        );
+        // `[:/]+` gives a `:` back to the owner when it has to.
+        assert_eq!(parse_github_remote("git@github.com::/a.git"), gh(":", "a"));
+    }
+
+    #[test]
+    fn refuses_what_is_not_a_github_repo_root() {
+        for url in [
+            "git@gitlab.com:vorn-run/vorn.git",
+            "https://bitbucket.org/a/b.git",
+            "https://github.com/vorn-run/vorn/tree/main",
+            "",
+            "   ",
+            "github.com",
+            "https://github.com/onlyowner",
+            "https://github.com/a/b\nc",
+        ] {
+            assert_eq!(parse_github_remote(url), None, "{url:?}");
+        }
     }
 }

@@ -367,8 +367,8 @@ pub(crate) fn create(store: &mut Store) -> Result<()> {
     conn.execute_batch(ARTIFACT_DDL)?;
     conn.execute_batch(EFFECT_RECEIPTS_DDL)?;
 
-    let workspace = store.options().default_workspace.clone();
-    let owner = store.options().owner_name.clone();
+    let workspace = store.options()?.default_workspace.clone();
+    let owner = store.options()?.owner_name.clone();
     migrate(store.conn_mut(), &workspace, &owner)?;
     verify(store.conn_mut())?;
     seed_legacy_connector_poll_state(store.conn_mut())?;
@@ -1174,7 +1174,7 @@ fn seed_legacy_connector_poll_state(conn: &mut Connection) -> Result<()> {
 /// Inserts each seeded workflow once: the flag in `defaults` records that it
 /// was, so a deleted seed stays deleted and an upgrade gets it exactly once.
 pub(crate) fn seed_system_defaults(store: &mut Store) -> Result<()> {
-    let seeds = store.options().seed_workflows.clone();
+    let seeds = store.options()?.seed_workflows.clone();
     let conn = store.conn_mut();
     for seed in seeds {
         let flag: Option<String> = conn

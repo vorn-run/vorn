@@ -476,6 +476,7 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
       await step('git:worktreeDirty', (s) => s.worktrees[0])
       // Moves the server's sessions, so it is the server's to answer.
       await step('git:checkoutBranch', (s) => ({ cwd: s.worktrees[0], branch: 'merged' }))
+      // Drops the server's cached size of the worktree, so the server answers it too.
       await step('git:removeWorktree', (s) => ({
         projectPath: s.f.repo,
         worktreePath: s.worktrees[0],

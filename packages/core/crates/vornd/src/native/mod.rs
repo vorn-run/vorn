@@ -23,14 +23,23 @@
 //!
 //! The work runs on blocking threads, at most [`MAX_CONCURRENT`] at a time,
 //! and the calls that change a repository take turns per repository
-//! ([`Turns`]), as the server's do.
+//! ([`Turns`]), as the server's do. Calls on an MCP connection's child wait on
+//! the child rather than a thread, and run on the runtime instead.
+//!
+//! With the `connection` group native, vornd also reads the calls that change
+//! what the server holds of a connection's secrets as they pass to it
+//! ([`secrets`]): the desktop's pushes as they go, a rotated secret or a
+//! deleted connection once the server's answer says it was done.
 
 pub mod agent;
+pub mod connection;
 pub mod env;
 pub mod file;
 pub mod git;
 pub mod ide;
+pub mod mcp;
 pub mod reach;
+pub mod secrets;
 pub mod shell;
 
 use std::collections::HashMap;
@@ -42,7 +51,7 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc, Semaphore};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, warn};
-use vorn_store::{Placement, ProjectHosts};
+use vorn_store::{Placement, ProjectHosts, Store};
 
 use crate::applink::AppLink;
 use crate::groups::{Counted, Groups, Mode};
@@ -61,14 +70,14 @@ pub enum Effect {
 }
 
 /// Every call vornd answers, and its effect. `git:listRemoteBranches`
-/// fetches, `ide:open` starts an editor and `agent:listModels` starts the
-/// agent's CLI, so none of them runs twice.
+/// fetches, `ide:open` starts an editor, `agent:listModels` starts the
+/// agent's CLI, and the two connection calls that start a child run its
+/// tools, so none of them runs twice.
 pub const METHODS: &[(&str, Effect)] = &[
     ("git:isGitRepo", Effect::Read),
     ("git:listBranches", Effect::Read),
     ("git:listRemoteBranches", Effect::Change),
     ("git:createWorktree", Effect::Change),
-    ("git:removeWorktree", Effect::Change),
     ("git:getWorktreeBranch", Effect::Read),
     ("git:worktreeDirty", Effect::Read),
     ("git:listWorktrees", Effect::Read),
@@ -96,6 +105,14 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("pairing:approve", Effect::Change),
     ("pairing:deny", Effect::Change),
     ("pairing:cancel", Effect::Change),
+    ("connection:list", Effect::Read),
+    ("connection:getSourceLink", Effect::Read),
+    ("connection:listMcpTools", Effect::Read),
+    ("connection:listActions", Effect::Read),
+    ("connection:preflight", Effect::Read),
+    ("connection:refreshMcpTools", Effect::Change),
+    ("connection:executeAction", Effect::Change),
+    ("connector:detectRepo", Effect::Read),
     ("agent:detectInstalled", Effect::Read),
     ("agent:listModels", Effect::Change),
     ("sessions:getRecent", Effect::Read),
@@ -105,6 +122,10 @@ pub const METHODS: &[(&str, Effect)] = &[
 
 /// Calls in a native group that the server keeps answering, and why.
 pub const SERVER_ONLY: &[(&str, &str)] = &[
+    (
+        "git:removeWorktree",
+        "drops the server's cached size of the worktree it removes",
+    ),
     (
         "git:checkoutBranch",
         "moves the server's sessions on that worktree to the new branch and tells clients",
@@ -129,6 +150,106 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
     (
         "auth:authenticate",
         "admits the server's own socket; vornd checks the credential beside it",
+    ),
+    (
+        "connection:create",
+        "seeds the connector's workflows from the server's registry and starts discovery there",
+    ),
+    (
+        "connection:update",
+        "stops the server's own child for the connection; vornd restarts its own when the launch changes",
+    ),
+    (
+        "connection:delete",
+        "removes the connection's workflows, its signed-in window and the server's child",
+    ),
+    (
+        "connection:browserAuth",
+        "reads how a package signs in, from the server's packs and checkouts",
+    ),
+    (
+        "connection:signedIn",
+        "resumes the workflow runs waiting on the sign-in",
+    ),
+    (
+        "connection:signedOut",
+        "ends the signed-in window the server holds for the connection",
+    ),
+    (
+        "connection:listKeys",
+        "needs every connector's manifest, which the server's registry holds",
+    ),
+    (
+        "connection:rotateSecret",
+        "needs the connector's manifest to tell a secret from a plain field",
+    ),
+    (
+        "connection:backfill",
+        "polls through the server's connectors and writes the task board",
+    ),
+    (
+        "connection:upsertFromItem",
+        "writes the task board, which the server owns",
+    ),
+    (
+        "connector:list",
+        "the connectors and their manifests are the server's registry, packages included",
+    ),
+    (
+        "connector:get",
+        "the connectors and their manifests are the server's registry, packages included",
+    ),
+    (
+        "connector:inboxComplete",
+        "the connector inbox's leases are the server's scheduler's",
+    ),
+    (
+        "connector:inboxRenew",
+        "the connector inbox's leases are the server's scheduler's",
+    ),
+    (
+        "connector:probeSdk",
+        "starts a package in the connector protocol, which the server speaks",
+    ),
+    (
+        "connector:catalog",
+        "the server fetches and keeps the catalog",
+    ),
+    (
+        "connector:catalogRefresh",
+        "the server fetches and keeps the catalog",
+    ),
+    (
+        "connector:inspectPack",
+        "packages are verified, installed and loaded by the server",
+    ),
+    (
+        "connector:installPack",
+        "packages are verified, installed and loaded by the server",
+    ),
+    (
+        "connector:removePack",
+        "packages are verified, installed and loaded by the server",
+    ),
+    (
+        "connector:rollbackPack",
+        "packages are verified, installed and loaded by the server",
+    ),
+    (
+        "connector:listPacks",
+        "packages are verified, installed and loaded by the server",
+    ),
+    (
+        "connector:seedWorkflow",
+        "needs the connector's manifest from the server's registry",
+    ),
+    (
+        "connector:status",
+        "asks each connector in the server's registry whether it is signed in",
+    ),
+    (
+        "connector:probeAuth",
+        "asks a connector in the server's registry whether it is signed in",
     ),
     (
         "sessions:restored",
@@ -291,6 +412,8 @@ pub struct Native {
     link: OnceLock<Arc<AppLink>>,
     /// The desktop's launch credential, which is also the server's local one.
     desktop: OnceLock<Vec<u8>>,
+    secrets: secrets::Secrets,
+    mcp: mcp::McpClients,
     /// The agents' model lists, kept as the server keeps them.
     catalog: vorn_agents::models::Catalog,
     shells: shell::Shells,
@@ -298,6 +421,10 @@ pub struct Native {
 
 impl Native {
     pub fn new() -> Arc<Native> {
+        Native::with_secrets(secrets::Secrets::new())
+    }
+
+    fn with_secrets(secrets: secrets::Secrets) -> Arc<Native> {
         Arc::new(Native {
             env: env::SafeEnv::new(),
             db: OnceLock::new(),
@@ -308,6 +435,8 @@ impl Native {
             reach: reach::Reach::default(),
             link: OnceLock::new(),
             desktop: OnceLock::new(),
+            secrets,
+            mcp: mcp::McpClients::default(),
             catalog: vorn_agents::models::Catalog::default(),
             shells: shell::Shells::default(),
         })
@@ -349,13 +478,18 @@ impl Native {
         self.env.prime();
     }
 
-    /// Answers `method` with `params`, blocking this thread meanwhile.
+    /// Answers `method` with `params`, blocking this thread meanwhile. The
+    /// calls [`connection::is_async`] names are answered by [`Native::answer`]
+    /// only.
     pub fn call(&self, method: &str, params: &Value) -> Answer {
         match method.split_once(':').map(|(g, _)| g) {
             Some("git") => git::call(self, method, params),
             Some("file") => self.file(method, params),
             Some("ide") => self.ide(method, params),
             Some("server" | "tailscale" | "token" | "pairing") => self.reach_call(method, params),
+            Some("connection" | "connector") if !connection::is_async(method) => {
+                connection::read(self, method, params)
+            }
             Some("agent" | "sessions") => agent::call(self, method, params),
             Some("shell") => match method {
                 "shell:listExecutables" => Answer::Result(self.shells.executables(&self.env)),
@@ -363,6 +497,99 @@ impl Native {
                 _ => Answer::Forward,
             },
             _ => Answer::Forward,
+        }
+    }
+
+    /// Answers `method` with `params`: on a blocking thread once a slot is
+    /// free, or on the runtime for a call that waits on an MCP child. A
+    /// panic is the server's call to answer, not a crash, unless the call
+    /// may already have changed something.
+    pub async fn answer(self: &Arc<Self>, method: String, params: Value) -> Answer {
+        if connection::is_async(&method) {
+            let running =
+                tokio::spawn(connection::change(Arc::clone(self), method.clone(), params));
+            return match running.await {
+                Ok(answer) => answer,
+                Err(err) => {
+                    warn!(%method, %err, "a native call failed");
+                    Answer::Error(format!("{method} failed in vornd"))
+                }
+            };
+        }
+        let Ok(_slot) = self.slots.acquire().await else {
+            return Answer::Forward;
+        };
+        let native = Arc::clone(self);
+        let m = method.clone();
+        match tokio::task::spawn_blocking(move || native.call(&m, &params)).await {
+            Ok(answer) => answer,
+            Err(err) => {
+                warn!(%method, %err, "a native call failed; the server answers it");
+                Answer::Forward
+            }
+        }
+    }
+
+    /// The server's database, opened beside it for one call. `None` without
+    /// one, and when it cannot be opened (the server answers then).
+    fn store(&self) -> Option<Store> {
+        let db = self.db.get()?;
+        match Store::open_beside(db) {
+            Ok(store) => store,
+            Err(err) => {
+                debug!(%err, "could not open the database; the server answers");
+                None
+            }
+        }
+    }
+
+    /// `dbSignalChange`: tells the server, and any other process watching
+    /// the data directory, that the configuration changed.
+    fn signal_change(&self) {
+        let Some(dir) = self.db.get().and_then(|db| db.parent()) else {
+            return;
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        if let Err(err) = std::fs::write(dir.join(".db-signal"), now.to_string()) {
+            debug!(%err, "could not signal a configuration change");
+        }
+    }
+
+    /// Reads a call on its way to the server that changes a connection's
+    /// secrets there, and returns what to do once the server answers it, if
+    /// anything.
+    fn observe(&self, method: &str, params: &Value) -> Option<AfterOk> {
+        if self.secrets.observe(method, params) {
+            return None;
+        }
+        match method {
+            "connection:rotateSecret" => {
+                let text = |k| params.get(k).and_then(Value::as_str).map(str::to_owned);
+                Some(AfterOk::Rotated {
+                    id: text("connectionId")?,
+                    field: text("field")?,
+                    plaintext: text("plaintext")?,
+                })
+            }
+            "connection:delete" => Some(AfterOk::Deleted(params.as_str()?.to_owned())),
+            _ => None,
+        }
+    }
+
+    /// The server did what [`Native::observe`] saw asked of it.
+    fn done(&self, after: AfterOk) {
+        match after {
+            AfterOk::Rotated {
+                id,
+                field,
+                plaintext,
+            } => self.secrets.merge(&id, &field, &plaintext),
+            AfterOk::Deleted(id) => {
+                self.secrets.forget(&id);
+                self.mcp.stop(&id);
+            }
         }
     }
 
@@ -574,6 +801,23 @@ pub struct Conn {
     upstream: mpsc::WeakSender<Message>,
     authed: AtomicBool,
     shadows: Arc<Shadows>,
+    /// Calls on their way to the server that change a connection's secrets
+    /// there, by request id: applied here once the server answers them.
+    pending: Mutex<HashMap<String, AfterOk>>,
+    waiting: AtomicUsize,
+}
+
+/// What a call the server answers changes in what vornd knows.
+#[derive(Debug)]
+enum AfterOk {
+    /// `connection:rotateSecret`: one secret field has a new value.
+    Rotated {
+        id: String,
+        field: String,
+        plaintext: String,
+    },
+    /// `connection:delete`.
+    Deleted(String),
 }
 
 impl Conn {
@@ -593,6 +837,8 @@ impl Conn {
             upstream: upstream.downgrade(),
             authed: AtomicBool::new(desktop),
             shadows: Arc::default(),
+            pending: Mutex::default(),
+            waiting: AtomicUsize::new(0),
         })
     }
 
@@ -661,6 +907,7 @@ impl Conn {
 
     /// Decides who answers a client's call to `method`, whose frame is `text`.
     pub fn offer(self: &Arc<Self>, method: &str, text: &str) -> Offer {
+        self.watch(method, text);
         if method == AUTH_METHOD {
             if let Some(token) = request_of(text)
                 .and_then(|(_, params)| params.get("token")?.as_str().map(str::to_owned))
@@ -698,6 +945,34 @@ impl Conn {
             _ => {
                 self.groups.count(method, Counted::Forwarded);
                 Offer::Pass
+            }
+        }
+    }
+
+    /// Keeps what vornd knows of connection secrets in step with the
+    /// server's, while vornd answers connection calls.
+    fn watch(&self, method: &str, text: &str) {
+        let watched = matches!(
+            method,
+            "credentials:setDecrypted"
+                | "credentials:clearDecrypted"
+                | "connection:rotateSecret"
+                | "connection:delete"
+        );
+        if !watched || !self.admitted() || self.groups.mode("connection") != Mode::Native {
+            return;
+        }
+        let Ok(Value::Object(frame)) = serde_json::from_str::<Value>(text) else {
+            return;
+        };
+        let params = frame.get("params").unwrap_or(&Value::Null);
+        let Some(after) = self.native.observe(method, params) else {
+            return;
+        };
+        if let Some(id) = frame.get("id").filter(|id| !id.is_null()) {
+            let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+            if pending.insert(id.to_string(), after).is_none() {
+                self.waiting.fetch_add(1, Ordering::AcqRel);
             }
         }
     }
@@ -743,21 +1018,8 @@ impl Conn {
         });
     }
 
-    /// The call on a blocking thread, once a slot is free. A panic there is
-    /// the server's call to answer, not a crash.
     async fn run(&self, method: String, params: Value) -> Answer {
-        let Ok(_slot) = self.native.slots.acquire().await else {
-            return Answer::Forward;
-        };
-        let native = Arc::clone(&self.native);
-        let m = method.clone();
-        match tokio::task::spawn_blocking(move || native.call(&m, &params)).await {
-            Ok(answer) => answer,
-            Err(err) => {
-                warn!(%method, %err, "a native call failed; the server answers it");
-                Answer::Forward
-            }
-        }
+        self.native.answer(method, params).await
     }
 
     /// Reads a frame the server sent this client: whether it admits the
@@ -767,7 +1029,8 @@ impl Conn {
         let admitting =
             !self.admitted() && (text.contains("\"result\"") || text.contains("\"auth:ok\""));
         let shadowed = self.shadows.waiting() && text.contains("\"id\"");
-        if !admitting && !shadowed {
+        let pending = self.waiting.load(Ordering::Acquire) > 0 && text.contains("\"id\"");
+        if !admitting && !shadowed && !pending {
             return;
         }
         let Ok(Value::Object(frame)) = serde_json::from_str::<Value>(text) else {
@@ -785,6 +1048,11 @@ impl Conn {
                     .settle(CREDENTIAL, Side::Server, json!(true), &self.groups);
             }
         }
+        if pending && method.is_none() {
+            if let Some(id) = id {
+                self.settle_pending(&id.to_string(), &frame);
+            }
+        }
         if shadowed && method.is_none() {
             if let Some(id) = id {
                 let frame = Value::Object(frame.clone());
@@ -795,6 +1063,34 @@ impl Conn {
                     &self.groups,
                 );
             }
+        }
+    }
+}
+
+impl Conn {
+    /// The server answered `id`: what it changed, vornd applies too.
+    fn settle_pending(&self, id: &str, frame: &serde_json::Map<String, Value>) {
+        let after = self
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+        let Some(after) = after else {
+            return;
+        };
+        self.waiting.fetch_sub(1, Ordering::AcqRel);
+        let ok = match &after {
+            AfterOk::Rotated { .. } => {
+                frame
+                    .get("result")
+                    .and_then(|r| r.get("ok"))
+                    .and_then(Value::as_bool)
+                    == Some(true)
+            }
+            AfterOk::Deleted(_) => !frame.contains_key("error"),
+        };
+        if ok {
+            self.native.done(after);
         }
     }
 }
@@ -940,5 +1236,34 @@ mod tests {
             t.join().unwrap();
         }
         assert_eq!(most.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn follows_the_secrets_the_server_is_asked_to_change() {
+        let native = Native::with_secrets(secrets::Secrets::with_keychain(None));
+        let push = json!({ "connectionId": "c", "fields": { "token": "t", "secretEnv": "{}" } });
+        assert!(native.observe("credentials:setDecrypted", &push).is_none());
+        let rotate = json!({ "connectionId": "c", "field": "token", "plaintext": "u" });
+        let after = native.observe("connection:rotateSecret", &rotate).unwrap();
+        // Nothing changes until the server says it did.
+        assert!(
+            matches!(native.secrets.lookup("c"), secrets::Known::Fields(f) if f["token"] == "t")
+        );
+        native.done(after);
+        let secrets::Known::Fields(fields) = native.secrets.lookup("c") else {
+            panic!("the secrets are known");
+        };
+        assert_eq!(fields["token"], "u");
+        assert_eq!(fields["secretEnv"], "{}");
+
+        let after = native.observe("connection:delete", &json!("c")).unwrap();
+        native.done(after);
+        assert!(matches!(
+            native.secrets.lookup("c"),
+            secrets::Known::Unknown
+        ));
+        assert!(native
+            .observe("connection:rotateSecret", &json!({ "connectionId": "c" }))
+            .is_none());
     }
 }

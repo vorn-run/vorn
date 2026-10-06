@@ -20,10 +20,14 @@ engine = ["dep:vorn-engine"]
 
 [dependencies]
 bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "client-legacy", "http1"] }
+# Connector MCP servers are spoken to through the official Rust SDK, as a client
+# of a child on stdio.
+rmcp = { version = "3.5", default-features = false, features = ["client", "transport-child-process"] }
 # Key order kept, so an answer vornd frames reads as the server's does.
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "signal", "io-util", "process"] }
@@ -41,6 +45,16 @@ vorn-protocol = { path = "../protocol" }
 vorn-reach = { path = "../reach" }
 vorn-term-proto = { path = "../term-proto" }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
+
+# Connector credentials are kept in the OS keychain where there is one vornd
+# can reach without a desktop session bus: Keychain and Credential Manager.
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+keyring-core = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-native-keyring-store = { version = "1", default-features = false }
+keyring-core = "1"
 
 [dev-dependencies]
 libghostty-vt = { version = "0.2.2", default-features = false }
