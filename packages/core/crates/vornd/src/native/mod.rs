@@ -46,7 +46,7 @@ pub mod secrets;
 pub mod sessions;
 pub mod shell;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -842,15 +842,6 @@ impl Shadows {
     fn waiting(&self) -> bool {
         self.open.load(Ordering::Acquire) > 0
     }
-
-    /// The method of the request out under `key`.
-    fn method(&self, key: &str) -> Option<String> {
-        self.pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(key)
-            .map(|p| p.method.clone())
-    }
 }
 
 /// The group of the credential and Origin checks.
@@ -889,7 +880,18 @@ pub struct Conn {
     pending: Mutex<HashMap<String, AfterOk>>,
     waiting: AtomicUsize,
     /// Shadowed creates whose plan is compared, by request id.
-    plans: Mutex<HashSet<String>>,
+    plans: Mutex<HashMap<String, Planned>>,
+}
+
+/// A create shadowed, kept until the server answers it and asks for its
+/// spawn: what vornd would start is worked out then ([`Conn::planned_answer`]).
+#[derive(Debug)]
+struct Planned {
+    method: String,
+    params: Value,
+    /// How many shells there were when the call came, before the server's
+    /// answer adds one: a new shell is numbered after them.
+    shells: usize,
 }
 
 /// What a call the server answers changes in what vornd knows.
@@ -1118,33 +1120,28 @@ impl Conn {
         self.native.answer(method, params).await
     }
 
-    /// Works out what vornd would start for a create the server answers,
-    /// to compare with what the server starts. The shells there are now are
-    /// read before the server's answer can add one.
-    fn plan(self: &Arc<Self>, method: String, id: Value, params: Value) {
-        let key = id.to_string();
-        self.shadows.begin(key.clone(), &method);
-        self.lock_plans().insert(key.clone());
-        let shells = self
+    /// Keeps a create the server answers, to work out what vornd would have
+    /// started for it once the server has ([`Conn::planned_answer`]). The
+    /// shells there are now are read before the server's answer can add one.
+    fn plan(&self, method: String, id: Value, params: Value) {
+        let Some(shells) = self
             .native
             .registry
             .get()
-            .and_then(|r| r.read(Registry::shells));
-        let conn = Arc::clone(self);
-        tokio::spawn(async move {
-            let native = Arc::clone(&conn.native);
-            let m = method.clone();
-            let planned = tokio::task::spawn_blocking(move || {
-                shells.and_then(|n| sessions::plan(&native, &m, &params, n))
-            })
-            .await
-            .ok()
-            .flatten();
-            match planned {
-                Some(plan) => conn.shadows.settle(&key, Side::Native, plan, &conn.groups),
-                None => conn.unported(&key, &method),
-            }
-        });
+            .and_then(|r| r.read(Registry::shells))
+        else {
+            return self.groups.count(&method, Counted::ShadowUnported);
+        };
+        let key = id.to_string();
+        self.shadows.begin(key.clone(), &method);
+        self.lock_plans().insert(
+            key,
+            Planned {
+                method,
+                params,
+                shells,
+            },
+        );
     }
 
     /// Files what vornd would answer a call that changes a terminal, read
@@ -1169,15 +1166,20 @@ impl Conn {
         }
     }
 
-    fn lock_plans(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
+    fn lock_plans(&self) -> std::sync::MutexGuard<'_, HashMap<String, Planned>> {
         self.plans.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The server answered a create whose plan is being compared: its side
-    /// is the spawn it asked vornd for under the record's id, with the
-    /// record.
-    fn planned_answer(self: &Arc<Self>, key: String, frame: &serde_json::Map<String, Value>) {
-        let method = self.shadows.method(&key).unwrap_or_default();
+    /// The server answered a create whose plan is compared: its side is the
+    /// spawn it asked vornd for under the record's id, with the record.
+    /// vornd's side is worked out only then, after the server's start, which
+    /// writes what a launch reads (a shell's shims) as it goes.
+    fn planned_answer(
+        self: &Arc<Self>,
+        key: String,
+        planned: Planned,
+        frame: &serde_json::Map<String, Value>,
+    ) {
         let record = frame.get("result").cloned();
         let name = record
             .as_ref()
@@ -1185,18 +1187,32 @@ impl Conn {
             .and_then(Value::as_str)
             .map(str::to_owned);
         let (Some(record), Some(name), Some(link)) = (record, name, self.native.link.get()) else {
-            return self.unported(&key, &method);
+            return self.unported(&key, &planned.method);
         };
         let (conn, link) = (Arc::clone(self), Arc::clone(link));
         tokio::spawn(async move {
-            match link.spawned(&name, SPAWN_WAIT).await {
-                Some(spawn) => {
-                    let theirs = sessions::spawn_plan(&spawn, &record);
-                    conn.shadows
-                        .settle(&key, Side::Server, theirs, &conn.groups);
-                }
-                None => conn.unported(&key, &method),
-            }
+            let Some(spawn) = link.spawned(&name, SPAWN_WAIT).await else {
+                return conn.unported(&key, &planned.method);
+            };
+            let native = Arc::clone(&conn.native);
+            let Planned {
+                method,
+                params,
+                shells,
+            } = planned;
+            let m = method.clone();
+            let ours =
+                tokio::task::spawn_blocking(move || sessions::plan(&native, &m, &params, shells))
+                    .await
+                    .ok()
+                    .flatten();
+            let Some(ours) = ours else {
+                return conn.unported(&key, &method);
+            };
+            conn.shadows.settle(&key, Side::Native, ours, &conn.groups);
+            let theirs = sessions::spawn_plan(&spawn, &record);
+            conn.shadows
+                .settle(&key, Side::Server, theirs, &conn.groups);
         });
     }
 
@@ -1232,12 +1248,11 @@ impl Conn {
             }
         }
         if shadowed && method.is_none() {
-            if let Some(key) = id
-                .map(Value::to_string)
-                .filter(|k| self.lock_plans().remove(k))
-            {
-                self.planned_answer(key, &frame);
-                return;
+            if let Some(key) = id.map(Value::to_string) {
+                if let Some(planned) = self.lock_plans().remove(&key) {
+                    self.planned_answer(key, planned, &frame);
+                    return;
+                }
             }
             if let Some(id) = id {
                 let frame = Value::Object(frame.clone());
