@@ -1,0 +1,1297 @@
+{
+  "nodeTypes": {
+    "trigger": {
+      "summary": "What starts a run: by hand, on a schedule, on a task event, when a session is restored, by polling a connection, or on a webhook. config.triggerType picks which.",
+      "configSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "triggerType": {
+                "type": "string",
+                "const": "manual",
+                "description": "Runs when someone starts it, or execute_workflow"
+              },
+              "contextual": {
+                "description": "Offered from a task card or terminal right-click, inheriting its folder, branch and worktree as {{context.*}}",
+                "type": "boolean"
+              },
+              "inputs": {
+                "description": "Parameters asked for before each run, read as {{inputs.<key>}}",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "maxLength": 100,
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                      "description": "Identifier the value is read by, as {{inputs.<key>}}"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 200,
+                      "description": "What the run dialog calls this field"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "text",
+                        "textarea",
+                        "number",
+                        "select",
+                        "boolean",
+                        "project",
+                        "branch"
+                      ],
+                      "description": "Which control the run dialog shows, and how a supplied value is checked"
+                    },
+                    "required": {
+                      "description": "A run cannot start without a value",
+                      "type": "boolean"
+                    },
+                    "defaultValue": {
+                      "description": "Used when the run supplies nothing. A number must be finite, a boolean \"true\" or \"false\", a select one of its options",
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    "options": {
+                      "description": "Choices for a select; a select without any is refused",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "string",
+                            "maxLength": 200,
+                            "description": "What {{inputs.<key>}} expands to"
+                          },
+                          "label": {
+                            "type": "string",
+                            "maxLength": 200,
+                            "description": "What the dialog shows"
+                          }
+                        },
+                        "required": [
+                          "value",
+                          "label"
+                        ],
+                        "additionalProperties": {}
+                      }
+                    },
+                    "placeholder": {
+                      "description": "Hint shown in an empty field",
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    "description": {
+                      "description": "Help text shown under the field",
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "label",
+                    "type"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "required": [
+              "triggerType"
+            ],
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "triggerType": {
+                "type": "string",
+                "const": "once",
+                "description": "Runs once at a set time"
+              },
+              "runAt": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "When to run, as an ISO 8601 date-time"
+              }
+            },
+            "required": [
+              "triggerType",
+              "runAt"
+            ],
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "triggerType": {
+                "type": "string",
+                "const": "recurring",
+                "description": "Runs on a cron schedule"
+              },
+              "cron": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "Five-field cron expression, e.g. \"0 9 * * 1-5\""
+              },
+              "timezone": {
+                "description": "IANA zone the cron is read in, e.g. \"Europe/Madrid\". Defaults to the machine",
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "triggerType",
+              "cron"
+            ],
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "triggerType": {
+                "type": "string",
+                "const": "taskCreated",
+                "description": "Runs when a task is created; the task is {{task.*}}"
+              },
+              "projectFilter": {
+                "description": "Only fire for this project, by name. Omit to fire for every project",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "triggerType"
+            ],
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "triggerType": {
+                "type": "string",
+                "const": "taskStatusChanged",
+                "description": "Runs when a task moves between statuses; the task is {{task.*}}, the move {{trigger.fromStatus}} and {{trigger.toStatus}}"
+              },
+              "projectFilter": {
+                "description": "Only fire for this project, by name. Omit to fire for every project",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "fromStatus": {
+                "description": "Only when it leaves this status",
+                "type": "string",
+                "enum": [
+                  "todo",
+                  "in_progress",
+                  "in_review",
+                  "done",
+                  "cancelled"
+                ]
+              },
+              "toStatus": {
+                "description": "Only when it enters this status",
+                "type": "string",
+                "enum": [
+                  "todo",
+                  "in_progress",
+                  "in_review",
+                  "done",
+                  "cancelled"
+                ]
+              }
+            },
+            "required": [
+              "triggerType"
+            ],
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "triggerType": {
+                "type": "string",
+                "const": "sessionRestored",
+                "description": "Runs when a session comes back after a quit, crash or reboot; {{trigger.restore}} says cold or warm"
+              },
+              "projectFilter": {
+                "description": "Only fire for this project, by name. Omit to fire for every project",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "restore": {
+                "description": "cold (default): only when a process starts again. any: also when a pane reattaches to one still running",
+                "type": "string",
+                "enum": [
+                  "cold",
+                  "any"
+                ]
+              },
+              "concurrency": {
+                "description": "perProject (default) runs one at a time per project, so restored sessions do not race for one port",
+                "type": "string",
+                "enum": [
+                  "perProject",
+                  "unbounded"
+                ]
+              }
+            },
+            "required": [
+              "triggerType"
+            ],
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "triggerType": {
+                "type": "string",
+                "const": "connectorPoll",
+                "description": "Polls a connection on a cron and runs once per new item; the item is {{connectorItem.*}}"
+              },
+              "connectionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Connection to poll, from list_connections"
+              },
+              "event": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "Event type from the connector's manifest, e.g. issueCreated (list_connector_actions shows them)"
+              },
+              "cron": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "How often to poll, as a five-field cron expression"
+              },
+              "timezone": {
+                "description": "IANA zone the cron is read in",
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "triggerType",
+              "connectionId",
+              "event",
+              "cron"
+            ],
+            "additionalProperties": {}
+          },
+          {
+            "type": "object",
+            "properties": {
+              "triggerType": {
+                "type": "string",
+                "const": "webhook",
+                "description": "Runs when the local webhook route receives a request; its body, headers and query are {{trigger.*}}"
+              },
+              "method": {
+                "type": "string",
+                "enum": [
+                  "POST",
+                  "GET"
+                ],
+                "description": "HTTP method the route answers"
+              },
+              "token": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "Secret path segment; a request without it is refused. Use a long random string"
+              }
+            },
+            "required": [
+              "triggerType",
+              "method",
+              "token"
+            ],
+            "additionalProperties": {}
+          }
+        ]
+      },
+      "outputs": [],
+      "rules": [
+        "A workflow has exactly one trigger, and no edge points into it.",
+        "A manual trigger may declare inputs; each is read anywhere as {{inputs.<key>}}, and execute_workflow takes their values.",
+        "What the trigger carries is read as {{task.*}}, {{trigger.*}} or {{connectorItem.*}}, depending on its type."
+      ]
+    },
+    "launchAgent": {
+      "summary": "Starts an AI coding agent in a project with a prompt. Headless, it runs in the background and the run waits for its answer; otherwise it opens a terminal tab.",
+      "configSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "agentType": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "copilot",
+              "codex",
+              "opencode",
+              "gemini",
+              "fromTask"
+            ],
+            "description": "Which agent CLI runs. fromTask uses the task's assigned agent, so it needs a task in scope (a task trigger, taskId or taskFromQueue)"
+          },
+          "model": {
+            "description": "Model passed to the CLI as written, e.g. \"opus\". Needs a concrete agentType",
+            "type": "string",
+            "maxLength": 200
+          },
+          "projectName": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Registered project the agent works in, by name (list_projects)"
+          },
+          "projectPath": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "That project's absolute path; templates such as {{context.projectPath}} work"
+          },
+          "prompt": {
+            "description": "What the agent is asked to do. Templates expand before it is sent",
+            "type": "string",
+            "maxLength": 10000
+          },
+          "headless": {
+            "description": "Run in the background and wait for it to finish, so later steps can read its output. Without it the agent opens in a terminal tab and the run does not wait on its answer",
+            "type": "boolean"
+          },
+          "outputSchema": {
+            "description": "JSON Schema its final answer must match (headless only). Each top-level property becomes {{steps.<slug>.<field>}}; an answer that does not match fails the step",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "timeoutMs": {
+            "description": "How long a headless run may take before it is killed and the step fails, in milliseconds. Defaults to the app setting",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "worktreeMode": {
+            "description": "Where it works: none (the project folder), new (a fresh git worktree), fromStep (the worktree an earlier step made), existing (existingWorktreePath)",
+            "type": "string",
+            "enum": [
+              "none",
+              "new",
+              "fromStep",
+              "existing"
+            ]
+          },
+          "worktreeFromStepSlug": {
+            "description": "For worktreeMode fromStep: slug of the earlier agent step whose worktree to reuse",
+            "type": "string",
+            "maxLength": 200
+          },
+          "existingWorktreePath": {
+            "description": "For worktreeMode existing: absolute path of the worktree to work in",
+            "type": "string",
+            "maxLength": 1000
+          },
+          "useWorktree": {
+            "description": "Older switch for a new worktree; prefer worktreeMode. fromContext inherits it from a contextual manual trigger",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "const": "fromContext"
+              }
+            ]
+          },
+          "branch": {
+            "description": "Branch to check out or create for the worktree",
+            "type": "string",
+            "maxLength": 200
+          },
+          "args": {
+            "description": "Extra command-line arguments for the agent CLI",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "displayName": {
+            "description": "Name shown on the session tab",
+            "type": "string",
+            "maxLength": 200
+          },
+          "remoteHostId": {
+            "description": "Run on this remote host instead of this machine",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "promptDelayMs": {
+            "description": "Wait this long after the agent starts before sending the prompt, in milliseconds",
+            "type": "number",
+            "minimum": 0
+          },
+          "taskId": {
+            "description": "Task the session is attached to",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "taskFromQueue": {
+            "description": "Take the project's next todo task and attach the session to it",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "agentType",
+          "projectName",
+          "projectPath"
+        ],
+        "additionalProperties": {}
+      },
+      "outputs": [
+        {
+          "field": "output",
+          "description": "The agent's final answer (headless)"
+        },
+        {
+          "field": "<outputSchema property>",
+          "description": "Each top-level property of config.outputSchema, parsed from the answer (headless only)"
+        },
+        {
+          "field": "worktreePath",
+          "description": "The directory the agent worked in"
+        },
+        {
+          "field": "status",
+          "description": "success or error"
+        },
+        {
+          "field": "error",
+          "description": "Why it failed, or empty"
+        }
+      ],
+      "rules": [
+        "outputSchema requires headless: true, and an answer that does not match it fails the step.",
+        "Read typed fields in a condition, e.g. variable {{steps.review.approved}} equals true, rather than matching words in output.",
+        "agentType fromTask needs a task in scope: a task trigger, taskId or taskFromQueue. model needs a concrete agentType.",
+        "worktreeMode fromStep reuses the worktree of the earlier agent step named by worktreeFromStepSlug."
+      ]
+    },
+    "script": {
+      "summary": "Runs a bash, python, node or powershell script.",
+      "configSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "scriptType": {
+            "type": "string",
+            "enum": [
+              "bash",
+              "powershell",
+              "python",
+              "node"
+            ],
+            "description": "Interpreter the script runs under"
+          },
+          "scriptContent": {
+            "type": "string",
+            "maxLength": 200000,
+            "description": "The script. Templates expand before it runs, so quote them as data. Its stdout is {{steps.<slug>.output}}; a non-zero exit fails the step"
+          },
+          "cwd": {
+            "description": "Directory it runs in. Defaults to projectPath",
+            "type": "string",
+            "maxLength": 1000
+          },
+          "projectName": {
+            "description": "Project the script belongs to, by name",
+            "type": "string",
+            "maxLength": 200
+          },
+          "projectPath": {
+            "description": "That project's absolute path, used as the working directory when cwd is unset",
+            "type": "string",
+            "maxLength": 1000
+          },
+          "args": {
+            "description": "Arguments passed to the script",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "secretsFrom": {
+            "description": "Connection whose stored secrets become this script's environment variables at run time, so no secret is written into the workflow",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "runId": {
+            "description": "Set by the engine; leave it out",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "scriptType",
+          "scriptContent"
+        ],
+        "additionalProperties": {}
+      },
+      "outputs": [
+        {
+          "field": "output",
+          "description": "What the script printed to stdout"
+        },
+        {
+          "field": "status",
+          "description": "success or error"
+        },
+        {
+          "field": "error",
+          "description": "Why it failed, or empty"
+        }
+      ],
+      "rules": [
+        "Templates expand into the script text before it runs. Keep a value as data rather than code, e.g. inside a quoted heredoc: cat <<'EOF' ... EOF.",
+        "A non-zero exit fails the step.",
+        "secretsFrom names a connection whose secrets become environment variables, so no secret is written into the workflow."
+      ]
+    },
+    "condition": {
+      "summary": "Compares a value, usually a step output, and sends the run down its true or its false branch.",
+      "configSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "variable": {
+            "type": "string",
+            "maxLength": 200000,
+            "description": "The value to test, usually a template such as {{steps.review.approved}}"
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "equals",
+              "notEquals",
+              "contains",
+              "notContains",
+              "isEmpty",
+              "isNotEmpty"
+            ],
+            "description": "How variable is compared with value. Comparisons are on text"
+          },
+          "value": {
+            "description": "What variable is compared with; ignored by isEmpty and isNotEmpty",
+            "type": "string",
+            "maxLength": 200000
+          }
+        },
+        "required": [
+          "variable",
+          "operator"
+        ],
+        "additionalProperties": {}
+      },
+      "outputs": [
+        {
+          "field": "output",
+          "description": "\"true\" or \"false\""
+        },
+        {
+          "field": "status",
+          "description": "success or error"
+        },
+        {
+          "field": "error",
+          "description": "Why it failed, or empty"
+        }
+      ],
+      "rules": [
+        "Give it two outgoing edges, one with conditionBranch \"true\" and one with \"false\". Steps on the branch not taken are skipped.",
+        "Comparisons are on text: equals true matches the text \"true\".",
+        "Inside a loop body, both branches must stay inside the body."
+      ]
+    },
+    "approval": {
+      "summary": "Pauses the run until a person approves or rejects, in the app or with resolve_gate. It can show a review page, let the reviewer rewrite some text, and send the work back with a comment.",
+      "configSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "message": {
+            "description": "The question the reviewer is asked. Templates expand when the gate opens",
+            "type": "string",
+            "maxLength": 200000
+          },
+          "timeoutMs": {
+            "description": "Reject automatically after this long, in milliseconds. Omit to wait for ever",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "view": {
+            "description": "A review page shown beside the question: HTML, or the path of a .html file, with templates filled in when the gate opens",
+            "type": "string",
+            "maxLength": 200000
+          },
+          "edit": {
+            "description": "Text the reviewer may rewrite, as a template. Later steps read the result as {{steps.<gate>.text}}. When it expands to a JSON list of records the reviewer sees a table, and the rows they keep are {{steps.<gate>.items}}",
+            "type": "string",
+            "maxLength": 200000
+          },
+          "feedback": {
+            "description": "Lets the reviewer send the work back with a comment instead of only approving or rejecting; the comment is {{steps.<gate>.feedback}} to the steps that redo it",
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Id of an earlier step, outside any loop body, that leads to this gate. Send back re-runs everything from it to the gate"
+              },
+              "maxRounds": {
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 10,
+                "description": "How many times the gate may ask, the first included (2 to 10)"
+              }
+            },
+            "required": [
+              "from",
+              "maxRounds"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "additionalProperties": {}
+      },
+      "outputs": [
+        {
+          "field": "text",
+          "description": "The editable text as the reviewer left it"
+        },
+        {
+          "field": "items",
+          "description": "When the editable text is a JSON list of records: the rows the reviewer kept, as a list, ready for a forEach loop"
+        },
+        {
+          "field": "comments",
+          "description": "Comments pinned to the review page in the latest round, as a JSON list of {quote, comment, anchored}"
+        },
+        {
+          "field": "feedback",
+          "description": "The general note from the latest round"
+        },
+        {
+          "field": "feedbackAll",
+          "description": "Every note, one line per round"
+        },
+        {
+          "field": "round",
+          "description": "Which time the gate asked, from 1"
+        },
+        {
+          "field": "status",
+          "description": "success or error"
+        },
+        {
+          "field": "error",
+          "description": "Why it failed, or empty"
+        }
+      ],
+      "rules": [
+        "A gate cannot sit inside a loop body.",
+        "When edit expands to a JSON list of records the reviewer sees a table; a rewrite that is no longer valid JSON is refused.",
+        "feedback.from is the id of an earlier step that leads to this gate, not the trigger and not a step inside a loop. Sending back re-runs every step from it to the gate. maxRounds is 2 to 10.",
+        "A reject ends the run."
+      ]
+    },
+    "createTaskFromItem": {
+      "summary": "Creates a task from the connector item that started the run, or updates the one it created before.",
+      "configSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "nodeType": {
+            "description": "Always createTaskFromItem",
+            "type": "string",
+            "const": "createTaskFromItem"
+          },
+          "project": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Project the task lands in, by name, or fromConnection to use the connection's execution project"
+          },
+          "initialStatus": {
+            "type": "string",
+            "enum": [
+              "todo",
+              "in_progress",
+              "in_review",
+              "done",
+              "cancelled"
+            ],
+            "description": "Status of a newly created task. Re-syncing an existing one never changes its status"
+          }
+        },
+        "required": [
+          "project",
+          "initialStatus"
+        ],
+        "additionalProperties": {}
+      },
+      "outputs": [
+        {
+          "field": "output",
+          "description": "Imported or Updated, with the item id and title"
+        },
+        {
+          "field": "status",
+          "description": "success or error"
+        },
+        {
+          "field": "error",
+          "description": "Why it failed, or empty"
+        }
+      ],
+      "rules": [
+        "Needs {{connectorItem.*}}: put it after a connectorPoll trigger.",
+        "Re-syncing an item updates its title and description but never its status."
+      ]
+    },
+    "callConnectorAction": {
+      "summary": "Runs one action of a connected service (a comment, an issue, a merge...) with arguments built from templates.",
+      "configSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "nodeType": {
+            "description": "Always callConnectorAction",
+            "type": "string",
+            "const": "callConnectorAction"
+          },
+          "connectionId": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Connection the action runs against, from list_connections"
+          },
+          "action": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Action type from the connector, e.g. commentOnPullRequest; list_connector_actions lists them with their args"
+          },
+          "actionLabel": {
+            "description": "The action's display name, for the canvas",
+            "type": "string",
+            "maxLength": 200
+          },
+          "connectorId": {
+            "description": "Connector the action belongs to, for a step placed before a connection exists",
+            "type": "string",
+            "maxLength": 200
+          },
+          "args": {
+            "description": "The action's arguments by name, every value a string template; a list or object a template names arrives as JSON text. list_connector_actions gives each action's args",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 200000
+            }
+          }
+        },
+        "required": [
+          "connectionId",
+          "action"
+        ],
+        "additionalProperties": {}
+      },
+      "outputs": [
+        {
+          "field": "output",
+          "description": "The action result as text"
+        },
+        {
+          "field": "<the action's output fields>",
+          "description": "Each field the action declares in its outputSchema; list_connector_actions gives them"
+        },
+        {
+          "field": "status",
+          "description": "success or error"
+        },
+        {
+          "field": "error",
+          "description": "Why it failed, or empty"
+        }
+      ],
+      "rules": [
+        "connectionId comes from list_connections; action and its args from list_connector_actions.",
+        "A step waits, rather than fails, when its connection needs signing in again."
+      ]
+    },
+    "httpRequest": {
+      "summary": "Sends one HTTP request, optionally through an http connection that adds auth.",
+      "configSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "nodeType": {
+            "description": "Always httpRequest",
+            "type": "string",
+            "const": "httpRequest"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ],
+            "description": "HTTP method"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "Absolute URL, or a path resolved against the profile's base URL. Templates expand"
+          },
+          "headers": {
+            "description": "Request headers. Names are literal; values are templates",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 200000
+            }
+          },
+          "body": {
+            "description": "Request body as a template; empty sends none",
+            "type": "string",
+            "maxLength": 200000
+          },
+          "profileConnectionId": {
+            "description": "An http connection whose base URL and auth are applied server-side, so no credential sits in the workflow",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "method",
+          "url"
+        ],
+        "additionalProperties": {}
+      },
+      "outputs": [
+        {
+          "field": "body",
+          "description": "Response body, JSON-parsed when possible"
+        },
+        {
+          "field": "headers",
+          "description": "Response headers, by lower-case name"
+        },
+        {
+          "field": "output",
+          "description": "HTTP <code>, e.g. \"HTTP 404\": the way to read the response status"
+        },
+        {
+          "field": "status",
+          "description": "success or error: the step's own status, which replaces the response code under this name"
+        },
+        {
+          "field": "error",
+          "description": "Why it failed, or empty"
+        }
+      ],
+      "rules": [
+        "Put credentials in an http connection (profileConnectionId), not in headers.",
+        "Any answer succeeds, a 4xx or 5xx included: to act on the code, test {{steps.<slug>.output}} (e.g. contains \"HTTP 2\"). Only a network error or the 30 second timeout fails the step. Redirects are not followed."
+      ]
+    },
+    "loop": {
+      "summary": "Runs a group of steps (its body) several times: repeat up to 10 passes, stopping early when until holds, or forEach once per item of a list.",
+      "configSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "nodeType": {
+            "description": "Always loop",
+            "type": "string",
+            "const": "loop"
+          },
+          "mode": {
+            "description": "repeat (default) runs the body up to maxIterations times; forEach runs it once for each item of items, with no cap on how many",
+            "type": "string",
+            "enum": [
+              "repeat",
+              "forEach"
+            ]
+          },
+          "items": {
+            "description": "For forEach: the list to walk, as a template naming it, e.g. {{steps.gate.items}}. JSON text of a list works too, and so does an object holding exactly one list. Each pass reads its item as {{loop.item}} or {{loop.item.<field>}}",
+            "type": "string",
+            "maxLength": 200000
+          },
+          "bodyNodeIds": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "description": "Ids of the steps the loop runs each pass. Wire them with edges: loop -> the entry steps, then between body steps, and from the last body steps to the step after the loop"
+          },
+          "maxIterations": {
+            "description": "For repeat: how many passes at most, a whole number from 1 to 10. Required for repeat, ignored for forEach",
+            "type": "number"
+          },
+          "until": {
+            "description": "Checked after each pass; the loop stops early once it holds, e.g. {{steps.review.approved}} equals true",
+            "type": "object",
+            "properties": {
+              "variable": {
+                "type": "string",
+                "maxLength": 200000,
+                "description": "The value to test, usually a template such as {{steps.review.approved}}"
+              },
+              "operator": {
+                "type": "string",
+                "enum": [
+                  "equals",
+                  "notEquals",
+                  "contains",
+                  "notContains",
+                  "isEmpty",
+                  "isNotEmpty"
+                ],
+                "description": "How variable is compared with value. Comparisons are on text"
+              },
+              "value": {
+                "description": "What variable is compared with; ignored by isEmpty and isNotEmpty",
+                "type": "string",
+                "maxLength": 200000
+              }
+            },
+            "required": [
+              "variable",
+              "operator"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "bodyNodeIds"
+        ],
+        "additionalProperties": {}
+      },
+      "outputs": [
+        {
+          "field": "output",
+          "description": "How many passes ran"
+        },
+        {
+          "field": "passes",
+          "description": "How many passes ran, as a number"
+        },
+        {
+          "field": "count",
+          "description": "How many passes were planned: maxIterations, or the number of items"
+        },
+        {
+          "field": "results",
+          "description": "Per pass: {index, item?, status, steps: {<slug>: {output, status, error, ...}}}; each output cut to loopResultOutputChars"
+        },
+        {
+          "field": "outputs",
+          "description": "Per pass, the output of the last body step that ran (on the branch taken), cut to loopResultOutputChars"
+        },
+        {
+          "field": "status",
+          "description": "success or error"
+        },
+        {
+          "field": "error",
+          "description": "Why it failed, or empty"
+        }
+      ],
+      "rules": [
+        "bodyNodeIds lists every step in the body. Wire the loop to each body entry step, body steps to each other, and the last body steps to the step after the loop.",
+        "Nothing outside the loop may point into its body; only the loop starts its steps.",
+        "A body cannot hold an approval gate, a trigger or another loop, and cannot contain a cycle.",
+        "repeat needs maxIterations, 1 to 10. forEach needs items and has no cap.",
+        "Body steps read {{loop.item}} / {{loop.item.<field>}} (forEach), {{loop.index}} from 0, {{loop.number}} from 1 and {{loop.count}}.",
+        "A body step that fails ends the loop there, unless that step has onError: continue.",
+        "Inside the body, {{steps.<slug>.*}} of a body step is this pass. After the loop, read the passes through {{steps.<loop>.results}} or .outputs."
+      ]
+    }
+  },
+  "edgeSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100,
+        "description": "Unique within the workflow"
+      },
+      "source": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100,
+        "description": "Id of the node that runs first"
+      },
+      "target": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100,
+        "description": "Id of the node that runs after it"
+      },
+      "conditionBranch": {
+        "description": "On an edge leaving a condition: which outcome takes it. Wire both. Omit on every other edge",
+        "type": "string",
+        "enum": [
+          "true",
+          "false"
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "source",
+      "target"
+    ]
+  },
+  "limits": {
+    "repeatMaxIterations": 10,
+    "forEachMaxItems": "uncapped",
+    "maxGateRounds": 10,
+    "templateTextChars": 50000,
+    "loopResultOutputChars": 8000
+  },
+  "templates": {
+    "syntax": "{{namespace.path.to.field}} anywhere a config takes text. An unknown namespace is left as written; a known one with nothing there becomes empty. Text longer than templateTextChars keeps its end.",
+    "namespaces": {
+      "steps": "{{steps.<slug>.<field>}}: the output of an earlier step, by its slug; the fields are listed under each node type",
+      "task": "{{task.title}}, .description, .id, .status, .branch, .projectName: the task a task trigger fired for",
+      "trigger": "{{trigger.*}}: what the trigger carried: fromStatus/toStatus, restore, or a webhook body, headers and query",
+      "connectorItem": "{{connectorItem.title}}, .body, .externalId, .externalUrl: the item a connectorPoll trigger fired for",
+      "inputs": "{{inputs.<key>}}: the values a manual run was started with",
+      "context": "{{context.cwd}}, .projectPath, .projectName, .branch, .worktreePath: where a contextual manual run was started from",
+      "loop": "{{loop.item}}, {{loop.item.<field>}}, {{loop.index}} (from 0), {{loop.number}} (from 1), {{loop.count}}: only inside a loop body"
+    },
+    "examples": [
+      "{{steps.review.approved}}",
+      "{{steps.gate.items}}",
+      "{{loop.item.path}}",
+      "{{steps.loop.outputs}}",
+      "{{inputs.pullRequest}}",
+      "{{task.title}}"
+    ]
+  },
+  "example": {
+    "nodes": [
+      {
+        "id": "start",
+        "type": "trigger",
+        "label": "Start",
+        "config": {
+          "triggerType": "manual",
+          "inputs": [
+            {
+              "key": "pullRequest",
+              "label": "Pull request",
+              "type": "text",
+              "required": true
+            }
+          ]
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "review",
+        "type": "callConnectorAction",
+        "label": "Read review findings",
+        "slug": "review",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "<connection id from list_connections>",
+          "action": "listReviewFindings",
+          "args": {
+            "pullRequest": "{{inputs.pullRequest}}"
+          }
+        },
+        "position": {
+          "x": 0,
+          "y": 140
+        }
+      },
+      {
+        "id": "gate",
+        "type": "approval",
+        "label": "Pick findings to post",
+        "slug": "gate",
+        "config": {
+          "message": "Keep the findings worth a comment, and delete the rest.",
+          "edit": "{{steps.review.findings}}"
+        },
+        "position": {
+          "x": 0,
+          "y": 280
+        }
+      },
+      {
+        "id": "loop",
+        "type": "loop",
+        "label": "For each finding",
+        "slug": "loop",
+        "config": {
+          "nodeType": "loop",
+          "mode": "forEach",
+          "items": "{{steps.gate.items}}",
+          "bodyNodeIds": [
+            "severe",
+            "comment",
+            "skip"
+          ]
+        },
+        "position": {
+          "x": 0,
+          "y": 420
+        }
+      },
+      {
+        "id": "severe",
+        "type": "condition",
+        "label": "High severity?",
+        "slug": "severe",
+        "config": {
+          "variable": "{{loop.item.severity}}",
+          "operator": "equals",
+          "value": "high"
+        },
+        "position": {
+          "x": 0,
+          "y": 560
+        }
+      },
+      {
+        "id": "comment",
+        "type": "callConnectorAction",
+        "label": "Comment on the line",
+        "slug": "comment",
+        "config": {
+          "nodeType": "callConnectorAction",
+          "connectionId": "<connection id from list_connections>",
+          "action": "commentOnPullRequest",
+          "args": {
+            "pullRequest": "{{inputs.pullRequest}}",
+            "path": "{{loop.item.path}}",
+            "line": "{{loop.item.line}}",
+            "body": "{{loop.item.body}}"
+          }
+        },
+        "position": {
+          "x": -160,
+          "y": 700
+        }
+      },
+      {
+        "id": "skip",
+        "type": "script",
+        "label": "Note the skip",
+        "slug": "skip",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "cat <<'EOF'\nNot posted: {{loop.item.path}}\nEOF\n"
+        },
+        "position": {
+          "x": 160,
+          "y": 700
+        }
+      },
+      {
+        "id": "summary",
+        "type": "script",
+        "label": "Summarise",
+        "slug": "summary",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "cat <<'EOF'\nWhat each finding came to:\n{{steps.loop.outputs}}\nEOF\n"
+        },
+        "position": {
+          "x": 0,
+          "y": 840
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e-start-review",
+        "source": "start",
+        "target": "review"
+      },
+      {
+        "id": "e-review-gate",
+        "source": "review",
+        "target": "gate"
+      },
+      {
+        "id": "e-gate-loop",
+        "source": "gate",
+        "target": "loop"
+      },
+      {
+        "id": "e-loop-severe",
+        "source": "loop",
+        "target": "severe"
+      },
+      {
+        "id": "e-severe-comment",
+        "source": "severe",
+        "target": "comment",
+        "conditionBranch": "true"
+      },
+      {
+        "id": "e-severe-skip",
+        "source": "severe",
+        "target": "skip",
+        "conditionBranch": "false"
+      },
+      {
+        "id": "e-comment-summary",
+        "source": "comment",
+        "target": "summary"
+      },
+      {
+        "id": "e-skip-summary",
+        "source": "skip",
+        "target": "summary"
+      }
+    ]
+  }
+}

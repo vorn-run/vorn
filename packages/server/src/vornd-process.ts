@@ -107,6 +107,8 @@ export interface Vornd {
   upstream: number
   /** Its channel for this server, when it holds sessions: terminals start there. */
   app?: string
+  /** The groups of calls it answers itself rather than forwarding here. */
+  native?: string[]
   /** Called once if it exits, with why, unless `stop` was called first. */
   onExit(listener: (detail: string) => void): void
   stop(): void
@@ -210,14 +212,14 @@ export function startVornd(
     const lines = createInterface({ input: child.stdout })
     lines.once('line', (line) => {
       lines.close()
-      let reported: { port?: unknown; protocol?: unknown; app?: unknown }
+      let reported: { port?: unknown; protocol?: unknown; app?: unknown; native?: unknown }
       try {
         reported = JSON.parse(line) ?? {}
       } catch {
         fail(new Error(`vornd said something other than where it listens: ${line}`))
         return
       }
-      const { port, protocol, app } = reported
+      const { port, protocol, app, native } = reported
       if (typeof port !== 'number' || !Number.isInteger(port) || port <= 0) {
         fail(new Error(`vornd reported no usable port: ${line}`))
         return
@@ -234,6 +236,9 @@ export function startVornd(
         port,
         upstream,
         ...(typeof app === 'string' && app ? { app } : {}),
+        ...(Array.isArray(native)
+          ? { native: native.filter((g): g is string => typeof g === 'string') }
+          : {}),
         onExit(listener) {
           if (stopped) return
           if (exitDetail !== null) listener(exitDetail)
@@ -303,6 +308,11 @@ export class VorndKeeper {
   /** Where clients reach the server through vornd, or null while it is not up. */
   get port(): number | null {
     return this.running?.port ?? null
+  }
+
+  /** Whether the running vornd answers the calls of `group` itself. */
+  answers(group: string): boolean {
+    return this.running?.native?.includes(group) ?? false
   }
 
   /** Start vornd in front of the server on `upstream`, keeping its holder in `home`. */

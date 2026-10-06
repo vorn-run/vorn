@@ -68,7 +68,7 @@ MCP included, reaches a server that moved.`
  * starts, so a cached value would go stale exactly when Vorn is restarted — the
  * moment MCP is most likely to be mid-session.
  */
-function readLocalToken(): string {
+export function readLocalToken(): string {
   try {
     const token = fs.readFileSync(localTokenFile(), 'utf-8').trim()
     if (!token) throw new Error('empty')

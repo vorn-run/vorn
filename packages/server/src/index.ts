@@ -14,7 +14,9 @@ import {
   handleConnection,
   registerMethod,
   setServerIdentity,
-  setLiveSessionCount
+  setLiveSessionCount,
+  disconnectToken,
+  isLoopbackAddress
 } from './ws-handler'
 import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
 import { browserBridge } from './browser-bridge'
@@ -65,6 +67,7 @@ import { ptyManager } from './pty-manager'
 import { vorndSessions } from './vornd-sessions'
 import { nativeServerSwitch, VorndKeeper } from './vornd-process'
 import { peerAddress, relayThroughVornd, relaysThroughVornd } from './vornd-relay'
+import { linkReach, relayPairing, VORND_FORWARDED_HEADER } from './vornd-reach'
 import { seedRestored, verifyRestored } from './restored-sessions'
 import { getGitBranchAsync, getGitHeadAsync } from './git-utils'
 import { sessionManager } from './session-persistence'
@@ -161,6 +164,12 @@ const vorndKeeper = new VorndKeeper({
   nativeServer: () => nativeServerSwitch(configManager.loadConfig().defaults?.experimental)
 })
 vorndSessions.setLauncher(vorndKeeper)
+const vorndReach = linkReach({
+  channel: vorndSessions,
+  broadcast: (method, params) => clientRegistry.broadcast(method, params),
+  disconnectToken,
+  host: getCurrentHost
+})
 
 export async function startServer(
   options: {
@@ -242,7 +251,9 @@ export async function startServer(
     clientRegistry.broadcast(IPC.CONFIG_CHANGED, cfg)
     // Auto-rebind when networkAccessEnabled changes, and re-read the names the
     // web client may be served from on the same transition.
-    checkAndRebind().catch((err) => log.warn({ err }, '[server] rebind check failed'))
+    checkAndRebind()
+      .catch((err) => log.warn({ err }, '[server] rebind check failed'))
+      .finally(() => vorndReach.hostChanged())
     void refreshTrustedOrigins()
   })
 
@@ -341,7 +352,23 @@ export async function startServer(
     }
   }
 
+  /** vornd's answer to a phone's pairing request, when vornd holds pairing. */
+  const pairedByVornd = (req: FastifyRequest): ReturnType<typeof relayPairing> =>
+    relayPairing(
+      {
+        url: req.url,
+        body: req.body,
+        ip: req.ip,
+        fromVornd:
+          req.headers[VORND_FORWARDED_HEADER] !== undefined &&
+          isLoopbackAddress(req.socket.remoteAddress)
+      },
+      vorndKeeper.answers('pairing') ? vorndKeeper.port : null
+    )
+
   app.post('/api/pair/redeem', { preValidation: requireJson }, async (req, reply) => {
+    const relayed = await pairedByVornd(req)
+    if (relayed) return reply.code(relayed.status).send(relayed.body)
     const { code, deviceName } = (req.body ?? {}) as { code?: unknown; deviceName?: unknown }
     const result = redeemCode(code, deviceName, req.ip)
     if (!result.ok) return reply.code(400).send({ error: result.reason })
@@ -353,7 +380,9 @@ export async function startServer(
     return { requestId: result.requestId }
   })
 
-  app.post('/api/pair/poll', { preValidation: requireJson }, async (req) => {
+  app.post('/api/pair/poll', { preValidation: requireJson }, async (req, reply) => {
+    const relayed = await pairedByVornd(req)
+    if (relayed) return reply.code(relayed.status).send(relayed.body)
     const { requestId } = (req.body ?? {}) as { requestId?: unknown }
     const result = pollRequest(requestId, os.hostname().replace(/\.local$/, ''))
     // The token comes into existence here rather than at approval, so this is

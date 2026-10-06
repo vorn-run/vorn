@@ -1,0 +1,2863 @@
+[
+  {
+    "name": "get_config",
+    "description": "Get the full Vorn configuration (projects, tasks, workflows, settings)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_sessions",
+    "description": "List terminal sessions. Filter by status: \"active\" (running terminals) or \"recent\" (past sessions).",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "description": "Session filter (default: active)",
+          "type": "string",
+          "enum": [
+            "active",
+            "recent"
+          ]
+        },
+        "project_name": {
+          "description": "Filter by project name",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "project_path": {
+          "description": "Filter by project path (for recent sessions)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "launch_session",
+    "description": "Launch an AI agent session (interactive terminal or headless). Requires the Vorn app to be running.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "agent_type": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "copilot",
+            "codex",
+            "opencode",
+            "gemini"
+          ],
+          "description": "Agent type to launch"
+        },
+        "project_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Project name"
+        },
+        "project_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Absolute path to project directory"
+        },
+        "prompt": {
+          "description": "Initial prompt to send to the agent",
+          "type": "string",
+          "maxLength": 10000
+        },
+        "branch": {
+          "description": "Git branch to checkout",
+          "type": "string",
+          "maxLength": 200
+        },
+        "use_worktree": {
+          "description": "Create a git worktree",
+          "type": "boolean"
+        },
+        "display_name": {
+          "description": "Display name for the session",
+          "type": "string",
+          "maxLength": 200
+        },
+        "headless": {
+          "description": "Launch as headless (no UI) session",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "agent_type",
+        "project_name",
+        "project_path"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "kill_session",
+    "description": "Kill a terminal or headless session. Requires the Vorn app to be running.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Session ID to kill"
+        },
+        "headless": {
+          "description": "Kill a headless session instead of a terminal",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "rename_session",
+    "description": "Rename a terminal session. Changes the display name shown in the UI.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Session ID"
+        },
+        "display_name": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "New display name"
+        }
+      },
+      "required": [
+        "id",
+        "display_name"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "reorder_sessions",
+    "description": "Reorder terminal sessions in the grid. Provide session IDs in the desired display order.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "session_ids": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "description": "Session IDs in desired order"
+        }
+      },
+      "required": [
+        "session_ids"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "read_session_output",
+    "description": "Read terminal output from a running session. Output is stored in a rolling 1000-line buffer with ANSI codes stripped.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Session ID"
+        },
+        "lines": {
+          "description": "Number of lines to read from the end (default: all)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "write_to_terminal",
+    "description": "Send input to a running terminal session. Requires the Vorn app to be running.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Session ID"
+        },
+        "data": {
+          "type": "string",
+          "maxLength": 50000,
+          "description": "Data to write (text input to send to the agent)"
+        },
+        "raw": {
+          "description": "Send data as-is without appending carriage return (for raw terminal control)",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "data"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "send_key",
+    "description": "Send a single keystroke or key combo to a terminal session without appending Enter. Use for TUI interactions like selecting menu options (1, 2, y, n), pressing Escape, Ctrl+C, arrow keys, etc.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Session ID"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20,
+          "description": "Key to send: single char (1, y, n), named key (enter, escape, tab, up, down, left, right, backspace, delete, home, end), or combo (ctrl+c, ctrl+d, ctrl+x, ctrl+z, shift+tab)"
+        }
+      },
+      "required": [
+        "id",
+        "key"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_session_events",
+    "description": "List session lifecycle events (created, exited, renamed). Use for post-mortem analysis and multi-agent coordination.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "description": "Filter by session ID",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "event_type": {
+          "description": "Filter by event type",
+          "type": "string",
+          "enum": [
+            "created",
+            "exited",
+            "renamed"
+          ]
+        },
+        "limit": {
+          "description": "Max events to return (default: 50)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_connectors",
+    "description": "List every connector and extension: the ones built into Vorn, the ones installable from a package, and how many connections each already has. A connector polls a service; an extension adds footers and panes to a session card and says what it may touch. Use this before creating a workflow that calls a connector action, or to find an id to install.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "installable_only": {
+          "description": "Only connectors that are not set up yet",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "Only one kind: what polls a service, or what shows on a card",
+          "type": "string",
+          "enum": [
+            "connector",
+            "extension"
+          ]
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_connections",
+    "description": "List configured connector connections, including when each last synced and the error from its last failure. Use this to diagnose a connector that is not producing tasks.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "connector_id": {
+          "description": "Only connections for this connector",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "failing_only": {
+          "description": "Only connections whose last sync failed",
+          "type": "boolean"
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_connector_actions",
+    "description": "List the actions a connection can execute, with their input schemas. Call this before run_connector_action or before adding a callConnectorAction node to a workflow.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "connection_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Connection ID"
+        }
+      },
+      "required": [
+        "connection_id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "inspect_connector_package",
+    "description": "Start a connector package and read what it offers — its triggers, actions and required environment variables, or for an extension what it contributes to a card and what it asks to touch — without installing it. Use this to review one before install_connector, or to check a local build.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "package": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "npm package name, or a command to run a local build (e.g. \"node /path/to/dist/index.js\")"
+        }
+      },
+      "required": [
+        "package"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "install_connector",
+    "description": "Install a connector from a pack file, from the catalog, or by a launch command, creating a connection ready to poll. Installing an extension is the whole of setting it up: it takes no trigger and makes no connection, and shows on the cards its activation names. Call list_connectors for catalog ids and inspect_connector_package to see which environment variables are needed. Secrets cannot be set this way — see the error it returns if the connector requires one.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "connector_id": {
+          "description": "Catalog connector id (from list_connectors). Use this or package.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "package": {
+          "description": "Launch command the connection runs, or a package name to run with npx",
+          "type": "string",
+          "maxLength": 200
+        },
+        "pack_path": {
+          "description": "Path to a .vorn.tgz pack to install first. It is verified and copied to disk, and the connection then launches those files rather than resolving a package.",
+          "type": "string",
+          "maxLength": 200
+        },
+        "name": {
+          "description": "Connection name (defaults to the connector name)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "project": {
+          "description": "Vorn project tasks should be created in",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "trigger": {
+          "description": "Trigger type to configure (defaults to the first the connector offers)",
+          "type": "string",
+          "maxLength": 200
+        },
+        "env": {
+          "description": "Non-secret environment variables the connector needs",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "sync_interval_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "run_connector_action",
+    "description": "Execute one action on a connection — create an issue, run a query, close a work item. Call list_connector_actions first for the action name and its arguments.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "connection_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Connection ID"
+        },
+        "action": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Action name from list_connector_actions"
+        },
+        "args": {
+          "description": "Action arguments",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "connection_id",
+        "action"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "backfill_connection",
+    "description": "Pull items from a connection now and turn them into tasks, without waiting for its poll interval. Use this to verify a connection works after installing it.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "connection_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Connection ID"
+        }
+      },
+      "required": [
+        "connection_id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "read_page",
+    "description": "Read your session browser pane as an accessibility tree. Interactive elements carry a \"ref\" you can pass to browser_interact. Prefer this over screenshot: it is far cheaper and gives you actionable handles. Long pages paginate — pass the returned nextCursor back as `cursor`. When the page is a design artifact it also returns \"artifact\" (what the file declares) and \"artifactValues\" (what it is currently showing). Work from artifactValues: a person can turn a control without spending a turn, so the value on screen is routinely not the default in the file.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "description": "\"interactive\" (default) returns only actionable elements; \"all\" adds text",
+          "type": "string",
+          "enum": [
+            "interactive",
+            "all"
+          ]
+        },
+        "cursor": {
+          "description": "nextCursor from a previous read_page result",
+          "type": "string",
+          "maxLength": 200
+        },
+        "limit": {
+          "description": "Max nodes (default 200)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "get_page_text",
+    "description": "Read the visible text of your session browser pane. Use when you want to read an article or verify copy, rather than act on controls. Long pages paginate — pass the returned nextCursor back as `cursor`.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "description": "nextCursor from a previous get_page_text result",
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "read_console_messages",
+    "description": "Read console output captured from your session browser pane since it opened.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "limit": {
+          "description": "Max messages (default 50)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "read_network_requests",
+    "description": "Read network requests captured from your session browser pane since it opened.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "limit": {
+          "description": "Max requests (default 50)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "browser_screenshot",
+    "description": "Capture your session browser pane as a PNG. This is the expensive last resort — reach for read_page first, and use this only when layout or rendering is the actual question.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "full_page": {
+          "description": "Capture beyond the viewport",
+          "type": "boolean"
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "browser_find",
+    "description": "Find elements in your session browser pane whose accessible name contains some text. Cheaper than reading the whole page when you already know what you are looking for.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Text to match against element names (case-insensitive)"
+        },
+        "limit": {
+          "description": "Max matches (default 20)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "browser_interact",
+    "description": "Act on your session browser pane: click, hover, type, press a key, or scroll. Address the target by \"ref\" from read_page where possible — refs survive reflow, coordinates do not. A ref from before a navigation is refused rather than guessed at; re-read the page. A ref target is scrolled into view first, so it does not need to be on screen already. \"ok\" means the input was dispatched, not that the page did what you expected — read the state back after anything that matters.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "click",
+            "hover",
+            "type",
+            "key",
+            "scroll"
+          ],
+          "description": "What to do. \"type\" clicks the target first when one is given."
+        },
+        "ref": {
+          "description": "Element ref from read_page",
+          "type": "string",
+          "maxLength": 200
+        },
+        "x": {
+          "description": "Viewport x, when no ref is available",
+          "type": "number"
+        },
+        "y": {
+          "description": "Viewport y, when no ref is available",
+          "type": "number"
+        },
+        "text": {
+          "description": "Text for \"type\", or the key name for \"key\" (e.g. \"Enter\")",
+          "type": "string",
+          "maxLength": 5000
+        },
+        "delta_y": {
+          "description": "Scroll amount in pixels (default 400)",
+          "type": "number"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "open_browser_pane",
+    "description": "Open the browser pane for your session, optionally at a URL. You do not need a person to open it for you. Opening a pane that already exists just points it at the URL.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "url": {
+          "description": "URL to open (defaults to the pane's start page)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "browser_tabs",
+    "description": "List, add, close, or switch tabs in your session browser pane. \"close\" and \"select\" take a zero-based index — call \"list\" first to see what those indices name, since a tab that redirected or followed a link is no longer on the page it was opened with. Closing the last remaining tab closes the pane.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "list",
+            "add",
+            "close",
+            "select"
+          ],
+          "description": "What to do with tabs"
+        },
+        "url": {
+          "description": "URL for \"add\"",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "index": {
+          "description": "Zero-based tab index for close/select",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "browser_navigate",
+    "description": "Navigate your session browser pane to a URL. Opens the pane first if none is open. http and https, plus file: urls inside your session's own project or worktree — anything outside it is refused, so serve files from elsewhere over http instead. The pane carries no claude.ai login, so artifact URLs will not load in it.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "description": "URL to open"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "browser_history",
+    "description": "Step back or forward through your session browser pane's own history — the same thing the pane's back and forward buttons do. Fails when there is no page to move to, rather than quietly staying put.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": [
+            "back",
+            "forward"
+          ],
+          "description": "Which way to step"
+        }
+      },
+      "required": [
+        "direction"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "device_list",
+    "description": "List the iOS simulators on this machine, with their state and which session (if any) has claimed each. The only device tool that works before you claim anything — start here.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "device_claim",
+    "description": "Claim a simulator for your session, booting it if needed. Every other device tool acts on your claimed device. Claiming one another session holds fails and names the holder — two agents driving one screen produce results that look like app bugs.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "udid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Simulator UDID from device_list"
+        }
+      },
+      "required": [
+        "udid"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "device_release",
+    "description": "Release your claimed simulator so another session can use it. A simulator Vorn booted is shut down; one that was already running when you claimed it is left alone.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "read_screen",
+    "description": "Read your claimed simulator as an accessibility tree. Elements carry a \"ref\" you can pass to device_interact. Prefer this over device_screenshot: it is far cheaper and gives you handles rather than pixels. Coordinates are in POINTS, which is what taps take — a screenshot is typically 3x larger in pixels. Long screens paginate via nextCursor.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "filter": {
+          "description": "\"interactive\" (default) returns only actionable elements; \"all\" adds text",
+          "type": "string",
+          "enum": [
+            "interactive",
+            "all"
+          ]
+        },
+        "cursor": {
+          "description": "nextCursor from a previous read_screen result",
+          "type": "string",
+          "maxLength": 200
+        },
+        "limit": {
+          "description": "Max elements (default 200)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "device_find",
+    "description": "Find elements on your claimed simulator whose label or accessibility identifier contains some text. Searches the whole screen, not just the first page read_screen would return.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Text to match against labels and identifiers (case-insensitive)"
+        },
+        "limit": {
+          "description": "Max matches (default 20)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "device_interact",
+    "description": "Act on your claimed simulator: tap, swipe, type, press a hardware button, long-press, or rotate it. Address the target by \"ref\" from read_screen where possible. Coordinates are in POINTS. A ref from before an earlier interaction is refused rather than guessed at — read the screen again. A swipe starting at the very edge of the screen is refused too: iOS claims those as system gestures and swallows them, which looks to you like nothing happened.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "tap",
+            "swipe",
+            "type",
+            "button",
+            "press",
+            "rotate"
+          ],
+          "description": "\"press\" is a long press; \"button\" takes a name in `text`; \"rotate\" takes `orientation`"
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Element ref from read_screen or device_find"
+        },
+        "x": {
+          "description": "Screen x in points, when no ref is available",
+          "type": "number"
+        },
+        "y": {
+          "description": "Screen y in points, when no ref is available",
+          "type": "number"
+        },
+        "to_x": {
+          "description": "Swipe destination x, in points",
+          "type": "number"
+        },
+        "to_y": {
+          "description": "Swipe destination y, in points",
+          "type": "number"
+        },
+        "text": {
+          "description": "Text for \"type\", or the button name for \"button\" (HOME, LOCK, SIRI, SIDE_BUTTON)",
+          "type": "string",
+          "maxLength": 5000
+        },
+        "orientation": {
+          "description": "Which way up to turn the device, for \"rotate\"",
+          "type": "string",
+          "enum": [
+            "portrait",
+            "portrait-upside-down",
+            "landscape-left",
+            "landscape-right"
+          ]
+        },
+        "duration": {
+          "description": "Seconds to hold, for \"press\"",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "system_gesture": {
+          "description": "Allow a stroke starting in the bezel band, when a system gesture is the intent",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "device_screenshot",
+    "description": "Capture your claimed simulator as a downscaled PNG. The expensive last resort — reach for read_screen first, and use this only when layout or rendering is the actual question. The result reports the scale factor: divide an image coordinate by it to get the point coordinate device_interact takes.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "max_edge": {
+          "description": "Longest edge of the returned image in pixels (default 1000)",
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 2000
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "device_launch",
+    "description": "Launch an installed app on your claimed simulator by bundle id.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "bundle_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "e.g. com.apple.Preferences"
+        }
+      },
+      "required": [
+        "bundle_id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "device_terminate",
+    "description": "Terminate a running app on your claimed simulator by bundle id.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "bundle_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "e.g. com.apple.Preferences"
+        }
+      },
+      "required": [
+        "bundle_id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "device_install",
+    "description": "Install a built .app bundle on your claimed simulator. Takes a path to an already-built bundle; it does not build anything for you.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Absolute path to a .app bundle"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "device_open_url",
+    "description": "Open a URL on your claimed simulator — a web URL in Safari, or a custom scheme to exercise deep links into an app.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "description": "URL or custom-scheme link to open"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "device_logs",
+    "description": "Read log output captured from your claimed simulator since it was claimed.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "limit": {
+          "description": "Max lines (default 100)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "open_device_pane",
+    "description": "Open the device pane for your session so the person can watch. You do not need this to drive a simulator — every other device tool works with the pane closed.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "udid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Simulator to show (defaults to your claimed one)"
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "publish_artifact",
+    "description": "Publish a page, doc or design for the person to review. It opens in your session browser pane, where they can comment on the exact words and send their notes back to you as one message. Pass artifactId to publish the next version of an artifact after addressing comments. A page or design is self-contained HTML (no network: inline styles, scripts and images as data: URIs); a doc is Markdown.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "page",
+            "doc",
+            "design"
+          ],
+          "description": "page: any HTML; doc: Markdown; design: HTML with a design manifest"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "What the artifact is called in the pane"
+        },
+        "file": {
+          "description": "A .html or .md file inside your project or worktree; give this or content",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "content": {
+          "description": "The HTML or Markdown itself",
+          "type": "string",
+          "maxLength": 5242880
+        },
+        "artifactId": {
+          "description": "Publish the next version of this artifact",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "open": {
+          "description": "Open it in the browser pane (default true)",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "title"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_artifacts",
+    "description": "List the artifacts published by your session or in your project, newest first.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "read_artifact_comments",
+    "description": "Read the comments the person left on an artifact: the quoted words or point each one is about, the comment, which version it was written on, and whether it was sent to you.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "version": {
+          "description": "Only comments written on this version",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "artifactId"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "read_artifact",
+    "description": "Read the source of an artifact version: Markdown for a doc, HTML for a page or design. Use it before publishing the next version when the person saved edits of their own.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "version": {
+          "description": "Defaults to the latest version",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "artifactId"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_projects",
+    "description": "List all projects, optionally filtered by workspace",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "description": "Filter by workspace ID (e.g. \"personal\")",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "create_project",
+    "description": "Create a new project",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Project name (unique identifier)"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Absolute path to project directory"
+        },
+        "preferred_agents": {
+          "description": "Preferred agent types",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "copilot",
+              "codex",
+              "opencode",
+              "gemini"
+            ]
+          }
+        },
+        "icon": {
+          "description": "Lucide icon name",
+          "type": "string",
+          "maxLength": 200
+        },
+        "icon_color": {
+          "description": "Hex color for icon",
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{3,8}$"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "update_project",
+    "description": "Update a project's properties",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Project name (identifier, cannot be changed)"
+        },
+        "path": {
+          "description": "New project path",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "preferred_agents": {
+          "description": "Preferred agent types",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "copilot",
+              "codex",
+              "opencode",
+              "gemini"
+            ]
+          }
+        },
+        "icon": {
+          "description": "Lucide icon name",
+          "type": "string",
+          "maxLength": 200
+        },
+        "icon_color": {
+          "description": "Hex color for icon",
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{3,8}$"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "delete_project",
+    "description": "Delete a project and all its tasks",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Project name"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_tasks",
+    "description": "List tasks, optionally filtered by project, status, assigned agent, or workspace. Archived tasks are excluded by default; pass include_archived=true to include them.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "project_name": {
+          "description": "Filter by project name",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "status": {
+          "description": "Filter by status",
+          "type": "string",
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "cancelled"
+          ]
+        },
+        "assigned_agent": {
+          "description": "Filter by assigned agent type",
+          "type": "string",
+          "enum": [
+            "claude",
+            "copilot",
+            "codex",
+            "opencode",
+            "gemini"
+          ]
+        },
+        "workspace_id": {
+          "description": "Filter by workspace ID (returns tasks from all projects in that workspace)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "include_archived": {
+          "description": "Include archived tasks in the result (default: false)",
+          "type": "boolean"
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "create_task",
+    "description": "Create a new task in a project",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "project_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Project name (must match existing project)"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Task title"
+        },
+        "description": {
+          "description": "Task description (markdown)",
+          "type": "string",
+          "maxLength": 5000
+        },
+        "status": {
+          "description": "Task status (default: todo)",
+          "type": "string",
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "cancelled"
+          ]
+        },
+        "branch": {
+          "description": "Git branch for this task",
+          "type": "string",
+          "maxLength": 200
+        },
+        "use_worktree": {
+          "description": "Create a git worktree for this task",
+          "type": "boolean"
+        },
+        "assigned_agent": {
+          "description": "Assign to an agent type",
+          "type": "string",
+          "enum": [
+            "claude",
+            "copilot",
+            "codex",
+            "opencode",
+            "gemini"
+          ]
+        }
+      },
+      "required": [
+        "project_name",
+        "title"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "get_task",
+    "description": "Get a task by ID",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Task ID"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "update_task",
+    "description": "Update a task's properties",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Task ID"
+        },
+        "title": {
+          "description": "New title",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "description": {
+          "description": "New description",
+          "type": "string",
+          "maxLength": 5000
+        },
+        "status": {
+          "description": "New status",
+          "type": "string",
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "done",
+            "cancelled"
+          ]
+        },
+        "branch": {
+          "description": "Git branch",
+          "type": "string",
+          "maxLength": 200
+        },
+        "use_worktree": {
+          "description": "Use git worktree",
+          "type": "boolean"
+        },
+        "assigned_agent": {
+          "description": "Assigned agent type",
+          "type": "string",
+          "enum": [
+            "claude",
+            "copilot",
+            "codex",
+            "opencode",
+            "gemini"
+          ]
+        },
+        "order": {
+          "description": "Queue order",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "delete_task",
+    "description": "Delete a task by ID",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Task ID"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "archive_task",
+    "description": "Archive a finished task (status must be done or cancelled). Archived tasks are hidden from default views but preserved and restorable.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Task ID"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "unarchive_task",
+    "description": "Restore an archived task so it shows in default views again.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Task ID"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "get_my_context",
+    "description": "Get your current task and project context. Auto-detects based on your working directory. Call this at the start of a session to understand what you are working on.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "description": "Your current working directory (auto-detected if omitted). Used to match against known projects and task worktrees.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "task_id": {
+          "description": "Specific task ID to get context for (overrides auto-detection)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_workflows",
+    "description": "List all workflows, optionally filtered by workspace",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "description": "Filter by workspace ID",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "create_workflow",
+    "description": "Create a workflow: a graph of steps started by one trigger. Call describe_workflow_nodes first — it gives the config schema, outputs and rules of every node type, the template namespaces, and a complete example to copy. Pass nodes and edges (every node type is supported), or the convenience format (trigger + actions, a straight line of agents).\n\nNode types: trigger (exactly one, what starts the run), launchAgent (an AI agent; headless with an outputSchema gives typed fields), script (bash/python/node/powershell), condition (branches: wire both outcomes with edge conditionBranch \"true\" and \"false\"), approval (a human gate; can show a table to edit and send work back), createTaskFromItem, callConnectorAction (an action of a connected service; list_connector_actions gives its args), httpRequest, and loop.\n\nGive a node a slug and later steps read its output as {{steps.<slug>.<field>}}.\n\nLoops: config.bodyNodeIds lists the steps the loop runs each pass. Wire an edge from the loop to each body entry step, edges between body steps, and from the last body steps to the step after the loop; nothing outside the loop may point into its body, and a condition inside it keeps both branches inside. mode \"repeat\" runs up to maxIterations (1-10) passes, stopping early when until holds; mode \"forEach\" runs once per item of items (e.g. {{steps.gate.items}}), and body steps read {{loop.item.<field>}}. A loop body cannot hold an approval, a trigger or another loop.\n\nEach node config is checked against its type, and the graph for loop and gate wiring; a refusal names the node and field.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Workflow name"
+        },
+        "trigger": {
+          "description": "Trigger config (convenience mode). Defaults to manual.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "triggerType": {
+                  "type": "string",
+                  "const": "manual",
+                  "description": "Runs when someone starts it, or execute_workflow"
+                },
+                "contextual": {
+                  "description": "Offered from a task card or terminal right-click, inheriting its folder, branch and worktree as {{context.*}}",
+                  "type": "boolean"
+                },
+                "inputs": {
+                  "description": "Parameters asked for before each run, read as {{inputs.<key>}}",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "maxLength": 100,
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                        "description": "Identifier the value is read by, as {{inputs.<key>}}"
+                      },
+                      "label": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "description": "What the run dialog calls this field"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "text",
+                          "textarea",
+                          "number",
+                          "select",
+                          "boolean",
+                          "project",
+                          "branch"
+                        ],
+                        "description": "Which control the run dialog shows, and how a supplied value is checked"
+                      },
+                      "required": {
+                        "description": "A run cannot start without a value",
+                        "type": "boolean"
+                      },
+                      "defaultValue": {
+                        "description": "Used when the run supplies nothing. A number must be finite, a boolean \"true\" or \"false\", a select one of its options",
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "options": {
+                        "description": "Choices for a select; a select without any is refused",
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "maxLength": 200,
+                              "description": "What {{inputs.<key>}} expands to"
+                            },
+                            "label": {
+                              "type": "string",
+                              "maxLength": 200,
+                              "description": "What the dialog shows"
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "label"
+                          ],
+                          "additionalProperties": {}
+                        }
+                      },
+                      "placeholder": {
+                        "description": "Hint shown in an empty field",
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "description": {
+                        "description": "Help text shown under the field",
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "label",
+                      "type"
+                    ],
+                    "additionalProperties": {}
+                  }
+                }
+              },
+              "required": [
+                "triggerType"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "triggerType": {
+                  "type": "string",
+                  "const": "once",
+                  "description": "Runs once at a set time"
+                },
+                "runAt": {
+                  "type": "string",
+                  "maxLength": 200,
+                  "description": "When to run, as an ISO 8601 date-time"
+                }
+              },
+              "required": [
+                "triggerType",
+                "runAt"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "triggerType": {
+                  "type": "string",
+                  "const": "recurring",
+                  "description": "Runs on a cron schedule"
+                },
+                "cron": {
+                  "type": "string",
+                  "maxLength": 200,
+                  "description": "Five-field cron expression, e.g. \"0 9 * * 1-5\""
+                },
+                "timezone": {
+                  "description": "IANA zone the cron is read in, e.g. \"Europe/Madrid\". Defaults to the machine",
+                  "type": "string",
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "triggerType",
+                "cron"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "triggerType": {
+                  "type": "string",
+                  "const": "taskCreated",
+                  "description": "Runs when a task is created; the task is {{task.*}}"
+                },
+                "projectFilter": {
+                  "description": "Only fire for this project, by name. Omit to fire for every project",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "triggerType"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "triggerType": {
+                  "type": "string",
+                  "const": "taskStatusChanged",
+                  "description": "Runs when a task moves between statuses; the task is {{task.*}}, the move {{trigger.fromStatus}} and {{trigger.toStatus}}"
+                },
+                "projectFilter": {
+                  "description": "Only fire for this project, by name. Omit to fire for every project",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "fromStatus": {
+                  "description": "Only when it leaves this status",
+                  "type": "string",
+                  "enum": [
+                    "todo",
+                    "in_progress",
+                    "in_review",
+                    "done",
+                    "cancelled"
+                  ]
+                },
+                "toStatus": {
+                  "description": "Only when it enters this status",
+                  "type": "string",
+                  "enum": [
+                    "todo",
+                    "in_progress",
+                    "in_review",
+                    "done",
+                    "cancelled"
+                  ]
+                }
+              },
+              "required": [
+                "triggerType"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "triggerType": {
+                  "type": "string",
+                  "const": "sessionRestored",
+                  "description": "Runs when a session comes back after a quit, crash or reboot; {{trigger.restore}} says cold or warm"
+                },
+                "projectFilter": {
+                  "description": "Only fire for this project, by name. Omit to fire for every project",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "restore": {
+                  "description": "cold (default): only when a process starts again. any: also when a pane reattaches to one still running",
+                  "type": "string",
+                  "enum": [
+                    "cold",
+                    "any"
+                  ]
+                },
+                "concurrency": {
+                  "description": "perProject (default) runs one at a time per project, so restored sessions do not race for one port",
+                  "type": "string",
+                  "enum": [
+                    "perProject",
+                    "unbounded"
+                  ]
+                }
+              },
+              "required": [
+                "triggerType"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "triggerType": {
+                  "type": "string",
+                  "const": "connectorPoll",
+                  "description": "Polls a connection on a cron and runs once per new item; the item is {{connectorItem.*}}"
+                },
+                "connectionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100,
+                  "description": "Connection to poll, from list_connections"
+                },
+                "event": {
+                  "type": "string",
+                  "maxLength": 200,
+                  "description": "Event type from the connector's manifest, e.g. issueCreated (list_connector_actions shows them)"
+                },
+                "cron": {
+                  "type": "string",
+                  "maxLength": 200,
+                  "description": "How often to poll, as a five-field cron expression"
+                },
+                "timezone": {
+                  "description": "IANA zone the cron is read in",
+                  "type": "string",
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "triggerType",
+                "connectionId",
+                "event",
+                "cron"
+              ],
+              "additionalProperties": {}
+            },
+            {
+              "type": "object",
+              "properties": {
+                "triggerType": {
+                  "type": "string",
+                  "const": "webhook",
+                  "description": "Runs when the local webhook route receives a request; its body, headers and query are {{trigger.*}}"
+                },
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "POST",
+                    "GET"
+                  ],
+                  "description": "HTTP method the route answers"
+                },
+                "token": {
+                  "type": "string",
+                  "maxLength": 200,
+                  "description": "Secret path segment; a request without it is refused. Use a long random string"
+                }
+              },
+              "required": [
+                "triggerType",
+                "method",
+                "token"
+              ],
+              "additionalProperties": {}
+            }
+          ]
+        },
+        "actions": {
+          "description": "Agents to run one after another (convenience mode). Auto-generates the graph.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "agentType": {
+                "type": "string",
+                "enum": [
+                  "claude",
+                  "copilot",
+                  "codex",
+                  "opencode",
+                  "gemini"
+                ]
+              },
+              "projectName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "projectPath": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 200
+                }
+              },
+              "displayName": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "branch": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "useWorktree": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "const": "fromContext"
+                  }
+                ]
+              },
+              "remoteHostId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "prompt": {
+                "type": "string",
+                "maxLength": 10000
+              },
+              "promptDelayMs": {
+                "type": "number"
+              },
+              "taskId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "taskFromQueue": {
+                "type": "boolean"
+              },
+              "headless": {
+                "type": "boolean"
+              },
+              "outputSchema": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "agentType",
+              "projectName",
+              "projectPath"
+            ]
+          }
+        },
+        "nodes": {
+          "description": "Graph nodes; pass with edges. describe_workflow_nodes has each config schema",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Unique within the workflow; edges and bodyNodeIds refer to it"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "trigger",
+                  "launchAgent",
+                  "script",
+                  "condition",
+                  "approval",
+                  "createTaskFromItem",
+                  "callConnectorAction",
+                  "httpRequest",
+                  "loop"
+                ],
+                "description": "Node type; describe_workflow_nodes gives the config each one takes"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "Name shown on the canvas and in run history"
+              },
+              "slug": {
+                "description": "Name later steps read this one by, as {{steps.<slug>.<field>}}",
+                "type": "string",
+                "maxLength": 200
+              },
+              "config": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {},
+                "description": "The type's own settings; describe_workflow_nodes has the schema for each type"
+              },
+              "position": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "description": "Where the node sits on the canvas"
+              },
+              "onError": {
+                "description": "stop (default) ends the run when this step fails; continue carries on past it",
+                "type": "string",
+                "enum": [
+                  "stop",
+                  "continue"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "label",
+              "config",
+              "position"
+            ]
+          }
+        },
+        "edges": {
+          "description": "Graph edges; pass with nodes. A step runs once every edge into it has run",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Unique within the workflow"
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Id of the node that runs first"
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Id of the node that runs after it"
+              },
+              "conditionBranch": {
+                "description": "On an edge leaving a condition: which outcome takes it. Wire both. Omit on every other edge",
+                "type": "string",
+                "enum": [
+                  "true",
+                  "false"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "source",
+              "target"
+            ]
+          }
+        },
+        "icon": {
+          "description": "Lucide icon name (default: zap)",
+          "type": "string",
+          "maxLength": 200
+        },
+        "icon_color": {
+          "description": "Hex color (default: #6366f1)",
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{3,8}$"
+        },
+        "enabled": {
+          "description": "Whether its trigger fires on its own (default: true). Manual runs work either way",
+          "type": "boolean"
+        },
+        "stagger_delay_ms": {
+          "description": "Delay in ms between actions",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "update_workflow",
+    "description": "Change a workflow. Only the fields you pass change; nodes and edges each replace the whole list, so read the workflow first (list_workflows), edit it, and send the full list back. Checked like create_workflow: each node config against its type (describe_workflow_nodes), and the graph for loop and gate wiring. A node whose config you left exactly as stored is let through with a warning even if it breaks a newer rule, so an older workflow stays editable; fix what the warning names when you can.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "workflow_id": {
+          "description": "Workflow ID (from list_workflows)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "id": {
+          "description": "Deprecated alias for workflow_id",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "name": {
+          "description": "New name",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "nodes": {
+          "description": "Every node of the workflow, replacing the stored list",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Unique within the workflow; edges and bodyNodeIds refer to it"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "trigger",
+                  "launchAgent",
+                  "script",
+                  "condition",
+                  "approval",
+                  "createTaskFromItem",
+                  "callConnectorAction",
+                  "httpRequest",
+                  "loop"
+                ],
+                "description": "Node type; describe_workflow_nodes gives the config each one takes"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "Name shown on the canvas and in run history"
+              },
+              "slug": {
+                "description": "Name later steps read this one by, as {{steps.<slug>.<field>}}",
+                "type": "string",
+                "maxLength": 200
+              },
+              "config": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {},
+                "description": "The type's own settings; describe_workflow_nodes has the schema for each type"
+              },
+              "position": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "description": "Where the node sits on the canvas"
+              },
+              "onError": {
+                "description": "stop (default) ends the run when this step fails; continue carries on past it",
+                "type": "string",
+                "enum": [
+                  "stop",
+                  "continue"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "label",
+              "config",
+              "position"
+            ]
+          }
+        },
+        "edges": {
+          "description": "Every edge of the workflow, replacing the stored list",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Unique within the workflow"
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Id of the node that runs first"
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Id of the node that runs after it"
+              },
+              "conditionBranch": {
+                "description": "On an edge leaving a condition: which outcome takes it. Wire both. Omit on every other edge",
+                "type": "string",
+                "enum": [
+                  "true",
+                  "false"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "source",
+              "target"
+            ]
+          }
+        },
+        "icon": {
+          "description": "Lucide icon name",
+          "type": "string",
+          "maxLength": 200
+        },
+        "icon_color": {
+          "description": "Hex color",
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{3,8}$"
+        },
+        "enabled": {
+          "description": "Whether its trigger fires on its own. Manual runs work either way",
+          "type": "boolean"
+        },
+        "stagger_delay_ms": {
+          "description": "Delay in ms between actions",
+          "type": "number"
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "delete_workflow",
+    "description": "Delete a workflow",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "workflow_id": {
+          "description": "Workflow ID (from list_workflows)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "id": {
+          "description": "Deprecated alias for workflow_id",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_workflow_runs",
+    "description": "List workflow execution history. Filter by workflow_id or task_id; with neither, lists the runs parked on an approval gate, each waiting node saying what it asks.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "workflow_id": {
+          "description": "Filter by workflow ID",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "task_id": {
+          "description": "Filter by task ID (runs triggered by this task)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "limit": {
+          "description": "Max results (default: 20)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "stop_workflow_run",
+    "description": "Stop a workflow run that is still going, including one parked on an approval gate. Kills the agents it started, marks its unfinished nodes, and closes the run as cancelled. Requires the Vorn app to be running.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Run ID (from list_workflow_runs)"
+        }
+      },
+      "required": [
+        "run_id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "resolve_gate",
+    "description": "Approve, reject, or send back the approval gate a workflow run is parked on, the way the Vorn app does. Requires the Vorn app to be running: the decision is broadcast, and the instance holding the run is what resumes it. Read what is being approved first — list_workflow_runs names the waiting node and what it asks.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Run ID (from list_workflow_runs)"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "reject",
+            "changes"
+          ],
+          "description": "approve lets the run go on; reject ends it; changes sends the work back to the step the gate redoes from, with your comment, and the gate asks again"
+        },
+        "comment": {
+          "description": "Required for changes: what to change. Optional on approve and reject; kept with the run.",
+          "type": "string",
+          "maxLength": 20000
+        },
+        "edited": {
+          "description": "Your rewrite of the gate's editable text, when it has one. Kept beside the original, and read by later steps as {{steps.<gate>.text}}. Ignored on reject.",
+          "type": "string",
+          "maxLength": 200000
+        },
+        "comments": {
+          "description": "Comments on the review page, each on the words it quotes. Carried back with changes and read by the redone steps as {{steps.<gate>.comments}}; ignored on approve and reject.",
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "quote": {
+                "description": "The words on the review page it is about",
+                "type": "string",
+                "maxLength": 2000
+              },
+              "comment": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              }
+            },
+            "required": [
+              "comment"
+            ]
+          }
+        },
+        "node_id": {
+          "description": "The waiting node, when a run has more than one gate open",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "run_id",
+        "decision"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "get_workflow_schedule",
+    "description": "Get scheduler info for a workflow: execution log or next scheduled run. Requires the Vorn app to be running.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "workflow_id": {
+          "description": "Workflow ID (required for next_run, optional for log)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "info": {
+          "description": "What to retrieve (default: log)",
+          "type": "string",
+          "enum": [
+            "log",
+            "next_run"
+          ]
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "execute_workflow",
+    "description": "Run a workflow now, as if triggered manually. Supply values for any parameters the workflow declares (see the trigger node's inputs); declared defaults fill in anything omitted. Requires the Vorn app to be running. Returns as soon as the run is queued — poll list_workflow_runs for the outcome. Runs of one workflow go side by side; only a run repeating one started in the last ten seconds with the same inputs is refused as a duplicate.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "workflow_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Workflow ID (from list_workflows)"
+        },
+        "inputs": {
+          "description": "Values for the declared parameters, keyed by input key ({{inputs.<key>}})",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        }
+      },
+      "required": [
+        "workflow_id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "export_workflow",
+    "description": "Export a workflow as a portable file you can commit beside the code it drives. Absolute paths become {{project.path}} and the local remote-host binding is dropped, so it runs on another machine after import. Connections are dropped too and recorded as requirements the importing machine rebinds by connector and name.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "workflow_id": {
+          "description": "Workflow ID (from list_workflows)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "id": {
+          "description": "Deprecated alias for workflow_id",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "import_workflow",
+    "description": "Import a workflow exported by export_workflow, resolving {{project.path}} and {{project.name}} against a registered project. Recorded connection requirements are rebound when this machine has one unambiguous match, and reported as still to connect otherwise. The id is derived from the bundle and the workflow's slug, so importing the same file again updates it in place instead of creating a duplicate.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "workflow": {
+          "type": "string",
+          "maxLength": 500000,
+          "description": "The exported workflow JSON"
+        },
+        "project_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Registered project to resolve paths against"
+        },
+        "bundle": {
+          "description": "Namespace for the derived id (default: the project name)",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "workflow",
+        "project_name"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "describe_workflow_nodes",
+    "description": "The reference for writing a workflow: for each node type its config schema, the outputs later steps read, and the rules create_workflow checks; the edge schema; limits; the template namespaces; and a complete example workflow to adapt. Call it before create_workflow or update_workflow.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "types": {
+          "description": "Only these node types. Omit for all nine",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "trigger",
+              "launchAgent",
+              "script",
+              "condition",
+              "approval",
+              "createTaskFromItem",
+              "callConnectorAction",
+              "httpRequest",
+              "loop"
+            ]
+          }
+        }
+      }
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "list_workspaces",
+    "description": "List all workspaces",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "create_workspace",
+    "description": "Create a new workspace for organizing projects",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Workspace name"
+        },
+        "icon": {
+          "description": "Lucide icon name",
+          "type": "string",
+          "maxLength": 200
+        },
+        "icon_color": {
+          "description": "Hex color for icon",
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{3,8}$"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "update_workspace",
+    "description": "Update a workspace's properties",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Workspace ID"
+        },
+        "name": {
+          "description": "New name",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "icon": {
+          "description": "Lucide icon name",
+          "type": "string",
+          "maxLength": 200
+        },
+        "icon_color": {
+          "description": "Hex color for icon",
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{3,8}$"
+        },
+        "order": {
+          "description": "Sort order",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "delete_workspace",
+    "description": "Delete a workspace",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Workspace ID"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+]

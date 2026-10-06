@@ -1,0 +1,5766 @@
+{
+  "tools": {
+    "get_config": null,
+    "list_sessions": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "filter",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "active",
+                "recent"
+              ]
+            }
+          }
+        ],
+        [
+          "project_name",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Name must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Name must be 200 characters or less"
+                },
+                {
+                  "k": "custom",
+                  "name": "safeName",
+                  "message": "Name must not contain path traversal characters (.. / \\)"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "project_path",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Path must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 1000,
+                  "message": "Path must be 1000 characters or less"
+                },
+                {
+                  "k": "custom",
+                  "name": "absolutePath",
+                  "message": "Path must be absolute (start with /)"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "launch_session": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "agent_type",
+          {
+            "t": "enum",
+            "values": [
+              "claude",
+              "copilot",
+              "codex",
+              "opencode",
+              "gemini"
+            ]
+          }
+        ],
+        [
+          "project_name",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Name must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Name must be 200 characters or less"
+              },
+              {
+                "k": "custom",
+                "name": "safeName",
+                "message": "Name must not contain path traversal characters (.. / \\)"
+              }
+            ]
+          }
+        ],
+        [
+          "project_path",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Path must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 1000,
+                "message": "Path must be 1000 characters or less"
+              },
+              {
+                "k": "custom",
+                "name": "absolutePath",
+                "message": "Path must be absolute (start with /)"
+              }
+            ]
+          }
+        ],
+        [
+          "prompt",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 10000,
+                  "message": "Prompt must be 10000 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "branch",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "use_worktree",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ],
+        [
+          "display_name",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "headless",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ]
+      ]
+    },
+    "kill_session": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "headless",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ]
+      ]
+    },
+    "rename_session": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "display_name",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "reorder_sessions": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "session_ids",
+          {
+            "t": "array",
+            "item": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            },
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "At least one session ID is required"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "read_session_output": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "lines",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 1000
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "write_to_terminal": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "data",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 50000,
+                "message": "Data must be 50000 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "raw",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ]
+      ]
+    },
+    "send_key": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "key",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1
+              },
+              {
+                "k": "max",
+                "value": 20
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "list_session_events": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "session_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "event_type",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "created",
+                "exited",
+                "renamed"
+              ]
+            }
+          }
+        ],
+        [
+          "limit",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 200
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "list_connectors": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "installable_only",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ],
+        [
+          "kind",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "connector",
+                "extension"
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "list_connections": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "connector_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "failing_only",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ]
+      ]
+    },
+    "list_connector_actions": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "connection_id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "inspect_connector_package": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "package",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "install_connector": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "connector_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "package",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "pack_path",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "name",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Title must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 500,
+                  "message": "Title must be 500 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "project",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Name must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Name must be 200 characters or less"
+                },
+                {
+                  "k": "custom",
+                  "name": "safeName",
+                  "message": "Name must not contain path traversal characters (.. / \\)"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "trigger",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "env",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "record",
+              "value": {
+                "t": "string"
+              }
+            }
+          }
+        ],
+        [
+          "sync_interval_minutes",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 1440
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "run_connector_action": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "connection_id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "action",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "args",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "record",
+              "value": {
+                "t": "unknown"
+              }
+            }
+          }
+        ]
+      ]
+    },
+    "backfill_connection": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "connection_id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "read_page": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "filter",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "interactive",
+                "all"
+              ]
+            }
+          }
+        ],
+        [
+          "cursor",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "limit",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 200
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "get_page_text": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "cursor",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "read_console_messages": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "limit",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 200
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "read_network_requests": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "limit",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 200
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "browser_screenshot": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "full_page",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ]
+      ]
+    },
+    "browser_find": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "text",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "limit",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 50
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "browser_interact": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "action",
+          {
+            "t": "enum",
+            "values": [
+              "click",
+              "hover",
+              "type",
+              "key",
+              "scroll"
+            ]
+          }
+        ],
+        [
+          "ref",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "x",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
+        ],
+        [
+          "y",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
+        ],
+        [
+          "text",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 5000,
+                  "message": "Description must be 5000 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "delta_y",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
+        ]
+      ]
+    },
+    "open_browser_pane": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "url",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "URL must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 2048,
+                  "message": "URL is too long"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "browser_tabs": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "action",
+          {
+            "t": "enum",
+            "values": [
+              "list",
+              "add",
+              "close",
+              "select"
+            ]
+          }
+        ],
+        [
+          "url",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "URL must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 2048,
+                  "message": "URL is too long"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "index",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 0
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "browser_navigate": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "url",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "URL must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 2048,
+                "message": "URL is too long"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "browser_history": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "direction",
+          {
+            "t": "enum",
+            "values": [
+              "back",
+              "forward"
+            ]
+          }
+        ]
+      ]
+    },
+    "device_list": {
+      "t": "object",
+      "mode": "strip",
+      "shape": []
+    },
+    "device_claim": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "udid",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              },
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Value must not be empty"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "device_release": {
+      "t": "object",
+      "mode": "strip",
+      "shape": []
+    },
+    "read_screen": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "filter",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "interactive",
+                "all"
+              ]
+            }
+          }
+        ],
+        [
+          "cursor",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "limit",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 200
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "device_find": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "text",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              },
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Value must not be empty"
+              }
+            ]
+          }
+        ],
+        [
+          "limit",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 50
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "device_interact": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "action",
+          {
+            "t": "enum",
+            "values": [
+              "tap",
+              "swipe",
+              "type",
+              "button",
+              "press",
+              "rotate"
+            ]
+          }
+        ],
+        [
+          "ref",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                },
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Value must not be empty"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "x",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
+        ],
+        [
+          "y",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
+        ],
+        [
+          "to_x",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
+        ],
+        [
+          "to_y",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
+        ],
+        [
+          "text",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 5000,
+                  "message": "Description must be 5000 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "orientation",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "portrait",
+                "portrait-upside-down",
+                "landscape-left",
+                "landscape-right"
+              ]
+            }
+          }
+        ],
+        [
+          "duration",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "gte",
+                  "value": 0
+                },
+                {
+                  "k": "lte",
+                  "value": 30
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "system_gesture",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ]
+      ]
+    },
+    "device_screenshot": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "max_edge",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 200
+                },
+                {
+                  "k": "lte",
+                  "value": 2000
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "device_launch": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "bundle_id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              },
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Value must not be empty"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "device_terminate": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "bundle_id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              },
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Value must not be empty"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "device_install": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "path",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Path must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 1000,
+                "message": "Path must be 1000 characters or less"
+              },
+              {
+                "k": "custom",
+                "name": "absolutePath",
+                "message": "Path must be absolute (start with /)"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "device_open_url": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "url",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "URL must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 2048,
+                "message": "URL is too long"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "device_logs": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "limit",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 500
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "open_device_pane": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "udid",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                },
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Value must not be empty"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "publish_artifact": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "kind",
+          {
+            "t": "enum",
+            "values": [
+              "page",
+              "doc",
+              "design"
+            ]
+          }
+        ],
+        [
+          "title",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              },
+              {
+                "k": "min",
+                "value": 1
+              }
+            ]
+          }
+        ],
+        [
+          "file",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1
+                },
+                {
+                  "k": "max",
+                  "value": 1000
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "content",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 5242880
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "artifactId",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "open",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ]
+      ]
+    },
+    "list_artifacts": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "limit",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 100
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "read_artifact_comments": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "artifactId",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "version",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "read_artifact": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "artifactId",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "version",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "list_projects": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "workspace_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "create_project": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "name",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Name must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Name must be 200 characters or less"
+              },
+              {
+                "k": "custom",
+                "name": "safeName",
+                "message": "Name must not contain path traversal characters (.. / \\)"
+              }
+            ]
+          }
+        ],
+        [
+          "path",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Path must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 1000,
+                "message": "Path must be 1000 characters or less"
+              },
+              {
+                "k": "custom",
+                "name": "absolutePath",
+                "message": "Path must be absolute (start with /)"
+              }
+            ]
+          }
+        ],
+        [
+          "preferred_agents",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "enum",
+                "values": [
+                  "claude",
+                  "copilot",
+                  "codex",
+                  "opencode",
+                  "gemini"
+                ]
+              }
+            }
+          }
+        ],
+        [
+          "icon",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "icon_color",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "regex",
+                  "source": "^#[0-9a-fA-F]{3,8}$",
+                  "shown": "/^#[0-9a-fA-F]{3,8}$/",
+                  "message": "Must be a valid hex color (e.g. #6366f1)"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "update_project": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "name",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Name must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Name must be 200 characters or less"
+              },
+              {
+                "k": "custom",
+                "name": "safeName",
+                "message": "Name must not contain path traversal characters (.. / \\)"
+              }
+            ]
+          }
+        ],
+        [
+          "path",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Path must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 1000,
+                  "message": "Path must be 1000 characters or less"
+                },
+                {
+                  "k": "custom",
+                  "name": "absolutePath",
+                  "message": "Path must be absolute (start with /)"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "preferred_agents",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "enum",
+                "values": [
+                  "claude",
+                  "copilot",
+                  "codex",
+                  "opencode",
+                  "gemini"
+                ]
+              }
+            }
+          }
+        ],
+        [
+          "icon",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "icon_color",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "regex",
+                  "source": "^#[0-9a-fA-F]{3,8}$",
+                  "shown": "/^#[0-9a-fA-F]{3,8}$/",
+                  "message": "Must be a valid hex color (e.g. #6366f1)"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "delete_project": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "name",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Name must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Name must be 200 characters or less"
+              },
+              {
+                "k": "custom",
+                "name": "safeName",
+                "message": "Name must not contain path traversal characters (.. / \\)"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "list_tasks": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "project_name",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Name must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Name must be 200 characters or less"
+                },
+                {
+                  "k": "custom",
+                  "name": "safeName",
+                  "message": "Name must not contain path traversal characters (.. / \\)"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "status",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "todo",
+                "in_progress",
+                "in_review",
+                "done",
+                "cancelled"
+              ]
+            }
+          }
+        ],
+        [
+          "assigned_agent",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "claude",
+                "copilot",
+                "codex",
+                "opencode",
+                "gemini"
+              ]
+            }
+          }
+        ],
+        [
+          "workspace_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "include_archived",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ]
+      ]
+    },
+    "create_task": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "project_name",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Name must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Name must be 200 characters or less"
+              },
+              {
+                "k": "custom",
+                "name": "safeName",
+                "message": "Name must not contain path traversal characters (.. / \\)"
+              }
+            ]
+          }
+        ],
+        [
+          "title",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Title must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 500,
+                "message": "Title must be 500 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "description",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 5000,
+                  "message": "Description must be 5000 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "status",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "todo",
+                "in_progress",
+                "in_review",
+                "done",
+                "cancelled"
+              ]
+            }
+          }
+        ],
+        [
+          "branch",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "use_worktree",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ],
+        [
+          "assigned_agent",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "claude",
+                "copilot",
+                "codex",
+                "opencode",
+                "gemini"
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "get_task": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "update_task": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "title",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Title must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 500,
+                  "message": "Title must be 500 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "description",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 5000,
+                  "message": "Description must be 5000 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "status",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "todo",
+                "in_progress",
+                "in_review",
+                "done",
+                "cancelled"
+              ]
+            }
+          }
+        ],
+        [
+          "branch",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "use_worktree",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ],
+        [
+          "assigned_agent",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "claude",
+                "copilot",
+                "codex",
+                "opencode",
+                "gemini"
+              ]
+            }
+          }
+        ],
+        [
+          "order",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
+        ]
+      ]
+    },
+    "delete_task": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "archive_task": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "unarchive_task": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "get_my_context": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "cwd",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Path must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 1000,
+                  "message": "Path must be 1000 characters or less"
+                },
+                {
+                  "k": "custom",
+                  "name": "absolutePath",
+                  "message": "Path must be absolute (start with /)"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "task_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "list_workflows": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "workspace_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "create_workflow": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "name",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Title must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 500,
+                "message": "Title must be 500 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "trigger",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "ref",
+              "name": "nodeConfig.trigger"
+            }
+          }
+        ],
+        [
+          "actions",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "object",
+                "mode": "strip",
+                "shape": [
+                  [
+                    "agentType",
+                    {
+                      "t": "enum",
+                      "values": [
+                        "claude",
+                        "copilot",
+                        "codex",
+                        "opencode",
+                        "gemini"
+                      ]
+                    }
+                  ],
+                  [
+                    "projectName",
+                    {
+                      "t": "string",
+                      "checks": [
+                        {
+                          "k": "min",
+                          "value": 1,
+                          "message": "Name must not be empty"
+                        },
+                        {
+                          "k": "max",
+                          "value": 200,
+                          "message": "Name must be 200 characters or less"
+                        },
+                        {
+                          "k": "custom",
+                          "name": "safeName",
+                          "message": "Name must not contain path traversal characters (.. / \\)"
+                        }
+                      ]
+                    }
+                  ],
+                  [
+                    "projectPath",
+                    {
+                      "t": "string",
+                      "checks": [
+                        {
+                          "k": "min",
+                          "value": 1,
+                          "message": "Path must not be empty"
+                        },
+                        {
+                          "k": "max",
+                          "value": 1000,
+                          "message": "Path must be 1000 characters or less"
+                        },
+                        {
+                          "k": "custom",
+                          "name": "absolutePath",
+                          "message": "Path must be absolute (start with /)"
+                        }
+                      ]
+                    }
+                  ],
+                  [
+                    "args",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "array",
+                        "item": {
+                          "t": "string",
+                          "checks": [
+                            {
+                              "k": "max",
+                              "value": 200,
+                              "message": "Value must be 200 characters or less"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ],
+                  [
+                    "displayName",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "string",
+                        "checks": [
+                          {
+                            "k": "max",
+                            "value": 200,
+                            "message": "Value must be 200 characters or less"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "branch",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "string",
+                        "checks": [
+                          {
+                            "k": "max",
+                            "value": 200,
+                            "message": "Value must be 200 characters or less"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "useWorktree",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "union",
+                        "options": [
+                          {
+                            "t": "boolean"
+                          },
+                          {
+                            "t": "literal",
+                            "values": [
+                              "fromContext"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "remoteHostId",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "string",
+                        "checks": [
+                          {
+                            "k": "min",
+                            "value": 1,
+                            "message": "ID must not be empty"
+                          },
+                          {
+                            "k": "max",
+                            "value": 100,
+                            "message": "ID must be 100 characters or less"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "prompt",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "string",
+                        "checks": [
+                          {
+                            "k": "max",
+                            "value": 10000,
+                            "message": "Prompt must be 10000 characters or less"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "promptDelayMs",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "number"
+                      }
+                    }
+                  ],
+                  [
+                    "taskId",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "string",
+                        "checks": [
+                          {
+                            "k": "min",
+                            "value": 1,
+                            "message": "ID must not be empty"
+                          },
+                          {
+                            "k": "max",
+                            "value": 100,
+                            "message": "ID must be 100 characters or less"
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "taskFromQueue",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "boolean"
+                      }
+                    }
+                  ],
+                  [
+                    "headless",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "boolean"
+                      }
+                    }
+                  ],
+                  [
+                    "outputSchema",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "record",
+                        "value": {
+                          "t": "unknown"
+                        }
+                      }
+                    }
+                  ]
+                ],
+                "checks": [
+                  {
+                    "k": "custom",
+                    "name": "outputSchemaNeedsHeadless",
+                    "message": "outputSchema requires headless: true",
+                    "path": [
+                      "outputSchema"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        [
+          "nodes",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "ref",
+                "name": "node"
+              }
+            }
+          }
+        ],
+        [
+          "edges",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "ref",
+                "name": "edge"
+              }
+            }
+          }
+        ],
+        [
+          "icon",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "icon_color",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "regex",
+                  "source": "^#[0-9a-fA-F]{3,8}$",
+                  "shown": "/^#[0-9a-fA-F]{3,8}$/",
+                  "message": "Must be a valid hex color (e.g. #6366f1)"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "enabled",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ],
+        [
+          "stagger_delay_ms",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
+        ]
+      ]
+    },
+    "update_workflow": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "workflow_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "name",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Title must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 500,
+                  "message": "Title must be 500 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "nodes",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "ref",
+                "name": "nodeShape"
+              }
+            }
+          }
+        ],
+        [
+          "edges",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "ref",
+                "name": "edge"
+              }
+            }
+          }
+        ],
+        [
+          "icon",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "icon_color",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "regex",
+                  "source": "^#[0-9a-fA-F]{3,8}$",
+                  "shown": "/^#[0-9a-fA-F]{3,8}$/",
+                  "message": "Must be a valid hex color (e.g. #6366f1)"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "enabled",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ],
+        [
+          "stagger_delay_ms",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
+        ]
+      ]
+    },
+    "delete_workflow": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "workflow_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "list_workflow_runs": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "workflow_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "task_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "limit",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 1
+                },
+                {
+                  "k": "lte",
+                  "value": 100
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "stop_workflow_run": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "run_id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ]
+      ]
+    },
+    "resolve_gate": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "run_id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "decision",
+          {
+            "t": "enum",
+            "values": [
+              "approve",
+              "reject",
+              "changes"
+            ]
+          }
+        ],
+        [
+          "comment",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 20000
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "edited",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200000
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "comments",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "object",
+                "mode": "strip",
+                "shape": [
+                  [
+                    "quote",
+                    {
+                      "t": "optional",
+                      "inner": {
+                        "t": "string",
+                        "checks": [
+                          {
+                            "k": "max",
+                            "value": 2000
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  [
+                    "comment",
+                    {
+                      "t": "string",
+                      "checks": [
+                        {
+                          "k": "min",
+                          "value": 1
+                        },
+                        {
+                          "k": "max",
+                          "value": 4000
+                        }
+                      ]
+                    }
+                  ]
+                ]
+              },
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 100
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "node_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "get_workflow_schedule": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "workflow_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "info",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "log",
+                "next_run"
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "execute_workflow": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "workflow_id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "inputs",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "record",
+              "value": {
+                "t": "union",
+                "options": [
+                  {
+                    "t": "string"
+                  },
+                  {
+                    "t": "number"
+                  },
+                  {
+                    "t": "boolean"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      ]
+    },
+    "export_workflow": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "workflow_id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "id",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "import_workflow": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "workflow",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 500000
+              }
+            ]
+          }
+        ],
+        [
+          "project_name",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Name must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Name must be 200 characters or less"
+              },
+              {
+                "k": "custom",
+                "name": "safeName",
+                "message": "Name must not contain path traversal characters (.. / \\)"
+              }
+            ]
+          }
+        ],
+        [
+          "bundle",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Name must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Name must be 200 characters or less"
+                },
+                {
+                  "k": "custom",
+                  "name": "safeName",
+                  "message": "Name must not contain path traversal characters (.. / \\)"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "describe_workflow_nodes": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "types",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "enum",
+                "values": [
+                  "trigger",
+                  "launchAgent",
+                  "script",
+                  "condition",
+                  "approval",
+                  "createTaskFromItem",
+                  "callConnectorAction",
+                  "httpRequest",
+                  "loop"
+                ]
+              }
+            }
+          }
+        ]
+      ]
+    },
+    "list_workspaces": null,
+    "create_workspace": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "name",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "Name must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Name must be 200 characters or less"
+              },
+              {
+                "k": "custom",
+                "name": "safeName",
+                "message": "Name must not contain path traversal characters (.. / \\)"
+              }
+            ]
+          }
+        ],
+        [
+          "icon",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "icon_color",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "regex",
+                  "source": "^#[0-9a-fA-F]{3,8}$",
+                  "shown": "/^#[0-9a-fA-F]{3,8}$/",
+                  "message": "Must be a valid hex color (e.g. #6366f1)"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "update_workspace": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "name",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "Name must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Name must be 200 characters or less"
+                },
+                {
+                  "k": "custom",
+                  "name": "safeName",
+                  "message": "Name must not contain path traversal characters (.. / \\)"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "icon",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "icon_color",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "regex",
+                  "source": "^#[0-9a-fA-F]{3,8}$",
+                  "shown": "/^#[0-9a-fA-F]{3,8}$/",
+                  "message": "Must be a valid hex color (e.g. #6366f1)"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "order",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gte",
+                  "value": 0
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "delete_workspace": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ]
+      ]
+    }
+  },
+  "defs": {
+    "edge": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "source",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "target",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "conditionBranch",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "true",
+                "false"
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "node": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "type",
+          {
+            "t": "enum",
+            "values": [
+              "trigger",
+              "launchAgent",
+              "script",
+              "condition",
+              "approval",
+              "createTaskFromItem",
+              "callConnectorAction",
+              "httpRequest",
+              "loop"
+            ]
+          }
+        ],
+        [
+          "label",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "slug",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "config",
+          {
+            "t": "record",
+            "value": {
+              "t": "unknown"
+            }
+          }
+        ],
+        [
+          "position",
+          {
+            "t": "object",
+            "mode": "strip",
+            "shape": [
+              [
+                "x",
+                {
+                  "t": "number"
+                }
+              ],
+              [
+                "y",
+                {
+                  "t": "number"
+                }
+              ]
+            ]
+          }
+        ],
+        [
+          "onError",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "stop",
+                "continue"
+              ]
+            }
+          }
+        ]
+      ],
+      "checks": [
+        {
+          "k": "custom",
+          "name": "nodeConfig"
+        }
+      ]
+    },
+    "nodeConfig.approval": {
+      "t": "object",
+      "mode": "loose",
+      "shape": [
+        [
+          "message",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200000,
+                  "message": "Text must be 200000 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "timeoutMs",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gt",
+                  "value": 0
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "view",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200000,
+                  "message": "Text must be 200000 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "edit",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200000,
+                  "message": "Text must be 200000 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "feedback",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "object",
+              "mode": "loose",
+              "shape": [
+                [
+                  "from",
+                  {
+                    "t": "string",
+                    "checks": [
+                      {
+                        "k": "min",
+                        "value": 1,
+                        "message": "ID must not be empty"
+                      },
+                      {
+                        "k": "max",
+                        "value": 100,
+                        "message": "ID must be 100 characters or less"
+                      }
+                    ]
+                  }
+                ],
+                [
+                  "maxRounds",
+                  {
+                    "t": "number",
+                    "checks": [
+                      {
+                        "k": "int"
+                      },
+                      {
+                        "k": "gte",
+                        "value": 2
+                      },
+                      {
+                        "k": "lte",
+                        "value": 10
+                      }
+                    ]
+                  }
+                ]
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "nodeConfig.callConnectorAction": {
+      "t": "object",
+      "mode": "loose",
+      "shape": [
+        [
+          "nodeType",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "literal",
+              "values": [
+                "callConnectorAction"
+              ]
+            }
+          }
+        ],
+        [
+          "connectionId",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 100
+              }
+            ]
+          }
+        ],
+        [
+          "action",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "actionLabel",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "connectorId",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "args",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "record",
+              "value": {
+                "t": "string",
+                "checks": [
+                  {
+                    "k": "max",
+                    "value": 200000,
+                    "message": "Text must be 200000 characters or less"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      ]
+    },
+    "nodeConfig.condition": {
+      "t": "object",
+      "mode": "loose",
+      "shape": [
+        [
+          "variable",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200000,
+                "message": "Text must be 200000 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "operator",
+          {
+            "t": "enum",
+            "values": [
+              "equals",
+              "notEquals",
+              "contains",
+              "notContains",
+              "isEmpty",
+              "isNotEmpty"
+            ]
+          }
+        ],
+        [
+          "value",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200000,
+                  "message": "Text must be 200000 characters or less"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "nodeConfig.createTaskFromItem": {
+      "t": "object",
+      "mode": "loose",
+      "shape": [
+        [
+          "nodeType",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "literal",
+              "values": [
+                "createTaskFromItem"
+              ]
+            }
+          }
+        ],
+        [
+          "project",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200
+              }
+            ]
+          }
+        ],
+        [
+          "initialStatus",
+          {
+            "t": "enum",
+            "values": [
+              "todo",
+              "in_progress",
+              "in_review",
+              "done",
+              "cancelled"
+            ]
+          }
+        ]
+      ]
+    },
+    "nodeConfig.httpRequest": {
+      "t": "object",
+      "mode": "loose",
+      "shape": [
+        [
+          "nodeType",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "literal",
+              "values": [
+                "httpRequest"
+              ]
+            }
+          }
+        ],
+        [
+          "method",
+          {
+            "t": "enum",
+            "values": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
+            ]
+          }
+        ],
+        [
+          "url",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 2048
+              }
+            ]
+          }
+        ],
+        [
+          "headers",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "record",
+              "value": {
+                "t": "string",
+                "checks": [
+                  {
+                    "k": "max",
+                    "value": 200000,
+                    "message": "Text must be 200000 characters or less"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        [
+          "body",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200000,
+                  "message": "Text must be 200000 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "profileConnectionId",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "nodeConfig.launchAgent": {
+      "t": "object",
+      "mode": "loose",
+      "shape": [
+        [
+          "agentType",
+          {
+            "t": "enum",
+            "values": [
+              "claude",
+              "copilot",
+              "codex",
+              "opencode",
+              "gemini",
+              "fromTask"
+            ]
+          }
+        ],
+        [
+          "model",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "projectName",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200
+              }
+            ]
+          }
+        ],
+        [
+          "projectPath",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 1000
+              }
+            ]
+          }
+        ],
+        [
+          "prompt",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 10000,
+                  "message": "Prompt must be 10000 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "headless",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ],
+        [
+          "outputSchema",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "record",
+              "value": {
+                "t": "unknown"
+              }
+            }
+          }
+        ],
+        [
+          "timeoutMs",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "int"
+                },
+                {
+                  "k": "gt",
+                  "value": 0
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "worktreeMode",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "none",
+                "new",
+                "fromStep",
+                "existing"
+              ]
+            }
+          }
+        ],
+        [
+          "worktreeFromStepSlug",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "existingWorktreePath",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 1000
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "useWorktree",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "union",
+              "options": [
+                {
+                  "t": "boolean"
+                },
+                {
+                  "t": "literal",
+                  "values": [
+                    "fromContext"
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "branch",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "args",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "string",
+                "checks": [
+                  {
+                    "k": "max",
+                    "value": 200,
+                    "message": "Value must be 200 characters or less"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        [
+          "displayName",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "remoteHostId",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "promptDelayMs",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number",
+              "checks": [
+                {
+                  "k": "gte",
+                  "value": 0
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "taskId",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "taskFromQueue",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ]
+      ],
+      "checks": [
+        {
+          "k": "custom",
+          "name": "outputSchemaNeedsHeadless",
+          "message": "outputSchema requires headless: true",
+          "path": [
+            "outputSchema"
+          ]
+        }
+      ]
+    },
+    "nodeConfig.loop": {
+      "t": "object",
+      "mode": "loose",
+      "shape": [
+        [
+          "nodeType",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "literal",
+              "values": [
+                "loop"
+              ]
+            }
+          }
+        ],
+        [
+          "mode",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "repeat",
+                "forEach"
+              ]
+            }
+          }
+        ],
+        [
+          "items",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200000,
+                  "message": "Text must be 200000 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "bodyNodeIds",
+          {
+            "t": "array",
+            "item": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            },
+            "checks": [
+              {
+                "k": "min",
+                "value": 1
+              }
+            ]
+          }
+        ],
+        [
+          "maxIterations",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "number"
+            }
+          }
+        ],
+        [
+          "until",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "ref",
+              "name": "nodeConfig.condition"
+            }
+          }
+        ]
+      ],
+      "checks": [
+        {
+          "k": "custom",
+          "name": "loopConfig"
+        }
+      ]
+    },
+    "nodeConfig.script": {
+      "t": "object",
+      "mode": "loose",
+      "shape": [
+        [
+          "scriptType",
+          {
+            "t": "enum",
+            "values": [
+              "bash",
+              "powershell",
+              "python",
+              "node"
+            ]
+          }
+        ],
+        [
+          "scriptContent",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200000,
+                "message": "Text must be 200000 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "cwd",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 1000
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "projectName",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "projectPath",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 1000
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "args",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "string",
+                "checks": [
+                  {
+                    "k": "max",
+                    "value": 200,
+                    "message": "Value must be 200 characters or less"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        [
+          "secretsFrom",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "runId",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "min",
+                  "value": 1,
+                  "message": "ID must not be empty"
+                },
+                {
+                  "k": "max",
+                  "value": 100,
+                  "message": "ID must be 100 characters or less"
+                }
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "nodeConfig.trigger": {
+      "t": "discriminated",
+      "key": "triggerType",
+      "options": [
+        {
+          "values": [
+            "manual"
+          ],
+          "schema": {
+            "t": "object",
+            "mode": "loose",
+            "shape": [
+              [
+                "triggerType",
+                {
+                  "t": "literal",
+                  "values": [
+                    "manual"
+                  ]
+                }
+              ],
+              [
+                "contextual",
+                {
+                  "t": "optional",
+                  "inner": {
+                    "t": "boolean"
+                  }
+                }
+              ],
+              [
+                "inputs",
+                {
+                  "t": "optional",
+                  "inner": {
+                    "t": "ref",
+                    "name": "workflowInputs"
+                  }
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "values": [
+            "once"
+          ],
+          "schema": {
+            "t": "object",
+            "mode": "loose",
+            "shape": [
+              [
+                "triggerType",
+                {
+                  "t": "literal",
+                  "values": [
+                    "once"
+                  ]
+                }
+              ],
+              [
+                "runAt",
+                {
+                  "t": "string",
+                  "checks": [
+                    {
+                      "k": "max",
+                      "value": 200,
+                      "message": "Value must be 200 characters or less"
+                    }
+                  ]
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "values": [
+            "recurring"
+          ],
+          "schema": {
+            "t": "object",
+            "mode": "loose",
+            "shape": [
+              [
+                "triggerType",
+                {
+                  "t": "literal",
+                  "values": [
+                    "recurring"
+                  ]
+                }
+              ],
+              [
+                "cron",
+                {
+                  "t": "string",
+                  "checks": [
+                    {
+                      "k": "max",
+                      "value": 200,
+                      "message": "Value must be 200 characters or less"
+                    }
+                  ]
+                }
+              ],
+              [
+                "timezone",
+                {
+                  "t": "optional",
+                  "inner": {
+                    "t": "string",
+                    "checks": [
+                      {
+                        "k": "max",
+                        "value": 200,
+                        "message": "Value must be 200 characters or less"
+                      }
+                    ]
+                  }
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "values": [
+            "taskCreated"
+          ],
+          "schema": {
+            "t": "object",
+            "mode": "loose",
+            "shape": [
+              [
+                "triggerType",
+                {
+                  "t": "literal",
+                  "values": [
+                    "taskCreated"
+                  ]
+                }
+              ],
+              [
+                "projectFilter",
+                {
+                  "t": "optional",
+                  "inner": {
+                    "t": "string",
+                    "checks": [
+                      {
+                        "k": "min",
+                        "value": 1,
+                        "message": "Name must not be empty"
+                      },
+                      {
+                        "k": "max",
+                        "value": 200,
+                        "message": "Name must be 200 characters or less"
+                      },
+                      {
+                        "k": "custom",
+                        "name": "safeName",
+                        "message": "Name must not contain path traversal characters (.. / \\)"
+                      }
+                    ]
+                  }
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "values": [
+            "taskStatusChanged"
+          ],
+          "schema": {
+            "t": "object",
+            "mode": "loose",
+            "shape": [
+              [
+                "triggerType",
+                {
+                  "t": "literal",
+                  "values": [
+                    "taskStatusChanged"
+                  ]
+                }
+              ],
+              [
+                "projectFilter",
+                {
+                  "t": "optional",
+                  "inner": {
+                    "t": "string",
+                    "checks": [
+                      {
+                        "k": "min",
+                        "value": 1,
+                        "message": "Name must not be empty"
+                      },
+                      {
+                        "k": "max",
+                        "value": 200,
+                        "message": "Name must be 200 characters or less"
+                      },
+                      {
+                        "k": "custom",
+                        "name": "safeName",
+                        "message": "Name must not contain path traversal characters (.. / \\)"
+                      }
+                    ]
+                  }
+                }
+              ],
+              [
+                "fromStatus",
+                {
+                  "t": "optional",
+                  "inner": {
+                    "t": "enum",
+                    "values": [
+                      "todo",
+                      "in_progress",
+                      "in_review",
+                      "done",
+                      "cancelled"
+                    ]
+                  }
+                }
+              ],
+              [
+                "toStatus",
+                {
+                  "t": "optional",
+                  "inner": {
+                    "t": "enum",
+                    "values": [
+                      "todo",
+                      "in_progress",
+                      "in_review",
+                      "done",
+                      "cancelled"
+                    ]
+                  }
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "values": [
+            "sessionRestored"
+          ],
+          "schema": {
+            "t": "object",
+            "mode": "loose",
+            "shape": [
+              [
+                "triggerType",
+                {
+                  "t": "literal",
+                  "values": [
+                    "sessionRestored"
+                  ]
+                }
+              ],
+              [
+                "projectFilter",
+                {
+                  "t": "optional",
+                  "inner": {
+                    "t": "string",
+                    "checks": [
+                      {
+                        "k": "min",
+                        "value": 1,
+                        "message": "Name must not be empty"
+                      },
+                      {
+                        "k": "max",
+                        "value": 200,
+                        "message": "Name must be 200 characters or less"
+                      },
+                      {
+                        "k": "custom",
+                        "name": "safeName",
+                        "message": "Name must not contain path traversal characters (.. / \\)"
+                      }
+                    ]
+                  }
+                }
+              ],
+              [
+                "restore",
+                {
+                  "t": "optional",
+                  "inner": {
+                    "t": "enum",
+                    "values": [
+                      "cold",
+                      "any"
+                    ]
+                  }
+                }
+              ],
+              [
+                "concurrency",
+                {
+                  "t": "optional",
+                  "inner": {
+                    "t": "enum",
+                    "values": [
+                      "perProject",
+                      "unbounded"
+                    ]
+                  }
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "values": [
+            "connectorPoll"
+          ],
+          "schema": {
+            "t": "object",
+            "mode": "loose",
+            "shape": [
+              [
+                "triggerType",
+                {
+                  "t": "literal",
+                  "values": [
+                    "connectorPoll"
+                  ]
+                }
+              ],
+              [
+                "connectionId",
+                {
+                  "t": "string",
+                  "checks": [
+                    {
+                      "k": "min",
+                      "value": 1,
+                      "message": "ID must not be empty"
+                    },
+                    {
+                      "k": "max",
+                      "value": 100,
+                      "message": "ID must be 100 characters or less"
+                    }
+                  ]
+                }
+              ],
+              [
+                "event",
+                {
+                  "t": "string",
+                  "checks": [
+                    {
+                      "k": "max",
+                      "value": 200,
+                      "message": "Value must be 200 characters or less"
+                    }
+                  ]
+                }
+              ],
+              [
+                "cron",
+                {
+                  "t": "string",
+                  "checks": [
+                    {
+                      "k": "max",
+                      "value": 200,
+                      "message": "Value must be 200 characters or less"
+                    }
+                  ]
+                }
+              ],
+              [
+                "timezone",
+                {
+                  "t": "optional",
+                  "inner": {
+                    "t": "string",
+                    "checks": [
+                      {
+                        "k": "max",
+                        "value": 200,
+                        "message": "Value must be 200 characters or less"
+                      }
+                    ]
+                  }
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "values": [
+            "webhook"
+          ],
+          "schema": {
+            "t": "object",
+            "mode": "loose",
+            "shape": [
+              [
+                "triggerType",
+                {
+                  "t": "literal",
+                  "values": [
+                    "webhook"
+                  ]
+                }
+              ],
+              [
+                "method",
+                {
+                  "t": "enum",
+                  "values": [
+                    "POST",
+                    "GET"
+                  ]
+                }
+              ],
+              [
+                "token",
+                {
+                  "t": "string",
+                  "checks": [
+                    {
+                      "k": "max",
+                      "value": 200,
+                      "message": "Value must be 200 characters or less"
+                    }
+                  ]
+                }
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "nodeShape": {
+      "t": "object",
+      "mode": "strip",
+      "shape": [
+        [
+          "id",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "min",
+                "value": 1,
+                "message": "ID must not be empty"
+              },
+              {
+                "k": "max",
+                "value": 100,
+                "message": "ID must be 100 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "type",
+          {
+            "t": "enum",
+            "values": [
+              "trigger",
+              "launchAgent",
+              "script",
+              "condition",
+              "approval",
+              "createTaskFromItem",
+              "callConnectorAction",
+              "httpRequest",
+              "loop"
+            ]
+          }
+        ],
+        [
+          "label",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "slug",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "config",
+          {
+            "t": "record",
+            "value": {
+              "t": "unknown"
+            }
+          }
+        ],
+        [
+          "position",
+          {
+            "t": "object",
+            "mode": "strip",
+            "shape": [
+              [
+                "x",
+                {
+                  "t": "number"
+                }
+              ],
+              [
+                "y",
+                {
+                  "t": "number"
+                }
+              ]
+            ]
+          }
+        ],
+        [
+          "onError",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "enum",
+              "values": [
+                "stop",
+                "continue"
+              ]
+            }
+          }
+        ]
+      ]
+    },
+    "workflowInputDef": {
+      "t": "object",
+      "mode": "loose",
+      "shape": [
+        [
+          "key",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "regex",
+                "source": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "shown": "/^[A-Za-z_][A-Za-z0-9_]*$/",
+                "message": "key must be a valid identifier — it becomes {{inputs.<key>}}"
+              },
+              {
+                "k": "max",
+                "value": 100
+              }
+            ]
+          }
+        ],
+        [
+          "label",
+          {
+            "t": "string",
+            "checks": [
+              {
+                "k": "max",
+                "value": 200,
+                "message": "Value must be 200 characters or less"
+              }
+            ]
+          }
+        ],
+        [
+          "type",
+          {
+            "t": "enum",
+            "values": [
+              "text",
+              "textarea",
+              "number",
+              "select",
+              "boolean",
+              "project",
+              "branch"
+            ]
+          }
+        ],
+        [
+          "required",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "boolean"
+            }
+          }
+        ],
+        [
+          "defaultValue",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "options",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "array",
+              "item": {
+                "t": "object",
+                "mode": "loose",
+                "shape": [
+                  [
+                    "value",
+                    {
+                      "t": "string",
+                      "checks": [
+                        {
+                          "k": "max",
+                          "value": 200,
+                          "message": "Value must be 200 characters or less"
+                        }
+                      ]
+                    }
+                  ],
+                  [
+                    "label",
+                    {
+                      "t": "string",
+                      "checks": [
+                        {
+                          "k": "max",
+                          "value": 200,
+                          "message": "Value must be 200 characters or less"
+                        }
+                      ]
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        ],
+        [
+          "placeholder",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ],
+        [
+          "description",
+          {
+            "t": "optional",
+            "inner": {
+              "t": "string",
+              "checks": [
+                {
+                  "k": "max",
+                  "value": 200,
+                  "message": "Value must be 200 characters or less"
+                }
+              ]
+            }
+          }
+        ]
+      ],
+      "checks": [
+        {
+          "k": "custom",
+          "name": "workflowInputDef"
+        }
+      ]
+    },
+    "workflowInputs": {
+      "t": "array",
+      "item": {
+        "t": "ref",
+        "name": "workflowInputDef"
+      },
+      "checks": [
+        {
+          "k": "custom",
+          "name": "uniqueInputKeys"
+        }
+      ]
+    }
+  }
+}

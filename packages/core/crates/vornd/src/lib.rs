@@ -16,8 +16,10 @@
 //!
 //! The groups of calls it has taken over from the server ([`native`]) are
 //! answered here when the Native server switch, or a per-group setting,
-//! says so ([`groups`]).
+//! says so ([`groups`]). So, under the `mcp` group, is Vorn's MCP server,
+//! at `/mcp` ([`mcp`]).
 
+pub mod applink;
 #[cfg(feature = "engine")]
 pub mod control;
 #[cfg(feature = "engine")]
@@ -28,8 +30,10 @@ pub mod groups;
 pub mod holder;
 #[cfg(feature = "engine")]
 pub mod journal;
+pub mod mcp;
 pub mod names;
 pub mod native;
+mod pair;
 pub mod protocol;
 pub mod proxy;
 pub mod registry;

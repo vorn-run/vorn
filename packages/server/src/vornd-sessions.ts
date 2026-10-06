@@ -401,6 +401,7 @@ export class VorndSessions extends EventEmitter {
       return
     }
     if (this.channel !== channel) return
+    this.emit('subscribed')
     this.holderTold(state.connected)
     if (this.nativeWork && state.registry) this.mirror.load(state.registry)
     try {
@@ -612,6 +613,22 @@ export class VorndSessions extends EventEmitter {
         if (pty?.watched) this.watch(pty)
         return
       }
+      default:
+        // What vornd asks of this server beyond its sessions.
+        if (method.startsWith('vornd:')) this.emit('ask', method, params)
+    }
+  }
+
+  /** Tell vornd `method` with `params`; false when there is no channel or it refused. */
+  async tell(method: string, params: unknown): Promise<boolean> {
+    const channel = this.channel
+    if (!channel || channel.isClosed) return false
+    try {
+      await channel.request(method, params)
+      return true
+    } catch (err) {
+      log.warn({ err, method }, '[vornd] vornd refused a call')
+      return false
     }
   }
 

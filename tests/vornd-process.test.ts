@@ -30,6 +30,10 @@ if (mode === 'ok') {
   process.stdout.write(JSON.stringify({ port: 47001, protocol: 1, upstream }) + '\\n')
   process.stdin.resume()
   process.stdin.on('end', () => process.exit(0))
+} else if (mode === 'native') {
+  process.stdout.write(JSON.stringify({ port: 47001, protocol: 1, native: ['git', 'pairing', 5] }) + '\\n')
+  process.stdin.resume()
+  process.stdin.on('end', () => process.exit(0))
 } else if (mode === 'garbage') {
   process.stdout.write('listening!\\n')
   setInterval(() => {}, 1000)
@@ -126,6 +130,15 @@ describe('starting vornd', () => {
     started.push(vornd)
     expect(vornd.port).toBe(47001)
     expect(vornd.upstream).toBe(50091)
+  })
+
+  it('reads the groups it answers itself, and none when it names none', async () => {
+    const native = await startVornd('vornd', 50091, { spawnImpl: stubSpawn('native') })
+    started.push(native)
+    expect(native.native).toEqual(['git', 'pairing'])
+    const plain = await startVornd('vornd', 50091, { spawnImpl: stubSpawn('ok') })
+    started.push(plain)
+    expect(plain.native).toBeUndefined()
   })
 
   it("hands vornd the desktop's token in its environment, never in its arguments", async () => {
@@ -306,6 +319,7 @@ describe('keeping vornd running', () => {
     expect(connect).toHaveBeenCalledWith('/run/app.sock')
     expect(keeper.state).toEqual({ state: 'on', port: 47001, nativeServer: false })
     expect(keeper.port).toBe(47001)
+    expect(keeper.answers('pairing')).toBe(false)
     expect(keeper.starting).toBe(false)
     keeper.stop()
     expect(running.stopped).toBe(true)
@@ -334,6 +348,9 @@ describe('keeping vornd running', () => {
       nativeServer: { db: path.join('/home', 'x', '.vorn', 'vorn.db') }
     })
     expect(keeper.state).toEqual({ state: 'on', port: 47001, nativeServer: true })
+    first!.native = ['pairing']
+    expect(keeper.answers('pairing')).toBe(true)
+    expect(keeper.answers('git')).toBe(false)
 
     on = false
     first!.exit('code=1, signal=null')

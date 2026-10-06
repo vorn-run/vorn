@@ -40,6 +40,14 @@
 //! - `vornd:kill {id, signal}` signals the session's program (`hup`,
 //!   `term`, `kill` or `int`).
 //! - `vornd:closeStdin {id}` ends a piped session's input.
+//! - `vornd:reach {host}` says where the server is bound (`0.0.0.0` when it
+//!   takes connections from the network), and that the names a browser may
+//!   load the web client from are to be read again.
+//!
+//! A subscribed connection is also sent what vornd asks of the server
+//! ([`crate::applink`]): `vornd:broadcast {method, params}`, a notification
+//! for every client, and `vornd:tokenRevoked {tokenId}`, after which the
+//! server closes the sockets that authenticated with that token.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,6 +62,7 @@ use vorn_engine::{Effect, EffectId};
 use vorn_sessiond::os;
 use vorn_sessiond_wire::Sig;
 
+use crate::applink::AppLink;
 use crate::engine::{Engine, Event};
 use crate::journal::{Held, Stamped};
 use crate::streams::{answer, exit_code, refuse, Forwarder};
@@ -139,13 +148,13 @@ pub fn withdraw(home: &Path) {
 }
 
 /// Serves the app's channel on `listener` until it fails.
-pub async fn serve(mut listener: os::Listener, engine: Arc<Engine>) {
+pub async fn serve(mut listener: os::Listener, engine: Arc<Engine>, link: Arc<AppLink>) {
     loop {
         match listener.accept().await {
             Ok(stream) => {
-                let engine = Arc::clone(&engine);
+                let (engine, link) = (Arc::clone(&engine), Arc::clone(&link));
                 tokio::spawn(async move {
-                    let why = serve_conn(stream, engine).await;
+                    let why = serve_conn(stream, engine, link).await;
                     info!(%why, "the app's channel closed");
                 });
             }
@@ -159,7 +168,7 @@ pub async fn serve(mut listener: os::Listener, engine: Arc<Engine>) {
 }
 
 /// One connection from the app, until it ends; answers why it ended.
-pub async fn serve_conn<S>(stream: S, engine: Arc<Engine>) -> String
+pub async fn serve_conn<S>(stream: S, engine: Arc<Engine>, link: Arc<AppLink>) -> String
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -231,6 +240,9 @@ where
         })
     };
 
+    // What vornd asks of the server, from the subscription on.
+    let mut asks: Option<tokio::task::JoinHandle<()>> = None;
+
     let mut frames = Frames::default();
     let mut buf = vec![0u8; 64 << 10];
     let why = 'conn: loop {
@@ -246,7 +258,15 @@ where
                     let Ok(text) = std::str::from_utf8(&payload) else {
                         break 'conn "a frame that is not UTF-8".to_owned();
                     };
-                    call(&engine, id, &fwd, &subscribed, text);
+                    let app = App {
+                        engine: &engine,
+                        conn: id,
+                        fwd: &fwd,
+                        subscribed: &subscribed,
+                        link: &link,
+                        asks: &mut asks,
+                    };
+                    call(app, text);
                 }
                 Ok(Some((kind, _))) => debug!(kind, "a frame kind the app does not send"),
                 Ok(None) => break,
@@ -256,9 +276,28 @@ where
     };
     notifier.abort();
     noter.abort();
+    if let Some(asks) = asks {
+        asks.abort();
+    }
     writer.abort();
     engine.registry().left(id);
     why
+}
+
+/// Sends a subscribed connection what vornd asks of the server, until the
+/// task is aborted, which ends its subscription.
+fn forward_asks(link: &Arc<AppLink>, fwd: Forwarder) -> tokio::task::JoinHandle<()> {
+    let (mut rx, listening) = link.listen();
+    tokio::spawn(async move {
+        let _listening = listening;
+        loop {
+            match rx.recv().await {
+                Ok(note) => fwd.send_now(&note),
+                Err(RecvError::Lagged(n)) => warn!(n, "the server fell behind vornd's asks"),
+                Err(RecvError::Closed) => return,
+            }
+        }
+    })
 }
 
 /// Writes one frame.
@@ -307,8 +346,26 @@ impl Frames {
     }
 }
 
+/// One connection from the app, as a call sees it.
+struct App<'a> {
+    engine: &'a Arc<Engine>,
+    conn: u64,
+    fwd: &'a Forwarder,
+    subscribed: &'a AtomicBool,
+    link: &'a Arc<AppLink>,
+    asks: &'a mut Option<tokio::task::JoinHandle<()>>,
+}
+
 /// Answers one JSON frame from the app.
-fn call(engine: &Arc<Engine>, conn: u64, fwd: &Forwarder, subscribed: &AtomicBool, text: &str) {
+fn call(app: App<'_>, text: &str) {
+    let App {
+        engine,
+        conn,
+        fwd,
+        subscribed,
+        link,
+        asks,
+    } = app;
     let Ok(Value::Object(frame)) = serde_json::from_str::<Value>(text) else {
         return;
     };
@@ -325,6 +382,9 @@ fn call(engine: &Arc<Engine>, conn: u64, fwd: &Forwarder, subscribed: &AtomicBoo
         "vornd:subscribe" => {
             let state = state(engine);
             subscribed.store(true, Ordering::Release);
+            if asks.is_none() {
+                *asks = Some(forward_asks(link, fwd.clone()));
+            }
             Ok(state)
         }
         "vornd:record" => match engine.registry().feed(conn, &params) {
@@ -337,6 +397,13 @@ fn call(engine: &Arc<Engine>, conn: u64, fwd: &Forwarder, subscribed: &AtomicBoo
             }
         },
         "vornd:registry" => Ok(engine.registry().snapshot()),
+        "vornd:reach" => match params.get("host").and_then(Value::as_str) {
+            Some(host) => {
+                link.set_server_host(host.to_owned());
+                Ok(Value::Null)
+            }
+            None => Err("vornd:reach needs a host".to_owned()),
+        },
         "vornd:kill" => match (session, signal_of(&params)) {
             (Some(s), Some(sig)) => engine.signal(s, sig).map(|()| Value::Null),
             _ => Err("vornd:kill needs an id and a signal: hup, term, kill or int".to_owned()),
@@ -543,7 +610,11 @@ mod tests {
     impl App {
         fn open(engine: &Arc<Engine>) -> App {
             let (ours, theirs) = tokio::io::duplex(1 << 20);
-            tokio::spawn(serve_conn(theirs, Arc::clone(engine)));
+            tokio::spawn(serve_conn(
+                theirs,
+                Arc::clone(engine),
+                Arc::new(crate::applink::AppLink::default()),
+            ));
             App {
                 io: ours,
                 frames: Frames::default(),
