@@ -1,9 +1,16 @@
 import { EventEmitter } from 'node:events'
 import { decodeTerminalFrameV2 } from '@vornrun/shared/terminal-frame'
-import type { VorndStatus } from '@vornrun/shared/types'
+import type { HeadlessSession, TerminalSession, VorndStatus } from '@vornrun/shared/types'
 import log from './logger'
 import { claimEffect, pruneEffectReceipts } from './database'
 import { APP_PROTOCOL, VorndChannel } from './vornd-channel'
+import {
+  sessionFeed,
+  type RecordFeed,
+  type RecordKind,
+  type RecordSink,
+  type Stamp
+} from './session-feed'
 
 /**
  * Sessions started and held by vornd, the native daemon, instead of by this
@@ -21,6 +28,11 @@ import { APP_PROTOCOL, VorndChannel } from './vornd-channel'
  * An effect may be told twice, after vornd or this server restarts. Status and
  * directory are states and setting one again changes nothing. A notification
  * and an exit are acted on once, by the receipt each leaves in the database.
+ *
+ * While vornd runs native work (Settings › Experimental › Native server, or a
+ * per-group setting), it keeps a copy of this server's session records: this
+ * server feeds it (`session-feed.ts`) and follows the copy's changes (`SessionMirror`).
+ * The records stay this server's; nothing reads the copy here yet.
  */
 
 /** A session as vornd reports it. */
@@ -60,6 +72,8 @@ interface Subscribed {
   sessions: HeldSession[]
   ended: HeldSession[]
   notices: EffectNote[]
+  /** vornd's copy of the session records, when it keeps one. */
+  registry?: RegistrySnapshot
 }
 
 /** What vornd is asked to start. */
@@ -183,6 +197,12 @@ export class VorndPty extends EventEmitter {
     return this.ended
   }
 
+  /** The record cursor of the exit effect, once vornd has told it. */
+  get exitAt(): Stamp | null {
+    const note = this.exitSeen
+    return note ? { epoch: note.epoch, rseq: note.rseq, index: note.index } : null
+  }
+
   /** Where reading resumes after vornd or its holder starts again. */
   readCursor(): { epoch: number; nextRseq: number; nextOffset: number } | null {
     return this.epoch === null
@@ -263,8 +283,8 @@ function claim(effectId: string, kind: string): boolean {
  *
  * Emits `held` (HeldSession[]) with the sessions vornd holds that no
  * terminal here stands for, after each subscription, so the terminals of a
- * previous run can be taken on again; and `notify` (id, title, body) once per
- * notification.
+ * previous run can be taken on again; and `notify` (id, title, body, effectId)
+ * once per notification.
  */
 export class VorndSessions extends EventEmitter {
   private channel: VorndChannel | null = null
@@ -275,6 +295,35 @@ export class VorndSessions extends EventEmitter {
 
   /** What starts vornd, and says whether it is coming. */
   private launcher: VorndLauncher | null = null
+
+  /** Whether vornd runs native work and keeps a copy of the session records. */
+  private nativeWork = false
+
+  /** Where `sessionFeed` sends this server's session records: this channel, when vornd wants them. */
+  readonly recordSink: RecordSink = {
+    wants: () => this.nativeWork && this.inUse(),
+    send: (params) => this.channel?.notify('vornd:record', params)
+  }
+
+  /** What tells vornd's copy of the records; set for the server's own channel only. */
+  private feed: RecordFeed | null = null
+
+  /** Feeds vornd's copy of the session records through this channel. */
+  feedRecords(feed: RecordFeed): void {
+    this.feed = feed
+    feed.attach(this.recordSink)
+  }
+
+  /** vornd's copy of the session records, as its changes are told. */
+  readonly mirror = new SessionMirror(() => this.resyncMirror())
+
+  /**
+   * Whether vornd runs native work, as its `vornd:hello` said: it then keeps a
+   * copy of the session records, and notifications carry their effect ids.
+   */
+  isNative(): boolean {
+    return this.nativeWork && this.inUse()
+  }
 
   /** Whether the channel to vornd is up. */
   inUse(): boolean {
@@ -307,9 +356,10 @@ export class VorndSessions extends EventEmitter {
 
   private async open(endpoint: string): Promise<boolean> {
     let channel: VorndChannel
+    let hello: { protocol?: number; native?: boolean }
     try {
       channel = await VorndChannel.connect(endpoint)
-      const hello = await channel.request<{ protocol?: number }>('vornd:hello')
+      hello = await channel.request<{ protocol?: number; native?: boolean }>('vornd:hello')
       if (hello?.protocol !== APP_PROTOCOL) {
         channel.close()
         throw new Error(
@@ -322,6 +372,7 @@ export class VorndSessions extends EventEmitter {
     }
     const old = this.channel
     this.channel = channel
+    this.nativeWork = hello?.native === true
     old?.close()
     channel.on('notification', (method: string, params: unknown) =>
       this.notified(channel, method, params)
@@ -334,6 +385,8 @@ export class VorndSessions extends EventEmitter {
       log.warn(`[vornd] the channel to vornd closed (${why}); its sessions carry on there`)
     })
     log.info({ endpoint }, '[vornd] connected to vornd')
+    // Before the subscription, which then answers with the copy as fed.
+    this.feed?.snapshot()
     await this.subscribe(channel)
     return !channel.isClosed
   }
@@ -349,6 +402,7 @@ export class VorndSessions extends EventEmitter {
     }
     if (this.channel !== channel) return
     this.holderTold(state.connected)
+    if (this.nativeWork && state.registry) this.mirror.load(state.registry)
     try {
       pruneEffectReceipts('notify', Date.now() - NOTICE_RECEIPT_MS)
     } catch {
@@ -541,6 +595,10 @@ export class VorndSessions extends EventEmitter {
       case 'vornd:activity':
         this.ptys.get(id)?.emit('activity')
         return
+      case 'vornd:session':
+        if (this.nativeWork && channel === this.channel)
+          this.mirror.apply(p as unknown as SessionNote)
+        return
       case 'vornd:connected':
         // The holder came back: what it holds may have changed.
         if (channel === this.channel) this.holderTold(true)
@@ -577,7 +635,27 @@ export class VorndSessions extends EventEmitter {
   /** Shown once, whichever connection tells it and however often. */
   private notice(note: EffectNote): void {
     if (!claim(note.effectId, 'notify')) return
-    this.emit('notify', note.id, note.title ?? '', note.body ?? '')
+    this.emit('notify', note.id, note.title ?? '', note.body ?? '', note.effectId)
+  }
+
+  /**
+   * vornd's copy of the session records, whole; null without native work or a
+   * channel. Asked on the same channel the records go out on, so the answer
+   * reflects every record sent before it.
+   */
+  async registry(): Promise<RegistrySnapshot | null> {
+    const channel = this.channel
+    if (!channel || !this.nativeWork) return null
+    return channel.request<RegistrySnapshot>('vornd:registry')
+  }
+
+  /** The mirror missed a change: it starts again from the copy whole. */
+  private resyncMirror(): void {
+    this.registry()
+      .then((snapshot) => {
+        if (snapshot) this.mirror.load(snapshot)
+      })
+      .catch((err: Error) => log.warn({ err }, '[vornd] could not read the session registry'))
   }
 
   /** Close the channel, for tests and a server on its way out. */
@@ -605,4 +683,175 @@ export interface VorndLauncher {
   ready(): Promise<void>
 }
 
+/** vornd's copy of the session records, whole, at one revision. */
+export interface RegistrySnapshot {
+  /** Which vornd: drawn when it started. Revisions of another one mean nothing here. */
+  gen: string
+  rev: number
+  terminals: TerminalSession[]
+  headless: HeadlessSession[]
+  order: string[]
+  holds: Record<string, number>
+}
+
+/** One change to vornd's copy, as `vornd:session` tells it. */
+export interface SessionNote {
+  gen: string
+  rev: number
+  op: 'upsert' | 'remove' | 'order' | 'holds' | 'snapshot'
+  kind?: RecordKind
+  record?: TerminalSession | HeadlessSession
+  id?: string
+  order?: string[]
+  holds?: Record<string, number>
+  terminals?: TerminalSession[]
+  headless?: HeadlessSession[]
+}
+
+/** What `SessionMirror.apply` did with a note. */
+export type MirrorOutcome = 'applied' | 'stale' | 'resync' | 'waiting'
+
+/**
+ * vornd's copy of the session records, followed here.
+ *
+ * Changes are applied in revision order. A note from another generation (vornd
+ * restarted) or one that skips a revision means something was missed, and the
+ * mirror asks for the copy whole (`resync`); notes that arrive meanwhile wait
+ * and are applied on top of it. A note at or below the revision held was
+ * applied already, and is dropped.
+ *
+ * Records are frozen outside production, so code that changes one in place
+ * instead of asking vornd fails where it is written.
+ */
+export class SessionMirror {
+  private gen: string | null = null
+  private rev = 0
+  private readonly terminalRecords = new Map<string, TerminalSession>()
+  private readonly headlessRecords = new Map<string, HeadlessSession>()
+  private terminalOrder: string[] = []
+  private heldDirs: Record<string, number> = {}
+  /** Notes waiting for a snapshot; null once one has been loaded and nothing is missing. */
+  private waiting: SessionNote[] | null = []
+
+  constructor(private readonly resync: () => void) {}
+
+  /** Where the mirror stands: null until it has loaded a snapshot. */
+  get revision(): { gen: string; rev: number } | null {
+    return this.gen === null ? null : { gen: this.gen, rev: this.rev }
+  }
+
+  /** Starts again from the copy whole, then applies what waited for it. */
+  load(snapshot: RegistrySnapshot): void {
+    this.gen = snapshot.gen
+    this.rev = snapshot.rev
+    this.terminalRecords.clear()
+    for (const r of snapshot.terminals) this.terminalRecords.set(r.id, freeze(r))
+    this.headlessRecords.clear()
+    for (const r of snapshot.headless) this.headlessRecords.set(r.id, freeze(r))
+    this.terminalOrder = [...snapshot.order]
+    this.heldDirs = { ...snapshot.holds }
+    const waited = (this.waiting ?? [])
+      .filter((n) => n.gen === snapshot.gen && n.rev > snapshot.rev)
+      .sort((a, b) => a.rev - b.rev)
+    this.waiting = null
+    for (const note of waited) this.apply(note)
+  }
+
+  apply(note: SessionNote): MirrorOutcome {
+    if (this.waiting) {
+      this.waiting.push(note)
+      return 'waiting'
+    }
+    if (note.op === 'snapshot' && note.terminals && note.headless) {
+      if (note.gen === this.gen && note.rev <= this.rev) return 'stale'
+      this.load({
+        gen: note.gen,
+        rev: note.rev,
+        terminals: note.terminals,
+        headless: note.headless,
+        order: note.order ?? [],
+        holds: note.holds ?? {}
+      })
+      return 'applied'
+    }
+    if (note.gen !== this.gen) return this.missed(note)
+    if (note.rev <= this.rev) return 'stale'
+    if (note.rev !== this.rev + 1) return this.missed(note)
+    switch (note.op) {
+      case 'upsert':
+        if (note.kind === 'terminal' && note.record)
+          this.terminalRecords.set(note.record.id, freeze(note.record as TerminalSession))
+        else if (note.kind === 'headless' && note.record)
+          this.headlessRecords.set(note.record.id, freeze(note.record as HeadlessSession))
+        else return this.missed(note)
+        break
+      case 'remove':
+        if (note.kind === 'terminal' && note.id) this.terminalRecords.delete(note.id)
+        else if (note.kind === 'headless' && note.id) this.headlessRecords.delete(note.id)
+        else return this.missed(note)
+        break
+      case 'order':
+        this.terminalOrder = [...(note.order ?? [])]
+        break
+      case 'holds':
+        this.heldDirs = { ...(note.holds ?? {}) }
+        break
+      default:
+        return this.missed(note)
+    }
+    this.rev = note.rev
+    return 'applied'
+  }
+
+  /** The terminals, listed as the pty manager lists them: the order first, then the rest. */
+  terminals(): TerminalSession[] {
+    const listed: TerminalSession[] = []
+    for (const id of this.terminalOrder) {
+      const r = this.terminalRecords.get(id)
+      if (r) listed.push(r)
+    }
+    const ordered = new Set(this.terminalOrder)
+    for (const r of this.terminalRecords.values()) if (!ordered.has(r.id)) listed.push(r)
+    return listed
+  }
+
+  headless(): HeadlessSession[] {
+    return [...this.headlessRecords.values()]
+  }
+
+  terminal(id: string): TerminalSession | undefined {
+    return this.terminalRecords.get(id)
+  }
+
+  /** Sessions at work in a worktree: terminals not idle, agents still running. */
+  activeInWorktree(worktreePath: string): { count: number; sessionIds: string[] } {
+    const sessionIds = [
+      ...[...this.terminalRecords.values()]
+        .filter((s) => s.worktreePath === worktreePath && s.status !== 'idle')
+        .map((s) => s.id),
+      ...[...this.headlessRecords.values()]
+        .filter((s) => s.worktreePath === worktreePath && s.status === 'running')
+        .map((s) => s.id)
+    ]
+    return { count: sessionIds.length, sessionIds }
+  }
+
+  /** The workspaces held while a session is prepared. */
+  holds(): Readonly<Record<string, number>> {
+    return this.heldDirs
+  }
+
+  private missed(note: SessionNote): MirrorOutcome {
+    this.waiting = [note]
+    this.resync()
+    return 'resync'
+  }
+}
+
+/** Frozen outside production: a record from the mirror is vornd's, not this server's to edit. */
+function freeze<T extends object>(record: T): T {
+  return process.env.NODE_ENV === 'production' ? record : Object.freeze(record)
+}
+
 export const vorndSessions = new VorndSessions()
+vorndSessions.feedRecords(sessionFeed)

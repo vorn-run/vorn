@@ -2,11 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockFindUnlinked = vi.fn()
 const mockGetActiveSessions = vi.fn(() => [])
+const mockRecordChanged = vi.fn()
 
 vi.mock('../packages/server/src/pty-manager', () => ({
   ptyManager: {
     findUnlinkedSessionByCwd: (...args: unknown[]) => mockFindUnlinked(...args),
-    getActiveSessions: () => mockGetActiveSessions()
+    getActiveSessions: () => mockGetActiveSessions(),
+    recordChanged: (id: string) => mockRecordChanged(id)
   }
 }))
 vi.mock('../packages/server/src/logger', () => ({
@@ -47,6 +49,8 @@ describe('tryLink', () => {
     const result = hookStatusMapper.tryLink('sess-1', '/project')
     expect(result).toBe('term-1')
     expect(session.hookSessionId).toBe('sess-1')
+    // Changed in place, so vornd's copy of the record is told.
+    expect(mockRecordChanged).toHaveBeenCalledWith('term-1')
     // statusSource is set by promoteToHookStatus(), not tryLink()
     expect(session.statusSource).toBeUndefined()
   })

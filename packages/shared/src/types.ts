@@ -131,6 +131,15 @@ export interface TerminalSession {
    * restored from a previous process has to tell somebody.
    */
   savedAt?: number
+  /**
+   * The revision of the session registry this record was last changed at.
+   *
+   * Set only on records that come from vornd's registry. A client that hears
+   * of one session from more than one place (the answer to its own call and
+   * the broadcast to every client) keeps the higher revision and drops the
+   * older; a record without one is taken as it comes.
+   */
+  rev?: number
 }
 
 /**

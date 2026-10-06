@@ -1409,9 +1409,11 @@ export interface ServerNotifications {
   'terminal:bell': { id: string }
   /**
    * A program in a terminal asked for a desktop notification (OSC 9 or 777).
-   * Told once, however often vornd reports it.
+   * Told once, however often vornd reports it. `effectId` names it the same
+   * way each time it is told, so a client can show it once; present while vornd
+   * runs native work.
    */
-  'terminal:notify': { id: string; title: string; body: string }
+  'terminal:notify': { id: string; title: string; body: string; effectId?: string }
   /**
    * Output for this terminal was withheld while the client was too far behind.
    * Its screen is now stale: re-attach to get the present one.
