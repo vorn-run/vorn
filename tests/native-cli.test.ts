@@ -647,7 +647,7 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
         // will not delete a running program; what is left is the OS's to clear.
         if (process.platform !== 'win32') throw err
       }
-    })
+    }, 30_000)
 
     it('answers the same commands alike', async () => {
       const dir = ['--data-dir', dataDir]
