@@ -640,7 +640,8 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
     const stdout = new PassThrough()
     const transport = new StdioServerTransport(stdin, stdout)
     stdin.once('end', () => void transport.close())
-    const relayed = relay(transport, url!, relayHeaders(TEST_CREDENTIAL, process.cwd(), {}))
+    const upstream = { url: url!, headers: relayHeaders(TEST_CREDENTIAL, process.cwd(), {}) }
+    const relayed = relay(transport, upstream, { locate: async () => upstream, fetch })
     const lines = createInterface({ input: stdout })[Symbol.asyncIterator]()
     const ask = async (message: object): Promise<unknown> => {
       stdin.write(JSON.stringify(message) + '\n')
@@ -665,9 +666,6 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
     const viaRelay = await ask(call)
     reset()
     await forgetCache()
-    // The relay hands on each message as the SDK's client transport parsed
-    // it, which orders a response's keys as its schema does; the values are
-    // the server's.
     expect(viaRelay).toEqual(await ts.send(call as JSONRPCMessage))
 
     stdin.end()
