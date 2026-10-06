@@ -98,6 +98,9 @@ jobs:
         run: |
           echo "$MAC_CERTIFICATE" | base64 --decode > certificate.p12
           security create-keychain -p actions build.keychain
+          # A new keychain locks itself after 5 minutes, and codesign then waits
+          # forever for a password. Keep it unlocked for the whole job.
+          security set-keychain-settings -lut 21600 build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p actions build.keychain
           security import certificate.p12 -k build.keychain -P "$MAC_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
