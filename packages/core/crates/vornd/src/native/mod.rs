@@ -29,6 +29,7 @@ pub mod env;
 pub mod file;
 pub mod git;
 pub mod ide;
+pub mod reach;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -41,6 +42,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, warn};
 use vorn_store::{Placement, ProjectHosts};
 
+use crate::applink::AppLink;
 use crate::groups::{Counted, Groups, Mode};
 use crate::streams::Forwarder;
 
@@ -79,6 +81,18 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("file:writeContent", Effect::Change),
     ("ide:detect", Effect::Read),
     ("ide:open", Effect::Change),
+    ("server:reachableUrls", Effect::Read),
+    ("tailscale:status", Effect::Read),
+    ("token:list", Effect::Read),
+    ("token:create", Effect::Change),
+    ("token:revoke", Effect::Change),
+    // Pairing is held in one place, the server's or vornd's, so its calls
+    // are never run on both sides to compare: listing prunes, too.
+    ("pairing:start", Effect::Change),
+    ("pairing:pending", Effect::Change),
+    ("pairing:approve", Effect::Change),
+    ("pairing:deny", Effect::Change),
+    ("pairing:cancel", Effect::Change),
 ];
 
 /// Calls in a native group that the server keeps answering, and why.
@@ -94,6 +108,19 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
     (
         "git:renameWorktree",
         "moves the server's sessions to the worktree's new path and tells clients",
+    ),
+    ("server:shutdown", "stops the server itself"),
+    (
+        "server:handoff",
+        "hands the server's listener and sessions to the server taking over",
+    ),
+    (
+        "server:vornd",
+        "reports on the vornd the server keeps running",
+    ),
+    (
+        "auth:authenticate",
+        "admits the server's own socket; vornd checks the credential beside it",
     ),
 ];
 
@@ -235,6 +262,11 @@ pub struct Native {
     turns: Turns,
     ignored: file::IgnoreCache,
     ides: ide::Ides,
+    reach: reach::Reach,
+    /// The app's channel, for what only the server can do.
+    link: OnceLock<Arc<AppLink>>,
+    /// The desktop's launch credential, which is also the server's local one.
+    desktop: OnceLock<Vec<u8>>,
 }
 
 impl Native {
@@ -246,7 +278,36 @@ impl Native {
             turns: Turns::default(),
             ignored: file::IgnoreCache::default(),
             ides: ide::Ides::default(),
+            reach: reach::Reach::default(),
+            link: OnceLock::new(),
+            desktop: OnceLock::new(),
         })
+    }
+
+    /// The server's port, which the addresses a browser uses name.
+    pub fn set_server_port(&self, port: u16) {
+        self.reach.set_server_port(port);
+    }
+
+    /// The app's channel. Only the first one given is kept.
+    pub fn set_link(&self, link: Arc<AppLink>) {
+        let _ = self.link.set(link);
+    }
+
+    /// The desktop's launch credential. Only the first one given is kept.
+    pub fn set_desktop_token(&self, token: Vec<u8>) {
+        let _ = self.desktop.set(token);
+    }
+
+    /// Reads again which names a browser may load the web client from.
+    pub fn refresh_trusted(&self) {
+        self.reach.refresh_trusted(&self.env);
+    }
+
+    /// The names a browser may load the web client from, beyond addresses
+    /// and `localhost`.
+    pub fn trusted(&self) -> vorn_reach::origin::TrustedHosts {
+        self.reach.trusted()
     }
 
     /// Where the server's database is. Only the first one given is kept.
@@ -265,6 +326,7 @@ impl Native {
             Some("git") => git::call(self, method, params),
             Some("file") => self.file(method, params),
             Some("ide") => self.ide(method, params),
+            Some("server" | "tailscale" | "token" | "pairing") => self.reach_call(method, params),
             _ => Answer::Forward,
         }
     }
@@ -446,6 +508,18 @@ impl Shadows {
     }
 }
 
+/// The group of the credential and Origin checks.
+pub const AUTH_GROUP: &str = "auth";
+/// What a credential check is counted as, wherever the credential came from.
+pub const AUTH_METHOD: &str = "auth:authenticate";
+/// What an Origin check is counted as.
+pub const ORIGIN_METHOD: &str = "auth:origin";
+/// The close code the server refuses a credential with.
+pub const CLOSE_CREDENTIAL_REJECTED: u16 = 4002;
+/// The shadow comparison of the credential check, which no request id can
+/// name: ids are JSON, quoted or numbers.
+const CREDENTIAL: &str = "credential";
+
 /// What [`Conn::offer`] did with a frame.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Offer {
@@ -491,8 +565,78 @@ impl Conn {
         self.authed.load(Ordering::Acquire)
     }
 
+    /// Checks the credential a client presents, on its upgrade or in
+    /// `auth:authenticate`, by the `auth` group's mode. The server checks it
+    /// too, and closes the socket if it refuses, whatever vornd made of it.
+    ///
+    /// - **native**: a credential vornd admits admits the connection here
+    ///   at once, without waiting for the server's word. One it refuses or
+    ///   cannot read is the server's to judge.
+    /// - **shadow**: vornd's verdict is compared with the server's, which is
+    ///   an answer or `auth:ok` (admitted) or a close with
+    ///   [`CLOSE_CREDENTIAL_REJECTED`] (refused).
+    pub fn check_credential(self: &Arc<Self>, raw: String) {
+        let mode = self.groups.mode(AUTH_GROUP);
+        if mode == Mode::Forward || self.admitted() {
+            self.groups.count(AUTH_METHOD, Counted::Forwarded);
+            return;
+        }
+        if mode == Mode::Shadow {
+            self.shadows.begin(CREDENTIAL.to_owned(), AUTH_METHOD);
+        }
+        let conn = Arc::clone(self);
+        tokio::spawn(async move {
+            let native = Arc::clone(&conn.native);
+            let verdict = tokio::task::spawn_blocking(move || native.verify_credential(&raw))
+                .await
+                .unwrap_or(reach::Verdict::CannotTell);
+            match (mode, verdict) {
+                (Mode::Native, reach::Verdict::Admitted) => {
+                    conn.authed.store(true, Ordering::Release);
+                    conn.groups.count(AUTH_METHOD, Counted::Native);
+                }
+                (Mode::Native, _) => conn.groups.count(AUTH_METHOD, Counted::Forwarded),
+                (_, reach::Verdict::CannotTell) => {
+                    conn.groups.count(AUTH_METHOD, Counted::Forwarded);
+                    if conn.shadows.cancel(CREDENTIAL).is_some() {
+                        conn.groups.count(AUTH_METHOD, Counted::ShadowUnported);
+                    }
+                }
+                (_, verdict) => {
+                    conn.groups.count(AUTH_METHOD, Counted::Forwarded);
+                    let admitted = verdict == reach::Verdict::Admitted;
+                    conn.shadows
+                        .settle(CREDENTIAL, Side::Native, json!(admitted), &conn.groups);
+                }
+            }
+        });
+    }
+
+    /// The server closed the connection with `code`.
+    pub fn on_server_close(&self, code: u16) {
+        if code != CLOSE_CREDENTIAL_REJECTED {
+            return;
+        }
+        if self.authed.swap(false, Ordering::AcqRel) {
+            warn!("the server refused a credential vornd admitted");
+        }
+        self.shadows
+            .settle(CREDENTIAL, Side::Server, json!(false), &self.groups);
+    }
+
     /// Decides who answers a client's call to `method`, whose frame is `text`.
     pub fn offer(self: &Arc<Self>, method: &str, text: &str) -> Offer {
+        if method == AUTH_METHOD {
+            if let Some(token) = request_of(text)
+                .and_then(|(_, params)| params.get("token")?.as_str().map(str::to_owned))
+                .filter(|t| !t.is_empty())
+            {
+                self.check_credential(token);
+            } else {
+                self.groups.count(method, Counted::Forwarded);
+            }
+            return Offer::Pass;
+        }
         let mode = self.groups.route(method);
         if mode == Mode::Forward {
             self.groups.count(method, Counted::Forwarded);
@@ -602,6 +746,8 @@ impl Conn {
             let answer = method.is_none() && id.is_some() && frame.contains_key("result");
             if answer || (method == Some("auth:ok") && id.is_none()) {
                 self.authed.store(true, Ordering::Release);
+                self.shadows
+                    .settle(CREDENTIAL, Side::Server, json!(true), &self.groups);
             }
         }
         if shadowed && method.is_none() {

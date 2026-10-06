@@ -18,6 +18,7 @@ members = [
   "crates/protocol",
   "crates/store",
   "crates/cli",
+  "crates/reach",
 ]
 
 [package]

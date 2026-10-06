@@ -2686,6 +2686,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-reach"
+version = "0.0.0"
+dependencies = [
+ "data-encoding",
+ "getrandom 0.4.3",
+ "libc",
+ "serde_json",
+ "sha2",
+ "uuid",
+ "windows-sys",
+]
+
+[[package]]
 name = "vorn-recovery"
 version = "0.7.5"
 dependencies = [
@@ -2783,6 +2796,8 @@ dependencies = [
  "vorn-git",
  "vorn-grid-client",
  "vorn-pipeline",
+ "vorn-protocol",
+ "vorn-reach",
  "vorn-recovery",
  "vorn-screen",
  "vorn-sessiond",

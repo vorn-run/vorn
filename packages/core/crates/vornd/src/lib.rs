@@ -18,6 +18,7 @@
 //! answered here when the Native server switch, or a per-group setting,
 //! says so ([`groups`]).
 
+pub mod applink;
 #[cfg(feature = "engine")]
 pub mod control;
 #[cfg(feature = "engine")]
@@ -30,6 +31,7 @@ pub mod holder;
 pub mod journal;
 pub mod names;
 pub mod native;
+mod pair;
 pub mod protocol;
 pub mod proxy;
 #[cfg(feature = "engine")]
