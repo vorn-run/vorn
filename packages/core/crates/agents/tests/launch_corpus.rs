@@ -68,11 +68,13 @@ fn outcome<T>(result: Result<T, launch::LaunchError>, ok: impl Fn(T) -> Value) -
 #[test]
 fn launches_as_the_corpus_says() {
     let corpus = corpus();
-    let mut checked = 0;
+    let (mut checked, mut skipped) = (0, 0);
     for case in corpus["launch"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();
         let bin_names = strings(&case["bin"]).unwrap_or_default();
         if !bin_names.is_empty() && !cfg!(unix) {
+            // Fake binaries need an executable bit, which only unix has.
+            skipped += 1;
             continue;
         }
         let Some(agent) = Agent::from_id(case["payload"]["agentType"].as_str().unwrap()) else {
@@ -140,7 +142,10 @@ fn launches_as_the_corpus_says() {
         assert_eq!(headless, case["headless"], "headless: {name}");
         checked += 1;
     }
-    assert!(checked > 100, "only {checked} launch cases ran");
+    assert!(
+        checked > 0 && checked + skipped > 100,
+        "only {checked} launch cases ran ({skipped} skipped)"
+    );
 }
 
 #[test]
