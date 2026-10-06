@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Builds the crate and copies the cdylib to ./vorn_core.node, the one name the
 // server and electron-builder look for on every platform. Then builds vornd and
-// vorn-sessiond and copies them to ./vornd and ./vorn-sessiond (with .exe on
-// Windows), where the app looks for them. On Windows it also fetches the
+// vorn-sessiond and the vorn command and copies them to ./vornd,
+// ./vorn-sessiond and ./vorn (with .exe on Windows), where the app looks for
+// them and electron-builder picks them up. On Windows it also fetches the
 // ConPTY vorn-sessiond ships with to beside it (scripts/fetch-conpty.mjs).
 //
 //   --debug        unoptimized build
@@ -61,11 +62,11 @@ copyOut(library, 'vorn_core.node')
 // --no-ghostty builds vornd without it; vorn-sessiond never links Ghostty.
 // vornd starts the vorn-sessiond shipped beside it.
 const exe = process.platform === 'win32' ? '.exe' : ''
-const daemonArgs = ['build', '--locked', '-p', 'vornd', '-p', 'vorn-sessiond']
+const daemonArgs = ['build', '--locked', '-p', 'vornd', '-p', 'vorn-sessiond', '-p', 'vorn-cli']
 if (profile === 'release') daemonArgs.push('--release')
 if (args.has('--no-ghostty')) daemonArgs.push('--no-default-features')
 cargo(daemonArgs)
-for (const daemon of ['vornd', 'vorn-sessiond']) copyOut(daemon + exe, daemon + exe)
+for (const daemon of ['vornd', 'vorn-sessiond', 'vorn']) copyOut(daemon + exe, daemon + exe)
 
 // vorn-sessiond hosts Windows sessions in the ConPTY shipped beside it.
 if (process.platform === 'win32') {

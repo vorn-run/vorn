@@ -1,0 +1,37 @@
+[package]
+name = "vorn-cli"
+# Follows the app's version (scripts/sync-versions.sh): `vorn --version` prints it.
+version = "0.8.0-beta.3"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The vorn command: sessions, workflows and device tokens from a terminal, and an MCP relay for agents"
+
+[[bin]]
+name = "vorn"
+path = "src/main.rs"
+
+[dependencies]
+bytes = "1"
+data-encoding = "2"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+getrandom = "0.4"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = { version = "0.10", default-features = false }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "io-std", "macros", "sync", "time", "process"] }
+tokio-tungstenite = "0.28"
+uuid = { version = "1", features = ["v4"] }
+vorn-protocol = { path = "../protocol" }
+vorn-store = { path = "../store" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server"] }
+tempfile = "3"
