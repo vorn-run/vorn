@@ -122,7 +122,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// One open database.
 pub struct Store {
     conn: Connection,
-    options: StoreOptions,
+    /// `None` for a store opened beside the server ([`Store::open_beside`]).
+    options: Option<StoreOptions>,
     /// The file, or `None` in memory.
     path: Option<PathBuf>,
 }
@@ -158,7 +159,7 @@ impl Store {
         let conn = Connection::open_in_memory()?;
         let mut store = Store {
             conn,
-            options,
+            options: Some(options),
             path: None,
         };
         store.prepare_connection()?;
@@ -176,13 +177,37 @@ impl Store {
         )?;
         let mut store = Store {
             conn,
-            options,
+            options: Some(options),
             path: Some(path.to_owned()),
         };
         store.prepare_connection()?;
         schema::create(&mut store)?;
         schema::seed_system_defaults(&mut store)?;
         Ok(store)
+    }
+
+    /// Opens `path` for a process standing beside the server (vornd), which
+    /// reads and updates rows the server's schema already has: nothing is
+    /// created, migrated or seeded, and the journal mode is left as the
+    /// server set it. `None` when there is no such file yet.
+    ///
+    /// Only for calls on rows. The app's defaults are the server's to supply,
+    /// so a call that falls back on them (`loadConfig`) is not for this store.
+    pub fn open_beside(path: &Path) -> Result<Option<Store>> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        Ok(Some(Store {
+            conn,
+            options: None,
+            path: Some(path.to_owned()),
+        }))
     }
 
     fn prepare_connection(&mut self) -> Result<()> {
@@ -239,8 +264,11 @@ impl Store {
         &mut self.conn
     }
 
-    pub(crate) fn options(&self) -> &StoreOptions {
-        &self.options
+    /// The app's defaults; refused on a store opened beside the server.
+    pub(crate) fn options(&self) -> Result<&StoreOptions> {
+        self.options.as_ref().ok_or_else(|| {
+            Error::Refused("a store opened beside the server has none of the app's defaults".into())
+        })
     }
 
     /// Answers the call the TypeScript store names `call`, with its arguments

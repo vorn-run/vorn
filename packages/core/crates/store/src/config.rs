@@ -71,7 +71,7 @@ impl Store {
             row_to_session_group,
         )?;
         if agent_commands.is_empty() {
-            agent_commands = self.options().default_agent_commands.clone();
+            agent_commands = self.options()?.default_agent_commands.clone();
         }
 
         let mut config = Map::new();
@@ -127,7 +127,10 @@ impl Store {
         };
         out.insert(
             "shell".into(),
-            or("shell", Value::String(self.options().default_shell.clone())),
+            or(
+                "shell",
+                Value::String(self.options()?.default_shell.clone()),
+            ),
         );
         out.insert("fontSize".into(), or("fontSize", Value::from(13)));
         out.insert("theme".into(), or("theme", Value::from("dark")));
@@ -209,7 +212,7 @@ impl Store {
     /// both, so deleting after the upserts loses nothing.
     pub fn save_config(&mut self, config: &Value, deleted_defaults: &[String]) -> Result<()> {
         let config = SavedConfig::deserialize(config)?;
-        let default_workspace = self.options().default_workspace.clone();
+        let default_workspace = self.options()?.default_workspace.clone();
         let tx = self.conn_mut().transaction()?;
 
         let base = config.revision.unwrap_or(NO_BASE_REVISION);
