@@ -448,5 +448,44 @@
         "z": 1
       }
     }
+  },
+  {
+    "tool": "list_connections",
+    "args": {
+      "connector_id": [],
+      "failing_only": true
+    },
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"Invalid input: expected string, received array\"\n  },\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"ID must not be empty\"\n  }\n]"
+  },
+  {
+    "tool": "list_connections",
+    "args": {
+      "connector_id": 7
+    },
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+  },
+  {
+    "tool": "list_connections",
+    "args": {
+      "connector_id": {
+        "length": 0
+      }
+    },
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"Invalid input: expected string, received object\"\n  },\n  {\n    \"origin\": \"unknown\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"ID must not be empty\"\n  }\n]"
+  },
+  {
+    "tool": "create_project",
+    "args": {
+      "name": [],
+      "path": ""
+    },
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"name\"\n    ],\n    \"message\": \"Invalid input: expected string, received array\"\n  },\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"name\"\n    ],\n    \"message\": \"Name must not be empty\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must not be empty\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must be absolute (start with /)\"\n  }\n]"
+  },
+  {
+    "tool": "reorder_sessions",
+    "args": {
+      "session_ids": ""
+    },
+    "error": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"session_ids\"\n    ],\n    \"message\": \"Invalid input: expected array, received string\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"session_ids\"\n    ],\n    \"message\": \"At least one session ID is required\"\n  }\n]"
   }
 ]

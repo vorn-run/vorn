@@ -520,7 +520,7 @@ impl Registry {
             },
             Schema::String(checks) => match input {
                 Some(Value::String(_)) => self.checked(Parsed::ok(input.cloned()), checks),
-                other => Parsed::failed(Issue::invalid_type("string", other)),
+                other => self.refused(Issue::invalid_type("string", other), other, checks),
             },
             Schema::Number(checks) => match input {
                 Some(Value::Number(_)) => self.checked(Parsed::ok(input.cloned()), checks),
@@ -535,7 +535,7 @@ impl Registry {
             }
             Schema::Array { item, checks } => {
                 let Some(Value::Array(items)) = input else {
-                    return Parsed::failed(Issue::invalid_type("array", input));
+                    return self.refused(Issue::invalid_type("array", input), input, checks);
                 };
                 let mut out = Vec::with_capacity(items.len());
                 let mut issues = Vec::new();
@@ -554,7 +554,7 @@ impl Registry {
             }
             Schema::Record { value, checks } => {
                 let Some(Value::Object(map)) = input else {
-                    return Parsed::failed(Issue::invalid_type("record", input));
+                    return self.refused(Issue::invalid_type("record", input), input, checks);
                 };
                 let mut out = Map::new();
                 let mut issues = Vec::new();
@@ -583,7 +583,7 @@ impl Registry {
                 checks,
             } => {
                 let Some(Value::Object(map)) = input else {
-                    return Parsed::failed(Issue::invalid_type("object", input));
+                    return self.refused(Issue::invalid_type("object", input), input, checks);
                 };
                 let mut out = Map::new();
                 let mut issues = Vec::new();
@@ -739,17 +739,30 @@ impl Registry {
         parsed
     }
 
+    /// A value of the wrong type. zod still runs the checks on it that guard
+    /// themselves (the length checks, on anything with a `length`), so an
+    /// empty array where a non-empty string belongs is reported twice.
+    fn refused(&self, issue: Issue, input: Option<&Value>, checks: &[Check]) -> Parsed {
+        self.checked(
+            Parsed {
+                value: input.cloned(),
+                issues: vec![issue],
+            },
+            checks,
+        )
+    }
+
     fn check(&self, check: &Check, parsed: &mut Parsed) {
         let Some(value) = parsed.value.as_ref() else {
             return;
         };
         let issue = match check {
-            Check::Min(min, message) => {
-                let (origin, len) = sized(value);
+            Check::Min(min, message) => sized(value).and_then(|(origin, len)| {
                 (len < *min).then(|| {
                     let text = message.clone().unwrap_or_else(|| {
                         format!(
-                            "Too small: expected {origin} to have >={} {}",
+                            "Too small: expected {origin} {}>={}{}",
+                            verb(origin),
                             json::number_to_string(*min),
                             unit(origin)
                         )
@@ -765,13 +778,13 @@ impl Registry {
                         Flow::Continue,
                     )
                 })
-            }
-            Check::Max(max, message) => {
-                let (origin, len) = sized(value);
+            }),
+            Check::Max(max, message) => sized(value).and_then(|(origin, len)| {
                 (len > *max).then(|| {
                     let text = message.clone().unwrap_or_else(|| {
                         format!(
-                            "Too big: expected {origin} to have <={} {}",
+                            "Too big: expected {origin} {}<={}{}",
+                            verb(origin),
                             json::number_to_string(*max),
                             unit(origin)
                         )
@@ -787,7 +800,7 @@ impl Registry {
                         Flow::Continue,
                     )
                 })
-            }
+            }),
             Check::Gte(limit, message) => small(value, *limit, true, message),
             Check::Gt(limit, message) => small(value, *limit, false, message),
             Check::Lte(limit, message) => big(value, *limit, true, message),
@@ -869,21 +882,36 @@ impl Registry {
     }
 }
 
-/// What a length check measures, and how much of it there is. zod counts a
-/// string in code points, so an emoji is one character, not two.
-fn sized(value: &Value) -> (&'static str, f64) {
+/// What a length check measures, and how much of it there is, or `None`
+/// for a value without a `length`, which zod's length checks pass over. zod
+/// counts a string in code points, so an emoji is one character, not two;
+/// an object's own `length` key is a length too.
+fn sized(value: &Value) -> Option<(&'static str, f64)> {
     match value {
-        Value::String(s) => ("string", s.chars().count() as f64),
-        Value::Array(items) => ("array", items.len() as f64),
-        _ => ("string", 0.0),
+        Value::String(s) => Some(("string", s.chars().count() as f64)),
+        Value::Array(items) => Some(("array", items.len() as f64)),
+        Value::Object(map) => map
+            .get("length")
+            .and_then(Value::as_f64)
+            .map(|n| ("unknown", n)),
+        _ => None,
+    }
+}
+
+/// How zod's English messages size an origin: "to have" a count of units
+/// for a string or an array, "to be" a number for anything else.
+fn verb(origin: &str) -> &'static str {
+    match origin {
+        "string" | "array" => "to have ",
+        _ => "to be ",
     }
 }
 
 fn unit(origin: &str) -> &'static str {
-    if origin == "array" {
-        "items"
-    } else {
-        "characters"
+    match origin {
+        "array" => " items",
+        "string" => " characters",
+        _ => "",
     }
 }
 
