@@ -78,6 +78,7 @@ import {
 } from './lib/notifications'
 import { restoreDevicePanes } from './lib/device-restore'
 import { markPaneEnded } from './lib/session-resume'
+import { staleRev, takesCreated } from './lib/session-rev'
 
 export function App() {
   const {
@@ -362,9 +363,10 @@ export function App() {
     const removeSessionCreatedListener = window.api.onSessionCreated((session) => {
       const state = useAppStore.getState()
       void hydrateExtensions(session.id, useAppStore.getState)
-      if (!state.terminals.has(session.id)) {
+      const held = state.terminals.get(session.id)
+      if (takesCreated(held?.session, session)) {
         state.addTerminal(session)
-        if (session.projectPath) {
+        if (!held && session.projectPath) {
           state.loadWorktrees(session.projectPath)
         }
       }
@@ -436,6 +438,8 @@ export function App() {
     const removeSessionUpdatedListener = window.api.onSessionUpdated((session) => {
       const store = useAppStore.getState()
       const existing = store.terminals.get(session.id)
+      // A copy older than the one held, heard after it, changes nothing.
+      if (existing && staleRev(existing.session, session)) return
       if (existing) {
         void hydrateExtensions(session.id, useAppStore.getState)
         if (session.status !== existing.status) {
@@ -465,6 +469,7 @@ export function App() {
         if (Object.keys(wtUpdates).length > 0) {
           store.updateSessionWorktree(session.id, wtUpdates)
         }
+        if (session.rev !== undefined) store.noteSessionRev(session.id, session.rev)
       } else {
         const updates: { branch?: string; worktreePath?: string; worktreeName?: string } = {}
         if (session.branch) updates.branch = session.branch

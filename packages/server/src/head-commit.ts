@@ -12,7 +12,9 @@ export class HeadRefresh {
 
   constructor(
     private readonly read: (cwd: string) => Promise<string | null>,
-    private readonly every: number = HEAD_REFRESH_MS
+    private readonly every: number = HEAD_REFRESH_MS,
+    /** Told after a read moved a session's recorded HEAD, which it does in place. */
+    private readonly moved: (session: TerminalSession) => void = () => {}
   ) {}
 
   refresh(sessions: TerminalSession[], now: number = Date.now()): void {
@@ -28,7 +30,10 @@ export class HeadRefresh {
       this.latest.set(s.id, read)
       this.read(s.worktreePath ?? s.projectPath).then(
         (head) => {
-          if (head && this.latest.get(s.id) === read) s.headCommit = head
+          if (head && this.latest.get(s.id) === read && s.headCommit !== head) {
+            s.headCommit = head
+            this.moved(s)
+          }
         },
         () => {}
       )

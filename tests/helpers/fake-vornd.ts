@@ -24,8 +24,13 @@ export class FakeVornd {
   private server!: net.Server
   private conns = new Set<net.Socket>()
   /** What `vornd:subscribe` answers. */
-  state: { connected: boolean; sessions: HeldSession[]; ended: HeldSession[]; notices: unknown[] } =
-    { connected: true, sessions: [], ended: [], notices: [] }
+  state: {
+    connected: boolean
+    sessions: HeldSession[]
+    ended: HeldSession[]
+    notices: unknown[]
+    registry?: unknown
+  } = { connected: true, sessions: [], ended: [], notices: [] }
   /** What `terminal:readOutput` answers. */
   output: string[] = []
   /** Every call the server made, in order. */
@@ -35,6 +40,10 @@ export class FakeVornd {
   protocol = APP_PROTOCOL
   /** Set, every `vornd:spawn` is refused with it. */
   spawnError: string | null = null
+  /** Whether `vornd:hello` says vornd runs native work, and so wants the session records. */
+  native = false
+  /** What `vornd:registry` answers. */
+  registry: unknown = null
 
   constructor(private readonly dataDir: string) {
     // Each its own endpoint: two made in the same millisecond must not share one.
@@ -113,7 +122,9 @@ export class FakeVornd {
       )
       return
     }
-    if (msg.method === 'vornd:hello') result = { protocol: this.protocol, build: 'test' }
+    if (msg.method === 'vornd:hello') {
+      result = { protocol: this.protocol, build: 'test', ...(this.native && { native: true }) }
+    } else if (msg.method === 'vornd:registry') result = this.registry
     else if (msg.method === 'vornd:subscribe') result = this.state
     else if (msg.method === 'vornd:spawn') {
       result = { id: msg.params?.name, pid: this.nextPid++, epoch: 7 }

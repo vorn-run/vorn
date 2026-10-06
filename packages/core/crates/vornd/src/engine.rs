@@ -53,6 +53,7 @@ use vorn_term_proto::{Cursor, Entry, Record};
 use crate::holder::{Conn, Writer};
 use crate::journal::{Journal, Kind};
 use crate::names::Names;
+use crate::registry::SessionRegistry;
 use crate::size::{Sizes, Who};
 use crate::streams::{Action, Snap, Streams};
 
@@ -172,6 +173,8 @@ pub struct Engine {
     sizes: Arc<Sizes>,
     names: Mutex<Names>,
     journal: Mutex<Journal>,
+    /// The copy of the app's session records, which the app's channel feeds.
+    registry: Arc<SessionRegistry>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -208,6 +211,7 @@ impl Engine {
         Arc::new(Engine {
             names: Mutex::new(Names::load(names_file)),
             journal: Mutex::new(Journal::default()),
+            registry: SessionRegistry::new(),
             // Every session's records go on to bytes clients.
             cfg: Config {
                 stream: true,
@@ -232,6 +236,11 @@ impl Engine {
     /// The terminal streams of the sessions this engine holds.
     pub fn streams(&self) -> &Arc<Streams> {
         &self.streams
+    }
+
+    /// The app's session records, as the app's channel told them.
+    pub fn registry(&self) -> &Arc<SessionRegistry> {
+        &self.registry
     }
 
     /// A resize of `session`, past the size rule. sessiond applies it and

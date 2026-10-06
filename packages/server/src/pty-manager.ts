@@ -43,6 +43,7 @@ import { NATIVE_STATUS } from './native-core'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 import { isHandingOver, HANDOVER_MESSAGE } from './handoff/donor'
 import { vorndSessions, VorndPty, type HeldSession, type VorndExit } from './vornd-sessions'
+import { sessionFeed, type Stamp } from './session-feed'
 
 /**
  * What a PTY starts at, before any client has fitted itself to a pane.
@@ -96,7 +97,7 @@ type WorktreeSessionCounter = (
 
 class PtyManager extends EventEmitter {
   /** Recorded HEAD per session, refreshed by the save loop. */
-  readonly heads = new HeadRefresh(getGitHead)
+  readonly heads = new HeadRefresh(getGitHead, undefined, (s) => this.recordChanged(s.id))
   private ptys = new Map<string, VorndPty>()
   private sessions = new Map<string, TerminalSession>()
   /**
@@ -135,6 +136,34 @@ class PtyManager extends EventEmitter {
   constructor() {
     super()
     setImmediate(() => this.cleanStaleTempKeys())
+    sessionFeed.setTerminalSource({
+      terminals: () => this.getActiveSessions(),
+      order: () => this.sessionOrder
+    })
+  }
+
+  /**
+   * Tell vornd's copy of the registry what this record is now (`session-feed`).
+   *
+   * Called after every change to a record: here, and by the places outside
+   * that change one in place (a hook linking it, an agent's id captured, a
+   * resume carrying fields over). Telling it twice costs nothing. An
+   * extension's pane is not a session and is never told.
+   */
+  recordChanged(id: string): void {
+    const session = this.sessions.get(id)
+    if (!session || this.extensionPtys.has(id)) return
+    sessionFeed.terminal(session)
+  }
+
+  /** `sessionOrder` changed. */
+  private orderChanged(): void {
+    sessionFeed.order(this.sessionOrder)
+  }
+
+  /** A record was let go of. */
+  private recordRemoved(id: string): void {
+    sessionFeed.remove('terminal', id)
   }
 
   /**
@@ -152,6 +181,7 @@ class PtyManager extends EventEmitter {
     const session = this.sessions.get(id)
     if (!session || session.agentType !== 'shell' || session.shellCwd === cwd) return
     session.shellCwd = cwd
+    this.recordChanged(id)
     this.emit('session-cwd', id, cwd)
   }
 
@@ -277,6 +307,8 @@ class PtyManager extends EventEmitter {
           ? this.createRemotePty(id, shell, payload, prepared.remoteHost)
           : this.createLocalPty(id, shell, payload, prepared.local)
 
+      this.recordChanged(session.id)
+      this.orderChanged()
       this.emit('session-created', session, payload)
       return session
     } finally {
@@ -645,6 +677,8 @@ class PtyManager extends EventEmitter {
     this.sessions.set(id, session)
     this.sessionOrder.push(id)
     this.normalizedPaths.set(id, normalizePath(workingDir))
+    this.recordChanged(id)
+    this.orderChanged()
     return session
   }
 
@@ -724,14 +758,19 @@ class PtyManager extends EventEmitter {
     held.on('started', (pid: number) => {
       const session = this.sessions.get(id)
       if (session) session.pid = pid
+      this.recordChanged(id)
     })
-    held.on('status', (code: number) => {
+    held.on('status', (code: number, note?: Stamp) => {
       const session = this.sessions.get(id)
       const status = NATIVE_STATUS[code]
       if (!session || !status) return
       this.vorndStatus.set(id, status)
       if (session.agentType === 'shell' || session.statusSource === 'hooks') return
-      this.setStatus(id, status)
+      this.setStatus(
+        id,
+        status,
+        note ? { epoch: note.epoch, rseq: note.rseq, index: note.index } : null
+      )
     })
     held.on('cwd', (cwd: string) => this.noteShellCwd(id, cwd))
     held.on('activity', () => {
@@ -747,7 +786,7 @@ class PtyManager extends EventEmitter {
       }
       this.armIdle(id, session)
     })
-    held.onExit((exit) => this.processEnded(id, exit))
+    held.onExit((exit) => this.processEnded(id, exit, held.exitAt ?? null))
   }
 
   /**
@@ -763,6 +802,8 @@ class PtyManager extends EventEmitter {
     this.normalizedPaths.set(session.id, normalizePath(session.worktreePath || session.projectPath))
     const program = vorndSessions.adopt(held, watched, (p) => this.setupVorndEvents(session.id, p))
     this.ptys.set(session.id, program)
+    this.recordChanged(session.id)
+    this.orderChanged()
   }
 
   /** Whether this PTY is an extension's pane rather than a session someone started. */
@@ -797,10 +838,11 @@ class PtyManager extends EventEmitter {
   }
 
   /** A session's program ended. */
-  private processEnded(id: string, { exitCode, repeated }: VorndExit): void {
+  private processEnded(id: string, { exitCode, repeated }: VorndExit, exitAt: Stamp | null): void {
     this.deleteTempKey(id)
     this.clearSessionTracking(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
+    this.orderChanged()
 
     this.ptys.delete(id)
     this.vorndStatus.delete(id)
@@ -811,6 +853,9 @@ class PtyManager extends EventEmitter {
       if (session.agentType === 'shell') {
         session.shellExitCode = exitCode
       }
+      sessionFeed.statusAt(id, null)
+      sessionFeed.exitAt('terminal', id, exitAt)
+      this.recordChanged(id)
       // An exit told again, after vornd restarted, was acted on the first time.
       if (session.worktreePath && !repeated) {
         // Only prompt cleanup when this is the last session using the worktree
@@ -855,6 +900,7 @@ class PtyManager extends EventEmitter {
     if (cols > MAX_GEOMETRY || rows > MAX_GEOMETRY) return
     session.cols = cols
     session.rows = rows
+    this.recordChanged(id)
   }
 
   /**
@@ -877,6 +923,8 @@ class PtyManager extends EventEmitter {
     this.clearSessionTracking(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.ptys.delete(id)
+    this.recordRemoved(id)
+    this.orderChanged()
   }
 
   /**
@@ -896,6 +944,8 @@ class PtyManager extends EventEmitter {
     this.sessions.set(session.id, session)
     this.normalizedPaths.set(session.id, normalizePath(session.worktreePath || session.projectPath))
     if (!this.sessionOrder.includes(session.id)) this.sessionOrder.push(session.id)
+    this.recordChanged(session.id)
+    this.orderChanged()
   }
 
   killPty(id: string): void {
@@ -911,6 +961,8 @@ class PtyManager extends EventEmitter {
     this.clearSessionTracking(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.ptys.delete(id)
+    this.recordRemoved(id)
+    this.orderChanged()
 
     if (session) {
       this.emit('session-exit', session)
@@ -951,10 +1003,12 @@ class PtyManager extends EventEmitter {
     for (const id of this.ptys.keys()) vorndSessions.release(id)
     this.ptys.clear()
     this.vorndStatus.clear()
+    for (const id of this.sessions.keys()) this.recordRemoved(id)
     this.sessions.clear()
     for (const timer of this.idleTimers.values()) clearTimeout(timer)
     this.idleTimers.clear()
     this.sessionOrder = []
+    this.orderChanged()
   }
 
   /**
@@ -1013,10 +1067,13 @@ class PtyManager extends EventEmitter {
     this.setStatus(id, status)
   }
 
-  private setStatus(id: string, status: AgentStatus): void {
+  /** @param at The effect that told it, when vornd did; null for a hook, a timer or input. */
+  private setStatus(id: string, status: AgentStatus, at: Stamp | null = null): void {
     const session = this.sessions.get(id)
     if (session && session.status !== status) {
       session.status = status
+      sessionFeed.statusAt(id, at)
+      this.recordChanged(id)
       this.emit('client-message', IPC.SESSION_UPDATED, session)
     }
   }
@@ -1028,6 +1085,7 @@ class PtyManager extends EventEmitter {
 
     if (session.statusSource !== 'hooks') {
       session.statusSource = 'hooks'
+      this.recordChanged(id)
       log.info(`[pty] session ${id} promoted to hook-based status`)
     }
 
@@ -1055,6 +1113,7 @@ class PtyManager extends EventEmitter {
     if (!session) throw new Error(`Session not found: ${id}`)
     session.displayName = displayName
     if (byPerson) session.renamedByPerson = true
+    this.recordChanged(id)
     this.emit('client-message', IPC.SESSION_UPDATED, session)
   }
 
@@ -1064,6 +1123,7 @@ class PtyManager extends EventEmitter {
     if (!session) throw new Error(`Session not found: ${id}`)
     if (groupId) session.groupId = groupId
     else delete session.groupId
+    this.recordChanged(id)
     this.emit('client-message', IPC.SESSION_UPDATED, session)
   }
 
@@ -1073,6 +1133,7 @@ class PtyManager extends EventEmitter {
       if (!this.sessions.has(id)) throw new Error(`Session not found: ${id}`)
     }
     this.sessionOrder = ids
+    this.orderChanged()
     this.emit('client-message', IPC.SESSION_REORDERED, ids)
   }
 
@@ -1105,6 +1166,7 @@ class PtyManager extends EventEmitter {
         if (updates.worktreeName !== undefined) s.worktreeName = updates.worktreeName
         if (updates.worktreePath !== undefined) s.worktreePath = updates.worktreePath
         this.heads.invalidate(s.id)
+        this.recordChanged(s.id)
         this.emit('client-message', IPC.SESSION_UPDATED, s)
       }
     }

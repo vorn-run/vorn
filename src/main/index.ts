@@ -45,6 +45,7 @@ import type { ServerBridge } from './server/server-bridge'
 import { primeHostPath, resetHostPath, setPathSource } from './binary-path'
 import log from './logger'
 import { loginItemFor } from './login-item'
+import { NoticeReceipts } from './notice-receipts'
 
 let isQuitting = false
 
@@ -331,6 +332,9 @@ function applyLoginItem(config: unknown): void {
   app.setLoginItemSettings({ openAtLogin })
 }
 
+/** Kept for the life of the app, across servers: a server that restarts tells its notifications again. */
+const notices = new NoticeReceipts()
+
 /**
  * Wire up server notification forwarding.
  * When the server pushes events via WebSocket, forward them to the
@@ -347,6 +351,7 @@ function wireServerNotifications(bridge: ServerBridge): void {
     connectedBefore = true
   })
   bridge.on('server-notification', (method: string, params: unknown) => {
+    if (method === IPC.TERMINAL_NOTIFY && !notices.shows(params)) return
     // Before the switch rather than inside it: `CONFIG_CHANGED` is one label in a
     // fall-through group that forwards seventeen events identically, so giving it
     // a body of its own would mean splitting it out and repeating the forward.

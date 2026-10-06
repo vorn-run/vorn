@@ -29,6 +29,7 @@ class HookStatusMapper {
       log.info(`[hooks] linked session ${sessionId} -> terminal ${session.id} (cwd: ${cwd})`)
       this.sessionMap.set(sessionId, session.id)
       session.hookSessionId = sessionId
+      ptyManager.recordChanged(session.id)
       // Don't set statusSource here — promoteToHookStatus() handles it and
       // also re-arms the idle timer. Setting it directly would bypass that.
       return session.id

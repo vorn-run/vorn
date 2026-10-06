@@ -24,6 +24,7 @@ import log from './logger'
 import { holdWorkspace } from './workspace-holds'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 import { vorndSessions, type VorndPty } from './vornd-sessions'
+import { sessionFeed } from './session-feed'
 
 const MAX_OUTPUT_LINES = 1000
 const FORCE_KILL_DELAY_MS = 5000
@@ -34,6 +35,17 @@ class HeadlessManager extends EventEmitter {
   private sessions = new Map<string, HeadlessSession>()
   private outputBuffers = new Map<string, string[]>()
   private agentCommands: Record<AiAgentType, AgentCommandConfig> = { ...DEFAULT_AGENT_COMMANDS }
+
+  constructor() {
+    super()
+    sessionFeed.setHeadlessSource(() => this.getActiveSessions())
+  }
+
+  /** Tell vornd's copy of the registry what this record is now (`session-feed`). */
+  private recordChanged(id: string): void {
+    const session = this.sessions.get(id)
+    if (session) sessionFeed.headless(session)
+  }
 
   setAgentCommands(overrides?: Partial<Record<AiAgentType, AgentCommandConfig>>): void {
     this.agentCommands = { ...DEFAULT_AGENT_COMMANDS }
@@ -186,12 +198,15 @@ class HeadlessManager extends EventEmitter {
     this.inVornd.set(id, agent)
     this.outputBuffers.set(id, [])
     this.sessions.set(id, session)
+    this.recordChanged(id)
     agent.on('started', (pid: number) => {
       session.pid = pid
+      this.recordChanged(id)
     })
     agent.onData(output)
     agent.onExit(({ exitCode, repeated }) => {
       this.inVornd.delete(id)
+      sessionFeed.exitAt('headless', id, agent.exitAt ?? null)
       this.exited(id, exitCode, repeated)
     })
     return session
@@ -210,6 +225,7 @@ class HeadlessManager extends EventEmitter {
     sess.status = 'exited'
     sess.exitCode = exitCode
     sess.endedAt = Date.now()
+    this.recordChanged(id)
     if (!repeated) {
       this.emit('client-message', IPC.HEADLESS_EXIT, { id, exitCode: exitCode ?? 1 })
     }
@@ -218,6 +234,7 @@ class HeadlessManager extends EventEmitter {
     setTimeout(() => {
       this.outputBuffers.delete(id)
       this.sessions.delete(id)
+      sessionFeed.remove('headless', id)
     }, 30_000)
   }
 
@@ -260,6 +277,7 @@ class HeadlessManager extends EventEmitter {
         if (updates.branch !== undefined) s.branch = updates.branch
         if (updates.worktreeName !== undefined) s.worktreeName = updates.worktreeName
         if (updates.worktreePath !== undefined) s.worktreePath = updates.worktreePath
+        this.recordChanged(s.id)
         this.emit('client-message', IPC.SESSION_UPDATED, s)
       }
     }
@@ -270,6 +288,7 @@ class HeadlessManager extends EventEmitter {
     // Left running: an agent in vornd outlives this server.
     for (const id of this.inVornd.keys()) vorndSessions.release(id)
     this.inVornd.clear()
+    for (const id of this.sessions.keys()) sessionFeed.remove('headless', id)
     this.sessions.clear()
     this.outputBuffers.clear()
   }

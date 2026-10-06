@@ -1194,6 +1194,7 @@ export function registerAllMethods(): void {
           // out is written back as null by the save below and gone for good.
           ...(previous.groupId !== undefined && { groupId: previous.groupId })
         })
+        ptyManager.recordChanged(session.id)
         announceSession(session)
         sessionManager.scheduleSave()
         return { ok: true as const, session }
@@ -1244,7 +1245,10 @@ export function registerAllMethods(): void {
       settleResume?.(session)
       // Carried on the server rather than through the payload, so membership is
       // never something a client can set on a spawn.
-      if (grounded.groupId !== undefined) session.groupId = grounded.groupId
+      if (grounded.groupId !== undefined) {
+        session.groupId = grounded.groupId
+        ptyManager.recordChanged(session.id)
+      }
       // The record names the conversation now, so the claim standing in for it is
       // spent; leaving it would hold an id the session already reports.
       if (session.agentSessionId) releaseSpawningTranscriptsFor(id)
@@ -2259,8 +2263,11 @@ export function registerAllMethods(): void {
   }
 
   // Wire manager events → broadcast to WS clients
-  vorndSessions.on('notify', (id: string, title: string, body: string) => {
-    clientRegistry.broadcast(IPC.TERMINAL_NOTIFY, { id, title, body }, id)
+  vorndSessions.on('notify', (id: string, title: string, body: string, effectId: string) => {
+    // The effect's id lets a client that hears it twice show it once. Only
+    // while vornd runs native work: otherwise the payload is as it always was.
+    const payload = vorndSessions.isNative() ? { id, title, body, effectId } : { id, title, body }
+    clientRegistry.broadcast(IPC.TERMINAL_NOTIFY, payload, id)
   })
   vorndSessions.on('held', (held: HeldSession[]) => takeOnHeld(held))
 
@@ -2337,6 +2344,7 @@ export function registerAllMethods(): void {
       copilotInstallations.set(session.id, installation)
       hookStatusMapper.forceLink(installation.sessionId, session.id)
       session.hookSessionId = installation.sessionId
+      ptyManager.recordChanged(session.id)
       // Don't set statusSource = 'hooks' eagerly — it disables the pattern-based
       // fallback. If hooks actually fire, promoteToHookStatus is called on the
       // first event. This fixes status stuck on 'waiting' when hooks don't work
@@ -2369,6 +2377,7 @@ export function registerAllMethods(): void {
           const capturedId = captureAgentSessionId(s.agentType, cwd)
           if (!capturedId) return attempt(rest)
           s.agentSessionId = capturedId
+          ptyManager.recordChanged(s.id)
           // Its own record names the conversation now, so the spawn claim is spent.
           releaseSpawningTranscriptsFor(captureSessionId)
           sessionManager.scheduleSave()

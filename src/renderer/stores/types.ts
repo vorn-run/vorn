@@ -309,6 +309,8 @@ export interface TerminalsSlice {
   updateSessionBranch: (id: string, branch: string) => void
   updateSessionCwd: (id: string, shellCwd: string) => void
   setBranchForCwd: (cwd: string, branch: string) => void
+  /** The registry revision a session's record is at now, once its changes are applied. */
+  noteSessionRev: (id: string, rev: number) => void
   updateSessionGroupId: (id: string, groupId: string | undefined) => void
   updateSessionWorktree: (
     id: string,

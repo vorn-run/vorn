@@ -28,6 +28,7 @@ hyper-util = { version = "0.1", features = ["tokio", "server", "client-legacy", 
 # Connector MCP servers are spoken to through the official Rust SDK, as a client
 # of a child on stdio.
 rmcp = { version = "3.5", default-features = false, features = ["client", "transport-child-process"] }
+serde = { version = "1", features = ["derive"] }
 # Key order kept, so an answer vornd frames reads as the server's does.
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "signal", "io-util", "process"] }

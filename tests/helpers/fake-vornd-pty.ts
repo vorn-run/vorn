@@ -26,6 +26,8 @@ export class FakeVorndPty extends EventEmitter {
   stdinClosed = false
   /** Thrown by `kill`, as for a session already gone. */
   killError: Error | null = null
+  /** The record cursor of the exit effect, as `VorndPty.exitAt` reports it. */
+  exitAt: { epoch: number; rseq: number; index: number } | null = null
   private ended = false
   private readonly dataListeners = new Set<(data: string) => void>()
   private readonly exitListeners = new Set<(event: VorndExit) => void>()
@@ -76,9 +78,9 @@ export class FakeVorndPty extends EventEmitter {
     this.emit('started', pid)
   }
 
-  /** A status effect, by its code in `NATIVE_STATUS`. */
-  status(code: number): void {
-    this.emit('status', code)
+  /** A status effect, by its code in `NATIVE_STATUS`, and the record it came from. */
+  status(code: number, at?: { epoch: number; rseq: number; index: number }): void {
+    this.emit('status', code, at)
   }
 
   cwd(dir: string): void {
