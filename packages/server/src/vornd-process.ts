@@ -133,8 +133,10 @@ export function startVornd(
     sessiond?: { binary: string; home: string }
     /** The credential the desktop's connection presents, so vornd can tell it is the desktop. */
     desktopToken?: string
-    /** Answer the groups vornd has taken over itself, reading the database at `db`. */
-    nativeServer?: { db: string }
+    /** The server's database, read for what the native and shadowed calls need. */
+    db?: string
+    /** Answer the groups vornd has taken over itself. */
+    nativeServer?: boolean
   } = {}
 ): Promise<Vornd> {
   const run = options.spawnImpl ?? spawn
@@ -146,7 +148,8 @@ export function startVornd(
       if (options.sessiond) {
         args.push('--sessiond', options.sessiond.binary, '--home', options.sessiond.home)
       }
-      if (options.nativeServer) args.push('--native-server', '--db', options.nativeServer.db)
+      if (options.db) args.push('--db', options.db)
+      if (options.nativeServer) args.push('--native-server')
       child = run(binary, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
@@ -358,7 +361,8 @@ export class VorndKeeper {
         sessiond: binaries.sessiond ? { binary: binaries.sessiond, home: this.home } : undefined,
         desktopToken: this.deps.desktopToken?.() ?? undefined,
         // The server's database, in the same data directory as the holder.
-        nativeServer: nativeServer ? { db: path.join(this.home, 'vorn.db') } : undefined
+        db: path.join(this.home, 'vorn.db'),
+        nativeServer
       })
     } catch (err) {
       this.fail((err as Error).message)
