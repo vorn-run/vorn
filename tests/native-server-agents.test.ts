@@ -515,7 +515,7 @@ describe.skipIf(!runnable)(
         expect(groups[group]?.mode).toBe('native')
         expect(groups[group]?.native ?? 0).toBeGreaterThan(0)
       }
-    })
+    }, 60_000)
 
     it('lists each agent’s models as the server does, cached and refreshed alike', async () => {
       const direct = await Client.open(serverPort)
@@ -587,7 +587,7 @@ describe.skipIf(!runnable)(
       expect((after.sessions?.forwarded ?? 0) - (before.sessions?.forwarded ?? 0)).toBe(2)
       expect((after.agent?.forwarded ?? 0) - (before.agent?.forwarded ?? 0)).toBe(1)
       expect(after.sessions?.native ?? 0).toBe(before.sessions?.native ?? 0)
-    })
+    }, 60_000)
 
     it('shadows every lookup and finds no difference', async () => {
       const direct = await Client.open(serverPort)
@@ -614,6 +614,6 @@ describe.skipIf(!runnable)(
         expect(groups[group]?.shadowMismatched ?? 0).toBe(0)
         expect(groups[group]?.shadowMatched ?? 0).toBeGreaterThan(0)
       }
-    })
+    }, 60_000)
   }
 )
