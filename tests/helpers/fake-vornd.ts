@@ -42,6 +42,12 @@ export class FakeVornd {
   spawnError: string | null = null
   /** Whether `vornd:hello` says vornd runs native work, and so wants the session records. */
   native = false
+  /** Whether `vornd:hello` says vornd's copy decides the terminals' statuses. */
+  statuses = false
+  /** Whether `vornd:hello` says vornd creates and changes terminals itself. */
+  terminals = false
+  /** What `vornd:claim` answers as the holder: null for a claim taken. */
+  claimHolder: string | null = null
   /** What `vornd:registry` answers. */
   registry: unknown = null
 
@@ -123,8 +129,15 @@ export class FakeVornd {
       return
     }
     if (msg.method === 'vornd:hello') {
-      result = { protocol: this.protocol, build: 'test', ...(this.native && { native: true }) }
-    } else if (msg.method === 'vornd:registry') result = this.registry
+      result = {
+        protocol: this.protocol,
+        build: 'test',
+        ...(this.native && { native: true }),
+        ...(this.statuses && { statuses: true }),
+        ...(this.terminals && { terminals: true })
+      }
+    } else if (msg.method === 'vornd:claim') result = { holder: this.claimHolder }
+    else if (msg.method === 'vornd:registry') result = this.registry
     else if (msg.method === 'vornd:subscribe') result = this.state
     else if (msg.method === 'vornd:spawn') {
       result = { id: msg.params?.name, pid: this.nextPid++, epoch: 7 }
