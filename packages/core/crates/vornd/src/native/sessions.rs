@@ -31,7 +31,7 @@
 //! the server's as the spawn each would ask for ([`plan`]), and the other
 //! calls as what each would answer ([`foresee`]), read from the copy.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::Path;
 use std::sync::Mutex;
@@ -123,11 +123,10 @@ pub struct Started {
 /// What the sessions vornd starts keep between calls.
 #[derive(Debug, Default)]
 pub struct Sessions {
-    /// Sessions whose program is being started.
-    starting: Mutex<HashSet<String>>,
-    /// Sessions closed while their program was being started: it is
-    /// signalled once it is up.
-    doomed: Mutex<HashSet<String>>,
+    /// Sessions whose program is being started, and whether each was closed
+    /// meanwhile: one it is signalled once it is up. One lock for both, so a
+    /// close cannot fall between the start's look and its answer.
+    starting: Mutex<HashMap<String, bool>>,
     /// Creates naming a conversation, while they prepare.
     creating: OnePerKey<Answer>,
 }
@@ -346,15 +345,17 @@ fn record_json(record: &TerminalSession) -> Value {
     serde_json::to_value(record).unwrap_or(Value::Null)
 }
 
-/// Whether vornd can start a session now: the registry holds the server's
-/// records and decides, and the session holder is connected. When not, the
-/// server does it.
+/// Whether vornd can start a session now: it creates terminals (as
+/// `vornd:hello` told the server, which follows them only then), the
+/// registry holds the server's records and decides, and the session holder
+/// is connected. When not, the server does it.
 fn can_start(native: &Native) -> bool {
+    let creates = native.link.get().is_some_and(|l| l.creates_terminals());
     let fed = native
         .registry
         .get()
         .is_some_and(|r| r.read(|r| r.decides()) == Some(true));
-    fed && native.host.get().is_some_and(|h| h.ready())
+    creates && fed && native.host.get().is_some_and(|h| h.ready())
 }
 
 /// `terminal:create` for a local agent.
@@ -777,7 +778,7 @@ fn register(
         },
         ring_bytes: None,
     };
-    native.sessions.lock_starting().insert(id.clone());
+    native.sessions.lock_starting().insert(id.clone(), false);
     let (registry, host_after) = (std::sync::Arc::clone(registry), std::sync::Arc::clone(host));
     let sessions = std::sync::Arc::clone(&native.sessions);
     let name = id.clone();
@@ -786,12 +787,18 @@ fn register(
         name,
         typed,
         Box::new(move |outcome| {
-            sessions.lock_starting().remove(&id);
-            let doomed = sessions.lock_doomed().remove(&id);
+            let doomed = sessions.lock_starting().remove(&id) == Some(true);
             match outcome {
                 Ok(s) => {
-                    registry.change(|r| ((), r.started(&id, s.pid, s.epoch).into_iter().collect()));
-                    if doomed {
+                    // A record gone meanwhile (the server let go of it) holds
+                    // the program no more than a close does.
+                    let held = registry
+                        .change(|r| match r.started(&id, s.pid, s.epoch) {
+                            Some(note) => (true, vec![note]),
+                            None => (false, Vec::new()),
+                        })
+                        .unwrap_or(false);
+                    if doomed || !held {
                         host_after.signal(&id, Sig::Hup);
                     }
                 }
@@ -806,12 +813,21 @@ fn register(
 }
 
 impl Sessions {
-    fn lock_starting(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
+    fn lock_starting(&self) -> std::sync::MutexGuard<'_, HashMap<String, bool>> {
         self.starting.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn lock_doomed(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
-        self.doomed.lock().unwrap_or_else(|e| e.into_inner())
+    /// Marks session `id` closed while its program starts, if it is still
+    /// starting: answers whether it was, under the one lock the start's
+    /// answer takes.
+    fn doom(&self, id: &str) -> bool {
+        match self.lock_starting().get_mut(id) {
+            Some(doomed) => {
+                *doomed = true;
+                true
+            }
+            None => false,
+        }
     }
 }
 
@@ -846,10 +862,8 @@ fn kill(native: &Native, id: &str) -> Answer {
     if let Some(claims) = claims(native) {
         claims.release_for(id);
     }
-    if live {
-        if native.sessions.lock_starting().contains(id) {
-            native.sessions.lock_doomed().insert(id.to_owned());
-        } else if let Some(host) = native.host.get() {
+    if live && !native.sessions.doom(id) {
+        if let Some(host) = native.host.get() {
             host.signal(id, Sig::Hup);
         }
     }
@@ -1073,10 +1087,19 @@ pub fn spawn_plan(spawn: &Value, reply: &Value) -> Value {
 mod tests {
     use super::*;
 
+    /// A project path that is absolute where the test runs.
+    fn project() -> &'static str {
+        if cfg!(windows) {
+            "C:\\p"
+        } else {
+            "/p"
+        }
+    }
+
     #[test]
     fn reads_a_local_create_and_leaves_the_rest_to_the_server() {
         let req = CreateRequest::read(&json!({
-            "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "agentType": "claude", "projectName": "p", "projectPath": project(),
             "useWorktree": true, "branch": "b", "args": ["--x"], "promptDelayMs": 5,
         }))
         .unwrap();
@@ -1085,21 +1108,21 @@ mod tests {
         assert_eq!(req.args.as_deref(), Some(&["--x".to_owned()][..]));
         for theirs in [
             // A remote host's session is started over SSH, by the server.
-            json!({ "agentType": "claude", "projectName": "p", "projectPath": "/p", "remoteHostId": "h" }),
+            json!({ "agentType": "claude", "projectName": "p", "projectPath": project(), "remoteHostId": "h" }),
             // A param the handler does not read.
-            json!({ "agentType": "claude", "projectName": "p", "projectPath": "/p", "extra": 1 }),
+            json!({ "agentType": "claude", "projectName": "p", "projectPath": project(), "extra": 1 }),
             // Shapes it would not expect.
-            json!({ "agentType": "claude", "projectName": "p", "projectPath": "/p", "useWorktree": "yes" }),
+            json!({ "agentType": "claude", "projectName": "p", "projectPath": project(), "useWorktree": "yes" }),
             json!({ "agentType": "claude", "projectName": "p", "projectPath": "rel" }),
-            json!({ "agentType": "shell", "projectName": "p", "projectPath": "/p" }),
-            json!({ "agentType": "claude", "projectPath": "/p" }),
+            json!({ "agentType": "shell", "projectName": "p", "projectPath": project() }),
+            json!({ "agentType": "claude", "projectPath": project() }),
             json!("claude"),
         ] {
             assert_eq!(CreateRequest::read(&theirs), None, "{theirs}");
         }
         // An empty remote host is none, as the handler reads it.
         assert!(CreateRequest::read(&json!({
-            "agentType": "codex", "projectName": "p", "projectPath": "/p", "remoteHostId": "",
+            "agentType": "codex", "projectName": "p", "projectPath": project(), "remoteHostId": "",
         }))
         .is_some());
     }
@@ -1108,7 +1131,7 @@ mod tests {
     fn names_a_conversation_only_for_an_agent_that_can_be_sent_back_to_one() {
         let named = |agent: &str, resume: Value| {
             CreateRequest::read(&json!({
-                "agentType": agent, "projectName": "p", "projectPath": "/p",
+                "agentType": agent, "projectName": "p", "projectPath": project(),
                 "resumeSessionId": resume,
             }))
             .unwrap()
@@ -1198,6 +1221,7 @@ mod tests {
         let host = std::sync::Arc::new(FakeHost::default());
         native.set_host(std::sync::Arc::clone(&host) as std::sync::Arc<dyn Host>);
         let link = std::sync::Arc::new(crate::applink::AppLink::default());
+        link.set_creates_terminals();
         native.set_link(std::sync::Arc::clone(&link));
         Fed {
             native,
@@ -1264,6 +1288,36 @@ mod tests {
         assert!(fed.host.signalled().is_empty());
         fed.host.up(77);
         assert_eq!(fed.host.signalled(), ["n"]);
+
+        // One whose record the server let go of while it started: nothing
+        // holds the program, so it is hung up too.
+        let record = skeleton("m", "shell", "p", "/p");
+        register(
+            &fed.native,
+            record,
+            "/p",
+            vec!["sh".into()],
+            Vec::new(),
+            None,
+        );
+        fed.registry
+            .feed(1, &json!({ "op": "remove", "kind": "terminal", "id": "m" }))
+            .unwrap();
+        fed.host.up(78);
+        assert_eq!(fed.host.signalled(), ["n", "m"]);
+    }
+
+    #[test]
+    fn creates_nothing_unless_vornd_creates_terminals() {
+        let fed = fed();
+        let link = std::sync::Arc::new(crate::applink::AppLink::default());
+        let native = Native::new();
+        native.set_registry(std::sync::Arc::clone(&fed.registry));
+        native.set_host(std::sync::Arc::clone(&fed.host) as std::sync::Arc<dyn Host>);
+        native.set_link(link);
+        // The shell group alone native: the server would not follow it.
+        assert_eq!(call(&native, "shell:create", &Value::Null), Answer::Forward);
+        assert!(fed.host.starts.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1320,7 +1374,7 @@ mod tests {
         let fed = fed();
         fed.link.set_closing(crate::applink::Closing::Draining);
         let req = CreateRequest::read(&json!({
-            "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "agentType": "claude", "projectName": "p", "projectPath": project(),
         }))
         .unwrap();
         assert_eq!(
@@ -1338,7 +1392,7 @@ mod tests {
         fed.registry
             .change(|r| ((), r.set_fields("a", fields).unwrap().into_iter().collect()));
         let named = CreateRequest::read(&json!({
-            "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "agentType": "claude", "projectName": "p", "projectPath": project(),
             "resumeSessionId": "conv",
         }))
         .unwrap();
