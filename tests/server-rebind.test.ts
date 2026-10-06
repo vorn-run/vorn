@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'node:events'
-import type { Server } from 'node:http'
+import http, { type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import WebSocket, { WebSocketServer } from 'ws'
 
 // ─── Mocks ───────────────────────────────────────────────────────
 
@@ -17,7 +19,12 @@ vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
 
-import { initRebind, checkAndRebind, getCurrentHost } from '../packages/server/src/server-rebind'
+import {
+  initRebind,
+  checkAndRebind,
+  getCurrentHost,
+  releaseListener
+} from '../packages/server/src/server-rebind'
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -234,5 +241,31 @@ describe('server-rebind', () => {
     await checkAndRebind()
 
     expect(server.listenCalls[0].port).toBe(12345)
+  })
+})
+
+describe('releaseListener', () => {
+  it('frees the port while a WebSocket is still open on it', async () => {
+    const server = http.createServer()
+    const wss = new WebSocketServer({ server })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    const client = new WebSocket(`ws://127.0.0.1:${port}`)
+    await new Promise((resolve) => client.once('open', resolve))
+    initRebind(server, '127.0.0.1', port)
+
+    await releaseListener()
+
+    // The replacement binds the same port while the old socket is still up.
+    const replacement = http.createServer()
+    await new Promise<void>((resolve, reject) => {
+      replacement.once('error', reject)
+      replacement.listen(port, '127.0.0.1', resolve)
+    })
+    expect(client.readyState).toBe(WebSocket.OPEN)
+
+    client.close()
+    for (const ws of wss.clients) ws.terminate()
+    await new Promise((resolve) => replacement.close(resolve))
   })
 })
