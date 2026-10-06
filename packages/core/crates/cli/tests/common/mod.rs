@@ -170,21 +170,52 @@ fn header(req: &Request<Incoming>, name: &str) -> Option<String> {
 pub async fn mcp_server(
     reply: impl Fn(&str, &Value) -> Reply + Send + Sync + 'static,
 ) -> (u16, Log) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server = mcp_server_at(0, CREDENTIAL, move |seen, body| reply(&seen.method, body)).await;
+    (server.port, server.log.clone())
+}
+
+/// A fake vornd `/mcp` that can be stopped, as vornd stops when Vorn quits.
+pub struct FakeMcp {
+    pub port: u16,
+    pub log: Log,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl FakeMcp {
+    /// Stops listening and drops every open connection.
+    pub async fn stop(self) {
+        self.task.abort();
+        let _ = self.task.await;
+    }
+}
+
+/// vornd's `/mcp` on `port` (0 for any), taking `credential` and answering
+/// each request with `reply(what was seen, JSON-RPC body)`.
+pub async fn mcp_server_at(
+    port: u16,
+    credential: &str,
+    reply: impl Fn(&Seen, &Value) -> Reply + Send + Sync + 'static,
+) -> FakeMcp {
+    let listener = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let log: Log = Arc::default();
     let reply = Arc::new(reply);
+    let bearer = Arc::new(format!("Bearer {credential}"));
     let seen = log.clone();
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
+        // Owned here, so stopping the server drops its connections too.
+        let mut connections = tokio::task::JoinSet::new();
         loop {
             let Ok((stream, _)): std::io::Result<(_, SocketAddr)> = listener.accept().await else {
                 return;
             };
             let reply = reply.clone();
             let seen = seen.clone();
+            let bearer = bearer.clone();
             let service = hyper::service::service_fn(move |req: Request<Incoming>| {
                 let reply = reply.clone();
                 let seen = seen.clone();
+                let bearer = bearer.clone();
                 async move {
                     let auth = header(&req, "authorization");
                     let entry = Seen {
@@ -197,17 +228,15 @@ pub async fn mcp_server(
                     let path_ok = req.uri().path() == "/mcp";
                     let body = req.into_body().collect().await.unwrap().to_bytes();
                     let body = String::from_utf8_lossy(&body).into_owned();
-                    seen.lock().unwrap().push(Seen {
-                        body: body.clone(),
-                        ..entry.clone()
-                    });
-                    let answer = if auth.as_deref() != Some(&format!("Bearer {CREDENTIAL}")) {
+                    let entry = Seen { body, ..entry };
+                    seen.lock().unwrap().push(entry.clone());
+                    let answer = if auth.as_deref() != Some(bearer.as_str()) {
                         Reply::status(401, "who are you")
                     } else if !path_ok {
                         Reply::status(404, "")
                     } else {
-                        let parsed = serde_json::from_str(&body).unwrap_or(Value::Null);
-                        reply(&entry.method, &parsed)
+                        let parsed = serde_json::from_str(&entry.body).unwrap_or(Value::Null);
+                        reply(&entry, &parsed)
                     };
                     let mut response = Response::builder()
                         .status(answer.status)
@@ -218,12 +247,47 @@ pub async fn mcp_server(
                     Ok::<_, Infallible>(response.body(Full::new(Bytes::from(answer.body))).unwrap())
                 }
             });
-            tokio::spawn(async move {
+            connections.spawn(async move {
                 let _ = hyper::server::conn::http1::Builder::new()
                     .serve_connection(TokioIo::new(stream), service)
                     .await;
             });
         }
     });
-    (port, log)
+    FakeMcp { port, log, task }
+}
+
+/// A vornd that keeps sessions in memory, as the real one does: it issues
+/// `session` on initialize and no longer knows any other.
+pub async fn vornd_mcp(port: u16, credential: &str, session: &'static str) -> FakeMcp {
+    mcp_server_at(port, credential, move |seen, body| {
+        if seen.method == "DELETE" {
+            return Reply::status(200, "");
+        }
+        let id = body.get("id").cloned().unwrap_or(Value::Null);
+        let method = body.get("method").and_then(Value::as_str);
+        if method == Some("initialize") {
+            return Reply {
+                session: Some(session),
+                ..Reply::json(
+                    serde_json::json!({
+                        "jsonrpc": "2.0", "id": id,
+                        "result": {"protocolVersion": "2025-06-18", "serverInfo": {"name": session}}
+                    })
+                    .to_string(),
+                )
+            };
+        }
+        if seen.session.as_deref() != Some(session) {
+            return Reply::status(404, "Session not found");
+        }
+        if body.get("id").is_none() {
+            return Reply::status(202, "");
+        }
+        Reply::json(
+            serde_json::json!({"jsonrpc": "2.0", "id": id, "result": {"from": session}})
+                .to_string(),
+        )
+    })
+    .await
 }
