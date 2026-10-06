@@ -15,7 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, OpenFlags};
 use serde_json::{Map, Value};
 use vorn_protocol::WorkspaceConfig;
 
@@ -222,38 +222,6 @@ impl Store {
         Ok(())
     }
 
-    /// The `defaults` row `key` of the database at `path`, as stored, without
-    /// creating, migrating or writing anything: how a host decides which store
-    /// opens the file before either has. Read-only, so closing it never
-    /// checkpoints or removes the -wal file under another library's
-    /// connection in the same process. `None` when there is no such file,
-    /// table or row.
-    pub fn read_default(path: &Path, key: &str) -> Result<Option<String>> {
-        if !path.exists() {
-            return Ok(None);
-        }
-        let conn = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-        conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        let has_table: bool = conn.query_row(
-            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'defaults'",
-            [],
-            |row| row.get(0),
-        )?;
-        if !has_table {
-            return Ok(None);
-        }
-        let value = conn
-            .query_row("SELECT value FROM defaults WHERE key = ?", [key], |row| {
-                row.get::<_, Option<String>>(0)
-            })
-            .optional()?
-            .flatten();
-        Ok(value)
-    }
-
     /// The database file, or `None` in memory.
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
@@ -274,8 +242,8 @@ impl Store {
         })
     }
 
-    /// Answers the call the TypeScript store names `call`, with its arguments
-    /// as a JSON array in signature order, and returns what it would return.
+    /// Answers the `database.ts` call named `call`, with its arguments as a
+    /// JSON array in signature order, and returns what it returns.
     /// `undefined` is `null` both ways.
     pub fn call(&mut self, call: &str, args: Value) -> Result<Value> {
         dispatch::call(self, call, args)
@@ -325,39 +293,5 @@ pub(crate) mod test_support {
 
     pub fn store() -> Store {
         Store::open_in_memory(options()).expect("an in-memory store opens")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_a_default_without_creating_anything() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("vorn.db");
-        assert_eq!(Store::read_default(&path, "experimental").unwrap(), None);
-        assert!(!path.exists());
-
-        let (store, _) = Store::open(&path, test_support::options()).unwrap();
-        store
-            .conn()
-            .execute(
-                "INSERT OR REPLACE INTO defaults (key, value) VALUES ('experimental', '{\"nativeStore\":true}')",
-                [],
-            )
-            .unwrap();
-        drop(store);
-        assert_eq!(
-            Store::read_default(&path, "experimental")
-                .unwrap()
-                .as_deref(),
-            Some(r#"{"nativeStore":true}"#)
-        );
-        assert_eq!(Store::read_default(&path, "missing").unwrap(), None);
-
-        let empty = dir.path().join("empty.db");
-        Connection::open(&empty).unwrap();
-        assert_eq!(Store::read_default(&empty, "experimental").unwrap(), None);
     }
 }

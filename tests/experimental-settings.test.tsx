@@ -69,7 +69,7 @@ describe('ExperimentalSettings', () => {
     render(<ExperimentalSettings />)
     expect(
       await screen.findByText(
-        'The native core did not load, so git runs more slowly and the native store is not available: vorn_core.node not found'
+        'The native core did not load, so git runs more slowly: vorn_core.node not found'
       )
     ).toBeInTheDocument()
     expect(screen.queryByText(/Native core \d/)).not.toBeInTheDocument()
@@ -88,7 +88,7 @@ describe('ExperimentalSettings', () => {
   it('says nothing about the core when the server cannot report on it', async () => {
     status = new Error('older server')
     render(<ExperimentalSettings />)
-    await screen.findByRole('switch', { name: 'Native store' })
+    await screen.findByRole('switch', { name: 'Native server' })
     expect(screen.queryByText(/Native core/)).not.toBeInTheDocument()
   })
 
@@ -253,61 +253,6 @@ describe('ExperimentalSettings', () => {
       await findServerSwitch()
       await screen.findByText('Native core 0.2.0')
       expect(screen.queryByText(/these calls/)).not.toBeInTheDocument()
-    })
-  })
-
-  describe('the native store switch', () => {
-    const findStoreSwitch = (): Promise<HTMLElement> =>
-      screen.findByRole('switch', { name: 'Native store' })
-
-    it('is off by default and saves under defaults.experimental', async () => {
-      render(<ExperimentalSettings />)
-      const toggle = await findStoreSwitch()
-      expect(toggle).toHaveAttribute('aria-checked', 'false')
-      fireEvent.click(toggle)
-      expect(saveConfig).toHaveBeenCalledWith(config({ nativeStore: true }))
-    })
-
-    it('is shown where vornd cannot run', async () => {
-      daemon = null
-      render(<ExperimentalSettings />)
-      expect(await findStoreSwitch()).toBeInTheDocument()
-    })
-
-    it('says the switch applies from the next start, both ways', async () => {
-      mockStore.config = config({ nativeStore: true })
-      status = core({ store: { native: false, error: null } })
-      const { unmount } = render(<ExperimentalSettings />)
-      expect(
-        await screen.findByText('Vorn uses the native store the next time it starts.')
-      ).toBeInTheDocument()
-      unmount()
-
-      mockStore.config = config({ nativeStore: false })
-      status = core({ store: { native: true, error: null } })
-      render(<ExperimentalSettings />)
-      expect(
-        await screen.findByText('Vorn goes back to its built-in store the next time it starts.')
-      ).toBeInTheDocument()
-    })
-
-    it('says why the native store did not open', async () => {
-      mockStore.config = config({ nativeStore: true })
-      status = core({ store: { native: false, error: 'the native core is not loaded' } })
-      render(<ExperimentalSettings />)
-      expect(
-        await screen.findByText(
-          'Vorn kept its built-in store, because the native store did not open: the native core is not loaded.'
-        )
-      ).toBeInTheDocument()
-    })
-
-    it('says nothing more while the native store is in use as asked', async () => {
-      mockStore.config = config({ nativeStore: true })
-      status = core({ store: { native: true, error: null } })
-      render(<ExperimentalSettings />)
-      await screen.findByText('Native core 0.2.0')
-      expect(screen.queryByText(/store the next time/)).not.toBeInTheDocument()
     })
   })
 })

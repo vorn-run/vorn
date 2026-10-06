@@ -1,0 +1,1338 @@
+[
+  [
+    "loadConfig fresh",
+    {
+      "agentCommands": {
+        "claude": {
+          "args": [],
+          "command": "claude",
+          "headlessArgs": ["--dangerously-skip-permissions"]
+        },
+        "codex": {
+          "args": [],
+          "command": "codex",
+          "headlessArgs": ["-a", "never"]
+        },
+        "copilot": {
+          "args": [],
+          "command": "copilot",
+          "headlessArgs": ["--allow-all"]
+        },
+        "gemini": {
+          "args": [],
+          "command": "gemini",
+          "headlessArgs": ["-y"]
+        },
+        "opencode": {
+          "args": [],
+          "command": "opencode"
+        }
+      },
+      "defaults": {
+        "domBlockRendering": true,
+        "fontSize": 13,
+        "keepSessionsRunning": true,
+        "minimalShellPrompt": true,
+        "reopenSessions": true,
+        "shell": "<default shell>",
+        "startAtLogin": false,
+        "theme": "dark"
+      },
+      "projects": [],
+      "remoteHosts": [],
+      "revision": 0,
+      "sessionGroups": [],
+      "tasks": [],
+      "version": 1,
+      "workflows": [],
+      "workspaces": [
+        {
+          "icon": "User",
+          "iconColor": "#6b7280",
+          "id": "personal",
+          "name": "Personal",
+          "order": 0
+        }
+      ]
+    }
+  ],
+  [
+    "loadConfig saved",
+    {
+      "agentCommands": {
+        "claude": {
+          "args": [],
+          "command": "claude",
+          "headlessArgs": ["--dangerously-skip-permissions"]
+        },
+        "codex": {
+          "args": [],
+          "command": "codex",
+          "headlessArgs": ["-a", "never"]
+        },
+        "copilot": {
+          "args": [],
+          "command": "copilot",
+          "headlessArgs": ["--allow-all"]
+        },
+        "gemini": {
+          "args": [],
+          "command": "gemini",
+          "headlessArgs": ["-y"]
+        },
+        "opencode": {
+          "args": [],
+          "command": "opencode"
+        }
+      },
+      "defaults": {
+        "domBlockRendering": true,
+        "experimental": {
+          "nativeServer": true
+        },
+        "fontSize": 15,
+        "keepSessionsRunning": true,
+        "minimalShellPrompt": true,
+        "reopenSessions": true,
+        "shell": "<default shell>",
+        "startAtLogin": false,
+        "theme": "dark"
+      },
+      "projects": [
+        {
+          "hostIds": ["local"],
+          "icon": "Folder",
+          "name": "proj",
+          "path": "/tmp/proj",
+          "preferredAgents": ["claude"],
+          "workspaceId": "personal"
+        }
+      ],
+      "remoteHosts": [],
+      "revision": 1,
+      "sessionGroups": [],
+      "tasks": [],
+      "version": 1,
+      "workflows": [],
+      "workspaces": [
+        {
+          "icon": "User",
+          "iconColor": "#6b7280",
+          "id": "personal",
+          "name": "Personal",
+          "order": 0
+        }
+      ]
+    }
+  ],
+  [
+    "dbListProjects",
+    [
+      {
+        "hostIds": ["local"],
+        "icon": "Folder",
+        "name": "proj",
+        "path": "/tmp/proj",
+        "preferredAgents": ["claude"],
+        "workspaceId": "personal"
+      }
+    ]
+  ],
+  [
+    "dbGetProject",
+    {
+      "hostIds": ["local", "h1"],
+      "icon": "Star",
+      "name": "other",
+      "path": "/tmp/other",
+      "preferredAgents": ["claude"],
+      "workspaceId": "personal"
+    }
+  ],
+  ["dbGetProject deleted", null],
+  [
+    "dbListTasks",
+    [
+      {
+        "createdAt": "2026-10-01T00:00:00.000Z",
+        "description": "body",
+        "id": "t1",
+        "order": 0,
+        "projectName": "proj",
+        "status": "done",
+        "title": "Task t1",
+        "updatedAt": "2026-10-01T00:00:00.000Z"
+      },
+      {
+        "branch": "b",
+        "createdAt": "2026-10-01T00:00:00.000Z",
+        "description": "body",
+        "id": "t2",
+        "order": 1.5,
+        "projectName": "proj",
+        "status": "todo",
+        "title": "Task t2",
+        "updatedAt": "2026-10-01T00:00:00.000Z",
+        "useWorktree": true
+      }
+    ]
+  ],
+  [
+    "dbListTasks by status",
+    [
+      {
+        "createdAt": "2026-10-01T00:00:00.000Z",
+        "description": "body",
+        "id": "t1",
+        "order": 0,
+        "projectName": "proj",
+        "status": "done",
+        "title": "Task t1",
+        "updatedAt": "2026-10-01T00:00:00.000Z"
+      }
+    ]
+  ],
+  [
+    "dbGetTask",
+    {
+      "branch": "b",
+      "createdAt": "2026-10-01T00:00:00.000Z",
+      "description": "body",
+      "id": "t2",
+      "order": 1.5,
+      "projectName": "proj",
+      "status": "todo",
+      "title": "Task t2",
+      "updatedAt": "2026-10-01T00:00:00.000Z",
+      "useWorktree": true
+    }
+  ],
+  ["dbGetMaxTaskOrder", 1.5],
+  ["dbGetMaxTaskOrder none", -1],
+  ["dbUpdateWorkflow", 1],
+  ["dbUpdateWorkflow none", 0],
+  [
+    "dbGetWorkflow",
+    {
+      "edges": [],
+      "enabled": true,
+      "icon": "Plug",
+      "iconColor": "#fff",
+      "id": "wf-1",
+      "lastRunAt": "2026-10-01T10:00:00.000Z",
+      "lastRunStatus": "success",
+      "name": "wf-1",
+      "nodes": [],
+      "workspaceId": "personal"
+    }
+  ],
+  [
+    "dbListWorkflows",
+    [
+      {
+        "edges": [],
+        "enabled": true,
+        "icon": "Plug",
+        "iconColor": "#fff",
+        "id": "wf-1",
+        "lastRunAt": "2026-10-01T10:00:00.000Z",
+        "lastRunStatus": "success",
+        "name": "wf-1",
+        "nodes": [],
+        "workspaceId": "personal"
+      }
+    ]
+  ],
+  [
+    "dbGetOwnerUser",
+    {
+      "createdAt": "<now>",
+      "id": "<uuid 1>",
+      "name": "<owner name>",
+      "role": "owner"
+    }
+  ],
+  ["dbHasDeviceTokens empty", false],
+  [
+    "dbGetDeviceTokenSecret",
+    {
+      "id": "dt1",
+      "revokedAt": null,
+      "tokenHash": "hash",
+      "userId": "<uuid 1>"
+    }
+  ],
+  ["dbRevokeDeviceToken", true],
+  ["dbRevokeDeviceToken again", false],
+  [
+    "dbListDeviceTokens",
+    [
+      {
+        "createdAt": "2026-10-01T00:00:00.000Z",
+        "id": "dt1",
+        "lastSeenAt": "2026-10-01T01:00:00.000Z",
+        "name": "phone",
+        "revokedAt": "2026-10-01T02:00:00.000Z",
+        "userId": "<uuid 1>"
+      }
+    ]
+  ],
+  [
+    "dbListSessionGroups",
+    [
+      {
+        "id": "g1",
+        "name": "G2",
+        "order": 0,
+        "workspaceId": "ws"
+      }
+    ]
+  ],
+  [
+    "dbListWorkspaces",
+    [
+      {
+        "icon": "User",
+        "iconColor": "#6b7280",
+        "id": "personal",
+        "name": "Personal",
+        "order": 0
+      }
+    ]
+  ],
+  ["dbListSessionGroups after", []],
+  [
+    "dbListSSHKeys",
+    [
+      {
+        "createdAt": "2026-10-01T00:00:00.000Z",
+        "id": "k1",
+        "label": "key",
+        "publicKey": "pub"
+      }
+    ]
+  ],
+  [
+    "dbGetSSHKey",
+    {
+      "createdAt": "2026-10-01T00:00:00.000Z",
+      "encryptedPrivateKey": "enc",
+      "id": "k1",
+      "label": "key",
+      "publicKey": "pub"
+    }
+  ],
+  ["dbGetSSHKey deleted", null],
+  [
+    "dbListSourceConnections",
+    [
+      {
+        "connectorId": "github",
+        "createdAt": "2026-10-01T00:00:00.000Z",
+        "filters": {
+          "owner": "owner",
+          "repo": "repo"
+        },
+        "id": "conn-1",
+        "name": "renamed",
+        "signedInAs": "me",
+        "signedInAt": "2026-10-01T00:00:00.000Z",
+        "statusMapping": {},
+        "syncIntervalMinutes": 5
+      }
+    ]
+  ],
+  [
+    "dbGetSourceConnection",
+    {
+      "connectorId": "github",
+      "createdAt": "2026-10-01T00:00:00.000Z",
+      "filters": {
+        "owner": "owner",
+        "repo": "repo"
+      },
+      "id": "conn-1",
+      "name": "renamed",
+      "signedInAs": "me",
+      "signedInAt": "2026-10-01T00:00:00.000Z",
+      "statusMapping": {},
+      "syncIntervalMinutes": 5
+    }
+  ],
+  ["dbGetConnectorPollCursor none", null],
+  ["dbRecordConnectorPollPage", 3],
+  ["dbGetConnectorPollCursor", "c1"],
+  [
+    "dbClaimConnectorInbox",
+    [
+      {
+        "attempts": 1,
+        "connectionId": "conn-1",
+        "connectorId": "github",
+        "connectorItem": {
+          "connectionId": "conn-1",
+          "connectorId": "github",
+          "externalId": "a",
+          "raw": {
+            "externalId": "a"
+          },
+          "title": "Item a"
+        },
+        "eventId": "a",
+        "eventTimestamp": "2026-10-01T00:30:00.000Z",
+        "eventType": "issueCreated",
+        "id": 1,
+        "leaseToken": "<uuid 1>",
+        "workflowId": "wf-1"
+      },
+      {
+        "attempts": 1,
+        "connectionId": "conn-1",
+        "connectorId": "github",
+        "connectorItem": {
+          "connectionId": "conn-1",
+          "connectorId": "github",
+          "externalId": "b",
+          "raw": {
+            "externalId": "b"
+          },
+          "title": "Item b"
+        },
+        "eventId": "b",
+        "eventTimestamp": "2026-10-01T00:30:00.000Z",
+        "eventType": "issueCreated",
+        "id": 2,
+        "leaseToken": "<uuid 2>",
+        "workflowId": "wf-1"
+      },
+      {
+        "attempts": 1,
+        "connectionId": "conn-1",
+        "connectorId": "github",
+        "connectorItem": {
+          "connectionId": "conn-1",
+          "connectorId": "github",
+          "externalId": "c",
+          "raw": {
+            "externalId": "c"
+          },
+          "title": "Item c"
+        },
+        "eventId": "c",
+        "eventTimestamp": "2026-10-01T00:30:00.000Z",
+        "eventType": "issueCreated",
+        "id": 3,
+        "leaseToken": "<uuid 3>",
+        "workflowId": "wf-1"
+      }
+    ]
+  ],
+  ["dbCountActiveConnectorInboxLeases", 3],
+  ["dbCompleteConnectorInbox", true],
+  ["dbCompleteConnectorInbox stale", false],
+  ["dbRetryConnectorInbox", true],
+  ["dbRenewConnectorInboxLease", true],
+  ["dbDeferConnectorInbox", true],
+  ["dbCountActiveConnectorInboxLeases after", 0],
+  [
+    "dbGetTaskSourceLink",
+    {
+      "conflictState": "upstream_changed",
+      "connectionId": "conn-1",
+      "connectorId": "github",
+      "externalId": "a",
+      "externalUrl": "https://example.com/a",
+      "lastSyncedAt": "2026-10-01T00:00:00.000Z",
+      "sourceStatusRaw": "open",
+      "sourceUpdatedAt": "2026-10-01T00:00:00.000Z",
+      "taskId": "t1"
+    }
+  ],
+  [
+    "dbGetTaskSourceLinkByExternalId",
+    {
+      "conflictState": "upstream_changed",
+      "connectionId": "conn-1",
+      "connectorId": "github",
+      "externalId": "a",
+      "externalUrl": "https://example.com/a",
+      "lastSyncedAt": "2026-10-01T00:00:00.000Z",
+      "sourceStatusRaw": "open",
+      "sourceUpdatedAt": "2026-10-01T00:00:00.000Z",
+      "taskId": "t1"
+    }
+  ],
+  [
+    "dbListTaskSourceLinks",
+    [
+      {
+        "conflictState": "upstream_changed",
+        "connectionId": "conn-1",
+        "connectorId": "github",
+        "externalId": "a",
+        "externalUrl": "https://example.com/a",
+        "lastSyncedAt": "2026-10-01T00:00:00.000Z",
+        "sourceStatusRaw": "open",
+        "sourceUpdatedAt": "2026-10-01T00:00:00.000Z",
+        "taskId": "t1"
+      }
+    ]
+  ],
+  [
+    "dbFindTaskByConnectorExternalId",
+    {
+      "branch": "b",
+      "createdAt": "2026-10-01T00:00:00.000Z",
+      "description": "body",
+      "id": "t2",
+      "order": 1.5,
+      "projectName": "proj",
+      "sourceConnectorId": "github",
+      "sourceExternalId": "z",
+      "status": "todo",
+      "title": "Task t2",
+      "updatedAt": "2026-10-01T00:00:00.000Z",
+      "useWorktree": true
+    }
+  ],
+  ["dbGetTaskSourceLink deleted", null],
+  ["listWorkflowRunIds", ["wf-1:r1", "wf-1:r2", "wf-1:r3"]],
+  [
+    "getWorkflowRun",
+    {
+      "completedAt": "2026-10-01T11:00:00.000Z",
+      "nodeStates": [
+        {
+          "agentType": "claude",
+          "nodeId": "n1",
+          "output": "ok",
+          "status": "success"
+        },
+        {
+          "nodeId": "gate",
+          "status": "waiting",
+          "waitingFor": "signIn"
+        }
+      ],
+      "runId": "wf-1:r2",
+      "startedAt": "2026-10-01T10:00:00.000Z",
+      "status": "success",
+      "triggerTaskId": "t1",
+      "workflowId": "wf-1"
+    }
+  ],
+  [
+    "listWorkflowRuns",
+    [
+      {
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r1",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "running",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1"
+      },
+      {
+        "completedAt": "2026-10-01T11:00:00.000Z",
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r2",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "success",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1"
+      }
+    ]
+  ],
+  [
+    "listWorkflowRunsByTask",
+    [
+      {
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r1",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "running",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1",
+        "workflowName": "wf-1"
+      },
+      {
+        "completedAt": "2026-10-01T11:00:00.000Z",
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r2",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "success",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1",
+        "workflowName": "wf-1"
+      },
+      {
+        "connectorInboxId": 1,
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r3",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "running",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1",
+        "workflowName": "wf-1"
+      }
+    ]
+  ],
+  [
+    "listRunningRuns",
+    [
+      {
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r1",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "running",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1"
+      },
+      {
+        "connectorInboxId": 1,
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r3",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "running",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1"
+      }
+    ]
+  ],
+  [
+    "listRunsWithWaitingGates",
+    [
+      {
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r1",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "running",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1"
+      },
+      {
+        "completedAt": "2026-10-01T11:00:00.000Z",
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r2",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "success",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1"
+      },
+      {
+        "connectorInboxId": 1,
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r3",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "running",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1"
+      }
+    ]
+  ],
+  [
+    "listRunsWithWaitingGates signIn",
+    [
+      {
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r1",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "running",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1"
+      },
+      {
+        "completedAt": "2026-10-01T11:00:00.000Z",
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r2",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "success",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1"
+      },
+      {
+        "connectorInboxId": 1,
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r3",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "running",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1"
+      }
+    ]
+  ],
+  [
+    "listAllWorkflowRuns",
+    [
+      {
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r1",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "running",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1",
+        "workflowName": "wf-1"
+      },
+      {
+        "completedAt": "2026-10-01T11:00:00.000Z",
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r2",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "success",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1",
+        "workflowName": "wf-1"
+      },
+      {
+        "connectorInboxId": 1,
+        "nodeStates": [
+          {
+            "agentType": "claude",
+            "nodeId": "n1",
+            "output": "ok",
+            "status": "success"
+          },
+          {
+            "nodeId": "gate",
+            "status": "waiting",
+            "waitingFor": "signIn"
+          }
+        ],
+        "runId": "wf-1:r3",
+        "startedAt": "2026-10-01T10:00:00.000Z",
+        "status": "running",
+        "triggerTaskId": "t1",
+        "workflowId": "wf-1",
+        "workflowName": "wf-1"
+      }
+    ]
+  ],
+  [
+    "dbGetWorkflowRunByConnectorInboxId",
+    {
+      "connectorInboxId": 1,
+      "nodeStates": [
+        {
+          "agentType": "claude",
+          "nodeId": "n1",
+          "output": "ok",
+          "status": "success"
+        },
+        {
+          "nodeId": "gate",
+          "status": "waiting",
+          "waitingFor": "signIn"
+        }
+      ],
+      "runId": "wf-1:r3",
+      "startedAt": "2026-10-01T10:00:00.000Z",
+      "status": "running",
+      "triggerTaskId": "t1",
+      "workflowId": "wf-1"
+    }
+  ],
+  [
+    "getPreviousSessions",
+    [
+      {
+        "agentType": "claude",
+        "branch": "main",
+        "createdAt": 1700000000000,
+        "id": "s1",
+        "pid": 42,
+        "projectName": "proj",
+        "projectPath": "/tmp/proj",
+        "savedAt": "<now ms>",
+        "status": "running"
+      }
+    ]
+  ],
+  ["getPreviousSessions cleared", []],
+  [
+    "getScheduleLogEntries",
+    [
+      {
+        "error": "nope",
+        "executedAt": "2026-10-01T00:00:00.000Z",
+        "sessionsLaunched": 0,
+        "status": "error",
+        "workflowId": "wf-1",
+        "workflowName": "wf-1"
+      }
+    ]
+  ],
+  ["getScheduleLogEntries cleared", []],
+  ["claimEffect", true],
+  ["claimEffect again", false],
+  ["pruneEffectReceipts", 1],
+  [
+    "listSessionEvents",
+    [
+      {
+        "eventType": "created",
+        "id": 1,
+        "metadata": {
+          "a": 1
+        },
+        "sessionId": "s1",
+        "timestamp": "2026-10-01T00:00:00.000Z"
+      }
+    ]
+  ],
+  [
+    "listSessionEventsBySession",
+    [
+      {
+        "eventType": "created",
+        "id": 1,
+        "metadata": {
+          "a": 1
+        },
+        "sessionId": "s1",
+        "timestamp": "2026-10-01T00:00:00.000Z"
+      }
+    ]
+  ],
+  [
+    "getArtifact",
+    {
+      "createdAt": "<now>",
+      "gateNodeId": "gate",
+      "gateRunId": "wf-1:r1",
+      "id": "<uuid 1>",
+      "kind": "page",
+      "latestVersion": 0,
+      "projectName": "proj",
+      "sessionId": "s1",
+      "title": "Page",
+      "updatedAt": "<now>"
+    }
+  ],
+  ["getArtifactToken", "string"],
+  [
+    "findGateArtifact",
+    {
+      "createdAt": "<now>",
+      "gateNodeId": "gate",
+      "gateRunId": "wf-1:r1",
+      "id": "<uuid 1>",
+      "kind": "page",
+      "latestVersion": 0,
+      "projectName": "proj",
+      "sessionId": "s1",
+      "title": "Page",
+      "updatedAt": "<now>"
+    }
+  ],
+  [
+    "listArtifacts",
+    [
+      {
+        "createdAt": "<now>",
+        "gateNodeId": "gate",
+        "gateRunId": "wf-1:r1",
+        "id": "<uuid 1>",
+        "kind": "page",
+        "latestVersion": 0,
+        "projectName": "proj",
+        "sessionId": "s1",
+        "title": "Renamed",
+        "updatedAt": "<now>"
+      }
+    ]
+  ],
+  [
+    "addArtifactVersion",
+    {
+      "artifactId": "<uuid 1>",
+      "author": "agent",
+      "createdAt": "<now>",
+      "version": 1
+    }
+  ],
+  [
+    "insertArtifactComment",
+    {
+      "anchor": null,
+      "artifactId": "<uuid 1>",
+      "body": "first",
+      "createdAt": "<now>",
+      "id": "<uuid 2>",
+      "state": "draft",
+      "updatedAt": "<now>",
+      "version": 1
+    }
+  ],
+  [
+    "updateArtifactComment",
+    {
+      "anchor": null,
+      "artifactId": "<uuid 1>",
+      "body": "edited",
+      "createdAt": "<now>",
+      "id": "<uuid 2>",
+      "state": "draft",
+      "updatedAt": "<now>",
+      "version": 1
+    }
+  ],
+  [
+    "getArtifactComment",
+    {
+      "anchor": null,
+      "artifactId": "<uuid 1>",
+      "body": "edited",
+      "createdAt": "<now>",
+      "id": "<uuid 2>",
+      "state": "draft",
+      "updatedAt": "<now>",
+      "version": 1
+    }
+  ],
+  [
+    "sendArtifactDrafts",
+    {
+      "batchId": "<uuid 1>",
+      "comments": [
+        {
+          "anchor": null,
+          "artifactId": "<uuid 2>",
+          "batchId": "<uuid 1>",
+          "body": "edited",
+          "createdAt": "<now>",
+          "id": "<uuid 3>",
+          "sentAt": "<now>",
+          "state": "sent",
+          "updatedAt": "<now>",
+          "version": 1
+        }
+      ]
+    }
+  ],
+  ["unansweredBatchId", "<uuid 1>"],
+  [
+    "listArtifactComments",
+    [
+      {
+        "anchor": null,
+        "artifactId": "<uuid 1>",
+        "batchId": "<uuid 2>",
+        "body": "edited",
+        "createdAt": "<now>",
+        "id": "<uuid 3>",
+        "sentAt": "<now>",
+        "state": "sent",
+        "updatedAt": "<now>",
+        "version": 1
+      }
+    ]
+  ],
+  [
+    "listArtifactVersions",
+    [
+      {
+        "artifactId": "<uuid 1>",
+        "author": "agent",
+        "createdAt": "<now>",
+        "version": 1
+      }
+    ]
+  ],
+  ["deleteArtifactComment", true],
+  ["listArtifactIds", ["<uuid 1>"]],
+  ["deleteArtifactsUpdatedBefore", []],
+  [
+    "loadConfig final",
+    {
+      "agentCommands": {
+        "claude": {
+          "args": [],
+          "command": "claude",
+          "headlessArgs": ["--dangerously-skip-permissions"]
+        },
+        "codex": {
+          "args": [],
+          "command": "codex",
+          "headlessArgs": ["-a", "never"]
+        },
+        "copilot": {
+          "args": [],
+          "command": "copilot",
+          "headlessArgs": ["--allow-all"]
+        },
+        "gemini": {
+          "args": [],
+          "command": "gemini",
+          "headlessArgs": ["-y"]
+        },
+        "opencode": {
+          "args": [],
+          "command": "opencode"
+        }
+      },
+      "defaults": {
+        "domBlockRendering": true,
+        "experimental": {
+          "nativeServer": true
+        },
+        "fontSize": 15,
+        "keepSessionsRunning": true,
+        "minimalShellPrompt": true,
+        "reopenSessions": true,
+        "shell": "<default shell>",
+        "startAtLogin": false,
+        "theme": "dark"
+      },
+      "projects": [
+        {
+          "hostIds": ["local"],
+          "icon": "Folder",
+          "name": "proj",
+          "path": "/tmp/proj",
+          "preferredAgents": ["claude"],
+          "workspaceId": "personal"
+        }
+      ],
+      "remoteHosts": [],
+      "revision": 1,
+      "sessionGroups": [],
+      "tasks": [
+        {
+          "createdAt": "2026-10-01T00:00:00.000Z",
+          "description": "body",
+          "id": "t1",
+          "order": 0,
+          "projectName": "proj",
+          "status": "done",
+          "title": "Task t1",
+          "updatedAt": "2026-10-01T00:00:00.000Z"
+        },
+        {
+          "branch": "b",
+          "createdAt": "2026-10-01T00:00:00.000Z",
+          "description": "body",
+          "id": "t2",
+          "order": 1.5,
+          "projectName": "proj",
+          "sourceConnectorId": "github",
+          "sourceExternalId": "z",
+          "status": "todo",
+          "title": "Task t2",
+          "updatedAt": "2026-10-01T00:00:00.000Z",
+          "useWorktree": true
+        }
+      ],
+      "version": 1,
+      "workflows": [
+        {
+          "edges": [],
+          "enabled": true,
+          "icon": "Plug",
+          "iconColor": "#fff",
+          "id": "wf-1",
+          "lastRunAt": "2026-10-01T10:00:00.000Z",
+          "lastRunStatus": "success",
+          "name": "wf-1",
+          "nodes": [],
+          "workspaceId": "personal"
+        }
+      ],
+      "workspaces": [
+        {
+          "icon": "User",
+          "iconColor": "#6b7280",
+          "id": "personal",
+          "name": "Personal",
+          "order": 0
+        }
+      ]
+    }
+  ],
+  [
+    "loadConfig resaved",
+    {
+      "agentCommands": {
+        "claude": {
+          "args": [],
+          "command": "claude",
+          "headlessArgs": ["--dangerously-skip-permissions"]
+        },
+        "codex": {
+          "args": [],
+          "command": "codex",
+          "headlessArgs": ["-a", "never"]
+        },
+        "copilot": {
+          "args": [],
+          "command": "copilot",
+          "headlessArgs": ["--allow-all"]
+        },
+        "gemini": {
+          "args": [],
+          "command": "gemini",
+          "headlessArgs": ["-y"]
+        },
+        "opencode": {
+          "args": [],
+          "command": "opencode"
+        }
+      },
+      "defaults": {
+        "domBlockRendering": true,
+        "experimental": {
+          "nativeServer": true
+        },
+        "fontSize": 15,
+        "keepSessionsRunning": true,
+        "minimalShellPrompt": true,
+        "reopenSessions": true,
+        "shell": "<default shell>",
+        "startAtLogin": false,
+        "theme": "dark"
+      },
+      "projects": [
+        {
+          "hostIds": ["local"],
+          "icon": "Folder",
+          "name": "proj",
+          "path": "/tmp/proj",
+          "preferredAgents": ["claude"],
+          "workspaceId": "personal"
+        }
+      ],
+      "remoteHosts": [],
+      "revision": 2,
+      "sessionGroups": [],
+      "tasks": [
+        {
+          "createdAt": "2026-10-01T00:00:00.000Z",
+          "description": "body",
+          "id": "t1",
+          "order": 0,
+          "projectName": "proj",
+          "status": "done",
+          "title": "Task t1",
+          "updatedAt": "2026-10-01T00:00:00.000Z"
+        },
+        {
+          "branch": "b",
+          "createdAt": "2026-10-01T00:00:00.000Z",
+          "description": "body",
+          "id": "t2",
+          "order": 1.5,
+          "projectName": "proj",
+          "sourceConnectorId": "github",
+          "sourceExternalId": "z",
+          "status": "todo",
+          "title": "Task t2",
+          "updatedAt": "2026-10-01T00:00:00.000Z",
+          "useWorktree": true
+        }
+      ],
+      "version": 1,
+      "workflows": [
+        {
+          "edges": [],
+          "enabled": true,
+          "icon": "Plug",
+          "iconColor": "#fff",
+          "id": "wf-1",
+          "lastRunAt": "2026-10-01T10:00:00.000Z",
+          "lastRunStatus": "success",
+          "name": "wf-1",
+          "nodes": [],
+          "workspaceId": "personal"
+        }
+      ],
+      "workspaces": [
+        {
+          "icon": "User",
+          "iconColor": "#6b7280",
+          "id": "personal",
+          "name": "Personal",
+          "order": 0
+        }
+      ]
+    }
+  ]
+]

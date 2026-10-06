@@ -88,13 +88,6 @@ impl NativeStore {
         })
     }
 
-    /// The `defaults` row `key` of the database file, as stored, or null,
-    /// without creating or migrating it.
-    #[napi(catch_unwind)]
-    pub fn read_default(path: String, key: String) -> napi::Result<Option<String>> {
-        vorn_store::Store::read_default(std::path::Path::new(&path), &key).map_err(to_napi)
-    }
-
     /// The backup of a corrupt file this open replaced, or null.
     #[napi(getter)]
     pub fn recovered(&self) -> Option<String> {

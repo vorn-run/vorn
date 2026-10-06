@@ -142,8 +142,7 @@ import {
   dbListWorkflows,
   dbUpdateWorkflow,
   dbListTasks,
-  dbGetTask,
-  storeStatus
+  dbGetTask
 } from './database'
 import {
   connectorRegistry,
@@ -1100,7 +1099,7 @@ export function registerAllMethods(): void {
 
   // Config
   registerMethod('config:load', () => configManager.loadConfig())
-  registerMethod('core:status', () => ({ ...coreStatus(), store: storeStatus() }))
+  registerMethod('core:status', () => coreStatus())
   registerMethod('config:save', (config) => {
     clearAgentDetectionCache()
     // Read before the write, so a task that changed status can be seen to have.
