@@ -1,8 +1,10 @@
 name: Core
 
-# Builds the Rust core (packages/core) on every desktop platform and packages
-# the app with it, so a change that breaks the crate, the libghostty-vt build or
-# the way the binary ships shows up before it reaches a release.
+# Builds the Rust core (packages/core) and packages the app with it, so a change
+# that breaks the crate, the libghostty-vt build or the way the binary ships
+# shows up before it reaches a release. Pull requests and pushes to main build
+# on Linux only; macOS and Windows are built by the release workflow and on a
+# manual run here, which keeps the per-change cost to one runner.
 
 on:
   push:
@@ -77,7 +79,7 @@ jobs:
       matrix:
         # macos-15, not latest: Zig 0.15.2 cannot read the newer macOS SDK's
         # libSystem and fails to link even its own build runner there.
-        os: [ubuntu-latest, macos-15, windows-2022]
+        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["ubuntu-latest", "macos-15", "windows-2022"]') || fromJSON('["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
 
     steps:
