@@ -99,6 +99,7 @@ describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
     client.close()
   })
 
+  // A login shell on a busy runner can take seconds to answer.
   it('tells a shell in vornd it runs in xterm-256color, as a PTY here would', async () => {
     const before = process.env.TERM
     process.env.TERM = 'dumb'
@@ -115,7 +116,7 @@ describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
     expect(await client.text()).toContain('term=[xterm-256color]')
     ptyManager.writeToPty(session.id, 'exit\r')
     client.close()
-  })
+  }, 20_000)
 
   it('reports where a shell moved from what vornd parsed', async () => {
     const cwds: string[] = []
@@ -199,7 +200,13 @@ describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
       () => (ptyManager.getActiveSessions().find((s) => s.id === session.id)?.pid ?? 0) > 0
     )
     ptyManager.killAll()
-    const report = await vornd.report()
-    expect(report.sessions.some((s) => s.session === session.id)).toBe(true)
-  })
+    // A report taken while vornd is busy can come back empty; one that lists
+    // the session shows it outlived this server's sessions.
+    let listed = false
+    await until('vornd to report the session', async () => {
+      listed = (await vornd.report()).sessions.some((s) => s.session === session.id)
+      return listed
+    })
+    expect(listed).toBe(true)
+  }, 20_000)
 })
