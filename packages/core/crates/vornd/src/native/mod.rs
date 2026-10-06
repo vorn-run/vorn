@@ -25,10 +25,12 @@
 //! and the calls that change a repository take turns per repository
 //! ([`Turns`]), as the server's do.
 
+pub mod agent;
 pub mod env;
 pub mod file;
 pub mod git;
 pub mod ide;
+pub mod shell;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -57,7 +59,8 @@ pub enum Effect {
 }
 
 /// Every call vornd answers, and its effect. `git:listRemoteBranches`
-/// fetches, and `ide:open` starts an editor, so neither runs twice.
+/// fetches, `ide:open` starts an editor and `agent:listModels` starts the
+/// agent's CLI, so none of them runs twice.
 pub const METHODS: &[(&str, Effect)] = &[
     ("git:isGitRepo", Effect::Read),
     ("git:listBranches", Effect::Read),
@@ -79,6 +82,11 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("file:writeContent", Effect::Change),
     ("ide:detect", Effect::Read),
     ("ide:open", Effect::Change),
+    ("agent:detectInstalled", Effect::Read),
+    ("agent:listModels", Effect::Change),
+    ("sessions:getRecent", Effect::Read),
+    ("shell:listExecutables", Effect::Read),
+    ("shell:listInstalled", Effect::Read),
 ];
 
 /// Calls in a native group that the server keeps answering, and why.
@@ -94,6 +102,22 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
     (
         "git:renameWorktree",
         "moves the server's sessions to the worktree's new path and tells clients",
+    ),
+    (
+        "sessions:restored",
+        "lists the sessions the server carried over from its last run",
+    ),
+    (
+        "sessions:resume",
+        "starts a session in the server's registry, under the id it had",
+    ),
+    (
+        "sessions:clear",
+        "declines the server's carried-over sessions and saves the registry",
+    ),
+    (
+        "shell:create",
+        "starts a shell session in the server's registry and tells clients",
     ),
 ];
 
@@ -228,13 +252,16 @@ impl Turns {
 pub struct Native {
     env: Arc<env::SafeEnv>,
     /// `vorn.db`, read to tell a project on this machine from one on a
-    /// remote host. Without it every call that names a project goes to the
-    /// server, which can tell.
+    /// remote host, and for how the agents are configured. Without it every
+    /// call that needs either goes to the server, which can tell.
     db: OnceLock<PathBuf>,
     slots: Semaphore,
     turns: Turns,
     ignored: file::IgnoreCache,
     ides: ide::Ides,
+    /// The agents' model lists, kept as the server keeps them.
+    catalog: vorn_agents::models::Catalog,
+    shells: shell::Shells,
 }
 
 impl Native {
@@ -246,6 +273,8 @@ impl Native {
             turns: Turns::default(),
             ignored: file::IgnoreCache::default(),
             ides: ide::Ides::default(),
+            catalog: vorn_agents::models::Catalog::default(),
+            shells: shell::Shells::default(),
         })
     }
 
@@ -265,6 +294,12 @@ impl Native {
             Some("git") => git::call(self, method, params),
             Some("file") => self.file(method, params),
             Some("ide") => self.ide(method, params),
+            Some("agent" | "sessions") => agent::call(self, method, params),
+            Some("shell") => match method {
+                "shell:listExecutables" => Answer::Result(self.shells.executables(&self.env)),
+                "shell:listInstalled" => Answer::Result(self.shells.installed()),
+                _ => Answer::Forward,
+            },
             _ => Answer::Forward,
         }
     }

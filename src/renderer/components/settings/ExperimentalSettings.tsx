@@ -21,7 +21,7 @@ function vorndNote(status: VorndStatus | null): string | null {
 const SERVER_SWITCH = {
   label: 'Native server',
   description:
-    'Answer git, file explorer and editor calls in vornd instead of the server. Applies after restarting Vorn'
+    'Answer git, file explorer, editor, agent lookup and shell lookup calls in vornd instead of the server. Applies after restarting Vorn'
 }
 
 /** What the native server is doing, when it differs from what the switch says, or null. */

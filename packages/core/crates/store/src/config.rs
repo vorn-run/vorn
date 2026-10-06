@@ -598,7 +598,7 @@ fn js_key_order(map: Map<String, Value>) -> Map<String, Value> {
 
 /// `loadAgentCommands`: by agent type, `args` parsed, the optional fields
 /// present only when their column is not NULL.
-fn load_agent_commands(conn: &Connection) -> Result<Map<String, Value>> {
+pub(crate) fn load_agent_commands(conn: &Connection) -> Result<Map<String, Value>> {
     let mut stmt = conn.prepare("SELECT * FROM agent_commands")?;
     let mut rows = stmt.query([])?;
     let mut result = Map::new();

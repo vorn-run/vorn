@@ -84,6 +84,32 @@ impl SafeEnv {
     /// this process's until then, filtered either way. Asks the shell again
     /// when it is time to.
     pub fn get(self: &Arc<Self>) -> Env {
+        self.filtered(&[])
+    }
+
+    /// The server's `getLaunchEnv`, for what an agent runs: [`SafeEnv::get`]
+    /// but for the names the person passed through (`envPassthrough`), and
+    /// with `VORN_DATA_DIR` naming the server's data directory.
+    pub fn launch(self: &Arc<Self>, passthrough: &[String], data_dir: Option<&Path>) -> Env {
+        let names: Vec<String> = passthrough
+            .iter()
+            .map(|k| k.trim().to_uppercase())
+            .filter(|k| !k.is_empty())
+            .collect();
+        let mut env = self.filtered(&names);
+        if let Some(dir) = data_dir {
+            let dir = dir.to_string_lossy().into_owned();
+            match env.iter_mut().find(|(k, _)| k == "VORN_DATA_DIR") {
+                Some(slot) => slot.1 = dir,
+                None => env.push(("VORN_DATA_DIR".to_owned(), dir)),
+            }
+        }
+        env
+    }
+
+    /// The shell's environment once it answered, this process's until then,
+    /// filtered with `passthrough`.
+    fn filtered(self: &Arc<Self>, passthrough: &[String]) -> Env {
         let (answered, ask) = {
             let mut shell = self.shell();
             match &*shell {
@@ -101,8 +127,8 @@ impl SafeEnv {
             self.ask();
         }
         match answered {
-            Some(env) => filter(env.iter().cloned()),
-            None => filter(std::env::vars()),
+            Some(env) => filter_with(env.iter().cloned(), passthrough),
+            None => filter_with(std::env::vars(), passthrough),
         }
     }
 
@@ -233,18 +259,28 @@ fn parse_env_output(output: &str) -> Env {
 
 /// The server's `filterEnv` with nothing passed through.
 pub fn filter(source: impl Iterator<Item = (String, String)>) -> Env {
+    filter_with(source, &[])
+}
+
+/// The server's `filterEnv`: `passthrough`, uppercased names, lets those
+/// credential-shaped names through, but never the ones stripped whatever
+/// the configuration says.
+fn filter_with(source: impl Iterator<Item = (String, String)>, passthrough: &[String]) -> Env {
     source
         .filter(|(key, _)| {
             let upper = key.to_uppercase();
-            !(STRIP_KEYS.contains(&upper.as_str())
-                || STRIP_PREFIXES.iter().any(|p| upper.starts_with(p))
-                || SENSITIVE_PREFIXES.iter().any(|p| upper.starts_with(p)))
+            let stripped = STRIP_KEYS.contains(&upper.as_str())
+                || STRIP_PREFIXES.iter().any(|p| upper.starts_with(p));
+            let sensitive = !passthrough.contains(&upper)
+                && SENSITIVE_PREFIXES.iter().any(|p| upper.starts_with(p));
+            !(stripped || sensitive)
         })
         .collect()
 }
 
-/// The first entry of `path_env` holding `name` that can be run.
-fn find_on_path(name: &str, path_env: &str) -> Option<PathBuf> {
+/// The first entry of `path_env` holding `name` that can be run
+/// (`findOnPath`).
+pub fn find_on_path(name: &str, path_env: &str) -> Option<PathBuf> {
     let sep = if cfg!(windows) { ';' } else { ':' };
     let candidates: Vec<String> = if cfg!(windows) {
         vec![
@@ -300,6 +336,22 @@ mod tests {
         ]));
         let names: Vec<&str> = kept.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(names, ["PATH", "HOME", "ANTHROPIC_BASE_URL"]);
+    }
+
+    #[test]
+    fn passes_through_only_what_was_named_and_never_the_stripped() {
+        let passthrough = vec!["ANTHROPIC_API_KEY".to_owned(), "CLAUDECODE".to_owned()];
+        let kept = filter_with(
+            pairs(&[
+                ("anthropic_api_key", "k"),
+                ("GITHUB_TOKEN", "x"),
+                ("CLAUDECODE", "1"),
+                ("PATH", "/bin"),
+            ]),
+            &passthrough,
+        );
+        let names: Vec<&str> = kept.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(names, ["anthropic_api_key", "PATH"]);
     }
 
     #[test]
