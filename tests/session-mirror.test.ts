@@ -150,6 +150,50 @@ describe('SessionMirror', () => {
     expect(resyncs).toBe(0)
   })
 
+  it('tells the changes vornd made itself, and how each record reached it', () => {
+    const took: Array<[string, string]> = []
+    const native: SessionNote[] = []
+    const own = new SessionMirror(
+      () => resyncs++,
+      (record, how) => took.push([record.id, how]),
+      (note) => native.push(note)
+    )
+    own.load(snapshot('g1', 1, { terminals: [terminal('a')], nativeHolds: { '/w': 1 } }))
+    // The holds the snapshot carried are told as a change, so they are acted on.
+    expect(native.map((n) => [n.op, n.nativeHolds])).toEqual([['holds', { '/w': 1 }]])
+    expect(own.nativeHolds()).toEqual({ '/w': 1 })
+
+    // A record the server changed, one vornd renamed, one vornd created.
+    own.apply(upsert('g1', 2, terminal('a', { cols: 90 })))
+    own.apply({ ...upsert('g1', 3, terminal('a', { displayName: 'mine' })), native: true })
+    own.apply({ ...upsert('g1', 4, terminal('n')), native: true, created: true })
+    own.apply({
+      ...upsert('g1', 5, terminal('n', { pid: 7 })),
+      native: true,
+      started: { pid: 7, epoch: 1 }
+    })
+    own.apply({ gen: 'g1', rev: 6, op: 'order', order: ['n', 'a'], native: true, reordered: true })
+    own.apply({ gen: 'g1', rev: 7, op: 'holds', holds: {}, nativeHolds: {} })
+    own.apply({ gen: 'g1', rev: 8, op: 'remove', kind: 'terminal', id: 'n', native: true })
+    expect(took).toEqual([
+      ['a', 'load'],
+      ['a', 'note'],
+      ['a', 'native'],
+      ['n', 'note'],
+      ['n', 'note']
+    ])
+    expect(native.slice(1).map((n) => [n.rev, n.op])).toEqual([
+      [3, 'upsert'],
+      [4, 'upsert'],
+      [5, 'upsert'],
+      [6, 'order'],
+      [7, 'holds'],
+      [8, 'remove']
+    ])
+    expect(own.nativeHolds()).toEqual({})
+    expect(own.terminals().map((t) => t.id)).toEqual(['a'])
+  })
+
   it('freezes its records, so changing one in place fails where it is written', () => {
     const record = mirror.terminal('a')!
     expect(() => {

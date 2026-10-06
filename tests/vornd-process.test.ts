@@ -179,7 +179,7 @@ describe('starting vornd', () => {
     ])
   })
 
-  it('asks it to answer the calls it has taken over, against the database, only when told to', async () => {
+  it('names the database when it has one, and asks it to answer the calls it has taken over only when told to', async () => {
     let seen: string[] = []
     const spawnImpl = ((binary: string, args: string[], options: object) => {
       seen = args
@@ -187,20 +187,23 @@ describe('starting vornd', () => {
     }) as unknown as typeof spawn
     started.push(await startVornd('vornd', 50091, { spawnImpl }))
     expect(seen).not.toContain('--native-server')
-    started.push(
-      await startVornd('vornd', 50091, {
-        spawnImpl,
-        nativeServer: { db: '/Users/x/.vorn/vorn.db' }
-      })
-    )
+    expect(seen).not.toContain('--db')
+    started.push(await startVornd('vornd', 50091, { spawnImpl, db: '/Users/x/.vorn/vorn.db' }))
     expect(seen).toEqual([
       '--upstream',
       '127.0.0.1:50091',
       '--exit-with-stdin',
-      '--native-server',
       '--db',
       '/Users/x/.vorn/vorn.db'
     ])
+    started.push(
+      await startVornd('vornd', 50091, {
+        spawnImpl,
+        db: '/Users/x/.vorn/vorn.db',
+        nativeServer: true
+      })
+    )
+    expect(seen.slice(3)).toEqual(['--db', '/Users/x/.vorn/vorn.db', '--native-server'])
   })
 
   it('stops it by closing its stdin, and does not report that as an exit', async () => {
@@ -314,7 +317,9 @@ describe('keeping vornd running', () => {
     await launched
     expect(start).toHaveBeenCalledWith('/b/vornd', 50091, {
       sessiond: { binary: '/b/vorn-sessiond', home: '/home/x/.vorn' },
-      desktopToken: 'secret'
+      desktopToken: 'secret',
+      db: path.join('/home/x/.vorn', 'vorn.db'),
+      nativeServer: false
     })
     expect(connect).toHaveBeenCalledWith('/run/app.sock')
     expect(keeper.state).toEqual({ state: 'on', port: 47001, nativeServer: false })
@@ -345,7 +350,8 @@ describe('keeping vornd running', () => {
     expect(start).toHaveBeenLastCalledWith('/b/vornd', 50091, {
       sessiond: { binary: '/b/vorn-sessiond', home: path.join('/home', 'x', '.vorn') },
       desktopToken: undefined,
-      nativeServer: { db: path.join('/home', 'x', '.vorn', 'vorn.db') }
+      db: path.join('/home', 'x', '.vorn', 'vorn.db'),
+      nativeServer: true
     })
     expect(keeper.state).toEqual({ state: 'on', port: 47001, nativeServer: true })
     first!.native = ['pairing']
@@ -356,7 +362,7 @@ describe('keeping vornd running', () => {
     first!.exit('code=1, signal=null')
     await vi.advanceTimersByTimeAsync(500)
     await keeper.ready()
-    expect(start.mock.lastCall?.[2]).toMatchObject({ nativeServer: undefined })
+    expect(start.mock.lastCall?.[2]).toMatchObject({ nativeServer: false })
     expect(keeper.state).toEqual({ state: 'on', port: 47002, nativeServer: false })
     keeper.stop()
   })
@@ -381,7 +387,9 @@ describe('keeping vornd running', () => {
     await keeper.launch(50091, '/h')
     expect(start).toHaveBeenCalledWith('/b/vornd', 50091, {
       sessiond: undefined,
-      desktopToken: undefined
+      desktopToken: undefined,
+      db: path.join('/h', 'vorn.db'),
+      nativeServer: false
     })
     expect(connect).not.toHaveBeenCalled()
     expect(keeper.state.state).toBe('on')

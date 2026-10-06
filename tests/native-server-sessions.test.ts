@@ -31,7 +31,7 @@ import { spawnsRealServers } from './helpers/one-at-a-time'
 import { normalizeRun, withoutHookLinks, type RunDirs } from './helpers/sessions-parity'
 
 const TEST_CREDENTIAL = 'native-server-sessions-credential'
-const GROUPS = 'terminal=shadow,headless=shadow,worktree=shadow'
+const GROUPS = 'terminal=shadow,shell=shadow,headless=shadow,worktree=shadow'
 
 const vornd = [
   process.env.VORN_CONFORMANCE_VORND,
@@ -144,8 +144,12 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     SessionMirror: typeof Mirror
     hookServer: typeof import('../packages/server/src/hook-server').hookServer
   }
-  /** How many of each call went through vornd, to check the counts against. */
-  const made: Record<string, number> = { terminal: 0, headless: 0, worktree: 0 }
+  /**
+   * How many compared calls went through vornd, to check the counts against:
+   * the reads, and the calls that create or change a terminal, whose plan or
+   * refusal vornd works out beside the server's.
+   */
+  const made: Record<string, number> = { terminal: 0, shell: 0, headless: 0, worktree: 0 }
   const saved: Record<string, string | undefined> = {}
 
   async function counts(): Promise<Counts> {
@@ -349,6 +353,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     const shellA = await through.result<TerminalSession>('shell:create', work.projA)
     const shellB = await through.result<TerminalSession>('shell:create', work.projA)
     await until('both shells to start', () => [shellA, shellB].every((s) => record(s.id)!.pid > 0))
+    made.shell += 2
     await compare()
 
     // An agent in a worktree, linked by a hook as Claude's SessionStart does.
@@ -359,6 +364,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
       existingWorktreePath: work.wt
     })
     await until('the agent to start', () => record(claude.id)!.pid > 0)
+    made.terminal++
     hook('claude-conversation', work.wt)
     await until(
       'the hook to link it',
@@ -380,6 +386,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
       projectPath: work.projC
     })
     await until('copilot to start', () => record(copilot.id)!.pid > 0)
+    made.terminal++
     const linked = record(copilot.id)?.hookSessionId
     if (linked) {
       hook(linked, work.projC)
@@ -392,6 +399,12 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     await through.result('terminal:setGroup', { id: shellB.id, groupId: 'group-1' })
     await through.result('terminal:reorder', [copilot.id, shellB.id, claude.id, shellA.id])
     await through.result('terminal:setGroup', { id: shellB.id, groupId: null })
+    // And what the server refuses: vornd would have refused it in the same words.
+    const twice = await through.call('terminal:reorder', [shellA.id, shellA.id])
+    expect((twice.error as { message: string }).message).toBe('Duplicate session IDs')
+    const missing = await through.call('terminal:rename', { id: 'no-such', displayName: 'x' })
+    expect((missing.error as { message: string }).message).toBe('Session not found: no-such')
+    made.terminal += 6
     await compare([work.wt])
 
     // A shell that ends keeps its card, idle, with how it ended.
@@ -414,6 +427,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     // A card closed.
     await through.result('terminal:kill', shellA.id)
     await until('the card to go', () => record(shellA.id) === undefined)
+    made.terminal++
     await compare([work.wt])
 
     // A headless agent, from start to its exit.
@@ -764,6 +778,15 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     // A card that is not there: the server tells its exit anyway.
     await call('close a card that is not there', 'terminal:kill', 'no-such-card')
     await until('every exit', () => direct.toldBy('terminal:exit').length >= 3)
+    // Clients through vornd hear each exit once, from whoever tells it.
+    await until(
+      'every exit through vornd',
+      () => new Set(through.toldBy('terminal:exit').map((p) => (p as { id: string }).id)).size >= 3
+    )
+
+    // A shell opened again after the closes is numbered after the ones left.
+    const shellC = await created('shell after a close', 'shell:create', path.join(work, 'claude'))
+    await live([shellC])
 
     // Settled: the registry stops changing.
     let last = ''
@@ -796,6 +819,8 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
         cleanup: toldOf('worktree:confirmCleanup'),
         // In the order they were closed: each waited for the one before.
         exits: toldOf('terminal:exit').map((p) => (p as { id: string }).id),
+        // As a client through vornd hears them: once each, whoever tells it.
+        exitsThrough: through.toldBy('terminal:exit').map((p) => (p as { id: string }).id),
         renamed: toldOf('session:updated')
           .map((p) => p as TerminalSession)
           .filter((s) => s.displayName === 'Build' || s.groupId === 'group-1')
@@ -845,7 +870,7 @@ describe.skipIf(!runnable)('the terminals vornd creates and changes, against the
     expect(off.told.cleanup).toHaveLength(1)
     expect(runs.off?.answeredBy).toEqual({
       terminal: { native: 0, forwarded: 19 },
-      shell: { native: 0, forwarded: 2 }
+      shell: { native: 0, forwarded: 3 }
     })
   })
 
@@ -855,7 +880,7 @@ describe.skipIf(!runnable)('the terminals vornd creates and changes, against the
     // is not there, which the server tells clients of anyway.
     expect(runs.on?.answeredBy).toEqual({
       terminal: { native: 15, forwarded: 4 },
-      shell: { native: 2, forwarded: 0 }
+      shell: { native: 3, forwarded: 0 }
     })
   })
 
