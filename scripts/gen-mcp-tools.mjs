@@ -65,7 +65,8 @@ const REFINEMENTS = new Map()
 
 function refinementsOf(schema, name) {
   const custom = (schema._zod.def.checks ?? []).filter((c) => c._zod.def.check === 'custom')
-  if (custom.length !== 1) throw new Error(`${name}: expected one refinement, found ${custom.length}`)
+  if (custom.length !== 1)
+    throw new Error(`${name}: expected one refinement, found ${custom.length}`)
   REFINEMENTS.set(custom[0], name)
 }
 
@@ -143,7 +144,8 @@ function check(c) {
       if (def.format !== 'safeint') throw new Error(`number format ${def.format}`)
       return withMessage({ k: 'int' })
     case 'string_format':
-      if (def.format !== 'regex' || def.pattern.flags) throw new Error(`string format ${def.format}`)
+      if (def.format !== 'regex' || def.pattern.flags)
+        throw new Error(`string format ${def.format}`)
       return withMessage({ k: 'regex', source: def.pattern.source, shown: String(def.pattern) })
     case 'custom':
       return refinement(c)
@@ -232,7 +234,11 @@ async function generate() {
     inputs[tool.name] = schema ? ir(schema) : null
   }
   for (const type of nodeConfig.NODE_TYPES) ir(nodeConfig.configSchemaByType[type])
-  const sortedDefs = Object.fromEntries(Object.keys(defs).sort().map((k) => [k, defs[k]]))
+  const sortedDefs = Object.fromEntries(
+    Object.keys(defs)
+      .sort()
+      .map((k) => [k, defs[k]])
+  )
   return {
     'tools.json': tools,
     'schemas.json': { tools: inputs, defs: sortedDefs },
@@ -254,7 +260,9 @@ for (const [name, value] of Object.entries(files)) {
       // Missing reads as stale.
     }
     if (current !== text) {
-      console.error(`${path.relative(root, file)} is out of date: run node scripts/gen-mcp-tools.mjs`)
+      console.error(
+        `${path.relative(root, file)} is out of date: run node scripts/gen-mcp-tools.mjs`
+      )
       stale = true
     }
   } else {

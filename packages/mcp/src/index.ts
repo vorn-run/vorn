@@ -5,6 +5,8 @@ declare const __MCP_VERSION__: string | undefined
 import { createRequire } from 'node:module'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { configManager } from '@vornrun/server/config-manager'
+import { readLocalToken, rpcCall } from '@vornrun/server/rpc-client'
+import { relay, relayHeaders, vorndMcpUrl } from './relay'
 import { createMcpServer } from './server'
 
 // Redirect all console methods to stderr (stdout is reserved for JSON-RPC)
@@ -16,6 +18,15 @@ console.warn = (...args: unknown[]) => _origError('[mcp:warn]', ...args)
 console.error = (...args: unknown[]) => _origError('[mcp:error]', ...args)
 
 async function main() {
+  // When vornd serves the tools, this process only relays to it.
+  const url = await vorndMcpUrl({ vorndStatus: () => rpcCall('server:vornd'), fetch })
+  if (url) {
+    const transport = new StdioServerTransport()
+    process.stdin.once('end', () => void transport.close())
+    await relay(transport, url, relayHeaders(readLocalToken(), process.cwd(), process.env))
+    process.exit(0)
+  }
+
   // Initialize database only (lightweight — no PTY, no scheduler)
   configManager.init()
 

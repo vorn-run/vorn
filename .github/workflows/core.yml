@@ -39,6 +39,7 @@ on:
       - 'scripts/gen-mcp-tools.mjs'
       - 'tests/native-server-mcp.test.ts'
       - 'tests/helpers/mcp-parity.ts'
+      - 'tests/mcp-relay.test.ts'
       - 'tests/helpers/store-parity.ts'
       - 'tests/database-*.test.ts'
       - 'tests/artifact-*.test.ts'
