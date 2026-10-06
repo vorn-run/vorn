@@ -322,7 +322,20 @@ fn a_git_wrapper_on_path_is_run_not_bypassed() {
         req.bin = bin_name;
         req.env.retain(|(key, _)| key != "PATH");
         req.env.push(("PATH".into(), bin.display().to_string()));
-        let reply = run(&req).unwrap();
+        // A test spawning on another thread can hold the script's write
+        // descriptor across its fork for a moment, so exec may see it busy.
+        let mut tries = 0;
+        let reply = loop {
+            match run(&req) {
+                Err(vorn_git::Error::Spawn { error, .. })
+                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 50 =>
+                {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                other => break other.unwrap(),
+            }
+        };
         assert_eq!(reply.stdout, "wrapped\n");
         assert_eq!(reply.engine, Engine::Git);
     }
