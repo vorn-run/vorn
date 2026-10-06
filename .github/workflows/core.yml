@@ -34,7 +34,8 @@ on:
       - 'packages/server/src/store-types.ts'
       - 'packages/shared/src/types.ts'
       - 'scripts/gen-store-schema.mjs'
-      - 'tests/native-store.test.ts'
+      - 'tests/store-reference.test.ts'
+      - 'tests/fixtures/js-reference/store.json'
       - 'tests/helpers/store-parity.ts'
       - 'tests/database-*.test.ts'
       - 'tests/artifact-*.test.ts'
@@ -162,25 +163,10 @@ jobs:
       - name: Native call
         run: yarn vitest run tests/native-core.test.ts tests/git-native-parity.test.ts
 
-      # Both stores answering the same calls, on each platform.
-      - name: Native store
-        run: yarn vitest run tests/native-store.test.ts
-
-      # Every test that keeps data, again with the database in the native
-      # store, which fails the run rather than fall back to the TypeScript one.
-      # Linux only, as these files run in the main suite.
-      - name: Store tests on the native store
-        if: runner.os == 'Linux'
-        env:
-          VORN_NATIVE_STORE: '1'
-        run: yarn vitest run $(grep -l -E 'initTestDatabase|initDatabase' tests/*.test.ts tests/*.test.tsx)
-
-      - name: Conformance through vornd, native store
-        if: runner.os == 'Linux'
-        env:
-          VORN_CONFORMANCE_VORND: packages/core/vornd
-          VORN_NATIVE_STORE: '1'
-        run: yarn test:conformance
+      # The store against what the TypeScript store it replaced answered, on
+      # each platform.
+      - name: Store against the JS reference
+        run: yarn vitest run tests/store-reference.test.ts
 
       # The same files with every group vornd can answer itself answered there.
       - name: Conformance through vornd, native server

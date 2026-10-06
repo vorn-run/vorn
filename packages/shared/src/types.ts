@@ -1815,11 +1815,6 @@ export interface BranchDeleteResult {
 /** Work in progress that can be tried before it is the default. */
 export interface ExperimentalConfig {
   /**
-   * The server keeps its database through the Rust store instead of its own,
-   * on the same file. Read by the server when it starts.
-   */
-  nativeStore?: boolean
-  /**
    * vornd answers the groups of calls it has taken over from the server (git,
    * the file explorer, editors) itself. Read by the server each time it starts
    * vornd, and passed to it.
@@ -1883,11 +1878,6 @@ export interface CoreStatus {
   error: string | null
   /** What the loaded binary was built without, in words, as for a build without libghostty-vt. */
   missing: string[]
-  /**
-   * Whether the database is in the Rust store, and why not when the Native
-   * store switch asked for it and it could not open. Absent from an older server.
-   */
-  store?: { native: boolean; error: string | null }
 }
 
 /** Retention preferences for the worktree manager. */

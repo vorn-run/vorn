@@ -1,5 +1,5 @@
 //! What every module needs to read rows and bind values the way the
-//! TypeScript store does through libsql.
+//! TypeScript store it replaced did through libsql.
 
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::Row;
