@@ -204,7 +204,13 @@ afterAll(async () => {
       s.child.kill()
       await exited
     }
-    fs.rmSync(s.dataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    try {
+      fs.rmSync(s.dataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    } catch (err) {
+      // The session holder outlives the server, and Windows will not delete
+      // a running program.
+      if (process.platform !== 'win32') throw err
+    }
   }
 })
 
@@ -233,9 +239,14 @@ describe.skipIf(!vornd)('reach with the Native server switch on', () => {
     expect(await desktop.result('token:list')).toEqual(listed)
 
     const phone = await Client.open(server.vornd, { authorization: `Bearer ${made.plaintext}` })
-    // The server marks the token seen as the phone connects.
-    const seen = await phone.result<Array<{ id: string; lastSeenAt: string | null }>>('token:list')
-    expect(seen.find((t) => t.id === made.token.id)?.lastSeenAt).toEqual(expect.any(String))
+    // The server marks the token seen as the phone connects, which vornd,
+    // answering at once, can read before it has.
+    const seen = await waitFor('the token to be seen', async () => {
+      const list =
+        await phone.result<Array<{ id: string; lastSeenAt: string | null }>>('token:list')
+      return list.find((t) => t.id === made.token.id)?.lastSeenAt ?? null
+    })
+    expect(seen).toEqual(expect.any(String))
     expect(await desktop.result('token:revoke', made.token.id)).toEqual({ revoked: true })
     expect(await phone.closed).toBe(4002)
     expect(await desktop.result('token:revoke', made.token.id)).toEqual({ revoked: false })

@@ -640,7 +640,13 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
       await stop?.()
       const { closeDatabase } = await import('../packages/server/src/database')
       closeDatabase()
-      fs.rmSync(dataDir, { recursive: true, force: true })
+      try {
+        fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+      } catch (err) {
+        // The session holder the server started outlives it, and Windows
+        // will not delete a running program; what is left is the OS's to clear.
+        if (process.platform !== 'win32') throw err
+      }
     })
 
     it('answers the same commands alike', async () => {
