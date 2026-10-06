@@ -5,10 +5,11 @@
 //! and taken out of the environment before anything is started, so neither
 //! sessiond nor any program it runs inherits it.
 //!
-//! Prints one line of JSON, `{"port":N,"protocol":P}`, once it is listening, so
+//! Prints one line of JSON, `{"port":N,"protocol":P,"native":[..]}`, once it is listening, so
 //! whoever started it knows where to connect. With a session holder and the
 //! engine, the line also names the grid endpoint, `"grid":"<socket or pipe>"`,
-//! and the app's, `"app":"<socket or pipe>"`.
+//! and the app's, `"app":"<socket or pipe>"`. `"native"` lists the groups
+//! vornd answers itself.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -20,6 +21,7 @@ use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+use vornd::applink::AppLink;
 use vornd::holder::{self, Holder, HolderConfig};
 use vornd::protocol::VORND_PROTOCOL;
 use vornd::{proxy, Daemon, Groups};
@@ -226,13 +228,13 @@ fn serve_grid(_: &HolderConfig, _: &Holder) -> Option<String> {
 /// `run/`, where the app's server looks. Without it vornd runs on; the
 /// server then starts its terminals itself.
 #[cfg(feature = "engine")]
-fn serve_app(cfg: &HolderConfig, holder: &Holder) -> Option<String> {
+fn serve_app(cfg: &HolderConfig, holder: &Holder, link: &Arc<AppLink>) -> Option<String> {
     use vornd::control;
     let engine = holder.engine()?.clone();
     let endpoint = control::endpoint(&cfg.home);
     match vorn_sessiond::os::Listener::bind(&cfg.home, &endpoint) {
         Ok(listener) => {
-            tokio::spawn(control::serve(listener, engine));
+            tokio::spawn(control::serve(listener, engine, Arc::clone(link)));
             if let Err(err) = control::announce(&cfg.home, &endpoint) {
                 error!(%endpoint, %err, "could not name the app's endpoint");
                 return None;
@@ -248,7 +250,7 @@ fn serve_app(cfg: &HolderConfig, holder: &Holder) -> Option<String> {
 }
 
 #[cfg(not(feature = "engine"))]
-fn serve_app(_: &HolderConfig, _: &Holder) -> Option<String> {
+fn serve_app(_: &HolderConfig, _: &Holder, _: &Arc<AppLink>) -> Option<String> {
     None
 }
 
@@ -304,11 +306,12 @@ fn main() -> ExitCode {
         let mut kept = None;
         let mut grid: Option<String> = None;
         let mut app: Option<(PathBuf, String)> = None;
+        let link = Arc::new(AppLink::default());
         let daemon = match args.holder {
             Some(cfg) => {
                 let holder = Arc::new(new_holder(&cfg));
                 grid = serve_grid(&cfg, &holder);
-                app = serve_app(&cfg, &holder).map(|e| (cfg.home.clone(), e));
+                app = serve_app(&cfg, &holder, &link).map(|e| (cfg.home.clone(), e));
                 tokio::spawn(holder::keep(cfg, holder.clone()));
                 kept = Some(holder.clone());
                 Daemon::with_holder(args.upstream, args.groups, holder)
@@ -324,6 +327,10 @@ fn main() -> ExitCode {
         if let Some(token) = desktop_token {
             daemon.set_desktop_token(token);
         }
+        if let Ok(addr) = listener.local_addr() {
+            daemon.set_listen_addr(addr);
+        }
+        daemon.set_app_link(link);
         proxy::log_upstream(&daemon).await;
         info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
         let mut stdout = std::io::stdout().lock();
@@ -334,6 +341,13 @@ fn main() -> ExitCode {
         if let Some((_, e)) = &app {
             ready["app"] = e.as_str().into();
         }
+        let native: Vec<&str> = daemon
+            .groups()
+            .modes()
+            .filter(|(_, mode)| *mode == vornd::groups::Mode::Native)
+            .map(|(group, _)| group)
+            .collect();
+        ready["native"] = native.into();
         let _ = writeln!(stdout, "{ready}");
         let _ = stdout.flush();
         drop(stdout);

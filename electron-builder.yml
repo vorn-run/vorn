@@ -90,6 +90,12 @@ extraResources:
     to: 'vornd/vorn-sessiond'
   - from: 'packages/core/vorn-sessiond.exe'
     to: 'vornd/vorn-sessiond.exe'
+  # The vorn command, built beside them. It runs the server in ../server when
+  # there is none, with the app as its Node.
+  - from: 'packages/core/vorn'
+    to: 'vornd/vorn'
+  - from: 'packages/core/vorn.exe'
+    to: 'vornd/vorn.exe'
   # On Windows, the ConPTY vorn-sessiond hosts its sessions in: conpty.dll
   # beside it and OpenConsole.exe in a folder for the architecture, which vornd
   # installs with it. Fetched by `yarn build:core` on Windows only.

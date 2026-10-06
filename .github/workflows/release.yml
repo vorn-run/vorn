@@ -135,8 +135,9 @@ jobs:
       - name: Packaged core present
         shell: bash
         run: |
-          for name in core/vorn_core.node vornd/vornd vornd/vorn-sessiond; do
-            file=$(find dist -ipath "*/resources/$name*" -type f -print -quit)
+          for name in core/vorn_core.node vornd/vornd vornd/vorn-sessiond vornd/vorn; do
+            # Exact, or with .exe: vornd/vorn is a prefix of vornd/vornd.
+            file=$(find dist \( -ipath "*/resources/$name" -o -ipath "*/resources/$name.exe" \) -type f -print -quit)
             if [ -z "$file" ]; then
               echo "ERROR: $name is not in the packaged resources"
               exit 1
@@ -244,8 +245,9 @@ jobs:
         shell: bash
         run: |
           # The ConPTY vorn-sessiond hosts Windows sessions in ships beside it.
-          for name in core/vorn_core.node vornd/vornd vornd/vorn-sessiond vornd/conpty.dll vornd/x64/OpenConsole.exe; do
-            file=$(find dist -ipath "*/resources/$name*" -type f -print -quit)
+          for name in core/vorn_core.node vornd/vornd vornd/vorn-sessiond vornd/vorn vornd/conpty.dll vornd/x64/OpenConsole.exe; do
+            # Exact, or with .exe: vornd/vorn is a prefix of vornd/vornd.
+            file=$(find dist \( -ipath "*/resources/$name" -o -ipath "*/resources/$name.exe" \) -type f -print -quit)
             if [ -z "$file" ]; then
               echo "ERROR: $name is not in the packaged resources"
               exit 1
@@ -344,8 +346,9 @@ jobs:
       - name: Packaged core present
         shell: bash
         run: |
-          for name in core/vorn_core.node vornd/vornd vornd/vorn-sessiond; do
-            file=$(find dist -ipath "*/resources/$name*" -type f -print -quit)
+          for name in core/vorn_core.node vornd/vornd vornd/vorn-sessiond vornd/vorn; do
+            # Exact, or with .exe: vornd/vorn is a prefix of vornd/vornd.
+            file=$(find dist \( -ipath "*/resources/$name" -o -ipath "*/resources/$name.exe" \) -type f -print -quit)
             if [ -z "$file" ]; then
               echo "ERROR: $name is not in the packaged resources"
               exit 1

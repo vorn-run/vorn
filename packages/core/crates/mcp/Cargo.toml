@@ -1,0 +1,21 @@
+[package]
+name = "vorn-mcp"
+# Never published and never versioned on its own; vorn-core carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Vorn's MCP server: the protocol, the tools and the Streamable HTTP transport, answering as the TypeScript server does"
+
+[dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# Patterns from the tools' schemas, and the few the tools match with.
+regex = "1"
+# Key order kept: tool results are JSON text, and the TypeScript writes keys in insertion order.
+serde_json = { version = "1", features = ["preserve_order"] }
+# Ids for what the tools create and the nonce that closes an untrusted fence.
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "sync"] }

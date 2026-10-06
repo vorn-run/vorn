@@ -2314,6 +2314,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5b0ebf6537e3e8db8bb7d21ecb6d7399738c953c757945c6b95e46c4e95df7b"
 
 [[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
+]
+
+[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2758,6 +2769,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-cli"
+version = "0.8.0-beta.3"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "futures-util",
+ "getrandom 0.4.3",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
+ "vorn-protocol",
+ "vorn-store",
+]
+
+[[package]]
 name = "vorn-core"
 version = "0.8.0-beta.3"
 dependencies = [
@@ -2822,6 +2855,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-mcp"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "regex",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "vorn-pipeline"
 version = "0.7.5"
 dependencies = [
@@ -2843,6 +2887,19 @@ dependencies = [
  "serde_json",
  "syn 2.0.119",
  "typify",
+]
+
+[[package]]
+name = "vorn-reach"
+version = "0.0.0"
+dependencies = [
+ "data-encoding",
+ "getrandom 0.4.3",
+ "libc",
+ "serde_json",
+ "sha2",
+ "uuid",
+ "windows-sys",
 ]
 
 [[package]]
@@ -2947,7 +3004,10 @@ dependencies = [
  "vorn-engine",
  "vorn-git",
  "vorn-grid-client",
+ "vorn-mcp",
  "vorn-pipeline",
+ "vorn-protocol",
+ "vorn-reach",
  "vorn-recovery",
  "vorn-screen",
  "vorn-sessiond",

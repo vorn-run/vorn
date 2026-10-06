@@ -48,9 +48,10 @@ use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::WebSocketStream;
 use tracing::{debug, info, warn};
 
-use crate::groups::Groups;
+use crate::applink::AppLink;
+use crate::groups::{Counted, Groups, Mode};
 use crate::holder::Holder;
-use crate::native::{Conn, Native, Offer};
+use crate::native::{Conn, Native, Offer, AUTH_GROUP, ORIGIN_METHOD};
 use crate::protocol::{
     inspect_server_frame, method_of, ServerFrame, SERVER_PROTOCOLS, VORND_PROTOCOL,
 };
@@ -72,7 +73,7 @@ const CLOSE_GRACE: Duration = Duration::from_secs(5);
 
 const UPSTREAM_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
-type Body = BoxBody<Bytes, hyper::Error>;
+pub(crate) type Body = BoxBody<Bytes, hyper::Error>;
 
 /// Frames from a client waiting to be written to the server.
 const UPSTREAM_QUEUE: usize = 64;
@@ -94,6 +95,10 @@ pub struct Daemon {
     spawn: std::sync::atomic::AtomicBool,
     /// The desktop's launch token, when the app that started vornd gave it.
     desktop_token: std::sync::OnceLock<Vec<u8>>,
+    /// Where vornd itself listens, which its MCP tools call back to.
+    listen: std::sync::OnceLock<SocketAddr>,
+    /// The MCP server, made on the first request it may answer.
+    mcp: std::sync::OnceLock<Arc<crate::mcp::Mcp>>,
 }
 
 impl Daemon {
@@ -126,6 +131,8 @@ impl Daemon {
             streams,
             spawn: std::sync::atomic::AtomicBool::new(false),
             desktop_token: std::sync::OnceLock::new(),
+            listen: std::sync::OnceLock::new(),
+            mcp: std::sync::OnceLock::new(),
             upstream,
             groups: Arc::new(groups),
             client: Client::builder(TokioExecutor::new()).build_http(),
@@ -160,8 +167,36 @@ impl Daemon {
     /// bearer credential is the desktop's. Only the first one given is kept.
     pub fn set_desktop_token(&self, token: Vec<u8>) {
         if !token.is_empty() {
+            if let Some(native) = &self.native {
+                native.set_desktop_token(token.clone());
+            }
             let _ = self.desktop_token.set(token);
         }
+    }
+
+    /// The app's channel, for what the native groups ask of the server.
+    /// Also reads, now and whenever the server says where it is bound,
+    /// which names a browser may load the web client from.
+    pub fn set_app_link(&self, link: Arc<AppLink>) {
+        let Some(native) = &self.native else {
+            return;
+        };
+        native.set_link(Arc::clone(&link));
+        native.set_server_port(self.upstream.port());
+        let native = Arc::clone(native);
+        tokio::spawn(async move {
+            loop {
+                let n = Arc::clone(&native);
+                let _ = tokio::task::spawn_blocking(move || n.refresh_trusted()).await;
+                link.reached().await;
+            }
+        });
+    }
+
+    /// Where vornd listens. Its MCP tools reach the server through it, so
+    /// their calls are routed as any client's are.
+    pub fn set_listen_addr(&self, addr: SocketAddr) {
+        let _ = self.listen.set(addr);
     }
 
     /// Whether a WebSocket that opened with these headers is the desktop's.
@@ -206,7 +241,7 @@ pub async fn serve(
         };
         let daemon = daemon.clone();
         tokio::spawn(async move {
-            let service = service_fn(move |req| handle(daemon.clone(), req));
+            let service = service_fn(move |req| handle(daemon.clone(), req, peer));
             let conn = hyper::server::conn::http1::Builder::new()
                 .serve_connection(TokioIo::new(stream), service)
                 .with_upgrades();
@@ -217,7 +252,11 @@ pub async fn serve(
     }
 }
 
-async fn handle(daemon: Arc<Daemon>, req: Request<Incoming>) -> Result<Response<Body>, Infallible> {
+async fn handle(
+    daemon: Arc<Daemon>,
+    req: Request<Incoming>,
+    peer: SocketAddr,
+) -> Result<Response<Body>, Infallible> {
     #[cfg(feature = "engine")]
     if req.uri().path() == crate::engine::SESSIONS_PATH && req.method() == Method::GET {
         let digests = req
@@ -232,7 +271,53 @@ async fn handle(daemon: Arc<Daemon>, req: Request<Incoming>) -> Result<Response<
     if is_websocket_upgrade(req.headers()) {
         return Ok(websocket(daemon, req).await);
     }
+    if req.method() == Method::POST && crate::pair::is_pair_path(req.uri().path()) {
+        if let Some(native) = daemon
+            .native
+            .as_ref()
+            .filter(|_| daemon.groups.mode("pairing") == Mode::Native)
+        {
+            let native = Arc::clone(native);
+            return Ok(crate::pair::answer(&daemon, &native, req, peer).await);
+        }
+    }
+    if req.uri().path() == crate::mcp::PATH {
+        match daemon.groups.mode(crate::mcp::GROUP) {
+            Mode::Native => return Ok(mcp(&daemon, req).await),
+            // A relay talks to the TypeScript tools or to these, never both,
+            // so there is nothing to compare.
+            Mode::Shadow => {
+                daemon
+                    .groups
+                    .count(crate::mcp::COUNTED_AS, Counted::Forwarded);
+                daemon
+                    .groups
+                    .count(crate::mcp::COUNTED_AS, Counted::ShadowUnported);
+            }
+            Mode::Forward => daemon
+                .groups
+                .count(crate::mcp::COUNTED_AS, Counted::Forwarded),
+        }
+    }
     Ok(forward_http(&daemon, req).await)
+}
+
+/// `/mcp` answered here ([`crate::mcp`]), for a caller it lets in.
+async fn mcp(daemon: &Daemon, req: Request<Incoming>) -> Response<Body> {
+    let token = daemon.desktop_token.get().map(Vec::as_slice);
+    if let Some(refused) = crate::mcp::refusal(req.headers(), token) {
+        return refused;
+    }
+    let (Some(token), Some(addr)) = (token, daemon.listen.get()) else {
+        return plain(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "vornd is not ready to serve MCP",
+        );
+    };
+    let mcp = daemon
+        .mcp
+        .get_or_init(|| Arc::new(crate::mcp::Mcp::new(*addr, token)));
+    crate::mcp::answer(&daemon.groups, mcp, req).await
 }
 
 async fn health(daemon: &Daemon) -> Response<Body> {
@@ -252,6 +337,9 @@ async fn health(daemon: &Daemon) -> Response<Body> {
         entry["shadowMatched"] = json!(c.shadow_matched);
         entry["shadowMismatched"] = json!(c.shadow_mismatched);
         entry["shadowUnported"] = json!(c.shadow_unported);
+    }
+    if let (Some(mcp), Some(entry)) = (daemon.mcp.get(), groups.get_mut(crate::mcp::GROUP)) {
+        entry["sessions"] = json!(mcp.sessions());
     }
     let body = json!({
         "ok": reachable,
@@ -336,6 +424,37 @@ async fn forward_http(daemon: &Daemon, req: Request<Incoming>) -> Response<Body>
     }
 }
 
+impl Daemon {
+    /// Hands the server a request whose body vornd has already read.
+    pub(crate) async fn forward_buffered(
+        &self,
+        mut parts: hyper::http::request::Parts,
+        body: Bytes,
+    ) -> Response<Body> {
+        let path = parts.uri.path_and_query().map_or("/", |p| p.as_str());
+        parts.uri = match format!("http://{}{}", self.upstream, path).parse() {
+            Ok(uri) => uri,
+            Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request path"),
+        };
+        strip_hop_by_hop(&mut parts.headers);
+        match self
+            .probe
+            .request(Request::from_parts(parts, Full::new(body)))
+            .await
+        {
+            Ok(res) => {
+                let (mut parts, body) = res.into_parts();
+                strip_hop_by_hop(&mut parts.headers);
+                Response::from_parts(parts, body.boxed())
+            }
+            Err(err) => {
+                warn!(%err, "the server did not answer an HTTP request");
+                plain(StatusCode::BAD_GATEWAY, "the Vorn server is not answering")
+            }
+        }
+    }
+}
+
 fn ws_config() -> WebSocketConfig {
     WebSocketConfig::default()
         .max_message_size(Some(MAX_MESSAGE))
@@ -347,6 +466,25 @@ async fn websocket(daemon: Arc<Daemon>, mut req: Request<Incoming>) -> Response<
         return plain(StatusCode::BAD_REQUEST, "missing Sec-WebSocket-Key");
     };
     let desktop = daemon.is_desktop(req.headers());
+    // The Origin check, which the server makes on `/ws` alone.
+    let origin = daemon
+        .native
+        .as_ref()
+        .filter(|_| req.uri().path() == "/ws")
+        .and_then(|native| {
+            let mode = daemon.groups.mode(AUTH_GROUP);
+            (mode != Mode::Forward).then(|| (mode, origin_allowed(native, req.headers())))
+        });
+    if let Some((Mode::Native, false)) = origin {
+        daemon.groups.count(ORIGIN_METHOD, Counted::Native);
+        return origin_refused();
+    }
+    let credential = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(vorn_reach::token::bearer_from)
+        .map(str::to_owned);
     let path = req.uri().path_and_query().map_or("/", |p| p.as_str());
     let mut upstream_req = match format!("ws://{}{}", daemon.upstream, path).into_client_request() {
         Ok(r) => r,
@@ -371,8 +509,14 @@ async fn websocket(daemon: Arc<Daemon>, mut req: Request<Incoming>) -> Response<
         match tokio_tungstenite::connect_async_with_config(upstream_req, Some(ws_config()), false)
             .await
         {
-            Ok(pair) => pair,
+            Ok(pair) => {
+                count_origin(&daemon.groups, origin, true);
+                pair
+            }
             Err(tungstenite::Error::Http(refused)) => {
+                if refused.status() == StatusCode::FORBIDDEN {
+                    count_origin(&daemon.groups, origin, false);
+                }
                 // The server said no. The client hears the same answer.
                 let (mut parts, body) = refused.into_parts();
                 strip_hop_by_hop(&mut parts.headers);
@@ -414,7 +558,7 @@ async fn websocket(daemon: Arc<Daemon>, mut req: Request<Incoming>) -> Response<
         .await;
         daemon.open.fetch_add(1, Ordering::Relaxed);
         daemon.served.fetch_add(1, Ordering::Relaxed);
-        pump(&daemon, client, server, desktop).await;
+        pump(&daemon, client, server, desktop, credential).await;
         daemon.open.fetch_sub(1, Ordering::Relaxed);
     });
     res
@@ -431,6 +575,7 @@ async fn pump<C, S>(
     client: WebSocketStream<C>,
     server: WebSocketStream<S>,
     desktop: bool,
+    credential: Option<String>,
 ) where
     C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -481,6 +626,9 @@ async fn pump<C, S>(
             desktop,
         )
     });
+    if let (Some(native), Some(credential)) = (&native, credential) {
+        native.check_credential(credential);
+    }
 
     let groups_daemon = daemon.clone();
     let reply = forward.clone();
@@ -543,6 +691,12 @@ async fn pump<C, S>(
                     }
                 }
                 Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => continue,
+                Message::Close(frame) => {
+                    if let (Some(native), Some(f)) = (&native, &frame) {
+                        native.on_server_close(u16::from(f.code));
+                    }
+                    Message::Close(frame)
+                }
                 other => other,
             };
             // The writer sends a close after everything queued before it,
@@ -574,6 +728,49 @@ async fn pump<C, S>(
         .is_err()
     {
         writer.abort();
+    }
+}
+
+/// Whether the upgrade's `Origin` is one the server allows.
+fn origin_allowed(native: &Native, headers: &HeaderMap) -> bool {
+    let mut origins = headers.get_all(header::ORIGIN).iter();
+    let origin = match (origins.next(), origins.next()) {
+        (None, _) => None,
+        // The server sees two as one, joined with a comma, which no URL is.
+        (Some(_), Some(_)) => return false,
+        (Some(v), None) => match v.to_str() {
+            Ok(s) => Some(s),
+            Err(_) => return false,
+        },
+    };
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok());
+    vorn_reach::origin::is_allowed_upgrade(origin, host, &native.trusted())
+}
+
+/// What the server answers an upgrade from a page it does not trust.
+fn origin_refused() -> Response<Body> {
+    let mut res = Response::new(full(r#"{"error":"Origin not allowed"}"#));
+    *res.status_mut() = StatusCode::FORBIDDEN;
+    res.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json; charset=utf-8"),
+    );
+    res
+}
+
+/// Counts the server's answer to the Origin check against vornd's, in
+/// shadow mode.
+fn count_origin(groups: &Groups, origin: Option<(Mode, bool)>, server: bool) {
+    match origin {
+        Some((Mode::Shadow, ours)) if ours == server => {
+            groups.count(ORIGIN_METHOD, Counted::ShadowMatched)
+        }
+        Some((Mode::Shadow, _)) => {
+            warn!(server, "the Origin check differs from the server's");
+            groups.count(ORIGIN_METHOD, Counted::ShadowMismatched)
+        }
+        Some((Mode::Native, _)) => groups.count(ORIGIN_METHOD, Counted::Native),
+        _ => {}
     }
 }
 
@@ -695,7 +892,7 @@ fn strip_hop_by_hop(headers: &mut HeaderMap) {
     }
 }
 
-fn full(body: impl Into<Bytes>) -> Body {
+pub(crate) fn full(body: impl Into<Bytes>) -> Body {
     Full::new(body.into())
         .map_err(|never| match never {})
         .boxed()

@@ -1,0 +1,491 @@
+[
+  {
+    "tool": "get_task",
+    "args": null,
+    "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+  },
+  {
+    "tool": "get_task",
+    "args": {},
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"id\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+  },
+  {
+    "tool": "get_task",
+    "args": {
+      "id": 5
+    },
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"id\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+  },
+  {
+    "tool": "get_task",
+    "args": {
+      "id": "",
+      "extra": 1
+    },
+    "error": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"id\"\n    ],\n    \"message\": \"ID must not be empty\"\n  }\n]"
+  },
+  {
+    "tool": "get_task",
+    "args": {
+      "id": "abc",
+      "extra": 1
+    },
+    "data": {
+      "id": "abc"
+    }
+  },
+  {
+    "tool": "create_project",
+    "args": {
+      "name": "../x",
+      "path": "rel",
+      "icon_color": "blue",
+      "preferred_agents": ["claude", "shell"]
+    },
+    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"name\"\n    ],\n    \"message\": \"Name must not contain path traversal characters (.. / \\\\)\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must be absolute (start with /)\"\n  },\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"claude\",\n      \"copilot\",\n      \"codex\",\n      \"opencode\",\n      \"gemini\"\n    ],\n    \"path\": [\n      \"preferred_agents\",\n      1\n    ],\n    \"message\": \"Invalid option: expected one of \\\"claude\\\"|\\\"copilot\\\"|\\\"codex\\\"|\\\"opencode\\\"|\\\"gemini\\\"\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"invalid_format\",\n    \"format\": \"regex\",\n    \"pattern\": \"/^#[0-9a-fA-F]{3,8}$/\",\n    \"path\": [\n      \"icon_color\"\n    ],\n    \"message\": \"Must be a valid hex color (e.g. #6366f1)\"\n  }\n]"
+  },
+  {
+    "tool": "create_project",
+    "args": {
+      "icon": "z",
+      "path": "/a",
+      "name": "ok"
+    },
+    "data": {
+      "name": "ok",
+      "path": "/a",
+      "icon": "z"
+    }
+  },
+  {
+    "tool": "create_project",
+    "args": {
+      "name": "",
+      "path": ""
+    },
+    "error": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"name\"\n    ],\n    \"message\": \"Name must not be empty\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must not be empty\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must be absolute (start with /)\"\n  }\n]"
+  },
+  {
+    "tool": "update_workspace",
+    "args": {
+      "id": "w",
+      "order": 1.5
+    },
+    "error": "[\n  {\n    \"expected\": \"int\",\n    \"format\": \"safeint\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"order\"\n    ],\n    \"message\": \"Invalid input: expected int, received number\"\n  }\n]"
+  },
+  {
+    "tool": "update_workspace",
+    "args": {
+      "id": "w",
+      "order": -1
+    },
+    "error": "[\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 0,\n    \"inclusive\": true,\n    \"path\": [\n      \"order\"\n    ],\n    \"message\": \"Too small: expected number to be >=0\"\n  }\n]"
+  },
+  {
+    "tool": "update_workspace",
+    "args": {
+      "id": "w",
+      "order": 1e300
+    },
+    "error": "[\n  {\n    \"code\": \"too_big\",\n    \"maximum\": 9007199254740991,\n    \"note\": \"Integers must be within the safe integer range.\",\n    \"origin\": \"int\",\n    \"inclusive\": true,\n    \"path\": [\n      \"order\"\n    ],\n    \"message\": \"Too big: expected int to be <=9007199254740991\"\n  }\n]"
+  },
+  {
+    "tool": "update_workspace",
+    "args": {
+      "id": "w",
+      "order": "3"
+    },
+    "error": "[\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"order\"\n    ],\n    \"message\": \"Invalid input: expected number, received string\"\n  }\n]"
+  },
+  {
+    "tool": "read_session_output",
+    "args": {
+      "id": "s",
+      "lines": 0
+    },
+    "error": "[\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"lines\"\n    ],\n    \"message\": \"Too small: expected number to be >=1\"\n  }\n]"
+  },
+  {
+    "tool": "read_session_output",
+    "args": {
+      "id": "s",
+      "lines": 2000.5
+    },
+    "error": "[\n  {\n    \"expected\": \"int\",\n    \"format\": \"safeint\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"lines\"\n    ],\n    \"message\": \"Invalid input: expected int, received number\"\n  }\n]"
+  },
+  {
+    "tool": "reorder_sessions",
+    "args": {
+      "session_ids": []
+    },
+    "error": "[\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"session_ids\"\n    ],\n    \"message\": \"At least one session ID is required\"\n  }\n]"
+  },
+  {
+    "tool": "reorder_sessions",
+    "args": {
+      "session_ids": ["a", 1, ""]
+    },
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"session_ids\",\n      1\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"session_ids\",\n      2\n    ],\n    \"message\": \"ID must not be empty\"\n  }\n]"
+  },
+  {
+    "tool": "send_key",
+    "args": {
+      "id": "s",
+      "key": "😀😀😀😀😀😀😀😀😀😀x"
+    },
+    "data": {
+      "id": "s",
+      "key": "😀😀😀😀😀😀😀😀😀😀x"
+    }
+  },
+  {
+    "tool": "execute_workflow",
+    "args": {
+      "workflow_id": "w",
+      "inputs": {
+        "1": null,
+        "2": "x",
+        "b": 1,
+        "a": true
+      }
+    },
+    "error": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [\n      [\n        {\n          \"expected\": \"string\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected string, received null\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"number\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected number, received null\"\n        }\n      ],\n      [\n        {\n          \"expected\": \"boolean\",\n          \"code\": \"invalid_type\",\n          \"path\": [],\n          \"message\": \"Invalid input: expected boolean, received null\"\n        }\n      ]\n    ],\n    \"path\": [\n      \"inputs\",\n      \"1\"\n    ],\n    \"message\": \"Invalid input\"\n  }\n]"
+  },
+  {
+    "tool": "execute_workflow",
+    "args": {
+      "workflow_id": "w",
+      "inputs": []
+    },
+    "error": "[\n  {\n    \"expected\": \"record\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"inputs\"\n    ],\n    \"message\": \"Invalid input: expected record, received array\"\n  }\n]"
+  },
+  {
+    "tool": "list_tasks",
+    "args": {
+      "status": "nope",
+      "assigned_agent": 3
+    },
+    "error": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"todo\",\n      \"in_progress\",\n      \"in_review\",\n      \"done\",\n      \"cancelled\"\n    ],\n    \"path\": [\n      \"status\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"todo\\\"|\\\"in_progress\\\"|\\\"in_review\\\"|\\\"done\\\"|\\\"cancelled\\\"\"\n  },\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"claude\",\n      \"copilot\",\n      \"codex\",\n      \"opencode\",\n      \"gemini\"\n    ],\n    \"path\": [\n      \"assigned_agent\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"claude\\\"|\\\"copilot\\\"|\\\"codex\\\"|\\\"opencode\\\"|\\\"gemini\\\"\"\n  }\n]"
+  },
+  {
+    "tool": "create_workflow",
+    "args": {
+      "name": "W",
+      "trigger": {
+        "triggerType": "nope"
+      }
+    },
+    "error": "[\n  {\n    \"code\": \"invalid_union\",\n    \"errors\": [],\n    \"note\": \"No matching discriminator\",\n    \"discriminator\": \"triggerType\",\n    \"options\": [\n      \"manual\",\n      \"once\",\n      \"recurring\",\n      \"taskCreated\",\n      \"taskStatusChanged\",\n      \"sessionRestored\",\n      \"connectorPoll\",\n      \"webhook\"\n    ],\n    \"path\": [\n      \"trigger\",\n      \"triggerType\"\n    ],\n    \"message\": \"Invalid discriminator value. Expected 'manual' | 'once' | 'recurring' | 'taskCreated' | 'taskStatusChanged' | 'sessionRestored' | 'connectorPoll' | 'webhook'\"\n  }\n]"
+  },
+  {
+    "tool": "create_workflow",
+    "args": {
+      "name": "W",
+      "trigger": 5
+    },
+    "error": "[\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"object\",\n    \"path\": [\n      \"trigger\"\n    ],\n    \"message\": \"Invalid input: expected object, received number\"\n  }\n]"
+  },
+  {
+    "tool": "create_workflow",
+    "args": {
+      "name": "W",
+      "trigger": {
+        "triggerType": "manual",
+        "inputs": [
+          {
+            "key": "a",
+            "label": "A",
+            "type": "select"
+          },
+          {
+            "key": "a",
+            "label": "B",
+            "type": "number",
+            "defaultValue": "x"
+          }
+        ]
+      }
+    },
+    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"trigger\",\n      \"inputs\",\n      0,\n      \"options\"\n    ],\n    \"message\": \"select input \\\"a\\\" declares no options, so the run dialog could offer nothing\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"trigger\",\n      \"inputs\",\n      1,\n      \"defaultValue\"\n    ],\n    \"message\": \"default \\\"x\\\" for number input \\\"a\\\" is not a finite number\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"trigger\",\n      \"inputs\",\n      1,\n      \"key\"\n    ],\n    \"message\": \"duplicate input key \\\"a\\\" — only one value can survive under {{inputs.a}}\"\n  }\n]"
+  },
+  {
+    "tool": "create_workflow",
+    "args": {
+      "name": "W",
+      "trigger": {
+        "triggerType": "manual",
+        "inputs": [
+          {
+            "key": "a",
+            "label": "A",
+            "type": "boolean",
+            "defaultValue": "yes",
+            "zz": 1
+          }
+        ]
+      }
+    },
+    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"trigger\",\n      \"inputs\",\n      0,\n      \"defaultValue\"\n    ],\n    \"message\": \"default \\\"yes\\\" for boolean input \\\"a\\\" must be \\\"true\\\" or \\\"false\\\"\"\n  }\n]"
+  },
+  {
+    "tool": "create_workflow",
+    "args": {
+      "name": "W",
+      "trigger": {
+        "triggerType": "manual"
+      },
+      "actions": [
+        {
+          "agentType": "claude",
+          "projectName": "p",
+          "projectPath": "/p",
+          "outputSchema": {
+            "a": 1
+          }
+        }
+      ]
+    },
+    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"actions\",\n      0,\n      \"outputSchema\"\n    ],\n    \"message\": \"outputSchema requires headless: true\"\n  }\n]"
+  },
+  {
+    "tool": "create_workflow",
+    "args": {
+      "name": "W",
+      "nodes": [
+        {
+          "id": "l",
+          "type": "loop",
+          "label": "L",
+          "config": {
+            "mode": "repeat",
+            "bodyNodeIds": []
+          },
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "s",
+          "type": "script",
+          "label": "S",
+          "config": {},
+          "position": {
+            "x": 0
+          }
+        }
+      ],
+      "edges": []
+    },
+    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      0,\n      \"config\",\n      \"bodyNodeIds\"\n    ],\n    \"message\": \"Too small: expected array to have >=1 items\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      0,\n      \"config\",\n      \"maxIterations\"\n    ],\n    \"message\": \"a repeat loop needs maxIterations as a whole number from 1 to 10\"\n  },\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"nodes\",\n      1,\n      \"position\",\n      \"y\"\n    ],\n    \"message\": \"Invalid input: expected number, received undefined\"\n  }\n]"
+  },
+  {
+    "tool": "create_workflow",
+    "args": {
+      "name": "W",
+      "nodes": [
+        {
+          "id": "l",
+          "type": "loop",
+          "label": "L",
+          "config": {
+            "mode": "forEach",
+            "items": "  ",
+            "bodyNodeIds": ["s"]
+          },
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "a",
+          "type": "launchAgent",
+          "label": "A",
+          "config": {
+            "agentType": "claude",
+            "outputSchema": {}
+          },
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e",
+          "source": "l"
+        }
+      ]
+    },
+    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      0,\n      \"config\",\n      \"items\"\n    ],\n    \"message\": \"a forEach loop needs items: a template naming the list to walk\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      1,\n      \"config\",\n      \"projectName\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      1,\n      \"config\",\n      \"projectPath\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"edges\",\n      0,\n      \"target\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+  },
+  {
+    "tool": "create_workflow",
+    "args": {
+      "name": "W",
+      "nodes": [
+        {
+          "id": "t",
+          "type": "trigger",
+          "label": "T",
+          "config": {
+            "triggerType": "manual",
+            "inputs": "x"
+          },
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        },
+        {
+          "id": "c",
+          "type": "condition",
+          "label": "C",
+          "config": {},
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      ],
+      "edges": []
+    },
+    "error": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      0,\n      \"config\",\n      \"inputs\"\n    ],\n    \"message\": \"Invalid input: expected array, received string\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      1,\n      \"config\",\n      \"variable\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"nodes\",\n      1,\n      \"config\",\n      \"operator\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"equals\\\"|\\\"notEquals\\\"|\\\"contains\\\"|\\\"notContains\\\"|\\\"isEmpty\\\"|\\\"isNotEmpty\\\"\"\n  }\n]"
+  },
+  {
+    "tool": "update_workflow",
+    "args": {
+      "workflow_id": "w",
+      "nodes": [
+        {
+          "id": "n",
+          "type": "bogus",
+          "label": "N",
+          "config": {},
+          "position": {
+            "x": 0,
+            "y": 0
+          }
+        }
+      ]
+    },
+    "error": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"trigger\",\n      \"launchAgent\",\n      \"script\",\n      \"condition\",\n      \"approval\",\n      \"createTaskFromItem\",\n      \"callConnectorAction\",\n      \"httpRequest\",\n      \"loop\"\n    ],\n    \"path\": [\n      \"nodes\",\n      0,\n      \"type\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"trigger\\\"|\\\"launchAgent\\\"|\\\"script\\\"|\\\"condition\\\"|\\\"approval\\\"|\\\"createTaskFromItem\\\"|\\\"callConnectorAction\\\"|\\\"httpRequest\\\"|\\\"loop\\\"\"\n  }\n]"
+  },
+  {
+    "tool": "resolve_gate",
+    "args": {
+      "run_id": "r",
+      "decision": "changes",
+      "comments": [
+        {
+          "comment": ""
+        },
+        {
+          "quote": 1,
+          "comment": "x"
+        }
+      ]
+    },
+    "error": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"comments\",\n      0,\n      \"comment\"\n    ],\n    \"message\": \"Too small: expected string to have >=1 characters\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"comments\",\n      1,\n      \"quote\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+  },
+  {
+    "tool": "install_connector",
+    "args": {
+      "env": {
+        "A": 1,
+        "B": "b"
+      },
+      "sync_interval_minutes": 0
+    },
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"env\",\n      \"A\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"origin\": \"number\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"sync_interval_minutes\"\n    ],\n    \"message\": \"Too small: expected number to be >=1\"\n  }\n]"
+  },
+  {
+    "tool": "device_interact",
+    "args": {
+      "action": "tap",
+      "ref": ""
+    },
+    "error": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"ref\"\n    ],\n    \"message\": \"Value must not be empty\"\n  }\n]"
+  },
+  {
+    "tool": "device_list",
+    "args": null,
+    "error": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+  },
+  {
+    "tool": "device_list",
+    "args": {
+      "x": 1
+    },
+    "data": {}
+  },
+  {
+    "tool": "describe_workflow_nodes",
+    "args": {
+      "types": ["loop", "nope"]
+    },
+    "error": "[\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"trigger\",\n      \"launchAgent\",\n      \"script\",\n      \"condition\",\n      \"approval\",\n      \"createTaskFromItem\",\n      \"callConnectorAction\",\n      \"httpRequest\",\n      \"loop\"\n    ],\n    \"path\": [\n      \"types\",\n      1\n    ],\n    \"message\": \"Invalid option: expected one of \\\"trigger\\\"|\\\"launchAgent\\\"|\\\"script\\\"|\\\"condition\\\"|\\\"approval\\\"|\\\"createTaskFromItem\\\"|\\\"callConnectorAction\\\"|\\\"httpRequest\\\"|\\\"loop\\\"\"\n  }\n]"
+  },
+  {
+    "tool": "run_connector_action",
+    "args": {
+      "connection_id": "c",
+      "action": "a",
+      "args": {
+        "2": 3,
+        "10": 2,
+        "z": 1
+      }
+    },
+    "data": {
+      "connection_id": "c",
+      "action": "a",
+      "args": {
+        "2": 3,
+        "10": 2,
+        "z": 1
+      }
+    }
+  },
+  {
+    "tool": "list_connections",
+    "args": {
+      "connector_id": [],
+      "failing_only": true
+    },
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"Invalid input: expected string, received array\"\n  },\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"ID must not be empty\"\n  }\n]"
+  },
+  {
+    "tool": "list_connections",
+    "args": {
+      "connector_id": 7
+    },
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+  },
+  {
+    "tool": "list_connections",
+    "args": {
+      "connector_id": {
+        "length": 0
+      }
+    },
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"Invalid input: expected string, received object\"\n  },\n  {\n    \"origin\": \"unknown\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"connector_id\"\n    ],\n    \"message\": \"ID must not be empty\"\n  }\n]"
+  },
+  {
+    "tool": "create_project",
+    "args": {
+      "name": [],
+      "path": ""
+    },
+    "error": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"name\"\n    ],\n    \"message\": \"Invalid input: expected string, received array\"\n  },\n  {\n    \"origin\": \"array\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"name\"\n    ],\n    \"message\": \"Name must not be empty\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must not be empty\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"path\"\n    ],\n    \"message\": \"Path must be absolute (start with /)\"\n  }\n]"
+  },
+  {
+    "tool": "reorder_sessions",
+    "args": {
+      "session_ids": ""
+    },
+    "error": "[\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"session_ids\"\n    ],\n    \"message\": \"Invalid input: expected array, received string\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"session_ids\"\n    ],\n    \"message\": \"At least one session ID is required\"\n  }\n]"
+  }
+]

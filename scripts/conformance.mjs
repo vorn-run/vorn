@@ -27,7 +27,9 @@ const FILES = [
   'tests/js-reference.test.ts',
   'tests/native-server-git.test.ts',
   'tests/native-server-agents.test.ts',
-  'tests/native-server-connectors.test.ts'
+  'tests/native-server-connectors.test.ts',
+  'tests/native-server-mcp.test.ts',
+  'tests/native-cli.test.ts'
 ]
 
 function run(command, args, env = process.env) {

@@ -1,0 +1,21 @@
+[package]
+name = "vorn-reach"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Who may reach a Vorn server and how: Origin checks, device tokens, pairing a phone, Tailscale status and the addresses a browser can use"
+
+[dependencies]
+data-encoding = "2"
+getrandom = "0.4"
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis"] }
