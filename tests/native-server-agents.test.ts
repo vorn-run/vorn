@@ -408,6 +408,22 @@ function writeStore(file: string): void {
 
 const ENV_KEYS = ['HOME', 'XDG_DATA_HOME', 'PATH', 'SHELL'] as const
 
+/**
+ * Both sides read each shell's `--version`, giving PowerShell six seconds.
+ * A cold PowerShell on a CI runner can take longer, and then only the side
+ * that asked first goes without a version; one warm start first keeps the
+ * two answers about the machine, not about which side asked first.
+ */
+function warmPowerShell(): void {
+  for (const name of ['pwsh', 'powershell']) {
+    try {
+      execFileSync(name, ['--version'], { stdio: 'ignore', timeout: 30_000 })
+    } catch {
+      // Not installed, which both sides see alike.
+    }
+  }
+}
+
 let serverPort: number
 let closeServer: () => Promise<void>
 let native: Vornd | undefined
@@ -429,6 +445,7 @@ describe.skipIf(!runnable)(
       process.env.XDG_DATA_HOME = path.join(fx.home, '.local', 'share')
       process.env.PATH = `${tools.bin}${path.delimiter}${process.env.PATH ?? ''}`
       process.env.SHELL = tools.shell
+      warmPowerShell()
 
       process.env.SECRET_VORN_BOOTSTRAP_TOKEN = TEST_CREDENTIAL
       const { startServer } = await import('../packages/server/src/index')
