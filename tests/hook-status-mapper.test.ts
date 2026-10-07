@@ -6,7 +6,10 @@ const mockLinkHookSession = vi.fn()
 
 vi.mock('../packages/server/src/pty-manager', () => ({
   ptyManager: {
-    findUnlinkedSessionByCwd: (...args: unknown[]) => mockFindUnlinked(...args),
+    findUnlinkedSessionsByCwd: (...args: unknown[]) => {
+      const found = mockFindUnlinked(...args)
+      return found ? [found] : []
+    },
     getActiveSessions: () => mockGetActiveSessions(),
     linkHookSession: (id: string, hookSessionId: string) => mockLinkHookSession(id, hookSessionId)
   }

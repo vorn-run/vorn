@@ -1414,14 +1414,16 @@ class PtyManager extends EventEmitter {
   }
 
   /**
-   * Finds the most-recently-created terminal matching cwd that:
-   * - is NOT already linked to a Claude session (no hookSessionId)
-   * - is NOT in the excludeIds set (already claimed by another session_id)
+   * The terminals matching cwd, most recently created first, that:
+   * - are NOT already linked to a Claude session (no hookSessionId)
+   * - are NOT in the excludeIds set (already claimed by another session_id)
+   *
+   * All of them rather than the newest, so a caller can tell a guess between
+   * several from a single match.
    */
-  findUnlinkedSessionByCwd(cwd: string, excludeIds: Set<string>): TerminalSession | undefined {
+  findUnlinkedSessionsByCwd(cwd: string, excludeIds: Set<string>): TerminalSession[] {
     const normalizedCwd = normalizePath(cwd)
-    let best: TerminalSession | undefined
-    let bestTime = 0
+    const found: TerminalSession[] = []
 
     for (const session of this.sessions.values()) {
       if (session.hookSessionId) continue // already linked
@@ -1429,13 +1431,10 @@ class PtyManager extends EventEmitter {
       const sessionPath =
         this.normalizedPaths.get(session.id) ??
         normalizePath(session.worktreePath || session.projectPath)
-      if (sessionPath === normalizedCwd && session.createdAt > bestTime) {
-        best = session
-        bestTime = session.createdAt
-      }
+      if (sessionPath === normalizedCwd) found.push(session)
     }
 
-    return best
+    return found.sort((a, b) => b.createdAt - a.createdAt)
   }
 }
 
