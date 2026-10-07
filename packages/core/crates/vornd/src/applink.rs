@@ -69,6 +69,8 @@ pub struct AppLink {
     /// Whether vornd answers the clients' `terminal:create` and the rest
     /// itself, which `vornd:hello` tells the server.
     terminals: AtomicBool,
+    /// The same for `headless:create` and `headless:kill`.
+    headless: AtomicBool,
     closing: Mutex<Closing>,
     /// The conversations being started, by vornd's creates and the
     /// server's own starts alike.
@@ -86,6 +88,7 @@ impl Default for AppLink {
             server_host: Mutex::new(None),
             reached: Notify::new(),
             terminals: AtomicBool::new(false),
+            headless: AtomicBool::new(false),
             closing: Mutex::new(Closing::Open),
             claims: Claims::default(),
             spawns: Mutex::new(VecDeque::new()),
@@ -146,6 +149,15 @@ impl AppLink {
 
     pub fn creates_terminals(&self) -> bool {
         self.terminals.load(Ordering::Acquire)
+    }
+
+    /// vornd answers the calls that start and stop headless agents.
+    pub fn set_creates_headless(&self) {
+        self.headless.store(true, Ordering::Release);
+    }
+
+    pub fn creates_headless(&self) -> bool {
+        self.headless.load(Ordering::Acquire)
     }
 
     /// What the server said of its winding down.

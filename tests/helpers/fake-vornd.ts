@@ -46,6 +46,8 @@ export class FakeVornd {
   statuses = false
   /** Whether `vornd:hello` says vornd creates and changes terminals itself. */
   terminals = false
+  /** Whether `vornd:hello` says vornd starts and stops headless agents itself. */
+  headless = false
   /** What `vornd:claim` answers as the holder: null for a claim taken. */
   claimHolder: string | null = null
   /** What `vornd:registry` answers. */
@@ -134,7 +136,8 @@ export class FakeVornd {
         build: 'test',
         ...(this.native && { native: true }),
         ...(this.statuses && { statuses: true }),
-        ...(this.terminals && { terminals: true })
+        ...(this.terminals && { terminals: true }),
+        ...(this.headless && { headless: true })
       }
     } else if (msg.method === 'vornd:claim') result = { holder: this.claimHolder }
     else if (msg.method === 'vornd:registry') result = this.registry

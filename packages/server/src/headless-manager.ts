@@ -23,28 +23,89 @@ import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import log from './logger'
 import { holdWorkspace } from './workspace-holds'
 import { isDraining, DRAINING_MESSAGE } from './draining'
-import { vorndSessions, type VorndPty } from './vornd-sessions'
+import { vorndSessions, type SessionNote, type VorndPty } from './vornd-sessions'
 import { sessionFeed } from './session-feed'
 
 const MAX_OUTPUT_LINES = 1000
 const FORCE_KILL_DELAY_MS = 5000
 
+/**
+ * The headless agents: started on pipes in vornd's session holder, their
+ * output read here for the clients and the workflow waiting on each.
+ *
+ * With the Native server switch on (`vorndSessions.createsHeadless`), vornd
+ * answers the clients' `headless:create` and `headless:kill` itself and tells
+ * this server the record through its copy of the registry (`fromVornd`); the
+ * agent is then followed here as one this server started. How an agent ended
+ * is read from its session by vornd and mirrored here, and told once, after
+ * the last of its output, as every exit is.
+ */
 class HeadlessManager extends EventEmitter {
   /** Agents running in vornd: they outlive this server. */
   private inVornd = new Map<string, VorndPty>()
   private sessions = new Map<string, HeadlessSession>()
   private outputBuffers = new Map<string, string[]>()
+  /** Agents whose exit has been acted on, until their records go. */
+  private ended = new Set<string>()
   private agentCommands: Record<AiAgentType, AgentCommandConfig> = { ...DEFAULT_AGENT_COMMANDS }
 
   constructor() {
     super()
     sessionFeed.setHeadlessSource(() => this.getActiveSessions())
+    vorndSessions.on('native', (note: SessionNote) => this.fromVornd(note))
   }
 
   /** Tell vornd's copy of the registry what this record is now (`session-feed`). */
   private recordChanged(id: string): void {
     const session = this.sessions.get(id)
-    if (session) sessionFeed.headless(session)
+    if (session) sessionFeed.headless(session, session.status === 'exited')
+  }
+
+  /**
+   * A change vornd made itself, for a client's call: an agent it started,
+   * whose program is up or could not start, and how one ended. Followed as
+   * this server's own starts are, so clients and workflows are told alike.
+   */
+  private fromVornd(note: SessionNote): void {
+    if (note.kind !== 'headless' || note.op !== 'upsert' || !note.record) return
+    if (!vorndSessions.createsHeadless()) return
+    const record = note.record as HeadlessSession
+    if (note.created) this.adoptCreated(record)
+    const agent = this.inVornd.get(record.id)
+    if (note.started) agent?.started(note.started.pid, note.started.epoch)
+    if (note.failed !== undefined) {
+      log.warn({ id: record.id, why: note.failed }, '[headless] vornd could not start this agent')
+      agent?.finish(1)
+    }
+    if (record.status === 'exited') this.endedInVornd(record)
+  }
+
+  /**
+   * An agent vornd started for a client, taken on as `createHeadless` takes on
+   * one this server starts: its output read, its record held, and told as created.
+   */
+  private adoptCreated(record: HeadlessSession): void {
+    if (this.sessions.has(record.id)) return
+    // vornd's revision and stamps are its copy's, not this server's record.
+    const session: HeadlessSession & { rev?: unknown; exitAt?: unknown } = { ...record }
+    delete session.rev
+    delete session.exitAt
+    log.info(`[headless] vornd launched ${session.id}: ${session.launchCommand ?? ''}`)
+    this.follow(session, vorndSessions.follow(session.id, true))
+    this.emit('session-created', session)
+  }
+
+  /**
+   * vornd read the agent's exit from its session: the record takes it as vornd
+   * told it. The exit itself is told when the last of the output has been read.
+   */
+  private endedInVornd(record: HeadlessSession): void {
+    const session = this.sessions.get(record.id)
+    if (!session || session.status !== 'running') return
+    session.status = 'exited'
+    session.exitCode = record.exitCode
+    session.endedAt = record.endedAt
+    this.recordChanged(record.id)
   }
 
   setAgentCommands(overrides?: Partial<Record<AiAgentType, AgentCommandConfig>>): void {
@@ -181,11 +242,6 @@ class HeadlessManager extends EventEmitter {
       ...(agentSessionId ? { agentSessionId } : {}),
       launchCommand
     }
-    const output = (data: string): void => {
-      this.appendOutput(id, data)
-      this.emit('client-message', IPC.HEADLESS_DATA, { id, data })
-    }
-
     // On pipes in vornd's session holder, not a terminal: some agents behave
     // differently on a TTY, and the prompt goes in on stdin, which then closes.
     // What `shell: true` would run on Windows, spelled out: vornd takes an argv.
@@ -195,6 +251,13 @@ class HeadlessManager extends EventEmitter {
     const agent = vorndSessions.spawn(id, { argv, cwd: effectivePath, env, piped: true }, true)
     if (spawnArgs.stdin != null) agent.write(spawnArgs.stdin)
     agent.closeStdin()
+    this.follow(session, agent)
+    return session
+  }
+
+  /** Keep `session`'s record and read its program's output and exit from `agent`. */
+  private follow(session: HeadlessSession, agent: VorndPty): void {
+    const id = session.id
     this.inVornd.set(id, agent)
     this.outputBuffers.set(id, [])
     this.sessions.set(id, session)
@@ -203,37 +266,47 @@ class HeadlessManager extends EventEmitter {
       session.pid = pid
       this.recordChanged(id)
     })
-    agent.onData(output)
+    agent.onData((data: string) => {
+      this.appendOutput(id, data)
+      this.emit('client-message', IPC.HEADLESS_DATA, { id, data })
+    })
     agent.onExit(({ exitCode, repeated }) => {
       this.inVornd.delete(id)
       sessionFeed.exitAt('headless', id, agent.exitAt ?? null)
       this.exited(id, exitCode, repeated)
     })
-    return session
   }
 
   /**
    * The agent ended. Told once to the windows and the workflow waiting on it;
    * an exit told again after vornd restarted (`repeated`) was told the first
    * time, and running the workflow's next step twice is the one thing a
-   * receipt is for.
+   * receipt is for. How it ended is what vornd's copy says of it, when vornd
+   * read the exit itself (`endedInVornd`); else what the exit said.
    */
   private exited(id: string, exitCode: number | undefined, repeated = false): void {
     const sess = this.sessions.get(id)
-    if (!sess || sess.status !== 'running') return
+    if (!sess || this.ended.has(id)) return
+    this.ended.add(id)
     log.info(`[headless] process ${id} exited with code ${exitCode}`)
-    sess.status = 'exited'
-    sess.exitCode = exitCode
-    sess.endedAt = Date.now()
-    this.recordChanged(id)
+    if (sess.status === 'running') {
+      const copy = vorndSessions.createsHeadless()
+        ? vorndSessions.mirror.headlessRecord(id)
+        : undefined
+      sess.status = 'exited'
+      sess.exitCode = copy?.status === 'exited' ? copy.exitCode : exitCode
+      sess.endedAt = copy?.status === 'exited' ? copy.endedAt : Date.now()
+      this.recordChanged(id)
+    }
     if (!repeated) {
-      this.emit('client-message', IPC.HEADLESS_EXIT, { id, exitCode: exitCode ?? 1 })
+      this.emit('client-message', IPC.HEADLESS_EXIT, { id, exitCode: sess.exitCode ?? 1 })
     }
     // Clean up output buffer and session after a short delay to allow
     // final reads from the renderer, preventing unbounded memory growth.
     setTimeout(() => {
       this.outputBuffers.delete(id)
       this.sessions.delete(id)
+      this.ended.delete(id)
       sessionFeed.remove('headless', id)
     }, 30_000)
   }
@@ -291,6 +364,7 @@ class HeadlessManager extends EventEmitter {
     for (const id of this.sessions.keys()) sessionFeed.remove('headless', id)
     this.sessions.clear()
     this.outputBuffers.clear()
+    this.ended.clear()
   }
 
   private appendOutput(id: string, data: string): void {

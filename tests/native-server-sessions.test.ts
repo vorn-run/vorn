@@ -28,7 +28,12 @@ import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '../packages/shared/src/prot
 import type { HeadlessSession, TerminalSession } from '../packages/shared/src/types'
 import type { SessionMirror as Mirror } from '../packages/server/src/vornd-sessions'
 import { spawnsRealServers } from './helpers/one-at-a-time'
-import { normalizeRun, withoutHookLinks, type RunDirs } from './helpers/sessions-parity'
+import {
+  normalizeRun,
+  outputWhole,
+  withoutHookLinks,
+  type RunDirs
+} from './helpers/sessions-parity'
 
 const TEST_CREDENTIAL = 'native-server-sessions-credential'
 const GROUPS = 'terminal=shadow,shell=shadow,headless=shadow,worktree=shadow'
@@ -136,7 +141,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
   let direct: Client
   let through: Client
   let vorndPort: number
-  let work: { projA: string; projC: string; wt: string; agent: string; ends: string }
+  let work: { projA: string; projC: string; wt: string; agent: string }
   let server: {
     ptyManager: typeof import('../packages/server/src/pty-manager').ptyManager
     headlessManager: typeof import('../packages/server/src/headless-manager').headlessManager
@@ -255,18 +260,18 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
       projA: path.join(base, 'proj-a'),
       projC: path.join(base, 'proj-c'),
       wt: path.join(base, 'wt-a'),
-      agent: path.join(base, 'bin', 'fake-agent'),
-      ends: path.join(base, 'bin', 'fake-headless')
+      agent: path.join(base, 'bin', 'fake-agent')
     }
     for (const dir of [work.projA, work.projC, work.wt, path.dirname(work.agent)]) {
       fs.mkdirSync(dir, { recursive: true })
     }
-    // An agent that says nothing and waits; a headless one that reads its
-    // prompt, prints and ends.
-    fs.writeFileSync(work.agent, '#!/bin/sh\nexec sleep 600\n', { mode: 0o755 })
-    fs.writeFileSync(work.ends, '#!/bin/sh\ncat >/dev/null\necho done\nexit 3\n', {
-      mode: 0o755
-    })
+    // An agent that says nothing and waits on a terminal; headless, on pipes,
+    // it reads its prompt, prints and ends.
+    fs.writeFileSync(
+      work.agent,
+      '#!/bin/sh\nif [ -t 0 ]; then exec sleep 600; fi\ncat >/dev/null\necho done\nexit 3\n',
+      { mode: 0o755 }
+    )
 
     const { startServer } = await import('../packages/server/src/index')
     const origWrite = process.stdout.write.bind(process.stdout)
@@ -304,12 +309,15 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     })
     expect((await counts()).terminal?.mode).toBe('shadow')
     through = await Client.open(vorndPort)
-    const agents = {
-      claude: { command: work.agent, args: [] },
-      copilot: { command: work.agent, args: [] }
-    }
-    server.ptyManager.setAgentCommands(agents)
-    server.headlessManager.setAgentCommands({ claude: { command: work.ends, args: [] } })
+    // Saved, not set in place: vornd reads the agents' commands from the database.
+    const config = await direct.result<Record<string, unknown>>('config:load')
+    await direct.result('config:save', {
+      ...config,
+      agentCommands: {
+        claude: { command: work.agent, args: [] },
+        copilot: { command: work.agent, args: [] }
+      }
+    })
   }, 60_000)
 
   afterAll(async () => {
@@ -449,6 +457,8 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
         server.headlessManager.getActiveSessions().find((s) => s.id === agent.id)?.status ===
         'exited'
     )
+    // Its create was compared too, as the spawn each side would ask for.
+    made.headless++
     await compare([work.wt])
 
     // And the comparison can fail: a record changed in place without telling
@@ -467,10 +477,17 @@ spawnsRealServers()
 
 const AGENTS = ['claude', 'codex', 'copilot', 'gemini', 'opencode'] as const
 
-/** A stub agent: it says what it was started with, and waits. */
+/**
+ * A stub agent: it says what it was started with, and waits. Headless, on
+ * pipes, it reads its prompt and says it, waits if told to, and ends with 3.
+ */
 const ARGV_AGENT = `#!/bin/sh
 printf 'ARGV:%s\\n' "$*"
-exec sleep 600
+if [ -t 0 ]; then exec sleep 600; fi
+p=$(cat)
+printf 'PROMPT:%s\\n' "$p"
+case "$p" in *wait*) sleep 600;; esac
+exit 3
 `
 
 /** A client of one server that keeps every notification it is told. */
@@ -791,6 +808,53 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     const shellC = await created('shell after a close', 'shell:create', path.join(work, 'claude'))
     await live([shellC])
 
+    // A headless agent of every kind, each run to its end, and one stopped.
+    const headless: Record<string, string> = {}
+    for (const agent of AGENTS) {
+      headless[agent] = await created(`headless ${agent}`, 'headless:create', {
+        agentType: agent,
+        projectName: agent,
+        projectPath: path.join(work, agent),
+        initialPrompt: `print the ${agent} parity\nline two`,
+        workflowId: 'wf-1',
+        workflowName: 'Parity'
+      })
+    }
+    const stopped = await created('headless to stop', 'headless:create', {
+      agentType: 'claude',
+      projectName: 'claude',
+      projectPath: path.join(work, 'claude'),
+      displayName: 'Waits',
+      initialPrompt: 'wait here'
+    })
+    const headlessEnded = async (ids: string[]): Promise<void> => {
+      await until('the headless agents to end', async () => {
+        const all = await direct.result<HeadlessSession[]>('headless:list')
+        const exits = direct.toldBy('headless:exit') as { id: string }[]
+        return ids.every(
+          (id) =>
+            all.find((s) => s.id === id)?.status === 'exited' && exits.some((e) => e.id === id)
+        )
+      })
+    }
+    await headlessEnded(Object.values(headless))
+    // Stopped once it has said its prompt: a stop can reach an agent before it prints.
+    await until('the waiting agent to say its prompt', () =>
+      direct
+        .toldBy('headless:data')
+        .some(
+          (p) =>
+            (p as { id: string; data: string }).id === stopped &&
+            /wait here/.test((p as { data: string }).data)
+        )
+    )
+    await call('stop a headless agent', 'headless:kill', stopped)
+    await headlessEnded([stopped])
+    await call('stop one that ended', 'headless:kill', headless.claude)
+    await call('stop one that is not there', 'headless:kill', 'no-such-agent')
+    const agentsListed = await direct.result<HeadlessSession[]>('headless:list')
+    const byAgent = { ...headless, stopped }
+
     // Settled: the registry stops changing.
     let last = ''
     let since = Date.now()
@@ -811,19 +875,34 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
       native: groups[group]?.native,
       forwarded: groups[group]?.forwarded
     })
+    const exits = toldOf('headless:exit') as { id: string; exitCode: number }[]
+    const exitsTold = toldOf('terminal:exit').map((p) => (p as { id: string }).id)
+    const heardThrough = through.toldBy('terminal:exit').map((p) => (p as { id: string }).id)
     return {
-      answeredBy: { terminal: by('terminal'), shell: by('shell') },
+      answeredBy: { terminal: by('terminal'), shell: by('shell'), headless: by('headless') },
       replies: withoutHookLinks(replies),
       argv,
       listed: await listed(),
+      agentsListed: Object.fromEntries(
+        Object.entries(byAgent).map(([name, id]) => [name, agentsListed.find((s) => s.id === id)])
+      ),
+      agentsOutput: outputWhole(toldOf('headless:data') as { id: string; data: string }[], byAgent),
+      agentsExits: Object.fromEntries(
+        Object.entries(byAgent).map(([name, id]) => [name, exits.find((e) => e.id === id)])
+      ),
       told: {
         created: toldOf('session:created'),
         reordered: toldOf('session:reordered'),
         cleanup: toldOf('worktree:confirmCleanup'),
         // In the order they were closed: each waited for the one before.
-        exits: toldOf('terminal:exit').map((p) => (p as { id: string }).id),
-        // As a client through vornd hears them: once each, whoever tells it.
-        exitsThrough: through.toldBy('terminal:exit').map((p) => (p as { id: string }).id),
+        exits: exitsTold,
+        // As a client through vornd hears them: once each, whoever tells it,
+        // in an order of its own, so listed in the server's.
+        exitsThrough: {
+          once: new Set(heardThrough).size === heardThrough.length,
+          ids: exitsTold.filter((id) => heardThrough.includes(id)),
+          unheard: exitsTold.filter((id) => !heardThrough.includes(id))
+        },
         renamed: toldOf('session:updated')
           .map((p) => p as TerminalSession)
           .filter((s) => s.displayName === 'Build' || s.groupId === 'group-1')
@@ -873,22 +952,36 @@ describe.skipIf(!runnable)('the terminals vornd creates and changes, against the
     expect(off.told.cleanup).toHaveLength(1)
     expect(runs.off?.answeredBy).toEqual({
       terminal: { native: 0, forwarded: 19 },
-      shell: { native: 0, forwarded: 3 }
+      shell: { native: 0, forwarded: 3 },
+      headless: { native: 0, forwarded: 9 }
     })
+    const exits = runs.off as { agentsExits: Record<string, { exitCode: number }> }
+    expect(Object.values(exits.agentsExits).map((e) => e.exitCode)).toEqual([3, 3, 3, 3, 3, 143])
   })
 
   it('has vornd answer them with the switch on, and the server what is its own', () => {
     // Refused by the server in its words: a card that is not there, a
     // duplicate in an order, one missing from it; and a close of a card that
     // is not there, which the server tells clients of anyway.
+    // A stop of an agent the registry does not hold is the server's, which
+    // answers nothing for it too.
     expect(runs.on?.answeredBy).toEqual({
       terminal: { native: 15, forwarded: 4 },
-      shell: { native: 3, forwarded: 0 }
+      shell: { native: 3, forwarded: 0 },
+      headless: { native: 8, forwarded: 1 }
     })
   })
 
   it('answers, starts, tells and lists the same with the switch on', () => {
-    for (const part of ['replies', 'argv', 'told', 'listed'] as const) {
+    for (const part of [
+      'replies',
+      'argv',
+      'told',
+      'listed',
+      'agentsListed',
+      'agentsOutput',
+      'agentsExits'
+    ] as const) {
       expect([part, runs.on?.[part]]).toEqual([part, runs.off?.[part]])
     }
   })

@@ -20,9 +20,10 @@
 //!   two answers are compared when both are in ([`Conn::on_server_text`]),
 //!   and a difference is logged with the method and counted. The client
 //!   never sees vornd's answer. A create (`terminal:create`,
-//!   `shell:create`) is not run twice either; what vornd would start for
-//!   it is worked out instead ([`sessions::plan`]) and compared with the
-//!   spawn the server asks for and the record it answers.
+//!   `shell:create`, `headless:create`) is not run twice either; what
+//!   vornd would start for it is worked out instead ([`sessions::plan`])
+//!   and compared with the spawn the server asks for and the record it
+//!   answers.
 //!
 //! The work runs on blocking threads, at most [`MAX_CONCURRENT`] at a time,
 //! and the calls that change a repository take turns per repository
@@ -39,6 +40,7 @@ pub mod connection;
 pub mod env;
 pub mod file;
 pub mod git;
+pub mod headless;
 pub mod ide;
 pub mod mcp;
 pub mod reach;
@@ -130,8 +132,8 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("shell:listInstalled", Effect::Read),
     // Answered from the copy of the server's records ([`crate::registry`]),
     // which vornd changes itself for the calls that change a terminal
-    // ([`sessions`]); the headless and worktree reads in shadow mode only
-    // ([`crate::groups::SHADOW_GROUPS`]).
+    // ([`sessions`]) or start and stop a headless agent ([`headless`]);
+    // the worktree read in shadow mode only ([`crate::groups::SHADOW_GROUPS`]).
     ("terminal:listActive", Effect::Read),
     ("terminal:create", Effect::Change),
     ("terminal:kill", Effect::Change),
@@ -140,6 +142,8 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("terminal:reorder", Effect::Change),
     ("shell:create", Effect::Change),
     ("headless:list", Effect::Read),
+    ("headless:create", Effect::Change),
+    ("headless:kill", Effect::Change),
     ("worktree:activeSessions", Effect::Read),
 ];
 
@@ -534,6 +538,7 @@ impl Native {
             Some("terminal") if method != "terminal:listActive" => {
                 sessions::call(self, method, params)
             }
+            Some("headless") if method != "headless:list" => headless::call(self, method, params),
             Some("terminal" | "headless" | "worktree") => self.sessions(method, params),
             Some("shell") => match method {
                 "shell:listExecutables" => Answer::Result(self.shells.executables(&self.env)),

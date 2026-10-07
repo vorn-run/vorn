@@ -1216,9 +1216,10 @@ impl crate::native::sessions::Host for EngineHost {
         &self,
         spec: SpawnSpec,
         name: String,
-        typed: Option<Vec<u8>>,
+        input: crate::native::sessions::Input,
         then: crate::native::sessions::Then,
     ) {
+        use crate::native::sessions::Input;
         let engine = Arc::clone(&self.engine);
         let asked = tokio::time::Instant::now();
         self.runtime.spawn(async move {
@@ -1228,10 +1229,23 @@ impl crate::native::sessions::Host for EngineHost {
                         pid: s.pid,
                         epoch: s.epoch,
                     }));
-                    if let Some(bytes) = typed {
-                        tokio::time::sleep_until(asked + crate::native::sessions::TYPE_AFTER).await;
-                        if let Err(err) = engine.write(&s.id, bytes) {
-                            warn!(id = %s.id, %err, "could not type the agent's launch line");
+                    match input {
+                        Input::None => {}
+                        Input::Typed(bytes) => {
+                            tokio::time::sleep_until(asked + crate::native::sessions::TYPE_AFTER)
+                                .await;
+                            if let Err(err) = engine.write(&s.id, bytes) {
+                                warn!(id = %s.id, %err, "could not type the agent's launch line");
+                            }
+                        }
+                        Input::Prompt(prompt) => {
+                            let written = match prompt {
+                                Some(bytes) => engine.write(&s.id, bytes),
+                                None => Ok(()),
+                            };
+                            if let Err(err) = written.and_then(|()| engine.close_stdin(&s.id)) {
+                                warn!(id = %s.id, %err, "could not give the agent its prompt");
+                            }
                         }
                     }
                 }
@@ -1244,6 +1258,16 @@ impl crate::native::sessions::Host for EngineHost {
         if let Err(err) = self.engine.signal(id, sig) {
             debug!(%id, %err, "could not signal a session vornd closed");
         }
+    }
+
+    fn signal_after(&self, id: &str, sig: Sig, after: Duration) {
+        let engine = Arc::clone(&self.engine);
+        let id = id.to_owned();
+        self.runtime.spawn(async move {
+            tokio::time::sleep(after).await;
+            // One that ended meanwhile is not there to signal: nothing to say.
+            let _ = engine.signal(&id, sig);
+        });
     }
 }
 
@@ -1269,6 +1293,9 @@ async fn follow_statuses(engine: Arc<Engine>, mut events: broadcast::Receiver<Ev
                 Ok(Event::Effect(fx, Effect::Status(code))) => {
                     registry.screen_status(&fx.session, code, Stamp::from(&fx));
                 }
+                Ok(Event::Effect(fx, Effect::Exit { code, signal })) => {
+                    registry.headless_exit(&fx.session, ended_with(code, signal), Stamp::from(&fx));
+                }
                 Ok(Event::Activity(session)) => {
                     let head = engine.head_stamp(&session);
                     registry.activity(&session, head, tokio::time::Instant::now());
@@ -1284,6 +1311,10 @@ async fn follow_statuses(engine: Arc<Engine>, mut events: broadcast::Receiver<Ev
                         if let Some(s) = h.status {
                             registry.screen_status(&h.session, s.value, Stamp::from(&s.id));
                         }
+                        if let Some(e) = h.exit {
+                            let (code, signal) = e.value;
+                            registry.headless_exit(&h.session, ended_with(code, signal), Stamp::from(&e.id));
+                        }
                     }
                 }
                 Err(broadcast::error::RecvError::Closed) => return,
@@ -1293,6 +1324,12 @@ async fn follow_statuses(engine: Arc<Engine>, mut events: broadcast::Receiver<Ev
             }
         }
     }
+}
+
+/// A headless record's exit code, as the server reads the exit effect
+/// ([`crate::streams::exit_code`]).
+fn ended_with(code: Option<i32>, signal: Option<i32>) -> i32 {
+    i32::try_from(crate::streams::exit_code(code, signal)).unwrap_or(i32::MAX)
 }
 
 /// Sleeps until `at`; never resolves for `None`.
