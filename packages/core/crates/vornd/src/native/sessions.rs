@@ -1115,7 +1115,16 @@ fn plan_json(
     plan_of(argv, cwd, keys, &record_json(record))
 }
 
-/// A plan from its parts, the environment's names sorted.
+/// What a minted conversation id reads as in a plan, wherever it appears.
+const MINTED: &str = "<agentSessionId>";
+
+/// The conversation id `record` was given, when it was given one.
+fn minted(record: &Value) -> Option<&str> {
+    given(record.get("agentSessionId").and_then(Value::as_str))
+}
+
+/// A plan from its parts, the environment's names sorted, and the minted
+/// conversation id the same on both sides.
 pub(super) fn plan_of(
     argv: Vec<String>,
     cwd: &str,
@@ -1124,6 +1133,10 @@ pub(super) fn plan_of(
 ) -> Value {
     keys.sort();
     keys.dedup();
+    let argv: Vec<String> = match minted(record) {
+        Some(id) => argv.iter().map(|a| a.replace(id, MINTED)).collect(),
+        None => argv,
+    };
     json!({
         "argv": argv,
         "cwd": cwd,
@@ -1151,11 +1164,12 @@ pub fn plan_record(record: &Value) -> Value {
             ) {
                 continue;
             }
-            // Minted for an agent that pins one: only that there is one.
-            let v = if k == "agentSessionId" {
-                json!(true)
-            } else {
-                v.clone()
+            // Minted for an agent that pins one: only that there is one,
+            // and the same wherever the launch names it.
+            let v = match (k.as_str(), v.as_str(), minted(record)) {
+                ("agentSessionId", _, _) => json!(true),
+                ("launchCommand", Some(line), Some(id)) => json!(line.replace(id, MINTED)),
+                _ => v.clone(),
             };
             kept.insert(k.clone(), v);
         }
@@ -1165,20 +1179,14 @@ pub fn plan_record(record: &Value) -> Value {
 
 /// A spawn as the server asked vornd for it, as a plan is compared.
 pub fn spawn_plan(spawn: &Value, reply: &Value) -> Value {
-    let argv = spawn.get("argv").cloned().unwrap_or(Value::Null);
-    let cwd = spawn.get("cwd").cloned().unwrap_or(Value::Null);
-    let mut keys: Vec<String> = spawn
+    let argv = spawn.get("argv").and_then(strings).unwrap_or_default();
+    let cwd = spawn.get("cwd").and_then(Value::as_str).unwrap_or_default();
+    let keys: Vec<String> = spawn
         .get("env")
         .and_then(Value::as_object)
         .map(|m| m.keys().cloned().collect())
         .unwrap_or_default();
-    keys.sort();
-    json!({
-        "argv": argv,
-        "cwd": cwd,
-        "envKeys": keys,
-        "record": plan_record(reply),
-    })
+    plan_of(argv, cwd, keys, reply)
 }
 
 #[cfg(test)]
@@ -1539,6 +1547,16 @@ pub(super) mod tests {
         }
         assert_eq!(plan_record(&reply)["agentSessionId"], true);
         assert!(plan_record(&reply).get("pid").is_none());
+        // A minted id reads the same wherever the launch names it.
+        let mut headless = reply.clone();
+        headless["launchCommand"] = json!("claude --session-id minted -p");
+        let spawn = json!({ "argv": ["claude", "--session-id", "minted", "-p"], "cwd": "/p" });
+        let planned = spawn_plan(&spawn, &headless);
+        assert_eq!(planned["argv"][2], "<agentSessionId>");
+        assert_eq!(
+            planned["record"]["launchCommand"],
+            "claude --session-id <agentSessionId> -p"
+        );
         let mut linked = reply.clone();
         linked["hookSessionId"] = json!("copilot-hook");
         assert_eq!(plan_record(&linked), plan_record(&reply));

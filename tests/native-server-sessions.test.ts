@@ -141,7 +141,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
   let direct: Client
   let through: Client
   let vorndPort: number
-  let work: { projA: string; projC: string; wt: string; agent: string; ends: string }
+  let work: { projA: string; projC: string; wt: string; agent: string }
   let server: {
     ptyManager: typeof import('../packages/server/src/pty-manager').ptyManager
     headlessManager: typeof import('../packages/server/src/headless-manager').headlessManager
@@ -260,18 +260,18 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
       projA: path.join(base, 'proj-a'),
       projC: path.join(base, 'proj-c'),
       wt: path.join(base, 'wt-a'),
-      agent: path.join(base, 'bin', 'fake-agent'),
-      ends: path.join(base, 'bin', 'fake-headless')
+      agent: path.join(base, 'bin', 'fake-agent')
     }
     for (const dir of [work.projA, work.projC, work.wt, path.dirname(work.agent)]) {
       fs.mkdirSync(dir, { recursive: true })
     }
-    // An agent that says nothing and waits; a headless one that reads its
-    // prompt, prints and ends.
-    fs.writeFileSync(work.agent, '#!/bin/sh\nexec sleep 600\n', { mode: 0o755 })
-    fs.writeFileSync(work.ends, '#!/bin/sh\ncat >/dev/null\necho done\nexit 3\n', {
-      mode: 0o755
-    })
+    // An agent that says nothing and waits on a terminal; headless, on pipes,
+    // it reads its prompt, prints and ends.
+    fs.writeFileSync(
+      work.agent,
+      '#!/bin/sh\nif [ -t 0 ]; then exec sleep 600; fi\ncat >/dev/null\necho done\nexit 3\n',
+      { mode: 0o755 }
+    )
 
     const { startServer } = await import('../packages/server/src/index')
     const origWrite = process.stdout.write.bind(process.stdout)
@@ -309,12 +309,15 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     })
     expect((await counts()).terminal?.mode).toBe('shadow')
     through = await Client.open(vorndPort)
-    const agents = {
-      claude: { command: work.agent, args: [] },
-      copilot: { command: work.agent, args: [] }
-    }
-    server.ptyManager.setAgentCommands(agents)
-    server.headlessManager.setAgentCommands({ claude: { command: work.ends, args: [] } })
+    // Saved, not set in place: vornd reads the agents' commands from the database.
+    const config = await direct.result<Record<string, unknown>>('config:load')
+    await direct.result('config:save', {
+      ...config,
+      agentCommands: {
+        claude: { command: work.agent, args: [] },
+        copilot: { command: work.agent, args: [] }
+      }
+    })
   }, 60_000)
 
   afterAll(async () => {
