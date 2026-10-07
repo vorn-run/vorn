@@ -304,13 +304,14 @@ async fn the_report_says_how_and_not_what() {
 
 /// A session started again under its name as soon as its exit is told, as
 /// the app resumes a shell that ended, is started rather than refused while
-/// the ended one is still leaving the engine.
+/// the ended one is still leaving the engine; a tap taken for it, as a
+/// remote login takes one, reads the new run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_name_is_free_again_once_its_exit_is_told() {
     let rig = Rig::start().await;
     let mut v = rig.vornd();
     let spec = || SpawnSpec {
-        argv: vec!["sh".into(), "-c".into(), "exit 3".into()],
+        argv: vec!["sh".into(), "-c".into(), "echo printed; exit 3".into()],
         cwd: std::env::temp_dir().to_string_lossy().into_owned(),
         env: Vec::new(),
         io: Io::Pty { cols: 80, rows: 24 },
@@ -330,7 +331,10 @@ async fn a_name_is_free_again_once_its_exit_is_told() {
                 Err(_) => panic!("run {run} never exited"),
             }
         }
+        let mut tap = v.engine.tap("again");
         let s = v.engine.spawn_as(spec(), Some("again".into())).await;
         assert_eq!(s.map(|s| s.id), Ok("again".to_owned()), "run {run}");
+        let read = tokio::time::timeout(PATIENCE, tap.recv()).await;
+        assert!(matches!(read, Ok(Some(_))), "run {run}'s tap: {read:?}");
     }
 }

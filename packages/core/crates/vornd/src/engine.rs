@@ -1146,7 +1146,10 @@ impl Driver<'_> {
             }
             closed.push_back(b.clone());
         }
-        self.engine.untap(&b.session);
+        // A tap taken for a spawn parked under the name is the next run's.
+        if !self.parked.contains_key(&b.session) {
+            self.engine.untap(&b.session);
+        }
         self.engine
             .streams
             .closed(&b.session, b.exited, &summary.screen);
