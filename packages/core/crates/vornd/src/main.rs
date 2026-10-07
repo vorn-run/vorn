@@ -273,6 +273,7 @@ fn carry_records(
     let engine = holder.engine()?;
     let registry = engine.registry();
     registry.own_records();
+    registry.expect_holder();
     let file = vornd::carry::CarryFile::in_dir(&cfg.home.join("vornd"));
     if let Some(carried) = file.load() {
         let (offered, aged) = registry.carry(carried, vornd::registry::now_ms());

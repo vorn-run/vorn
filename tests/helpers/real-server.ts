@@ -115,12 +115,21 @@ export interface RealServer {
 
 export const realServers: RealServer[] = []
 
-/** @param dirs An earlier server's directories, to start again on what it left. */
-export async function startRealServer(nativeServer: boolean, dirs?: RunDirs): Promise<RealServer> {
+/**
+ * @param dirs An earlier server's directories, to start again on what it left.
+ * @param options.early Returns once vornd says where it is, as the app connects, without waiting for the holder.
+ */
+export async function startRealServer(
+  nativeServer: boolean,
+  dirs?: RunDirs,
+  options: { early?: boolean } = {}
+): Promise<RealServer> {
   const made = (name: string): string =>
     fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `vorn-parity-${name}-`)))
   // Its own home: the agents' hook settings and the hook endpoint are there.
   dirs ??= { home: made('home'), data: made('data'), work: made('work') }
+  // A killed server leaves its port behind.
+  fs.rmSync(path.join(dirs.data, WS_PORT_FILENAME), { force: true })
   const log: string[] = []
   const child = spawn(
     process.execPath,
@@ -172,6 +181,10 @@ export async function startRealServer(nativeServer: boolean, dirs?: RunDirs): Pr
     server.vornd = s.port
     return true
   })
+  if (options.early) {
+    direct.close()
+    return server
+  }
   await until('the session holder, and with the switch the copy deciding', async () => {
     const res = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
     const health = (await res.json()) as {

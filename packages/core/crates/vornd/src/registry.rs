@@ -62,7 +62,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize, Serializer};
@@ -2099,6 +2099,8 @@ fn takes_screen(row: &Row<TerminalSession>) -> bool {
 #[derive(Debug)]
 pub struct SessionRegistry {
     state: Mutex<Fed>,
+    /// Woken when the copy settles ([`SessionRegistry::settle`]).
+    settled: Condvar,
     notes: broadcast::Sender<Value>,
     wanted: AtomicBool,
 }
@@ -2110,6 +2112,13 @@ struct Fed {
     /// sent its snapshot, or once it has gone, the copy cannot be trusted
     /// to be the server's and nothing is answered from it.
     feeder: Option<u64>,
+    /// Whether the holder has yet to say what it holds, after
+    /// [`SessionRegistry::expect_holder`]: until then a session it still runs
+    /// would read as one of the last run's.
+    holder_pending: bool,
+    /// Whether the server has yet to send its first snapshot, after
+    /// [`SessionRegistry::expect_holder`].
+    feed_pending: bool,
 }
 
 impl SessionRegistry {
@@ -2123,7 +2132,10 @@ impl SessionRegistry {
             state: Mutex::new(Fed {
                 registry: Registry::new(gen),
                 feeder: None,
+                holder_pending: false,
+                feed_pending: false,
             }),
+            settled: Condvar::new(),
             notes: broadcast::channel(NOTES_KEPT).0,
             wanted: AtomicBool::new(false),
         })
@@ -2152,10 +2164,43 @@ impl SessionRegistry {
         let mut fed = self.lock();
         if snapshot {
             fed.feeder = Some(conn);
+            fed.feed_pending = false;
         }
         let note = fed.registry.apply(change);
         self.tell(note);
+        if snapshot {
+            self.settled.notify_all();
+        }
         Ok(())
+    }
+
+    /// Has [`SessionRegistry::settle`] wait for the holder's first list of
+    /// what it holds, and for the server's records: set by a vornd that
+    /// starts a holder, before the holder connects.
+    pub fn expect_holder(&self) {
+        let mut fed = self.lock();
+        fed.holder_pending = true;
+        fed.feed_pending = fed.feeder.is_none();
+    }
+
+    /// Waits, at most `limit`, until the copy says what runs and what is
+    /// offered: the server has fed it and the holder has listed what it still
+    /// runs. Without it, a client asking as vornd starts would be offered to
+    /// resume the sessions the holder is about to hand back live. Answers
+    /// whether it settled; past the limit it stops waiting, for every call.
+    pub fn settle(&self, limit: Duration) -> bool {
+        let fed = self.lock();
+        let (mut fed, waited) = self
+            .settled
+            .wait_timeout_while(fed, limit, |fed| fed.holder_pending || fed.feed_pending)
+            .unwrap_or_else(|e| e.into_inner());
+        if waited.timed_out() {
+            fed.holder_pending = false;
+            fed.feed_pending = false;
+            self.settled.notify_all();
+            return false;
+        }
+        true
     }
 
     /// Tells subscribers each note. Called under the lock, so notes go out in
@@ -2342,9 +2387,12 @@ impl SessionRegistry {
         adopted
     }
 
-    /// [`Registry::holder_listed`].
+    /// [`Registry::holder_listed`]; the copy may have settled.
     pub fn holder_listed(&self) {
-        self.lock().registry.holder_listed();
+        let mut fed = self.lock();
+        fed.registry.holder_listed();
+        fed.holder_pending = false;
+        self.settled.notify_all();
     }
 
     /// [`Registry::carried`], while vornd owns the records; `None` otherwise.
@@ -2634,6 +2682,43 @@ mod tests {
             let err = Change::try_from(&note).unwrap_err().to_string();
             assert!(err.contains(says), "{note}: {err}");
         }
+    }
+
+    #[test]
+    fn settles_at_once_when_no_holder_is_expected() {
+        let shared = SessionRegistry::with_gen(Gen(1));
+        assert!(shared.settle(Duration::ZERO));
+    }
+
+    #[test]
+    fn settles_once_the_server_has_fed_it_and_the_holder_has_listed() {
+        let shared = Arc::new(SessionRegistry::with_gen(Gen(1)));
+        shared.expect_holder();
+        let waiter = {
+            let shared = Arc::clone(&shared);
+            std::thread::spawn(move || shared.settle(Duration::from_secs(30)))
+        };
+        shared.holder_listed();
+        let snapshot = json!({ "op": "snapshot", "terminals": [], "headless": [] });
+        shared.feed(1, &snapshot).unwrap();
+        assert!(waiter.join().unwrap());
+        assert!(shared.settle(Duration::ZERO));
+    }
+
+    #[test]
+    fn a_listed_holder_alone_does_not_settle_it() {
+        let shared = SessionRegistry::with_gen(Gen(1));
+        shared.expect_holder();
+        shared.holder_listed();
+        assert!(!shared.settle(Duration::from_millis(5)));
+    }
+
+    #[test]
+    fn stops_waiting_for_every_call_once_the_limit_passed() {
+        let shared = SessionRegistry::with_gen(Gen(1));
+        shared.expect_holder();
+        assert!(!shared.settle(Duration::from_millis(5)));
+        assert!(shared.settle(Duration::ZERO));
     }
 
     #[test]
