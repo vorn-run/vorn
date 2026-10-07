@@ -48,6 +48,7 @@ pub mod secrets;
 pub mod sessions;
 pub mod shell;
 pub mod worktree;
+pub mod worktree_move;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -100,6 +101,9 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("git:diffFull", Effect::Read),
     ("git:commit", Effect::Change),
     ("git:push", Effect::Change),
+    // Answered once vornd holds the session records ([`worktree_move`]).
+    ("git:renameWorktreeBranch", Effect::Change),
+    ("git:renameWorktree", Effect::Change),
     ("file:listDir", Effect::Read),
     ("file:readContent", Effect::Read),
     ("file:stamp", Effect::Read),
@@ -158,14 +162,6 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
     (
         "git:checkoutBranch",
         "moves the server's sessions on that worktree to the new branch and tells clients",
-    ),
-    (
-        "git:renameWorktreeBranch",
-        "moves the server's sessions on that worktree to the new branch and tells clients",
-    ),
-    (
-        "git:renameWorktree",
-        "moves the server's sessions to the worktree's new path and tells clients",
     ),
     ("server:shutdown", "stops the server itself"),
     (
@@ -536,6 +532,9 @@ impl Native {
             Some("git") if method == "git:removeWorktree" => worktree::call(self, method, params),
             Some("worktree") if method != "worktree:activeSessions" => {
                 worktree::call(self, method, params)
+            }
+            Some("git") if worktree_move::foresees(method) => {
+                worktree_move::call(self, method, params)
             }
             Some("git") => git::call(self, method, params),
             Some("file") => self.file(method, params),

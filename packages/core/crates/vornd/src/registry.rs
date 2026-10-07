@@ -59,6 +59,9 @@ use tokio::sync::broadcast;
 use tokio::time::Instant;
 use vorn_term_proto::Cursor;
 
+mod moves;
+pub use moves::WorktreeMove;
+
 /// Notes kept for a subscriber that is behind; one further behind sees a gap
 /// in the revisions and asks for the whole registry.
 pub const NOTES_KEPT: usize = 1024;
