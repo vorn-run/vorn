@@ -1859,7 +1859,7 @@ export interface SessionHolder {
 export interface SessionHolders {
   /** The one new sessions go to. */
   current: SessionHolder | null
-  /** Ones left by an older build, which exit after their last session. */
+  /** Ones left by an older build, which exit after their last session; one that handed its sessions over reports none. */
   older: SessionHolder[]
   /** Why there is no current one, when there is not. */
   error: string | null
