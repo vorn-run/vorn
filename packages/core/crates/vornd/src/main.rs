@@ -506,7 +506,8 @@ mod tests {
         use vornd::Mode;
         let plain = parse(&["--upstream", "127.0.0.1:1"]).unwrap();
         assert_eq!(plain.groups.mode("git"), Mode::Native);
-        assert_eq!(plain.groups.mode("workflow"), Mode::Forward);
+        assert_eq!(plain.groups.mode("workflow"), Mode::Native);
+        assert_eq!(plain.groups.mode("task"), Mode::Forward);
         let shadowed = parse(&[
             "--upstream",
             "127.0.0.1:1",

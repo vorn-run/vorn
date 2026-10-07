@@ -342,10 +342,17 @@ async fn handle(
         return Ok(websocket(daemon, req).await);
     }
     if crate::native::work::routes::is_route(req.uri().path()) {
-        if let Some(work) = daemon.native.as_ref().and_then(|n| n.work()) {
-            let work = Arc::clone(work);
-            return Ok(crate::native::work::routes::answer(&work, req, peer).await);
-        }
+        // The server relays these paths here, so they are never sent back to it.
+        return Ok(match daemon.native.as_ref().and_then(|n| n.work()) {
+            Some(work) => {
+                let work = Arc::clone(work);
+                crate::native::work::routes::answer(&work, req, peer).await
+            }
+            None => plain(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "vornd is not running workflows",
+            ),
+        });
     }
     if req.method() == Method::POST && crate::pair::is_pair_path(req.uri().path()) {
         if let Some(native) = daemon
