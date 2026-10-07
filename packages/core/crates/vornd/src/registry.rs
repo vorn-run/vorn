@@ -918,6 +918,9 @@ pub struct Registry {
     /// When this machine came up, as the server told it: a session that ended
     /// before then was interrupted by the machine going down.
     boot_time: i64,
+    /// Whether records were carried in this run, from vornd's file or the
+    /// server's handover: the server's are taken only when none were.
+    carried: bool,
 }
 
 impl Registry {
@@ -938,6 +941,7 @@ impl Registry {
             carried_order: Vec::new(),
             owned: false,
             boot_time: 0,
+            carried: false,
         }
     }
 
@@ -1831,6 +1835,7 @@ impl Registry {
     /// ([`Registry::adopt`]). Answers how many are offered and how many
     /// aged out.
     pub fn carry(&mut self, c: Carried, now: i64) -> (usize, usize) {
+        self.carried = true;
         let mut aged = 0;
         let mut offered: Vec<Restored> = Vec::with_capacity(c.terminals.len() + c.restored.len());
         let fresh = |ended_at: i64| now - ended_at <= MAX_RESTORED_AGE_MS;
@@ -2293,14 +2298,21 @@ impl SessionRegistry {
     }
 
     /// The server's records of its last run, taken as what is carried when
-    /// vornd owns the records and has nothing carried of its own yet.
-    /// Answers how many are offered.
+    /// vornd owns the records and has carried none of its own: its file is
+    /// written once it owns them, so the server's are taken once, ever, and
+    /// a session declined or adopted since is not offered again. Answers
+    /// how many are offered.
     pub fn carry_once(&self, terminals: Vec<TerminalSession>, now: i64) -> usize {
         let mut fed = self.lock();
         let r = &mut fed.registry;
-        if !r.owns() || !r.restored.is_empty() {
+        if !r.owns() || r.carried {
             return 0;
         }
+        let live: HashSet<&str> = r.terminals.records().map(|t| t.id.as_str()).collect();
+        let terminals: Vec<TerminalSession> = terminals
+            .into_iter()
+            .filter(|t| !live.contains(t.id.as_str()))
+            .collect();
         let carried = Carried {
             terminals,
             ..Carried::default()
@@ -3302,8 +3314,7 @@ mod tests {
         assert!(r.terminals().is_empty());
         let agents = r.headless().count();
 
-        // The holder still has b and the running agent: live again, b where
-        // the last run listed it, as a terminal vornd made.
+        // The holder still has b and the agent: live again, b where the last run listed it.
         let notes = r.adopt(&Held {
             id: "b".into(),
             kind: Kind::Terminal,
@@ -3343,8 +3354,7 @@ mod tests {
         );
         assert_eq!(notes[0]["record"]["pid"], 44);
         assert_eq!(r.headless().count(), agents + 1);
-        // One no record names, and one the holder does not hold once it has
-        // said what it holds.
+        // One no record names, and one the holder no longer holds.
         assert!(r
             .adopt(&Held {
                 id: "z".into(),
@@ -3412,8 +3422,7 @@ mod tests {
             pid: 1,
             epoch: 1,
         });
-        // A server that has just connected: a shell of its own, and a list
-        // of offered sessions of its own.
+        // A server that has just connected, with a shell and offered sessions of its own.
         let note = r
             .apply(change(json!({
                 "op": "snapshot", "terminals": [terminal("sh")], "headless": [], "order": ["sh"],
@@ -3493,5 +3502,38 @@ mod tests {
         assert!(r.release_for_resume("sh").is_empty());
         // Not deciding: a resume is the server's.
         assert!(Registry::new(Gen(1)).resume(record("x")).is_err());
+    }
+
+    #[test]
+    fn takes_the_servers_records_only_when_none_were_carried() {
+        let registry = SessionRegistry::with_gen(Gen(1));
+        registry.own_records();
+        let one = vec![carried_shell("a", 1)];
+        assert_eq!(registry.carry_once(one.clone(), 2), 1);
+        // Declined since: the same records handed over again are not taken.
+        registry.change(|_| ((), Vec::new()));
+        registry.lock().registry.consume_all_restored();
+        assert_eq!(registry.carry_once(one.clone(), 2), 0);
+        // A vornd that read its own file takes none, with nothing offered.
+        let next = SessionRegistry::with_gen(Gen(2));
+        next.own_records();
+        next.carry(Carried::default(), 2);
+        assert_eq!(next.carry_once(one.clone(), 2), 0);
+        // Nor one that does not own the records.
+        assert_eq!(SessionRegistry::with_gen(Gen(3)).carry_once(one, 2), 0);
+        // A record of a terminal already live is not offered.
+        let live = SessionRegistry::with_gen(Gen(4));
+        live.own_records();
+        live.decide_statuses();
+        live.feed(
+            1,
+            &json!({ "op": "snapshot", "terminals": [terminal("a")], "headless": [] }),
+        )
+        .unwrap();
+        assert_eq!(
+            live.carry_once(vec![carried_shell("a", 1), carried_shell("b", 1)], 2),
+            1
+        );
+        assert_eq!(live.restored_ids(), ["b"]);
     }
 }

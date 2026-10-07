@@ -167,8 +167,7 @@ const vorndKeeper = new VorndKeeper({
   nativeServer: () => nativeServerSwitch(configManager.loadConfig().defaults?.experimental)
 })
 vorndSessions.setLauncher(vorndKeeper)
-// With the Native server switch on vornd owns the session records between
-// runs, and this server's own table of them is left as it is.
+// With the Native server switch on vornd owns the session records; this server writes none.
 sessionManager.setOwnedElsewhere(() => vorndSessions.restoresSessions())
 // vornd creates terminals for the clients with the Native server switch on, and
 // refuses them as this server does while it winds down.

@@ -431,9 +431,7 @@ fn call(app: App<'_>, text: &str) {
             }
         },
         "vornd:registry" => Ok(engine.registry().snapshot()),
-        // The server's records of its last run, handed over once: the first
-        // time it connects to a vornd that owns the records, which has
-        // nothing of its own yet to offer.
+        // The server's records of its last run, taken once by a vornd with nothing of its own.
         "vornd:carry" => match params
             .get("terminals")
             .map(Vec::<TerminalSession>::deserialize)
@@ -442,6 +440,22 @@ fn call(app: App<'_>, text: &str) {
                 let carried = engine
                     .registry()
                     .carry_once(terminals, crate::registry::now_ms());
+                // What the holder runs from that run is live again, not offered.
+                for h in engine.journal().held() {
+                    if h.kind != crate::journal::Kind::Pty {
+                        continue;
+                    }
+                    let epoch = engine
+                        .head_stamp(&h.session)
+                        .and_then(|s| u32::try_from(s.epoch).ok())
+                        .unwrap_or(0);
+                    engine.registry().adopt(&crate::registry::Held {
+                        id: h.session.clone(),
+                        kind: crate::registry::Kind::Terminal,
+                        pid: h.pid,
+                        epoch,
+                    });
+                }
                 for id in engine.registry().restored_ids() {
                     engine.streams().expect(&id);
                 }
@@ -1034,15 +1048,25 @@ mod tests {
         assert!(state["registry"].get("restored").is_none());
         let mut old = shell("a", "Shell 1");
         old["savedAt"] = json!(now - 1_000);
+        let mut held = shell("held", "Shell 2");
+        held["savedAt"] = json!(now - 1_000);
+        engine
+            .journal()
+            .opened("held", crate::journal::Kind::Pty, 7);
         let (carried, notes) = app
-            .call("vornd:carry", json!({ "terminals": [old.clone()] }))
+            .call("vornd:carry", json!({ "terminals": [old.clone(), held] }))
             .await;
-        assert_eq!(carried, json!({ "carried": 1 }));
+        assert_eq!(carried, json!({ "carried": 2 }));
         drop(notes);
         let offered = engine.registry().restored().unwrap();
         assert_eq!(offered[0]["session"]["id"], "a");
         assert_eq!(offered[0]["rebooted"], true);
         assert!(engine.streams().expects("a"));
+        assert!(!engine.streams().expects("held"));
+        // The one the holder runs is live again, not offered.
+        let snapshot = engine.registry().snapshot();
+        assert_eq!(snapshot["terminals"][0]["id"], "held");
+        assert_eq!(snapshot["terminals"][0]["pid"], 7);
         // Taken once: a later server's records are not.
         let (again, _) = app
             .call(

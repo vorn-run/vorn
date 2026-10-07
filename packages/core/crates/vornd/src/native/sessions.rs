@@ -316,8 +316,7 @@ pub fn foresee(native: &Native, method: &str, params: &Value) -> Option<Answer> 
     }
     let asked = asked(method, params)?;
     native.registry.get()?.read(|r| match &asked {
-        // A session of an earlier run closes without an exit, as the
-        // server closes one.
+        // A session of an earlier run closes without an exit, as the server closes one.
         Asked::Kill(id) => r
             .terminal(id)
             .map(|_| ())
@@ -396,8 +395,7 @@ fn resume(native: &Native, id: &str) -> Answer {
     if !fed_and_held(native) {
         return Answer::Error("Terminals cannot start: the session holder is not connected".into());
     }
-    // Taken before anything is started: the second of two clients looking
-    // at one cold pane is told it is gone.
+    // Taken first: the second of two clients on one cold pane is told it is gone.
     let taken = registry.change(|r| match r.consume_restored(id) {
         Some((offered, note)) => (Some(Taken::Offered(offered)), vec![note]),
         None => (r.ended_terminal(id).cloned().map(Taken::Ended), Vec::new()),
@@ -603,8 +601,7 @@ fn resume_agent(native: &Native, id: &str, previous: &TerminalSession) -> Answer
     let Some(claims) = claims(native) else {
         return Answer::Forward;
     };
-    // Read before the claim, so the claim and what it is checked against
-    // are one step; and not lapsing while the workspace is prepared.
+    // Scope read before the claim; claims do not lapse while the workspace is prepared.
     let scope = transcript_scope(native, &previous);
     claims.preparing(id);
     let now = Instant::now();
@@ -1466,8 +1463,7 @@ fn kill(native: &Native, id: &str) -> Answer {
     let Some(registry) = native.registry.get() else {
         return Answer::Forward;
     };
-    // A session of an earlier run has no program to hang up: closing it
-    // is a decision about the record, as a resume is, taken once.
+    // An offered session has no program to hang up: closing it takes the offer once.
     let offered = registry.change(
         |r| match r.owns().then(|| r.consume_restored(id)).flatten() {
             Some((_, note)) => (true, vec![note]),
@@ -1627,8 +1623,7 @@ fn plan_resume(native: &Native, id: &str) -> Option<Value> {
         ));
     }
     let previous = grounded(&previous, &cwd);
-    // Only a conversation the record names: a lookup in the agent's
-    // history is the server's to make, and the plan would guess at it.
+    // Only a conversation the record names: a history lookup is the server's to make.
     let transcript = given(previous.agent_session_id.as_deref()).map(str::to_owned);
     let req = restore_request(&previous, transcript)?;
     let settings = agent::settings(native)?;

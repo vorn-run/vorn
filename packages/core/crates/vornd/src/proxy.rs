@@ -210,8 +210,7 @@ impl Daemon {
             Mode::Forward => {}
             mode => link.set_scripts(Scripts::new(mode, native, Arc::clone(&self.groups))),
         }
-        // What is there now for each session carried from the last run,
-        // once the login shell's environment is in: git is on its PATH.
+        // Checked once the login shell's environment is in, so git is on its PATH.
         if link.restores() {
             let n = Arc::clone(native);
             tokio::task::spawn_blocking(move || crate::native::sessions::verify_restored(&n));

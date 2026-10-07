@@ -113,8 +113,7 @@ fn route(
     };
     let streams = engine.streams();
     if !streams.holds(session) {
-        // A session carried from the last run that runs nowhere yet: its
-        // attach is vornd's to answer, and nothing else about it is.
+        // A carried session that runs nowhere yet: only its attach is vornd's to answer.
         if method == "terminal:attach" && streams.expects(session) {
             if let Some(rpc) = rpc {
                 let cursor = params.get("cursor").and_then(cursor_of);

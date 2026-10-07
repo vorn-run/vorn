@@ -95,8 +95,7 @@ describe('the records vornd owns between runs, followed here', () => {
     fake.headless = true
     fake.restores = true
     fake.carried = 1
-    // What vornd carried and the holder still holds: a terminal with its
-    // name and group, and a headless agent; and one session only offered.
+    // Carried and still held: a named, grouped terminal and a headless agent; one only offered.
     fake.state.registry = {
       gen: GEN,
       rev,
@@ -172,6 +171,8 @@ describe('the records vornd owns between runs, followed here', () => {
       'from-db'
     ])
     expect(listRestored()).toEqual([])
+    // vornd took them: what it adopted from them is taken on from a second look.
+    await until('a second look', () => fake.made('vornd:subscribe').length === 2)
     // vornd's offers are mirrored.
     expect(vorndSessions.mirror.restored().map((r) => r.session.id)).toEqual(['cold'])
   })

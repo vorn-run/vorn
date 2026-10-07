@@ -1249,8 +1249,7 @@ impl crate::native::sessions::Host for EngineHost {
                     match input {
                         Input::None => {}
                         Input::Typed(bytes) => {
-                            // Once the shell has drawn its prompt: typed
-                            // before that, the line is echoed twice over.
+                            // After the prompt is drawn: typed sooner, the line is echoed twice.
                             let printed =
                                 first_output(&mut events, &s.id, asked + TYPE_AT_MOST).await;
                             tokio::time::sleep_until(type_at(asked, printed)).await;

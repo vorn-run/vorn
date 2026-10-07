@@ -144,8 +144,7 @@ async fn stdin_closed() {
 
 fn init_logging(log_file: Option<&str>) -> Result<(), String> {
     let filter = EnvFilter::try_from_env("VORND_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
-    // The server reads vornd's stderr and exits first: a line it can no
-    // longer take is dropped, where reporting it would panic vornd mid-stop.
+    // A line a gone server cannot take is dropped: reporting it would panic vornd mid-stop.
     let builder = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .log_internal_errors(false);
@@ -399,8 +398,7 @@ fn main() -> ExitCode {
         let _ = stdout.flush();
         drop(stdout);
         let exit_with_stdin = args.exit_with_stdin;
-        // The records are written down the moment a stop is asked for: the
-        // server that closed the pipe kills a vornd still winding down.
+        // Saved as soon as a stop is asked for: the server kills a vornd still winding down.
         #[cfg(feature = "engine")]
         let saving = kept
             .as_ref()
@@ -436,8 +434,7 @@ fn main() -> ExitCode {
         // the next vornd has nothing to replay.
         #[cfg(feature = "engine")]
         if let Some(engine) = kept.as_ref().and_then(|h| h.engine()) {
-            // The records first: they are small, and the server that closed
-            // the pipe kills a vornd still flushing a moment later.
+            // Records before the flush: the server kills a vornd still flushing.
             if let Some(file) = &carry {
                 vornd::carry::save_now(engine.registry(), file).await;
             }

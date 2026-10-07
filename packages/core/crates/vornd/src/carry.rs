@@ -158,8 +158,7 @@ mod tests {
         // Nothing of the registry's own revisions goes with a record.
         assert!(carried.terminals.iter().all(|t| t.rev.is_none()));
 
-        // Read back: both offered, in the order they were listed once the
-        // holder has them again.
+        // Read back: offered, then listed in their old order once the holder has them.
         let mut next = Registry::new(Gen(2));
         next.own_records();
         next.decide_statuses();

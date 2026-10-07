@@ -60,6 +60,8 @@ export async function carryToVornd(): Promise<void> {
   const records = consumeAllRestored().map((one) => one.session)
   if (records.length === 0) return
   const carried = await vorndSessions.carry(records)
+  // Some of them may run in the holder still: taken on now that vornd has their records.
+  if (carried > 0) vorndSessions.restock()
   log.info(
     { records: records.length, carried },
     "[restored] handed the last run's sessions to vornd"

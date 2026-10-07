@@ -1090,9 +1090,7 @@ impl Streams {
                 keep
             });
         }
-        // A holder that has not said what it holds by now may never: the
-        // attaches that waited for it are answered as a session that is
-        // not live, and told to attach again if it turns out to run.
+        // A holder silent this long may never answer: waiting attaches get a cold answer.
         let Inner {
             conns, expected, ..
         } = &mut *inner;

@@ -71,8 +71,7 @@ class HeadlessManager extends EventEmitter {
     if (note.kind !== 'headless' || note.op !== 'upsert' || !note.record) return
     if (!vorndSessions.createsHeadless()) return
     const record = note.record as HeadlessSession
-    // One the holder still held from the last run is taken on with its
-    // states, from the subscription that lists it (`adoptHeld`).
+    // One the holder still held from the last run is taken on by `adoptHeld`.
     if (note.created && !note.adopted) this.adoptCreated(record)
     const agent = this.inVornd.get(record.id)
     if (note.started) agent?.started(note.started.pid, note.started.epoch)

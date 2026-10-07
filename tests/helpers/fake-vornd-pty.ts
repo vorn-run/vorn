@@ -136,6 +136,8 @@ export const fakeVornd = {
   inUse: vi.fn(() => true),
   /** Whether vornd decides the statuses: off unless a test turns it on. */
   decidesStatus: vi.fn(() => false),
+  /** Whether vornd owns the session records between runs: off unless a test turns it on. */
+  restoresSessions: vi.fn(() => false),
   hookStatus: vi.fn((_id: string, _status: string | null, _promote: boolean): void => {}),
   input: vi.fn((_id: string): void => {}),
   patch: vi.fn((_id: string, _fields: Record<string, unknown>): void => {}),
@@ -165,6 +167,7 @@ export const fakeVornd = {
     fakeVornd.readOutput.mockReset().mockResolvedValue([])
     fakeVornd.inUse.mockReset().mockReturnValue(true)
     fakeVornd.decidesStatus.mockReset().mockReturnValue(false)
+    fakeVornd.restoresSessions.mockReset().mockReturnValue(false)
     fakeVornd.hookStatus.mockClear()
     fakeVornd.input.mockClear()
     fakeVornd.patch.mockClear()

@@ -520,7 +520,7 @@ case "$p" in *wait*) sleep 600;; esac
 exit 3
 `
 
-/** A client of one server that keeps every notification it is told. */
+/** The same calls, on one server, through its vornd; answers the transcript. */
 async function scenario(server: RealServer): Promise<Record<string, unknown>> {
   const { work } = server.dirs
   const stub = path.join(work, 'bin', 'argv-agent')

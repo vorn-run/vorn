@@ -42,6 +42,7 @@ export async function until(what: string, check: () => boolean | Promise<boolean
   }
 }
 
+/** A client of one server that keeps every notification it is told. */
 export class Watcher {
   private next = 1
   readonly told: Array<{ method: string; params: unknown }> = []
@@ -193,8 +194,7 @@ export async function stopRealServer(server: RealServer, keepHolder = false): Pr
     server.child.kill()
     await exited
   }
-  // vornd finishes its stop after the server (its records, its last
-  // checkpoints): nothing of its directories is touched until it is gone.
+  // vornd finishes its stop after the server: its directories are left until it is gone.
   await until('vornd to stop', () =>
     fetch(`http://127.0.0.1:${server.vornd}/vornd/health`).then(
       () => false,
@@ -238,7 +238,6 @@ export function answered(frame: Frame): unknown {
   return 'result' in frame ? { result: frame.result } : { void: true }
 }
 
-/** The same calls, on one server, through its vornd; answers the transcript. */
 /** Removes every started server's directories, once all have stopped. */
 export function removeRealServerDirs(): void {
   for (const s of realServers) {

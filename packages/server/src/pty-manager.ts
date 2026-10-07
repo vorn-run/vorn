@@ -267,8 +267,7 @@ class PtyManager extends EventEmitter {
     if (!vorndSessions.createsTerminals()) return
     if (note.op === 'upsert' && note.kind === 'terminal' && note.record) {
       const id = note.record.id
-      // One the holder still held from the last run is taken on with its
-      // states, from the subscription that lists it (`takeOnHeld`).
+      // One the holder still held from the last run is taken on by `takeOnHeld`.
       if (note.created && note.resumed) this.adoptResumed(note.record as TerminalSession)
       else if (note.created && !note.adopted) this.adoptCreated(note.record as TerminalSession)
       if (note.started) this.ptys.get(id)?.started(note.started.pid, note.started.epoch)

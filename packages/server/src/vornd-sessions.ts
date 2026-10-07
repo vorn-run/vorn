@@ -630,8 +630,7 @@ export class VorndSessions extends EventEmitter {
     this.emit('subscribed')
     this.holderTold(state.connected)
     if (this.nativeWork && state.registry) this.mirror.load(state.registry)
-    // vornd owns the records now: what this server's database still has of
-    // its last run is handed over, once, for a vornd with nothing of its own.
+    // vornd owns the records now: the database's records of the last run are handed over once.
     if (this.restoresSessions()) this.emit('restores')
     this.watchClosing()
     try {
@@ -938,6 +937,12 @@ export class VorndSessions extends EventEmitter {
       log.warn({ err }, '[vornd] could not hand the last run’s session records to vornd')
       return 0
     }
+  }
+
+  /** Take stock of what vornd holds again: after a handover it took, what it adopted from it. */
+  restock(): void {
+    const channel = this.channel
+    if (channel) void this.subscribe(channel)
   }
 
   /** Close the channel, for tests and a server on its way out. */

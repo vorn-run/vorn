@@ -183,8 +183,7 @@ async function warmRun(
       projectName: s.projectName,
       live: s.pid > 0
     }))
-    // The acceptance: a carried session attaches through vornd like a fresh
-    // one, with its screen, its size and a cursor to follow it by.
+    // The acceptance: a carried session attaches through vornd with its screen, size and cursor.
     const attach = (await through.call('terminal:attach', { id: ids.shellA }))
       .result as AttachAnswer
     replies['attach to a carried shell'] = {
