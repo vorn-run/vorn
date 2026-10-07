@@ -2994,8 +2994,25 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "uuid",
  "vorn-protocol",
  "vorn-store",
+]
+
+[[package]]
+name = "vorn-workflow"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "jiff",
+ "regex",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "vorn-protocol",
+ "vorn-work",
 ]
 
 [[package]]

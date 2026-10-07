@@ -43,6 +43,18 @@ pub fn tail(text: &str, units: usize) -> &str {
     &text[from..]
 }
 
+/// `new Date(ms).toISOString()`.
+pub fn iso(ms: i64) -> String {
+    jiff::Timestamp::from_millisecond(ms)
+        .map(|t| t.strftime("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+        .unwrap_or_default()
+}
+
+/// `new Date().toISOString()`.
+pub fn iso_now() -> String {
+    iso(jiff::Timestamp::now().as_millisecond())
+}
+
 /// `JSON.stringify(value)`: whole numbers without a fraction, as JavaScript
 /// prints them.
 pub fn stringify(value: &Value) -> String {
@@ -163,6 +175,13 @@ mod tests {
             stringify_pretty(&json!({ "a": [1] })),
             "{\n  \"a\": [\n    1\n  ]\n}"
         );
+    }
+
+    #[test]
+    fn prints_times_as_to_iso_string_does() {
+        assert_eq!(iso(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(iso(1_700_000_000_123), "2023-11-14T22:13:20.123Z");
+        assert_eq!(iso_now().len(), 24);
     }
 
     #[test]

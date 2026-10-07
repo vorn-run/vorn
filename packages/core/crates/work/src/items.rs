@@ -22,10 +22,14 @@ pub struct JsonErrorAt {
     pub column: usize,
 }
 
-/// Parses `text` as JSON, or says where it broke.
+/// Parses `text` as JSON, or says where it broke, as V8's message for the
+/// same text does: a token it did not expect and an early end name no
+/// position, so the end of the text is reported; the rest name where.
 pub fn parse_json(text: &str) -> Result<Value, JsonErrorAt> {
     serde_json::from_str(text).map_err(|err| {
-        if err.line() == 0 {
+        let unplaced =
+            err.is_eof() || err.line() == 0 || err.to_string().starts_with("expected value");
+        if unplaced {
             end_of(text)
         } else {
             JsonErrorAt {
@@ -133,7 +137,19 @@ mod tests {
 
     #[test]
     fn says_where_json_broke() {
-        assert_eq!(parse_json("{\n  \"a\": }").unwrap_err().line, 2);
+        // V8 names no position for an unexpected token or an early end.
+        assert_eq!(
+            parse_json("{\n  \"a\": }").unwrap_err(),
+            JsonErrorAt { line: 2, column: 9 }
+        );
+        assert_eq!(
+            parse_json("[{\"id\":1},").unwrap_err(),
+            JsonErrorAt {
+                line: 1,
+                column: 11
+            }
+        );
+        assert_eq!(parse_json("[1] x").unwrap_err().column, 5);
         assert!(parse_json("[1]").is_ok());
     }
 }

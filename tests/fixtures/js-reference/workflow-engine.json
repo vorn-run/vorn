@@ -2,6 +2,70 @@
   {
     "name": "a headless agent that exits cleanly",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -99,7 +163,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -127,6 +191,70 @@
   {
     "name": "a failed agent skips what follows",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -253,7 +381,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -281,6 +409,70 @@
   {
     "name": "a step that carries on after failing",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -381,7 +573,7 @@
               "nodeId": "a",
               "status": "error",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 1 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 1 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-1",
               "agentType": "claude",
               "projectName": "p",
@@ -395,7 +587,7 @@
               "nodeId": "b",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-2 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-2 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-2",
               "agentType": "claude",
               "projectName": "p",
@@ -417,7 +609,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -430,7 +622,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "B",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** B\n**Workflow ID:** wf-1\n\n## Task\n\ndo b\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** B\n**Workflow ID:** wf-1\n\n## Task\n\ndo b\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -458,6 +650,70 @@
   {
     "name": "an exit before the session id is known",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -533,7 +789,7 @@
               "nodeId": "a",
               "status": "error",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent had already exited (code 1) before its id reached us\n[+s] Agent exited with code 1 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent had already exited (code 1) before its id reached us\n[+s] Agent exited with code 1 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-1",
               "agentType": "claude",
               "projectName": "p",
@@ -556,7 +812,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -584,6 +840,70 @@
   {
     "name": "a silent agent times out",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -682,7 +1002,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -714,6 +1034,70 @@
   {
     "name": "a slow agent times out after output",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -813,7 +1197,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -845,6 +1229,70 @@
   {
     "name": "an agent that could not start",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -936,7 +1384,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -964,6 +1412,70 @@
   {
     "name": "typed output drives a condition",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -1168,7 +1680,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n\n## Required Output\n\nWhen you have finished, output a single JSON object that conforms to the JSON Schema below. Wrap it exactly between the two marker lines — nothing else after the closing marker:\n\n<<<VORN_OUTPUT>>>\n{ ...your JSON here... }\n<<<END_VORN_OUTPUT>>>\n\nSchema:\n\n```json\n{\n  \"type\": \"object\",\n  \"properties\": {\n    \"approved\": {\n      \"type\": \"boolean\"\n    },\n    \"score\": {\n      \"type\": \"number\"\n    }\n  },\n  \"required\": [\n    \"approved\"\n  ]\n}\n```\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n\n## Required Output\n\nWhen you have finished, output a single JSON object that conforms to the JSON Schema below. Wrap it exactly between the two marker lines \u2014 nothing else after the closing marker:\n\n<<<VORN_OUTPUT>>>\n{ ...your JSON here... }\n<<<END_VORN_OUTPUT>>>\n\nSchema:\n\n```json\n{\n  \"type\": \"object\",\n  \"properties\": {\n    \"approved\": {\n      \"type\": \"boolean\"\n    },\n    \"score\": {\n      \"type\": \"number\"\n    }\n  },\n  \"required\": [\n    \"approved\"\n  ]\n}\n```\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -1204,6 +1716,70 @@
   {
     "name": "typed output missing",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -1314,7 +1890,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n\n## Required Output\n\nWhen you have finished, output a single JSON object that conforms to the JSON Schema below. Wrap it exactly between the two marker lines — nothing else after the closing marker:\n\n<<<VORN_OUTPUT>>>\n{ ...your JSON here... }\n<<<END_VORN_OUTPUT>>>\n\nSchema:\n\n```json\n{\n  \"type\": \"object\",\n  \"properties\": {\n    \"approved\": {\n      \"type\": \"boolean\"\n    },\n    \"score\": {\n      \"type\": \"number\"\n    }\n  },\n  \"required\": [\n    \"approved\"\n  ]\n}\n```\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n\n## Required Output\n\nWhen you have finished, output a single JSON object that conforms to the JSON Schema below. Wrap it exactly between the two marker lines \u2014 nothing else after the closing marker:\n\n<<<VORN_OUTPUT>>>\n{ ...your JSON here... }\n<<<END_VORN_OUTPUT>>>\n\nSchema:\n\n```json\n{\n  \"type\": \"object\",\n  \"properties\": {\n    \"approved\": {\n      \"type\": \"boolean\"\n    },\n    \"score\": {\n      \"type\": \"number\"\n    }\n  },\n  \"required\": [\n    \"approved\"\n  ]\n}\n```\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -1500,7 +2076,7 @@
               "nodeId": "a",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching gemini in /app with a 45-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching gemini in /app with a 45-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-1",
               "taskId": "task-1",
               "worktreePath": "/wt/x",
@@ -1529,7 +2105,7 @@
             "projectPath": "/app",
             "displayName": "A",
             "branch": "fix-login",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\n# Task: Fix login\n\n**Project:** app\n**Project Path:** /app\n**Branch:** fix-login\n**Task Status:** In Progress\n**Task ID:** task-1\n\n## Description\n\nThe login breaks.\n\n## Other Tasks in This Project\n\n**Queued (2):**\n- Second\n- First queued\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools for project management:\n- `get_my_context` — Get your current task and project context\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status/description when done\n- `get_diff` — See current git changes\n- `list_branches` — List git branches\n\nWhen you complete this task, update its status to \"in_review\" or \"done\" using `update_task`.\n\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\n# Task: Fix login\n\n**Project:** app\n**Project Path:** /app\n**Branch:** fix-login\n**Task Status:** In Progress\n**Task ID:** task-1\n\n## Description\n\nThe login breaks.\n\n## Other Tasks in This Project\n\n**Queued (2):**\n- Second\n- First queued\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools for project management:\n- `get_my_context` \u2014 Get your current task and project context\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status/description when done\n- `get_diff` \u2014 See current git changes\n- `list_branches` \u2014 List git branches\n\nWhen you complete this task, update its status to \"in_review\" or \"done\" using `update_task`.\n\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -1704,7 +2280,7 @@
               "nodeId": "a",
               "status": "error",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /app with a 45-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 3 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /app with a 45-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 3 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-1",
               "taskId": "task-1",
               "agentType": "claude",
@@ -1729,7 +2305,7 @@
             "projectPath": "/app",
             "displayName": "A",
             "branch": "fix-login",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\n# Task: Fix login\n\n**Project:** app\n**Project Path:** /app\n**Branch:** fix-login\n**Task Status:** In Progress\n**Task ID:** task-1\n\n## Description\n\nThe login breaks.\n\n## Other Tasks in This Project\n\n**Queued (2):**\n- Second\n- First queued\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools for project management:\n- `get_my_context` — Get your current task and project context\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status/description when done\n- `get_diff` — See current git changes\n- `list_branches` — List git branches\n\nWhen you complete this task, update its status to \"in_review\" or \"done\" using `update_task`.\n\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\n# Task: Fix login\n\n**Project:** app\n**Project Path:** /app\n**Branch:** fix-login\n**Task Status:** In Progress\n**Task ID:** task-1\n\n## Description\n\nThe login breaks.\n\n## Other Tasks in This Project\n\n**Queued (2):**\n- Second\n- First queued\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools for project management:\n- `get_my_context` \u2014 Get your current task and project context\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status/description when done\n- `get_diff` \u2014 See current git changes\n- `list_branches` \u2014 List git branches\n\nWhen you complete this task, update its status to \"in_review\" or \"done\" using `update_task`.\n\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -1910,7 +2486,7 @@
               "nodeId": "a",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching codex in /app with a 47-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching codex in /app with a 47-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-1",
               "taskId": "task-3",
               "agentType": "codex",
@@ -1934,7 +2510,7 @@
             "projectPath": "/app",
             "displayName": "A",
             "useWorktree": true,
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\n# Task: First queued\n\n**Project:** app\n**Project Path:** /app\n**Worktree:** Yes (isolated git worktree)\n**Task Status:** To Do\n**Task ID:** task-3\n\n## Description\n\nThree\n\n## Other Tasks in This Project\n\n**In Progress (1):**\n- Fix login (branch: fix-login)\n\n**Queued (1):**\n- Second\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools for project management:\n- `get_my_context` — Get your current task and project context\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status/description when done\n- `get_diff` — See current git changes\n- `list_branches` — List git branches\n\nWhen you complete this task, update its status to \"in_review\" or \"done\" using `update_task`.\n\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\n# Task: First queued\n\n**Project:** app\n**Project Path:** /app\n**Worktree:** Yes (isolated git worktree)\n**Task Status:** To Do\n**Task ID:** task-3\n\n## Description\n\nThree\n\n## Other Tasks in This Project\n\n**In Progress (1):**\n- Fix login (branch: fix-login)\n\n**Queued (1):**\n- Second\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools for project management:\n- `get_my_context` \u2014 Get your current task and project context\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status/description when done\n- `get_diff` \u2014 See current git changes\n- `list_branches` \u2014 List git branches\n\nWhen you complete this task, update its status to \"in_review\" or \"done\" using `update_task`.\n\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -2133,6 +2709,70 @@
   {
     "name": "a condition takes one branch",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -2356,6 +2996,70 @@
   {
     "name": "a script with templates, arguments and streamed output",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -2487,6 +3191,70 @@
   {
     "name": "a failing script",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -2629,6 +3397,70 @@
   {
     "name": "a script that throws",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -2739,6 +3571,70 @@
   {
     "name": "a connector action feeds the next step",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -2920,6 +3816,70 @@
   {
     "name": "a connector action that fails, and one returning a list",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -3087,6 +4047,70 @@
   {
     "name": "a signed-out connection waits for the sign-in",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -3285,6 +4309,70 @@
   {
     "name": "an HTTP request",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -3431,6 +4519,70 @@
   {
     "name": "a failed HTTP request",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -3549,6 +4701,70 @@
   {
     "name": "a task from a connector item",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -3721,6 +4937,70 @@
   {
     "name": "a task from no connector item",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -3787,7 +5067,7 @@
               "status": "skipped",
               "startedAt": "<time>",
               "completedAt": "<time>",
-              "error": "No connector item in context — this node only runs from a connectorPoll trigger."
+              "error": "No connector item in context \u2014 this node only runs from a connectorPoll trigger."
             }
           ],
           "dedupeParams": "manual",
@@ -3817,6 +5097,70 @@
   {
     "name": "a connector poll run from the editor goes to the scheduler",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -3897,6 +5241,70 @@
   {
     "name": "an approved gate hands on its rewrite",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -4102,6 +5510,70 @@
   {
     "name": "a rejected gate skips what follows",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -4294,6 +5766,70 @@
   {
     "name": "a gate sends the work back",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -4561,6 +6097,70 @@
   {
     "name": "a gate that takes no changes",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -4770,6 +6370,70 @@
   {
     "name": "a gate refuses a rewrite that broke its list",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -4961,7 +6625,7 @@
               "iteration": 2,
               "completedAt": "<time>",
               "output": "2",
-              "logs": "── item 1 of 2 ──\n  EACH: success\n── item 2 of 2 ──\n  EACH: success\nStopped after 2 item(s): went through all 2 item(s).",
+              "logs": "\u2500\u2500 item 1 of 2 \u2500\u2500\n  EACH: success\n\u2500\u2500 item 2 of 2 \u2500\u2500\n  EACH: success\nStopped after 2 item(s): went through all 2 item(s).",
               "structuredOutput": {
                 "passes": 2,
                 "count": 2,
@@ -5065,6 +6729,70 @@
   {
     "name": "a gate times out",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -5231,6 +6959,70 @@
   {
     "name": "a gate with a review page",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -5391,6 +7183,70 @@
   {
     "name": "a gate whose review page is not a page",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -5498,6 +7354,70 @@
   {
     "name": "a loop repeats until its condition holds",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -5637,7 +7557,7 @@
               "iteration": 3,
               "completedAt": "<time>",
               "output": "3",
-              "logs": "── iteration 1 of at most 3 ──\n  CHECK: success\n  condition not met ({{steps.check.output}} was \"no\")\n── iteration 2 of at most 3 ──\n  CHECK: success\n  condition not met ({{steps.check.output}} was \"still no\")\n── iteration 3 of at most 3 ──\n  CHECK: success\nStopped after 3 pass(s): the condition held after pass 3.",
+              "logs": "\u2500\u2500 iteration 1 of at most 3 \u2500\u2500\n  CHECK: success\n  condition not met ({{steps.check.output}} was \"no\")\n\u2500\u2500 iteration 2 of at most 3 \u2500\u2500\n  CHECK: success\n  condition not met ({{steps.check.output}} was \"still no\")\n\u2500\u2500 iteration 3 of at most 3 \u2500\u2500\n  CHECK: success\nStopped after 3 pass(s): the condition held after pass 3.",
               "structuredOutput": {
                 "passes": 3,
                 "count": 3,
@@ -5756,6 +7676,70 @@
   {
     "name": "a repeat loop at its cap",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -5843,7 +7827,7 @@
               "iteration": 10,
               "completedAt": "<time>",
               "output": "10",
-              "logs": "── iteration 1 of at most 10 ──\n  S: success\n── iteration 2 of at most 10 ──\n  S: success\n── iteration 3 of at most 10 ──\n  S: success\n── iteration 4 of at most 10 ──\n  S: success\n── iteration 5 of at most 10 ──\n  S: success\n── iteration 6 of at most 10 ──\n  S: success\n── iteration 7 of at most 10 ──\n  S: success\n── iteration 8 of at most 10 ──\n  S: success\n── iteration 9 of at most 10 ──\n  S: success\n── iteration 10 of at most 10 ──\n  S: success\nStopped after 10 pass(s): reached the 10-pass limit.",
+              "logs": "\u2500\u2500 iteration 1 of at most 10 \u2500\u2500\n  S: success\n\u2500\u2500 iteration 2 of at most 10 \u2500\u2500\n  S: success\n\u2500\u2500 iteration 3 of at most 10 \u2500\u2500\n  S: success\n\u2500\u2500 iteration 4 of at most 10 \u2500\u2500\n  S: success\n\u2500\u2500 iteration 5 of at most 10 \u2500\u2500\n  S: success\n\u2500\u2500 iteration 6 of at most 10 \u2500\u2500\n  S: success\n\u2500\u2500 iteration 7 of at most 10 \u2500\u2500\n  S: success\n\u2500\u2500 iteration 8 of at most 10 \u2500\u2500\n  S: success\n\u2500\u2500 iteration 9 of at most 10 \u2500\u2500\n  S: success\n\u2500\u2500 iteration 10 of at most 10 \u2500\u2500\n  S: success\nStopped after 10 pass(s): reached the 10-pass limit.",
               "structuredOutput": {
                 "passes": 10,
                 "count": 10,
@@ -6079,6 +8063,70 @@
   {
     "name": "a for-each loop with a branch in its body",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -6262,7 +8310,7 @@
               "iteration": 2,
               "completedAt": "<time>",
               "output": "2",
-              "logs": "── item 1 of 2 ──\n  C: success\n  BIG: success\n  SMALL: skipped\n── item 2 of 2 ──\n  C: success\n  BIG: skipped\n  SMALL: success\nStopped after 2 item(s): went through all 2 item(s).",
+              "logs": "\u2500\u2500 item 1 of 2 \u2500\u2500\n  C: success\n  BIG: success\n  SMALL: skipped\n\u2500\u2500 item 2 of 2 \u2500\u2500\n  C: success\n  BIG: skipped\n  SMALL: success\nStopped after 2 item(s): went through all 2 item(s).",
               "structuredOutput": {
                 "passes": 2,
                 "count": 2,
@@ -6419,6 +8467,70 @@
   {
     "name": "a for-each loop over an empty list",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -6604,6 +8716,70 @@
   {
     "name": "a for-each loop over something that is not a list",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -6735,6 +8911,70 @@
   {
     "name": "a for-each loop stops at the failing item",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -6866,7 +9106,7 @@
               "iteration": 2,
               "completedAt": "<time>",
               "output": "2",
-              "logs": "── item 1 of 3 ──\n  S: success\n── item 2 of 3 ──\n  S: error\nStopped after 2 item(s): \"S\" failed on item 2.",
+              "logs": "\u2500\u2500 item 1 of 3 \u2500\u2500\n  S: success\n\u2500\u2500 item 2 of 3 \u2500\u2500\n  S: error\nStopped after 2 item(s): \"S\" failed on item 2.",
               "structuredOutput": {
                 "passes": 2,
                 "count": 3,
@@ -6963,6 +9203,70 @@
   {
     "name": "a loop whose body is fed from outside",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -7128,6 +9432,70 @@
   {
     "name": "a signed-out step inside a loop fails the pass",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -7227,7 +9595,7 @@
               "iteration": 1,
               "completedAt": "<time>",
               "output": "1",
-              "logs": "── iteration 1 of at most 2 ──\n  ACT: error\nStopped after 1 pass(s): \"ACT\" failed on pass 1.",
+              "logs": "\u2500\u2500 iteration 1 of at most 2 \u2500\u2500\n  ACT: error\nStopped after 1 pass(s): \"ACT\" failed on pass 1.",
               "structuredOutput": {
                 "passes": 1,
                 "count": 2,
@@ -7293,6 +9661,70 @@
   {
     "name": "a loop on a branch not taken",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -7487,6 +9919,70 @@
   {
     "name": "a run up to one step",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -7669,6 +10165,70 @@
   {
     "name": "a retry starts at the failure",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -8192,6 +10752,70 @@
   {
     "name": "stopping a run",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -8331,7 +10955,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -8532,7 +11156,7 @@
             "projectPath": "/app",
             "displayName": "Shown",
             "branch": "fix-login",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** Shown\n**Workflow ID:** wf-1\n\n## Task\n\n# Task: Fix login\n\n**Project:** app\n**Project Path:** /app\n**Branch:** fix-login\n**Task Status:** In Progress\n**Task ID:** task-1\n\n## Description\n\nThe login breaks.\n\n## Other Tasks in This Project\n\n**Queued (2):**\n- Second\n- First queued\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools for project management:\n- `get_my_context` — Get your current task and project context\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status/description when done\n- `get_diff` — See current git changes\n- `list_branches` — List git branches\n\nWhen you complete this task, update its status to \"in_review\" or \"done\" using `update_task`.\n\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** Shown\n**Workflow ID:** wf-1\n\n## Task\n\n# Task: Fix login\n\n**Project:** app\n**Project Path:** /app\n**Branch:** fix-login\n**Task Status:** In Progress\n**Task ID:** task-1\n\n## Description\n\nThe login breaks.\n\n## Other Tasks in This Project\n\n**Queued (2):**\n- Second\n- First queued\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools for project management:\n- `get_my_context` \u2014 Get your current task and project context\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status/description when done\n- `get_diff` \u2014 See current git changes\n- `list_branches` \u2014 List git branches\n\nWhen you complete this task, update its status to \"in_review\" or \"done\" using `update_task`.\n\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "args": ["--x"],
             "model": "m1"
           }
@@ -8567,6 +11191,70 @@
   {
     "name": "a step works in the worktree an earlier step made",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -8711,7 +11399,7 @@
               "nodeId": "a",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-1",
               "worktreePath": "/wt/a",
               "worktreeName": "a",
@@ -8727,7 +11415,7 @@
               "nodeId": "b",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /wt/a with a 17-line prompt\n[+s] Session sess-2 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /wt/a with a 17-line prompt\n[+s] Session sess-2 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-2",
               "worktreePath": "/wt/a",
               "worktreeName": "a",
@@ -8743,7 +11431,7 @@
               "nodeId": "c",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /elsewhere with a 17-line prompt\n[+s] Session sess-3 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /elsewhere with a 17-line prompt\n[+s] Session sess-3 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-3",
               "agentType": "claude",
               "projectName": "p",
@@ -8770,7 +11458,7 @@
             "displayName": "A",
             "branch": "feat-5",
             "useWorktree": true,
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -8784,7 +11472,7 @@
             "projectPath": "/p",
             "displayName": "B",
             "existingWorktreePath": "/wt/a",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** B\n**Workflow ID:** wf-1\n\n## Task\n\ndo b\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** B\n**Workflow ID:** wf-1\n\n## Task\n\ndo b\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -8798,7 +11486,7 @@
             "projectPath": "/p",
             "displayName": "C",
             "existingWorktreePath": "/elsewhere",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** C\n**Workflow ID:** wf-1\n\n## Task\n\ndo c\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** C\n**Workflow ID:** wf-1\n\n## Task\n\ndo c\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -8826,6 +11514,70 @@
   {
     "name": "a step whose source step made no worktree",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -8924,7 +11676,7 @@
               "nodeId": "a",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-1",
               "agentType": "claude",
               "projectName": "p",
@@ -8953,7 +11705,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -8981,6 +11733,70 @@
   {
     "name": "a contextual run reuses the source worktree",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -9073,7 +11889,7 @@
               "nodeId": "a",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /src/wt with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /src/wt with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-1",
               "worktreePath": "/src/wt",
               "worktreeName": "wt",
@@ -9099,7 +11915,7 @@
             "projectPath": "/app",
             "displayName": "A",
             "existingWorktreePath": "/src/wt",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -9127,6 +11943,70 @@
   {
     "name": "worktrees made by a run are cleaned up",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -9249,7 +12129,7 @@
               "nodeId": "a",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-1",
               "worktreePath": "/wt/a",
               "worktreeOrigin": "created",
@@ -9264,7 +12144,7 @@
               "nodeId": "b",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-2 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-2 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-2",
               "worktreePath": "/wt/b",
               "worktreeOrigin": "created",
@@ -9289,7 +12169,7 @@
             "projectPath": "/p",
             "displayName": "A",
             "useWorktree": true,
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -9303,7 +12183,7 @@
             "projectPath": "/p",
             "displayName": "B",
             "useWorktree": true,
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** B\n**Workflow ID:** wf-1\n\n## Task\n\ndo b\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** B\n**Workflow ID:** wf-1\n\n## Task\n\ndo b\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -9351,6 +12231,70 @@
   {
     "name": "a join after a survivable failure",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -9561,6 +12505,70 @@
   {
     "name": "a join below a failure that stops the run",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -9779,6 +12787,70 @@
   {
     "name": "a connector item is acknowledged after success",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -9937,6 +13009,70 @@
   {
     "name": "a connector item whose run failed is retried later",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -10098,6 +13234,70 @@
   {
     "name": "a rejected gate settles its connector item",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -10269,6 +13469,70 @@
   {
     "name": "a webhook run reads its request",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -10438,6 +13702,70 @@
   {
     "name": "two identical triggers make one run",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -10528,7 +13856,7 @@
               "nodeId": "a",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-1",
               "agentType": "claude",
               "projectName": "p",
@@ -10553,7 +13881,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "A",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** A\n**Workflow ID:** wf-1\n\n## Task\n\ndo a\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -10584,6 +13912,70 @@
   {
     "name": "a parallel wave with a stagger",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -10792,6 +14184,70 @@
   {
     "name": "an unknown step kind runs as an agent",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -10866,7 +14322,7 @@
               "nodeId": "x",
               "status": "success",
               "startedAt": "<time>",
-              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output — it produced nothing at all",
+              "diagnostics": "[+s] Launching claude in /p with a 17-line prompt\n[+s] Session sess-1 started (pid 4242): agent -p\n[+s] Will give up after 60 min without an exit\n[+s] Agent exited with code 0 after 0 bytes of output \u2014 it produced nothing at all",
               "sessionId": "sess-1",
               "agentType": "claude",
               "projectName": "p",
@@ -10888,7 +14344,7 @@
             "projectName": "p",
             "projectPath": "/p",
             "displayName": "X",
-            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** X\n**Workflow ID:** wf-1\n\n## Task\n\ngo\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` — Get your current project context\n- `list_workflow_runs` — See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` — List tasks in this project\n- `update_task` — Update task status when done\n",
+            "initialPrompt": "# Workflow: Test Workflow\n\n**Step:** X\n**Workflow ID:** wf-1\n\n## Task\n\ngo\n\n## Available Tools\n\nYou are managed by Vorn. You have access to MCP tools:\n- `get_my_context` \u2014 Get your current project context\n- `list_workflow_runs` \u2014 See previous runs for this workflow (workflow_id: \"wf-1\")\n- `list_tasks` \u2014 List tasks in this project\n- `update_task` \u2014 Update task status when done\n",
             "headless": true,
             "workflowId": "wf-1",
             "workflowName": "Test Workflow"
@@ -10916,6 +14372,70 @@
   {
     "name": "a run left running is reconciled",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -11102,6 +14622,70 @@
   {
     "name": "a run left running whose agent still runs",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
@@ -11204,6 +14788,70 @@
   {
     "name": "a finished connector run is acknowledged on start",
     "input": {
+      "config": {
+        "defaults": {
+          "defaultAgent": "codex",
+          "headlessStepTimeoutMinutes": 60
+        },
+        "projects": [
+          {
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": []
+          },
+          {
+            "name": "app",
+            "path": "/app",
+            "preferredAgents": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "task-1",
+            "projectName": "app",
+            "title": "Fix login",
+            "description": "The login breaks.",
+            "status": "in_progress",
+            "order": 1,
+            "assignedAgent": "gemini",
+            "branch": "fix-login",
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-2",
+            "projectName": "app",
+            "title": "Second",
+            "description": "Two",
+            "status": "todo",
+            "order": 3,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-3",
+            "projectName": "app",
+            "title": "First queued",
+            "description": "Three",
+            "status": "todo",
+            "order": 2,
+            "useWorktree": true,
+            "createdAt": "",
+            "updatedAt": ""
+          },
+          {
+            "id": "task-4",
+            "projectName": "p",
+            "title": "Elsewhere",
+            "description": "",
+            "status": "in_review",
+            "order": 1,
+            "branch": "b4",
+            "createdAt": "",
+            "updatedAt": ""
+          }
+        ]
+      },
       "workflow": {
         "id": "wf-1",
         "name": "Test Workflow",
