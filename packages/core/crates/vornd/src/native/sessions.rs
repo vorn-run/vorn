@@ -232,6 +232,7 @@ pub fn foresees(method: &str) -> bool {
         method,
         "terminal:kill" | "terminal:rename" | "terminal:setGroup" | "terminal:reorder"
     ) || headless::foresees(method)
+        || super::worktree_move::foresees(method)
 }
 
 /// What vornd would answer `method`, read from the copy of the registry
@@ -242,6 +243,9 @@ pub fn foresees(method: &str) -> bool {
 pub fn foresee(native: &Native, method: &str, params: &Value) -> Option<Answer> {
     if headless::foresees(method) {
         return headless::foresee(native, params);
+    }
+    if super::worktree_move::foresees(method) {
+        return super::worktree_move::foresee(native, method, params);
     }
     let asked = asked(method, params)?;
     native.registry.get()?.read(|r| match &asked {

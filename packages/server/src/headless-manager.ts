@@ -24,6 +24,7 @@ import log from './logger'
 import { holdWorkspace } from './workspace-holds'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 import { vorndSessions, type SessionNote, type VorndPty } from './vornd-sessions'
+import { applyWorktreeUpdates, type WorktreeUpdates } from './worktree-moves'
 import { sessionFeed } from './session-feed'
 
 const MAX_OUTPUT_LINES = 1000
@@ -77,6 +78,8 @@ class HeadlessManager extends EventEmitter {
       log.warn({ id: record.id, why: note.failed }, '[headless] vornd could not start this agent')
       agent?.finish(1)
     }
+    const moved = note.moved ? this.sessions.get(record.id) : undefined
+    if (moved) this.worktreeMoved(moved, record)
     if (record.status === 'exited') this.endedInVornd(record)
   }
 
@@ -341,19 +344,16 @@ class HeadlessManager extends EventEmitter {
     return { count: sessionIds.length, sessionIds }
   }
 
-  updateSessionsForWorktree(
-    worktreePath: string,
-    updates: { branch?: string; worktreePath?: string; worktreeName?: string }
-  ): void {
+  updateSessionsForWorktree(worktreePath: string, updates: WorktreeUpdates): void {
     for (const s of this.sessions.values()) {
-      if (s.worktreePath === worktreePath) {
-        if (updates.branch !== undefined) s.branch = updates.branch
-        if (updates.worktreeName !== undefined) s.worktreeName = updates.worktreeName
-        if (updates.worktreePath !== undefined) s.worktreePath = updates.worktreePath
-        this.recordChanged(s.id)
-        this.emit('client-message', IPC.SESSION_UPDATED, s)
-      }
+      if (s.worktreePath === worktreePath) this.worktreeMoved(s, updates)
     }
+  }
+
+  private worktreeMoved(s: HeadlessSession, updates: WorktreeUpdates): void {
+    applyWorktreeUpdates(s, updates)
+    this.recordChanged(s.id)
+    this.emit('client-message', IPC.SESSION_UPDATED, s)
   }
 
   /** Let go of every agent for a server on its way out. */

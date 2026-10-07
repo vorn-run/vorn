@@ -943,6 +943,8 @@ export interface SessionNote {
   failed?: string
   /** With `native`: the order a client set. */
   reordered?: boolean
+  /** With `native`: its worktree's branch was renamed, or the worktree moved, for a client. */
+  moved?: boolean
 }
 
 /**
