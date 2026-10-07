@@ -41,8 +41,10 @@ const PASSWORD = 'pw-parity-secret'
 
 /** ssh as these runs see it; `LOG` and `REMOTE_SHELL` are filled in per run. */
 const FAKE_SSH = `#!/bin/sh
-for a in "$@"; do printf '%s\\037' "$a"; done >> "LOG/argv"
-printf '\\n' >> "LOG/argv"
+us=$(printf '\\037')
+line=
+for a in "$@"; do line="$line$a$us"; done
+printf '%s\\n' "$line" >> "LOG/argv"
 case " $* " in *PreferredAuthentications=password*)
   printf "me@box.example's password: "
   stty -echo 2>/dev/null
@@ -115,7 +117,9 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     let found = ''
     let shown: string[] = []
     await until(`${id} to show ${what}`, async () => {
-      shown = await through.result<string[]>('terminal:readOutput', { id })
+      // Not started yet: the holder has no session under the id until then.
+      const frame = await through.call('terminal:readOutput', { id })
+      shown = (frame.result as string[] | undefined) ?? []
       found = shown.find((l) => what.test(l))?.trim() ?? ''
       return found !== ''
     }).catch((err: Error) => {
@@ -182,7 +186,11 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     await exited(byKey)
     await call('resume the ended session', 'sessions:resume', { id: byKey })
     const resumedShown = await said(byKey, /ARGV:/)
-    await until('the resume to log in', () => lines(path.join(log, 'argv')).length === 3)
+    await until('the resume to log in', () => lines(path.join(log, 'argv')).length === 3).catch(
+      (err: Error) => {
+        throw new Error(`${err.message}; ${JSON.stringify({ replies, log: lines(path.join(log, 'argv')) })}`)
+      }
+    )
 
     await call('close the password session', 'terminal:kill', byPassword)
     await exited(byPassword)
@@ -191,9 +199,12 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     return {
       replies,
       shown: { ...shown, resumed: resumedShown },
-      sshArgv: lines(path.join(log, 'argv')).map((l) => l.split('\x1f').filter(Boolean)),
+      // The two creates log in at once, in an order of their own.
+      sshArgv: lines(path.join(log, 'argv'))
+        .sort()
+        .map((l) => l.split('\x1f').filter(Boolean)),
       passwords: lines(path.join(log, 'passwords')),
-      remote: lines(path.join(log, 'remote')),
+      remote: lines(path.join(log, 'remote')).sort(),
       listedAtFirst,
       listed: await listed(),
       created: direct.toldBy('session:created')
@@ -234,7 +245,7 @@ describe.skipIf(!runnable)('terminals on a remote host, against the server', () 
 
   it('logs in by ssh with the password typed once, and runs the agent there', () => {
     const off = runs.off as { sshArgv: string[][]; passwords: string[]; remote: string[] }
-    expect(off.sshArgv[0]).toEqual([
+    expect(off.sshArgv[2]).toEqual([
       '-t',
       '-p',
       '2222',
@@ -247,7 +258,7 @@ describe.skipIf(!runnable)('terminals on a remote host, against the server', () 
       'me@box.example',
       'echo __VORN_READY_<id>__ && exec $SHELL -l'
     ])
-    expect(off.sshArgv[1]).toEqual([
+    expect(off.sshArgv[0]).toEqual([
       '-t',
       '-i',
       '/keys/id_test',
@@ -255,9 +266,9 @@ describe.skipIf(!runnable)('terminals on a remote host, against the server', () 
       'echo __VORN_READY_<id>__ && exec $SHELL -l'
     ])
     // The resume logs in again as the session did.
-    expect(off.sshArgv[2]).toEqual(off.sshArgv[1])
+    expect(off.sshArgv[1]).toEqual(off.sshArgv[0])
     expect(off.passwords).toEqual([PASSWORD])
-    expect(off.remote[0]).toBe("cd <work>/far && <work>/bin/argv-agent 'fix the remote build'")
+    expect(off.remote).toContain("cd <work>/far && <work>/bin/argv-agent 'fix the remote build'")
   })
 
   it('has vornd create and resume them with the switch on', () => {
