@@ -54,11 +54,7 @@ import { resolveSelection } from './extensions/selection'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
 import { installHooks } from './hook-installer'
-import {
-  installCopilotHooks,
-  uninstallCopilotHooks,
-  CopilotHookInstallation
-} from './copilot-hook-installer'
+import { installCopilotHooks } from './copilot-hook-installer'
 import {
   IPC,
   WidgetAgentInfo,
@@ -220,8 +216,6 @@ import { vorndSessions, type HeldSession } from './vornd-sessions'
 import { onePerKey } from './one-per-key'
 import { isWorkspaceHeld } from './workspace-holds'
 import { coreStatus } from './native-core'
-
-const copilotInstallations = new Map<string, CopilotHookInstallation>()
 
 /**
  * What a status change does to the two dates that hang off it.
@@ -2393,12 +2387,8 @@ export function registerAllMethods(): void {
       ...(session.branch && { branch: session.branch })
     })
 
-    if (payload.agentType === 'copilot') {
-      const port = hookServer.getPort()
-      if (port <= 0) return
-      const cwd = session.worktreePath || session.projectPath
-      const installation = installCopilotHooks(cwd, port)
-      copilotInstallations.set(session.id, installation)
+    if (payload.agentType === 'copilot' && hookServer.getPort() > 0) {
+      const installation = installCopilotHooks(session.id)
       hookStatusMapper.forceLink(installation.sessionId, session.id)
       ptyManager.linkHookSession(session.id, installation.sessionId)
       // Don't set statusSource = 'hooks' eagerly — it disables the pattern-based
@@ -2465,17 +2455,11 @@ export function registerAllMethods(): void {
     sessionManager.scheduleSave()
   })
 
-  // Clean up Copilot hooks on session exit
   ptyManager.on('session-exit', (session) => {
     // A session that died early holds nothing; without this its conversation
     // stays unreachable for the rest of the spawn window.
     releaseClaimsFor(session.id)
     releaseExtensionsFor(session)
-    const inst = copilotInstallations.get(session.id)
-    if (inst) {
-      uninstallCopilotHooks(inst)
-      copilotInstallations.delete(session.id)
-    }
 
     sessionManager.scheduleSave()
     broadcastWidgetUpdate()
