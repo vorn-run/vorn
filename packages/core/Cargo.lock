@@ -2985,6 +2985,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-worktrees"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vorn-git",
+]
+
+[[package]]
 name = "vornd"
 version = "0.8.0-beta.4"
 dependencies = [
@@ -3021,6 +3032,7 @@ dependencies = [
  "vorn-size",
  "vorn-store",
  "vorn-term-proto",
+ "vorn-worktrees",
  "windows-native-keyring-store",
 ]
 
