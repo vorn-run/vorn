@@ -970,21 +970,23 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
           .map((p) => p as TerminalSession)
           .filter((s) => s.displayName === 'Build' || s.groupId === 'group-1')
           .map((s) => ({ id: s.id, displayName: s.displayName, groupId: s.groupId })),
-        // Each change to the worktree agent's branch, path and name, once.
-        moved: [
-          ...new Set(
-            toldOf('session:updated')
-              .map((p) => p as TerminalSession)
-              .filter((s) => s.id === inWorktree)
-              .map((s) => JSON.stringify([s.branch, s.worktreePath, s.worktreeName]))
-          )
-        ]
+        moved: changesOf(
+          [...toldOf('session:created'), ...toldOf('session:updated')]
+            .map((p) => p as TerminalSession)
+            .filter((s) => s.id === inWorktree)
+            .map((s) => JSON.stringify([s.branch, s.worktreePath, s.worktreeName]))
+        )
       }
     }
   } finally {
     direct.close()
     through.close()
   }
+}
+
+/** Each change in a session's told values, from how it was created: status updates that change none of them are told at whatever moment they happen. */
+function changesOf(told: string[]): string[] {
+  return told.filter((value, i) => i > 0 && value !== told[i - 1])
 }
 
 describe.skipIf(!runnable)('the terminals vornd creates and changes, against the server', () => {
