@@ -150,8 +150,16 @@ async fn start(
     tokio::task::JoinHandle<std::io::Result<()>>,
 ) {
     let home = tempfile::tempdir().unwrap();
+    let (d, task) = start_in(home.path(), idle);
+    (d, home, task)
+}
+
+fn start_in(
+    home: &std::path::Path,
+    idle: Duration,
+) -> (Arc<Sessiond>, tokio::task::JoinHandle<std::io::Result<()>>) {
     let d = Sessiond::new(Config {
-        home: home.path().to_path_buf(),
+        home: home.to_path_buf(),
         instance: rand_instance(),
         build: "test".into(),
         idle_exit: idle,
@@ -159,7 +167,7 @@ async fn start(
     });
     let listener = server::bind(&d).unwrap();
     let task = tokio::spawn(server::serve(Arc::clone(&d), listener));
-    (d, home, task)
+    (d, task)
 }
 
 fn rand_instance() -> u128 {
@@ -533,4 +541,41 @@ async fn the_endpoint_is_for_this_user_only() {
     let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode(&home.path().join("run")), 0o700);
     assert_eq!(mode(std::path::Path::new(&d.endpoint())), 0o600);
+}
+
+#[tokio::test]
+async fn shutting_down_takes_back_the_endpoint_and_announcement() {
+    let (d, home, task) = start(Duration::from_secs(60)).await;
+    let run = home.path().join("run");
+    let files = || std::fs::read_dir(&run).unwrap().count();
+    // The endpoint and its announcement; a pipe on Windows leaves no file.
+    assert_eq!(files(), if cfg!(unix) { 2 } else { 1 });
+    let _v = Vornd::hello(&d).await;
+    d.shut_down();
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("stops when told")
+        .unwrap()
+        .unwrap();
+    assert_eq!(files(), 0);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn binding_sweeps_what_a_killed_sessiond_left() {
+    let home = tempfile::tempdir().unwrap();
+    let run = home.path().join("run");
+    std::fs::create_dir_all(&run).unwrap();
+    let stale = run.join("sessiond-1-dead.sock");
+    drop(std::os::unix::net::UnixListener::bind(&stale).unwrap());
+    // Past the sweep's grace.
+    let set_mtime = std::process::Command::new("touch")
+        .args(["-d", "2020-01-01T00:00:00"])
+        .arg(&stale)
+        .status()
+        .unwrap();
+    assert!(set_mtime.success());
+    let (d, _t) = start_in(home.path(), Duration::from_secs(60));
+    assert!(!stale.exists(), "the dead socket is swept");
+    assert!(std::path::Path::new(&d.endpoint()).exists());
 }

@@ -960,4 +960,21 @@ mod tests {
         withdraw(home.path());
         assert!(home.path().join("run").join(ANNOUNCEMENT).exists());
     }
+
+    /// The sweep can tell a dead vornd's endpoints by the pid in their names.
+    #[cfg(unix)]
+    #[test]
+    fn the_endpoints_are_named_for_the_sweep() {
+        let home = Path::new("/h");
+        let pid = std::process::id();
+        for endpoint in [endpoint(home), crate::grid::endpoint(home)] {
+            let name = Path::new(&endpoint).file_name().unwrap().to_str().unwrap();
+            assert!(
+                vorn_sessiond::rundir::PID_NAMED
+                    .iter()
+                    .any(|p| name == format!("{p}{pid}.sock")),
+                "{name}"
+            );
+        }
+    }
 }

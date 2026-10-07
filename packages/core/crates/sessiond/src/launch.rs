@@ -75,7 +75,7 @@ pub fn withdraw(home: &Path, instance: u128) {
     let _ = fs::remove_file(info_path(home, instance));
 }
 
-fn parse(text: &str) -> Option<Instance> {
+pub(crate) fn parse(text: &str) -> Option<Instance> {
     let mut endpoint = None;
     let mut pid = None;
     let mut proto = None;
@@ -105,9 +105,10 @@ fn parse(text: &str) -> Option<Instance> {
 }
 
 /// The instances announced under `home` whose process is still alive. An
-/// announcement left by one that crashed is removed.
+/// announcement left by one that crashed is removed, with its socket.
 pub fn running(home: &Path) -> Vec<Instance> {
-    let Ok(dir) = fs::read_dir(home.join("run")) else {
+    let run = home.join("run");
+    let Ok(dir) = fs::read_dir(&run) else {
         return Vec::new();
     };
     let mut out = Vec::new();
@@ -122,7 +123,7 @@ pub fn running(home: &Path) -> Vec<Instance> {
         if alive(i.pid) {
             out.push(i);
         } else {
-            let _ = fs::remove_file(&path);
+            crate::rundir::forget(&run, &path, &i);
         }
     }
     out.sort_by_key(|i| i.instance);

@@ -141,8 +141,32 @@ async fn a_sessiond_crash_ends_its_sessions() {
         "its session ended with it"
     );
     assert_eq!(v.recv().await, None);
-    // Its announcement is cleaned up by the next look.
+    // Its announcement and socket are cleaned up by the next look.
     assert!(launch::running(home.path()).is_empty());
+    assert_eq!(
+        std::fs::read_dir(home.path().join("run")).unwrap().count(),
+        0
+    );
+}
+
+/// SIGTERM is an orderly exit: sessiond takes its socket and announcement
+/// back.
+#[cfg(unix)]
+#[tokio::test]
+async fn sigterm_leaves_nothing_in_run() {
+    let home = tempfile::tempdir().unwrap();
+    let i = start(home.path());
+    assert!(Path::new(&i.endpoint).exists());
+    // SAFETY: kill(2) on the sessiond this test started.
+    assert_eq!(
+        unsafe { libc::kill(i.pid as libc::pid_t, libc::SIGTERM) },
+        0
+    );
+    assert!(gone_within(i.pid, Duration::from_secs(5)), "sessiond exits");
+    assert_eq!(
+        std::fs::read_dir(home.path().join("run")).unwrap().count(),
+        0
+    );
 }
 
 /// RC-T11: an old sessiond drains. New sessions go to the new one, and the

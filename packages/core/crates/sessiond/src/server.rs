@@ -53,6 +53,9 @@ pub struct Sessiond {
     idle_since: Mutex<Option<Instant>>,
     /// Set by Drain: no new sessions, and exit once the last one is released.
     draining: AtomicBool,
+    /// Set by [`Sessiond::shut_down`], so [`serve`] ends even if it was
+    /// between waits when `stop` was notified.
+    stopping: AtomicBool,
     pub stop: Notify,
 }
 
@@ -68,8 +71,16 @@ impl Sessiond {
             outbox: Mutex::new(None),
             idle_since: Mutex::new(Some(Instant::now())),
             draining: AtomicBool::new(false),
+            stopping: AtomicBool::new(false),
             stop: Notify::new(),
         })
+    }
+
+    /// Ends [`serve`], which then removes the endpoint and the announcement:
+    /// an orderly exit, as on SIGTERM, leaves nothing behind in `run/`.
+    pub fn shut_down(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        self.stop.notify_waiters();
     }
 
     /// Where vornd connects: a Unix socket path or a named pipe name.
@@ -571,9 +582,10 @@ pub fn endpoint(home: &Path, instance: u128) -> String {
     }
 }
 
-/// Bind the endpoint and announce it in `run/`. Connections wait until
-/// [`serve`] runs.
+/// Sweep what dead owners left in `run/` ([`crate::rundir`]), then bind the
+/// endpoint and announce it there. Connections wait until [`serve`] runs.
 pub fn bind(d: &Sessiond) -> std::io::Result<crate::os::Listener> {
+    crate::rundir::sweep(&d.cfg.home);
     let listener = crate::os::Listener::bind(&d.cfg.home, &d.endpoint())?;
     crate::launch::announce(
         &d.cfg.home,
@@ -600,7 +612,7 @@ pub async fn serve(d: Arc<Sessiond>, mut listener: crate::os::Listener) -> std::
                 tokio::spawn(Arc::clone(&d).serve_conn(stream));
             }
             _ = tokio::time::sleep(Duration::from_millis(250)) => {
-                if d.idle_for(idle) {
+                if d.idle_for(idle) || d.stopping.load(Ordering::SeqCst) {
                     break;
                 }
             }

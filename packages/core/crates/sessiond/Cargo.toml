@@ -14,7 +14,7 @@ serde = { version = "1", features = ["derive"] }
 vorn-sessiond-wire = { path = "../sessiond-wire" }
 vorn-term-proto = { path = "../term-proto", features = ["serde"] }
 portable-pty = "0.9"
-tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "sync", "macros", "time"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "sync", "macros", "time", "signal"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

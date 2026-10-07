@@ -309,6 +309,13 @@ fn main() -> ExitCode {
         let link = Arc::new(AppLink::default());
         let daemon = match args.holder {
             Some(cfg) => {
+                let home = cfg.home.clone();
+                match tokio::task::spawn_blocking(move || vorn_sessiond::rundir::sweep(&home)).await
+                {
+                    Ok(0) => {}
+                    Ok(swept) => info!(swept, "removed what dead owners left in run/"),
+                    Err(err) => error!(%err, "could not sweep run/"),
+                }
                 let holder = Arc::new(new_holder(&cfg));
                 grid = serve_grid(&cfg, &holder);
                 app = serve_app(&cfg, &holder, &link).map(|e| (cfg.home.clone(), e));
@@ -363,13 +370,7 @@ fn main() -> ExitCode {
             }
         };
         proxy::serve(listener, daemon, stop).await;
-        // A clean stop leaves a checkpoint at the end of every session, so
-        // the next vornd has nothing to replay.
-        #[cfg(feature = "engine")]
-        if let Some(engine) = kept.as_ref().and_then(|h| h.engine()) {
-            engine.flush().await;
-        }
-        // The grid socket is named for this process; nothing else removes it.
+        // The endpoints go first, so a kill during the flush leaves none.
         #[cfg(unix)]
         if let Some(endpoint) = &grid {
             let _ = std::fs::remove_file(endpoint);
@@ -379,6 +380,12 @@ fn main() -> ExitCode {
             vornd::control::withdraw(home);
             #[cfg(unix)]
             let _ = std::fs::remove_file(_endpoint);
+        }
+        // A clean stop leaves a checkpoint at the end of every session, so
+        // the next vornd has nothing to replay.
+        #[cfg(feature = "engine")]
+        if let Some(engine) = kept.as_ref().and_then(|h| h.engine()) {
+            engine.flush().await;
         }
         drop(kept);
         info!("stopped");
