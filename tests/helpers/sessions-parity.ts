@@ -12,7 +12,8 @@
  *   copilot is linked to. Each is `<minted n>`, numbered in the order the
  *   transcript first names it (an object's fields read in the order of their
  *   names, since the two sides write them in orders of their own), so an id
- *   has to recur where the other side's recurs.
+ *   has to recur where the other side's recurs. The ready marker a remote
+ *   login waits for, made of a session's id, is `__VORN_READY_<id>__`.
  * - {@link MOMENTS}: when a record was made, started or ended, and the process
  *   it runs as.
  * - {@link REGISTRY_FIELDS}: the revision and stamps of vornd's copy of the
@@ -42,6 +43,11 @@
  *   line after a fixed wait, which on a busy machine can come before the
  *   shell's prompt, and the line is then echoed twice; vornd types it once the
  *   shell has printed. Asserted on the switch-on run only.
+ * - {@link PASSWORD_BEFORE_PROMPT}: the server takes the local shell's echo
+ *   of the ssh line for the remote shell's ready marker, so it can type a
+ *   remote session's command before ssh asks for the password, which then
+ *   reads the command as the password; vornd waits for the remote shell to
+ *   print the marker. A password login is asserted on the switch-on run only.
  * - {@link SAVED_HEAD_COMMIT}: the server looks up each record's head commit
  *   again as it saves, so a shell's record carries one; vornd writes a record
  *   down as it stands. What an offered session records of its head is left
@@ -59,9 +65,13 @@ export const OUTPUT_CHUNKS = 'headless-output-chunk-boundaries'
 export const RESYNC_AFTER_RESUME = 'resync-told-after-a-cold-resume'
 export const HEADLESS_CARRIED = 'headless-agents-carried-over-a-restart'
 export const TYPED_BEFORE_PROMPT = 'launch-line-typed-before-the-prompt'
+export const PASSWORD_BEFORE_PROMPT = 'remote-command-typed-before-the-password'
 export const SAVED_HEAD_COMMIT = 'head-commit-refreshed-by-the-servers-save'
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
+
+/** What a remote shell prints once it is up: the session id's first eight characters. */
+const READY_MARKER = /__VORN_READY_[0-9a-f-]{8}__/g
 
 /** `<project>/<name>-<8 hex>` under `.vorn-worktrees`. */
 const WORKTREE_DIR = /(\.vorn-worktrees\/[^/]+\/[A-Za-z0-9-]+)-[0-9a-f]{8}/g
@@ -88,7 +98,10 @@ export function normalizeRun<T>(value: T, dirs: RunDirs): T {
     if (named) return named
     let out = s
     for (const [name, dir] of roots) out = out.split(dir).join(`<${name}>`)
-    return out.replace(WORKTREE_DIR, '$1-<id>').replace(UUID, mint)
+    return out
+      .replace(WORKTREE_DIR, '$1-<id>')
+      .replace(READY_MARKER, '__VORN_READY_<id>__')
+      .replace(UUID, mint)
   }
   const walk = (v: unknown): unknown => {
     if (typeof v === 'string') return text(v)

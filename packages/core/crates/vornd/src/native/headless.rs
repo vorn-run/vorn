@@ -60,8 +60,9 @@ const PROMPT_NAME_LEN: usize = 60;
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     match method {
         "headless:create" => match CreateRequest::read(params) {
-            Some(req) => create(native, &req),
-            None => Answer::Forward,
+            // A remote host's agent is the server's.
+            Some(req) if req.remote().is_none() => create(native, &req),
+            _ => Answer::Forward,
         },
         "headless:kill" => match params.as_str() {
             Some(id) => kill(native, id),
@@ -382,6 +383,9 @@ fn kill(native: &Native, id: &str) -> Answer {
 /// ([`super::sessions::plan`]). `None` when it cannot be worked out without
 /// a change (a worktree to make, a branch to check out).
 pub fn plan(native: &Native, req: &CreateRequest) -> Option<Value> {
+    if req.remote().is_some() {
+        return None;
+    }
     let settings = agent::settings(native)?;
     let config = agent::command_of(&settings, req.agent)?;
     let existing = given(req.existing_worktree_path.as_deref());

@@ -3,7 +3,8 @@
 //! headless spawn ([`headless_spawn`]), a shell's integration ([`shell`]),
 //! the environment each gets ([`env`]), where a resumed session starts
 //! ([`resume_cwd`]) and the name a prompt gives it
-//! ([`display_name_from_prompt`]).
+//! ([`display_name_from_prompt`]), and a session on a remote host
+//! ([`ssh`]).
 //!
 //! Each answers as the server's TypeScript of the same purpose does
 //! (`agent-launch`, `launch-tokens`, `model-arguments`, `resume-cwd`,
@@ -26,6 +27,7 @@ use crate::{js, paths, Agent, AgentCommand};
 pub mod env;
 pub mod model;
 pub mod shell;
+pub mod ssh;
 pub mod tokens;
 
 pub use model::{apply_model_arguments, command_shape, CommandShape};

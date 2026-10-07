@@ -623,7 +623,7 @@ pub(crate) fn load_agent_commands(conn: &Connection) -> Result<Map<String, Value
 }
 
 /// A `remote_hosts` row as `loadRemoteHosts` maps it.
-fn row_to_remote_host(row: &Row<'_>) -> Result<RemoteHost> {
+pub(crate) fn row_to_remote_host(row: &Row<'_>) -> Result<RemoteHost> {
     Ok(RemoteHost {
         id: get_text(row, "id")?,
         label: get_text(row, "label")?,

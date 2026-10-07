@@ -11,6 +11,9 @@ use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags};
 
+use vorn_protocol::RemoteHost;
+
+use crate::config::row_to_remote_host;
 use crate::Result;
 
 /// The id every project has for this machine.
@@ -128,6 +131,32 @@ impl ProjectHosts {
     }
 }
 
+/// Remote host `id` as the server keeps it, read beside it; `None` when there is no such file, table or host.
+pub fn remote_host(path: &Path, id: &str) -> Result<Option<RemoteHost>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    let tables: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'remote_hosts'",
+        [],
+        |row| row.get(0),
+    )?;
+    if tables == 0 {
+        return Ok(None);
+    }
+    let mut stmt = conn.prepare("SELECT * FROM remote_hosts WHERE id = ?1")?;
+    let mut rows = stmt.query([id])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(row_to_remote_host(row)?)),
+        None => Ok(None),
+    }
+}
+
 /// `path` without its last `/segment`, or all of it when it ends in `/`:
 /// the server's `path.replace(/\/[^/]+$/, '')`.
 fn parent_of(path: &str) -> &str {
@@ -227,5 +256,34 @@ mod tests {
             )
             .unwrap();
         assert!(ProjectHosts::read(&path).is_err());
+    }
+
+    #[test]
+    fn reads_one_remote_host_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vorn.db");
+        assert!(remote_host(&path, "h1").unwrap().is_none());
+        let (store, _) =
+            crate::Store::open(&path, crate::test_support::options()).expect("a store opens");
+        store
+            .conn()
+            .execute_batch(
+                "INSERT INTO remote_hosts (id, label, hostname, user, port, auth_method, ssh_options)
+                 VALUES ('h1', 'Box', 'box.example', 'me', 2222, 'password', '-A');",
+            )
+            .unwrap();
+        let host = remote_host(&path, "h1").unwrap().expect("the host");
+        assert_eq!(
+            (
+                host.label.as_str(),
+                host.hostname.as_str(),
+                host.user.as_str()
+            ),
+            ("Box", "box.example", "me")
+        );
+        assert_eq!(host.port, 2222.0);
+        assert_eq!(host.auth_method.map(|m| m.0).as_deref(), Some("password"));
+        assert_eq!(host.ssh_options.as_deref(), Some("-A"));
+        assert!(remote_host(&path, "h2").unwrap().is_none());
     }
 }

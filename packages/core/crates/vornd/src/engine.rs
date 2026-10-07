@@ -180,6 +180,8 @@ pub struct Engine {
     journal: Mutex<Journal>,
     /// The copy of the app's session records, which the app's channel feeds.
     registry: Arc<SessionRegistry>,
+    /// Sessions whose output is read as it comes, by name: a remote login's.
+    taps: Mutex<HashMap<String, mpsc::UnboundedSender<Vec<u8>>>>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -230,7 +232,38 @@ impl Engine {
             grid: Mutex::new(GridConns::default()),
             streams,
             sizes,
+            taps: Mutex::default(),
         })
+    }
+
+    fn taps(&self) -> std::sync::MutexGuard<'_, HashMap<String, mpsc::UnboundedSender<Vec<u8>>>> {
+        self.taps.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// What session `id` prints from now on, until [`Engine::untap`] or its end.
+    pub fn tap(&self, id: &str) -> mpsc::UnboundedReceiver<Vec<u8>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.taps().insert(id.to_owned(), tx);
+        rx
+    }
+
+    pub fn untap(&self, id: &str) {
+        self.taps().remove(id);
+    }
+
+    /// Hands what session `id` printed to its tap, if it has one.
+    fn tapped(&self, id: &str, entries: &[Entry]) {
+        let mut taps = self.taps();
+        let Some(tap) = taps.get(id) else {
+            return;
+        };
+        let sent = entries.iter().all(|e| match &e.rec {
+            Record::Data { bytes, .. } => tap.send(bytes.clone()).is_ok(),
+            _ => true,
+        });
+        if !sent {
+            taps.remove(id);
+        }
     }
 
     /// Every session's size rule.
@@ -989,6 +1022,9 @@ impl Driver<'_> {
             }
             Out::Applied(entries) => {
                 let printed = entries.iter().any(|e| matches!(e.rec, Record::Data { .. }));
+                if printed {
+                    self.engine.tapped(id, &entries);
+                }
                 if printed
                     && self
                         .engine
@@ -1093,6 +1129,7 @@ impl Driver<'_> {
             }
             closed.push_back(b.clone());
         }
+        self.engine.untap(&b.session);
         self.engine
             .streams
             .closed(&b.session, b.exited, &summary.screen);
@@ -1239,7 +1276,9 @@ impl crate::native::sessions::Host for EngineHost {
         let asked = tokio::time::Instant::now();
         // Taken before the spawn, so the shell's first output is not missed.
         let mut events = engine.subscribe();
+        let tap = matches!(input, Input::Remote(_)).then(|| engine.tap(&name));
         self.runtime.spawn(async move {
+            let named = name.clone();
             match engine.spawn_as(spec, Some(name)).await {
                 Ok(s) => {
                     then(Ok(crate::native::sessions::Started {
@@ -1266,9 +1305,21 @@ impl crate::native::sessions::Host for EngineHost {
                                 warn!(id = %s.id, %err, "could not give the agent its prompt");
                             }
                         }
+                        Input::Remote(remote) => {
+                            let printed =
+                                first_output(&mut events, &s.id, asked + TYPE_AT_MOST).await;
+                            tokio::time::sleep_until(type_at(asked, printed)).await;
+                            if let Some(tap) = tap {
+                                log_in(&engine, &s.id, asked, *remote, tap).await;
+                            }
+                            engine.untap(&s.id);
+                        }
                     }
                 }
-                Err(why) => then(Err(why)),
+                Err(why) => {
+                    engine.untap(&named);
+                    then(Err(why));
+                }
             }
         });
     }
@@ -1296,6 +1347,78 @@ impl crate::native::sessions::Host for EngineHost {
     fn forget(&self, id: &str) {
         self.engine.streams.forget(id);
     }
+}
+
+/// Logs remote terminal `id` in, its shell's prompt drawn: types the ssh line, the password when asked
+/// and the command once the remote shell is up, reading `tap` until the login is over or the session ends.
+async fn log_in(
+    engine: &Engine,
+    id: &str,
+    asked: tokio::time::Instant,
+    remote: crate::native::ssh::Remote,
+    mut tap: mpsc::UnboundedReceiver<Vec<u8>>,
+) {
+    use vorn_agents::launch::ssh::{
+        Login, LoginStep, COMMAND_DELAY, FALLBACK_AFTER, PASSWORD_DELAY, PASSWORD_FOR,
+    };
+    let typed = |what: &str, line: &str| {
+        let mut bytes = Vec::with_capacity(line.len() + 1);
+        bytes.extend_from_slice(line.as_bytes());
+        bytes.push(b'\r');
+        if let Err(err) = engine.write(id, bytes) {
+            warn!(%id, %err, what, "could not type into a remote terminal");
+        }
+    };
+    if let Some(key) = &remote.key {
+        if let Err(err) = key.write() {
+            warn!(%id, %err, "could not write the stored key; ssh uses the agent");
+        }
+    }
+    typed("the ssh line", &remote.line);
+    let mut login = Login::new(remote.marker.clone(), remote.password.is_some());
+    let forget_key = || {
+        if let Some(key) = &remote.key {
+            key.remove();
+        }
+    };
+    let end = asked + PASSWORD_FOR;
+    while !login.done(asked.elapsed()) {
+        let steps = tokio::select! {
+            chunk = tap.recv() => match chunk {
+                Some(bytes) => login.feed(&String::from_utf8_lossy(&bytes), asked.elapsed()),
+                None => break,
+            },
+            () = tokio::time::sleep_until(asked + FALLBACK_AFTER), if login.awaits_fallback() => {
+                login.due(asked.elapsed()).into_iter().collect()
+            }
+            () = tokio::time::sleep_until(end) => break,
+        };
+        for step in steps {
+            match step {
+                LoginStep::Password => {
+                    tokio::time::sleep(PASSWORD_DELAY).await;
+                    if let Some(password) = &remote.password {
+                        typed("the password", password.expose());
+                    }
+                }
+                LoginStep::Connected => {
+                    tokio::time::sleep(COMMAND_DELAY).await;
+                    typed("the command", &remote.command);
+                    forget_key();
+                }
+                LoginStep::Fallback => {
+                    warn!(%id, "the remote shell did not say it was up; typing the command anyway");
+                    typed("the command", &remote.command);
+                    forget_key();
+                }
+                LoginStep::Failed(why) => {
+                    warn!(%id, why, "ssh could not log in");
+                    forget_key();
+                }
+            }
+        }
+    }
+    forget_key();
 }
 
 /// When session `id` first prints, or `None` once `deadline` passes first.
