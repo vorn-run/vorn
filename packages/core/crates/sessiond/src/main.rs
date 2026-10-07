@@ -3,7 +3,8 @@
 //! Binds a user-only endpoint under `DIR` (default `$VORN_HOME`, else
 //! `~/.vorn`), announces it in `run/`, prints `listening <endpoint>` on
 //! stdout for whoever runs it by hand, and serves until it has held no sessions and had no
-//! vornd for `SECS` (default 60, or `VORN_SESSIOND_IDLE_EXIT`).
+//! vornd for `SECS` (default 60, or `VORN_SESSIOND_IDLE_EXIT`), or until
+//! SIGTERM or Ctrl-C. Either way it takes its endpoint and announcement back.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -59,12 +60,33 @@ fn main() {
         // Printed once the endpoint can take a connection.
         println!("listening {}", d.endpoint());
         let _ = std::io::stdout().flush();
+        let stopper = std::sync::Arc::clone(&d);
+        tokio::spawn(async move {
+            terminated().await;
+            stopper.shut_down();
+        });
         server::serve(d, listener).await
     });
     if let Err(e) = res {
         eprintln!("vorn-sessiond: {e}");
         std::process::exit(1);
     }
+}
+
+/// Resolves on SIGTERM or Ctrl-C.
+async fn terminated() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 fn home_dir() -> Option<PathBuf> {

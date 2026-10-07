@@ -58,6 +58,8 @@ impl Drop for Reap {
 struct Vornd {
     child: Child,
     port: u16,
+    /// The line vornd printed once it was listening.
+    ready: Value,
     log: PathBuf,
 }
 
@@ -103,6 +105,7 @@ impl Vornd {
         let mut v = Vornd {
             child,
             port: 0,
+            ready: Value::Null,
             log,
         };
         let line = rx
@@ -114,6 +117,7 @@ impl Vornd {
             .as_u64()
             .and_then(|p| u16::try_from(p).ok())
             .expect("a port");
+        v.ready = ready;
         v
     }
 
@@ -497,4 +501,63 @@ fn the_session_report_is_served() {
     assert_eq!(with_digests["connected"], true, "{with_digests}");
     assert_eq!(with_digests["sessions"], serde_json::json!([]));
     v.stop();
+}
+
+/// vornd sweeps the sockets that killed vornds left under its home, keeps
+/// another home's, and takes its own endpoints back when it stops.
+#[cfg(unix)]
+#[test]
+fn run_holds_only_live_sockets() {
+    use std::os::unix::net::UnixListener;
+    let home = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let mut reap = Reap::default();
+    let dead = {
+        let mut child = Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        pid
+    };
+    let stale = |home: &Path| {
+        let run = home.join("run");
+        std::fs::create_dir_all(&run).unwrap();
+        let paths = [
+            run.join(format!("vornd-app-{dead}.sock")),
+            run.join(format!("vornd-grid-{dead}.sock")),
+        ];
+        for p in &paths {
+            drop(UnixListener::bind(p).unwrap());
+        }
+        paths
+    };
+    let mine = stale(home.path());
+    let theirs = stale(other.path());
+
+    let v = Vornd::start(home.path(), &[]);
+    reap.add(pid(&v.current()));
+    for p in &mine {
+        assert!(!p.exists(), "{} is left", p.display());
+    }
+    for p in &theirs {
+        assert!(p.exists(), "{} was removed", p.display());
+    }
+    // Only the session engine serves the app and grid endpoints.
+    let own: Vec<PathBuf> = ["app", "grid"]
+        .iter()
+        .filter_map(|k| v.ready[k].as_str().map(PathBuf::from))
+        .collect();
+    assert_eq!(own.len(), if cfg!(feature = "engine") { 2 } else { 0 });
+    for p in &own {
+        assert!(p.exists(), "{} is missing", p.display());
+    }
+    v.stop();
+    for p in &own {
+        assert!(!p.exists(), "{} is left after a stop", p.display());
+    }
+    #[cfg(feature = "engine")]
+    assert!(!home
+        .path()
+        .join("run")
+        .join(vornd::control::ANNOUNCEMENT)
+        .exists());
 }

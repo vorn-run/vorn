@@ -13,6 +13,7 @@ pub mod log;
 pub mod os;
 #[cfg(unix)]
 pub mod pty;
+pub mod rundir;
 pub mod server;
 pub mod session;
 pub mod spool;
