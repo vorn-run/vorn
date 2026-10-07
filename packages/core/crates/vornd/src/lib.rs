@@ -20,6 +20,7 @@
 //! at `/mcp` ([`mcp`]).
 
 pub mod applink;
+pub mod claims;
 #[cfg(feature = "engine")]
 pub mod control;
 #[cfg(feature = "engine")]

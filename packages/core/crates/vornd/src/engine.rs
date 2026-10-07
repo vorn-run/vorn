@@ -1192,6 +1192,61 @@ impl Driver<'_> {
     }
 }
 
+/// The engine as what starts the sessions vornd creates for clients
+/// ([`crate::native::sessions`]).
+#[derive(Debug)]
+pub struct EngineHost {
+    engine: Arc<Engine>,
+    /// Where a start runs: it is asked for from a blocking thread.
+    runtime: tokio::runtime::Handle,
+}
+
+impl EngineHost {
+    pub fn new(engine: Arc<Engine>, runtime: tokio::runtime::Handle) -> EngineHost {
+        EngineHost { engine, runtime }
+    }
+}
+
+impl crate::native::sessions::Host for EngineHost {
+    fn ready(&self) -> bool {
+        self.engine.connected()
+    }
+
+    fn start(
+        &self,
+        spec: SpawnSpec,
+        name: String,
+        typed: Option<Vec<u8>>,
+        then: crate::native::sessions::Then,
+    ) {
+        let engine = Arc::clone(&self.engine);
+        let asked = tokio::time::Instant::now();
+        self.runtime.spawn(async move {
+            match engine.spawn_as(spec, Some(name)).await {
+                Ok(s) => {
+                    then(Ok(crate::native::sessions::Started {
+                        pid: s.pid,
+                        epoch: s.epoch,
+                    }));
+                    if let Some(bytes) = typed {
+                        tokio::time::sleep_until(asked + crate::native::sessions::TYPE_AFTER).await;
+                        if let Err(err) = engine.write(&s.id, bytes) {
+                            warn!(id = %s.id, %err, "could not type the agent's launch line");
+                        }
+                    }
+                }
+                Err(why) => then(Err(why)),
+            }
+        });
+    }
+
+    fn signal(&self, id: &str, sig: Sig) {
+        if let Err(err) = self.engine.signal(id, sig) {
+            debug!(%id, %err, "could not signal a session vornd closed");
+        }
+    }
+}
+
 impl From<&EffectId> for Stamp {
     fn from(id: &EffectId) -> Stamp {
         Stamp {

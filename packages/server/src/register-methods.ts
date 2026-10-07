@@ -24,6 +24,7 @@ import { buildRestorePayload } from '@vornrun/shared/session-restore'
 import { resumeCwdFor } from './resume-cwd'
 import {
   claimTranscriptFor,
+  freeTranscriptFor,
   sessionToBindOnCreate,
   transcriptScope,
   transcriptHolder,
@@ -710,6 +711,38 @@ const createNamed = onePerKey<TerminalSession>()
 /** Resumes between claiming their conversation and spawning, by session id. */
 const resuming = new Map<string, Promise<TerminalSession | undefined>>()
 
+/**
+ * The conversations being started are claimed in vornd while it creates
+ * terminals for the clients, so its creates and this server's own starts check
+ * one set of claims; here otherwise. A claim made here is let go of in both.
+ */
+async function claimInVornd(transcriptId: string, id: string): Promise<string | undefined> {
+  return vorndSessions.claim(transcriptId, id)
+}
+
+function releaseClaim(transcriptId: string, id: string): void {
+  releaseSpawningTranscript(transcriptId, id)
+  vorndSessions.unclaim(id, transcriptId)
+}
+
+function releaseClaimsFor(id: string): void {
+  releaseSpawningTranscriptsFor(id)
+  vorndSessions.unclaim(id)
+}
+
+/** `holdClaimsWhilePreparing`, in vornd too while it holds the claims. */
+function holdClaims(id: string): () => void {
+  const prepared = holdClaimsWhilePreparing(id)
+  const told = vorndSessions.preparing(id)
+  let done = false
+  return () => {
+    if (done) return
+    done = true
+    prepared()
+    if (told) vorndSessions.prepared(id)
+  }
+}
+
 export function registerAllMethods(): void {
   // Wire headless worktree counter into pty-manager for cleanup gating
   ptyManager.setHeadlessWorktreeCounter((worktreePath, excludeId) =>
@@ -731,7 +764,8 @@ export function registerAllMethods(): void {
       // Claimed before preparing, under the id the session will have, so a
       // resume of the same conversation sees it in flight and chooses another.
       const id = crypto.randomUUID()
-      const holder = claimSpawningTranscript(named, id)
+      const inVornd = vorndSessions.createsTerminals()
+      const holder = inVornd ? await claimInVornd(named, id) : claimSpawningTranscript(named, id)
       if (holder !== undefined) {
         // A resume got there first: wait for it, then show what it started.
         await resuming.get(holder)
@@ -739,21 +773,22 @@ export function registerAllMethods(): void {
         const bound =
           sessionToBindOnCreate(named, live) ?? live.find((session) => session.id === holder)
         if (bound) return bound
-        if (claimSpawningTranscript(named, id) !== undefined) {
+        const again = inVornd ? await claimInVornd(named, id) : claimSpawningTranscript(named, id)
+        if (again !== undefined) {
           throw new Error('This conversation is already starting in another pane')
         }
       }
-      const prepared = holdClaimsWhilePreparing(id)
+      const prepared = holdClaims(id)
       try {
         const session = ptyManager.spawnPty(payload, await ptyManager.prepareSession(payload), id)
         prepared()
         // An agent that was told the id names the conversation itself; one that
         // cannot be keeps the claim until it reports, seconds later.
-        if (session.agentSessionId) releaseSpawningTranscript(named, id)
+        if (session.agentSessionId) releaseClaim(named, id)
         return session
       } catch (err) {
         prepared()
-        releaseSpawningTranscript(named, id)
+        releaseClaim(named, id)
         throw err
       }
     })
@@ -1195,6 +1230,8 @@ export function registerAllMethods(): void {
           ...(previous.groupId !== undefined && { groupId: previous.groupId })
         })
         ptyManager.recordChanged(session.id)
+        // vornd keeps a name and a group while it decides, whatever an upsert says.
+        ptyManager.tellPatched(session.id)
         announceSession(session)
         sessionManager.scheduleSave()
         return { ok: true as const, session }
@@ -1220,14 +1257,25 @@ export function registerAllMethods(): void {
       // one synchronous step: with native git this await lets other calls run.
       const scope = await transcriptScope(grounded)
       // Not lapsing while the workspace below is prepared, however long git takes.
-      claimsPrepared = holdClaimsWhilePreparing(id)
-      transcriptId = claimTranscriptFor(
-        grounded,
-        ptyManager.getLiveSessions(),
-        id,
-        headlessManager.getActiveSessions(),
-        scope
-      )
+      claimsPrepared = holdClaims(id)
+      if (vorndSessions.createsTerminals()) {
+        // Claimed in vornd, which its creates check: taken meanwhile, the agent chooses.
+        const free = freeTranscriptFor(
+          grounded,
+          ptyManager.getLiveSessions(),
+          headlessManager.getActiveSessions(),
+          scope
+        )
+        transcriptId = free && (await claimInVornd(free, id)) === undefined ? free : undefined
+      } else {
+        transcriptId = claimTranscriptFor(
+          grounded,
+          ptyManager.getLiveSessions(),
+          id,
+          headlessManager.getActiveSessions(),
+          scope
+        )
+      }
       // A create naming this conversation while it prepares waits for this spawn.
       const spawned = new Promise<TerminalSession | undefined>(
         (resolve) => (settleResume = resolve)
@@ -1246,12 +1294,11 @@ export function registerAllMethods(): void {
       // Carried on the server rather than through the payload, so membership is
       // never something a client can set on a spawn.
       if (grounded.groupId !== undefined) {
-        session.groupId = grounded.groupId
-        ptyManager.recordChanged(session.id)
+        ptyManager.setRecordFields(session.id, { groupId: grounded.groupId })
       }
       // The record names the conversation now, so the claim standing in for it is
       // spent; leaving it would hold an id the session already reports.
-      if (session.agentSessionId) releaseSpawningTranscriptsFor(id)
+      if (session.agentSessionId) releaseClaimsFor(id)
       sessionManager.scheduleSave()
       return { ok: true as const, session }
     } catch (err) {
@@ -1263,7 +1310,7 @@ export function registerAllMethods(): void {
       if (restored) restoreHeld(restored)
       else if (dead) ptyManager.restoreReleased(dead)
       claimsPrepared?.()
-      if (transcriptId) releaseSpawningTranscript(transcriptId, id)
+      if (transcriptId) releaseClaim(transcriptId, id)
       settleResume?.(undefined)
       return {
         ok: false as const,
@@ -2368,17 +2415,16 @@ export function registerAllMethods(): void {
         setTimeout(() => {
           const s = ptyManager.getActiveSessions().find((t) => t.id === captureSessionId)
           if (!s) {
-            releaseSpawningTranscriptsFor(captureSessionId)
+            releaseClaimsFor(captureSessionId)
             return
           }
           if (s.agentSessionId) return
           const cwd = s.worktreePath || s.projectPath
           const capturedId = captureAgentSessionId(s.agentType, cwd)
           if (!capturedId) return attempt(rest)
-          s.agentSessionId = capturedId
-          ptyManager.recordChanged(s.id)
+          ptyManager.setRecordFields(s.id, { agentSessionId: capturedId })
           // Its own record names the conversation now, so the spawn claim is spent.
-          releaseSpawningTranscriptsFor(captureSessionId)
+          releaseClaimsFor(captureSessionId)
           sessionManager.scheduleSave()
           clientRegistry.broadcast(IPC.SESSION_UPDATED, s)
           broadcastWidgetUpdate()
@@ -2388,6 +2434,16 @@ export function registerAllMethods(): void {
       attempt([5000, 5000, 10_000, 20_000])
     }
 
+    sessionManager.scheduleSave()
+    broadcastWidgetUpdate()
+  })
+
+  // What vornd changed for a client (with the Native server switch on), told
+  // and saved as the methods that make the same changes here do.
+  ptyManager.on('session-renamed', (id: string, displayName: string) => {
+    logSessionEvent(id, 'renamed', { displayName })
+  })
+  ptyManager.on('records-changed', () => {
     sessionManager.scheduleSave()
     broadcastWidgetUpdate()
   })
@@ -2403,7 +2459,7 @@ export function registerAllMethods(): void {
   ptyManager.on('session-exit', (session) => {
     // A session that died early holds nothing; without this its conversation
     // stays unreachable for the rest of the spawn window.
-    releaseSpawningTranscriptsFor(session.id)
+    releaseClaimsFor(session.id)
     releaseExtensionsFor(session)
     const inst = copilotInstallations.get(session.id)
     if (inst) {

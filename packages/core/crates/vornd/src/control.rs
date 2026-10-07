@@ -19,11 +19,14 @@
 //! toward the size rule and its `terminal:resize` is applied as it is, and
 //! `vornd:spawn` is always answered. Beside them:
 //!
-//! - `vornd:hello` answers `{protocol, build, native, statuses}`; `native`
-//!   says vornd runs native work and keeps a copy of the server's session
-//!   records ([`crate::registry`]), which the server then feeds, and
-//!   `statuses` that the copy decides the terminals' statuses, which the
-//!   server then takes from it.
+//! - `vornd:hello` answers `{protocol, build, native, statuses,
+//!   terminals}`; `native` says vornd runs native work and keeps a copy of
+//!   the server's session records ([`crate::registry`]), which the server
+//!   then feeds, `statuses` that the copy decides the terminals' statuses,
+//!   which the server then takes from it, and `terminals` that vornd
+//!   creates, closes and changes terminals for the clients itself
+//!   ([`crate::native::sessions`]), which the server then follows from the
+//!   copy's notes.
 //! - `vornd:subscribe` answers `{connected, sessions, ended, notices}`: every
 //!   session held with its latest states, the sessions that ended lately and
 //!   the notifications kept, and with `native` also `registry`, the copy of
@@ -51,11 +54,21 @@
 //! - `vornd:reach {host}` says where the server is bound (`0.0.0.0` when it
 //!   takes connections from the network), and that the names a browser may
 //!   load the web client from are to be read again.
+//! - While vornd creates terminals, the server says what bears on that:
+//!   `vornd:draining {draining, handingOver}`, a notification, whether it
+//!   is winding down; and the conversations its own starts take, in the
+//!   claims vornd's creates check ([`crate::claims`]): `vornd:claim
+//!   {transcriptId, sessionId}` answers `{holder}`, the session already
+//!   starting on it or null when the claim is taken, and the notifications
+//!   `vornd:unclaim {sessionId, transcriptId?}`, `vornd:preparing
+//!   {sessionId}` and `vornd:prepared {sessionId}`.
 //!
 //! A subscribed connection is also sent what vornd asks of the server
 //! ([`crate::applink`]): `vornd:broadcast {method, params}`, a notification
-//! for every client, and `vornd:tokenRevoked {tokenId}`, after which the
-//! server closes the sockets that authenticated with that token.
+//! for every client; `vornd:tokenRevoked {tokenId}`, after which the server
+//! closes the sockets that authenticated with that token; and
+//! `vornd:cleanupOffer {id, projectPath, worktreePath}`, the offer to clean
+//! up a worktree whose last terminal vornd closed, for every client.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -70,7 +83,7 @@ use vorn_engine::{Effect, EffectId};
 use vorn_sessiond::os;
 use vorn_sessiond_wire::Sig;
 
-use crate::applink::AppLink;
+use crate::applink::{AppLink, Closing};
 use crate::engine::{Engine, Event};
 use crate::journal::{Held, Stamped};
 use crate::registry::{HookStatus, Patch};
@@ -388,6 +401,7 @@ fn call(app: App<'_>, text: &str) {
             "build": env!("CARGO_PKG_VERSION"),
             "native": engine.registry().wanted(),
             "statuses": engine.registry().decides(),
+            "terminals": link.creates_terminals() && engine.registry().decides(),
         })),
         "vornd:subscribe" => {
             let state = state(engine);
@@ -442,7 +456,26 @@ fn call(app: App<'_>, text: &str) {
             Some(s) => engine.close_stdin(s).map(|()| Value::Null),
             None => Err("vornd:closeStdin needs an id".to_owned()),
         },
+        "vornd:draining" => {
+            let flag = |k| params.get(k).and_then(Value::as_bool) == Some(true);
+            link.set_closing(if flag("draining") {
+                Closing::Draining
+            } else if flag("handingOver") {
+                Closing::HandingOver
+            } else {
+                Closing::Open
+            });
+            Ok(Value::Null)
+        }
+        "vornd:claim" | "vornd:unclaim" | "vornd:preparing" | "vornd:prepared" => {
+            claim(link, method, &params)
+        }
         _ => {
+            if method == "vornd:spawn" {
+                if let Some(name) = params.get("name").and_then(Value::as_str) {
+                    link.record_spawn(name, &params);
+                }
+            }
             if crate::terminal::handle_for_app(engine, conn, fwd, text) {
                 return;
             }
@@ -457,6 +490,37 @@ fn call(app: App<'_>, text: &str) {
             Ok(v) => fwd.send_now(&answer(&rpc, v)),
             Err(e) => fwd.send_now(&refuse(&rpc, &e)),
         }
+    }
+}
+
+/// The server's claims on the conversations its own starts take.
+fn claim(link: &AppLink, method: &str, params: &Value) -> Result<Value, String> {
+    let text = |k| params.get(k).and_then(Value::as_str);
+    let claims = link.claims();
+    let now = std::time::Instant::now();
+    match (method, text("sessionId"), text("transcriptId")) {
+        ("vornd:claim", Some(session), Some(transcript)) => {
+            Ok(json!({ "holder": claims.claim(transcript, session, now) }))
+        }
+        ("vornd:unclaim", Some(session), Some(transcript)) => {
+            claims.release(transcript, session);
+            Ok(Value::Null)
+        }
+        ("vornd:unclaim", Some(session), None) => {
+            claims.release_for(session);
+            Ok(Value::Null)
+        }
+        ("vornd:preparing", Some(session), _) => {
+            claims.preparing(session);
+            Ok(Value::Null)
+        }
+        ("vornd:prepared", Some(session), _) => {
+            claims.prepared(session, now);
+            Ok(Value::Null)
+        }
+        _ => Err(format!(
+            "{method} needs a sessionId, and a claim a transcriptId"
+        )),
     }
 }
 

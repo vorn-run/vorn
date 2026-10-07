@@ -9,6 +9,13 @@ import { normalizePath } from './process-utils'
  */
 const held = new Map<string, number>()
 
+/**
+ * The directories vornd holds while it prepares a session it creates itself,
+ * as its copy of the registry last said: a worktree action here checks them
+ * as it checks this server's own. Never told back to vornd.
+ */
+let vorndHeld: Record<string, number> = {}
+
 /** Told after every hold and release, with no arguments: `heldWorkspaces` says what is held. */
 const listeners = new Set<() => void>()
 
@@ -33,7 +40,13 @@ export function holdWorkspace(dir: string): () => void {
 }
 
 export function isWorkspaceHeld(dir: string): boolean {
-  return held.has(normalizePath(dir))
+  const key = normalizePath(dir)
+  return held.has(key) || Object.hasOwn(vorndHeld, key)
+}
+
+/** What vornd holds now, by normalized path: what it says replaces what it said. */
+export function setVorndHolds(holds: Record<string, number>): void {
+  vorndHeld = { ...holds }
 }
 
 /** Every directory held, by its normalized path, with how many preparations hold it. */
