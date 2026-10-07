@@ -107,7 +107,13 @@ describe('the headless agents vornd starts, followed here', () => {
       // The copy's revision and stamps are not the server's record.
       expect(listed(agentType)).toEqual(record(agentType, { agentType }))
       // Told once: a snapshot told again does not create it twice.
-      note({ op: 'upsert', kind: 'headless', record: record(agentType), native: true, created: true })
+      note({
+        op: 'upsert',
+        kind: 'headless',
+        record: record(agentType),
+        native: true,
+        created: true
+      })
     }
     expect(created.map((s) => s.agentType)).toEqual(AGENTS)
     expect(headlessManager.getActiveSessions().map((s) => s.id)).toEqual(AGENTS)
