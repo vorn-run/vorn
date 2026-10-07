@@ -25,7 +25,7 @@ use std::time::Instant;
 use vorn_term_proto::{Cursor, Entry, GapReason, Record, RecordHeader};
 
 use crate::spool::Spool;
-use crate::wire::{AttachFrom, AttachRefusal, Checkpoint, ExitInfo};
+use crate::wire::{AttachFrom, AttachRefusal, Checkpoint, ExitInfo, Manifest};
 
 /// What a session may hold before it spills to disk, and how much disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +165,9 @@ pub struct SessionLog {
     lost: u64,
     exit: Option<ExitInfo>,
     size: (u16, u16),
+    /// Added to this process's record clock: a log handed over from another
+    /// sessiond carries on from that one's, so `at_ns` never runs back.
+    clock: u64,
 }
 
 impl SessionLog {
@@ -194,7 +197,128 @@ impl SessionLog {
             lost: 0,
             exit: None,
             size,
+            clock: 0,
         }
+    }
+
+    /// Fill in `m`'s log fields, for handing the session to another
+    /// sessiond. Settles any pending Gap first, so the ring is the whole
+    /// story.
+    pub(crate) fn describe(&mut self, m: &mut Manifest) {
+        self.settle_gap();
+        m.epoch = self.epoch;
+        m.ring_budget = self.budget.ring_bytes;
+        m.spool_budget = self.budget.spool_bytes;
+        m.blocking = self.overflow == Overflow::Block;
+        m.head = self.head;
+        m.sent = self.sent;
+        m.delivered = self.delivered;
+        m.retain_from = self.retain_from;
+        (m.cols, m.rows) = self.size;
+        m.exit = self.exit;
+        m.clock_ns = self.clock_ns();
+        m.ring_entries = self.ring.len() as u64;
+        m.spool = self.spool.state();
+        m.newest = self.newest.is_some();
+        m.fallback = self.fallback.is_some();
+    }
+
+    /// The records in memory, oldest first.
+    pub(crate) fn ring(&self) -> &VecDeque<Entry> {
+        &self.ring
+    }
+
+    pub(crate) fn checkpoints(&self) -> (Option<&Checkpoint>, Option<&Checkpoint>) {
+        (self.newest.as_ref(), self.fallback.as_ref())
+    }
+
+    /// The log another sessiond described in `m`, with the ring and
+    /// checkpoints it sent, carrying on in the spool file at `spool_path`.
+    /// Checked to be one contiguous run ending at `m.head`. Its spool's
+    /// bytes count against `pool` from here on, and the file is kept when
+    /// the log is dropped until [`SessionLog::keep_spool`] says otherwise.
+    pub(crate) fn adopt(
+        m: &Manifest,
+        ring: VecDeque<Entry>,
+        newest: Option<Checkpoint>,
+        fallback: Option<Checkpoint>,
+        spool_path: impl Into<PathBuf>,
+        pool: SpoolPool,
+    ) -> io::Result<SessionLog> {
+        let bad = |why: &str| io::Error::new(io::ErrorKind::InvalidData, why.to_owned());
+        if ring.len() as u64 != m.ring_entries {
+            return Err(bad("ring entries missing"));
+        }
+        if m.head.epoch != m.epoch {
+            return Err(bad("head from another epoch"));
+        }
+        if let Some(first) = ring.front() {
+            if m.spool.count > 0 && first.hdr.rseq != m.spool.end {
+                return Err(bad("the ring does not follow the spool"));
+            }
+            let mut at = before(&first.hdr);
+            for e in &ring {
+                if !at.is_followed_by(&e.hdr) {
+                    return Err(bad("the ring is not contiguous"));
+                }
+                at = e.after();
+            }
+            if at != m.head {
+                return Err(bad("the ring does not end at head"));
+            }
+        } else if m.spool.count > 0 && m.spool.end != m.head.next_rseq {
+            return Err(bad("the spool does not end at head"));
+        }
+        for cp in newest.iter().chain(&fallback) {
+            if !cp.crc_ok() || cp.resume.epoch != m.epoch {
+                return Err(bad("a damaged checkpoint"));
+            }
+        }
+        if newest.is_some() != m.newest || fallback.is_some() != m.fallback {
+            return Err(bad("checkpoints missing"));
+        }
+        let spool = Spool::adopt(spool_path, m.epoch, &m.spool)?;
+        if !pool.take(spool.bytes()) {
+            return Err(bad("no room in the spool budget"));
+        }
+        let ring_bytes = ring.iter().map(|e| ring_cost(&e.rec)).sum();
+        Ok(SessionLog {
+            epoch: m.epoch,
+            budget: Budget {
+                ring_bytes: m.ring_budget,
+                spool_bytes: m.spool_budget,
+            },
+            overflow: if m.blocking {
+                Overflow::Block
+            } else {
+                Overflow::Drop
+            },
+            head: m.head,
+            sent: m.sent,
+            delivered: m.delivered,
+            retain_from: m.retain_from,
+            newest,
+            fallback,
+            ring,
+            ring_bytes,
+            spool,
+            pool,
+            lost: 0,
+            exit: m.exit,
+            size: (m.cols, m.rows),
+            clock: m.clock_ns.saturating_sub(now_ns()),
+        })
+    }
+
+    /// Whether dropping the log leaves its spool file, as it must while the
+    /// session is being handed over or once another sessiond has it.
+    pub(crate) fn keep_spool(&mut self, keep: bool) {
+        self.spool.keep(keep);
+    }
+
+    /// The clock `at_ns` is read from.
+    fn clock_ns(&self) -> u64 {
+        now_ns() + self.clock
     }
 
     /// Append a record. Data that does not fit is dropped (and a Gap will
@@ -251,7 +375,7 @@ impl SessionLog {
                 rseq: self.head.next_rseq,
                 start_offset: self.head.next_offset,
             },
-            at_ns: now_ns(),
+            at_ns: self.clock_ns(),
             rec,
         };
         self.head = entry.after();

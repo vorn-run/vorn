@@ -51,6 +51,13 @@ fn main() {
         idle_exit: Duration::from_secs(idle),
         spool_cap: 512 << 20,
     });
+    #[cfg(unix)]
+    if let Some(f) = std::env::var("VORN_SESSIOND_HANDOFF_FAULT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        d.inject(f);
+    }
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

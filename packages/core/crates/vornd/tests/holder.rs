@@ -411,6 +411,7 @@ fn an_incompatible_sessiond_is_left_alone() {
         build: "99.0.0".into(),
         instance: 0xf00,
         exe: None,
+        handoff: None,
     };
     launch::announce(home.path(), &foreign).unwrap();
 

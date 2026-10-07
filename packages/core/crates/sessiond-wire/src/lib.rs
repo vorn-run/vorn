@@ -15,6 +15,14 @@ use vorn_term_proto::{Cursor, Entry};
 /// allowed to run.
 pub const PROTO: u16 = 1;
 
+/// The handoff protocol version this sessiond speaks: how an older holder
+/// hands its live sessions to a newer one on the same machine. A holder
+/// announces it (`handoff=` in `run/`); one that does not is drained.
+pub const HANDOFF: u16 = 1;
+/// The type byte of [`ToSessiond::Handoff`], which a sessiond reads first to
+/// tell a newer sessiond from vornd.
+pub const HANDOFF_FRAME: u8 = 0x0d;
+
 /// The largest frame either side accepts. Entries are batched below it.
 pub const MAX_FRAME: usize = 16 << 20;
 
@@ -156,6 +164,126 @@ pub struct Nonce {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Drain;
 
+/// vornd asks its own sessiond to take every session the older holder at
+/// `from` holds. Answered by [`Adopted`], or [`Failed`] when the older one
+/// keeps them all.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Adopt {
+    pub req: u64,
+    /// The older holder's endpoint.
+    pub from: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Adopted {
+    pub req: u64,
+    pub sessions: Vec<SessionId>,
+}
+
+/// The first frame a newer sessiond sends an older one to take its
+/// sessions; the rest of that connection is [`ToAdopter`] and [`ToDonor`],
+/// with descriptors passed beside the bytes. A holder that does not know
+/// this type closes the connection, as for any frame it cannot read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HandoffHello {
+    pub version_min: u16,
+    pub version_max: u16,
+    pub instance: u128,
+    pub build: String,
+}
+
+/// The donor froze every session and is about to send them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Offer {
+    pub version: u16,
+    pub instance: u128,
+    pub pid: u32,
+    pub sessions: u32,
+}
+
+/// What each descriptor passed with a [`Manifest`] is, in the order sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FdRole {
+    /// A terminal's master end: output, input and resizing.
+    Master,
+    Stdout,
+    Stderr,
+    Stdin,
+}
+
+/// Where a session's disk spool stands; the file itself stays where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpoolState {
+    /// Bytes on disk, header included: the file must be exactly this long.
+    pub bytes: u64,
+    pub count: u64,
+    pub first: Option<u64>,
+    pub first_offset: Option<u64>,
+    pub end: u64,
+    pub marks: Vec<(u64, u64)>,
+    pub torn: bool,
+}
+
+/// Everything about one session but its ring and checkpoints, which follow
+/// it as [`RingChunk`]s and [`ToAdopter::Newest`] / [`ToAdopter::Fallback`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Manifest {
+    pub session: SessionId,
+    pub kind: Kind,
+    pub pid: u32,
+    pub fds: Vec<FdRole>,
+    /// Output streams still open.
+    pub open_streams: u8,
+    /// Whether input is still taken: a writer for the master or stdin.
+    pub input: bool,
+    pub reaped: Option<ExitInfo>,
+    pub epoch: u32,
+    pub ring_budget: u64,
+    pub spool_budget: u64,
+    /// The log stops reading when full rather than dropping output.
+    pub blocking: bool,
+    pub head: Cursor,
+    pub sent: Cursor,
+    pub delivered: Cursor,
+    pub retain_from: Cursor,
+    pub cols: u16,
+    pub rows: u16,
+    pub exit: Option<ExitInfo>,
+    /// The donor's record clock when it froze, so `at_ns` keeps rising.
+    pub clock_ns: u64,
+    pub ring_entries: u64,
+    pub spool: SpoolState,
+    pub newest: bool,
+    pub fallback: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RingChunk {
+    pub session: SessionId,
+    pub entries: Vec<Entry>,
+}
+
+/// Every session was sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Done;
+
+/// The adopter staged every session and can run them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ready;
+
+/// The donor gives the sessions up once the adopter says [`Took`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Commit;
+
+/// The adopter runs the sessions from here on; the donor only reaps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Took;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Refuse {
+    pub why: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Kind {
     Pty,
@@ -295,6 +423,8 @@ messages! {
         Release(SessionRef) = 0x0a,
         Ping(Nonce) = 0x0b,
         Drain(Drain) = 0x0c,
+        Handoff(HandoffHello) = 0x0d,
+        Adopt(Adopt) = 0x0e,
     }
 }
 
@@ -309,6 +439,29 @@ messages! {
         Failed(Failed) = 0x86,
         InputDone(InputDone) = 0x87,
         Pong(Nonce) = 0x88,
+        Adopted(Adopted) = 0x89,
+    }
+}
+
+messages! {
+    /// Older sessiond → newer, after [`ToSessiond::Handoff`].
+    ToAdopter {
+        Offer(Offer) = 0x41,
+        Manifest(Box<Manifest>) = 0x42,
+        Ring(RingChunk) = 0x43,
+        Newest(Checkpoint) = 0x44,
+        Fallback(Checkpoint) = 0x45,
+        Done(Done) = 0x46,
+        Commit(Commit) = 0x47,
+        Refuse(Refuse) = 0x48,
+    }
+}
+
+messages! {
+    /// Newer sessiond → older, after [`ToSessiond::Handoff`].
+    ToDonor {
+        Ready(Ready) = 0x51,
+        Took(Took) = 0x52,
     }
 }
 
@@ -404,6 +557,16 @@ mod tests {
                 blob: b"blob".to_vec(),
             }),
             ToSessiond::Ping(Nonce { nonce: 42 }),
+            ToSessiond::Handoff(HandoffHello {
+                version_min: HANDOFF,
+                version_max: HANDOFF,
+                instance: 7,
+                build: "0.8.1".into(),
+            }),
+            ToSessiond::Adopt(Adopt {
+                req: 4,
+                from: "/tmp/run/sessiond-1-a.sock".into(),
+            }),
         ]
     }
 
@@ -442,6 +605,63 @@ mod tests {
         assert_eq!(r.pending(), 0);
         r.push(&reply.encode());
         assert_eq!(r.read::<ToVornd>().unwrap(), Some(reply));
+    }
+
+    #[test]
+    fn handoff_messages_round_trip() {
+        let hello = ToSessiond::Handoff(HandoffHello {
+            version_min: 1,
+            version_max: 1,
+            instance: 7,
+            build: "b".into(),
+        });
+        assert_eq!(hello.kind(), HANDOFF_FRAME);
+        let manifest = ToAdopter::Manifest(Box::new(Manifest {
+            session: "0000000a-1".into(),
+            kind: Kind::Piped,
+            pid: 42,
+            fds: vec![FdRole::Stdout, FdRole::Stderr, FdRole::Stdin],
+            open_streams: 2,
+            input: true,
+            reaped: None,
+            epoch: 0,
+            ring_budget: 8 << 20,
+            spool_budget: 64 << 20,
+            blocking: true,
+            head: cursor(9, 300),
+            sent: cursor(8, 200),
+            delivered: cursor(7, 100),
+            retain_from: cursor(0, 0),
+            cols: 0,
+            rows: 0,
+            exit: None,
+            clock_ns: 123,
+            ring_entries: 9,
+            spool: SpoolState {
+                bytes: 0,
+                count: 0,
+                first: None,
+                first_offset: None,
+                end: 0,
+                marks: vec![(0, 9)],
+                torn: false,
+            },
+            newest: false,
+            fallback: false,
+        }));
+        let mut r = FrameReader::default();
+        for m in [
+            manifest.clone(),
+            ToAdopter::Done(Done),
+            ToAdopter::Commit(Commit),
+        ] {
+            r.push(&m.encode());
+            assert_eq!(r.read::<ToAdopter>().unwrap(), Some(m));
+        }
+        r.push(&ToDonor::Took(Took).encode());
+        assert_eq!(r.read::<ToDonor>().unwrap(), Some(ToDonor::Took(Took)));
+        r.push(&ToVornd::Adopted(Adopted { req: 1, sessions: vec!["a".into()] }).encode());
+        assert!(matches!(r.read::<ToVornd>(), Ok(Some(ToVornd::Adopted(_)))));
     }
 
     #[test]

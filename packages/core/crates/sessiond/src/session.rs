@@ -5,12 +5,24 @@
 //! saw things happen. A resize takes the same lock, performs the resize and
 //! appends its record before any later output. Exit is appended only once the
 //! output has ended *and* the child was reaped, so no data ever follows it.
+//!
+//! On macOS and Linux a session can be handed to a newer sessiond
+//! ([`crate::handoff`]). A reader there waits for output with `poll` and
+//! reads it under the session lock, so freezing the session ([`Mode`]) under
+//! that lock leaves no byte read and not yet recorded, and the descriptors
+//! can go to the newer sessiond with the log exactly where they stand.
 
+#[cfg(unix)]
+use std::fs::File;
 use std::io::Read;
+#[cfg(unix)]
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread;
 use std::time::Duration;
 
@@ -18,10 +30,12 @@ use std::time::Duration;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use portable_pty::{Child, ChildKiller};
 use tokio::sync::Notify;
-use vorn_term_proto::{Record, Stream};
+use vorn_term_proto::{Entry, Record, Stream};
 
 use crate::log::{AppendError, Budget, Overflow, SessionLog, SpoolPool};
-use crate::wire::{ExitInfo, Io, Kind, Sig, SpawnSpec, Stdin};
+#[cfg(unix)]
+use crate::wire::{Checkpoint, Manifest, SpoolState};
+use crate::wire::{ExitInfo, FdRole, Io, Kind, Sig, SpawnSpec, Stdin};
 
 /// How much one read takes.
 const READ_BYTES: usize = 64 << 10;
@@ -31,11 +45,24 @@ const READ_BYTES: usize = 64 << 10;
 /// not run out while sessiond itself holds a reader back (a blocking session
 /// whose log is full): that output is the program's, and is kept.
 const DRAIN_AFTER_EXIT: Duration = Duration::from_secs(2);
+/// How often an adopted session looks for its program's exit, which the
+/// sessiond that started it reaps and writes down.
+#[cfg(unix)]
+const WATCH_EVERY: Duration = Duration::from_millis(100);
+/// How long an adopted session waits for the exit to be written down once
+/// its program is gone, before it records the exit as unknown: the sessiond
+/// that started it may have died, and then nobody writes it.
+#[cfg(unix)]
+const UNKNOWN_EXIT_AFTER: Duration = Duration::from_secs(1);
 
 /// What a session's writer thread does next.
 enum Input {
     Bytes { input_seq: u64, bytes: Vec<u8> },
     CloseStdin,
+    /// Another sessiond writes to the session from now on: leave without
+    /// closing anything for the program.
+    #[cfg(unix)]
+    Stop,
 }
 
 /// Reported when the kernel took a write.
@@ -45,16 +72,39 @@ pub struct Written {
     pub written: u32,
 }
 
+/// Where a session stands in a handoff to a newer sessiond.
+#[cfg_attr(windows, allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// Reading, writing and recording as usual.
+    Live,
+    /// Being handed over: nothing is read, written or recorded until the
+    /// handoff commits or is called off.
+    Frozen,
+    /// Another sessiond runs it; this one only reaps the program.
+    HandedOff,
+}
+
 pub struct Session {
     pub id: String,
     pub kind: Kind,
     pub pid: u32,
+    /// Whether this process started the program and so is the one that reaps
+    /// it. An adopted session's program is reaped by the sessiond that
+    /// started it.
+    #[cfg_attr(windows, allow(dead_code))]
+    child: bool,
     state: Mutex<State>,
     /// Signalled when a record is appended.
     pub changed: Notify,
-    /// Signalled when a blocked reader may find room.
+    /// Signalled when a blocked reader may find room, and when the mode
+    /// changes.
     room: Condvar,
     input: Mutex<Option<mpsc::Sender<Input>>>,
+    /// Written once the session is handed off, so readers waiting for output
+    /// wake and let their descriptors go.
+    #[cfg(unix)]
+    wake: (std::io::PipeReader, std::io::PipeWriter),
 }
 
 struct State {
@@ -69,6 +119,81 @@ struct State {
     /// only just let go may still have the rest of the pipe to read.
     was_held: bool,
     reaped: Option<ExitInfo>,
+    mode: Mode,
+    /// Input queued that the writer has not finished with, close included.
+    inflight: u32,
+    /// Whether dropping the session ends its program: not while a handoff
+    /// stages it, nor once another sessiond runs it.
+    owns_child: bool,
+    /// The pipe ends readers and the writer use, for a handoff to pass on.
+    #[cfg(unix)]
+    fds: Vec<(FdRole, RawFd)>,
+    /// Where the exit goes once handed off, for the sessiond that has it.
+    #[cfg(unix)]
+    exit_file: Option<PathBuf>,
+    /// Whether the program was reaped when the session froze, so the
+    /// manifest said so already.
+    #[cfg(unix)]
+    reaped_when_frozen: bool,
+}
+
+impl State {
+    fn new(log: SessionLog, master: Option<Master>, killer: Box<dyn ChildKiller + Send + Sync>, open_streams: u8) -> State {
+        State {
+            log,
+            master,
+            killer,
+            open_streams,
+            held: 0,
+            was_held: false,
+            reaped: None,
+            mode: Mode::Live,
+            inflight: 0,
+            owns_child: true,
+            #[cfg(unix)]
+            fds: Vec::new(),
+            #[cfg(unix)]
+            exit_file: None,
+            #[cfg(unix)]
+            reaped_when_frozen: false,
+        }
+    }
+
+    /// The handle a thread that is about to let `fd` go no longer passes on.
+    #[cfg(unix)]
+    fn forget(&mut self, fd: RawFd) {
+        self.fds.retain(|&(_, f)| f != fd);
+    }
+}
+
+/// A session's output end, as its reader thread holds it.
+#[cfg(unix)]
+type ReadEnd = File;
+#[cfg(windows)]
+type ReadEnd = Box<dyn Read + Send>;
+
+/// What a frozen session hands to a newer sessiond: its manifest, then its
+/// records in memory and its checkpoints, and the descriptors that go with
+/// the manifest, in its `fds` order. The descriptors stay open here.
+#[cfg(unix)]
+pub(crate) struct Handover {
+    pub manifest: Manifest,
+    pub ring: Vec<Entry>,
+    pub newest: Option<Checkpoint>,
+    pub fallback: Option<Checkpoint>,
+    pub fds: Vec<RawFd>,
+}
+
+/// A session a newer sessiond received and has not started: nothing reads,
+/// writes or reaps it yet, and dropping it ends nothing but its own copies
+/// of the descriptors.
+#[cfg(unix)]
+pub(crate) struct Staged {
+    session: Arc<Session>,
+    reader: Option<File>,
+    stdout: Option<File>,
+    stderr: Option<File>,
+    stdin: Option<File>,
 }
 
 impl Session {
@@ -89,6 +214,21 @@ impl Session {
         }
     }
 
+    fn new(id: String, kind: Kind, pid: u32, child: bool, state: State) -> std::io::Result<Arc<Session>> {
+        Ok(Arc::new(Session {
+            id,
+            kind,
+            pid,
+            child,
+            state: Mutex::new(state),
+            changed: Notify::new(),
+            room: Condvar::new(),
+            input: Mutex::new(None),
+            #[cfg(unix)]
+            wake: std::io::pipe()?,
+        }))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn spawn_pty(
         id: String,
@@ -103,25 +243,10 @@ impl Session {
         let pid = child.process_id().unwrap_or(0);
         let budget = sized(Budget::PTY, spec.ring_bytes);
         let log = SessionLog::new(0, budget, Overflow::Drop, spool, pool, (cols, rows));
-        let session = Arc::new(Session {
-            id,
-            kind: Kind::Pty,
-            pid,
-            state: Mutex::new(State {
-                log,
-                master: Some(master),
-                killer: child.clone_killer(),
-                open_streams: 1,
-                held: 0,
-                was_held: false,
-                reaped: None,
-            }),
-            changed: Notify::new(),
-            room: Condvar::new(),
-            input: Mutex::new(None),
-        });
-        session.start_writer(writer, on_written);
-        session.start_reader(reader, Stream::Pty);
+        let state = State::new(log, Some(master), child.clone_killer(), 1);
+        let session = Self::new(id, Kind::Pty, pid, true, state)?;
+        session.start_writer(writer, None, on_written);
+        session.start_reader(reader, Stream::Pty, None);
         session.start_reaper(child);
         Ok(session)
     }
@@ -163,28 +288,17 @@ impl Session {
         let budget = sized(Budget::PIPED, spec.ring_bytes);
         let log = SessionLog::new(0, budget, Overflow::Block, spool, pool, (0, 0));
         let child: Box<dyn Child + Send + Sync> = Box::new(child);
-        let session = Arc::new(Session {
-            id,
-            kind: Kind::Piped,
-            pid,
-            state: Mutex::new(State {
-                log,
-                master: None,
-                killer: child.clone_killer(),
-                open_streams: 2,
-                held: 0,
-                was_held: false,
-                reaped: None,
-            }),
-            changed: Notify::new(),
-            room: Condvar::new(),
-            input: Mutex::new(None),
-        });
+        let state = State::new(log, None, child.clone_killer(), 2);
+        let session = Self::new(id, Kind::Piped, pid, true, state)?;
         if let Some(input) = input {
-            session.start_writer(Box::new(input), on_written);
+            #[cfg(unix)]
+            let fd = Some((FdRole::Stdin, input.as_raw_fd()));
+            #[cfg(windows)]
+            let fd = None;
+            session.start_writer(Box::new(input), fd, on_written);
         }
-        session.start_reader(Box::new(out), Stream::Stdout);
-        session.start_reader(Box::new(err), Stream::Stderr);
+        session.start_reader(read_end(out), Stream::Stdout, Some(FdRole::Stdout));
+        session.start_reader(read_end(err), Stream::Stderr, Some(FdRole::Stderr));
         session.start_reaper(child);
         Ok(session)
     }
@@ -193,17 +307,29 @@ impl Session {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Start the thread that writes input. `fd`, the descriptor `w` writes
+    /// to, is passed on in a handoff while the thread runs.
     fn start_writer(
         self: &Arc<Self>,
         mut w: Box<dyn std::io::Write + Send>,
+        fd: Option<(FdRole, RawFdOrNone)>,
         on_written: impl Fn(&str, Written) + Send + 'static,
     ) {
         let (tx, rx) = mpsc::channel::<Input>();
         *self.input.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        #[cfg(unix)]
+        if let Some(fd) = fd {
+            self.lock().fds.push(fd);
+        }
+        #[cfg(windows)]
+        let _ = fd;
         let id = self.id.clone();
+        // Weak: the session holds the sender this thread waits on.
+        let s: Weak<Session> = Arc::downgrade(self);
         thread::Builder::new()
             .name(format!("sessiond-w-{id}"))
             .spawn(move || {
+                let mut closing = false;
                 for msg in rx {
                     match msg {
                         Input::Bytes { input_seq, bytes } => {
@@ -211,71 +337,148 @@ impl Session {
                             // got through, never retried.
                             let written = write_some(&mut w, &bytes);
                             on_written(&id, Written { input_seq, written });
+                            if let Some(s) = s.upgrade() {
+                                s.lock().inflight -= 1;
+                            }
                         }
-                        Input::CloseStdin => break,
+                        Input::CloseStdin => {
+                            closing = true;
+                            break;
+                        }
+                        #[cfg(unix)]
+                        Input::Stop => break,
                     }
                 }
-                // Dropping the writer closes stdin: the agent sees EOF.
+                if let Some(s) = s.upgrade() {
+                    let mut st = s.lock();
+                    #[cfg(unix)]
+                    if let Some((_, fd)) = fd {
+                        st.forget(fd);
+                    }
+                    if closing {
+                        st.inflight -= 1;
+                    }
+                }
+                // Dropping the writer closes stdin: the agent sees EOF,
+                // unless a newer sessiond holds it too.
+                drop(w);
             })
             .expect("spawn writer thread");
     }
 
-    fn start_reader(self: &Arc<Self>, mut r: Box<dyn Read + Send>, stream: Stream) {
+    /// Start the thread that reads one output stream. `role` names a pipe
+    /// end that a handoff passes on; a terminal passes its master instead.
+    fn start_reader(self: &Arc<Self>, r: ReadEnd, stream: Stream, role: Option<FdRole>) {
+        #[cfg(unix)]
+        if let Some(role) = role {
+            self.lock().fds.push((role, r.as_raw_fd()));
+        }
+        #[cfg(windows)]
+        let _ = role;
         let s = Arc::clone(self);
         thread::Builder::new()
             .name(format!("sessiond-r-{}", self.id))
-            .spawn(move || {
-                let mut buf = vec![0u8; READ_BYTES];
-                loop {
-                    let n = match r.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => n,
-                    };
-                    let mut rec = Record::Data {
-                        stream,
-                        bytes: buf[..n].to_vec(),
-                    };
-                    let mut st = s.lock();
-                    let mut holding = false;
-                    let exited = loop {
-                        match st.log.append(rec) {
-                            // Kept, or dropped with a Gap to say so.
-                            Ok(_) => break false,
-                            // Full and blocking: stop reading until a
-                            // checkpoint makes room. The program blocks on
-                            // its next write; nothing is lost.
-                            Err(AppendError::Full(back)) => {
-                                rec = back;
-                                if !holding {
-                                    holding = true;
-                                    st.held += 1;
-                                }
-                                st.was_held = true;
-                                st = s
-                                    .room
-                                    .wait_timeout(st, Duration::from_millis(500))
-                                    .unwrap_or_else(|e| e.into_inner())
-                                    .0;
-                            }
-                            Err(AppendError::Exited) => break true,
-                        }
-                    };
-                    if holding {
-                        st.held -= 1;
-                    }
-                    if exited {
-                        return;
-                    }
-                    drop(st);
-                    s.changed.notify_waiters();
-                }
-                let mut st = s.lock();
-                st.open_streams -= 1;
-                s.finish(&mut st);
-                drop(st);
-                s.changed.notify_waiters();
-            })
+            .spawn(move || s.read_until_end(r, stream))
             .expect("spawn reader thread");
+    }
+
+    /// Read until the stream ends: wait for output, then read and record it
+    /// under the session lock, unless the session is frozen or handed off.
+    #[cfg(unix)]
+    fn read_until_end(&self, mut r: File, stream: Stream) {
+        let fd = r.as_raw_fd();
+        let mut buf = vec![0u8; READ_BYTES];
+        while let Ok(ready) = wait_readable(fd, self.wake.0.as_raw_fd()) {
+            let mut st = self.lock();
+            while st.mode == Mode::Frozen {
+                st = self.room.wait(st).unwrap_or_else(|e| e.into_inner());
+            }
+            if st.mode == Mode::HandedOff {
+                st.forget(fd);
+                return;
+            }
+            if !ready {
+                continue;
+            }
+            // Ready, and this thread is its only reader: the read returns at
+            // once, and the lock is held only for that.
+            let n = match r.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => n,
+            };
+            if !self.record(st, stream, &buf[..n]) {
+                self.lock().forget(fd);
+                return;
+            }
+        }
+        let mut st = self.lock();
+        st.forget(fd);
+        self.stream_ended(st);
+    }
+
+    #[cfg(windows)]
+    fn read_until_end(&self, mut r: ReadEnd, stream: Stream) {
+        let mut buf = vec![0u8; READ_BYTES];
+        loop {
+            let n = match r.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => n,
+            };
+            let st = self.lock();
+            if !self.record(st, stream, &buf[..n]) {
+                return;
+            }
+        }
+        self.stream_ended(self.lock());
+    }
+
+    /// Append what a reader read. False once the log has ended.
+    fn record(&self, mut st: MutexGuard<'_, State>, stream: Stream, bytes: &[u8]) -> bool {
+        let mut rec = Record::Data {
+            stream,
+            bytes: bytes.to_vec(),
+        };
+        let mut holding = false;
+        let exited = loop {
+            match st.log.append(rec) {
+                // Kept, or dropped with a Gap to say so.
+                Ok(_) => break false,
+                // Full and blocking: stop reading until a checkpoint makes
+                // room. The program blocks on its next write; nothing is
+                // lost. A handoff refuses to freeze while this waits.
+                Err(AppendError::Full(back)) => {
+                    rec = back;
+                    if !holding {
+                        holding = true;
+                        st.held += 1;
+                    }
+                    st.was_held = true;
+                    st = self
+                        .room
+                        .wait_timeout(st, Duration::from_millis(500))
+                        .unwrap_or_else(|e| e.into_inner())
+                        .0;
+                }
+                Err(AppendError::Exited) => break true,
+            }
+        };
+        if holding {
+            st.held -= 1;
+        }
+        drop(st);
+        if !exited {
+            self.changed.notify_waiters();
+        }
+        !exited
+    }
+
+    fn stream_ended(&self, mut st: MutexGuard<'_, State>) {
+        st.open_streams -= 1;
+        if st.mode == Mode::Live {
+            self.finish(&mut st);
+        }
+        drop(st);
+        self.changed.notify_waiters();
     }
 
     fn start_reaper(self: &Arc<Self>, mut child: Box<dyn Child + Send + Sync>) {
@@ -284,42 +487,58 @@ impl Session {
             .name(format!("sessiond-x-{}", self.id))
             .spawn(move || {
                 let info = wait(&mut child);
-                let mut st = s.lock();
-                st.reaped = Some(info);
-                // ConPTY: output only ends once the pseudoconsole is closed,
-                // which flushes conhost's last frame first. Closing it waits
-                // for the reader to drain the pipe, and the reader needs this
-                // lock to append, so it is closed after the lock is released.
-                let master = if cfg!(windows) {
-                    st.master.take()
-                } else {
-                    None
-                };
-                s.finish(&mut st);
-                drop(st);
-                drop(master);
-                s.changed.notify_waiters();
-                // A background job holding the terminal open must not hold
-                // the exit back for good. A reader sessiond holds back is not
-                // that: the cutoff waits until no reader has been held for a
-                // whole DRAIN_AFTER_EXIT, so a blocking session loses nothing.
-                loop {
-                    thread::sleep(DRAIN_AFTER_EXIT);
-                    let mut st = s.lock();
-                    if st.log.exited().is_some() {
-                        break;
-                    }
-                    if st.held > 0 || std::mem::take(&mut st.was_held) {
-                        continue;
-                    }
-                    st.open_streams = 0;
-                    s.finish(&mut st);
-                    drop(st);
-                    s.changed.notify_waiters();
-                    break;
-                }
+                s.reaped(info);
             })
             .expect("spawn reaper thread");
+    }
+
+    /// The program ended: record its exit once output has ended too, or,
+    /// for a session handed off, write it down for the sessiond that has it.
+    fn reaped(&self, info: ExitInfo) {
+        let mut st = self.lock();
+        st.reaped = Some(info);
+        #[cfg(unix)]
+        if st.mode == Mode::HandedOff {
+            if let Some(path) = &st.exit_file {
+                let _ = write_exit(path, info);
+            }
+            return;
+        }
+        // ConPTY: output only ends once the pseudoconsole is closed,
+        // which flushes conhost's last frame first. Closing it waits
+        // for the reader to drain the pipe, and the reader needs this
+        // lock to append, so it is closed after the lock is released.
+        let master = if cfg!(windows) {
+            st.master.take()
+        } else {
+            None
+        };
+        if st.mode == Mode::Live {
+            self.finish(&mut st);
+        }
+        drop(st);
+        drop(master);
+        self.changed.notify_waiters();
+        // A background job holding the terminal open must not hold
+        // the exit back for good. A reader sessiond holds back is not
+        // that: the cutoff waits until no reader has been held for a
+        // whole DRAIN_AFTER_EXIT, so a blocking session loses nothing.
+        // Nor does it run while a handoff has the session frozen.
+        loop {
+            thread::sleep(DRAIN_AFTER_EXIT);
+            let mut st = self.lock();
+            if st.log.exited().is_some() || st.mode == Mode::HandedOff {
+                break;
+            }
+            if st.mode == Mode::Frozen || st.held > 0 || std::mem::take(&mut st.was_held) {
+                continue;
+            }
+            st.open_streams = 0;
+            self.finish(&mut st);
+            drop(st);
+            self.changed.notify_waiters();
+            break;
+        }
     }
 
     /// Append Exit once output has ended and the child was reaped.
@@ -336,22 +555,37 @@ impl Session {
     }
 
     /// Queue input. At-most-once: it is written by the session's writer
-    /// thread, and a session without stdin drops it.
+    /// thread, and a session without stdin, or one being handed over,
+    /// drops it.
     pub fn write(&self, input_seq: u64, bytes: Vec<u8>) {
+        let mut st = self.lock();
+        if st.mode != Mode::Live {
+            return;
+        }
         if let Some(tx) = self
             .input
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
         {
-            let _ = tx.send(Input::Bytes { input_seq, bytes });
+            if tx.send(Input::Bytes { input_seq, bytes }).is_ok() {
+                st.inflight += 1;
+            }
         }
     }
 
-    /// Close a piped agent's stdin after what was queued before it.
+    /// Close a piped agent's stdin after what was queued before it. Not
+    /// while a handoff has the session: that would close it for the newer
+    /// sessiond too.
     pub fn close_stdin(&self) {
+        let mut st = self.lock();
+        if st.mode != Mode::Live {
+            return;
+        }
         if let Some(tx) = self.input.lock().unwrap_or_else(|e| e.into_inner()).take() {
-            let _ = tx.send(Input::CloseStdin);
+            if tx.send(Input::CloseStdin).is_ok() {
+                st.inflight += 1;
+            }
         }
     }
 
@@ -359,6 +593,9 @@ impl Session {
     /// with, so output read after the resize lands after its record.
     pub fn resize(&self, req: u64, cols: u16, rows: u16, px_w: u16, px_h: u16) -> bool {
         let mut st = self.lock();
+        if st.mode != Mode::Live {
+            return false;
+        }
         let Some(master) = st.master.as_ref() else {
             return false;
         };
@@ -386,8 +623,10 @@ impl Session {
                 Sig::Kill => libc::SIGKILL,
                 Sig::Hup => libc::SIGHUP,
             };
-            if self.pid != 0 && self.lock().reaped.is_none() {
-                // SAFETY: kill(2) with a pid this process spawned and has not reaped.
+            let st = self.lock();
+            if self.pid != 0 && st.reaped.is_none() && st.mode != Mode::HandedOff {
+                // SAFETY: kill(2) with a pid this process spawned, or adopted
+                // from the sessiond that did, and not yet reaped.
                 unsafe { libc::kill(self.pid as libc::pid_t, n) };
             }
         }
@@ -403,6 +642,18 @@ impl Session {
         }
     }
 
+    /// Store a checkpoint vornd cut, unless a handoff has the session: the
+    /// trim it may cause would change what was handed over.
+    pub fn put_checkpoint(&self, cp: crate::wire::Checkpoint) {
+        let mut st = self.lock();
+        if st.mode == Mode::Live {
+            // A refused checkpoint changes nothing; vornd cuts another.
+            let _ = st.log.put_checkpoint(cp);
+        }
+        drop(st);
+        self.room_made();
+    }
+
     /// Wake a reader blocked on a full log; called after a checkpoint trims.
     pub fn room_made(&self) {
         self.room.notify_all();
@@ -412,12 +663,398 @@ impl Session {
     pub fn with_log<R>(&self, f: impl FnOnce(&mut SessionLog) -> R) -> R {
         f(&mut self.lock().log)
     }
+
+    /// Whether this process started the program and has not reaped it yet.
+    #[cfg(unix)]
+    pub(crate) fn reaping(&self) -> bool {
+        self.child && self.lock().reaped.is_none()
+    }
+}
+
+#[cfg(unix)]
+type RawFdOrNone = RawFd;
+#[cfg(windows)]
+type RawFdOrNone = ();
+
+/// A child's pipe as a reader thread holds it.
+#[cfg(unix)]
+fn read_end(pipe: impl Into<OwnedFd>) -> ReadEnd {
+    File::from(pipe.into())
+}
+
+#[cfg(windows)]
+fn read_end(pipe: impl Read + Send + 'static) -> ReadEnd {
+    Box::new(pipe)
+}
+
+/// The handoff side of a session, macOS and Linux only.
+#[cfg(unix)]
+impl Session {
+    /// Stop reading, writing and recording, and describe the session for a
+    /// newer sessiond. Refused while a reader holds output a full log could
+    /// not take, or input is still being written: neither could be handed
+    /// over exactly.
+    pub(crate) fn freeze(&self) -> Result<Handover, String> {
+        let mut st = self.lock();
+        if st.mode != Mode::Live {
+            return Err(format!("{} is already being handed over", self.id));
+        }
+        if st.held > 0 {
+            return Err(format!("{} is waiting for room in a full log", self.id));
+        }
+        if st.inflight > 0 {
+            return Err(format!("{} is still writing input", self.id));
+        }
+        st.mode = Mode::Frozen;
+        st.reaped_when_frozen = st.reaped.is_some();
+        let input = self
+            .input
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some();
+        let mut roles = Vec::new();
+        let mut fds = Vec::new();
+        if let Some(m) = &st.master {
+            roles.push(FdRole::Master);
+            fds.push(m.as_raw_fd());
+        }
+        for &(role, fd) in &st.fds {
+            roles.push(role);
+            fds.push(fd);
+        }
+        let mut manifest = Manifest {
+            session: self.id.clone(),
+            kind: self.kind,
+            pid: self.pid,
+            fds: roles,
+            open_streams: st.open_streams,
+            input,
+            reaped: st.reaped,
+            epoch: 0,
+            ring_budget: 0,
+            spool_budget: 0,
+            blocking: false,
+            head: vorn_term_proto::Cursor::start(0),
+            sent: vorn_term_proto::Cursor::start(0),
+            delivered: vorn_term_proto::Cursor::start(0),
+            retain_from: vorn_term_proto::Cursor::start(0),
+            cols: 0,
+            rows: 0,
+            exit: None,
+            clock_ns: 0,
+            ring_entries: 0,
+            spool: SpoolState {
+                bytes: 0,
+                count: 0,
+                first: None,
+                first_offset: None,
+                end: 0,
+                marks: Vec::new(),
+                torn: false,
+            },
+            newest: false,
+            fallback: false,
+        };
+        st.log.describe(&mut manifest);
+        let (newest, fallback) = st.log.checkpoints();
+        let (newest, fallback) = (newest.cloned(), fallback.cloned());
+        let ring = st.log.ring().iter().cloned().collect();
+        Ok(Handover {
+            manifest,
+            ring,
+            newest,
+            fallback,
+            fds,
+        })
+    }
+
+    /// Call a handoff off: carry on as before it, recording an exit that
+    /// came meanwhile.
+    pub(crate) fn thaw(&self) {
+        let mut st = self.lock();
+        if st.mode != Mode::Frozen {
+            return;
+        }
+        st.mode = Mode::Live;
+        self.finish(&mut st);
+        drop(st);
+        self.room.notify_all();
+        self.changed.notify_waiters();
+    }
+
+    /// The newer sessiond runs the session now. Let every descriptor go,
+    /// so that it alone holds the terminal and the pipes, keep the spool
+    /// file it carries on in, and from here on only reap the program,
+    /// writing its exit to `exit_file`.
+    pub(crate) fn hand_off(&self, exit_file: PathBuf) {
+        let mut st = self.lock();
+        st.mode = Mode::HandedOff;
+        st.owns_child = false;
+        st.master = None;
+        let mut spent = SessionLog::new(
+            0,
+            Budget {
+                ring_bytes: 0,
+                spool_bytes: 0,
+            },
+            Overflow::Drop,
+            PathBuf::new(),
+            SpoolPool::new(0),
+            (0, 0),
+        );
+        spent.keep_spool(true);
+        let mut log = std::mem::replace(&mut st.log, spent);
+        log.keep_spool(true);
+        if let (Some(info), false) = (st.reaped, st.reaped_when_frozen) {
+            let _ = write_exit(&exit_file, info);
+        }
+        st.exit_file = Some(exit_file);
+        drop(st);
+        drop(log);
+        if let Some(tx) = self.input.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = tx.send(Input::Stop);
+        }
+        let _ = std::io::Write::write(&mut &self.wake.1, &[1]);
+        self.room.notify_all();
+    }
+
+    /// A session another sessiond described in `m` and passed `fds` for,
+    /// with `log` built from what it sent. Checks the descriptors are what
+    /// the manifest says; starts nothing.
+    pub(crate) fn stage(m: &Manifest, fds: Vec<OwnedFd>, log: SessionLog) -> std::io::Result<Staged> {
+        let bad = |why: String| std::io::Error::new(std::io::ErrorKind::InvalidData, why);
+        if fds.len() != m.fds.len() {
+            return Err(bad(format!("{}: descriptors missing", m.session)));
+        }
+        let mut master = None;
+        let (mut stdout, mut stdin, mut stderr) = (None, None, None);
+        for (&role, fd) in m.fds.iter().zip(fds) {
+            let slot = match role {
+                FdRole::Master => &mut master,
+                FdRole::Stdout => &mut stdout,
+                FdRole::Stderr => &mut stderr,
+                FdRole::Stdin => &mut stdin,
+            };
+            if slot.replace(fd).is_some() {
+                return Err(bad(format!("{}: {role:?} passed twice", m.session)));
+            }
+        }
+        let outs = u8::from(stdout.is_some()) + u8::from(stderr.is_some());
+        let fits = match m.kind {
+            // SAFETY: isatty on a descriptor this process owns.
+            Kind::Pty => {
+                outs == 0
+                    && stdin.is_none()
+                    && m.open_streams <= 1
+                    && master
+                        .as_ref()
+                        .is_some_and(|f| unsafe { libc::isatty(f.as_raw_fd()) } == 1)
+            }
+            Kind::Piped => master.is_none() && outs == m.open_streams && stdin.is_some() == m.input,
+        };
+        if !fits || m.pid == 0 {
+            return Err(bad(format!("{}: the descriptors do not fit the manifest", m.session)));
+        }
+        let master = master.map(Master::from);
+        let (reader, writer) = match &master {
+            Some(mst) => (
+                (m.open_streams == 1).then(|| mst.reader()).transpose()?,
+                m.input.then(|| mst.writer()).transpose()?,
+            ),
+            None => (None, stdin.map(File::from)),
+        };
+        let mut state = State::new(log, master, Box::new(PidKiller(m.pid)), m.open_streams);
+        state.reaped = m.reaped;
+        state.owns_child = false;
+        let session = Self::new(m.session.clone(), m.kind, m.pid, false, state)?;
+        Ok(Staged {
+            session,
+            reader,
+            stdout: stdout.map(File::from),
+            stderr: stderr.map(File::from),
+            stdin: writer,
+        })
+    }
+}
+
+#[cfg(unix)]
+impl Staged {
+    pub(crate) fn id(&self) -> &str {
+        &self.session.id
+    }
+
+    /// Run the session here: read, write, and watch `exit_file` for the
+    /// program's exit, which the sessiond that started it writes there.
+    pub(crate) fn start(
+        self,
+        exit_file: PathBuf,
+        on_written: impl Fn(&str, Written) + Send + 'static,
+    ) -> Arc<Session> {
+        let s = self.session;
+        {
+            let mut st = s.lock();
+            st.owns_child = true;
+            st.log.keep_spool(false);
+        }
+        if let Some(w) = self.stdin {
+            let fd = (s.kind == Kind::Piped).then(|| (FdRole::Stdin, w.as_raw_fd()));
+            s.start_writer(Box::new(w), fd, on_written);
+        }
+        if let Some(r) = self.reader {
+            s.start_reader(r, Stream::Pty, None);
+        }
+        if let Some(r) = self.stdout {
+            s.start_reader(r, Stream::Stdout, Some(FdRole::Stdout));
+        }
+        if let Some(r) = self.stderr {
+            s.start_reader(r, Stream::Stderr, Some(FdRole::Stderr));
+        }
+        let (reaped, exited) = {
+            let st = s.lock();
+            (st.reaped, st.log.exited().is_some())
+        };
+        let w = Arc::clone(&s);
+        let watch = move || match reaped {
+            Some(info) if !exited => w.reaped(info),
+            Some(_) => {}
+            None => {
+                if let Some(info) = w.watch_exit(&exit_file) {
+                    w.reaped(info);
+                }
+            }
+        };
+        thread::Builder::new()
+            .name(format!("sessiond-x-{}", s.id))
+            .spawn(watch)
+            .expect("spawn reaper thread");
+        s
+    }
+}
+
+#[cfg(unix)]
+impl Session {
+    /// Wait for an adopted program's exit: the file the sessiond that
+    /// started it writes once it reaps it, or, when the program is gone and
+    /// no file comes, an exit nobody knows. None once the session was
+    /// handed on again, for the next sessiond to watch.
+    fn watch_exit(&self, exit_file: &Path) -> Option<ExitInfo> {
+        let mut gone_since = None;
+        loop {
+            {
+                let st = self.lock();
+                match st.mode {
+                    Mode::HandedOff => return None,
+                    Mode::Live => {
+                        if let Some(info) = read_exit(exit_file) {
+                            let _ = std::fs::remove_file(exit_file);
+                            return Some(info);
+                        }
+                    }
+                    Mode::Frozen => {}
+                }
+            }
+            if crate::launch::alive(self.pid) {
+                gone_since = None;
+            } else {
+                let since = *gone_since.get_or_insert_with(std::time::Instant::now);
+                if since.elapsed() >= UNKNOWN_EXIT_AFTER && self.lock().mode == Mode::Live {
+                    return Some(ExitInfo {
+                        code: None,
+                        signal: None,
+                    });
+                }
+            }
+            thread::sleep(WATCH_EVERY);
+        }
+    }
+}
+
+/// Ends an adopted program, which is not this process's child, by its pid.
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy)]
+struct PidKiller(u32);
+
+#[cfg(unix)]
+impl ChildKiller for PidKiller {
+    fn kill(&mut self) -> std::io::Result<()> {
+        // SAFETY: kill(2) on a pid; the caller ends a program it holds.
+        if unsafe { libc::kill(self.0 as libc::pid_t, libc::SIGKILL) } == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(*self)
+    }
+}
+
+/// Wait until `fd` has output, or the wake pipe was written. True when `fd`
+/// is ready: has data, or has ended.
+#[cfg(unix)]
+fn wait_readable(fd: RawFd, wake: RawFd) -> std::io::Result<bool> {
+    let mut fds = [
+        libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: wake,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+    loop {
+        // SAFETY: poll on two pollfds this frame owns.
+        let n = unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) };
+        if n >= 0 {
+            if fds[0].revents & libc::POLLNVAL != 0 {
+                return Err(std::io::Error::from_raw_os_error(libc::EBADF));
+            }
+            return Ok(fds[0].revents != 0);
+        }
+        let e = std::io::Error::last_os_error();
+        if e.kind() != std::io::ErrorKind::Interrupted {
+            return Err(e);
+        }
+    }
+}
+
+/// Write a handed-off program's exit for the sessiond that has its session:
+/// to a temporary name first, so it never reads half of it.
+#[cfg(unix)]
+fn write_exit(path: &Path, info: ExitInfo) -> std::io::Result<()> {
+    let num = |v: Option<i32>| v.map(|v| v.to_string()).unwrap_or_default();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, format!("code={}\nsignal={}\n", num(info.code), num(info.signal)))?;
+    std::fs::rename(tmp, path)
+}
+
+#[cfg(unix)]
+fn read_exit(path: &Path) -> Option<ExitInfo> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let mut info = ExitInfo {
+        code: None,
+        signal: None,
+    };
+    for line in text.lines() {
+        match line.split_once('=')? {
+            ("code", v) => info.code = v.parse().ok(),
+            ("signal", v) => info.signal = v.parse().ok(),
+            _ => {}
+        }
+    }
+    Some(info)
 }
 
 impl Drop for State {
     fn drop(&mut self) {
         // A session dropped while its process runs: end it.
-        if self.reaped.is_none() {
+        if self.reaped.is_none() && self.owns_child {
             let _ = self.killer.kill();
         }
     }
@@ -433,7 +1070,7 @@ type Master = Box<dyn MasterPty + Send>;
 /// writing ends, and the program.
 type Terminal = (
     Master,
-    Box<dyn Read + Send>,
+    ReadEnd,
     Box<dyn std::io::Write + Send>,
     Box<dyn Child + Send + Sync>,
 );
@@ -475,7 +1112,7 @@ fn open_terminal(spec: &SpawnSpec, cols: u16, rows: u16) -> std::io::Result<Term
     let (master, child) = crate::pty::spawn(cmd, cols, rows)?;
     let reader = master.reader()?;
     let writer = master.writer()?;
-    Ok((master, Box::new(reader), Box::new(writer), Box::new(child)))
+    Ok((master, reader, Box::new(writer), Box::new(child)))
 }
 
 #[cfg(windows)]

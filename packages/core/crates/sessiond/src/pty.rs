@@ -53,6 +53,19 @@ impl Master {
     }
 }
 
+/// A master another sessiond passed over.
+impl From<OwnedFd> for Master {
+    fn from(fd: OwnedFd) -> Self {
+        Master { fd }
+    }
+}
+
+impl AsRawFd for Master {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.fd.as_raw_fd()
+    }
+}
+
 /// Start `cmd` on a new terminal of `cols` x `rows`, as the leader of its own
 /// session with the terminal as its controlling one. Its stdio is replaced.
 pub fn spawn(mut cmd: Command, cols: u16, rows: u16) -> io::Result<(Master, Child)> {
