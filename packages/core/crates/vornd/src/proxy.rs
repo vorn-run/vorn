@@ -210,6 +210,11 @@ impl Daemon {
             Mode::Forward => {}
             mode => link.set_scripts(Scripts::new(mode, native, Arc::clone(&self.groups))),
         }
+        // Checked once the login shell's environment is in, so git is on its PATH.
+        if link.restores() {
+            let n = Arc::clone(native);
+            tokio::task::spawn_blocking(move || crate::native::sessions::verify_restored(&n));
+        }
         let native = Arc::clone(native);
         tokio::spawn(async move {
             loop {

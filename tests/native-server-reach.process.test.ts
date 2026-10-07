@@ -14,6 +14,7 @@ import WebSocket from 'ws'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '@vornrun/shared/protocol'
 import { spawnsRealServers } from './helpers/one-at-a-time'
+import { vorndStopped } from './helpers/real-server'
 
 const repoRoot = path.join(__dirname, '..')
 const CREDENTIAL = 'native-reach-test-credential'
@@ -204,6 +205,7 @@ afterAll(async () => {
       s.child.kill()
       await exited
     }
+    await vorndStopped(s.vornd)
     try {
       fs.rmSync(s.dataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
     } catch (err) {

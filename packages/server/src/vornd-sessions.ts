@@ -1,8 +1,10 @@
 import { EventEmitter } from 'node:events'
+import os from 'node:os'
 import { decodeTerminalFrameV2 } from '@vornrun/shared/terminal-frame'
 import type {
   AgentStatus,
   HeadlessSession,
+  RestoredSession,
   TerminalSession,
   VorndStatus
 } from '@vornrun/shared/types'
@@ -60,6 +62,16 @@ import {
  * start and, from the session's exit effect, how it ended. This server follows
  * the agent as one it started itself: it reads the output for the clients and
  * the workflow waiting on it, and lets the record go a while after the exit.
+ *
+ * With both, vornd also owns the records between runs (`restoresSessions`):
+ * it writes its copy down and reads it back when it starts, so a terminal the
+ * holder still holds after this server restarts is live again in the copy
+ * before this server connects (`adopted`), and the rest are offered to resume
+ * from vornd's list (`restored`), which vornd answers `sessions:restored`,
+ * `sessions:resume` and `sessions:clear` from. A session it starts again under
+ * its id is told `resumed`. This server then saves nothing to its own session
+ * records: it takes them on from the copy (`takeOnHeld` in `register-methods`),
+ * and hands the ones its database still has to vornd once (`vornd:carry`).
  */
 
 /** A session as vornd reports it. */
@@ -95,6 +107,12 @@ interface Hello {
   terminals?: boolean
   headless?: boolean
   scripts?: 'native' | 'shadow' | null
+  restores?: boolean
+}
+
+/** When this machine came up. Uptime counts through sleep, so a laptop closed overnight is not a reboot. */
+function bootTime(): number {
+  return Date.now() - os.uptime() * 1000
 }
 
 /** Whether this server is winding down, as vornd is told it. */
@@ -356,6 +374,8 @@ export class VorndSessions extends EventEmitter {
 
   /** Whether vornd runs the project scripts, or compares what this server runs, as its `vornd:hello` said. */
   private scriptWork: Hello['scripts'] = null
+  /** Whether vornd owns the session records between runs, as its `vornd:hello` said. */
+  private restoreWork = false
 
   /** Whether this server is winding down, as vornd needs to know while it creates terminals. */
   private closingSource: (() => Closing) | null = null
@@ -427,6 +447,16 @@ export class VorndSessions extends EventEmitter {
   /** Whether vornd runs the project scripts (`native`) or compares the plans of this server's (`shadow`). */
   scriptMode(): 'native' | 'shadow' | null {
     return this.inUse() ? (this.scriptWork ?? null) : null
+  }
+
+  /**
+   * Whether vornd owns the session records between runs: it creates both
+   * terminals and headless agents, keeps its copy across runs and answers the
+   * calls about the sessions of earlier runs. This server then saves nothing
+   * to its own session records and takes them on from the copy.
+   */
+  restoresSessions(): boolean {
+    return this.restoreWork && this.createsTerminals() && this.createsHeadless()
   }
 
   /**
@@ -567,6 +597,7 @@ export class VorndSessions extends EventEmitter {
     this.terminalWork = hello?.terminals === true
     this.headlessWork = hello?.headless === true
     this.scriptWork = hello?.scripts ?? null
+    this.restoreWork = hello?.restores === true
     old?.close()
     channel.on('notification', (method: string, params: unknown) =>
       this.notified(channel, method, params)
@@ -589,7 +620,8 @@ export class VorndSessions extends EventEmitter {
   private async subscribe(channel: VorndChannel): Promise<void> {
     let state: Subscribed
     try {
-      state = await channel.request<Subscribed>('vornd:subscribe')
+      // When this machine came up, for which offered sessions a reboot ended.
+      state = await channel.request<Subscribed>('vornd:subscribe', { bootTime: bootTime() })
     } catch (err) {
       log.warn({ err }, '[vornd] could not subscribe to vornd')
       return
@@ -598,6 +630,8 @@ export class VorndSessions extends EventEmitter {
     this.emit('subscribed')
     this.holderTold(state.connected)
     if (this.nativeWork && state.registry) this.mirror.load(state.registry)
+    // vornd owns the records now: the database's records of the last run are handed over once.
+    if (this.restoresSessions()) this.emit('restores')
     this.watchClosing()
     try {
       pruneEffectReceipts('notify', Date.now() - NOTICE_RECEIPT_MS)
@@ -888,6 +922,29 @@ export class VorndSessions extends EventEmitter {
       .catch((err: Error) => log.warn({ err }, '[vornd] could not read the session registry'))
   }
 
+  /**
+   * Hand vornd the records this server's database kept of its last run, for
+   * it to offer while it owns the records; answers how many it took. A vornd
+   * that read its own records back takes none.
+   */
+  async carry(terminals: TerminalSession[]): Promise<number> {
+    const channel = this.channel
+    if (!channel || !this.restoresSessions() || terminals.length === 0) return 0
+    try {
+      const answer = await channel.request<{ carried?: number }>('vornd:carry', { terminals })
+      return answer?.carried ?? 0
+    } catch (err) {
+      log.warn({ err }, '[vornd] could not hand the last run’s session records to vornd')
+      return 0
+    }
+  }
+
+  /** Take stock of what vornd holds again: after a handover it took, what it adopted from it. */
+  restock(): void {
+    const channel = this.channel
+    if (channel) void this.subscribe(channel)
+  }
+
   /** Close the channel, for tests and a server on its way out. */
   close(): void {
     const channel = this.channel
@@ -926,6 +983,8 @@ export interface RegistrySnapshot {
   holds: Record<string, number>
   /** The workspaces vornd holds itself while it prepares a session, when it holds any. */
   nativeHolds?: Record<string, number>
+  /** The sessions of earlier runs still offered to resume, when vornd owns the records. */
+  restored?: RestoredSession[]
 }
 
 /** The fields of a terminal's record `vornd:patch` may set. */
@@ -941,7 +1000,7 @@ export type PatchField =
 export interface SessionNote {
   gen: string
   rev: number
-  op: 'upsert' | 'remove' | 'order' | 'holds' | 'snapshot'
+  op: 'upsert' | 'remove' | 'order' | 'holds' | 'snapshot' | 'restored'
   kind?: RecordKind
   record?: TerminalSession | HeadlessSession
   id?: string
@@ -950,10 +1009,18 @@ export interface SessionNote {
   terminals?: TerminalSession[]
   headless?: HeadlessSession[]
   nativeHolds?: Record<string, number>
+  /** The sessions of earlier runs still offered, as they are now. */
+  restored?: RestoredSession[]
   /** A change vornd made itself, for a client's call, rather than one this server told it. */
   native?: boolean
   /** With `native`: the terminal or headless agent vornd created. */
   created?: boolean
+  /** With `created`: a session of the last run the holder still held, live again in the copy. */
+  adopted?: boolean
+  /** With `created`: a session started again under the id it had. */
+  resumed?: boolean
+  /** With a `remove`: let go of quietly, its conversation running elsewhere. */
+  released?: boolean
   /** With `native`: its program is up. */
   started?: { pid: number; epoch: number }
   /** With `native`: its program could not be started, and why. */
@@ -993,6 +1060,7 @@ export class SessionMirror {
   private terminalOrder: string[] = []
   private heldDirs: Record<string, number> = {}
   private nativeDirs: Record<string, number> = {}
+  private restoredList: RestoredSession[] = []
   /** Notes waiting for a snapshot; null once one has been loaded and nothing is missing. */
   private waiting: SessionNote[] | null = []
 
@@ -1024,6 +1092,7 @@ export class SessionMirror {
     this.terminalOrder = [...snapshot.order]
     this.heldDirs = { ...snapshot.holds }
     this.nativeDirs = { ...snapshot.nativeHolds }
+    this.restoredList = (snapshot.restored ?? []).map(freeze)
     const waited = (this.waiting ?? [])
       .filter((n) => n.gen === snapshot.gen && n.rev > snapshot.rev)
       .sort((a, b) => a.rev - b.rev)
@@ -1053,7 +1122,8 @@ export class SessionMirror {
         headless: note.headless,
         order: note.order ?? [],
         holds: note.holds ?? {},
-        nativeHolds: note.nativeHolds
+        nativeHolds: note.nativeHolds,
+        restored: note.restored
       })
       return 'applied'
     }
@@ -1081,6 +1151,9 @@ export class SessionMirror {
       case 'holds':
         this.heldDirs = { ...(note.holds ?? {}) }
         this.nativeDirs = { ...note.nativeHolds }
+        break
+      case 'restored':
+        this.restoredList = (note.restored ?? []).map(freeze)
         break
       default:
         return this.missed(note)
@@ -1113,6 +1186,11 @@ export class SessionMirror {
 
   headlessRecord(id: string): HeadlessSession | undefined {
     return this.headlessRecords.get(id)
+  }
+
+  /** The sessions of earlier runs vornd still offers to resume. */
+  restored(): RestoredSession[] {
+    return [...this.restoredList]
   }
 
   /** Sessions at work in a worktree: terminals not idle, agents still running. */

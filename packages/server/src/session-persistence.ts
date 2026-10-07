@@ -12,6 +12,24 @@ const DEBOUNCE_MS = 500
 class SessionManager {
   private getActiveSessions: (() => TerminalSession[]) | null = null
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
+  /** Whether another process owns the session records now: vornd, with the Native server switch on. */
+  private ownedElsewhere: () => boolean = () => false
+  private saidOwned = false
+
+  /** Who says whether the records are another process's to write; this server then writes none. */
+  setOwnedElsewhere(check: () => boolean): void {
+    this.ownedElsewhere = check
+  }
+
+  /** True when the records are not this server's to write, said once in the log. */
+  private readOnly(): boolean {
+    if (!this.ownedElsewhere()) return false
+    if (!this.saidOwned) {
+      this.saidOwned = true
+      log.info('[session-persistence] vornd owns the session records; this server saves none')
+    }
+    return true
+  }
 
   /** Wire up a session source so the manager knows what to persist. */
   startAutoSave(getActiveSessions: () => TerminalSession[]): void {
@@ -47,6 +65,7 @@ class SessionManager {
   }
 
   saveSessions(sessions: TerminalSession[]): void {
+    if (this.readOnly()) return
     try {
       dbSaveSessions(sessions)
       log.info(`[session-persistence] saved ${sessions.length} session(s)`)
@@ -79,6 +98,7 @@ class SessionManager {
   }
 
   clear(): void {
+    if (this.readOnly()) return
     try {
       dbClearSessions()
     } catch (err) {

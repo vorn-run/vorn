@@ -31,6 +31,21 @@
  * - {@link OUTPUT_CHUNKS}: a headless agent's output reaches the clients in
  *   chunks cut where the pipe happened to deliver them, so each agent's output
  *   is compared whole ({@link outputWhole}).
+ * - {@link RESYNC_AFTER_RESUME}: a pane attached to a session of an earlier
+ *   run before it was resumed is told to attach again once it runs, by vornd,
+ *   which answered the attach; the server answers it with nothing to follow.
+ *   Asserted on its own in `native-server-restore.test.ts`, not normalized.
+ * - {@link HEADLESS_CARRIED}: a headless agent the holder still holds after a
+ *   restart is followed again with the switch on; the server never kept its
+ *   record. Asserted on its own there too.
+ * - {@link TYPED_BEFORE_PROMPT}: the server types a resumed agent's launch
+ *   line after a fixed wait, which on a busy machine can come before the
+ *   shell's prompt, and the line is then echoed twice; vornd types it once the
+ *   shell has printed. Asserted on the switch-on run only.
+ * - {@link SAVED_HEAD_COMMIT}: the server looks up each record's head commit
+ *   again as it saves, so a shell's record carries one; vornd writes a record
+ *   down as it stands. What an offered session records of its head is left
+ *   out by {@link withoutRecordedHeads}.
  */
 
 export const MINTED = 'ids-each-side-makes-up'
@@ -41,6 +56,10 @@ export const WORKTREE_ID = 'random-worktree-directory-ids'
 export const STATUS = 'statuses-decided-as-agents-run'
 export const HOOK_LINK_LATER = 'copilot-hook-link-after-the-create-answer'
 export const OUTPUT_CHUNKS = 'headless-output-chunk-boundaries'
+export const RESYNC_AFTER_RESUME = 'resync-told-after-a-cold-resume'
+export const HEADLESS_CARRIED = 'headless-agents-carried-over-a-restart'
+export const TYPED_BEFORE_PROMPT = 'launch-line-typed-before-the-prompt'
+export const SAVED_HEAD_COMMIT = 'head-commit-refreshed-by-the-servers-save'
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
 
@@ -125,4 +144,16 @@ export function outputWhole(
         .join('')
     ])
   )
+}
+
+/** Each offered session's environment without the head commit its record carried. */
+export function withoutRecordedHeads<T extends { environment?: unknown }>(offered: T[]): T[] {
+  return offered.map((one) => {
+    const environment = one.environment as
+      | { head?: { recorded?: unknown; actual?: unknown } }
+      | undefined
+    if (!environment?.head) return one
+    const { recorded: _recorded, ...head } = environment.head
+    return { ...one, environment: { ...environment, head } }
+  })
 }

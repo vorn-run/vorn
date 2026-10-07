@@ -37,7 +37,7 @@
 //! the answer to its attach.
 
 use std::collections::BTreeMap;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
@@ -403,12 +403,31 @@ struct Ended {
     screen: String,
 }
 
+/// A session vornd answers attaches for while it holds no stream of it: one
+/// carried from the last run, which the session holder may still hold, or
+/// which a resume may start again under its id.
+#[derive(Debug, Default)]
+struct Expected {
+    /// Connections that attached while it ran nowhere, told to attach again
+    /// once it runs.
+    watchers: HashSet<u64>,
+    /// Attaches waiting for the holder to say whether it holds it.
+    pending: Vec<Asked>,
+}
+
+/// How long an attach waits for the session holder to say what it holds.
+const HOLDER_WAIT: Duration = Duration::from_secs(10);
+
 #[derive(Debug, Default)]
 struct Inner {
     conns: HashMap<u64, Outbox>,
     sessions: HashMap<String, Stream>,
     ended: VecDeque<Ended>,
     waiting: HashMap<u64, Waiting>,
+    expected: HashMap<String, Expected>,
+    /// Whether the holder has said what it holds, since the engine last
+    /// connected to it.
+    holder_up: bool,
     next_conn: u64,
     next_token: u64,
 }
@@ -508,6 +527,10 @@ impl Streams {
                 }
                 s.early.retain(|a| a.conn != conn);
             }
+            for e in inner.expected.values_mut() {
+                e.watchers.remove(&conn);
+                e.pending.retain(|a| a.conn != conn);
+            }
             inner.waiting.retain(|_, w| w.conn != conn);
         }
         if let Some(Hook(f)) = self.left.get() {
@@ -568,9 +591,13 @@ impl Streams {
         inner.sessions.contains_key(session) || inner.ended.iter().any(|e| e.session == session)
     }
 
-    /// A session the engine took on, recovering or newly spawned.
+    /// A session the engine took on, recovering or newly spawned. One that
+    /// was expected ([`Streams::expect`]) runs now: the attaches that waited
+    /// for the holder wait for it to be live instead, and the clients that
+    /// attached while it ran nowhere are told to attach again.
     pub fn opened(&self, session: &str, epoch: u32) {
         let mut inner = self.inner();
+        let expected = inner.expected.remove(session);
         let s = inner
             .sessions
             .entry(session.to_owned())
@@ -582,15 +609,79 @@ impl Streams {
                 ..Stream::new(epoch)
             };
         }
+        let Some(e) = expected else {
+            return;
+        };
+        s.early.extend(e.pending);
+        let v = note(
+            "terminal:resync",
+            json!({ "id": session, "reason": "resumed" }),
+        );
+        for conn in e.watchers {
+            if let Some(out) = inner.conns.get(&conn) {
+                out.text(&v);
+            }
+        }
     }
 
     /// The engine's connection to sessiond ended: every session waits for
     /// the next one to recover it.
     pub fn suspended(&self) {
         let mut inner = self.inner();
+        inner.holder_up = false;
         for s in inner.sessions.values_mut() {
             s.live = false;
             s.fetch = None;
+        }
+    }
+
+    /// Answers attaches for `session` although nothing runs under it yet:
+    /// a session carried from the last run. Until the holder has said what
+    /// it holds, an attach waits; after that, one is answered as a session
+    /// that is not live, and told to attach again if the session is started
+    /// under the id later. Nothing changes for a session that runs.
+    pub fn expect(&self, session: &str) {
+        let mut inner = self.inner();
+        if inner.sessions.contains_key(session) {
+            return;
+        }
+        inner.expected.entry(session.to_owned()).or_default();
+    }
+
+    /// Whether `session` is expected and runs nowhere.
+    pub fn expects(&self, session: &str) -> bool {
+        self.inner().expected.contains_key(session)
+    }
+
+    /// `session` is no longer expected: it was let go of. Attaches waiting
+    /// on it are answered as a session that is not live.
+    pub fn forget(&self, session: &str) {
+        let mut inner = self.inner();
+        let Some(e) = inner.expected.remove(session) else {
+            return;
+        };
+        for a in e.pending {
+            if let Some(out) = inner.conns.get(&a.conn) {
+                out.text(&answer(&a.rpc, cold_answer()));
+            }
+        }
+    }
+
+    /// The holder has said what it holds: every expected session it did
+    /// not list runs nowhere, and the attaches that waited are answered so.
+    pub fn holder_up(&self) {
+        let mut inner = self.inner();
+        inner.holder_up = true;
+        let Inner {
+            conns, expected, ..
+        } = &mut *inner;
+        for e in expected.values_mut() {
+            for a in e.pending.drain(..) {
+                if let Some(out) = conns.get(&a.conn) {
+                    out.text(&answer(&a.rpc, cold_answer()));
+                    e.watchers.insert(a.conn);
+                }
+            }
         }
     }
 
@@ -999,6 +1090,23 @@ impl Streams {
                 keep
             });
         }
+        // A holder silent this long may never answer: waiting attaches get a cold answer.
+        let Inner {
+            conns, expected, ..
+        } = &mut *inner;
+        for e in expected.values_mut() {
+            let (late, waiting): (Vec<Asked>, Vec<Asked>) = e
+                .pending
+                .drain(..)
+                .partition(|a| now.duration_since(a.at) >= HOLDER_WAIT);
+            e.pending = waiting;
+            for a in late {
+                if let Some(out) = conns.get(&a.conn) {
+                    out.text(&answer(&a.rpc, cold_answer()));
+                    e.watchers.insert(a.conn);
+                }
+            }
+        }
     }
 }
 
@@ -1014,9 +1122,17 @@ impl Inner {
             return;
         };
         let Some(s) = self.sessions.get_mut(session) else {
-            match self.ended.iter().find(|e| e.session == session) {
-                Some(e) => out.text(&answer(&a.rpc, ended_answer(e))),
-                None => out.text(&refuse(&a.rpc, "no such session")),
+            if let Some(e) = self.ended.iter().find(|e| e.session == session) {
+                out.text(&answer(&a.rpc, ended_answer(e)));
+            } else if let Some(e) = self.expected.get_mut(session) {
+                if self.holder_up {
+                    out.text(&answer(&a.rpc, cold_answer()));
+                    e.watchers.insert(a.conn);
+                } else {
+                    e.pending.push(a);
+                }
+            } else {
+                out.text(&refuse(&a.rpc, "no such session"));
             }
             return;
         };
@@ -1122,6 +1238,12 @@ impl Inner {
             token,
         });
     }
+}
+
+/// The answer to an attach of a session that runs nowhere yet: nothing to
+/// show, as the server answers for a session of a previous run.
+fn cold_answer() -> Value {
+    json!({ "data": "", "seq": 0, "live": false, "continued": false })
 }
 
 /// The answer to an attach of a session that has ended: its last screen as
@@ -1480,5 +1602,86 @@ mod tests {
             next_rseq: 8,
             next_offset: 81,
         }));
+    }
+
+    /// The next text frame on `c`, parsed.
+    async fn text(c: &mut ClientConn) -> Value {
+        let o = tokio::time::timeout(Duration::from_secs(1), c.next())
+            .await
+            .expect("a frame within a second")
+            .expect("the connection is open");
+        match o.msg {
+            Message::Text(t) => serde_json::from_str(t.as_str()).unwrap(),
+            other => panic!("not text: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_attach_to_a_carried_session_waits_for_the_holder_and_is_told_when_it_runs() {
+        let streams = Streams::new();
+        let mut c = streams.connect();
+        streams.expect("x");
+        assert!(streams.expects("x") && !streams.holds("x"));
+        assert!(streams.attach(c.id(), "x", json!(1), None).is_empty());
+        // Nothing until the holder has said what it holds.
+        assert!(tokio::time::timeout(Duration::from_millis(50), c.next())
+            .await
+            .is_err());
+        streams.holder_up();
+        let a = text(&mut c).await;
+        assert_eq!(a["id"], 1);
+        assert_eq!(
+            (a["result"]["live"].clone(), a["result"]["data"].clone()),
+            (json!(false), json!(""))
+        );
+        // From now on at once.
+        streams.attach(c.id(), "x", json!(2), None);
+        assert_eq!(text(&mut c).await["result"]["live"], false);
+        // Started under the id: told to attach again, as the session runs.
+        streams.opened("x", 1);
+        let told = text(&mut c).await;
+        assert_eq!(told["method"], "terminal:resync");
+        assert_eq!(told["params"], json!({ "id": "x", "reason": "resumed" }));
+        assert!(!streams.expects("x") && streams.holds("x"));
+        // Expecting a session that runs changes nothing.
+        streams.expect("x");
+        assert!(!streams.expects("x"));
+    }
+
+    #[tokio::test]
+    async fn an_attach_that_waited_for_a_session_the_holder_has_waits_for_it_to_be_live() {
+        let streams = Streams::new();
+        let mut c = streams.connect();
+        streams.expect("y");
+        streams.attach(c.id(), "y", json!(3), None);
+        // Recovered from the holder before it has said all it holds.
+        streams.opened("y", 1);
+        assert!(tokio::time::timeout(Duration::from_millis(50), c.next())
+            .await
+            .is_err());
+        streams.holder_up();
+        assert!(tokio::time::timeout(Duration::from_millis(50), c.next())
+            .await
+            .is_err());
+        // Live: answered with a snapshot, asked of the engine.
+        let actions = streams.live("y", Cursor::start(1));
+        assert!(matches!(actions.as_slice(), [Action::Snapshot { session, .. }] if session == "y"));
+    }
+
+    #[tokio::test]
+    async fn a_carried_session_let_go_of_answers_what_waited_on_it() {
+        let streams = Streams::new();
+        let mut c = streams.connect();
+        streams.expect("z");
+        streams.attach(c.id(), "z", json!(4), None);
+        streams.forget("z");
+        assert_eq!(text(&mut c).await["result"]["live"], false);
+        assert!(!streams.expects("z"));
+        // Gone: an attach now is refused as any unknown session's is.
+        streams.attach(c.id(), "z", json!(5), None);
+        assert!(text(&mut c).await["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no such session"));
     }
 }

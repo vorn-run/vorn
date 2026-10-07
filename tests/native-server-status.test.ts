@@ -27,6 +27,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '@vornrun/shared/protocol'
 import type { AgentStatus, TerminalSession } from '@vornrun/shared/types'
 import { spawnsRealServers } from './helpers/one-at-a-time'
+import { vorndStopped } from './helpers/real-server'
 
 const repoRoot = path.join(__dirname, '..')
 const CREDENTIAL = 'native-status-test-credential'
@@ -431,6 +432,7 @@ async function stop(server: Server): Promise<void> {
     server.child.kill()
     await exited
   }
+  await vorndStopped(server.vornd)
   // The session holder outlives the server, by design, and its sessions
   // with it.
   if (holder) {

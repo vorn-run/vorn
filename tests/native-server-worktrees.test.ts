@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '../packages/shared/src/protocol'
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import { normalizeWorktrees } from './helpers/worktrees-parity'
+import { vorndStopped } from './helpers/real-server'
 
 const TEST_CREDENTIAL = 'native-server-worktrees-credential'
 
@@ -185,6 +186,7 @@ async function stopRealServer(server: RealServer): Promise<void> {
     server.child.kill()
     await exited
   }
+  await vorndStopped(server.vornd)
   if (holder) {
     try {
       process.kill(holder, 'SIGTERM')

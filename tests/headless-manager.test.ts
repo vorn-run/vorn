@@ -25,6 +25,7 @@ vi.mock('../packages/server/src/vornd-sessions', () => ({
     release: vi.fn(),
     on: vi.fn(),
     createsHeadless: () => false,
+    restoresSessions: () => false,
     mirror: { headlessRecord: () => undefined }
   }
 }))

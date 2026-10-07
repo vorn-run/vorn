@@ -113,6 +113,14 @@ fn route(
     };
     let streams = engine.streams();
     if !streams.holds(session) {
+        // A carried session that runs nowhere yet: only its attach is vornd's to answer.
+        if method == "terminal:attach" && streams.expects(session) {
+            if let Some(rpc) = rpc {
+                let cursor = params.get("cursor").and_then(cursor_of);
+                engine.perform(streams.attach(conn, session, rpc, cursor));
+            }
+            return true;
+        }
         return false;
     }
     let sizes = engine.sizes();

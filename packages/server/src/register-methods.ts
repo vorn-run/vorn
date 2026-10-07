@@ -212,7 +212,8 @@ import { captureAgentSessionId } from './agent-session-capture'
 import { listAgentModels } from './agent-model-catalog'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
 import log from './logger'
-import { vorndSessions, type HeldSession } from './vornd-sessions'
+import { vorndSessions } from './vornd-sessions'
+import { wireVorndRestore } from './vornd-restore'
 import { onePerKey } from './one-per-key'
 import { isWorkspaceHeld } from './workspace-holds'
 import { coreStatus } from './native-core'
@@ -573,25 +574,6 @@ async function activationStates(sessionId: string): Promise<ExtensionActivationS
  * windows but not the extensions would show a card with no bands and no way to
  * tell why.
  */
-/**
- * Terminals vornd still holds from this server's previous run: each is taken on
- * again under the record that run saved, rather than offered to resume. One
- * with no record is left where it is, and said so.
- */
-function takeOnHeld(held: HeldSession[]): void {
-  for (const one of held) {
-    if (one.kind !== 'pty') continue
-    const entry = consumeRestored(one.id)
-    if (!entry) {
-      log.info({ id: one.id }, '[vornd] vornd holds a terminal this server has no record of')
-      continue
-    }
-    ptyManager.adoptVornd(entry.session, one)
-    announceSession(entry.session)
-  }
-  sessionManager.scheduleSave()
-}
-
 export function announceSession(session: TerminalSession): void {
   clientRegistry.broadcast(IPC.SESSION_CREATED, session)
   syncExtensionsFor(session)
@@ -2311,7 +2293,7 @@ export function registerAllMethods(): void {
     const payload = vorndSessions.isNative() ? { id, title, body, effectId } : { id, title, body }
     clientRegistry.broadcast(IPC.TERMINAL_NOTIFY, payload, id)
   })
-  vorndSessions.on('held', (held: HeldSession[]) => takeOnHeld(held))
+  wireVorndRestore(announceSession)
 
   ptyManager.on('client-message', (channel: string, payload: unknown) => {
     // A payload's `id` is the instance this notification is about, which lets a

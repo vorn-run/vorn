@@ -174,6 +174,13 @@ impl AppLink {
         self.scripts.get()
     }
 
+    /// vornd owns the session records between runs, and answers the calls
+    /// that list and resume the sessions of earlier runs: it creates both
+    /// terminals and headless agents, so every record is its own.
+    pub fn restores(&self) -> bool {
+        self.creates_terminals() && self.creates_headless()
+    }
+
     /// What the server said of its winding down.
     pub fn set_closing(&self, closing: Closing) {
         *self.closing.lock().unwrap_or_else(|e| e.into_inner()) = closing;

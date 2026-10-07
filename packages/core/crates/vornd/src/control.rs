@@ -89,8 +89,9 @@ use vorn_sessiond_wire::Sig;
 use crate::applink::{AppLink, Closing};
 use crate::engine::{Engine, Event};
 use crate::journal::{Held, Stamped};
-use crate::registry::{HookStatus, Patch};
+use crate::registry::{HookStatus, Patch, TerminalSession};
 use crate::streams::{answer, exit_code, refuse, Forwarder};
+use serde::Deserialize;
 
 /// The version of this channel, which `vornd:hello` reports.
 pub const APP_PROTOCOL: u64 = 1;
@@ -407,8 +408,12 @@ fn call(app: App<'_>, text: &str) {
             "terminals": link.creates_terminals() && engine.registry().decides(),
             "headless": link.creates_headless() && engine.registry().decides(),
             "scripts": link.scripts().map(|s| s.mode().name()),
+            "restores": link.restores() && engine.registry().owns(),
         })),
         "vornd:subscribe" => {
+            if let Some(at) = params.get("bootTime").and_then(Value::as_i64) {
+                engine.registry().set_boot_time(at);
+            }
             let state = state(engine);
             subscribed.store(true, Ordering::Release);
             if asks.is_none() {
@@ -426,6 +431,39 @@ fn call(app: App<'_>, text: &str) {
             }
         },
         "vornd:registry" => Ok(engine.registry().snapshot()),
+        // The server's records of its last run, taken once by a vornd with nothing of its own.
+        "vornd:carry" => match params
+            .get("terminals")
+            .map(Vec::<TerminalSession>::deserialize)
+        {
+            Some(Ok(terminals)) => {
+                let carried = engine
+                    .registry()
+                    .carry_once(terminals, crate::registry::now_ms());
+                // What the holder runs from that run is live again, not offered.
+                for h in engine.journal().held() {
+                    if h.kind != crate::journal::Kind::Pty {
+                        continue;
+                    }
+                    let epoch = engine
+                        .head_stamp(&h.session)
+                        .and_then(|s| u32::try_from(s.epoch).ok())
+                        .unwrap_or(0);
+                    engine.registry().adopt(&crate::registry::Held {
+                        id: h.session.clone(),
+                        kind: crate::registry::Kind::Terminal,
+                        pid: h.pid,
+                        epoch,
+                    });
+                }
+                for id in engine.registry().restored_ids() {
+                    engine.streams().expect(&id);
+                }
+                Ok(json!({ "carried": carried }))
+            }
+            Some(Err(e)) => Err(format!("vornd:carry: {e}")),
+            None => Err("vornd:carry needs terminals".to_owned()),
+        },
         "vornd:hookStatus" => HookStatus::try_from(&params)
             .and_then(|call| {
                 let head = engine.head_stamp(&call.id);
@@ -982,5 +1020,63 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn a_vornd_that_owns_the_records_says_so_and_takes_the_servers_once() {
+        let engine = Engine::new(vorn_engine::Config::default());
+        engine.registry().want();
+        engine.decide_statuses();
+        let link = Arc::new(AppLink::default());
+        link.set_creates_terminals();
+        link.set_creates_headless();
+        let mut app = App::open_with(&engine, Arc::clone(&link));
+        assert_eq!(
+            app.call("vornd:hello", Value::Null).await.0["restores"],
+            false
+        );
+        engine.registry().own_records();
+        assert_eq!(
+            app.call("vornd:hello", Value::Null).await.0["restores"],
+            true
+        );
+        // When the machine came up decides which offers a reboot ended.
+        let now = crate::registry::now_ms();
+        let (state, _) = app
+            .call("vornd:subscribe", json!({ "bootTime": now }))
+            .await;
+        assert!(state["registry"].get("restored").is_none());
+        let mut old = shell("a", "Shell 1");
+        old["savedAt"] = json!(now - 1_000);
+        let mut held = shell("held", "Shell 2");
+        held["savedAt"] = json!(now - 1_000);
+        engine
+            .journal()
+            .opened("held", crate::journal::Kind::Pty, 7);
+        let (carried, notes) = app
+            .call("vornd:carry", json!({ "terminals": [old.clone(), held] }))
+            .await;
+        assert_eq!(carried, json!({ "carried": 2 }));
+        drop(notes);
+        let offered = engine.registry().restored().unwrap();
+        assert_eq!(offered[0]["session"]["id"], "a");
+        assert_eq!(offered[0]["rebooted"], true);
+        assert!(engine.streams().expects("a"));
+        assert!(!engine.streams().expects("held"));
+        // The one the holder runs is live again, not offered.
+        let snapshot = engine.registry().snapshot();
+        assert_eq!(snapshot["terminals"][0]["id"], "held");
+        assert_eq!(snapshot["terminals"][0]["pid"], 7);
+        // Taken once: a later server's records are not.
+        let (again, _) = app
+            .call(
+                "vornd:carry",
+                json!({ "terminals": [shell("b", "Shell 2")] }),
+            )
+            .await;
+        assert_eq!(again, json!({ "carried": 0 }));
+        assert_eq!(engine.registry().restored().unwrap().len(), 1);
+        let (state, _) = app.call("vornd:subscribe", Value::Null).await;
+        assert_eq!(state["registry"]["restored"].as_array().unwrap().len(), 1);
     }
 }
