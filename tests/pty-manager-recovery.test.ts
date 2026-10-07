@@ -67,7 +67,6 @@ import { fakeVornd, type FakeVorndPty } from './helpers/fake-vornd-pty'
 const createWorktreeMock = vi.mocked(createWorktree)
 const isGitRepoMock = vi.mocked(isGitRepo)
 
-const RUNNING = 1
 const WAITING = 2
 
 const REMOTE_HOST: RemoteHost = {
@@ -692,54 +691,21 @@ describe('SSH connection failures', () => {
 })
 
 describe('status from vornd', () => {
-  it('takes an agent session status from what vornd reports', async () => {
+  it("leaves an agent's status to vornd, and tells it the input that wakes one", async () => {
     const { session, fake } = await createAgent()
 
     fake.status(WAITING)
-    expect(session.status).toBe('waiting')
-
-    fake.status(RUNNING)
-    expect(statusUpdatesFor(session.id)).toEqual(['waiting', 'running'])
-  })
-
-  it('ignores a status code it does not know', async () => {
-    const { session, fake } = await createAgent()
-
-    fake.status(0)
-    fake.status(99)
-
+    fake.activity()
+    vi.advanceTimersByTime(60_000)
     expect(session.status).toBe('running')
     expect(statusUpdatesFor(session.id)).toEqual([])
-  })
 
-  it('leaves a hook-backed session to its hooks', async () => {
-    const { session, fake } = await createAgent()
-    ptyManager.promoteToHookStatus(session.id)
-
-    fake.status(WAITING)
-
-    expect(session.status).toBe('running')
-    expect(statusUpdatesFor(session.id)).toEqual([])
-  })
-
-  it('never gives a plain shell a status', () => {
-    const session = ptyManager.createShellPty('/tmp')
-    const fake = fakeVornd.last()
-
-    fake.status(WAITING)
-
-    expect(session.status).toBe('running')
-  })
-
-  it('takes a hook status over the one vornd reported', async () => {
-    const { session, fake } = await createAgent()
-    fake.status(WAITING)
-
-    ptyManager.promoteToHookStatus(session.id)
-    ptyManager.updateSessionStatus(session.id, 'running')
-    fake.status(WAITING)
-
-    expect(session.status).toBe('running')
+    ptyManager.writeToPty(session.id, 'y')
+    expect(fakeVornd.input).not.toHaveBeenCalled()
+    session.status = 'waiting'
+    ptyManager.writeToPty(session.id, 'next task\r')
+    expect(fakeVornd.input).toHaveBeenCalledWith(session.id)
+    expect(fake.written).toContain('next task\r')
   })
 
   it('follows a shell to the directory vornd says it is in', () => {
@@ -764,156 +730,7 @@ describe('status from vornd', () => {
   })
 })
 
-describe('idle timeout', () => {
-  it('marks a quiet session idle after the timeout', async () => {
-    const { session, fake } = await createAgent()
-
-    fake.activity()
-    vi.advanceTimersByTime(4999)
-    expect(session.status).toBe('running')
-
-    vi.advanceTimersByTime(1)
-    expect(session.status).toBe('idle')
-    expect(statusUpdatesFor(session.id)).toEqual(['idle'])
-  })
-
-  it('restarts the countdown on every activity', async () => {
-    const { session, fake } = await createAgent()
-
-    fake.activity()
-    vi.advanceTimersByTime(4000)
-    fake.activity()
-    vi.advanceTimersByTime(4000)
-    expect(session.status).toBe('running')
-
-    vi.advanceTimersByTime(1000)
-    expect(session.status).toBe('idle')
-  })
-
-  it('leaves a session that is waiting for input alone', async () => {
-    const { session, fake } = await createAgent()
-
-    fake.status(WAITING)
-    fake.activity()
-    expect(session.status).toBe('waiting')
-
-    vi.advanceTimersByTime(60_000)
-    expect(session.status).toBe('waiting')
-  })
-
-  it('wakes an idle session that prints again while vornd last said running', async () => {
-    const { session, fake } = await createAgent()
-    fake.status(RUNNING)
-    fake.activity()
-    vi.advanceTimersByTime(5000)
-    expect(session.status).toBe('idle')
-
-    fake.activity()
-
-    expect(session.status).toBe('running')
-    expect(statusUpdatesFor(session.id)).toEqual(['idle', 'running'])
-  })
-
-  it('leaves an idle session idle when vornd last said it was waiting', async () => {
-    const { session, fake } = await createAgent()
-    fake.status(WAITING)
-    ptyManager.updateSessionStatus(session.id, 'idle')
-
-    fake.activity()
-
-    expect(session.status).toBe('idle')
-  })
-
-  it('gives hook-backed sessions the longer timeout', async () => {
-    const { session, fake } = await createAgent()
-
-    fake.activity()
-    ptyManager.promoteToHookStatus(session.id)
-    expect(session.statusSource).toBe('hooks')
-
-    vi.advanceTimersByTime(5000)
-    expect(session.status).toBe('running')
-
-    vi.advanceTimersByTime(25_000)
-    expect(session.status).toBe('idle')
-  })
-
-  it('arms the longer timeout on activity once a session is hook-backed', async () => {
-    const { session, fake } = await createAgent()
-    ptyManager.promoteToHookStatus(session.id)
-
-    fake.activity()
-    vi.advanceTimersByTime(29_999)
-    expect(session.status).toBe('running')
-
-    vi.advanceTimersByTime(1)
-    expect(session.status).toBe('idle')
-  })
-
-  it('re-arms the hook timeout on every hook event', async () => {
-    const { session, fake } = await createAgent()
-    fake.activity()
-
-    ptyManager.promoteToHookStatus(session.id)
-    vi.advanceTimersByTime(20_000)
-    ptyManager.promoteToHookStatus(session.id)
-    vi.advanceTimersByTime(20_000)
-    expect(session.status).toBe('running')
-
-    vi.advanceTimersByTime(10_000)
-    expect(session.status).toBe('idle')
-  })
-
-  it('does not arm a timer when promoting a session that has shown no activity', async () => {
-    const { session } = await createAgent()
-
-    ptyManager.promoteToHookStatus(session.id)
-    vi.advanceTimersByTime(60_000)
-
-    // Nothing to time out yet — the timer is armed by the first activity.
-    expect(session.status).toBe('running')
-  })
-
-  it('ignores promotion of an unknown session', () => {
-    expect(() => ptyManager.promoteToHookStatus('no-such-session')).not.toThrow()
-  })
-
-  it('revives an idle session when the user types', async () => {
-    const { session, fake } = await createAgent()
-    fake.activity()
-    vi.advanceTimersByTime(5000)
-    expect(session.status).toBe('idle')
-
-    ptyManager.writeToPty(session.id, 'next task\r')
-
-    expect(session.status).toBe('running')
-    expect(statusUpdatesFor(session.id)).toEqual(['idle', 'running'])
-    expect(fake.written).toContain('next task\r')
-  })
-
-  it('leaves hook-backed sessions to their hooks when the user types', async () => {
-    const { session, fake } = await createAgent()
-    fake.activity()
-    ptyManager.promoteToHookStatus(session.id)
-    vi.advanceTimersByTime(30_000)
-    expect(session.status).toBe('idle')
-
-    ptyManager.writeToPty(session.id, 'next task\r')
-
-    expect(session.status).toBe('idle')
-  })
-
-  it('never arms an idle timer for plain shell sessions', () => {
-    const session = ptyManager.createShellPty('/tmp')
-    const fake = fakeVornd.last()
-
-    fake.activity()
-    vi.advanceTimersByTime(60_000)
-
-    expect(session.status).toBe('running')
-    expect(statusUpdatesFor(session.id)).toEqual([])
-  })
-
+describe('a session whose program ends', () => {
   it('records the exit code when a shell session ends', () => {
     const session = ptyManager.createShellPty('/tmp')
     const fake = fakeVornd.last()

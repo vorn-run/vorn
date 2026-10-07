@@ -1,5 +1,4 @@
-//! The session records vornd carries from one run to the next, with the
-//! Native server switch on.
+//! The session records vornd carries from one run to the next.
 //!
 //! vornd starts with the server and ends with it, so what its registry owns
 //! ([`crate::registry::Registry::own_records`]) is written down here, as

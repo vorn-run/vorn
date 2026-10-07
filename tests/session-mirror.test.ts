@@ -301,16 +301,7 @@ describe('the session records through the channel', () => {
     fs.rmSync(dataDir, { recursive: true, force: true })
   })
 
-  it('sends nothing to a vornd that runs no native work', async () => {
-    expect(await sessions.connect(fake.endpoint)).toBe(true)
-    feed.terminal(terminal('b'))
-    expect(sessions.isNative()).toBe(false)
-    expect(fake.made('vornd:record')).toEqual([])
-    expect(await sessions.registry()).toBeNull()
-  })
-
   it('feeds a vornd that asks, then follows its copy and resyncs after a gap', async () => {
-    fake.native = true
     const copy = snapshot('g1', 1, { terminals: [terminal('a', { rev: 1 })], order: ['a'] })
     fake.state.registry = copy
     expect(await sessions.connect(fake.endpoint)).toBe(true)

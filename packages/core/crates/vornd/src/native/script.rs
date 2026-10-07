@@ -1,5 +1,5 @@
-//! The server's project scripts, run in vornd's session holder with the
-//! Native server switch on (`vornd:script`).
+//! The server's project scripts, run in vornd's session holder
+//! (`vornd:script`).
 //!
 //! The server stays the entry point (`script:execute`, which its workflows
 //! call in process), and asks vornd on the app's channel to run each script

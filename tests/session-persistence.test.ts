@@ -1,11 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-const mockSaveSessions = vi.fn<(...args: unknown[]) => unknown>()
 const mockGetPrevious = vi.fn<(...args: unknown[]) => unknown[]>(() => [])
 const mockClearSessions = vi.fn<(...args: unknown[]) => unknown>()
 
 vi.mock('../packages/server/src/database', () => ({
-  saveSessions: (...args: unknown[]) => mockSaveSessions(...args),
   getPreviousSessions: (...args: unknown[]) => mockGetPrevious(...args),
   clearSessions: (...args: unknown[]) => mockClearSessions(...args)
 }))
@@ -19,19 +17,6 @@ describe('sessionManager', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     sessionManager.stopAutoSave()
-  })
-
-  it('saveSessions delegates to database', () => {
-    const sessions = [{ id: 's1' }] as never
-    sessionManager.saveSessions(sessions)
-    expect(mockSaveSessions).toHaveBeenCalledWith(sessions)
-  })
-
-  it('saveSessions catches errors silently', () => {
-    mockSaveSessions.mockImplementationOnce(() => {
-      throw new Error('db error')
-    })
-    expect(() => sessionManager.saveSessions([])).not.toThrow()
   })
 
   it('readPreviousSessions returns DB result', () => {
@@ -76,66 +61,35 @@ describe('sessionManager auto-save', () => {
     vi.useRealTimers()
   })
 
-  it('scheduleSave is a no-op before startAutoSave', () => {
+  it('reads nothing before startAutoSave', () => {
     sessionManager.scheduleSave()
+    sessionManager.persistNow()
     vi.advanceTimersByTime(1000)
-    expect(mockSaveSessions).not.toHaveBeenCalled()
+    expect(mockGetActive).not.toHaveBeenCalled()
   })
 
-  it('persistNow is a no-op before startAutoSave', () => {
-    sessionManager.persistNow()
-    expect(mockSaveSessions).not.toHaveBeenCalled()
-  })
-
-  it('persistNow saves immediately after startAutoSave', () => {
+  it('walks the sessions at once on persistNow, and writes no session record', () => {
     sessionManager.startAutoSave(mockGetActive)
     sessionManager.persistNow()
-    expect(mockGetActive).toHaveBeenCalled()
-    expect(mockSaveSessions).toHaveBeenCalledWith([{ id: 's1' }])
+    expect(mockGetActive).toHaveBeenCalledTimes(1)
+    expect(mockClearSessions).not.toHaveBeenCalled()
   })
 
-  it('scheduleSave debounces — rapid calls produce one save', () => {
+  it('debounces, so rapid changes cost one walk', () => {
     sessionManager.startAutoSave(mockGetActive)
     sessionManager.scheduleSave()
     sessionManager.scheduleSave()
     sessionManager.scheduleSave()
-    // Before debounce fires
-    expect(mockSaveSessions).not.toHaveBeenCalled()
-    // After debounce (500ms)
+    expect(mockGetActive).not.toHaveBeenCalled()
     vi.advanceTimersByTime(500)
-    expect(mockSaveSessions).toHaveBeenCalledTimes(1)
+    expect(mockGetActive).toHaveBeenCalledTimes(1)
   })
 
-  it('periodic interval saves only when dirty', () => {
-    sessionManager.startAutoSave(mockGetActive)
-    // Advance 30s — not dirty, should not save
-    vi.advanceTimersByTime(30_000)
-    expect(mockSaveSessions).not.toHaveBeenCalled()
-
-    // Mark dirty via scheduleSave, but clear it via persistNow before interval
-    sessionManager.scheduleSave()
-    vi.advanceTimersByTime(500) // debounce fires, clears dirty
-    mockSaveSessions.mockClear()
-
-    // Next interval tick — dirty is false again, should not save
-    vi.advanceTimersByTime(30_000)
-    expect(mockSaveSessions).not.toHaveBeenCalled()
-  })
-
-  it('periodic interval saves when dirty flag is set', () => {
-    sessionManager.startAutoSave(mockGetActive)
-    sessionManager.scheduleSave()
-    // Don't let debounce fire — advance straight to interval
-    vi.advanceTimersByTime(30_000)
-    // Both debounce (at 500ms) and interval (at 30s) should have fired
-    expect(mockSaveSessions).toHaveBeenCalled()
-  })
-
-  it('stopAutoSave prevents further saves', () => {
+  it('stopAutoSave cancels a pending walk', () => {
     sessionManager.startAutoSave(mockGetActive)
     sessionManager.scheduleSave()
     sessionManager.stopAutoSave()
     vi.advanceTimersByTime(30_000)
-    expect(mockSaveSessions).not.toHaveBeenCalled()
+    expect(mockGetActive).not.toHaveBeenCalled()
   })
 })

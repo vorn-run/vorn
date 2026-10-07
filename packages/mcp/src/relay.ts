@@ -5,7 +5,7 @@ import type { VorndStatus } from '@vornrun/shared/types'
 /**
  * The agent's side of vornd's MCP server.
  *
- * With the Native server switch on, vornd serves the tools at `/mcp` over
+ * vornd serves the tools at `/mcp` over
  * Streamable HTTP, and this process only carries messages between the agent's
  * stdio and that endpoint. The tools then run once, in vornd, for every agent,
  * instead of in a Node process per agent.
@@ -33,7 +33,7 @@ export interface RelayDeps {
 export async function vorndMcpUrl(deps: RelayDeps): Promise<URL | null> {
   try {
     const status = await deps.vorndStatus()
-    if (status.state !== 'on' || !status.nativeServer) return null
+    if (status.state !== 'on') return null
     const res = await deps.fetch(`http://127.0.0.1:${status.port}/vornd/health`, {
       signal: AbortSignal.timeout(ASK_TIMEOUT_MS)
     })

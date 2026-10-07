@@ -12,11 +12,11 @@ vi.mock('../packages/server/src/config-manager', () => ({
     onChange: () => () => {}
   }
 }))
-const saved = vi.hoisted(() => ({ calls: 0 }))
+const cleared = vi.hoisted(() => ({ calls: 0 }))
 vi.mock('../packages/server/src/database', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../packages/server/src/database')>()),
-  saveSessions: () => {
-    saved.calls += 1
+  clearSessions: () => {
+    cleared.calls += 1
   }
 }))
 
@@ -24,7 +24,6 @@ import { initDatabase, closeDatabase } from '../packages/server/src/database'
 import { IPC, type HeadlessSession, type TerminalSession } from '../packages/shared/src/types'
 import { ptyManager } from '../packages/server/src/pty-manager'
 import { headlessManager } from '../packages/server/src/headless-manager'
-import { sessionManager } from '../packages/server/src/session-persistence'
 import { seedRestored, listRestored } from '../packages/server/src/restored-sessions'
 import { vorndSessions, type SessionNote } from '../packages/server/src/vornd-sessions'
 import { wireVorndRestore } from '../packages/server/src/vornd-restore'
@@ -37,7 +36,7 @@ import { until } from './helpers/vornd-sessions'
  * still holds are taken on from the copy, a session vornd started again under
  * its id replaces the record it had, one let go of for a conversation running
  * elsewhere goes quietly, the list of sessions still offered is mirrored, the
- * database's own records are handed over once, and nothing is saved here. A
+ * database's own records are handed over once and then forgotten. A
  * fake vornd stands in, so each note can be sent on its own.
  */
 
@@ -89,11 +88,6 @@ describe('the records vornd owns between runs, followed here', () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vornd-restore-'))
     initDatabase(dataDir)
     fake = new FakeVornd(dataDir)
-    fake.native = true
-    fake.statuses = true
-    fake.terminals = true
-    fake.headless = true
-    fake.restores = true
     fake.carried = 1
     // Carried and still held: a named, grouped terminal and a headless agent; one only offered.
     fake.state.registry = {
@@ -131,11 +125,9 @@ describe('the records vornd owns between runs, followed here', () => {
       ptyManager.on(name, () => events.push(name))
     }
     wireVorndRestore((session) => announced.push(session))
-    sessionManager.setOwnedElsewhere(() => vorndSessions.restoresSessions())
     // What this server's database kept of the last run, handed over once.
     seedRestored([terminal('from-db', { savedAt: 7 })], 10)
     expect(await vorndSessions.connect(fake.endpoint)).toBe(true)
-    expect(vorndSessions.restoresSessions()).toBe(true)
   })
 
   afterAll(async () => {
@@ -177,13 +169,8 @@ describe('the records vornd owns between runs, followed here', () => {
     expect(vorndSessions.mirror.restored().map((r) => r.session.id)).toEqual(['cold'])
   })
 
-  it('saves nothing to its own session records while vornd owns them', async () => {
-    const before = saved.calls
-    sessionManager.startAutoSave(() => ptyManager.getActiveSessions())
-    sessionManager.persistNow()
-    sessionManager.clear()
-    await new Promise((r) => setTimeout(r, 20))
-    expect(saved.calls).toBe(before)
+  it('forgets the records it handed over, so they are handed over only once', () => {
+    expect(cleared.calls).toBe(1)
   })
 
   it('follows the offers as vornd changes them', async () => {

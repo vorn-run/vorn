@@ -130,9 +130,9 @@ impl Daemon {
             #[cfg(feature = "engine")]
             if let Some(engine) = holder.as_ref().and_then(|h| h.engine()) {
                 native.set_registry(Arc::clone(engine.registry()));
-                // With the switch on, the copy decides the terminals'
-                // statuses too, and the server takes them from it.
-                if groups.native_server() {
+                // With terminals native, the copy decides their statuses too,
+                // and the server takes them from it.
+                if groups.mode("terminal") == Mode::Native {
                     engine.decide_statuses();
                 }
                 // The terminals vornd creates are started in the engine.

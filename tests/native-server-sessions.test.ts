@@ -290,7 +290,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
       return state.state === 'on' && !!state.port
     })
     vorndPort = state.port!
-    await until('vornd to ask for the records', () => server.vorndSessions.isNative())
+    await until('vornd to ask for the records', () => server.vorndSessions.inUse())
     // The holder too: the server asks for a spawn once it is up, and a
     // create's comparison waits for that spawn.
     await until('the copy to be fed and the session holder up', async () => {

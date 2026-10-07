@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   findVornd,
-  nativeServerSwitch,
   startVornd,
   VorndKeeper,
   type Vornd,
@@ -179,14 +178,13 @@ describe('starting vornd', () => {
     ])
   })
 
-  it('names the database when it has one, and asks it to answer the calls it has taken over only when told to', async () => {
+  it('names the database when it has one', async () => {
     let seen: string[] = []
     const spawnImpl = ((binary: string, args: string[], options: object) => {
       seen = args
       return stubSpawn('ok')(binary, args, options as never)
     }) as unknown as typeof spawn
     started.push(await startVornd('vornd', 50091, { spawnImpl }))
-    expect(seen).not.toContain('--native-server')
     expect(seen).not.toContain('--db')
     started.push(await startVornd('vornd', 50091, { spawnImpl, db: '/Users/x/.vorn/vorn.db' }))
     expect(seen).toEqual([
@@ -196,14 +194,6 @@ describe('starting vornd', () => {
       '--db',
       '/Users/x/.vorn/vorn.db'
     ])
-    started.push(
-      await startVornd('vornd', 50091, {
-        spawnImpl,
-        db: '/Users/x/.vorn/vorn.db',
-        nativeServer: true
-      })
-    )
-    expect(seen.slice(3)).toEqual(['--db', '/Users/x/.vorn/vorn.db', '--native-server'])
   })
 
   it('stops it by closing its stdin, and does not report that as an exit', async () => {
@@ -318,11 +308,10 @@ describe('keeping vornd running', () => {
     expect(start).toHaveBeenCalledWith('/b/vornd', 50091, {
       sessiond: { binary: '/b/vorn-sessiond', home: '/home/x/.vorn' },
       desktopToken: 'secret',
-      db: path.join('/home/x/.vorn', 'vorn.db'),
-      nativeServer: false
+      db: path.join('/home/x/.vorn', 'vorn.db')
     })
     expect(connect).toHaveBeenCalledWith('/run/app.sock')
-    expect(keeper.state).toEqual({ state: 'on', port: 47001, nativeServer: false })
+    expect(keeper.state).toEqual({ state: 'on', port: 47001 })
     expect(keeper.port).toBe(47001)
     expect(keeper.answers('pairing')).toBe(false)
     expect(keeper.starting).toBe(false)
@@ -332,38 +321,17 @@ describe('keeping vornd running', () => {
     expect(keeper.port).toBeNull()
   })
 
-  it('reads the Native server switch at each start, and says what vornd was started with', async () => {
-    vi.useFakeTimers()
-    let first: ReturnType<typeof fakeVornd> | null = null
-    const start = vi
-      .fn()
-      .mockImplementationOnce(async () => (first = fakeVornd(47001)))
-      .mockImplementationOnce(async () => fakeVornd(47002))
-    let on = true
+  it('says which groups the vornd it started answers itself', async () => {
+    const running = fakeVornd(47001)
     const keeper = new VorndKeeper({
       find: () => binaries,
-      start: start as never,
-      connect: async () => true,
-      nativeServer: () => on
+      start: (async () => running) as never,
+      connect: async () => true
     })
-    await keeper.launch(50091, path.join('/home', 'x', '.vorn'))
-    expect(start).toHaveBeenLastCalledWith('/b/vornd', 50091, {
-      sessiond: { binary: '/b/vorn-sessiond', home: path.join('/home', 'x', '.vorn') },
-      desktopToken: undefined,
-      db: path.join('/home', 'x', '.vorn', 'vorn.db'),
-      nativeServer: true
-    })
-    expect(keeper.state).toEqual({ state: 'on', port: 47001, nativeServer: true })
-    first!.native = ['pairing']
+    await keeper.launch(50091, '/h')
+    running.native = ['pairing']
     expect(keeper.answers('pairing')).toBe(true)
     expect(keeper.answers('git')).toBe(false)
-
-    on = false
-    first!.exit('code=1, signal=null')
-    await vi.advanceTimersByTimeAsync(500)
-    await keeper.ready()
-    expect(start.mock.lastCall?.[2]).toMatchObject({ nativeServer: false })
-    expect(keeper.state).toEqual({ state: 'on', port: 47002, nativeServer: false })
     keeper.stop()
   })
 
@@ -388,8 +356,7 @@ describe('keeping vornd running', () => {
     expect(start).toHaveBeenCalledWith('/b/vornd', 50091, {
       sessiond: undefined,
       desktopToken: undefined,
-      db: path.join('/h', 'vorn.db'),
-      nativeServer: false
+      db: path.join('/h', 'vorn.db')
     })
     expect(connect).not.toHaveBeenCalled()
     expect(keeper.state.state).toBe('on')
@@ -402,7 +369,7 @@ describe('keeping vornd running', () => {
       connect: async () => false
     })
     await keeper.launch(50091, '/h')
-    expect(keeper.state).toEqual({ state: 'on', port: 47001, nativeServer: false })
+    expect(keeper.state).toEqual({ state: 'on', port: 47001 })
   })
 
   it('tries again with a growing delay when vornd fails to start', async () => {
@@ -430,7 +397,7 @@ describe('keeping vornd running', () => {
     expect(start).toHaveBeenCalledTimes(2)
     await vi.advanceTimersByTimeAsync(1)
     expect(start).toHaveBeenCalledTimes(3)
-    expect(keeper.state).toEqual({ state: 'on', port: 47002, nativeServer: false })
+    expect(keeper.state).toEqual({ state: 'on', port: 47002 })
   })
 
   it('starts vornd again when it exits on its own, and starts the delay over after a long run', async () => {
@@ -456,14 +423,14 @@ describe('keeping vornd running', () => {
     expect(keeper.state).toEqual({ state: 'failed', detail: 'vornd exited (code=1, signal=null)' })
     expect(keeper.port).toBeNull()
     await vi.advanceTimersByTimeAsync(500)
-    expect(keeper.state).toEqual({ state: 'on', port: 47002, nativeServer: false })
+    expect(keeper.state).toEqual({ state: 'on', port: 47002 })
     expect(connect).toHaveBeenCalledTimes(2)
 
     // Up for longer than a minute: the next restart waits the first delay again.
     now = 120_000
     second.exit('code=null, signal=SIGKILL')
     await vi.advanceTimersByTimeAsync(500)
-    expect(keeper.state).toEqual({ state: 'on', port: 47003, nativeServer: false })
+    expect(keeper.state).toEqual({ state: 'on', port: 47003 })
   })
 
   it('does not restart vornd once stopped, and stops one that finishes starting after', async () => {
@@ -512,25 +479,5 @@ describe('keeping vornd running', () => {
     const b = keeper.launch(50091, '/h')
     await Promise.all([a, b, keeper.ready()])
     expect(start).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('the Native server switch', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs()
-  })
-
-  it('follows Settings › Experimental, off by default', () => {
-    vi.stubEnv('VORN_NATIVE_SERVER', '')
-    expect(nativeServerSwitch(undefined)).toBe(false)
-    expect(nativeServerSwitch({})).toBe(false)
-    expect(nativeServerSwitch({ nativeServer: true })).toBe(true)
-  })
-
-  it('takes VORN_NATIVE_SERVER over the setting, both ways', () => {
-    vi.stubEnv('VORN_NATIVE_SERVER', '1')
-    expect(nativeServerSwitch({})).toBe(true)
-    vi.stubEnv('VORN_NATIVE_SERVER', '0')
-    expect(nativeServerSwitch({ nativeServer: true })).toBe(false)
   })
 })

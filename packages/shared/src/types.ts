@@ -1570,8 +1570,6 @@ export interface AppConfig {
     hasSeededDevServerWorkflow?: boolean
     /** Which worktrees the manager treats as stale, and what counts as build output. */
     worktreeRetention?: WorktreeRetentionConfig
-    /** Settings › Experimental. Each switch is off until someone turns it on. */
-    experimental?: ExperimentalConfig
   }
   projects: ProjectConfig[]
   agentCommands?: Partial<Record<AiAgentType, AgentCommandConfig>>
@@ -1821,16 +1819,6 @@ export interface BranchDeleteResult {
   failed: { branch: string; error: string }[]
 }
 
-/** Work in progress that can be tried before it is the default. */
-export interface ExperimentalConfig {
-  /**
-   * vornd answers the groups of calls it has taken over from the server (git,
-   * the file explorer, editors) itself. Read by the server each time it starts
-   * vornd, and passed to it.
-   */
-  nativeServer?: boolean
-}
-
 /**
  * Where a state of a terminal ends, in its record log: the first record and the
  * first byte that state does not include. The Session Recovery Contract's
@@ -1850,8 +1838,7 @@ export interface RecordCursor {
 /** Whether vornd is up in front of the server, and where; or why it is not. */
 export type VorndStatus =
   | { state: 'off' }
-  /** `nativeServer`: whether vornd was started answering the groups it has taken over. */
-  | { state: 'on'; port: number; nativeServer: boolean }
+  | { state: 'on'; port: number }
   /** vornd could not be started or reached; the app talks to the server directly. */
   | { state: 'failed'; detail: string }
 

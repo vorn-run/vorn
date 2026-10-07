@@ -66,9 +66,6 @@ describe('hook linking while vornd owns the terminal records', () => {
   beforeAll(async () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vornd-hook-linking-'))
     fake = new FakeVornd(dataDir)
-    fake.native = true
-    fake.statuses = true
-    fake.terminals = true
     fake.state.registry = {
       gen: GEN,
       rev,
@@ -80,7 +77,6 @@ describe('hook linking while vornd owns the terminal records', () => {
     }
     await fake.start()
     expect(await vorndSessions.connect(fake.endpoint)).toBe(true)
-    expect(vorndSessions.createsTerminals()).toBe(true)
 
     const created: Array<[string, Partial<TerminalSession>]> = [
       ['older', { createdAt: 1, agentSessionId: 'conv-older' }],

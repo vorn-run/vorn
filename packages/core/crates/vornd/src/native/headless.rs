@@ -1,4 +1,4 @@
-//! The headless calls vornd answers itself with the Native server switch on:
+//! The headless calls vornd answers itself:
 //! `headless:create` and `headless:kill`.
 //!
 //! A headless agent runs on pipes in vornd's session holder, never on a

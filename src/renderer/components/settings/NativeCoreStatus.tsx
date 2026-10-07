@@ -1,39 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useAppStore } from '../../stores'
-import type {
-  CoreStatus,
-  ExperimentalConfig,
-  SessionHolder,
-  SessionHolders,
-  VorndStatus
-} from '../../../shared/types'
-import { SettingsPageHeader } from './SettingsPageHeader'
-import { SettingRow } from './SettingRow'
-import { ToggleSwitch } from './ToggleSwitch'
+import type { CoreStatus, SessionHolder, SessionHolders, VorndStatus } from '../../../shared/types'
 
 /** Why vornd, which runs every terminal, is not in use, or null. */
 function vorndNote(status: VorndStatus | null): string | null {
   if (status?.state !== 'failed') return null
   return `Terminals cannot run, because vornd, the native daemon, is not in use: ${status.detail}.`
-}
-
-/** The native server's switch. The server reads it when it starts vornd. */
-const SERVER_SWITCH = {
-  label: 'Native server',
-  description:
-    'Answer git, file explorer, editor, agent lookup and shell lookup calls in vornd instead of the server. Applies after restarting Vorn'
-}
-
-/** What the native server is doing, when it differs from what the switch says, or null. */
-function serverNote(on: boolean, status: VorndStatus | null): string | null {
-  if (!status) return null
-  if (on && status.state === 'failed')
-    return 'The server answers these calls itself while vornd is not in use.'
-  const answering = status.state === 'on' && status.nativeServer
-  if (on && status.state === 'on' && !answering)
-    return 'vornd answers these calls the next time Vorn starts.'
-  if (!on && answering) return 'The server answers these calls again the next time Vorn starts.'
-  return null
 }
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
@@ -64,9 +35,8 @@ function coreNote(status: CoreStatus | null): string | null {
   return null
 }
 
-export function ExperimentalSettings() {
-  const config = useAppStore((s) => s.config)
-  const setConfig = useAppStore((s) => s.setConfig)
+/** The native core and vornd's session holders: what is wrong with them, and older holders to end. */
+export function NativeCoreStatus() {
   // Null until it arrives, and for a server older than the method.
   const [status, setStatus] = useState<CoreStatus | null>(null)
   // Null until it arrives, and for good where vornd's status cannot be asked (the browser).
@@ -104,12 +74,8 @@ export function ExperimentalSettings() {
     }
   }, [])
 
-  if (!config) return null
-
-  const flags = config.defaults.experimental ?? {}
   const note = coreNote(status)
   const daemonNote = vorndNote(daemon)
-  const nativeServerNote = serverNote(flags.nativeServer === true, daemon)
 
   const endHolder = (h: SessionHolder): void => {
     const count = h.sessions === null ? 'the sessions' : plural(h.sessions, 'session', 'sessions')
@@ -123,23 +89,11 @@ export function ExperimentalSettings() {
       .catch((err: Error) => setEndFailure(`Could not end them: ${err.message}.`))
   }
 
-  const setFlag = (key: keyof ExperimentalConfig, value: boolean): void => {
-    const updated = {
-      ...config,
-      defaults: { ...config.defaults, experimental: { ...flags, [key]: value } }
-    }
-    window.api.saveConfig(updated)
-    setConfig(updated)
-  }
-
   return (
-    <div>
-      <SettingsPageHeader
-        title="Experimental"
-        description="Work in progress you can try before it is the default."
-      />
+    <div className="mt-6">
+      {status?.version && <div className="text-xs text-gray-500">Native core {status.version}</div>}
       {note && (
-        <div className="mb-4 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
+        <div className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
           {note}
         </div>
       )}
@@ -171,23 +125,6 @@ export function ExperimentalSettings() {
           </div>
         ))}
       {endFailure && <div className="mt-2 text-xs text-red-400">{endFailure}</div>}
-      <div className="mt-1 space-y-1">
-        <SettingRow label={SERVER_SWITCH.label} description={SERVER_SWITCH.description}>
-          <ToggleSwitch
-            checked={flags.nativeServer === true}
-            onChange={(value) => setFlag('nativeServer', value)}
-            label={SERVER_SWITCH.label}
-          />
-        </SettingRow>
-      </div>
-      {nativeServerNote && (
-        <div className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
-          {nativeServerNote}
-        </div>
-      )}
-      {status?.version && (
-        <div className="mt-4 text-xs text-gray-500">Native core {status.version}</div>
-      )}
     </div>
   )
 }

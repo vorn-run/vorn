@@ -192,16 +192,6 @@ impl Store {
                 "worktreeRetention",
             ],
         );
-        // Kept to booleans: an edited-in value must not read as a switch
-        // that is on.
-        if let Some(Value::Object(raw)) = stored.get("experimental") {
-            let flags = raw
-                .iter()
-                .filter(|(_, v)| v.is_boolean())
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            out.insert("experimental".into(), Value::Object(js_key_order(flags)));
-        }
         Ok(out)
     }
 
@@ -827,7 +817,6 @@ mod tests {
             ("shell", "null"),
             ("rowHeight", "null"),
             ("envPassthrough", r#"["A", 1, "B"]"#),
-            ("experimental", r#"{"b": true, "x": "yes", "2": false}"#),
             ("unlisted", "1"),
         ] {
             store
@@ -842,9 +831,6 @@ mod tests {
         assert_eq!(defaults["shell"], json!("/bin/zsh"));
         assert_eq!(defaults["rowHeight"], Value::Null);
         assert_eq!(defaults["envPassthrough"], json!(["A", "B"]));
-        let experimental = defaults["experimental"].as_object().unwrap();
-        let keys: Vec<_> = experimental.keys().cloned().collect();
-        assert_eq!(keys, ["2", "b"]);
         assert!(defaults.get("unlisted").is_none());
     }
 

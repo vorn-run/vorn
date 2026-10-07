@@ -64,9 +64,6 @@ describe('the terminals vornd creates and changes, followed here', () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vornd-follow-'))
     initDatabase(dataDir)
     fake = new FakeVornd(dataDir)
-    fake.native = true
-    fake.statuses = true
-    fake.terminals = true
     fake.state.registry = {
       gen: GEN,
       rev,
@@ -85,7 +82,6 @@ describe('the terminals vornd creates and changes, followed here', () => {
     }
     vorndSessions.setClosingSource(() => closing)
     expect(await vorndSessions.connect(fake.endpoint)).toBe(true)
-    expect(vorndSessions.createsTerminals()).toBe(true)
   })
 
   afterAll(async () => {

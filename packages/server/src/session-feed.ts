@@ -4,10 +4,8 @@ import { heldWorkspaces, onHoldsChanged } from './workspace-holds'
 /**
  * What this server tells vornd of its session records.
  *
- * While vornd runs native work (Settings › Experimental › Native server, or a
- * per-group setting), it keeps a copy of this server's terminal and headless
- * records, and answers the calls that read them from it in shadow mode, so the
- * two can be compared. The copy is only as good as what it is told: every
+ * vornd keeps a copy of this server's terminal and headless records, and
+ * answers the calls that read them from it. The copy is only as good as what it is told: every
  * place that changes a record, here or anywhere that holds one, says so here.
  */
 
@@ -33,7 +31,7 @@ export interface RecordSource {
 
 /** The channel a `RecordFeed` writes to: vornd's, through `VorndSessions`. */
 export interface RecordSink {
-  /** Whether vornd wants the records now: it runs native work, and is connected. */
+  /** Whether vornd wants the records now: it is connected. */
   wants(): boolean
   send(params: Record<string, unknown>): void
 }
@@ -44,8 +42,8 @@ export interface RecordSink {
  * The pty and headless managers call it after every change they make to a
  * record, and so does every other place that changes one in place. Each call
  * is cheap and safe to repeat: a record is sent only when its JSON differs from
- * what was last sent, and nothing at all is done unless vornd asked (`wants`),
- * so with the Native server switch off this costs one boolean.
+ * what was last sent, and nothing at all is done while vornd is not connected
+ * (`wants`).
  *
  * A status or exit set by an effect vornd told is sent with that effect's
  * cursor (`statusAt`, `exitAt`), so vornd keeps the newer of two states told

@@ -91,28 +91,6 @@ describe('the records vornd is told', () => {
     expect(sent.at(-1)).toEqual({ op: 'remove', kind: 'terminal', id: shell.id })
   })
 
-  it('stamps a status vornd told with its record, and not one from input', async () => {
-    const agent = await ptyManager.createPty({
-      agentType: 'claude',
-      projectName: 'p',
-      projectPath: '/tmp'
-    } as never)
-    opened.push(agent.id)
-    const program = fakeVornd.last()
-    program.status(2, { epoch: 3, rseq: 7, index: 1 })
-    expect(upserts(agent.id).at(-1)).toMatchObject({
-      record: { status: 'waiting' },
-      statusAt: { epoch: 3, rseq: 7, index: 1 }
-    })
-    ptyManager.writeToPty(agent.id, 'y')
-    const typed = upserts(agent.id).at(-1)!
-    expect(typed).toMatchObject({ record: { status: 'running' } })
-    expect(typed).not.toHaveProperty('statusAt')
-
-    ptyManager.promoteToHookStatus(agent.id)
-    expect(lastRecord(agent.id).statusSource).toBe('hooks')
-  })
-
   it('tells the order and a resume, and nothing of an extension pane', () => {
     const a = ptyManager.createShellPty('/tmp')
     const b = ptyManager.createShellPty('/tmp')
@@ -143,7 +121,7 @@ describe('the records vornd is told', () => {
   })
 })
 
-describe('while vornd decides the statuses', () => {
+describe('the statuses, which vornd decides', () => {
   it('tells vornd what only the server sees, and takes each status from its copy', async () => {
     const agent = await ptyManager.createPty({
       agentType: 'claude',
@@ -158,7 +136,6 @@ describe('while vornd decides the statuses', () => {
       if (channel === 'session:updated') updated.push({ id: payload.id, status: payload.status })
     }
     ptyManager.on('client-message', onMessage)
-    fakeVornd.decidesStatus.mockReturnValue(true)
     try {
       const record = (): Record<string, unknown> =>
         ptyManager.getActiveSessions().find((s) => s.id === agent.id) as never
@@ -205,16 +182,7 @@ describe('while vornd decides the statuses', () => {
       expect(record().status).toBe('idle')
       expect(updated).toHaveLength(told)
     } finally {
-      fakeVornd.decidesStatus.mockReturnValue(false)
       ptyManager.off('client-message', onMessage)
     }
-  })
-
-  it('takes nothing from the copy while the server decides', () => {
-    const shell = ptyManager.createShellPty('/tmp')
-    opened.push(shell.id)
-    fakeVornd.mirrored({ ...shell, status: 'error' })
-    expect(ptyManager.getActiveSessions().find((s) => s.id === shell.id)?.status).toBe('running')
-    expect(fakeVornd.patch).not.toHaveBeenCalled()
   })
 })

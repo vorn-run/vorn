@@ -1,4 +1,5 @@
 import vornLogo from '../../assets/vorn-logo.png'
+import { NativeCoreStatus } from './NativeCoreStatus'
 
 export function AboutSettings() {
   return (
@@ -12,6 +13,7 @@ export function AboutSettings() {
           <p className="text-xs text-gray-600 mt-1">&copy; 2026 Javier Canizalez</p>
         </div>
       </div>
+      <NativeCoreStatus />
     </div>
   )
 }

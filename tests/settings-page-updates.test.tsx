@@ -67,9 +67,6 @@ vi.mock('../src/renderer/components/settings/KeysSettings', () => ({
 vi.mock('../src/renderer/components/settings/NetworkSettings', () => ({
   NetworkSettings: () => <div data-testid="network-panel" />
 }))
-vi.mock('../src/renderer/components/settings/ExperimentalSettings', () => ({
-  ExperimentalSettings: () => <div data-testid="experimental-panel" />
-}))
 vi.mock('../src/renderer/components/settings/AboutSettings', () => ({
   AboutSettings: () => <div data-testid="about-panel" />
 }))
@@ -132,10 +129,9 @@ describe('SettingsPage', () => {
     expect(screen.getByTestId('about-panel')).toBeInTheDocument()
   })
 
-  it('renders the Experimental panel when that category is selected', () => {
-    mockStore.settingsCategory = 'experimental'
+  it('has no Experimental section', () => {
     render(<SettingsPage />)
-    expect(screen.getByTestId('experimental-panel')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Experimental' })).toBeNull()
   })
 
   it('offers Keys beside the other connection settings', () => {

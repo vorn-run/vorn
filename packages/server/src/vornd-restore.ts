@@ -2,35 +2,27 @@ import type { HeadlessSession, TerminalSession } from '@vornrun/shared/types'
 import log from './logger'
 import { ptyManager } from './pty-manager'
 import { headlessManager } from './headless-manager'
-import { consumeAllRestored, consumeRestored } from './restored-sessions'
+import { consumeAllRestored } from './restored-sessions'
 import { sessionManager } from './session-persistence'
 import { vorndSessions, type HeldSession } from './vornd-sessions'
 
 /**
  * The sessions vornd still holds from this server's previous run, taken on
- * again.
- *
- * Each terminal is taken on under the record that run saved rather than offered
- * to resume; one with no record is left where it is, and said so. While vornd
- * owns the records between runs (`vorndSessions.restoresSessions`) the record is
- * its copy's, which has it live again already (`adopted`), and a headless agent
- * it holds is followed again too; otherwise it is the one this server's database
- * kept (`restored-sessions`). Either way `announce` tells the windows.
+ * again under the record vornd's copy has, which has them live again already
+ * (`adopted`); one with no record is left where it is, and said so. `announce`
+ * tells the windows.
  */
 export function takeOnHeld(
   held: HeldSession[],
   announce: (session: TerminalSession) => void
 ): void {
-  const fromVornd = vorndSessions.restoresSessions()
   for (const one of held) {
     if (one.kind === 'piped') {
-      const record = fromVornd ? vorndSessions.mirror.headlessRecord(one.id) : undefined
+      const record = vorndSessions.mirror.headlessRecord(one.id)
       if (record) headlessManager.adoptHeld(ownRecord(record), one)
       continue
     }
-    const session = fromVornd
-      ? vorndSessions.mirror.terminal(one.id)
-      : consumeRestored(one.id)?.session
+    const session = vorndSessions.mirror.terminal(one.id)
     if (!session) {
       log.info({ id: one.id }, '[vornd] vornd holds a terminal this server has no record of')
       continue
@@ -52,14 +44,15 @@ function ownRecord<T extends TerminalSession | HeadlessSession>(record: T): T {
 }
 
 /**
- * vornd owns the session records now: what this server's database kept of its
- * last run is handed to it, once, for a vornd with nothing of its own to offer.
- * Either way nothing is offered from here any more.
+ * vornd owns the session records: what an older server saved in its database is
+ * handed to it, and forgotten once vornd has answered, so it is handed only once.
  */
 export async function carryToVornd(): Promise<void> {
   const records = consumeAllRestored().map((one) => one.session)
   if (records.length === 0) return
   const carried = await vorndSessions.carry(records)
+  if (carried === null) return
+  sessionManager.clear()
   // Some of them may run in the holder still: taken on now that vornd has their records.
   if (carried > 0) vorndSessions.restock()
   log.info(

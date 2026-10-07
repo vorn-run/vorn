@@ -21,7 +21,7 @@
 //! one held keeps the held status or exit: a state told again after a
 //! reconnect never overwrites a newer one.
 //!
-//! With the Native server switch on, the registry also decides each
+//! With terminals native, the registry also decides each
 //! terminal's status itself ([`Registry::decide_statuses`]), from what the
 //! session's screen shows, from its output going quiet, from input the server
 //! writes to it and from what the agent's hooks report, as the server did. The
@@ -36,7 +36,7 @@
 //! `vornd:patch` and vornd's own calls set (a name, a group, the agent's
 //! conversation), which stay the registry's whatever an upsert says.
 //!
-//! With the Native server switch on, vornd also creates, renames, regroups,
+//! vornd also creates, renames, regroups,
 //! reorders and closes terminals itself ([`crate::native::sessions`]). Those
 //! changes are told with `native: true`, so the server knows they are not the
 //! echo of its own: a terminal vornd created (`created`, then `started` once
@@ -1545,8 +1545,7 @@ impl Registry {
     }
 }
 
-/// The changes vornd makes to the terminals itself, with the Native server
-/// switch on. Each answers the notes to tell, marked `native`; each needs
+/// The changes vornd makes to the terminals itself. Each answers the notes to tell, marked `native`; each needs
 /// the registry to decide the statuses, which is what makes the patched
 /// fields its own.
 impl Registry {
@@ -1784,7 +1783,7 @@ impl Registry {
     }
 }
 
-/// The records vornd owns between runs, with the Native server switch on:
+/// The records vornd owns between runs, with the sessions group native:
 /// what is carried from the last run, which of it the session holder still
 /// has, the sessions offered to resume, and resuming one.
 impl Registry {

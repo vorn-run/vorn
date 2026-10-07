@@ -1,6 +1,5 @@
 import { TerminalSession } from '@vornrun/shared/types'
 import {
-  saveSessions as dbSaveSessions,
   getPreviousSessions as dbGetPreviousSessions,
   clearSessions as dbClearSessions
 } from './database'
@@ -9,27 +8,15 @@ import log from './logger'
 /** Debounce window so rapid session events don't thrash the DB. */
 const DEBOUNCE_MS = 500
 
+/**
+ * What this server keeps of the session records, which is no longer the records
+ * themselves: vornd owns and writes them. Left here are the debounced walk over
+ * the live sessions that keeps each one's HEAD current, and what an older server
+ * saved, read once to hand to vornd and then cleared.
+ */
 class SessionManager {
   private getActiveSessions: (() => TerminalSession[]) | null = null
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
-  /** Whether another process owns the session records now: vornd, with the Native server switch on. */
-  private ownedElsewhere: () => boolean = () => false
-  private saidOwned = false
-
-  /** Who says whether the records are another process's to write; this server then writes none. */
-  setOwnedElsewhere(check: () => boolean): void {
-    this.ownedElsewhere = check
-  }
-
-  /** True when the records are not this server's to write, said once in the log. */
-  private readOnly(): boolean {
-    if (!this.ownedElsewhere()) return false
-    if (!this.saidOwned) {
-      this.saidOwned = true
-      log.info('[session-persistence] vornd owns the session records; this server saves none')
-    }
-    return true
-  }
 
   /** Wire up a session source so the manager knows what to persist. */
   startAutoSave(getActiveSessions: () => TerminalSession[]): void {
@@ -60,18 +47,7 @@ class SessionManager {
       clearTimeout(this.debounceTimer)
       this.debounceTimer = null
     }
-    const sessions = this.getActiveSessions()
-    this.saveSessions(sessions)
-  }
-
-  saveSessions(sessions: TerminalSession[]): void {
-    if (this.readOnly()) return
-    try {
-      dbSaveSessions(sessions)
-      log.info(`[session-persistence] saved ${sessions.length} session(s)`)
-    } catch (err) {
-      log.warn({ err }, `[session-persistence] saveSessions failed (${sessions.length} sessions):`)
-    }
+    this.getActiveSessions()
   }
 
   /**
@@ -97,8 +73,8 @@ class SessionManager {
     }
   }
 
+  /** Forgets what an older server saved, once vornd has been handed it. */
   clear(): void {
-    if (this.readOnly()) return
     try {
       dbClearSessions()
     } catch (err) {

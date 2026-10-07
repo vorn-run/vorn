@@ -90,21 +90,7 @@ describe('defaults survive a save/load round trip', () => {
   })
 })
 
-describe('the experimental switches', () => {
-  it('round-trip, so a switch turned on stays on after a restart', () => {
-    saveConfig(configWith({ experimental: { nativeServer: true } }))
-    expect(loadConfig().defaults.experimental).toEqual({ nativeServer: true })
-    saveConfig(configWith({ experimental: { nativeServer: false } }))
-    expect(loadConfig().defaults.experimental).toEqual({ nativeServer: false })
-  })
-
-  it('are absent until one has been touched', () => {
-    saveConfig(configWith({}))
-    expect(loadConfig().defaults.experimental).toBeUndefined()
-  })
-})
-
-describe('the four keys that were declared but never listed', () => {
+describe('the keys that were declared but never listed', () => {
   // Each was written on save and dropped on the next load, so the setting looked
   // like it worked until a reload. `worktreeRetention` is read server-side, so it
   // always resolved to undefined no matter what the user chose.
@@ -116,20 +102,6 @@ describe('the four keys that were declared but never listed', () => {
     saveConfig(configWith({ [key]: value } as Partial<AppConfig['defaults']>))
 
     expect(loadConfig().defaults[key as keyof AppConfig['defaults']]).toBe(value)
-  })
-
-  it('experimental, which the app reads when it starts', () => {
-    saveConfig(configWith({ experimental: { nativeServer: true } }))
-    expect(loadConfig().defaults.experimental).toEqual({ nativeServer: true })
-  })
-
-  it('experimental, keeping only switches that are true or false', () => {
-    const edited = {
-      nativeServer: 'yes',
-      other: false
-    } as unknown as AppConfig['defaults']['experimental']
-    saveConfig(configWith({ experimental: edited }))
-    expect(loadConfig().defaults.experimental).toEqual({ other: false })
   })
 
   it('worktreeRetention, which the server reads', () => {

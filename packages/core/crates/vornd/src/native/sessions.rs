@@ -1,4 +1,4 @@
-//! The terminal calls vornd answers itself with the Native server switch on:
+//! The terminal calls vornd answers itself:
 //! `terminal:create`, `kill`, `rename`, `setGroup` and `reorder`, and
 //! `shell:create`.
 //!

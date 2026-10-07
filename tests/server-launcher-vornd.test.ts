@@ -14,7 +14,7 @@ import type { VorndStatus } from '@vornrun/shared/types'
 const published = { port: 50091 as number | null }
 /** What the server answers to `server:vornd`, or the error it fails with. */
 const server = {
-  vornd: { state: 'on', port: 47001, nativeServer: false } as VorndStatus | Error,
+  vornd: { state: 'on', port: 47001 } as VorndStatus | Error,
   /** Whether the bridge connects once pointed at vornd. */
   reachable: true
 }
@@ -111,7 +111,7 @@ beforeEach(() => {
   vi.resetModules()
   bridges.length = 0
   published.port = 50091
-  server.vornd = { state: 'on', port: 47001, nativeServer: false }
+  server.vornd = { state: 'on', port: 47001 }
   server.reachable = true
   holders.read.mockReset()
   holders.read.mockResolvedValue({ current: null, older: [], error: null })
@@ -131,7 +131,7 @@ describe('vornd in front of the server', () => {
     expect(bridge.requests).toContain('server:vornd')
     expect(bridge.url).toBe('ws://127.0.0.1:47001/ws')
     expect(bridge.isConnected).toBe(true)
-    expect(getVorndStatus()).toEqual({ state: 'on', port: 47001, nativeServer: false })
+    expect(getVorndStatus()).toEqual({ state: 'on', port: 47001 })
   })
 
   it('reads the session holders from that vornd', async () => {
@@ -189,14 +189,14 @@ describe('vornd in front of the server', () => {
 
   it('follows vornd to its new port when it starts again', async () => {
     const { bridge, getVorndStatus } = await launch()
-    server.vornd = { state: 'on', port: 47002, nativeServer: false }
+    server.vornd = { state: 'on', port: 47002 }
     bridge.drop()
     // Back to the server, which says where vornd is now.
     expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
     expect(getVorndStatus()).toEqual({ state: 'failed', detail: 'vornd went away' })
     for (let i = 0; i < 5; i++) await settled()
     expect(bridge.url).toBe('ws://127.0.0.1:47002/ws')
-    expect(getVorndStatus()).toEqual({ state: 'on', port: 47002, nativeServer: false })
+    expect(getVorndStatus()).toEqual({ state: 'on', port: 47002 })
   })
 
   it('forgets vornd when the app lets go of the server', async () => {

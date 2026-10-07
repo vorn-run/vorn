@@ -1,7 +1,7 @@
 /**
  * What vornd tells this server after it cleans worktrees itself.
  *
- * With the Native server switch on, vornd answers the worktree manager's
+ * vornd answers the worktree manager's
  * calls and deletes what they ask. This server still measures worktrees for
  * its own answers, so it forgets the sizes of the paths vornd removed or
  * emptied, as it does after a cleanup of its own.

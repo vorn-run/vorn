@@ -52,8 +52,7 @@ pub const MCP_USAGE: &str = "Usage
 
 Vorn's MCP server over stdio, for an agent that starts its MCP servers as
 commands: JSON-RPC lines on stdin, answers on stdout. It relays to vornd,
-which serves MCP when Settings > Experimental > Native server is on, and
-follows vornd when Vorn restarts.
+which serves it, and follows vornd when Vorn restarts.
 ";
 
 /// The header Streamable HTTP keeps a session in.
@@ -86,7 +85,7 @@ impl std::fmt::Display for RelayError {
         match self {
             RelayError::NotServing { port } => write!(
                 f,
-                "vornd on port {port} does not serve MCP (/mcp answered 404).\nIt is older than this vorn, or the Native server switch is off: turn on\nSettings > Experimental > Native server and restart Vorn."
+                "vornd on port {port} does not serve MCP (/mcp answered 404).\nIt is older than this vorn: restart Vorn."
             ),
             RelayError::Input(err) => write!(f, "could not read stdin: {err}"),
         }
@@ -888,9 +887,6 @@ pub fn serving(status: &Value) -> Result<Endpoint, String> {
             )
         }
     }
-    if status.get("nativeServer").and_then(Value::as_bool) != Some(true) {
-        return Err("vornd runs without the Native server switch, so it does not serve MCP.\nTurn on Settings > Experimental > Native server and restart Vorn.".into());
-    }
     let port = status
         .get("port")
         .and_then(Value::as_u64)
@@ -952,12 +948,11 @@ mod tests {
 
     #[test]
     fn reads_where_vornd_serves() {
-        let on = json!({"state": "on", "port": 4123, "nativeServer": true});
+        let on = json!({"state": "on", "port": 4123});
         assert_eq!(serving(&on).unwrap().port, 4123);
-        let forward_only = json!({"state": "on", "port": 4123, "nativeServer": false});
-        assert!(serving(&forward_only)
+        assert!(serving(&json!({"state": "on", "port": 0}))
             .unwrap_err()
-            .contains("Native server"));
+            .contains("no port"));
         assert!(serving(&json!({"state": "off"}))
             .unwrap_err()
             .contains("not running vornd"));

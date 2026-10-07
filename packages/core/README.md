@@ -6,7 +6,7 @@ native store (`NativeStore`). Terminals run in vornd, which parses their output
 with [libghostty-vt](https://crates.io/crates/libghostty-vt), Ghostty's VT
 engine, and keeps each one's screen model, scrollback and agent status. A
 server whose binary is missing or will not load keeps running: git runs as a
-child process, and the reason is in the log and on **Settings › Experimental**.
+child process, and the reason is in the log.
 `VORN_CORE_PATH` points the server at a specific binary.
 
 ## Layout

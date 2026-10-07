@@ -40,22 +40,12 @@ export class FakeVornd {
   protocol = APP_PROTOCOL
   /** Set, every `vornd:spawn` is refused with it. */
   spawnError: string | null = null
-  /** Whether `vornd:hello` says vornd runs native work, and so wants the session records. */
-  native = false
-  /** Whether `vornd:hello` says vornd's copy decides the terminals' statuses. */
-  statuses = false
-  /** Whether `vornd:hello` says vornd creates and changes terminals itself. */
-  terminals = false
-  /** Whether `vornd:hello` says vornd starts and stops headless agents itself. */
-  headless = false
   /** What `vornd:hello` says of the project scripts: run by vornd, compared, or neither. */
   scripts: 'native' | 'shadow' | null = null
   /** Set, every `vornd:script` is refused with it. */
   scriptError: string | null = null
   /** Called with each `vornd:script` once it is answered, to run it as vornd would. */
   onScript: ((params: Record<string, unknown>) => void) | null = null
-  /** Whether `vornd:hello` says vornd owns the session records between runs. */
-  restores = false
   /** What `vornd:carry` answers as the number of records taken. */
   carried = 0
   /** What `vornd:claim` answers as the holder: null for a claim taken. */
@@ -150,12 +140,7 @@ export class FakeVornd {
       result = {
         protocol: this.protocol,
         build: 'test',
-        ...(this.native && { native: true }),
-        ...(this.statuses && { statuses: true }),
-        ...(this.terminals && { terminals: true }),
-        ...(this.headless && { headless: true }),
-        ...(this.scripts && { scripts: this.scripts }),
-        ...(this.restores && { restores: true })
+        ...(this.scripts && { scripts: this.scripts })
       }
     } else if (msg.method === 'vornd:claim') result = { holder: this.claimHolder }
     else if (msg.method === 'vornd:carry') result = { carried: this.carried }

@@ -130,7 +130,7 @@ describe('terminals in vornd', () => {
     ptyManager.killPty(session.id)
   })
 
-  it("take an agent's status from vornd unless its hooks report it", async () => {
+  it('start an agent there, typing its launch line once it runs', async () => {
     const session = await ptyManager.createPty({
       agentType: 'claude',
       projectName: 'p',
@@ -141,23 +141,9 @@ describe('terminals in vornd', () => {
     await until('the launch line', () =>
       fake.made('terminal:write').some((w) => w.id === session.id && w.data === 'claude-launch\r')
     )
-
-    fake.send('vornd:effect', effect(session.id, 'status', 3, { status: 2 }))
-    await until('waiting', () => session.status === 'waiting')
-    fake.send('vornd:effect', effect(session.id, 'status', 4, { status: 1 }))
-    await until('running', () => session.status === 'running')
-
-    // Idle after a quiet spell, and running again when it prints with nothing new to say.
-    ptyManager.updateSessionStatus(session.id, 'idle')
-    fake.send('vornd:activity', { id: session.id })
-    await until('running again', () => session.status === 'running')
-
-    // Hooks win once they report.
-    ptyManager.promoteToHookStatus(session.id)
-    fake.send('vornd:effect', effect(session.id, 'status', 5, { status: 3 }))
-    fake.send('vornd:activity', { id: session.id })
-    await new Promise((r) => setTimeout(r, 50))
-    expect(session.status).toBe('running')
+    expect(
+      fake.made('terminal:write').filter((w) => w.id === session.id && w.data === 'claude-launch\r')
+    ).toHaveLength(1)
 
     ptyManager.killPty(session.id)
     await until('the kill', () =>

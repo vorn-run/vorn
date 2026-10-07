@@ -66,9 +66,6 @@ describe('the headless agents vornd starts, followed here', () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vornd-headless-'))
     initDatabase(dataDir)
     fake = new FakeVornd(dataDir)
-    fake.native = true
-    fake.statuses = true
-    fake.headless = true
     fake.state.registry = {
       gen: GEN,
       rev,
@@ -83,8 +80,6 @@ describe('the headless agents vornd starts, followed here', () => {
     )
     headlessManager.on('session-created', (session: HeadlessSession) => created.push(session))
     expect(await vorndSessions.connect(fake.endpoint)).toBe(true)
-    expect(vorndSessions.createsHeadless()).toBe(true)
-    expect(vorndSessions.createsTerminals()).toBe(false)
   })
 
   afterAll(async () => {
