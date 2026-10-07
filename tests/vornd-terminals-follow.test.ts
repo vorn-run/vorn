@@ -179,6 +179,10 @@ describe('the terminals vornd creates and changes, followed here', () => {
     expect(toldOn(IPC.SESSION_UPDATED).slice(updates)).toEqual([
       expect.objectContaining({ id: 'n', branch: 'renamed', worktreeName: 'new' })
     ])
+    // A move the server made itself is told the same way.
+    ptyManager.updateSessionsForWorktree('/w/new-1a2b3c4d', { branch: 'again' })
+    expect(listed('n')?.branch).toBe('again')
+    expect(toldOn(IPC.SESSION_UPDATED).at(-1)).toMatchObject({ id: 'n', branch: 'again' })
 
     // Closed by vornd: let go of here; its exit comes when the program ends.
     note({ op: 'remove', kind: 'terminal', id: 'n', native: true })

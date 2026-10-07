@@ -195,6 +195,13 @@ describe('the headless agents vornd starts, followed here', () => {
     expect(toldOn(IPC.SESSION_UPDATED).slice(updates)).toEqual([
       expect.objectContaining({ id: 'opencode', branch: 'renamed' })
     ])
+    // A move the server made itself is told the same way.
+    headlessManager.updateSessionsForWorktree('/w/new-1a2b3c4d', { worktreeName: 'again' })
+    expect(listed('opencode')?.worktreeName).toBe('again')
+    expect(toldOn(IPC.SESSION_UPDATED).at(-1)).toMatchObject({
+      id: 'opencode',
+      worktreeName: 'again'
+    })
   })
 
   it('asks vornd to stop an agent it follows, and lets go of them all on the way out', async () => {
