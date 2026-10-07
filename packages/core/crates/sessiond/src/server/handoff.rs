@@ -362,7 +362,11 @@ impl Drop for Thaw<'_> {
 }
 
 fn send_session(sock: &mut UnixStream, h: &Handover) -> io::Result<()> {
-    fdpass::send(sock, &ToAdopter::Manifest(Box::new(h.manifest.clone())), &h.fds)?;
+    fdpass::send(
+        sock,
+        &ToAdopter::Manifest(Box::new(h.manifest.clone())),
+        &h.fds,
+    )?;
     let ring = |entries: &[vorn_term_proto::Entry]| {
         ToAdopter::Ring(RingChunk {
             session: h.manifest.session.clone(),

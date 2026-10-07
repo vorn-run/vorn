@@ -206,7 +206,10 @@ fn assert_whole(entries: &[Entry]) {
         assert!(!matches!(e.rec, Record::Gap { .. }), "a gap at {:?}", e.hdr);
         at = e.after();
     }
-    assert!(matches!(entries.last().map(|e| &e.rec), Some(Record::Exit { .. })));
+    assert!(matches!(
+        entries.last().map(|e| &e.rec),
+        Some(Record::Exit { .. })
+    ));
 }
 
 const SHELL: &str = r#"while read l; do echo "got:$l"; done; exit 3"#;

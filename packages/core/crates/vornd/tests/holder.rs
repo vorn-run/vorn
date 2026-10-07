@@ -786,7 +786,11 @@ fn an_older_build_hands_its_live_sessions_over() {
         .expect("the current one is announced")
         .endpoint;
     let (mut c, w) = Client::hello(&endpoint);
-    let info = w.sessions.iter().find(|s| s.session == id).expect("adopted");
+    let info = w
+        .sessions
+        .iter()
+        .find(|s| s.session == id)
+        .expect("adopted");
     assert_eq!(info.pid, shell);
     let at = old.client.cursor(&id);
     c.send(&ToSessiond::Attach(Attach {
@@ -799,7 +803,10 @@ fn an_older_build_hands_its_live_sessions_over() {
     let mut all = old.client.output(&id);
     all.extend(c.output(&id));
     let text = String::from_utf8_lossy(&all);
-    assert!(text.contains("got:one") && text.contains("got:two"), "{text}");
+    assert!(
+        text.contains("got:one") && text.contains("got:two"),
+        "{text}"
+    );
 
     launch::kill(shell).unwrap();
     assert!(

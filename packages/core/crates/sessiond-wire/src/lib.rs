@@ -660,7 +660,13 @@ mod tests {
         }
         r.push(&ToDonor::Took(Took).encode());
         assert_eq!(r.read::<ToDonor>().unwrap(), Some(ToDonor::Took(Took)));
-        r.push(&ToVornd::Adopted(Adopted { req: 1, sessions: vec!["a".into()] }).encode());
+        r.push(
+            &ToVornd::Adopted(Adopted {
+                req: 1,
+                sessions: vec!["a".into()],
+            })
+            .encode(),
+        );
         assert!(matches!(r.read::<ToVornd>(), Ok(Some(ToVornd::Adopted(_)))));
     }
 

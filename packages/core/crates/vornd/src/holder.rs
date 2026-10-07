@@ -259,7 +259,9 @@ async fn retire(current: &Instance, i: &Instance) -> HolderInstance {
                 seen.handed_off = true;
                 return seen;
             }
-            Err(err) => warn!(pid = i.pid, %err, "an older session holder could not hand over its sessions; draining it"),
+            Err(err) => {
+                warn!(pid = i.pid, %err, "an older session holder could not hand over its sessions; draining it")
+            }
         }
     }
     drain(i, seen).await

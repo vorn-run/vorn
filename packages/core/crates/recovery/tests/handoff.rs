@@ -31,7 +31,9 @@ const CHUNK: &str = "1024";
 const PAUSE_MS: &str = "4";
 
 fn sessiond_bin() -> PathBuf {
-    let dir = Path::new(EMIT).parent().expect("recovery-emit is in a directory");
+    let dir = Path::new(EMIT)
+        .parent()
+        .expect("recovery-emit is in a directory");
     let bin = dir.join("vorn-sessiond");
     assert!(
         bin.exists(),

@@ -57,7 +57,10 @@ const UNKNOWN_EXIT_AFTER: Duration = Duration::from_secs(1);
 
 /// What a session's writer thread does next.
 enum Input {
-    Bytes { input_seq: u64, bytes: Vec<u8> },
+    Bytes {
+        input_seq: u64,
+        bytes: Vec<u8>,
+    },
     CloseStdin,
     /// Another sessiond writes to the session from now on: leave without
     /// closing anything for the program.
@@ -138,7 +141,12 @@ struct State {
 }
 
 impl State {
-    fn new(log: SessionLog, master: Option<Master>, killer: Box<dyn ChildKiller + Send + Sync>, open_streams: u8) -> State {
+    fn new(
+        log: SessionLog,
+        master: Option<Master>,
+        killer: Box<dyn ChildKiller + Send + Sync>,
+        open_streams: u8,
+    ) -> State {
         State {
             log,
             master,
@@ -214,7 +222,13 @@ impl Session {
         }
     }
 
-    fn new(id: String, kind: Kind, pid: u32, child: bool, state: State) -> std::io::Result<Arc<Session>> {
+    fn new(
+        id: String,
+        kind: Kind,
+        pid: u32,
+        child: bool,
+        state: State,
+    ) -> std::io::Result<Arc<Session>> {
         Ok(Arc::new(Session {
             id,
             kind,
@@ -821,7 +835,11 @@ impl Session {
     /// A session another sessiond described in `m` and passed `fds` for,
     /// with `log` built from what it sent. Checks the descriptors are what
     /// the manifest says; starts nothing.
-    pub(crate) fn stage(m: &Manifest, fds: Vec<OwnedFd>, log: SessionLog) -> std::io::Result<Staged> {
+    pub(crate) fn stage(
+        m: &Manifest,
+        fds: Vec<OwnedFd>,
+        log: SessionLog,
+    ) -> std::io::Result<Staged> {
         let bad = |why: String| std::io::Error::new(std::io::ErrorKind::InvalidData, why);
         if fds.len() != m.fds.len() {
             return Err(bad(format!("{}: descriptors missing", m.session)));
@@ -853,7 +871,10 @@ impl Session {
             Kind::Piped => master.is_none() && outs == m.open_streams && stdin.is_some() == m.input,
         };
         if !fits || m.pid == 0 {
-            return Err(bad(format!("{}: the descriptors do not fit the manifest", m.session)));
+            return Err(bad(format!(
+                "{}: the descriptors do not fit the manifest",
+                m.session
+            )));
         }
         let master = master.map(Master::from);
         let (reader, writer) = match &master {
@@ -1030,7 +1051,10 @@ fn write_exit(path: &Path, info: ExitInfo) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, format!("code={}\nsignal={}\n", num(info.code), num(info.signal)))?;
+    std::fs::write(
+        &tmp,
+        format!("code={}\nsignal={}\n", num(info.code), num(info.signal)),
+    )?;
     std::fs::rename(tmp, path)
 }
 

@@ -469,7 +469,10 @@ mod tests {
         assert!(Spool::adopt(&path, 2, &st).is_err(), "no file");
         let mut other = Spool::new(&path, 3);
         other.append(&entry(0, 10)).unwrap();
-        assert!(Spool::adopt(&path, 2, &other.state()).is_err(), "wrong epoch");
+        assert!(
+            Spool::adopt(&path, 2, &other.state()).is_err(),
+            "wrong epoch"
+        );
         let mut short = other.state();
         short.bytes -= 1;
         assert!(Spool::adopt(&path, 3, &short).is_err(), "wrong length");

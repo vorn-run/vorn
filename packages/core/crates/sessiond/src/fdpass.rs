@@ -56,11 +56,7 @@ fn send_with_fds(sock: RawFd, bytes: &[u8], fds: &[RawFd]) -> io::Result<usize> 
         (*cmsg).cmsg_level = libc::SOL_SOCKET;
         (*cmsg).cmsg_type = libc::SCM_RIGHTS;
         (*cmsg).cmsg_len = libc::CMSG_LEN(fd_bytes as u32) as _;
-        std::ptr::copy_nonoverlapping(
-            fds.as_ptr().cast::<u8>(),
-            libc::CMSG_DATA(cmsg),
-            fd_bytes,
-        );
+        std::ptr::copy_nonoverlapping(fds.as_ptr().cast::<u8>(), libc::CMSG_DATA(cmsg), fd_bytes);
     }
     loop {
         // SAFETY: `msg` and everything it points at are valid for the call.
@@ -166,8 +162,7 @@ impl Receiver {
         unsafe {
             let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
             while !cmsg.is_null() {
-                if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_RIGHTS
-                {
+                if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_RIGHTS {
                     let data = libc::CMSG_DATA(cmsg);
                     let len = (*cmsg).cmsg_len as usize - (data as usize - cmsg as usize);
                     for i in 0..len / std::mem::size_of::<RawFd>() {
@@ -237,10 +232,18 @@ mod tests {
             a
         });
         let mut r = Receiver::new(b);
-        assert_eq!(r.recv::<ToVornd>().unwrap(), ToVornd::Pong(Nonce { nonce: 1 }));
-        assert_eq!(r.recv::<ToVornd>().unwrap(), ToVornd::Pong(Nonce { nonce: 2 }));
+        assert_eq!(
+            r.recv::<ToVornd>().unwrap(),
+            ToVornd::Pong(Nonce { nonce: 1 })
+        );
+        assert_eq!(
+            r.recv::<ToVornd>().unwrap(),
+            ToVornd::Pong(Nonce { nonce: 2 })
+        );
         let got = r.take_fds(2).unwrap();
-        assert!(matches!(r.recv::<ToVornd>().unwrap(), ToVornd::Failed(f) if f.error.len() == 300 << 10));
+        assert!(
+            matches!(r.recv::<ToVornd>().unwrap(), ToVornd::Failed(f) if f.error.len() == 300 << 10)
+        );
         assert_eq!(r.unclaimed(), 0);
         drop(sender.join().unwrap());
         assert_eq!(
