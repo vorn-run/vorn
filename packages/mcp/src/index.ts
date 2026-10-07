@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { configManager } from '@vornrun/server/config-manager'
 import { readLocalToken, rpcCall } from '@vornrun/server/rpc-client'
-import { relay, relayHeaders, vorndMcpUrl } from './relay'
+import { relay, relayHeaders, vorndMcpUrl, type Upstream } from './relay'
 import { createMcpServer } from './server'
 
 // Redirect all console methods to stderr (stdout is reserved for JSON-RPC)
@@ -19,11 +19,16 @@ console.error = (...args: unknown[]) => _origError('[mcp:error]', ...args)
 
 async function main() {
   // When vornd serves the tools, this process only relays to it.
-  const url = await vorndMcpUrl({ vorndStatus: () => rpcCall('server:vornd'), fetch })
-  if (url) {
+  // Asked again after a restart: the server re-reads its port, the credential is re-read here.
+  const locate = async (): Promise<Upstream | null> => {
+    const url = await vorndMcpUrl({ vorndStatus: () => rpcCall('server:vornd'), fetch })
+    return url && { url, headers: relayHeaders(readLocalToken(), process.cwd(), process.env) }
+  }
+  const upstream = await locate()
+  if (upstream) {
     const transport = new StdioServerTransport()
     process.stdin.once('end', () => void transport.close())
-    await relay(transport, url, relayHeaders(readLocalToken(), process.cwd(), process.env))
+    await relay(transport, upstream, { locate, fetch })
     process.exit(0)
   }
 
