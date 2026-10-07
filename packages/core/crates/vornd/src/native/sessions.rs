@@ -1751,8 +1751,7 @@ fn plan_resume(native: &Native, id: &str) -> Option<Value> {
             .or_else(|| r.ended_terminal(id).cloned())
     })??;
     if given(previous.remote_host_id.as_deref()).is_some() {
-        let transcript = given(previous.agent_session_id.as_deref()).map(str::to_owned);
-        let req = restore_request(&previous, transcript)?;
+        let req = restore_request(&previous, pinned_free(native, &previous))?;
         let settings = agent::settings(native)?;
         let config = agent::command_of(&settings, req.agent)?;
         return plan_remote(
