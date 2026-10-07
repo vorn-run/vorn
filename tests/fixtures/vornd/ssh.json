@@ -1,0 +1,150 @@
+{
+  "replies": {
+    "close the password session": {
+      "void": true
+    },
+    "close the resumed session": {
+      "void": true
+    },
+    "create on a key host": {
+      "result": {
+        "agentType": "codex",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "Keyed",
+        "id": "<minted 2>",
+        "pid": 0,
+        "projectName": "far",
+        "projectPath": "<work>/far",
+        "remoteHostId": "key",
+        "remoteHostLabel": "Key box",
+        "rows": 24
+      }
+    },
+    "create on a password host": {
+      "result": {
+        "agentType": "claude",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "fix the remote build",
+        "id": "<minted 1>",
+        "pid": 0,
+        "projectName": "far",
+        "projectPath": "<work>/far",
+        "remoteHostId": "pw",
+        "remoteHostLabel": "Password box",
+        "rows": 24
+      }
+    },
+    "resume the ended session": {
+      "result": {
+        "ok": true,
+        "session": {
+          "agentType": "codex",
+          "cols": 80,
+          "createdAt": "<moment>",
+          "displayName": "Keyed",
+          "id": "<minted 2>",
+          "pid": 0,
+          "projectName": "far",
+          "projectPath": "<work>/far",
+          "remoteHostId": "key",
+          "remoteHostLabel": "Key box",
+          "rows": 24
+        }
+      }
+    }
+  },
+  "shown": {
+    "key": "ARGV:",
+    "resumed": "ARGV:"
+  },
+  "sshArgv": [
+    ["-t", "-i", "/keys/id_test", "you@keys.example", "echo __VORN_READY_<id>__ && exec $SHELL -l"],
+    ["-t", "-i", "/keys/id_test", "you@keys.example", "echo __VORN_READY_<id>__ && exec $SHELL -l"],
+    [
+      "-t",
+      "-p",
+      "2222",
+      "-o",
+      "PreferredAuthentications=password",
+      "-o",
+      "PubkeyAuthentication=no",
+      "-o",
+      "StrictHostKeyChecking=no",
+      "me@box.example",
+      "echo __VORN_READY_<id>__ && exec $SHELL -l"
+    ]
+  ],
+  "remote": ["cd <work>/far && <work>/bin/argv-agent", "cd <work>/far && <work>/bin/argv-agent"],
+  "listedAtFirst": [
+    {
+      "agentType": "claude",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "fix the remote build",
+      "id": "<minted 1>",
+      "pid": "<pid>",
+      "projectName": "far",
+      "projectPath": "<work>/far",
+      "remoteHostId": "pw",
+      "remoteHostLabel": "Password box",
+      "rows": 24
+    },
+    {
+      "agentType": "codex",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "Keyed",
+      "id": "<minted 2>",
+      "pid": "<pid>",
+      "projectName": "far",
+      "projectPath": "<work>/far",
+      "remoteHostId": "key",
+      "remoteHostLabel": "Key box",
+      "rows": 24
+    }
+  ],
+  "listed": [],
+  "created": [
+    {
+      "agentType": "claude",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "fix the remote build",
+      "id": "<minted 1>",
+      "pid": 0,
+      "projectName": "far",
+      "projectPath": "<work>/far",
+      "remoteHostId": "pw",
+      "remoteHostLabel": "Password box",
+      "rows": 24
+    },
+    {
+      "agentType": "codex",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "Keyed",
+      "id": "<minted 2>",
+      "pid": 0,
+      "projectName": "far",
+      "projectPath": "<work>/far",
+      "remoteHostId": "key",
+      "remoteHostLabel": "Key box",
+      "rows": 24
+    },
+    {
+      "agentType": "codex",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "Keyed",
+      "id": "<minted 2>",
+      "pid": 0,
+      "projectName": "far",
+      "projectPath": "<work>/far",
+      "remoteHostId": "key",
+      "remoteHostLabel": "Key box",
+      "rows": 24
+    }
+  ]
+}

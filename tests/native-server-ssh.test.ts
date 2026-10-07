@@ -1,12 +1,12 @@
 /**
- * Terminals on a remote host, with the Native server switch off against on.
+ * Terminals on a remote host, created and resumed by vornd.
  *
  * `ssh` is a stub first on the login shell's PATH: it records its arguments
  * and the password it is given, prints the ready marker and runs what it was
  * asked to on this machine, as a remote login shell would. Each run creates a
  * session on a host that logs in by password and one by key file, lets the
  * second end and resumes it, and is compared as one transcript, normalized by
- * the accepted differences in `tests/helpers/sessions-parity.ts`.
+ * `tests/helpers/sessions-parity.ts`, with `tests/fixtures/vornd/ssh.json`.
  *
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
  * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix.
@@ -28,6 +28,7 @@ import {
   type RealServer
 } from './helpers/real-server'
 import { PASSWORD_BEFORE_PROMPT, normalizeRun } from './helpers/sessions-parity'
+import { recorded } from './helpers/vornd-fixtures'
 
 // Booting a server probes Tailscale with a real process; nothing here needs it.
 vi.mock('../packages/server/src/tailscale', () => ({
@@ -176,8 +177,7 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
       displayName: 'Keyed'
     })
     const shown = { key: await said(byKey, /ARGV:/) }
-    // The server's password login can type the command as the password: see PASSWORD_BEFORE_PROMPT.
-    const passwordShown = await said(byPassword, /ARGV:/).catch(() => '')
+    const passwordShown = await said(byPassword, /ARGV:/)
     const listedAtFirst = await listed()
 
     // The agent ended and ssh with it: the local shell is told to end too.
@@ -222,37 +222,32 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
   }
 }
 
-describe.skipIf(!runnable)('terminals on a remote host, against the server', () => {
-  const runs: Partial<Record<'off' | 'on', Record<string, unknown>>> = {}
-  const counts: Partial<Record<'off' | 'on', unknown>> = {}
+describe.skipIf(!runnable)('terminals on a remote host, through vornd', () => {
+  let run: Record<string, unknown> = {}
+  let counts: unknown
 
   beforeAll(async () => {
-    for (const [mode, on] of [
-      ['off', false],
-      ['on', true]
-    ] as const) {
-      const server = await startRealServer(on)
-      try {
-        runs[mode] = normalizeRun(await scenario(server), server.dirs)
-        const health = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-        const groups = ((await health.json()) as { groups: Record<string, { native?: number }> })
-          .groups
-        counts[mode] = { terminal: groups.terminal?.native, sessions: groups.sessions?.native }
-      } catch (err) {
-        throw new Error(`${mode}: ${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
-          cause: err
-        })
-      } finally {
-        await stopRealServer(server)
-      }
+    const server = await startRealServer()
+    try {
+      run = normalizeRun(await scenario(server), server.dirs)
+      const health = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
+      const groups = ((await health.json()) as { groups: Record<string, { native?: number }> })
+        .groups
+      counts = { terminal: groups.terminal?.native, sessions: groups.sessions?.native }
+    } catch (err) {
+      throw new Error(`${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
+        cause: err
+      })
+    } finally {
+      await stopRealServer(server)
     }
   }, 240_000)
 
   afterAll(() => removeRealServerDirs())
 
-  it('logs in by ssh with the options of each host, as the server does', () => {
-    const off = runs.off as { sshArgv: string[][] }
-    expect(off.sshArgv[2]).toEqual([
+  it('logs in by ssh with the options of each host', () => {
+    const { sshArgv } = run as { sshArgv: string[][] }
+    expect(sshArgv[2]).toEqual([
       '-t',
       '-p',
       '2222',
@@ -265,7 +260,7 @@ describe.skipIf(!runnable)('terminals on a remote host, against the server', () 
       'me@box.example',
       'echo __VORN_READY_<id>__ && exec $SHELL -l'
     ])
-    expect(off.sshArgv[0]).toEqual([
+    expect(sshArgv[0]).toEqual([
       '-t',
       '-i',
       '/keys/id_test',
@@ -273,37 +268,25 @@ describe.skipIf(!runnable)('terminals on a remote host, against the server', () 
       'echo __VORN_READY_<id>__ && exec $SHELL -l'
     ])
     // The resume logs in again as the session did.
-    expect(off.sshArgv[1]).toEqual(off.sshArgv[0])
+    expect(sshArgv[1]).toEqual(sshArgv[0])
   })
 
   it(`types the password once ssh asks, then the agent there (${PASSWORD_BEFORE_PROMPT})`, () => {
-    expect(runs.on?.passwordLogin).toEqual({
+    expect(run.passwordLogin).toEqual({
       shown: 'ARGV:fix the remote build',
       passwords: [PASSWORD],
       remote: ["cd <work>/far && <work>/bin/argv-agent 'fix the remote build'"]
     })
   })
 
-  it('has vornd create and resume them with the switch on', () => {
-    expect(counts.off).toEqual({ terminal: 0, sessions: 0 })
-    expect(counts.on).toEqual({ terminal: 4, sessions: 1 })
+  it('has vornd create and resume them', () => {
+    expect(counts).toEqual({ terminal: 4, sessions: 1 })
   })
 
-  it('logs in, answers, tells and lists the same with the switch on', () => {
-    for (const part of [
-      'replies',
-      'shown',
-      'sshArgv',
-      'remote',
-      'listedAtFirst',
-      'listed',
-      'created'
-    ] as const) {
-      expect([part, runs.on?.[part]]).toEqual([part, runs.off?.[part]])
-    }
-    for (const run of [runs.off, runs.on]) {
-      const { replies, listed, created } = run as Record<string, unknown>
-      expect(JSON.stringify({ replies, listed, created })).not.toContain(PASSWORD)
-    }
+  it('logs in, answers, tells and lists what it recorded', () => {
+    const { replies, shown, sshArgv, remote, listedAtFirst, listed, created } = run
+    const seen = { replies, shown, sshArgv, remote, listedAtFirst, listed, created }
+    expect(seen).toEqual(recorded('ssh', seen))
+    expect(JSON.stringify({ replies, listed, created })).not.toContain(PASSWORD)
   })
 })
