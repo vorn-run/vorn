@@ -81,6 +81,8 @@ pub struct AppLink {
     /// The latest spawns the server asked for, by the name it gave each.
     spawns: Mutex<VecDeque<(String, Value)>>,
     spawned: Notify,
+    /// The work model, which takes the triggers the server delivers.
+    work: OnceLock<Arc<crate::native::work::Work>>,
 }
 
 impl Default for AppLink {
@@ -97,6 +99,7 @@ impl Default for AppLink {
             claims: Claims::default(),
             spawns: Mutex::new(VecDeque::new()),
             spawned: Notify::new(),
+            work: OnceLock::new(),
         }
     }
 }
@@ -179,6 +182,15 @@ impl AppLink {
     /// terminals and headless agents, so every record is its own.
     pub fn restores(&self) -> bool {
         self.creates_terminals() && self.creates_headless()
+    }
+
+    /// The work model. Only the first one given is kept.
+    pub fn set_work(&self, work: Arc<crate::native::work::Work>) {
+        let _ = self.work.set(work);
+    }
+
+    pub fn work(&self) -> Option<&Arc<crate::native::work::Work>> {
+        self.work.get()
     }
 
     /// What the server said of its winding down.

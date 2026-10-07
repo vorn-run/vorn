@@ -30,7 +30,7 @@ rmcp = { version = "3.5", default-features = false, features = ["client", "trans
 serde = { version = "1", features = ["derive"] }
 # Key order kept, so an answer vornd frames reads as the server's does.
 serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "signal", "io-util", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "signal", "io-util", "process", "fs"] }
 tokio-tungstenite = "0.28"
 tracing = "0.1"
 vorn-sessiond = { path = "../sessiond" }
@@ -45,6 +45,7 @@ vorn-protocol = { path = "../protocol" }
 vorn-reach = { path = "../reach" }
 vorn-term-proto = { path = "../term-proto" }
 vorn-work = { path = "../work" }
+vorn-workflow = { path = "../workflow" }
 # The system's time zone, which a schedule without one fires in.
 jiff = "0.2"
 vorn-worktrees = { path = "../worktrees" }

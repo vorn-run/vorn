@@ -41,10 +41,17 @@ struct Link {
 /// A client of vornd's own `/ws`, presenting the local credential.
 pub struct Loopback {
     addr: SocketAddr,
+    /// `?topics=` on the connection, so only what its listener wants is sent.
+    query: String,
     bearer: String,
     link: tokio::sync::Mutex<Option<Link>>,
     next_id: AtomicU64,
+    /// The broadcasts the connection is sent, for whoever listens.
+    notes: tokio::sync::broadcast::Sender<Value>,
 }
+
+/// Broadcasts kept for a slow listener before the oldest are dropped.
+const NOTES_KEPT: usize = 4096;
 
 impl Loopback {
     pub fn new(mut addr: SocketAddr, token: &[u8]) -> Loopback {
@@ -57,10 +64,33 @@ impl Loopback {
         }
         Loopback {
             addr,
+            query: String::new(),
             bearer: format!("Bearer {}", String::from_utf8_lossy(token)),
             link: tokio::sync::Mutex::new(None),
             next_id: AtomicU64::new(0),
+            notes: tokio::sync::broadcast::channel(NOTES_KEPT).0,
         }
+    }
+
+    /// A client sent only the broadcasts `topics` name.
+    pub fn with_topics(addr: SocketAddr, token: &[u8], topics: &[&str]) -> Loopback {
+        let mut loopback = Loopback::new(addr, token);
+        loopback.query = format!(
+            "?topics={}",
+            topics.join(",").replace(':', "%3A").replace(',', "%2C")
+        );
+        loopback
+    }
+
+    /// The broadcasts this connection is sent from now on, as
+    /// `{method, params}`, while it is open.
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<Value> {
+        self.notes.subscribe()
+    }
+
+    /// Opens the connection when it is not open.
+    pub async fn connect(&self) -> Result<(), RpcError> {
+        self.link().await.map(|_| ())
     }
 
     /// The open socket's writer and waiters, opening one when there is none.
@@ -81,7 +111,7 @@ impl Loopback {
                 "Cannot connect to Vorn server: {err}. Is the app running?"
             ))
         };
-        let mut request = format!("ws://{}/ws", self.addr)
+        let mut request = format!("ws://{}/ws{}", self.addr, self.query)
             .into_client_request()
             .map_err(|e| cannot(&e))?;
         let bearer = HeaderValue::from_str(&self.bearer).map_err(|e| cannot(&e))?;
@@ -104,11 +134,12 @@ impl Loopback {
         });
         let reading = Arc::clone(&waiters);
         let flag = Arc::clone(&open);
+        let notes = self.notes.clone();
         tokio::spawn(async move {
             let mut code = CLOSE_ABNORMAL;
             while let Some(frame) = stream.next().await {
                 match frame {
-                    Ok(Message::Text(text)) => settle(&reading, text.as_str()),
+                    Ok(Message::Text(text)) => settle(&reading, &notes, text.as_str()),
                     Ok(Message::Close(close)) => {
                         code = close.map_or(CLOSE_ABNORMAL, |c| u16::from(c.code));
                         break;
@@ -131,13 +162,16 @@ impl Loopback {
     }
 }
 
-/// Hands an answer to whoever waits for its id. Anything else, a broadcast
-/// or a request of the server's, is not for the tools.
-fn settle(waiters: &Waiters, text: &str) {
+/// Hands an answer to whoever waits for its id, and a broadcast to whoever
+/// listens. A request of the server's is for neither.
+fn settle(waiters: &Waiters, notes: &tokio::sync::broadcast::Sender<Value>, text: &str) {
     let Ok(Value::Object(frame)) = serde_json::from_str::<Value>(text) else {
         return;
     };
     let Some(id) = frame.get("id").and_then(Value::as_u64) else {
+        if frame.get("method").is_some_and(Value::is_string) {
+            let _ = notes.send(Value::Object(frame));
+        }
         return;
     };
     if frame.contains_key("method") {
@@ -232,24 +266,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn answers_reach_their_caller_and_nothing_else_does() {
+    fn answers_reach_their_caller_and_broadcasts_their_listeners() {
         let waiters: Waiters = Arc::default();
         let (tx, mut rx) = oneshot::channel();
         waiters.lock().unwrap().insert(7, tx);
+        let notes = tokio::sync::broadcast::channel(4).0;
+        let mut heard = notes.subscribe();
         settle(
             &waiters,
+            &notes,
             r#"{"jsonrpc":"2.0","method":"task:changed","params":{}}"#,
         );
         settle(
             &waiters,
+            &notes,
             r#"{"jsonrpc":"2.0","id":7,"method":"ui:ask","params":{}}"#,
         );
-        settle(&waiters, "not json");
+        settle(&waiters, &notes, "not json");
         assert!(
             rx.try_recv().is_err(),
             "a broadcast or a request is not an answer"
         );
-        settle(&waiters, r#"{"jsonrpc":"2.0","id":7,"result":{"ok":true}}"#);
+        assert_eq!(heard.try_recv().unwrap()["method"], "task:changed");
+        assert!(heard.try_recv().is_err(), "a request is not a broadcast");
+        settle(
+            &waiters,
+            &notes,
+            r#"{"jsonrpc":"2.0","id":7,"result":{"ok":true}}"#,
+        );
         assert_eq!(rx.try_recv().unwrap(), Ok(json!({ "ok": true })));
     }
 
@@ -260,6 +304,7 @@ mod tests {
         waiters.lock().unwrap().insert(1, tx);
         settle(
             &waiters,
+            &tokio::sync::broadcast::channel(1).0,
             r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found: x:y"}}"#,
         );
         let err = rx.try_recv().unwrap().unwrap_err();

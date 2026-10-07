@@ -72,11 +72,6 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "headless",
     "worktree",
     "script",
-];
-
-/// Groups vornd only compares in shadow mode, reading the server's database,
-/// while the server still owns them: `native` is refused.
-pub const SHADOW_GROUPS: &[&str] = &[
     "workflow",
     "workflowRun",
     "scheduler",
@@ -239,10 +234,10 @@ mod tests {
         for group in NATIVE_GROUPS {
             assert_eq!(groups.mode(group), Mode::Native, "{group}");
         }
-        assert_eq!(groups.mode("workflow"), Mode::Forward);
+        assert_eq!(groups.mode("workflow"), Mode::Native);
         assert_eq!(groups.mode("task"), Mode::Forward);
-        let shadowed = Groups::new(Some("workflow=shadow,file=forward")).unwrap();
-        assert_eq!(shadowed.mode("workflow"), Mode::Shadow);
+        let shadowed = Groups::new(Some("git=shadow,file=forward")).unwrap();
+        assert_eq!(shadowed.mode("git"), Mode::Shadow);
         assert_eq!(shadowed.mode("file"), Mode::Forward);
         assert_eq!(shadowed.mode("ide"), Mode::Native);
     }

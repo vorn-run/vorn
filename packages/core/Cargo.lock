@@ -3065,6 +3065,7 @@ dependencies = [
  "vorn-store",
  "vorn-term-proto",
  "vorn-work",
+ "vorn-workflow",
  "vorn-worktrees",
  "windows-native-keyring-store",
 ]

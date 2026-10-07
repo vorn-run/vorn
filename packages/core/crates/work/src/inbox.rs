@@ -30,7 +30,12 @@ const DEFER_MS: i64 = 30_000;
 pub const WEBHOOK_CONNECTOR: &str = "webhook";
 
 /// Auth-bearing headers stay out of run records.
-const HEADER_DENYLIST: &[&str] = &["authorization", "cookie", "proxy-authorization", "x-api-key"];
+const HEADER_DENYLIST: &[&str] = &[
+    "authorization",
+    "cookie",
+    "proxy-authorization",
+    "x-api-key",
+];
 
 /// One row to run, and the run already working on it, if one is.
 #[derive(Clone, Debug, PartialEq)]
@@ -44,7 +49,11 @@ pub struct Due {
 
 /// Lets every lease go: the runs that held them ended with the process.
 pub fn release_leases(store: &mut Store, now_ms: i64) {
-    let _ = call(store, "dbReleaseConnectorInboxLeases", json!([js::iso(now_ms)]));
+    let _ = call(
+        store,
+        "dbReleaseConnectorInboxLeases",
+        json!([js::iso(now_ms)]),
+    );
 }
 
 /// `deliverPendingConnectorInbox`, up to running: leases what is due and
@@ -70,17 +79,25 @@ pub fn claim_due(store: &mut Store, now_ms: i64) -> Vec<Due> {
     for row in claimed.as_array().into_iter().flatten() {
         let id = row["id"].clone();
         let lease = row["leaseToken"].clone();
-        let existing = call(store, "dbGetWorkflowRunByConnectorInboxId", json!([id])).unwrap_or(Value::Null);
+        let existing =
+            call(store, "dbGetWorkflowRunByConnectorInboxId", json!([id])).unwrap_or(Value::Null);
         let finished = existing.is_object()
             && existing["status"] != "running"
             && (existing["connectorInboxDisposition"] == "processed"
                 || existing["status"] == "success"
                 || existing["status"] == "cancelled");
         if finished {
-            let _ = call(store, "dbCompleteConnectorInbox", json!([id, lease, js::iso(now_ms)]));
+            let _ = call(
+                store,
+                "dbCompleteConnectorInbox",
+                json!([id, lease, js::iso(now_ms)]),
+            );
             continue;
         }
-        let mut item = row["connectorItem"].as_object().cloned().unwrap_or_default();
+        let mut item = row["connectorItem"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
         item.insert("inboxId".into(), id);
         item.insert("inboxLeaseToken".into(), lease);
         due.push(Due {
@@ -93,7 +110,14 @@ pub fn claim_due(store: &mut Store, now_ms: i64) -> Vec<Due> {
 }
 
 /// `completeConnectorInbox`: a run settles its row.
-pub fn complete(store: &mut Store, id: i64, lease: &str, disposition: &str, error: Option<&str>, now_ms: i64) {
+pub fn complete(
+    store: &mut Store,
+    id: i64,
+    lease: &str,
+    disposition: &str,
+    error: Option<&str>,
+    now_ms: i64,
+) {
     let now = js::iso(now_ms);
     let _ = match disposition {
         "processed" => call(store, "dbCompleteConnectorInbox", json!([id, lease, now])),
@@ -102,16 +126,24 @@ pub fn complete(store: &mut Store, id: i64, lease: &str, disposition: &str, erro
             "dbRetryConnectorInbox",
             json!([{ "id": id, "leaseToken": lease, "error": error.filter(|e| !e.is_empty()).unwrap_or("Connector workflow failed"), "now": now }]),
         ),
-        _ => call(store, "dbDeferConnectorInbox", json!([id, lease, js::iso(now_ms + DEFER_MS)])),
+        _ => call(
+            store,
+            "dbDeferConnectorInbox",
+            json!([id, lease, js::iso(now_ms + DEFER_MS)]),
+        ),
     };
 }
 
 /// Extends a row's lease; false once the row is no longer the caller's.
 pub fn renew(store: &mut Store, id: i64, lease: &str, now_ms: i64) -> bool {
-    call(store, "dbRenewConnectorInboxLease", json!([id, lease, js::iso(now_ms + LEASE_MS)]))
-        .ok()
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+    call(
+        store,
+        "dbRenewConnectorInboxLease",
+        json!([id, lease, js::iso(now_ms + LEASE_MS)]),
+    )
+    .ok()
+    .and_then(|v| v.as_bool())
+    .unwrap_or(false)
 }
 
 /// A request to a workflow's webhook.
@@ -152,13 +184,23 @@ fn webhook_trigger(workflow: &Value) -> Option<&Value> {
 
 /// Files a request to `/wf-hooks/<workflow>/<token>` in the inbox. A
 /// sender's repeat of one delivery id is received once.
-pub fn receive_webhook(store: &mut Store, workflow_id: &str, token: &str, request: &Request, event_id: &str, now_ms: i64) -> Received {
+pub fn receive_webhook(
+    store: &mut Store,
+    workflow_id: &str,
+    token: &str,
+    request: &Request,
+    event_id: &str,
+    now_ms: i64,
+) -> Received {
     let workflow = call(store, "dbGetWorkflow", json!([workflow_id])).unwrap_or(Value::Null);
     let enabled = crate::is_truthy(workflow.get("enabled"));
     let Some(trigger) = webhook_trigger(&workflow).filter(|_| enabled) else {
         return Received::NotFound;
     };
-    let token_ok = trigger.get("token").and_then(Value::as_str).is_some_and(|t| crate::gates::same_token(t, token));
+    let token_ok = trigger
+        .get("token")
+        .and_then(Value::as_str)
+        .is_some_and(|t| crate::gates::same_token(t, token));
     if !token_ok || trigger.get("method").and_then(Value::as_str) != Some(request.method.as_str()) {
         return Received::NotFound;
     }
@@ -235,7 +277,11 @@ mod tests {
     fn post(delivery: Option<&str>) -> Request {
         Request {
             method: "POST".into(),
-            headers: vec![("Authorization".into(), "secret".into()), ("X-Id".into(), "1".into()), ("x-id".into(), "2".into())],
+            headers: vec![
+                ("Authorization".into(), "secret".into()),
+                ("X-Id".into(), "1".into()),
+                ("x-id".into(), "2".into()),
+            ],
             query: serde_json::from_value(json!({ "q": "z" })).unwrap(),
             body: json!({ "name": "n" }),
             delivery_id: delivery.map(str::to_owned),
@@ -248,12 +294,30 @@ mod tests {
         let mut s = store(dir.path());
         hooked(&mut s);
         let now = 1_700_000_000_000;
-        assert_eq!(receive_webhook(&mut s, "wf", "tok", &post(Some("d1")), "e1", now), Received::Queued);
-        assert_eq!(receive_webhook(&mut s, "wf", "tok", &post(Some("d1")), "e2", now), Received::Repeat);
-        assert_eq!(receive_webhook(&mut s, "wf", "bad", &post(None), "e3", now), Received::NotFound);
-        let get = Request { method: "GET".into(), ..post(None) };
-        assert_eq!(receive_webhook(&mut s, "wf", "tok", &get, "e4", now), Received::NotFound);
-        assert_eq!(receive_webhook(&mut s, "nope", "tok", &post(None), "e5", now), Received::NotFound);
+        assert_eq!(
+            receive_webhook(&mut s, "wf", "tok", &post(Some("d1")), "e1", now),
+            Received::Queued
+        );
+        assert_eq!(
+            receive_webhook(&mut s, "wf", "tok", &post(Some("d1")), "e2", now),
+            Received::Repeat
+        );
+        assert_eq!(
+            receive_webhook(&mut s, "wf", "bad", &post(None), "e3", now),
+            Received::NotFound
+        );
+        let get = Request {
+            method: "GET".into(),
+            ..post(None)
+        };
+        assert_eq!(
+            receive_webhook(&mut s, "wf", "tok", &get, "e4", now),
+            Received::NotFound
+        );
+        assert_eq!(
+            receive_webhook(&mut s, "nope", "tok", &post(None), "e5", now),
+            Received::NotFound
+        );
 
         let due = claim_due(&mut s, now + 1);
         assert_eq!(due.len(), 1);
@@ -263,7 +327,10 @@ mod tests {
         assert!(item["inboxLeaseToken"].is_string());
         // Leased: not handed out again.
         assert!(claim_due(&mut s, now + 2).is_empty());
-        let (id, lease) = (item["inboxId"].as_i64().unwrap(), item["inboxLeaseToken"].as_str().unwrap().to_owned());
+        let (id, lease) = (
+            item["inboxId"].as_i64().unwrap(),
+            item["inboxLeaseToken"].as_str().unwrap().to_owned(),
+        );
         assert!(renew(&mut s, id, &lease, now + 3));
         complete(&mut s, id, &lease, "processed", None, now + 4);
         assert!(!renew(&mut s, id, &lease, now + 5));
@@ -280,7 +347,13 @@ mod tests {
         release_leases(&mut s, now + 1);
         let again = claim_due(&mut s, now + 2);
         assert_eq!(again.len(), 1);
-        let (id, lease) = (again[0].item["inboxId"].as_i64().unwrap(), again[0].item["inboxLeaseToken"].as_str().unwrap().to_owned());
+        let (id, lease) = (
+            again[0].item["inboxId"].as_i64().unwrap(),
+            again[0].item["inboxLeaseToken"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        );
         complete(&mut s, id, &lease, "defer", None, now + 3);
         assert!(claim_due(&mut s, now + 4).is_empty());
         assert_eq!(claim_due(&mut s, now + 3 + DEFER_MS + 1).len(), 1);

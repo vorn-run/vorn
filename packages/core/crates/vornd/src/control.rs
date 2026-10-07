@@ -527,6 +527,40 @@ fn call(app: App<'_>, text: &str) {
         "vornd:claim" | "vornd:unclaim" | "vornd:preparing" | "vornd:prepared" => {
             claim(link, method, &params)
         }
+        "vornd:trigger" => match link.work() {
+            Some(work) => {
+                let (work, fwd) = (Arc::clone(work), fwd.clone());
+                tokio::spawn(async move {
+                    let received = work.trigger(&params).await;
+                    if let Some(rpc) = rpc {
+                        match received {
+                            Ok(first) => fwd.send_now(&answer(&rpc, json!({ "received": first }))),
+                            Err(e) => fwd.send_now(&refuse(&rpc, &e)),
+                        }
+                    }
+                });
+                return;
+            }
+            None => Err("vornd does not run workflows".to_owned()),
+        },
+        "vornd:signedIn" => match (
+            link.work(),
+            params.get("connectionId").and_then(Value::as_str),
+        ) {
+            (Some(work), Some(connection)) => {
+                let (work, connection) = (Arc::clone(work), connection.to_owned());
+                tokio::spawn(async move { work.signed_in(&connection).await });
+                Ok(Value::Null)
+            }
+            (None, _) => Err("vornd does not run workflows".to_owned()),
+            (_, None) => Err("vornd:signedIn needs a connectionId".to_owned()),
+        },
+        "vornd:configChanged" => {
+            if let Some(work) = link.work() {
+                work.workflows_changed_elsewhere();
+            }
+            Ok(Value::Null)
+        }
         _ => {
             if method == "vornd:spawn" {
                 if let Some(name) = params.get("name").and_then(Value::as_str) {

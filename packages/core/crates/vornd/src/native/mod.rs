@@ -161,21 +161,9 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("worktree:reclaimArtifacts", Effect::Change),
     ("worktree:pruneOrphans", Effect::Change),
     ("git:removeWorktree", Effect::Change),
-    // Read from the server's database in shadow mode only ([`work`]).
-    ("workflow:list", Effect::Read),
-    ("workflow:get", Effect::Read),
-    ("workflowRun:list", Effect::Read),
-    ("workflowRun:listByTask", Effect::Read),
-    ("workflowRun:listWaiting", Effect::Read),
-    ("workflowRun:listRunning", Effect::Read),
-    ("workflowRun:listAll", Effect::Read),
-    ("scheduler:getLog", Effect::Read),
-    ("scheduler:getNextRun", Effect::Read),
-    ("webhook:info", Effect::Read),
-    ("artifact:list", Effect::Read),
-    ("artifact:versionUrl", Effect::Read),
-    ("artifact:forGate", Effect::Read),
-    ("artifact:readSource", Effect::Read),
+    // The connector inbox's leases are the work model's ([`work`]).
+    ("connector:inboxComplete", Effect::Change),
+    ("connector:inboxRenew", Effect::Change),
 ];
 
 /// Calls in a native group that the server keeps answering, and why.
@@ -246,12 +234,8 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
         "the connectors and their manifests are the server's registry, packages included",
     ),
     (
-        "connector:inboxComplete",
-        "the connector inbox's leases are the server's scheduler's",
-    ),
-    (
-        "connector:inboxRenew",
-        "the connector inbox's leases are the server's scheduler's",
+        "connector:poll",
+        "fetches a connection's new items through the server's connectors",
     ),
     (
         "connector:probeSdk",
@@ -299,8 +283,12 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
     ),
 ];
 
-/// The effect of a call vornd answers, or `None` for one it does not.
+/// The effect of a call vornd answers, or `None` for one it does not. The
+/// work model's calls are all answered here, never compared.
 pub fn effect(method: &str) -> Option<Effect> {
+    if work::METHODS.contains(&method) {
+        return Some(Effect::Change);
+    }
     METHODS.iter().find(|(m, _)| *m == method).map(|(_, e)| *e)
 }
 
@@ -455,6 +443,8 @@ pub struct Native {
     /// The worktrees' sizes, measured by the inventory and kept for the
     /// actions that report what they freed.
     sizes: vorn_worktrees::Sizes,
+    /// The work model, once vornd has a database and its own address.
+    work: OnceLock<Arc<work::Work>>,
 }
 
 /// How long a call about what runs waits for the copy to settle as vornd
@@ -495,6 +485,7 @@ impl Native {
             host: OnceLock::new(),
             sessions: Arc::default(),
             sizes: vorn_worktrees::Sizes::default(),
+            work: OnceLock::new(),
         })
     }
 
@@ -514,6 +505,15 @@ impl Native {
     /// The server's port, which the addresses a browser uses name.
     pub fn set_server_port(&self, port: u16) {
         self.reach.set_server_port(port);
+    }
+
+    /// The work model. Only the first one given is kept.
+    pub fn set_work(&self, work: Arc<work::Work>) {
+        let _ = self.work.set(work);
+    }
+
+    pub fn work(&self) -> Option<&Arc<work::Work>> {
+        self.work.get()
     }
 
     /// The app's channel. Only the first one given is kept.
@@ -580,9 +580,6 @@ impl Native {
             }
             Some("headless") if method != "headless:list" => headless::call(self, method, params),
             Some("terminal" | "headless" | "worktree") => self.sessions(method, params),
-            Some("workflow" | "workflowRun" | "scheduler" | "webhook" | "artifact") => {
-                work::call(self, method, params)
-            }
             Some("shell") => match method {
                 "shell:listExecutables" => Answer::Result(self.shells.executables(&self.env)),
                 "shell:listInstalled" => Answer::Result(self.shells.installed()),
@@ -598,6 +595,22 @@ impl Native {
     /// panic is the server's call to answer, not a crash, unless the call
     /// may already have changed something.
     pub async fn answer(self: &Arc<Self>, method: String, params: Value) -> Answer {
+        if work::is_work(&method)
+            || matches!(
+                method.as_str(),
+                "connector:inboxComplete" | "connector:inboxRenew"
+            )
+        {
+            let Some(work) = self.work.get().cloned() else {
+                return Answer::Forward;
+            };
+            let m = method.clone();
+            let running = tokio::spawn(async move { work.answer(&m, &params).await });
+            return running.await.unwrap_or_else(|err| {
+                warn!(%method, %err, "a work call failed");
+                Answer::Error(format!("{method} failed in vornd"))
+            });
+        }
         if connection::is_async(&method) {
             let running =
                 tokio::spawn(connection::change(Arc::clone(self), method.clone(), params));
@@ -731,6 +744,32 @@ impl Native {
             }
             _ => Answer::Forward,
         }
+    }
+
+    /// The terminals and headless agents in the copy of the session
+    /// records, as clients get them; `None` while there is no copy.
+    pub(crate) fn session_records(&self) -> Option<(Vec<Value>, Vec<Value>)> {
+        self.registry.get()?.read(|r| {
+            (
+                r.terminals().into_iter().map(json_of).collect(),
+                r.headless().map(json_of).collect(),
+            )
+        })
+    }
+
+    /// The server's port, which the addresses clients open name.
+    pub(crate) fn server_port(&self) -> Option<u16> {
+        self.reach.server_port()
+    }
+
+    /// The app's channel, once given.
+    pub(crate) fn app_link(&self) -> Option<&Arc<AppLink>> {
+        self.link.get()
+    }
+
+    /// The database, once given.
+    pub(crate) fn database(&self) -> Option<&Path> {
+        self.db.get().map(PathBuf::as_path)
     }
 
     /// The calls that read the server's session registry, from vornd's copy
@@ -1441,24 +1480,16 @@ mod tests {
             assert!(!why.is_empty());
             assert!(crate::groups::NATIVE_GROUPS.contains(&crate::groups::group_of(method)));
         }
-        for (method, effect) in METHODS {
+        for (method, _) in METHODS {
             let group = crate::groups::group_of(method);
-            if crate::groups::SHADOW_GROUPS.contains(&group) {
-                assert_eq!(*effect, Effect::Read, "{method}");
-            } else {
-                assert!(crate::groups::NATIVE_GROUPS.contains(&group), "{method}");
-            }
+            assert!(crate::groups::NATIVE_GROUPS.contains(&group), "{method}");
         }
-    }
-
-    #[test]
-    fn a_group_vornd_only_compares_is_never_answered_natively() {
-        for group in crate::groups::SHADOW_GROUPS {
-            assert!(!crate::groups::NATIVE_GROUPS.contains(group), "{group}");
-            let err = crate::groups::Groups::parse(&format!("{group}=native")).unwrap_err();
-            assert!(err.contains("no native implementation"), "{err}");
-            let shadowed = crate::groups::Groups::parse(&format!("{group}=shadow")).unwrap();
-            assert_eq!(shadowed.mode(group), crate::groups::Mode::Shadow);
+        for method in work::METHODS {
+            assert_eq!(effect(method), Some(Effect::Change), "{method}");
+            assert!(
+                crate::groups::NATIVE_GROUPS.contains(&crate::groups::group_of(method)),
+                "{method}"
+            );
         }
     }
 

@@ -45,7 +45,13 @@ pub fn too_big(bytes: u64) -> String {
     )
 }
 
-pub fn write_body(data_dir: &Path, id: &str, version: u32, kind: &str, body: &str) -> Result<(), String> {
+pub fn write_body(
+    data_dir: &Path,
+    id: &str,
+    version: u32,
+    kind: &str,
+    body: &str,
+) -> Result<(), String> {
     let file = version_file(data_dir, id, version, kind);
     file.parent()
         .map_or(Ok(()), fs::create_dir_all)
@@ -92,7 +98,13 @@ pub struct Publisher {
 impl Publisher {
     /// A terminal record as the registry holds it.
     pub fn of_session(session: &Value) -> Publisher {
-        let text = |k: &str| session.get(k).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned);
+        let text = |k: &str| {
+            session
+                .get(k)
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        };
         Publisher {
             id: text("id").unwrap_or_default(),
             project_name: text("projectName"),
@@ -126,7 +138,8 @@ fn kind_takes(kind: &str, file: &str) -> bool {
 }
 
 fn read_inside_root(root: Option<&str>, file: &str, kind: &str) -> Result<String, String> {
-    let root = root.ok_or("This session has no project folder, so publish `content` instead of a file.")?;
+    let root =
+        root.ok_or("This session has no project folder, so publish `content` instead of a file.")?;
     if !kind_takes(kind, file) {
         return Err(if kind == "doc" {
             "A doc is published from a .md file.".into()
@@ -135,9 +148,12 @@ fn read_inside_root(root: Option<&str>, file: &str, kind: &str) -> Result<String
         });
     }
     let real_root = fs::canonicalize(root).map_err(|e| e.to_string())?;
-    let real = fs::canonicalize(Path::new(root).join(file)).map_err(|_| format!("No such file: {file}"))?;
+    let real = fs::canonicalize(Path::new(root).join(file))
+        .map_err(|_| format!("No such file: {file}"))?;
     if !real.starts_with(&real_root) {
-        return Err(format!("Refusing to publish {file}: it is outside this session's folder."));
+        return Err(format!(
+            "Refusing to publish {file}: it is outside this session's folder."
+        ));
     }
     let size = fs::metadata(&real).map_err(|e| e.to_string())?.len();
     if size > MAX_BYTES {
@@ -152,12 +168,26 @@ fn version_number(v: &Value) -> u32 {
 
 /// `publishArtifact`: a first version, or the next version of one this
 /// session can see. Answers `{ artifact, version, path, answered }`.
-pub fn publish(store: &mut Store, data_dir: &Path, session: &Publisher, request: &Value) -> Result<Value, String> {
-    let title = request.get("title").and_then(Value::as_str).unwrap_or("").trim().to_owned();
+pub fn publish(
+    store: &mut Store,
+    data_dir: &Path,
+    session: &Publisher,
+    request: &Value,
+) -> Result<Value, String> {
+    let title = request
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_owned();
     if title.is_empty() {
         return Err("An artifact needs a title.".into());
     }
-    let kind = request.get("kind").and_then(Value::as_str).unwrap_or("page").to_owned();
+    let kind = request
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("page")
+        .to_owned();
     let file = request.get("file").filter(|v| !v.is_null());
     let content = request.get("content").filter(|v| !v.is_null());
     if file.is_some() == content.is_some() {
@@ -174,7 +204,11 @@ pub fn publish(store: &mut Store, data_dir: &Path, session: &Publisher, request:
     if body.len() as u64 > MAX_BYTES {
         return Err(too_big(body.len() as u64));
     }
-    let (artifact, token, answers) = match request.get("artifactId").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+    let (artifact, token, answers) = match request
+        .get("artifactId")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
         Some(id) => {
             let existing = call(store, "getArtifact", json!([id]))?;
             if existing.is_null() || !can_see(&existing, session) {
@@ -182,7 +216,9 @@ pub fn publish(store: &mut Store, data_dir: &Path, session: &Publisher, request:
             }
             let has = existing.get("kind").and_then(Value::as_str).unwrap_or("");
             if has != kind {
-                return Err(format!("Artifact {id} is a {has}; it cannot become a {kind}."));
+                return Err(format!(
+                    "Artifact {id} is a {has}; it cannot become a {kind}."
+                ));
             }
             if existing.get("title").and_then(Value::as_str) != Some(title.as_str()) {
                 call(store, "renameArtifact", json!([id, title]))?;
@@ -205,9 +241,13 @@ pub fn publish(store: &mut Store, data_dir: &Path, session: &Publisher, request:
     let n = version_number(&version["version"]);
     write_body(data_dir, &id, n, &kind, &body)?;
     let answered = match answers.as_str() {
-        Some(batch) => call(store, "listArtifactComments", json!([id, { "batchId": batch }]))?
-            .as_array()
-            .map_or(0, Vec::len),
+        Some(batch) => call(
+            store,
+            "listArtifactComments",
+            json!([id, { "batchId": batch }]),
+        )?
+        .as_array()
+        .map_or(0, Vec::len),
         None => 0,
     };
     Ok(json!({
@@ -220,7 +260,14 @@ pub fn publish(store: &mut Store, data_dir: &Path, session: &Publisher, request:
 
 /// `publishGateArtifact`: a gate's review page as the next version of the
 /// gate's own artifact, so it can be commented on.
-pub fn publish_gate_page(store: &mut Store, data_dir: &Path, run_id: &str, node_id: &str, title: &str, html: &str) -> Result<Value, String> {
+pub fn publish_gate_page(
+    store: &mut Store,
+    data_dir: &Path,
+    run_id: &str,
+    node_id: &str,
+    title: &str,
+    html: &str,
+) -> Result<Value, String> {
     let mut artifact = call(store, "findGateArtifact", json!([run_id, node_id]))?;
     if artifact.is_null() {
         artifact = call(
@@ -232,7 +279,13 @@ pub fn publish_gate_page(store: &mut Store, data_dir: &Path, run_id: &str, node_
     }
     let id = artifact["id"].as_str().unwrap_or("").to_owned();
     let version = call(store, "addArtifactVersion", json!([id, "agent", null]))?;
-    write_body(data_dir, &id, version_number(&version["version"]), "page", html)?;
+    write_body(
+        data_dir,
+        &id,
+        version_number(&version["version"]),
+        "page",
+        html,
+    )?;
     Ok(json!({ "artifact": call(store, "getArtifact", json!([id]))?, "version": version }))
 }
 
@@ -245,7 +298,12 @@ pub fn gate_draft_comments(store: &mut Store, run_id: &str, node_id: &str) -> Va
     let Some(id) = artifact.get("id").and_then(Value::as_str) else {
         return json!([]);
     };
-    let drafts = call(store, "listArtifactComments", json!([id, { "state": "draft" }])).unwrap_or(json!([]));
+    let drafts = call(
+        store,
+        "listArtifactComments",
+        json!([id, { "state": "draft" }]),
+    )
+    .unwrap_or(json!([]));
     Value::Array(
         drafts
             .as_array()
@@ -264,7 +322,13 @@ pub fn gate_draft_comments(store: &mut Store, run_id: &str, node_id: &str) -> Va
 
 /// `artifactPage`: a version's HTML, or `None` unless the token is the
 /// artifact's and the version exists. A doc is rendered as a page.
-pub fn page(store: &mut Store, data_dir: &Path, id: &str, version: u32, token: &str) -> Option<String> {
+pub fn page(
+    store: &mut Store,
+    data_dir: &Path,
+    id: &str,
+    version: u32,
+    token: &str,
+) -> Option<String> {
     let expected = call(store, "getArtifactToken", json!([id])).ok()?;
     let artifact = call(store, "getArtifact", json!([id])).ok()?;
     let expected = expected.as_str()?;
@@ -310,7 +374,13 @@ pub fn read_source(store: &mut Store, data_dir: &Path, id: &str, version: Option
 
 /// `saveUserVersion`: a person's own edit of a doc as its next version,
 /// each changed paragraph a draft to send.
-pub fn save_user_version(store: &mut Store, data_dir: &Path, id: &str, body: &str, edits: &Value) -> Result<Value, String> {
+pub fn save_user_version(
+    store: &mut Store,
+    data_dir: &Path,
+    id: &str,
+    body: &str,
+    edits: &Value,
+) -> Result<Value, String> {
     let artifact = call(store, "getArtifact", json!([id]))?;
     if artifact.is_null() {
         return Err(format!("Artifact not found: {id}"));
@@ -346,8 +416,11 @@ pub fn sweep(store: &mut Store, data_dir: &Path, now_ms: i64) {
     let Ok(Value::Array(ids)) = call(store, "listArtifactIds", json!([])) else {
         return;
     };
-    let kept: std::collections::HashSet<String> = ids.iter().filter_map(Value::as_str).map(segment).collect();
-    let Ok(dirs) = fs::read_dir(data_dir.join("artifacts")) else { return };
+    let kept: std::collections::HashSet<String> =
+        ids.iter().filter_map(Value::as_str).map(segment).collect();
+    let Ok(dirs) = fs::read_dir(data_dir.join("artifacts")) else {
+        return;
+    };
     for dir in dirs.flatten() {
         if !kept.contains(&dir.file_name().to_string_lossy().into_owned()) {
             let _ = fs::remove_dir_all(dir.path());
@@ -403,8 +476,16 @@ fn line(c: &Value) -> String {
         _ if a.is_null() => format!("- The whole version: {}", said(body)),
         Some("quote") => format!("- `{}`: {}", quoted(&text("quote"), 300), said(body)),
         Some("edit") => {
-            let note = if body.trim().is_empty() { String::new() } else { format!(": {}", said(body)) };
-            format!("- Edited `{}` → `{}`{note}", quoted(&text("before"), 300), quoted(&text("after"), 300))
+            let note = if body.trim().is_empty() {
+                String::new()
+            } else {
+                format!(": {}", said(body))
+            };
+            format!(
+                "- Edited `{}` → `{}`{note}",
+                quoted(&text("before"), 300),
+                quoted(&text("after"), 300)
+            )
         }
         _ => format!(
             "- On `{}` at `{}`: {}",
@@ -417,18 +498,30 @@ fn line(c: &Value) -> String {
 
 /// `formatArtifactFeedback`: the message a batch becomes, its comments
 /// grouped by the version they were written on.
-pub fn feedback_message(artifact: &Value, comments: &[Value], latest_author: Option<&str>) -> String {
+pub fn feedback_message(
+    artifact: &Value,
+    comments: &[Value],
+    latest_author: Option<&str>,
+) -> String {
     let title = quoted(artifact["title"].as_str().unwrap_or(""), 120);
     let id = artifact["id"].as_str().unwrap_or("");
     let latest = js::to_string(&artifact["latestVersion"]);
-    let mut versions: Vec<u32> = comments.iter().map(|c| version_number(&c["version"])).collect();
+    let mut versions: Vec<u32> = comments
+        .iter()
+        .map(|c| version_number(&c["version"]))
+        .collect();
     versions.sort_unstable();
     versions.dedup();
     let groups: Vec<String> = versions
         .iter()
         .map(|v| {
             std::iter::once(format!("**{title} · v{v}:**"))
-                .chain(comments.iter().filter(|c| version_number(&c["version"]) == *v).map(line))
+                .chain(
+                    comments
+                        .iter()
+                        .filter(|c| version_number(&c["version"]) == *v)
+                        .map(line),
+                )
                 .collect::<Vec<_>>()
                 .join("\n")
         })
@@ -473,7 +566,8 @@ impl Queue {
     }
 
     pub fn hold(&mut self, artifact_id: &str, session_id: &str) {
-        self.queued.insert(artifact_id.to_owned(), session_id.to_owned());
+        self.queued
+            .insert(artifact_id.to_owned(), session_id.to_owned());
     }
 
     pub fn drop_artifact(&mut self, artifact_id: &str) {
@@ -483,14 +577,23 @@ impl Queue {
     /// The first artifact waiting on `session_id`, taken out: one paste
     /// per turn.
     pub fn next_for(&mut self, session_id: &str) -> Option<String> {
-        let id = self.queued.iter().find(|(_, s)| *s == session_id).map(|(a, _)| a.clone())?;
+        let id = self
+            .queued
+            .iter()
+            .find(|(_, s)| *s == session_id)
+            .map(|(a, _)| a.clone())?;
         self.queued.remove(&id);
         Some(id)
     }
 
     /// Every artifact waiting on a session that has gone, taken out.
     pub fn forget_session(&mut self, session_id: &str) -> Vec<String> {
-        let gone: Vec<String> = self.queued.iter().filter(|(_, s)| *s == session_id).map(|(a, _)| a.clone()).collect();
+        let gone: Vec<String> = self
+            .queued
+            .iter()
+            .filter(|(_, s)| *s == session_id)
+            .map(|(a, _)| a.clone())
+            .collect();
         for id in &gone {
             self.queued.remove(id);
         }
@@ -517,30 +620,72 @@ mod tests {
     fn publishes_versions_and_serves_them_with_the_token() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = store(dir.path());
-        let me = Publisher { id: "s1".into(), project_name: Some("app".into()), root: Some(dir.path().to_string_lossy().into()) };
-        let first = publish(&mut s, dir.path(), &me, &json!({ "kind": "page", "title": " Plan ", "content": "<h1>v1</h1>" })).unwrap();
+        let me = Publisher {
+            id: "s1".into(),
+            project_name: Some("app".into()),
+            root: Some(dir.path().to_string_lossy().into()),
+        };
+        let first = publish(
+            &mut s,
+            dir.path(),
+            &me,
+            &json!({ "kind": "page", "title": " Plan ", "content": "<h1>v1</h1>" }),
+        )
+        .unwrap();
         let id = first["artifact"]["id"].as_str().unwrap().to_owned();
         assert_eq!(first["version"]["version"], json!(1));
         let p = first["path"].as_str().unwrap();
         let token = p.split("?t=").nth(1).unwrap();
-        assert_eq!(page(&mut s, dir.path(), &id, 1, token).as_deref(), Some("<h1>v1</h1>"));
+        assert_eq!(
+            page(&mut s, dir.path(), &id, 1, token).as_deref(),
+            Some("<h1>v1</h1>")
+        );
         assert_eq!(page(&mut s, dir.path(), &id, 1, "wrong"), None);
         assert_eq!(page(&mut s, dir.path(), &id, 2, token), None);
 
         std::fs::write(dir.path().join("next.html"), "<h1>v2</h1>").unwrap();
-        let other = Publisher { id: "s2".into(), project_name: Some("app".into()), ..me.clone() };
-        let second = publish(&mut s, dir.path(), &other, &json!({ "kind": "page", "title": "Plan 2", "file": "next.html", "artifactId": id })).unwrap();
+        let other = Publisher {
+            id: "s2".into(),
+            project_name: Some("app".into()),
+            ..me.clone()
+        };
+        let second = publish(
+            &mut s,
+            dir.path(),
+            &other,
+            &json!({ "kind": "page", "title": "Plan 2", "file": "next.html", "artifactId": id }),
+        )
+        .unwrap();
         assert_eq!(second["artifact"]["title"], "Plan 2");
-        assert_eq!(read_source(&mut s, dir.path(), &id, None)["body"], "<h1>v2</h1>");
+        assert_eq!(
+            read_source(&mut s, dir.path(), &id, None)["body"],
+            "<h1>v2</h1>"
+        );
         assert_eq!(read_source(&mut s, dir.path(), &id, Some(9)), Value::Null);
 
-        let stranger = Publisher { id: "s3".into(), project_name: Some("x".into()), ..me.clone() };
+        let stranger = Publisher {
+            id: "s3".into(),
+            project_name: Some("x".into()),
+            ..me.clone()
+        };
         assert_eq!(
-            publish(&mut s, dir.path(), &stranger, &json!({ "kind": "page", "title": "t", "content": "x", "artifactId": id })).unwrap_err(),
+            publish(
+                &mut s,
+                dir.path(),
+                &stranger,
+                &json!({ "kind": "page", "title": "t", "content": "x", "artifactId": id })
+            )
+            .unwrap_err(),
             format!("No artifact {id} in this session or project.")
         );
         assert_eq!(
-            publish(&mut s, dir.path(), &me, &json!({ "kind": "doc", "title": "t", "content": "x", "artifactId": id })).unwrap_err(),
+            publish(
+                &mut s,
+                dir.path(),
+                &me,
+                &json!({ "kind": "doc", "title": "t", "content": "x", "artifactId": id })
+            )
+            .unwrap_err(),
             format!("Artifact {id} is a page; it cannot become a doc.")
         );
     }
@@ -549,50 +694,116 @@ mod tests {
     fn refuses_what_it_cannot_publish() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = store(dir.path());
-        let me = Publisher { id: "s1".into(), project_name: None, root: Some(dir.path().join("proj").to_string_lossy().into()) };
+        let me = Publisher {
+            id: "s1".into(),
+            project_name: None,
+            root: Some(dir.path().join("proj").to_string_lossy().into()),
+        };
         std::fs::create_dir_all(dir.path().join("proj")).unwrap();
         std::fs::write(dir.path().join("outside.html"), "x").unwrap();
         let err = |req: Value| publish(&mut store(dir.path()), dir.path(), &me, &req).unwrap_err();
-        assert_eq!(err(json!({ "kind": "page", "title": " ", "content": "x" })), "An artifact needs a title.");
-        assert_eq!(err(json!({ "kind": "page", "title": "t" })), "Publish either a file or content, not both and not neither.");
-        assert_eq!(err(json!({ "kind": "page", "title": "t", "content": "  " })), "The artifact is empty.");
-        assert_eq!(err(json!({ "kind": "doc", "title": "t", "file": "a.html" })), "A doc is published from a .md file.");
-        assert_eq!(err(json!({ "kind": "page", "title": "t", "file": "missing.html" })), "No such file: missing.html");
+        assert_eq!(
+            err(json!({ "kind": "page", "title": " ", "content": "x" })),
+            "An artifact needs a title."
+        );
+        assert_eq!(
+            err(json!({ "kind": "page", "title": "t" })),
+            "Publish either a file or content, not both and not neither."
+        );
+        assert_eq!(
+            err(json!({ "kind": "page", "title": "t", "content": "  " })),
+            "The artifact is empty."
+        );
+        assert_eq!(
+            err(json!({ "kind": "doc", "title": "t", "file": "a.html" })),
+            "A doc is published from a .md file."
+        );
+        assert_eq!(
+            err(json!({ "kind": "page", "title": "t", "file": "missing.html" })),
+            "No such file: missing.html"
+        );
         assert_eq!(
             err(json!({ "kind": "page", "title": "t", "file": "../outside.html" })),
             "Refusing to publish ../outside.html: it is outside this session's folder."
         );
-        let rootless = Publisher { root: None, ..me.clone() };
-        assert!(publish(&mut s, dir.path(), &rootless, &json!({ "kind": "page", "title": "t", "file": "a.html" })).unwrap_err().starts_with("This session has no project folder"));
+        let rootless = Publisher {
+            root: None,
+            ..me.clone()
+        };
+        assert!(publish(
+            &mut s,
+            dir.path(),
+            &rootless,
+            &json!({ "kind": "page", "title": "t", "file": "a.html" })
+        )
+        .unwrap_err()
+        .starts_with("This session has no project folder"));
     }
 
     #[test]
     fn a_doc_is_rendered_and_edited_in_place() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = store(dir.path());
-        let me = Publisher { id: "s1".into(), ..Publisher::default() };
-        let made = publish(&mut s, dir.path(), &me, &json!({ "kind": "doc", "title": "Notes", "content": "# Hi" })).unwrap();
+        let me = Publisher {
+            id: "s1".into(),
+            ..Publisher::default()
+        };
+        let made = publish(
+            &mut s,
+            dir.path(),
+            &me,
+            &json!({ "kind": "doc", "title": "Notes", "content": "# Hi" }),
+        )
+        .unwrap();
         let id = made["artifact"]["id"].as_str().unwrap().to_owned();
-        let token = made["path"].as_str().unwrap().split("?t=").nth(1).unwrap().to_owned();
-        assert!(page(&mut s, dir.path(), &id, 1, &token).unwrap().contains("<h1>Hi</h1>"));
-        let saved = save_user_version(&mut s, dir.path(), &id, "# Hey", &json!([{ "before": "Hi", "after": "Hey" }])).unwrap();
+        let token = made["path"]
+            .as_str()
+            .unwrap()
+            .split("?t=")
+            .nth(1)
+            .unwrap()
+            .to_owned();
+        assert!(page(&mut s, dir.path(), &id, 1, &token)
+            .unwrap()
+            .contains("<h1>Hi</h1>"));
+        let saved = save_user_version(
+            &mut s,
+            dir.path(),
+            &id,
+            "# Hey",
+            &json!([{ "before": "Hi", "after": "Hey" }]),
+        )
+        .unwrap();
         assert_eq!(saved["version"]["author"], "user");
         assert_eq!(saved["drafts"][0]["anchor"]["kind"], "edit");
-        assert_eq!(save_user_version(&mut s, dir.path(), "nope", "x", &json!([])).unwrap_err(), "Artifact not found: nope");
+        assert_eq!(
+            save_user_version(&mut s, dir.path(), "nope", "x", &json!([])).unwrap_err(),
+            "Artifact not found: nope"
+        );
     }
 
     #[test]
     fn a_gate_page_becomes_its_artifact_and_drafts_its_comments() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = store(dir.path());
-        let kept = publish_gate_page(&mut s, dir.path(), "r1", "g", "Review", "<p>one</p>").unwrap();
-        let again = publish_gate_page(&mut s, dir.path(), "r1", "g", "Review", "<p>two</p>").unwrap();
+        let kept =
+            publish_gate_page(&mut s, dir.path(), "r1", "g", "Review", "<p>one</p>").unwrap();
+        let again =
+            publish_gate_page(&mut s, dir.path(), "r1", "g", "Review", "<p>two</p>").unwrap();
         assert_eq!(kept["artifact"]["id"], again["artifact"]["id"]);
         assert_eq!(again["version"]["version"], json!(2));
         let id = again["artifact"]["id"].as_str().unwrap();
         call(&mut s, "insertArtifactComment", json!([{ "artifactId": id, "version": 2, "anchor": { "kind": "quote", "quote": "two" }, "body": "why" }])).unwrap();
-        call(&mut s, "insertArtifactComment", json!([{ "artifactId": id, "version": 2, "anchor": null, "body": "all" }])).unwrap();
-        assert_eq!(gate_draft_comments(&mut s, "r1", "g"), json!([{ "quote": "two", "comment": "why" }, { "comment": "all" }]));
+        call(
+            &mut s,
+            "insertArtifactComment",
+            json!([{ "artifactId": id, "version": 2, "anchor": null, "body": "all" }]),
+        )
+        .unwrap();
+        assert_eq!(
+            gate_draft_comments(&mut s, "r1", "g"),
+            json!([{ "quote": "two", "comment": "why" }, { "comment": "all" }])
+        );
         assert_eq!(gate_draft_comments(&mut s, "r9", "g"), json!([]));
     }
 
@@ -615,8 +826,12 @@ mod tests {
     #[test]
     fn delivery_waits_for_the_prompt_one_paste_at_a_time() {
         assert!(at_prompt(&json!({ "status": "idle" })));
-        assert!(at_prompt(&json!({ "status": "waiting", "statusSource": "pattern" })));
-        assert!(!at_prompt(&json!({ "status": "waiting", "statusSource": "hooks" })));
+        assert!(at_prompt(
+            &json!({ "status": "waiting", "statusSource": "pattern" })
+        ));
+        assert!(!at_prompt(
+            &json!({ "status": "waiting", "statusSource": "hooks" })
+        ));
         assert!(!at_prompt(&json!({ "status": "working" })));
         let mut q = Queue::default();
         q.hold("a", "s");

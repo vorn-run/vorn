@@ -5,10 +5,9 @@ import { ptyManager } from './pty-manager'
 import { headlessManager } from './headless-manager'
 import { configManager } from './config-manager'
 import { sessionManager } from './session-persistence'
-import { scheduler } from './scheduler'
-import { claimWorkflowRun, releaseWorkflowRun, type RunClaimRequest } from './workflow-run-claims'
-import { scheduleLogManager } from './schedule-log'
 import { getRecentSessions } from './agent-history'
+import { createTriggerOutbox, taskTriggersForChange } from './workflow-triggers'
+import { pollConnector } from './connector-poll'
 import { detectIDEs, openInIDE } from './ide-detector'
 import { detectMobileProject } from './mobile-detector'
 import { detectInstalledAgents, clearAgentDetectionCache } from './agent-detector'
@@ -35,8 +34,6 @@ import {
   releaseSpawningTranscriptsFor
 } from './transcript-claims'
 import { browserBridge } from './browser-bridge'
-import { registerArtifactMethods, sealGateDrafts } from './artifacts/methods'
-import { gateDraftComments } from './artifacts/service'
 import { activationFor, subjectOf } from './extensions/activation'
 import { footerReadings, stopFooters, syncFooters } from './extensions/footers'
 import { matchLinks, runHandler } from './extensions/handlers'
@@ -73,7 +70,6 @@ import type {
   HeadlessSession,
   ProjectConfig,
   TerminalSession,
-  WorkflowExecution,
   WorktreeRetentionConfig
 } from '@vornrun/shared/types'
 import { connectionConnectorId, DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
@@ -99,14 +95,6 @@ import {
   cleanupTaskImages
 } from './task-images'
 import {
-  saveWorkflowRun,
-  withoutDefinition,
-  listWorkflowRuns,
-  listWorkflowRunsByTask,
-  listAllWorkflowRuns,
-  listRunsWithWaitingGates,
-  listRunningRuns,
-  updateWorkflowRunStatus,
   dbSaveSSHKey,
   dbListSSHKeys,
   dbGetSSHKey,
@@ -134,9 +122,7 @@ import {
   dbInsertWorkflow,
   dbDeleteWorkflow,
   dbGetWorkflow,
-  getWorkflowRun,
   dbListWorkflows,
-  dbUpdateWorkflow,
   dbListTasks,
   dbGetTask
 } from './database'
@@ -166,18 +152,6 @@ import {
   performHttpRequest
 } from './connectors/http'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
-import { fireSessionRestoredTrigger, fireTaskTriggersForChange } from './workflows/triggers'
-import {
-  applyGateDecision,
-  executeWorkflow,
-  rerunWorkflowRun,
-  retryRunFromFailure,
-  stopWorkflowRun,
-  resumeSignInWaits,
-  runWaitsForSignIn,
-  gateTakesChanges,
-  gateEditIsRefused
-} from './workflows/engine'
 import { listKeys, passwordFields } from './connectors/keys'
 import { installedPack } from './connectors/packs'
 import {
@@ -651,34 +625,8 @@ export function sessionsToPersist(): TerminalSession[] {
   return [...active, ...restoredRecords()]
 }
 
-/**
- * Answer with a run rather than waiting for it to finish.
- *
- * A run lasts as long as its agents do, and every caller of these three is
- * holding a request open -- a window, a phone, the CLI. They want the run id
- * now, so the walk carries on behind the answer. The answer is a snapshot: the
- * engine goes on mutating the run it handed over, and a fast one can finish
- * before this is serialised.
- */
-function startedRun(
-  workflowId: string,
-  begin: (onStarted: (execution: WorkflowExecution) => void) => Promise<WorkflowExecution>
-): Promise<WorkflowExecution | null> {
-  return new Promise((resolve) => {
-    let answered = false
-    const answer = (execution: WorkflowExecution | null): void => {
-      if (answered) return
-      answered = true
-      resolve(execution ? structuredClone(withoutDefinition(execution)) : null)
-    }
-    begin(answer)
-      .then(answer)
-      .catch((err) => {
-        log.warn({ err, workflowId }, '[workflow] a run did not start')
-        answer(null)
-      })
-  })
-}
+/** Task triggers, delivered to vornd until it takes each. */
+const workflowTriggers = createTriggerOutbox(vorndSessions)
 
 /** Creates that name a conversation, by its id, while they prepare. */
 const createNamed = onePerKey<TerminalSession>()
@@ -828,89 +776,6 @@ export function registerAllMethods(): void {
     // A board renders titles. Descriptions are most of the bytes and none of
     // what is drawn, so they are left out until something asks for one task.
     return tasks.map((task) => ({ ...task, description: '' }))
-  })
-
-  registerMethod(
-    'workflow:resolveGate',
-    ({ runId, nodeId, decision, comment, edited, comments }) => {
-      // A sign-in wait ends when the connection signs in again, never by approval.
-      if (decision === 'approve' && runWaitsForSignIn(runId, nodeId)) return { accepted: false }
-      // Answered from anywhere, a request for changes takes the comments left on the review page.
-      const pinned =
-        decision === 'changes' ? (comments ?? gateDraftComments(runId, nodeId)) : undefined
-      if (decision === 'changes' && !gateTakesChanges(runId, nodeId, comment ?? '', pinned)) {
-        return { accepted: false }
-      }
-      const editRefused =
-        decision === 'reject' ? undefined : gateEditIsRefused(runId, nodeId, edited)
-      if (editRefused) return { accepted: false, reason: editRefused }
-      // Applied here, where the run is. It used to be broadcast for whichever
-      // window held the run to apply, which is why answering from a phone with
-      // nothing open did nothing at all.
-      log.info({ runId, nodeId, decision }, '[workflow] a gate was answered')
-      void applyGateDecision(runId, nodeId, decision, comment, edited, pinned)
-      if (decision === 'changes') sealGateDrafts(runId, nodeId)
-      // Still broadcast: a window showing the pill needs to stop showing it.
-      clientRegistry.broadcast(IPC.WORKFLOW_GATE_RESOLVED, { runId, nodeId, decision })
-      return { accepted: true }
-    }
-  )
-
-  registerMethod('workflow:sessionRestored', ({ sessionId, restore, environment }) => {
-    const session = ptyManager.getActiveSessions().find((s) => s.id === sessionId)
-    if (session) fireSessionRestoredTrigger(session, { restore, environment })
-  })
-
-  /**
-   * Start a run and answer with it, rather than waiting for it to finish.
-   *
-   * A run lasts as long as its agents do. The caller wants the run id back now
-   * -- to show a pane, or to print it -- so the walk carries on behind this.
-   */
-  registerMethod('workflow:run', async ({ workflowId, context, targetNodeId }) => {
-    const workflow = dbGetWorkflow(workflowId)
-    if (!workflow) return null
-    return startedRun(workflow.id, (onStarted) =>
-      executeWorkflow(workflow, context, { source: 'manual', targetNodeId, onStarted })
-    )
-  })
-
-  registerMethod('workflow:retryRun', async ({ runId }) => {
-    const run = getWorkflowRun(runId)
-    const workflow = run ? dbGetWorkflow(run.workflowId) : null
-    if (!run || !workflow) return null
-    return startedRun(workflow.id, (onStarted) => retryRunFromFailure(workflow, run, { onStarted }))
-  })
-
-  registerMethod('workflow:rerun', async ({ runId }) => {
-    const run = getWorkflowRun(runId)
-    const workflow = run ? dbGetWorkflow(run.workflowId) : null
-    if (!run || !workflow) return null
-    return startedRun(workflow.id, (onStarted) => rerunWorkflowRun(workflow, run, { onStarted }))
-  })
-
-  registerMethod(
-    'workflow:get',
-    ({ id }) => configManager.loadConfig().workflows?.find((w) => w.id === id) ?? null
-  )
-
-  // Straight from the table, the way `task:list` reads `dbListTasks` rather than
-  // going through the configuration. `workflow:get` above still goes the other
-  // way and finds by id in a loaded config; that is heavier and inconsistent,
-  // and untangling it is not this change.
-  registerMethod('workflow:list', () => dbListWorkflows())
-
-  registerMethod('workflow:setEnabled', ({ id, enabled }) => {
-    // The row count is how an unknown id is answered. Reading the workflow first
-    // would parse its nodes and edges to learn a boolean, so one malformed row
-    // could throw a call that never needed the definition -- and it would leave
-    // a gap between the check and the write.
-    if (dbUpdateWorkflow(id, { enabled }) === 0) return { ok: false }
-    // The desktop is drawing this workflow's dot right now and holds the
-    // configuration in a cache. Without this it goes on showing the old state
-    // until something else invalidates it.
-    configManager.notifyChanged()
-    return { ok: true }
   })
 
   registerMethod('project:list', () => configManager.loadConfig().projects ?? [])
@@ -1115,7 +980,7 @@ export function registerAllMethods(): void {
     const before = configManager.loadConfig()
     configManager.saveConfig(config)
     configManager.notifyChanged()
-    fireTaskTriggersForChange(before, config)
+    void workflowTriggers.deliver(taskTriggersForChange(before, config))
   })
 
   // Sessions
@@ -1505,13 +1370,6 @@ export function registerAllMethods(): void {
     return gitUtils.gitPush(cwd, remote)
   })
 
-  // Scheduler
-  registerMethod('scheduler:getLog', (workflowId) => scheduleLogManager.getEntries(workflowId))
-  registerMethod('scheduler:getNextRun', (workflowId) => {
-    const config = configManager.loadConfig()
-    return scheduler.getNextRun(workflowId, config.workflows ?? [])
-  })
-
   // Task images
   registerMethod('task:imageSave', ({ taskId, sourcePath }) => saveTaskImage(taskId, sourcePath))
   registerMethod('task:imageDelete', ({ taskId, filename }) => deleteTaskImage(taskId, filename))
@@ -1537,20 +1395,6 @@ export function registerAllMethods(): void {
 
   // Scripts
   registerMethod('script:execute', (config) => executeScript(config))
-
-  // Workflow runs
-  registerMethod('workflowRun:save', (execution) => saveWorkflowRun(execution))
-  registerMethod('workflowRun:list', ({ workflowId, limit }) =>
-    listWorkflowRuns(workflowId, limit).map(withoutDefinition)
-  )
-  registerMethod('workflowRun:listByTask', ({ taskId, limit }) =>
-    listWorkflowRunsByTask(taskId, limit).map(withoutDefinition)
-  )
-  registerMethod('workflowRun:listWaiting', () => listRunsWithWaitingGates().map(withoutDefinition))
-  registerMethod('workflowRun:listRunning', () => listRunningRuns().map(withoutDefinition))
-  registerMethod('workflowRun:listAll', ({ workspaceId, limit }) =>
-    listAllWorkflowRuns(workspaceId, limit).map(withoutDefinition)
-  )
 
   // Session events
   registerMethod('sessionEvent:list', ({ eventType, limit }) => listSessionEvents(eventType, limit))
@@ -1587,8 +1431,6 @@ export function registerAllMethods(): void {
     await shellEnvSettled(5_000)
     return resolvedShellPath()
   })
-
-  registerMethod('webhook:info', () => ({ baseUrl: `http://127.0.0.1:${serverPort}` }))
 
   // Tailscale network access. Informational only now: it supplies an address and
   // a QR code, and no longer decides whether the server binds wide.
@@ -1702,36 +1544,6 @@ export function registerAllMethods(): void {
     broadcastWidgetUpdate()
   })
 
-  // Workflow execution complete
-  registerMethod(
-    'workflow:executionComplete',
-    (data: {
-      workflowId: string
-      workflowName: string
-      completedAt: string
-      status: 'success' | 'error' | 'cancelled'
-      sessionsLaunched: number
-      source?: 'scheduler' | 'manual'
-    }) => {
-      if (data.status !== 'success' && data.status !== 'error' && data.status !== 'cancelled') {
-        return
-      }
-      // A run the user stopped isn't a schedule outcome — it still updates the
-      // workflow's last-run badge, but it would misreport the schedule's health.
-      if (data.source === 'scheduler' && data.status !== 'cancelled') {
-        scheduleLogManager.addEntry({
-          workflowId: data.workflowId,
-          workflowName: data.workflowName,
-          executedAt: data.completedAt,
-          status: data.status,
-          sessionsLaunched: data.sessionsLaunched
-        })
-      }
-      updateWorkflowRunStatus(data.workflowId, data.completedAt, data.status)
-      configManager.notifyChanged()
-    }
-  )
-
   // Connectors
   registerMethod('connector:list', () => {
     return connectorRegistry.list().map((c) => ({
@@ -1794,47 +1606,15 @@ export function registerAllMethods(): void {
   registerMethod('connection:signedIn', ({ connectionId, identity }) => {
     dbSetConnectionSignIn(connectionId, identity, new Date().toISOString())
     dbSignalChange()
-    void resumeSignInWaits(connectionId, listRunsWithWaitingGates('signIn')).catch((err) =>
-      log.warn({ err }, '[workflow] resuming after a sign-in failed')
-    )
+    // The runs waiting on the sign-in are vornd's.
+    void vorndSessions.tell('vornd:signedIn', { connectionId })
   })
 
   registerMethod('connection:signedOut', (id) => markSignedOut(id))
 
-  registerMethod('workflow:runManual', ({ workflowId, inputs }) => {
-    const wf = dbGetWorkflow(workflowId)
-    if (!wf) throw new Error(`Workflow ${workflowId} not found`)
-    // Refuse a startless run here rather than burning a claim on a fake run.
-    if (!wf.nodes.some((n) => n.type === 'trigger')) {
-      throw new Error(`Workflow "${wf.name}" has no trigger; add one before running it`)
-    }
-    scheduler.triggerWorkflow(workflowId, inputs)
-  })
-
-  // The run is here, so stopping it is done here rather than asked of whoever
-  // might be holding it.
-  registerMethod('workflow:stopRun', ({ runId }: { runId: string }) => {
-    void stopWorkflowRun(runId)
-  })
-
-  registerMethod('connector:inboxComplete', ({ id, leaseToken, disposition, error }) => {
-    scheduler.completeConnectorInbox(id, leaseToken, disposition, error)
-  })
-
-  registerMethod('connector:inboxRenew', ({ id, leaseToken }) => {
-    return scheduler.renewConnectorInbox(id, leaseToken)
-  })
-
-  // Runs execute in the renderer, but a scheduler tick reaches every connected
-  // instance. Claiming here — in the one process they all share — is what stops
-  // two open windows from launching the same agents twice.
-  registerMethod('workflowRun:claim', (req: RunClaimRequest) => claimWorkflowRun(req))
-
-  registerMethod(
-    'workflowRun:release',
-    ({ workflowId, params, runId }: { workflowId: string; params?: string; runId: string }) => {
-      releaseWorkflowRun(workflowId, params, runId)
-    }
+  // vornd fires connector-poll schedules and runs their items; the connectors are here.
+  registerMethod('connector:poll', ({ workflowId }: { workflowId: string }) =>
+    pollConnector(workflowId)
   )
 
   registerMethod('credentials:setDecrypted', ({ connectionId, fields }) => {
@@ -2241,8 +2021,6 @@ export function registerAllMethods(): void {
   registerMethod('browser:listTabs', (p) => browserBridge.request('browser:listTabs', p))
   registerMethod('browser:find', (p) => browserBridge.request('browser:find', p))
 
-  registerArtifactMethods(() => serverPort)
-
   // Device pane (relayed to Electron main, same bridge, same reasoning: the
   // idb_companion child process and its unix socket live only in main).
   registerMethod('device:list', (p) => browserBridge.request('device:list', p))
@@ -2310,9 +2088,6 @@ export function registerAllMethods(): void {
       projectPath: session.projectPath,
       headless: true
     })
-  })
-  scheduler.on('client-message', (channel: string, payload: unknown) => {
-    clientRegistry.broadcast(channel, payload)
   })
 
   // A background refresh found a different catalog: hand it over rather than let a list on screen keep the old one.

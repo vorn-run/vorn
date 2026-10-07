@@ -373,7 +373,8 @@ fn main() -> ExitCode {
         if let Ok(addr) = listener.local_addr() {
             daemon.set_listen_addr(addr);
         }
-        daemon.set_app_link(link);
+        daemon.set_app_link(Arc::clone(&link));
+        daemon.start_work(&link);
         proxy::log_upstream(&daemon).await;
         info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
         let mut stdout = std::io::stdout().lock();
