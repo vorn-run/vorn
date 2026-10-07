@@ -47,6 +47,7 @@ pub mod reach;
 pub mod secrets;
 pub mod sessions;
 pub mod shell;
+pub mod worktree;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -133,7 +134,7 @@ pub const METHODS: &[(&str, Effect)] = &[
     // Answered from the copy of the server's records ([`crate::registry`]),
     // which vornd changes itself for the calls that change a terminal
     // ([`sessions`]) or start and stop a headless agent ([`headless`]);
-    // the worktree read in shadow mode only ([`crate::groups::SHADOW_GROUPS`]).
+    // the worktree manager's from it and the repositories ([`worktree`]).
     ("terminal:listActive", Effect::Read),
     ("terminal:create", Effect::Change),
     ("terminal:kill", Effect::Change),
@@ -145,14 +146,15 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("headless:create", Effect::Change),
     ("headless:kill", Effect::Change),
     ("worktree:activeSessions", Effect::Read),
+    ("worktree:inventory", Effect::Read),
+    ("worktree:removeMany", Effect::Change),
+    ("worktree:reclaimArtifacts", Effect::Change),
+    ("worktree:pruneOrphans", Effect::Change),
+    ("git:removeWorktree", Effect::Change),
 ];
 
 /// Calls in a native group that the server keeps answering, and why.
 pub const SERVER_ONLY: &[(&str, &str)] = &[
-    (
-        "git:removeWorktree",
-        "drops the server's cached size of the worktree it removes",
-    ),
     (
         "git:checkoutBranch",
         "moves the server's sessions on that worktree to the new branch and tells clients",
@@ -445,6 +447,9 @@ pub struct Native {
     /// What starts the sessions vornd creates: the engine, when it runs one.
     host: OnceLock<Arc<dyn sessions::Host>>,
     sessions: Arc<sessions::Sessions>,
+    /// The worktrees' sizes, measured by the inventory and kept for the
+    /// actions that report what they freed.
+    sizes: vorn_worktrees::Sizes,
 }
 
 impl Native {
@@ -470,6 +475,7 @@ impl Native {
             registry: OnceLock::new(),
             host: OnceLock::new(),
             sessions: Arc::default(),
+            sizes: vorn_worktrees::Sizes::default(),
         })
     }
 
@@ -527,6 +533,10 @@ impl Native {
     /// only.
     pub fn call(&self, method: &str, params: &Value) -> Answer {
         match method.split_once(':').map(|(g, _)| g) {
+            Some("git") if method == "git:removeWorktree" => worktree::call(self, method, params),
+            Some("worktree") if method != "worktree:activeSessions" => {
+                worktree::call(self, method, params)
+            }
             Some("git") => git::call(self, method, params),
             Some("file") => self.file(method, params),
             Some("ide") => self.ide(method, params),
@@ -835,6 +845,10 @@ impl Shadows {
         else {
             return;
         };
+        let (native, server) = (
+            worktree::compared(&method, native),
+            worktree::compared(&method, server),
+        );
         if native == server {
             groups.count(&method, Counted::ShadowMatched);
         } else {
@@ -1035,7 +1049,9 @@ impl Conn {
                 self.plan(method.to_owned(), id, params);
                 Offer::Pass
             }
-            (Mode::Shadow, Some((Effect::Change, id, params))) if sessions::foresees(method) => {
+            (Mode::Shadow, Some((Effect::Change, id, params)))
+                if sessions::foresees(method) || worktree::foresees(method) =>
+            {
                 self.groups.count(method, Counted::Forwarded);
                 self.foresee(method, &id, &params);
                 Offer::Pass
@@ -1153,7 +1169,9 @@ impl Conn {
     /// without making the change, for the comparison with the server's
     /// answer when it comes.
     fn foresee(&self, method: &str, id: &Value, params: &Value) {
-        let frame = sessions::foresee(&self.native, method, params).and_then(|a| a.frame(id));
+        let frame = sessions::foresee(&self.native, method, params)
+            .or_else(|| worktree::foresee(&self.native, method, params))
+            .and_then(|a| a.frame(id));
         let Some(frame) = frame else {
             return self.groups.count(method, Counted::ShadowUnported);
         };
@@ -1383,16 +1401,9 @@ mod tests {
             assert!(!why.is_empty());
             assert!(crate::groups::NATIVE_GROUPS.contains(&crate::groups::group_of(method)));
         }
-        for (method, effect) in METHODS {
+        for (method, _) in METHODS {
             let group = crate::groups::group_of(method);
-            let shadow_only = crate::groups::SHADOW_GROUPS.contains(&group);
-            assert!(
-                crate::groups::NATIVE_GROUPS.contains(&group) || shadow_only,
-                "{method}"
-            );
-            // Only reads are run in shadow mode, so only reads are worth
-            // listing for a group vornd never answers.
-            assert!(!shadow_only || *effect == Effect::Read, "{method}");
+            assert!(crate::groups::NATIVE_GROUPS.contains(&group), "{method}");
         }
     }
 

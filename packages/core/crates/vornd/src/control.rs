@@ -69,7 +69,9 @@
 //! for every client; `vornd:tokenRevoked {tokenId}`, after which the server
 //! closes the sockets that authenticated with that token; and
 //! `vornd:cleanupOffer {id, projectPath, worktreePath}`, the offer to clean
-//! up a worktree whose last terminal vornd closed, for every client.
+//! up a worktree whose last terminal vornd closed, for every client; and
+//! `vornd:worktreesCleaned {paths}`, the worktrees a cleanup vornd ran
+//! removed or emptied, whose sizes the server forgets.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

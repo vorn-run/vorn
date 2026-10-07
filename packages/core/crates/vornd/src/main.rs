@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn passes_group_errors_on() {
-        let err = parse(&["--upstream", "127.0.0.1:1", "--groups", "worktree=native"]).unwrap_err();
+        let err = parse(&["--upstream", "127.0.0.1:1", "--groups", "task=native"]).unwrap_err();
         assert!(err.starts_with("--groups"), "{err}");
     }
 }

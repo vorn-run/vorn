@@ -72,12 +72,8 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "mcp",
     "terminal",
     "headless",
+    "worktree",
 ];
-
-/// Groups whose reads vornd can answer from its copy of the server's
-/// session records ([`crate::registry`]), to compare with the server's in
-/// shadow mode, while the server still owns them: `native` is refused.
-pub const SHADOW_GROUPS: &[&str] = &["worktree"];
 
 /// Groups the Native server switch runs natively: the one place a group
 /// joins the switch. Each is also in [`NATIVE_GROUPS`].
@@ -98,6 +94,7 @@ pub const NATIVE_SERVER_GROUPS: &[&str] = &[
     "mcp",
     "terminal",
     "headless",
+    "worktree",
 ];
 
 /// The group a method belongs to: everything before the first colon.
@@ -268,7 +265,6 @@ mod tests {
         for group in NATIVE_SERVER_GROUPS {
             assert_eq!(on.mode(group), Mode::Native, "{group}");
         }
-        assert_eq!(on.mode("worktree"), Mode::Forward);
         assert_eq!(on.mode("task"), Mode::Forward);
         let shadowed = Groups::new(true, Some("git=shadow,file=forward")).unwrap();
         assert_eq!(shadowed.mode("git"), Mode::Shadow);
@@ -285,23 +281,8 @@ mod tests {
     }
 
     #[test]
-    fn a_group_vornd_only_compares_may_be_shadowed_and_not_answered() {
-        for group in SHADOW_GROUPS {
-            assert!(!NATIVE_GROUPS.contains(group), "{group}");
-            assert!(!NATIVE_SERVER_GROUPS.contains(group), "{group}");
-            assert_eq!(
-                Groups::parse(&format!("{group}=shadow"))
-                    .unwrap()
-                    .mode(group),
-                Mode::Shadow
-            );
-            assert!(Groups::parse(&format!("{group}=native")).is_err());
-        }
-    }
-
-    #[test]
     fn refuses_native_for_a_group_nothing_implements() {
-        let err = Groups::parse("worktree=native").unwrap_err();
+        let err = Groups::parse("task=native").unwrap_err();
         assert!(err.contains("no native implementation"), "{err}");
         assert_eq!(
             Groups::parse("git=native").unwrap().mode("git"),

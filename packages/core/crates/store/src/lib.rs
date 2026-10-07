@@ -32,12 +32,14 @@ mod sessions;
 mod sql;
 mod tasks;
 mod tokens;
+mod worktrees;
 
 pub use agents::AgentSettings;
 pub use connectors::MAX_INBOX_ATTEMPTS;
 pub use hosts::{Placement, ProjectHost, ProjectHosts};
 pub use sql::now_iso;
 pub use tokens::DeviceTokens;
+pub use worktrees::WorktreeSettings;
 
 /// What the store needs from its host that is not in the database: defaults
 /// the app defines, and facts about the machine.
