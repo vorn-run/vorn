@@ -20,13 +20,14 @@
 //! `vornd:spawn` is always answered. Beside them:
 //!
 //! - `vornd:hello` answers `{protocol, build, native, statuses,
-//!   terminals}`; `native` says vornd runs native work and keeps a copy of
+//!   terminals, headless}`; `native` says vornd runs native work and keeps a copy of
 //!   the server's session records ([`crate::registry`]), which the server
 //!   then feeds, `statuses` that the copy decides the terminals' statuses,
-//!   which the server then takes from it, and `terminals` that vornd
-//!   creates, closes and changes terminals for the clients itself
-//!   ([`crate::native::sessions`]), which the server then follows from the
-//!   copy's notes.
+//!   which the server then takes from it, `terminals` that vornd
+//!   creates, closes and changes terminals for the clients itself, and
+//!   `headless` that it starts and stops headless agents for them
+//!   ([`crate::native::sessions`], [`crate::native::headless`]), which the
+//!   server then follows from the copy's notes.
 //! - `vornd:subscribe` answers `{connected, sessions, ended, notices}`: every
 //!   session held with its latest states, the sessions that ended lately and
 //!   the notifications kept, and with `native` also `registry`, the copy of
@@ -402,6 +403,7 @@ fn call(app: App<'_>, text: &str) {
             "native": engine.registry().wanted(),
             "statuses": engine.registry().decides(),
             "terminals": link.creates_terminals() && engine.registry().decides(),
+            "headless": link.creates_headless() && engine.registry().decides(),
         })),
         "vornd:subscribe" => {
             let state = state(engine);
@@ -710,12 +712,12 @@ mod tests {
 
     impl App {
         fn open(engine: &Arc<Engine>) -> App {
+            App::open_with(engine, Arc::new(crate::applink::AppLink::default()))
+        }
+
+        fn open_with(engine: &Arc<Engine>, link: Arc<AppLink>) -> App {
             let (ours, theirs) = tokio::io::duplex(1 << 20);
-            tokio::spawn(serve_conn(
-                theirs,
-                Arc::clone(engine),
-                Arc::new(crate::applink::AppLink::default()),
-            ));
+            tokio::spawn(serve_conn(theirs, Arc::clone(engine), link));
             App {
                 io: ours,
                 frames: Frames::default(),
@@ -781,6 +783,10 @@ mod tests {
         let (hello, _) = app.call("vornd:hello", Value::Null).await;
         assert_eq!(hello["native"], false);
         assert_eq!(hello["statuses"], false);
+        assert_eq!(
+            (&hello["terminals"], &hello["headless"]),
+            (&json!(false), &json!(false))
+        );
         let (state, _) = app.call("vornd:subscribe", Value::Null).await;
         assert!(state.get("registry").is_none());
 
@@ -862,10 +868,15 @@ mod tests {
         let engine = Engine::new(vorn_engine::Config::default());
         engine.registry().want();
         engine.decide_statuses();
-        let mut app = App::open(&engine);
+        let link = Arc::new(AppLink::default());
+        link.set_creates_headless();
+        let mut app = App::open_with(&engine, link);
+        let (hello, _) = app.call("vornd:hello", Value::Null).await;
+        assert_eq!(hello["statuses"], true);
+        // Each as vornd was started: terminals and headless agents apart.
         assert_eq!(
-            app.call("vornd:hello", Value::Null).await.0["statuses"],
-            true
+            (&hello["terminals"], &hello["headless"]),
+            (&json!(false), &json!(true))
         );
         let mut agent = shell("a", "Claude");
         agent["agentType"] = json!("claude");

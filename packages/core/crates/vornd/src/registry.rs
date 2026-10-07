@@ -375,8 +375,11 @@ impl Record for HeadlessSession {
         self.exit_code = held.exit_code;
         self.ended_at = held.ended_at;
     }
-    // Its status is the server's: running until it exits.
-    fn keep_decided(&mut self, _: &Self) {}
+    // While the registry decides, how an agent ended is read from its
+    // session ([`Registry::headless_exit`]), not from the server's record.
+    fn keep_decided(&mut self, held: &Self) {
+        self.keep_exit(held);
+    }
     // Nothing patches one.
     fn keep_patched(&mut self, _: &Self) {}
     fn tell(&mut self, rev: Rev, _: Option<Stamp>, exit_at: Option<Stamp>) {
@@ -811,6 +814,10 @@ struct Statuses {
     screens: HashMap<String, (AgentStatus, Stamp)>,
     /// When each terminal that went quiet turns idle.
     idle_at: HashMap<String, Instant>,
+    /// How each headless session's program ended, with the effect that
+    /// said so, kept while the engine holds the session as `screens` are:
+    /// a record put in later starts from it.
+    exits: HashMap<String, (i32, Stamp)>,
 }
 
 /// The registry: every record the server holds, as it last told them.
@@ -899,8 +906,10 @@ impl Registry {
                     }
                     Session::Headless(r) => {
                         let id = r.id.clone();
-                        if self.headless.upsert(r, at, ended, false, next) == Upserted::Unchanged {
-                            return None;
+                        match self.headless.upsert(r, at, ended, decided, next) {
+                            Upserted::Unchanged => return None,
+                            Upserted::Created => self.seed_headless(&id),
+                            Upserted::Changed => {}
                         }
                         let row = self.headless.get(&id).expect("the row was just put in");
                         json!({ "op": "upsert", "kind": Kind::Headless, "record": row.told() })
@@ -950,9 +959,12 @@ impl Registry {
                 s.terminals.retain(|t| !still.contains(&t.id));
                 self.closed = still;
                 let fresh = self.terminals.replace(s.terminals, &s.ended, decided, next);
-                self.headless.replace(s.headless, &[], false, next);
+                let fresh_headless = self.headless.replace(s.headless, &s.ended, decided, next);
                 for id in &fresh {
                     self.seed(id);
+                }
+                for id in &fresh_headless {
+                    self.seed_headless(id);
                 }
                 if let Some(st) = &mut self.statuses {
                     let terminals = &self.terminals;
@@ -1004,6 +1016,17 @@ impl Registry {
         if takes_screen(row) && !stale(Some(at), row.status_at) {
             row.record.status = status;
             row.status_at = Some(at);
+        }
+    }
+
+    /// A new headless record starts from how its program ended, when the
+    /// engine said so before the record came ([`Registry::headless_exit`]).
+    fn seed_headless(&mut self, id: &str) {
+        let Some(&(code, at)) = self.statuses.as_ref().and_then(|st| st.exits.get(id)) else {
+            return;
+        };
+        if let Some(row) = self.headless.get_mut(id) {
+            end_headless(row, code, Some(at));
         }
     }
 
@@ -1199,7 +1222,26 @@ impl Registry {
     pub fn session_closed(&mut self, id: &str) {
         if let Some(st) = &mut self.statuses {
             st.screens.remove(id);
+            st.exits.remove(id);
         }
+    }
+
+    /// An exit effect of session `id`'s program, kept for the headless
+    /// record that goes by the id, now or later: it ended with `code` at
+    /// `at`. Answers the note when a record changed. Told again by a
+    /// replay, it changes nothing.
+    pub fn headless_exit(&mut self, id: &str, code: i32, at: Stamp) -> Option<Value> {
+        let st = self.statuses.as_mut()?;
+        match st.exits.get(id) {
+            Some(&(_, held)) if at < held => return None,
+            _ => {}
+        }
+        st.exits.insert(id.to_owned(), (code, at));
+        let row = self.headless.get_mut(id)?;
+        if !end_headless(row, code, Some(at)) {
+            return None;
+        }
+        self.native_upsert_headless(id, json!({}))
     }
 
     /// When the next terminal turns idle, if one is waiting to.
@@ -1322,6 +1364,11 @@ impl Registry {
         self.terminals.get(id).map(|r| (&r.record, r.ended))
     }
 
+    /// The headless agent that goes by `id`.
+    pub fn headless_record(&self, id: &str) -> Option<&HeadlessSession> {
+        self.headless.get(id).map(|r| &r.record)
+    }
+
     /// The terminals whose programs still run (`getLiveSessions`).
     pub fn live_terminals(&self) -> impl Iterator<Item = &TerminalSession> {
         self.terminals
@@ -1363,6 +1410,61 @@ impl Registry {
             fields.extend(extra);
         }
         Some(self.native_note(fields))
+    }
+
+    /// Headless agent `id`'s row, told whole at the next revision with `extra`.
+    fn native_upsert_headless(&mut self, id: &str, extra: Value) -> Option<Value> {
+        let next = Rev(self.rev.0 + 1);
+        let row = self.headless.get_mut(id)?;
+        row.rev = next;
+        let mut fields = json!({ "op": "upsert", "kind": Kind::Headless, "record": row.told() });
+        if let (Value::Object(fields), Value::Object(extra)) = (&mut fields, extra) {
+            fields.extend(extra);
+        }
+        Some(self.native_note(fields))
+    }
+
+    /// Puts in a headless agent vornd is starting. Its program is not up
+    /// yet: [`Registry::headless_started`] or [`Registry::headless_failed`]
+    /// says how that went, and [`Registry::headless_exit`] how it ended.
+    pub fn create_headless(
+        &mut self,
+        record: HeadlessSession,
+    ) -> Result<Vec<Value>, RegistryError> {
+        const CALL: &str = "headless:create";
+        if !self.decides() {
+            return Err(RegistryError::NotDeciding { call: CALL });
+        }
+        let id = record.id.clone();
+        if self.headless.get(&id).is_some() {
+            return Err(RegistryError::BadCall {
+                call: CALL,
+                why: format!("headless session {id} exists already"),
+            });
+        }
+        let next = Rev(self.rev.0 + 1);
+        self.headless
+            .upsert(record, Stamps::default(), false, true, next);
+        self.seed_headless(&id);
+        Ok(self
+            .native_upsert_headless(&id, json!({ "created": true }))
+            .into_iter()
+            .collect())
+    }
+
+    /// Headless agent `id`'s program is up as `pid`, its records in `epoch`.
+    pub fn headless_started(&mut self, id: &str, pid: u32, epoch: u32) -> Option<Value> {
+        let row = self.headless.get_mut(id)?;
+        row.record.pid = pid;
+        self.native_upsert_headless(id, json!({ "started": { "pid": pid, "epoch": epoch } }))
+    }
+
+    /// Headless agent `id`'s program could not be started, and why: it
+    /// ended with exit code 1, as the server ends one whose spawn failed.
+    pub fn headless_failed(&mut self, id: &str, why: &str) -> Option<Value> {
+        let row = self.headless.get_mut(id)?;
+        end_headless(row, 1, None);
+        self.native_upsert_headless(id, json!({ "failed": why }))
     }
 
     /// Puts in a terminal vornd is creating, last in the order. Its program
@@ -1525,6 +1627,28 @@ impl Registry {
     }
 }
 
+/// Marks a headless agent's record exited with `code` at `at` (none for a
+/// program that never started), unless it ended so already or `at` is
+/// older than the exit it holds. Answers whether the record changed.
+fn end_headless(row: &mut Row<HeadlessSession>, code: i32, at: Option<Stamp>) -> bool {
+    let r = &mut row.record;
+    let ended_so = r.status == HeadlessStatus::Exited && r.exit_code == Some(code);
+    if stale(at, row.exit_at) || ended_so {
+        return false;
+    }
+    r.status = HeadlessStatus::Exited;
+    r.exit_code = Some(code);
+    r.ended_at = Some(now_ms());
+    row.exit_at = at;
+    true
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
 fn is_shell(row: &Row<TerminalSession>) -> bool {
     row.record.agent_type == "shell"
 }
@@ -1663,6 +1787,13 @@ impl SessionRegistry {
     /// [`Registry::session_closed`].
     pub fn session_closed(&self, id: &str) {
         self.lock().registry.session_closed(id);
+    }
+
+    /// [`Registry::headless_exit`].
+    pub fn headless_exit(&self, id: &str, code: i32, at: Stamp) {
+        let mut fed = self.lock();
+        let note = fed.registry.headless_exit(id, code, at);
+        self.tell(note);
     }
 
     /// [`Registry::next_idle`].
@@ -2468,5 +2599,129 @@ mod tests {
         let b = SessionRegistry::new();
         assert_ne!(a.snapshot()["gen"], b.snapshot()["gen"]);
         assert_eq!(a.snapshot()["rev"], 0);
+    }
+
+    fn headless_upsert(record: Value, extra: Value) -> Change {
+        let mut v = json!({ "op": "upsert", "kind": "headless", "record": record });
+        if let (Value::Object(v), Value::Object(extra)) = (&mut v, extra) {
+            v.extend(extra);
+        }
+        change(v)
+    }
+
+    #[test]
+    fn a_headless_agents_exit_is_read_from_its_session_while_the_registry_decides() {
+        let mut r = Registry::new(Gen(1));
+        r.decide_statuses();
+        r.apply(change(
+            json!({ "op": "snapshot", "terminals": [], "headless": [headless("h")] }),
+        ));
+        let note = r.headless_exit("h", 3, at(2, 5, 0)).unwrap();
+        assert_eq!(note["native"], true);
+        assert_eq!(note["record"]["status"], "exited");
+        assert_eq!(note["record"]["exitCode"], 3);
+        assert!(note["record"]["endedAt"].is_number());
+        assert_eq!(note["record"]["exitAt"]["rseq"], 5);
+        // Told again by a replay, or by an older effect: nothing moves.
+        assert!(r.headless_exit("h", 3, at(2, 5, 0)).is_none());
+        assert!(r.headless_exit("h", 0, at(2, 4, 0)).is_none());
+
+        // The server's record, still running, moves what it owns and not the exit.
+        let mut later = headless("h");
+        later["pid"] = json!(9);
+        let note = r.apply(headless_upsert(later, json!({}))).unwrap();
+        assert_eq!(note["record"]["pid"], 9);
+        assert_eq!(note["record"]["status"], "exited");
+        assert_eq!(note["record"]["exitCode"], 3);
+        // Once it says the program ended, its record is its own again.
+        let mut ended = headless("h");
+        ended["status"] = json!("exited");
+        ended["exitCode"] = json!(3);
+        ended["endedAt"] = json!(99);
+        let note = r
+            .apply(headless_upsert(
+                ended,
+                json!({ "ended": true, "exitAt": { "epoch": 2, "rseq": 5, "index": 0 } }),
+            ))
+            .unwrap();
+        assert_eq!(note["record"]["endedAt"], 99);
+
+        // An exit told before the record came: the record starts from it.
+        assert!(r.headless_exit("later", 2, at(2, 8, 0)).is_none());
+        let note = r
+            .apply(headless_upsert(headless("later"), json!({})))
+            .unwrap();
+        assert_eq!(note["record"]["status"], "exited");
+        assert_eq!(note["record"]["exitCode"], 2);
+        // The session left the engine: a record under the id again starts afresh.
+        r.session_closed("later");
+        r.apply(change(
+            json!({ "op": "remove", "kind": "headless", "id": "later" }),
+        ));
+        let note = r
+            .apply(headless_upsert(headless("later"), json!({})))
+            .unwrap();
+        assert_eq!(note["record"]["status"], "running");
+
+        // Without deciding, the exit is the server's to tell.
+        let mut r = Registry::new(Gen(1));
+        r.apply(change(
+            json!({ "op": "snapshot", "terminals": [], "headless": [headless("h")] }),
+        ));
+        assert!(r.headless_exit("h", 3, at(2, 5, 0)).is_none());
+        assert_eq!(
+            r.headless_record("h").unwrap().status,
+            HeadlessStatus::Running
+        );
+    }
+
+    #[test]
+    fn a_headless_agent_vornd_starts_is_told_created_started_and_failed() {
+        let mut r = Registry::new(Gen(1));
+        let record = HeadlessSession::deserialize(&headless("h")).unwrap();
+        assert!(matches!(
+            r.create_headless(record.clone()),
+            Err(RegistryError::NotDeciding { .. })
+        ));
+        r.decide_statuses();
+        r.apply(change(
+            json!({ "op": "snapshot", "terminals": [], "headless": [] }),
+        ));
+        let notes = r.create_headless(record.clone()).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0]["created"], true);
+        assert_eq!(notes[0]["native"], true);
+        assert_eq!(notes[0]["kind"], "headless");
+        assert_eq!(notes[0]["record"]["id"], "h");
+        assert!(matches!(
+            r.create_headless(record),
+            Err(RegistryError::BadCall { .. })
+        ));
+        let note = r.headless_started("h", 44, 3).unwrap();
+        assert_eq!(note["started"], json!({ "pid": 44, "epoch": 3 }));
+        assert_eq!(r.headless_record("h").unwrap().pid, 44);
+        assert!(r.headless_started("x", 1, 1).is_none());
+
+        let other = HeadlessSession::deserialize(&headless("f")).unwrap();
+        r.create_headless(other).unwrap();
+        let note = r.headless_failed("f", "no shell").unwrap();
+        assert_eq!(note["failed"], "no shell");
+        assert_eq!(note["record"]["status"], "exited");
+        assert_eq!(note["record"]["exitCode"], 1);
+        assert!(note["record"].get("exitAt").is_none());
+        // The server's record, mirrored with the failure: only that it
+        // heard the program ended is new, and told once.
+        let mut told = headless("f");
+        told["status"] = json!("exited");
+        told["exitCode"] = json!(1);
+        told["endedAt"] = note["record"]["endedAt"].clone();
+        let note = r
+            .apply(headless_upsert(told.clone(), json!({ "ended": true })))
+            .unwrap();
+        assert!(note.get("native").is_none());
+        assert!(r
+            .apply(headless_upsert(told, json!({ "ended": true })))
+            .is_none());
+        assert_eq!(r.snapshot()["headless"].as_array().unwrap().len(), 2);
     }
 }

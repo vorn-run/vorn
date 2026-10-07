@@ -20,7 +20,13 @@ const { spawnMock } = vi.hoisted(() => {
 })
 
 vi.mock('../packages/server/src/vornd-sessions', () => ({
-  vorndSessions: { spawn: spawnMock, release: vi.fn() }
+  vorndSessions: {
+    spawn: spawnMock,
+    release: vi.fn(),
+    on: vi.fn(),
+    createsHeadless: () => false,
+    mirror: { headlessRecord: () => undefined }
+  }
 }))
 vi.mock('../packages/server/src/resolve-executable', () => ({
   findOnPath: (name: string) => (name === 'claude' ? '/opt/agents/bin/claude' : null)

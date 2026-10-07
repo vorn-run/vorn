@@ -53,6 +53,13 @@ import {
  * claimed in vornd (`claim`), so its creates and this server's own starts (a
  * resume, a create for a remote host) check one set of claims, and vornd is told
  * when this server winds down (`tellClosing`), when it creates nothing new.
+ *
+ * Likewise the clients' calls that start and stop headless agents
+ * (`createsHeadless`): vornd starts the agent on pipes in its holder, puts the
+ * record in its copy and tells it (`native`, `created`), then its program's
+ * start and, from the session's exit effect, how it ended. This server follows
+ * the agent as one it started itself: it reads the output for the clients and
+ * the workflow waiting on it, and lets the record go a while after the exit.
  */
 
 /** A session as vornd reports it. */
@@ -86,6 +93,7 @@ interface Hello {
   native?: boolean
   statuses?: boolean
   terminals?: boolean
+  headless?: boolean
 }
 
 /** Whether this server is winding down, as vornd is told it. */
@@ -342,6 +350,9 @@ export class VorndSessions extends EventEmitter {
   /** Whether vornd creates and changes terminals for the clients, as its `vornd:hello` said. */
   private terminalWork = false
 
+  /** Whether vornd starts and stops headless agents for the clients, as its `vornd:hello` said. */
+  private headlessWork = false
+
   /** Whether this server is winding down, as vornd needs to know while it creates terminals. */
   private closingSource: (() => Closing) | null = null
   private toldClosing = ''
@@ -398,6 +409,15 @@ export class VorndSessions extends EventEmitter {
    */
   createsTerminals(): boolean {
     return this.terminalWork && this.decidesStatus()
+  }
+
+  /**
+   * Whether vornd answers the clients' calls that start and stop headless
+   * agents: it says so, and decides the statuses. Its records then come
+   * marked `native` (`SessionMirror`), and this server follows them.
+   */
+  createsHeadless(): boolean {
+    return this.headlessWork && this.decidesStatus()
   }
 
   /**
@@ -536,6 +556,7 @@ export class VorndSessions extends EventEmitter {
     this.nativeWork = hello?.native === true
     this.statusWork = hello?.statuses === true
     this.terminalWork = hello?.terminals === true
+    this.headlessWork = hello?.headless === true
     old?.close()
     channel.on('notification', (method: string, params: unknown) =>
       this.notified(channel, method, params)
@@ -638,10 +659,11 @@ export class VorndSessions extends EventEmitter {
 
   /**
    * A session vornd is starting itself, for a client's create: followed here
-   * as one this server asked for, and started when vornd says its program is up.
+   * as one this server asked for, and started when vornd says its program is
+   * up. `watched` for one whose output this server reads: a headless agent.
    */
-  follow(id: string): VorndPty {
-    const pty = new VorndPty(this, id, false)
+  follow(id: string, watched = false): VorndPty {
+    const pty = new VorndPty(this, id, watched)
     this.ptys.set(id, pty)
     return pty
   }
@@ -913,7 +935,7 @@ export interface SessionNote {
   nativeHolds?: Record<string, number>
   /** A change vornd made itself, for a client's call, rather than one this server told it. */
   native?: boolean
-  /** With `native`: the terminal vornd created. */
+  /** With `native`: the terminal or headless agent vornd created. */
   created?: boolean
   /** With `native`: its program is up. */
   started?: { pid: number; epoch: number }
@@ -1068,6 +1090,10 @@ export class SessionMirror {
 
   terminal(id: string): TerminalSession | undefined {
     return this.terminalRecords.get(id)
+  }
+
+  headlessRecord(id: string): HeadlessSession | undefined {
+    return this.headlessRecords.get(id)
   }
 
   /** Sessions at work in a worktree: terminals not idle, agents still running. */

@@ -252,16 +252,28 @@ describe('RecordFeed', () => {
   it('removes only what it told, and starts over with a snapshot', () => {
     feed.remove('headless', 'never-told')
     expect(sent).toEqual([])
+    const done = headless('done', { status: 'exited', exitCode: 0 })
     feed.setTerminalSource({ terminals: () => [terminal('a')], order: () => ['a'] })
-    feed.setHeadlessSource(() => [headless('h')])
+    feed.setHeadlessSource(() => [headless('h'), done])
     feed.snapshot()
-    expect(sent[0]).toMatchObject({ op: 'snapshot', order: ['a'], holds: {} })
+    // An agent that exited is one whose program ended, as a terminal's is.
+    expect(sent[0]).toMatchObject({ op: 'snapshot', order: ['a'], holds: {}, ended: ['done'] })
     // What the snapshot carried is not sent again.
     feed.terminal(terminal('a'))
     feed.order(['a'])
+    feed.headless(done, true)
     expect(sent).toHaveLength(1)
     feed.remove('headless', 'h')
     expect(sent[1]).toEqual({ op: 'remove', kind: 'headless', id: 'h' })
+    // Ended is a change in itself, told once.
+    const h = headless('h2')
+    feed.headless(h)
+    feed.headless(h, true)
+    feed.headless(h, true)
+    expect(sent.slice(2)).toEqual([
+      { op: 'upsert', kind: 'headless', record: h },
+      { op: 'upsert', kind: 'headless', record: h, ended: true }
+    ])
   })
 })
 

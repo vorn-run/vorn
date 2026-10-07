@@ -71,12 +71,13 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "auth",
     "mcp",
     "terminal",
+    "headless",
 ];
 
 /// Groups whose reads vornd can answer from its copy of the server's
 /// session records ([`crate::registry`]), to compare with the server's in
 /// shadow mode, while the server still owns them: `native` is refused.
-pub const SHADOW_GROUPS: &[&str] = &["headless", "worktree"];
+pub const SHADOW_GROUPS: &[&str] = &["worktree"];
 
 /// Groups the Native server switch runs natively: the one place a group
 /// joins the switch. Each is also in [`NATIVE_GROUPS`].
@@ -96,6 +97,7 @@ pub const NATIVE_SERVER_GROUPS: &[&str] = &[
     "auth",
     "mcp",
     "terminal",
+    "headless",
 ];
 
 /// The group a method belongs to: everything before the first colon.

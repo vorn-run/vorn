@@ -47,7 +47,7 @@ use vorn_agents::{paths, Agent};
 use vorn_git::repo::{extract_worktree_name, node_basename, Git};
 use vorn_sessiond_wire::{Io, Sig, SpawnSpec};
 
-use super::{agent, shell, Answer, Native};
+use super::{agent, headless, shell, Answer, Native};
 use crate::claims::{Claims, OnePerKey};
 use crate::registry::{AgentStatus, Registry, TerminalSession};
 
@@ -100,13 +100,27 @@ pub trait Host: Send + Sync + fmt::Debug {
     /// Whether a session can be started now: the holder is connected.
     fn ready(&self) -> bool;
 
-    /// Starts `spec` under `name`, then calls `then` with how it went. When
-    /// it is up, `typed` is written to it, no sooner than [`TYPE_AFTER`]
-    /// after this call. Returns at once.
-    fn start(&self, spec: SpawnSpec, name: String, typed: Option<Vec<u8>>, then: Then);
+    /// Starts `spec` under `name`, then calls `then` with how it went, and
+    /// gives it `input` once it is up. Returns at once.
+    fn start(&self, spec: SpawnSpec, name: String, input: Input, then: Then);
 
     /// Sends `sig` to session `id`'s program.
     fn signal(&self, id: &str, sig: Sig);
+
+    /// Sends `sig` to session `id`'s program `after` a while, if it still runs.
+    fn signal_after(&self, id: &str, sig: Sig, after: Duration);
+}
+
+/// What a session's program is given once it is up.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Input {
+    None,
+    /// Typed into a terminal, no sooner than [`TYPE_AFTER`] after the
+    /// start was asked for: an agent's launch line, for its shell.
+    Typed(Vec<u8>),
+    /// Written to a piped program's stdin, which then closes: a headless
+    /// agent's prompt, or nothing when it has none.
+    Prompt(Option<Vec<u8>>),
 }
 
 /// What a start's outcome is handed to.
@@ -123,10 +137,10 @@ pub struct Started {
 /// What the sessions vornd starts keep between calls.
 #[derive(Debug, Default)]
 pub struct Sessions {
-    /// Sessions whose program is being started, and whether each was closed
-    /// meanwhile: one it is signalled once it is up. One lock for both, so a
-    /// close cannot fall between the start's look and its answer.
-    starting: Mutex<HashMap<String, bool>>,
+    /// Sessions whose program is being started, and the signal a close or
+    /// a stop meanwhile asked for, sent once it is up. One lock for both,
+    /// so a close cannot fall between the start's look and its answer.
+    starting: Mutex<HashMap<String, Option<Sig>>>,
     /// Creates naming a conversation, while they prepare.
     creating: OnePerKey<Answer>,
 }
@@ -135,6 +149,11 @@ pub struct Sessions {
 /// (`refuseWhileClosing`), if it is.
 fn refusal(native: &Native) -> Option<&'static str> {
     native.link.get()?.closing().refusal()
+}
+
+/// How the server is winding down, if it is.
+pub(super) fn closing(native: &Native) -> Option<crate::applink::Closing> {
+    native.link.get().map(|l| l.closing())
 }
 
 /// The conversations being started, which vornd's creates and the server's
@@ -212,7 +231,7 @@ pub fn foresees(method: &str) -> bool {
     matches!(
         method,
         "terminal:kill" | "terminal:rename" | "terminal:setGroup" | "terminal:reorder"
-    )
+    ) || headless::foresees(method)
 }
 
 /// What vornd would answer `method`, read from the copy of the registry
@@ -221,6 +240,9 @@ pub fn foresees(method: &str) -> bool {
 /// copy does not hold, params of a shape its handler does not read, or no
 /// copy of its records yet.
 pub fn foresee(native: &Native, method: &str, params: &Value) -> Option<Answer> {
+    if headless::foresees(method) {
+        return headless::foresee(native, params);
+    }
     let asked = asked(method, params)?;
     native.registry.get()?.read(|r| match &asked {
         Asked::Kill(id) => r.terminal(id).map(|_| Answer::Void),
@@ -230,7 +252,7 @@ pub fn foresee(native: &Native, method: &str, params: &Value) -> Option<Answer> 
 }
 
 /// A check's outcome as the server answers it: nothing, or its refusal.
-fn refused(check: Result<(), crate::registry::RegistryError>) -> Answer {
+pub(super) fn refused(check: Result<(), crate::registry::RegistryError>) -> Answer {
     match check {
         Ok(()) => Answer::Void,
         Err(e) => Answer::Error(e.to_string()),
@@ -261,6 +283,9 @@ pub struct CreateRequest {
     pub worktree_name: Option<String>,
     pub initial_prompt: Option<String>,
     pub args: Option<Vec<String>>,
+    /// Read by a headless create only: the workflow that asked for it.
+    pub workflow_id: Option<String>,
+    pub workflow_name: Option<String>,
 }
 
 impl CreateRequest {
@@ -289,9 +314,7 @@ impl CreateRequest {
         if text("remoteHostId")?.is_some_and(|h| !h.is_empty()) {
             return None;
         }
-        // Read for their shape only: the server's handler ignores them.
-        text("workflowId")?;
-        text("workflowName")?;
+        // Read for its shape only: the server's handlers ignore it.
         flag("headless")?;
         match p.get("promptDelayMs") {
             None | Some(Value::Null | Value::Number(_)) => {}
@@ -319,6 +342,8 @@ impl CreateRequest {
             worktree_name: text("worktreeName")?,
             initial_prompt: text("initialPrompt")?,
             args,
+            workflow_id: text("workflowId")?,
+            workflow_name: text("workflowName")?,
         })
     }
 
@@ -330,11 +355,11 @@ impl CreateRequest {
 }
 
 /// JavaScript's truthiness for an optional string.
-fn given(s: Option<&str>) -> Option<&str> {
+pub(super) fn given(s: Option<&str>) -> Option<&str> {
     s.filter(|s| !s.is_empty())
 }
 
-fn now_ms() -> i64 {
+pub(super) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
@@ -351,11 +376,17 @@ fn record_json(record: &TerminalSession) -> Value {
 /// is connected. When not, the server does it.
 fn can_start(native: &Native) -> bool {
     let creates = native.link.get().is_some_and(|l| l.creates_terminals());
+    creates && fed_and_held(native)
+}
+
+/// Whether the registry holds the server's records and decides, and the
+/// session holder is connected.
+pub(super) fn fed_and_held(native: &Native) -> bool {
     let fed = native
         .registry
         .get()
         .is_some_and(|r| r.read(|r| r.decides()) == Some(true));
-    creates && fed && native.host.get().is_some_and(|h| h.ready())
+    fed && native.host.get().is_some_and(|h| h.ready())
 }
 
 /// `terminal:create` for a local agent.
@@ -436,7 +467,7 @@ fn live_record(native: &Native, id: &str) -> Option<Value> {
         .read(|r| r.live_terminals().find(|t| t.id == id).map(record_json))?
 }
 
-fn new_id() -> String {
+pub(super) fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
@@ -454,13 +485,20 @@ struct Prepared {
 }
 
 /// The workspaces one preparation holds, let go of when it is dropped.
-struct Holds<'a> {
+pub(super) struct Holds<'a> {
     native: &'a Native,
     dirs: Vec<String>,
 }
 
-impl Holds<'_> {
-    fn hold(&mut self, dir: &str) {
+impl<'a> Holds<'a> {
+    pub(super) fn new(native: &'a Native) -> Holds<'a> {
+        Holds {
+            native,
+            dirs: Vec::new(),
+        }
+    }
+
+    pub(super) fn hold(&mut self, dir: &str) {
         let key = paths::normalize(dir);
         if let Some(registry) = self.native.registry.get() {
             registry.change(|r| ((), vec![r.hold(&key)]));
@@ -491,10 +529,7 @@ fn start_agent(native: &Native, req: &CreateRequest, id: &str) -> Answer {
     let Some(config) = agent::command_of(&settings, req.agent) else {
         return Answer::Forward;
     };
-    let mut holds = Holds {
-        native,
-        dirs: Vec::new(),
-    };
+    let mut holds = Holds::new(native);
     // Held from here until the record is in, so a worktree action in between
     // sees it as in use: the worktree it names, and one it creates.
     if let Some(existing) = given(req.existing_worktree_path.as_deref()) {
@@ -535,8 +570,8 @@ fn start_agent(native: &Native, req: &CreateRequest, id: &str) -> Answer {
         agent_session_id: prepared.agent_session_id.filter(|a| !a.is_empty()),
         ..skeleton(id, req.agent.id(), &req.project_name, &req.project_path)
     };
-    let typed = format!("{}\r", prepared.launch_line).into_bytes();
-    let answer = register(native, record, &prepared.cwd, argv, env, Some(typed));
+    let typed = Input::Typed(format!("{}\r", prepared.launch_line).into_bytes());
+    let answer = register(native, record, &prepared.cwd, argv, env, typed);
     drop(holds);
     answer
 }
@@ -576,8 +611,89 @@ fn skeleton(id: &str, agent: &str, project_name: &str, project_path: &str) -> Te
     }
 }
 
-fn var(name: &str) -> Option<String> {
+pub(super) fn var(name: &str) -> Option<String> {
     std::env::var(name).ok()
+}
+
+/// The workspace a session runs in, as `prepareSession` and
+/// `createHeadless` work it out: the worktree it names, or one made for
+/// it, or the branch checked out in the project.
+#[derive(Debug, Default)]
+pub(super) struct Workspace {
+    /// Where the program starts: the worktree when there is one.
+    pub cwd: String,
+    /// The branch the call asked for, as it was taken; `None` leaves it to
+    /// what git says of `cwd`.
+    pub branch: Option<String>,
+    /// The worktree the call named, when it is there.
+    pub reused: Option<String>,
+    /// The worktree made for the call: its path and name.
+    pub made: Option<(String, String)>,
+}
+
+/// Works out the workspace for `req`, making a worktree or checking out a
+/// branch as the server does, holding each directory made in `holds`.
+pub(super) fn workspace(
+    native: &Native,
+    req: &CreateRequest,
+    holds: &mut Holds<'_>,
+) -> Result<Workspace, Answer> {
+    let git = Git {
+        bin: native.env.git_bin(),
+        env: native.env.get(),
+    };
+    let project = req.project_path.as_str();
+    let mut out = Workspace {
+        cwd: project.to_owned(),
+        ..Workspace::default()
+    };
+    let branch = given(req.branch.as_deref());
+    let existing = given(req.existing_worktree_path.as_deref());
+    if let Some(existing) = existing.filter(|e| Path::new(e).exists()) {
+        out.cwd = existing.to_owned();
+        out.branch = req.branch.clone();
+        out.reused = Some(existing.to_owned());
+    } else if let Some(branch) = branch.filter(|_| req.use_worktree || existing.is_some()) {
+        if git.is_git_repo(Path::new(project)) {
+            if let Some(gone) = existing {
+                warn!(path = gone, "the worktree is gone; making a new one");
+            }
+            let made = native.turns.take(Path::new(project), || {
+                git.create_worktree_at(project, branch, req.worktree_name.as_deref(), |p| {
+                    holds.hold(p)
+                })
+            });
+            let made = made.map_err(|e| Answer::Error(e.to_string()))?;
+            out.cwd.clone_from(&made.worktree_path);
+            out.made = Some((made.worktree_path, made.name));
+            out.branch = Some(made.branch);
+        } else {
+            warn!(project, "not a git repository; no worktree for it");
+        }
+    } else if let Some(branch) = branch {
+        let dir = Path::new(project);
+        if git.is_git_repo(dir) {
+            if git.branch(dir).as_deref() != Some(branch) {
+                // What git says is not the call's: the session starts on
+                // whatever is checked out, as the server's does.
+                let _ = native.turns.take(dir, || git.checkout(dir, branch));
+            }
+            out.branch = Some(branch.to_owned());
+        }
+    }
+    if out.branch.as_deref().is_none_or(str::is_empty) {
+        out.branch = git.branch(Path::new(&out.cwd));
+    }
+    Ok(out)
+}
+
+/// The commit `dir` stands at.
+pub(super) fn head_of(native: &Native, dir: &str) -> Option<String> {
+    let git = Git {
+        bin: native.env.git_bin(),
+        env: native.env.get(),
+    };
+    git.head(Path::new(dir))
 }
 
 /// The pinned id, the launch line and the workspace (`prepareLocal`). The
@@ -622,64 +738,29 @@ fn prepare(
     let launch_line = launch_line(&launch, Some(config), &safe, &machine)
         .map_err(|e| Answer::Error(e.to_string()))?;
 
-    let git = Git {
-        bin: native.env.git_bin(),
-        env: safe,
-    };
-    let project = req.project_path.as_str();
+    let space = workspace(native, req, holds)?;
     let mut out = Prepared {
         agent_session_id,
         launch_line,
-        cwd: project.to_owned(),
+        head_commit: head_of(native, &space.cwd),
+        branch: space.branch,
+        cwd: space.cwd,
         ..Prepared::default()
     };
-    let branch = given(req.branch.as_deref());
-    let existing = given(req.existing_worktree_path.as_deref());
-    let mut effective_branch = None;
-    if let Some(existing) = existing.filter(|e| Path::new(e).exists()) {
-        out.cwd = existing.to_owned();
-        effective_branch = req.branch.clone();
-        if paths::normalize(existing) != paths::normalize(project) {
-            out.worktree_path = Some(existing.to_owned());
-            out.worktree_name = Some(
-                given(req.worktree_name.as_deref())
-                    .map_or_else(|| extract_worktree_name(existing), str::to_owned),
-            );
-        }
-    } else if let Some(branch) = branch.filter(|_| req.use_worktree || existing.is_some()) {
-        if git.is_git_repo(Path::new(project)) {
-            if let Some(gone) = existing {
-                warn!(path = gone, "the worktree is gone; making a new one");
-            }
-            let made = native.turns.take(Path::new(project), || {
-                git.create_worktree_at(project, branch, req.worktree_name.as_deref(), |p| {
-                    holds.hold(p)
-                })
-            });
-            let made = made.map_err(|e| Answer::Error(e.to_string()))?;
-            out.cwd.clone_from(&made.worktree_path);
-            out.worktree_path = Some(made.worktree_path);
-            out.worktree_name = Some(made.name);
-            effective_branch = Some(made.branch);
-        } else {
-            warn!(project, "not a git repository; no worktree for it");
-        }
-    } else if let Some(branch) = branch {
-        let dir = Path::new(project);
-        if git.is_git_repo(dir) {
-            if git.branch(dir).as_deref() != Some(branch) {
-                // What git says is not the call's: the session starts on
-                // whatever is checked out, as the server's does.
-                let _ = native.turns.take(dir, || git.checkout(dir, branch));
-            }
-            effective_branch = Some(branch.to_owned());
-        }
+    // The project itself, named as a worktree, is no worktree.
+    if let Some(existing) = space
+        .reused
+        .filter(|e| paths::normalize(e) != paths::normalize(&req.project_path))
+    {
+        out.worktree_name = Some(
+            given(req.worktree_name.as_deref())
+                .map_or_else(|| extract_worktree_name(&existing), str::to_owned),
+        );
+        out.worktree_path = Some(existing);
+    } else if let Some((path, name)) = space.made {
+        out.worktree_path = Some(path);
+        out.worktree_name = Some(name);
     }
-    out.branch = match effective_branch.filter(|b| !b.is_empty()) {
-        Some(b) => Some(b),
-        None => git.branch(Path::new(&out.cwd)),
-    };
-    out.head_commit = git.head(Path::new(&out.cwd));
     Ok(out)
 }
 
@@ -726,11 +807,11 @@ fn shell_create(native: &Native, cwd: Option<&str>) -> Answer {
         shell_cwd: Some(dir.clone()),
         ..skeleton(&id, "shell", &project_name, &dir)
     };
-    register(native, record, &dir, argv, env, None)
+    register(native, record, &dir, argv, env, Input::None)
 }
 
 /// Sets `key` in `env`, replacing a value it had, as an object spread does.
-fn set(env: &mut Vec<(String, String)>, key: &str, value: String) {
+pub(super) fn set(env: &mut Vec<(String, String)>, key: &str, value: String) {
     match env.iter_mut().find(|(k, _)| k == key) {
         Some(slot) => slot.1 = value,
         None => env.push((key.to_owned(), value)),
@@ -745,7 +826,7 @@ fn register(
     cwd: &str,
     argv: Vec<String>,
     mut env: Vec<(String, String)>,
-    typed: Option<Vec<u8>>,
+    input: Input,
 ) -> Answer {
     let (Some(registry), Some(host)) = (native.registry.get(), native.host.get()) else {
         return Answer::Forward;
@@ -778,16 +859,16 @@ fn register(
         },
         ring_bytes: None,
     };
-    native.sessions.lock_starting().insert(id.clone(), false);
+    native.sessions.lock_starting().insert(id.clone(), None);
     let (registry, host_after) = (std::sync::Arc::clone(registry), std::sync::Arc::clone(host));
     let sessions = std::sync::Arc::clone(&native.sessions);
     let name = id.clone();
     host.start(
         spec,
         name,
-        typed,
+        input,
         Box::new(move |outcome| {
-            let doomed = sessions.lock_starting().remove(&id) == Some(true);
+            let doomed = sessions.lock_starting().remove(&id).flatten();
             match outcome {
                 Ok(s) => {
                     // A record gone meanwhile (the server let go of it) holds
@@ -798,8 +879,8 @@ fn register(
                             None => (false, Vec::new()),
                         })
                         .unwrap_or(false);
-                    if doomed || !held {
-                        host_after.signal(&id, Sig::Hup);
+                    if let Some(sig) = doomed.or((!held).then_some(Sig::Hup)) {
+                        host_after.signal(&id, sig);
                     }
                 }
                 Err(why) => {
@@ -813,17 +894,17 @@ fn register(
 }
 
 impl Sessions {
-    fn lock_starting(&self) -> std::sync::MutexGuard<'_, HashMap<String, bool>> {
+    pub(super) fn lock_starting(&self) -> std::sync::MutexGuard<'_, HashMap<String, Option<Sig>>> {
         self.starting.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Marks session `id` closed while its program starts, if it is still
-    /// starting: answers whether it was, under the one lock the start's
-    /// answer takes.
-    fn doom(&self, id: &str) -> bool {
+    /// Asks for `sig` to be sent to session `id` once its program is up,
+    /// if it is still starting: answers whether it was, under the one lock
+    /// the start's answer takes.
+    pub(super) fn doom(&self, id: &str, sig: Sig) -> bool {
         match self.lock_starting().get_mut(id) {
-            Some(doomed) => {
-                *doomed = true;
+            Some(pending) => {
+                *pending = Some(sig);
                 true
             }
             None => false,
@@ -862,7 +943,7 @@ fn kill(native: &Native, id: &str) -> Answer {
     if let Some(claims) = claims(native) {
         claims.release_for(id);
     }
-    if live && !native.sessions.doom(id) {
+    if live && !native.sessions.doom(id, Sig::Hup) {
         if let Some(host) = native.host.get() {
             host.signal(id, Sig::Hup);
         }
@@ -908,7 +989,10 @@ fn reorder(native: &Native, ids: Vec<String>) -> Answer {
 
 /// Whether [`plan`] works out what `method` would start.
 pub fn plans(method: &str) -> bool {
-    matches!(method, "terminal:create" | "shell:create")
+    matches!(
+        method,
+        "terminal:create" | "shell:create" | "headless:create"
+    )
 }
 
 /// What a create or a shell would start, worked out without starting or
@@ -921,6 +1005,7 @@ pub fn plans(method: &str) -> bool {
 pub fn plan(native: &Native, method: &str, params: &Value, shells: usize) -> Option<Value> {
     match method {
         "terminal:create" => plan_agent(native, &CreateRequest::read(params)?),
+        "headless:create" => headless::plan(native, &CreateRequest::read(params)?),
         "shell:create" => {
             let cwd = match params {
                 Value::Null => None,
@@ -946,10 +1031,7 @@ fn plan_agent(native: &Native, req: &CreateRequest) -> Option<Value> {
     if req.named().is_some() {
         return None;
     }
-    let mut holds = Holds {
-        native,
-        dirs: Vec::new(),
-    };
+    let mut holds = Holds::new(native);
     let prepared = prepare(native, req, &config, &mut holds).ok()?;
     let shell = launch_shell::default_shell(settings.shell.as_deref(), Platform::HOST, var);
     let mut argv = vec![shell];
@@ -1030,13 +1112,23 @@ fn plan_json(
     if !cfg!(windows) {
         keys.push("TERM".to_owned());
     }
+    plan_of(argv, cwd, keys, &record_json(record))
+}
+
+/// A plan from its parts, the environment's names sorted.
+pub(super) fn plan_of(
+    argv: Vec<String>,
+    cwd: &str,
+    mut keys: Vec<String>,
+    record: &Value,
+) -> Value {
     keys.sort();
     keys.dedup();
     json!({
         "argv": argv,
         "cwd": cwd,
         "envKeys": keys,
-        "record": plan_record(&record_json(record)),
+        "record": plan_record(record),
     })
 }
 
@@ -1049,7 +1141,13 @@ pub fn plan_record(record: &Value) -> Value {
         for (k, v) in fields {
             if matches!(
                 k.as_str(),
-                "id" | "createdAt" | "pid" | "rev" | "statusAt" | "exitAt" | "hookSessionId"
+                "id" | "createdAt"
+                    | "startedAt"
+                    | "pid"
+                    | "rev"
+                    | "statusAt"
+                    | "exitAt"
+                    | "hookSessionId"
             ) {
                 continue;
             }
@@ -1084,7 +1182,7 @@ pub fn spawn_plan(spawn: &Value, reply: &Value) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     /// A project path that is absolute where the test runs.
@@ -1147,8 +1245,8 @@ mod tests {
 
     /// A host that starts nothing until told, and keeps the signals sent.
     #[derive(Default)]
-    struct FakeHost {
-        starts: Mutex<Vec<(String, Then)>>,
+    pub(in crate::native) struct FakeHost {
+        pub(in crate::native) starts: Mutex<Vec<(String, SpawnSpec, Input, Then)>>,
         signals: Mutex<Vec<(String, Sig)>>,
     }
 
@@ -1162,20 +1260,35 @@ mod tests {
         fn ready(&self) -> bool {
             true
         }
-        fn start(&self, _: SpawnSpec, name: String, _: Option<Vec<u8>>, then: Then) {
-            self.starts.lock().unwrap().push((name, then));
+        fn start(&self, spec: SpawnSpec, name: String, input: Input, then: Then) {
+            self.starts.lock().unwrap().push((name, spec, input, then));
         }
         fn signal(&self, id: &str, sig: Sig) {
+            self.signals.lock().unwrap().push((id.to_owned(), sig));
+        }
+        fn signal_after(&self, id: &str, sig: Sig, _: Duration) {
             self.signals.lock().unwrap().push((id.to_owned(), sig));
         }
     }
 
     impl FakeHost {
-        fn up(&self, pid: u32) {
-            let (_, then) = self.starts.lock().unwrap().remove(0);
+        /// The oldest start is up as `pid`.
+        pub(in crate::native) fn up(&self, pid: u32) {
+            let (_, _, _, then) = self.starts.lock().unwrap().remove(0);
             then(Ok(Started { pid, epoch: 1 }));
         }
-        fn signalled(&self) -> Vec<String> {
+        /// The oldest start failed.
+        pub(in crate::native) fn down(&self, why: &str) {
+            let (_, _, _, then) = self.starts.lock().unwrap().remove(0);
+            then(Err(why.to_owned()));
+        }
+        /// What the latest start was asked for.
+        pub(in crate::native) fn last_start(&self) -> (SpawnSpec, Input) {
+            let starts = self.starts.lock().unwrap();
+            let (_, spec, input, _) = starts.last().expect("a start was asked for");
+            (spec.clone(), input.clone())
+        }
+        pub(in crate::native) fn signalled(&self) -> Vec<String> {
             self.signals
                 .lock()
                 .unwrap()
@@ -1183,18 +1296,21 @@ mod tests {
                 .map(|(id, _)| id.clone())
                 .collect()
         }
+        pub(in crate::native) fn signals(&self) -> Vec<(String, Sig)> {
+            self.signals.lock().unwrap().clone()
+        }
     }
 
-    struct Fed {
-        native: std::sync::Arc<Native>,
-        registry: std::sync::Arc<crate::registry::SessionRegistry>,
-        host: std::sync::Arc<FakeHost>,
-        link: std::sync::Arc<crate::applink::AppLink>,
+    pub(in crate::native) struct Fed {
+        pub(in crate::native) native: std::sync::Arc<Native>,
+        pub(in crate::native) registry: std::sync::Arc<crate::registry::SessionRegistry>,
+        pub(in crate::native) host: std::sync::Arc<FakeHost>,
+        pub(in crate::native) link: std::sync::Arc<crate::applink::AppLink>,
     }
 
     /// vornd holding the server's records: two agents in one worktree, one
     /// of them idle, and a shell.
-    fn fed() -> Fed {
+    pub(in crate::native) fn fed() -> Fed {
         let native = Native::new();
         let registry = crate::registry::SessionRegistry::new();
         native.set_registry(std::sync::Arc::clone(&registry));
@@ -1277,7 +1393,7 @@ mod tests {
             "/p",
             vec!["sh".into()],
             Vec::new(),
-            None,
+            Input::None,
         );
         assert!(matches!(answer, Answer::Result(ref r) if r["id"] == "n" && r["pid"] == 0));
         assert_eq!(ids(&fed), ["a", "b", "sh", "n"]);
@@ -1298,7 +1414,7 @@ mod tests {
             "/p",
             vec!["sh".into()],
             Vec::new(),
-            None,
+            Input::None,
         );
         fed.registry
             .feed(1, &json!({ "op": "remove", "kind": "terminal", "id": "m" }))

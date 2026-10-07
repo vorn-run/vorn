@@ -54,7 +54,8 @@ export interface RecordSink {
  *
  * A terminal whose program ended is sent with `ended`: while vornd decides the
  * statuses (`vornd-sessions.ts`), that is what gives the record back to this
- * server, status included.
+ * server, status included. So is a headless agent that exited, whose exit vornd
+ * reads from its session meanwhile.
  */
 export class RecordFeed {
   private terminalSource: RecordSource | null = null
@@ -109,9 +110,9 @@ export class RecordFeed {
     this.upsert('terminal', session, ended)
   }
 
-  /** A headless agent's record was created or changed. */
-  headless(session: HeadlessSession): void {
-    this.upsert('headless', session)
+  /** A headless agent's record was created or changed; `ended` once its program has. */
+  headless(session: HeadlessSession, ended = false): void {
+    this.upsert('headless', session, ended)
   }
 
   /** The server let go of a record. */
@@ -148,14 +149,20 @@ export class RecordFeed {
     const terminals = this.terminalSource?.terminals() ?? []
     const headless = this.headlessSource?.() ?? []
     const order = this.terminalSource?.order() ?? []
-    const ended = this.terminalSource?.ended?.() ?? []
+    const ended = [
+      ...(this.terminalSource?.ended?.() ?? []),
+      ...headless.filter((s) => s.status === 'exited').map((s) => s.id)
+    ]
     const holds = heldWorkspaces()
     this.told.clear()
     for (const s of terminals) {
       const key = `terminal/${s.id}`
       this.told.set(key, this.fingerprint('terminal', s, ended.includes(s.id)))
     }
-    for (const s of headless) this.told.set(`headless/${s.id}`, this.fingerprint('headless', s))
+    for (const s of headless) {
+      const key = `headless/${s.id}`
+      this.told.set(key, this.fingerprint('headless', s, s.status === 'exited'))
+    }
     this.toldOrder = JSON.stringify(order)
     this.toldHolds = JSON.stringify(holds)
     this.send({

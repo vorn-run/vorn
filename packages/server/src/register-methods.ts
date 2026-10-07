@@ -76,6 +76,7 @@ import type {
   ConnectorManifest,
   ExtensionActivationState,
   ExternalItem,
+  HeadlessSession,
   ProjectConfig,
   TerminalSession,
   WorkflowExecution,
@@ -2340,6 +2341,15 @@ export function registerAllMethods(): void {
       const p = payload as { id: string; exitCode: number }
       logSessionEvent(p.id, 'exited', { exitCode: p.exitCode })
     }
+  })
+  // An agent vornd started for a client: logged as `headless:create` logs one.
+  headlessManager.on('session-created', (session: HeadlessSession) => {
+    logSessionEvent(session.id, 'created', {
+      agentType: session.agentType,
+      projectName: session.projectName,
+      projectPath: session.projectPath,
+      headless: true
+    })
   })
   scheduler.on('client-message', (channel: string, payload: unknown) => {
     clientRegistry.broadcast(channel, payload)

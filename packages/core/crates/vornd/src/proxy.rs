@@ -202,6 +202,9 @@ impl Daemon {
         if self.groups.mode("terminal") == Mode::Native {
             link.set_creates_terminals();
         }
+        if self.groups.mode("headless") == Mode::Native {
+            link.set_creates_headless();
+        }
         let native = Arc::clone(native);
         tokio::spawn(async move {
             loop {
