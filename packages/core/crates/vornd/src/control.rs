@@ -79,7 +79,7 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::broadcast::{self, error::RecvError};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
 use vorn_engine::{Effect, EffectId};
@@ -205,7 +205,7 @@ where
     let subscribed = Arc::new(AtomicBool::new(false));
     // Taken before anything is answered, so nothing that happens from here
     // on is missed by a subscription; what it repeats, the app drops.
-    let mut events = engine.subscribe();
+    let events = engine.subscribe();
 
     let writer = tokio::spawn(async move {
         while let Some(o) = conn.next().await {
@@ -223,48 +223,16 @@ where
         }
         "the connection closed".to_owned()
     });
-    // Each change to the copy of the server's records, once subscribed. A
-    // subscriber left behind sees a gap in the revisions and asks again.
-    let mut notes = engine.registry().subscribe();
-    let noter = {
-        let (fwd, subscribed) = (fwd.clone(), Arc::clone(&subscribed));
-        tokio::spawn(async move {
-            loop {
-                match notes.recv().await {
-                    Ok(params) => {
-                        if subscribed.load(Ordering::Acquire) {
-                            fwd.send_now(&note("vornd:session", params));
-                        }
-                    }
-                    Err(RecvError::Lagged(_)) => {}
-                    Err(RecvError::Closed) => return,
-                }
-            }
-        })
-    };
-    let notifier = {
-        let (fwd, subscribed) = (fwd.clone(), Arc::clone(&subscribed));
-        tokio::spawn(async move {
-            loop {
-                match events.recv().await {
-                    Ok(ev) => {
-                        if subscribed.load(Ordering::Acquire) {
-                            if let Some(v) = event_note(&ev) {
-                                fwd.send_now(&v);
-                            }
-                        }
-                    }
-                    // Fell behind: the states are sent again whole.
-                    Err(RecvError::Lagged(_)) => {
-                        if subscribed.load(Ordering::Acquire) {
-                            fwd.send_now(&note("vornd:connected", json!({})));
-                        }
-                    }
-                    Err(RecvError::Closed) => return,
-                }
-            }
-        })
-    };
+    // Each change to the copy of the server's records and each engine event,
+    // once subscribed. A subscriber left behind sees a gap in the revisions
+    // and asks again.
+    let notes = engine.registry().subscribe();
+    let notifier = tokio::spawn(forward_notes(
+        notes,
+        events,
+        fwd.clone(),
+        Arc::clone(&subscribed),
+    ));
 
     // What vornd asks of the server, from the subscription on.
     let mut asks: Option<tokio::task::JoinHandle<()>> = None;
@@ -301,13 +269,56 @@ where
         }
     };
     notifier.abort();
-    noter.abort();
     if let Some(asks) = asks {
         asks.abort();
     }
     writer.abort();
     engine.registry().left(id);
     why
+}
+
+/// Forwards registry notes and engine events from one task, so they reach the
+/// app in the order they happened: a close's remove note is published before
+/// its program is hung up, so it goes ahead of that program's exit, and the
+/// app never takes the exit of a live record for a second one of a closed
+/// record. `biased` keeps that order when both are ready at once.
+async fn forward_notes(
+    mut notes: broadcast::Receiver<Value>,
+    mut events: broadcast::Receiver<Event>,
+    fwd: Forwarder,
+    subscribed: Arc<AtomicBool>,
+) {
+    let (mut notes_open, mut events_open) = (true, true);
+    while notes_open || events_open {
+        tokio::select! {
+            biased;
+            changed = notes.recv(), if notes_open => match changed {
+                Ok(params) => {
+                    if subscribed.load(Ordering::Acquire) {
+                        fwd.send_now(&note("vornd:session", params));
+                    }
+                }
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => notes_open = false,
+            },
+            ev = events.recv(), if events_open => match ev {
+                Ok(ev) => {
+                    if subscribed.load(Ordering::Acquire) {
+                        if let Some(v) = event_note(&ev) {
+                            fwd.send_now(&v);
+                        }
+                    }
+                }
+                // Fell behind: the states are sent again whole.
+                Err(RecvError::Lagged(_)) => {
+                    if subscribed.load(Ordering::Acquire) {
+                        fwd.send_now(&note("vornd:connected", json!({})));
+                    }
+                }
+                Err(RecvError::Closed) => events_open = false,
+            },
+        }
+    }
 }
 
 /// Sends a subscribed connection what vornd asks of the server, until the
@@ -818,6 +829,40 @@ mod tests {
             "id": id, "agentType": "shell", "projectName": "p", "projectPath": "/p",
             "status": "running", "createdAt": 1, "pid": 3, "displayName": name,
         })
+    }
+
+    #[tokio::test]
+    async fn a_close_is_told_before_the_exit_it_causes() {
+        let engine = Engine::new(vorn_engine::Config::default());
+        let mut conn = engine.streams().connect();
+        let (notes_tx, notes) = broadcast::channel(8);
+        let (events_tx, events) = broadcast::channel(8);
+        // Both waiting at once, the exit queued first, as a busy app sees them.
+        let exit = Effect::Exit {
+            code: Some(0),
+            signal: None,
+        };
+        events_tx.send(Event::Effect(fx(), exit)).unwrap();
+        notes_tx
+            .send(json!({ "op": "remove", "kind": "terminal", "id": "pane-1" }))
+            .unwrap();
+        drop((notes_tx, events_tx));
+        forward_notes(
+            notes,
+            events,
+            conn.forwarder(),
+            Arc::new(AtomicBool::new(true)),
+        )
+        .await;
+        let mut told = Vec::new();
+        while told.len() < 2 {
+            let Some(o) = conn.next().await else { break };
+            if let Message::Text(t) = o.msg {
+                let v: Value = serde_json::from_str(&t).unwrap();
+                told.push(v["method"].as_str().unwrap_or_default().to_owned());
+            }
+        }
+        assert_eq!(told, ["vornd:session", "vornd:effect"]);
     }
 
     #[tokio::test]
