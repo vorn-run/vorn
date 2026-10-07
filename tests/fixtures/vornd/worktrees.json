@@ -1,0 +1,471 @@
+{
+  "replies": {
+    "inventory": {
+      "result": {
+        "projects": [
+          {
+            "defaultBranch": "main",
+            "entries": [
+              {
+                "activeSessionIds": [],
+                "artifactBytes": 0,
+                "branch": "main",
+                "hasUpstream": false,
+                "idleDays": null,
+                "isDirty": false,
+                "isMain": true,
+                "isMerged": false,
+                "kind": "registered",
+                "lastCommitAt": null,
+                "lastTouchedAt": null,
+                "name": "repo",
+                "path": "<work>/repo",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": 0,
+                "sizeMeasured": false,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": 0,
+                  "level": "keep",
+                  "reasons": ["main worktree"]
+                }
+              },
+              {
+                "activeSessionIds": ["<session 0>"],
+                "artifactBytes": 0,
+                "branch": "busy",
+                "hasUpstream": false,
+                "idleDays": 0,
+                "isDirty": false,
+                "isMain": false,
+                "isMerged": true,
+                "kind": "registered",
+                "lastCommitAt": "2026-01-01T00:00:00Z",
+                "lastTouchedAt": "<moment>",
+                "name": "busy",
+                "path": "<work>/.vorn-worktrees/repo/busy",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": 0,
+                  "level": "keep",
+                  "reasons": ["1 active session"]
+                }
+              },
+              {
+                "activeSessionIds": [],
+                "artifactBytes": 0,
+                "branch": "dirty",
+                "hasUpstream": false,
+                "idleDays": 0,
+                "isDirty": true,
+                "isMain": false,
+                "isMerged": true,
+                "kind": "registered",
+                "lastCommitAt": "2026-01-01T00:00:00Z",
+                "lastTouchedAt": "<moment>",
+                "name": "dirty",
+                "path": "<work>/.vorn-worktrees/repo/dirty",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": 0,
+                  "level": "review",
+                  "reasons": ["uncommitted changes"]
+                }
+              },
+              {
+                "activeSessionIds": [],
+                "artifactBytes": 0,
+                "branch": "merged",
+                "hasUpstream": false,
+                "idleDays": 0,
+                "isDirty": false,
+                "isMain": false,
+                "isMerged": true,
+                "kind": "registered",
+                "lastCommitAt": "2026-01-01T00:00:00Z",
+                "lastTouchedAt": "<moment>",
+                "name": "merged",
+                "path": "<work>/.vorn-worktrees/repo/merged",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": "<bytes>",
+                  "level": "remove",
+                  "reasons": ["merged", "idle 0 days"]
+                }
+              },
+              {
+                "activeSessionIds": [],
+                "artifactBytes": "<bytes>",
+                "branch": "unmerged",
+                "hasUpstream": false,
+                "idleDays": 0,
+                "isDirty": true,
+                "isMain": false,
+                "isMerged": false,
+                "kind": "registered",
+                "lastCommitAt": "2026-01-01T00:00:00Z",
+                "lastTouchedAt": "<moment>",
+                "name": "unmerged",
+                "path": "<work>/.vorn-worktrees/repo/unmerged",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": 0,
+                  "level": "review",
+                  "reasons": ["uncommitted changes"]
+                }
+              },
+              {
+                "activeSessionIds": [],
+                "artifactBytes": 0,
+                "branch": null,
+                "hasUpstream": false,
+                "idleDays": null,
+                "isDirty": false,
+                "isMain": false,
+                "isMerged": false,
+                "kind": "orphan-dir",
+                "lastCommitAt": null,
+                "lastTouchedAt": null,
+                "name": "orphan",
+                "path": "<work>/.vorn-worktrees/repo/orphan",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": "<bytes>",
+                  "level": "orphan",
+                  "reasons": ["not registered with git"]
+                }
+              }
+            ],
+            "projectName": "repo",
+            "projectPath": "<work>/repo",
+            "remoteHostId": null,
+            "staleBranches": []
+          }
+        ],
+        "scannedAt": "<moment>"
+      }
+    },
+    "inventory after": {
+      "result": {
+        "projects": [
+          {
+            "defaultBranch": "main",
+            "entries": [
+              {
+                "activeSessionIds": [],
+                "artifactBytes": 0,
+                "branch": "main",
+                "hasUpstream": false,
+                "idleDays": null,
+                "isDirty": false,
+                "isMain": true,
+                "isMerged": false,
+                "kind": "registered",
+                "lastCommitAt": null,
+                "lastTouchedAt": null,
+                "name": "repo",
+                "path": "<work>/repo",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": 0,
+                "sizeMeasured": false,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": 0,
+                  "level": "keep",
+                  "reasons": ["main worktree"]
+                }
+              },
+              {
+                "activeSessionIds": ["<session 0>"],
+                "artifactBytes": 0,
+                "branch": "busy",
+                "hasUpstream": false,
+                "idleDays": 0,
+                "isDirty": false,
+                "isMain": false,
+                "isMerged": true,
+                "kind": "registered",
+                "lastCommitAt": "2026-01-01T00:00:00Z",
+                "lastTouchedAt": "<moment>",
+                "name": "busy",
+                "path": "<work>/.vorn-worktrees/repo/busy",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": 0,
+                  "level": "keep",
+                  "reasons": ["1 active session"]
+                }
+              },
+              {
+                "activeSessionIds": [],
+                "artifactBytes": 0,
+                "branch": "unmerged",
+                "hasUpstream": false,
+                "idleDays": 0,
+                "isDirty": false,
+                "isMain": false,
+                "isMerged": false,
+                "kind": "registered",
+                "lastCommitAt": "2026-01-01T00:00:00Z",
+                "lastTouchedAt": "<moment>",
+                "name": "unmerged",
+                "path": "<work>/.vorn-worktrees/repo/unmerged",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": 0,
+                  "level": "review",
+                  "reasons": ["unmerged and never pushed"]
+                }
+              }
+            ],
+            "projectName": "repo",
+            "projectPath": "<work>/repo",
+            "remoteHostId": null,
+            "staleBranches": []
+          }
+        ],
+        "scannedAt": "<moment>"
+      }
+    },
+    "inventory of one project, measured again": {
+      "result": {
+        "projects": [
+          {
+            "defaultBranch": "main",
+            "entries": [
+              {
+                "activeSessionIds": [],
+                "artifactBytes": 0,
+                "branch": "main",
+                "hasUpstream": false,
+                "idleDays": null,
+                "isDirty": false,
+                "isMain": true,
+                "isMerged": false,
+                "kind": "registered",
+                "lastCommitAt": null,
+                "lastTouchedAt": null,
+                "name": "repo",
+                "path": "<work>/repo",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": 0,
+                "sizeMeasured": false,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": 0,
+                  "level": "keep",
+                  "reasons": ["main worktree"]
+                }
+              },
+              {
+                "activeSessionIds": ["<session 0>"],
+                "artifactBytes": 0,
+                "branch": "busy",
+                "hasUpstream": false,
+                "idleDays": 0,
+                "isDirty": false,
+                "isMain": false,
+                "isMerged": true,
+                "kind": "registered",
+                "lastCommitAt": "2026-01-01T00:00:00Z",
+                "lastTouchedAt": "<moment>",
+                "name": "busy",
+                "path": "<work>/.vorn-worktrees/repo/busy",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": 0,
+                  "level": "keep",
+                  "reasons": ["1 active session"]
+                }
+              },
+              {
+                "activeSessionIds": [],
+                "artifactBytes": 0,
+                "branch": "dirty",
+                "hasUpstream": false,
+                "idleDays": 0,
+                "isDirty": true,
+                "isMain": false,
+                "isMerged": true,
+                "kind": "registered",
+                "lastCommitAt": "2026-01-01T00:00:00Z",
+                "lastTouchedAt": "<moment>",
+                "name": "dirty",
+                "path": "<work>/.vorn-worktrees/repo/dirty",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": 0,
+                  "level": "review",
+                  "reasons": ["uncommitted changes"]
+                }
+              },
+              {
+                "activeSessionIds": [],
+                "artifactBytes": 0,
+                "branch": "merged",
+                "hasUpstream": false,
+                "idleDays": 0,
+                "isDirty": false,
+                "isMain": false,
+                "isMerged": true,
+                "kind": "registered",
+                "lastCommitAt": "2026-01-01T00:00:00Z",
+                "lastTouchedAt": "<moment>",
+                "name": "merged",
+                "path": "<work>/.vorn-worktrees/repo/merged",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": "<bytes>",
+                  "level": "remove",
+                  "reasons": ["merged", "idle 0 days"]
+                }
+              },
+              {
+                "activeSessionIds": [],
+                "artifactBytes": "<bytes>",
+                "branch": "unmerged",
+                "hasUpstream": false,
+                "idleDays": 0,
+                "isDirty": true,
+                "isMain": false,
+                "isMerged": false,
+                "kind": "registered",
+                "lastCommitAt": "2026-01-01T00:00:00Z",
+                "lastTouchedAt": "<moment>",
+                "name": "unmerged",
+                "path": "<work>/.vorn-worktrees/repo/unmerged",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": 0,
+                  "level": "review",
+                  "reasons": ["uncommitted changes"]
+                }
+              },
+              {
+                "activeSessionIds": [],
+                "artifactBytes": 0,
+                "branch": null,
+                "hasUpstream": false,
+                "idleDays": null,
+                "isDirty": false,
+                "isMain": false,
+                "isMerged": false,
+                "kind": "orphan-dir",
+                "lastCommitAt": null,
+                "lastTouchedAt": null,
+                "name": "orphan",
+                "path": "<work>/.vorn-worktrees/repo/orphan",
+                "projectName": "repo",
+                "projectPath": "<work>/repo",
+                "sizeBytes": "<bytes>",
+                "sizeMeasured": true,
+                "verdict": {
+                  "autoSelect": false,
+                  "freesBytes": "<bytes>",
+                  "level": "orphan",
+                  "reasons": ["not registered with git"]
+                }
+              }
+            ],
+            "projectName": "repo",
+            "projectPath": "<work>/repo",
+            "remoteHostId": null,
+            "staleBranches": []
+          }
+        ],
+        "scannedAt": "<moment>"
+      }
+    },
+    "prune a registered worktree and a forgotten one": {
+      "result": {
+        "deletedBranches": [],
+        "failed": [
+          {
+            "error": "still registered with git — remove it as a worktree instead",
+            "path": "<work>/.vorn-worktrees/repo/unmerged"
+          }
+        ],
+        "freedBytes": "<bytes>",
+        "succeeded": ["<work>/.vorn-worktrees/repo/orphan"]
+      }
+    },
+    "prune where an agent works": {
+      "error": "<work>/.vorn-worktrees/repo/busy has 1 active session — close them first"
+    },
+    "reclaim build output": {
+      "result": {
+        "deletedBranches": [],
+        "failed": [],
+        "freedBytes": "<bytes>",
+        "succeeded": ["<work>/.vorn-worktrees/repo/unmerged"]
+      }
+    },
+    "remove one, forced": {
+      "result": true
+    },
+    "remove uncommitted and merged": {
+      "result": {
+        "deletedBranches": ["merged"],
+        "failed": [
+          {
+            "error": "git worktree remove failed",
+            "path": "<work>/.vorn-worktrees/repo/dirty"
+          }
+        ],
+        "freedBytes": "<bytes>",
+        "succeeded": ["<work>/.vorn-worktrees/repo/merged"]
+      }
+    },
+    "remove where an agent works": {
+      "error": "<work>/.vorn-worktrees/repo/busy has 1 active session — close them first"
+    }
+  },
+  "buildOutput": false
+}

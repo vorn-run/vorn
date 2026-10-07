@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 /**
- * Which terminal an agent's hook is linked to, with the Native server switch
- * off: the server starts the sessions itself. Two agents in one folder used to
+ * Which terminal an agent's hook is linked to when the server starts the
+ * sessions itself, as it does for a create vornd forwards. Two agents in one folder used to
  * be told apart by the folder alone, so the older one's events went to the
  * newer terminal. An exact identity (the terminal id the launch gave the agent,
  * or the conversation id it was started with) now decides first.

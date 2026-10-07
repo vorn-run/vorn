@@ -1,14 +1,13 @@
 /**
- * Sessions carried over a server restart, with the Native server switch off
- * against on.
+ * Sessions carried over a server restart, which vornd lists, attaches,
+ * offers and resumes.
  *
  * One server starts sessions and stops; a second starts on the same
  * directories while the session holder still holds them, and must list them
  * and answer an attach for them through vornd as it does for a fresh one; a
  * third starts after the holder is gone too, and must offer them to resume,
- * start each again under its id, and close one without a program. Each run is
- * compared as one transcript, normalized by the accepted differences in
- * `tests/helpers/sessions-parity.ts`.
+ * start each again under its id, and close one without a program. The run is
+ * one transcript, normalized by `tests/helpers/sessions-parity.ts`.
  *
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
  * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix.
@@ -35,6 +34,7 @@ import {
   type RealServer
 } from './helpers/real-server'
 import { normalizeRun, withoutRecordedHeads, type RunDirs } from './helpers/sessions-parity'
+import { recorded } from './helpers/vornd-fixtures'
 
 // Booting a server probes Tailscale with a real process; nothing here needs it.
 vi.mock('../packages/server/src/tailscale', () => ({
@@ -283,9 +283,9 @@ async function coldRun(
     await shown(through, ids.agent, 'ARGV:')
     const screen = await through.result<string[]>('terminal:readOutput', { id: ids.agent })
     replies['the agent was started once'] = screen.filter((l) => l.includes('ARGV:')).length
-    // Compared on its own: the server's fixed wait can type before the prompt (TYPED_BEFORE_PROMPT).
+    // Kept apart from the transcript (TYPED_BEFORE_PROMPT).
     const echoed = screen.filter(
-      (l) => l.includes('/bin/argv-agent --resume') && !l.includes('ARGV:')
+      (l) => l.includes('argv-agent --resume') && !l.includes('ARGV:')
     ).length
     replies['what the agent was resumed with'] = screen
       .filter((l) => l.includes('ARGV:'))
@@ -318,38 +318,32 @@ async function coldRun(
   }
 }
 
-/** Runs `phase` on `server`; a failure names the phase, the switch and that server's log. */
-async function phase<T>(
-  name: string,
-  nativeServer: boolean,
-  server: RealServer,
-  run: () => Promise<T>
-): Promise<T> {
+/** Runs `phase` on `server`; a failure names the phase and that server's log. */
+async function phase<T>(name: string, server: RealServer, run: () => Promise<T>): Promise<T> {
   try {
     return await run()
   } catch (err) {
     const log = server.log.join('').slice(-4000)
-    const which = `${name}, switch ${nativeServer ? 'on' : 'off'}`
-    throw new Error(`${which}: ${(err as Error).message}\n${log}`, { cause: err })
+    throw new Error(`${name}: ${(err as Error).message}\n${log}`, { cause: err })
   }
 }
 
-async function scenario(nativeServer: boolean): Promise<Observed> {
-  const first = await startRealServer(nativeServer)
+async function scenario(): Promise<Observed> {
+  const first = await startRealServer()
   const dirs: RunDirs = first.dirs
-  const { ids, replies } = await phase('first run', nativeServer, first, () => firstRun(first))
+  const { ids, replies } = await phase('first run', first, () => firstRun(first))
   await stopRealServer(first, true)
-  const second = await startRealServer(nativeServer, dirs)
+  const second = await startRealServer(dirs)
   let warm: Awaited<ReturnType<typeof warmRun>>
   try {
-    warm = await phase('restart with the holder', nativeServer, second, () => warmRun(second, ids))
+    warm = await phase('restart with the holder', second, () => warmRun(second, ids))
   } finally {
     await stopRealServer(second)
   }
-  const third = await startRealServer(nativeServer, dirs)
+  const third = await startRealServer(dirs)
   let cold: Awaited<ReturnType<typeof coldRun>>
   try {
-    cold = await phase('restart without the holder', nativeServer, third, () => coldRun(third, ids))
+    cold = await phase('restart without the holder', third, () => coldRun(third, ids))
   } finally {
     await stopRealServer(third)
   }
@@ -362,21 +356,20 @@ async function scenario(nativeServer: boolean): Promise<Observed> {
 }
 
 describe.skipIf(!runnable)('sessions carried over a restart, against the server', () => {
-  const runs: Partial<Record<'off' | 'on', Observed>> = {}
+  let run: Observed
 
   beforeAll(async () => {
-    runs.off = await scenario(false)
-    runs.on = await scenario(true)
+    run = await scenario()
   }, 360_000)
 
   afterAll(() => removeRealServerDirs())
 
-  it('lists, attaches, offers, resumes and closes the same with the switch on', () => {
-    expect(runs.on?.transcript).toEqual(runs.off?.transcript)
+  it('lists, attaches, offers, resumes and closes them', () => {
+    expect(run.transcript).toEqual(recorded('restore', run.transcript))
   })
 
   it('attaches a carried session through vornd like a fresh one', () => {
-    const attach = runs.on?.transcript['attach to a carried shell'] as Record<string, unknown>
+    const attach = run.transcript['attach to a carried shell'] as Record<string, unknown>
     expect(attach).toEqual({
       replies: 'vornd',
       live: true,
@@ -384,20 +377,18 @@ describe.skipIf(!runnable)('sessions carried over a restart, against the server'
       cursor: true,
       showsItsScreen: true
     })
-    expect(runs.on?.transcript['the agent was started once']).toBe(1)
-    expect(runs.on?.launchLinesEchoed).toBe(1)
-    expect(runs.on?.transcript['what the agent was resumed with']).toEqual([
+    expect(run.transcript['the agent was started once']).toBe(1)
+    expect(run.launchLinesEchoed).toBe(1)
+    expect(run.transcript['what the agent was resumed with']).toEqual([
       expect.stringMatching(/^ARGV:--resume <minted \d+>$/)
     ])
   })
 
-  it('tells a pane attached to a cold session to attach again once it runs, with the switch on', () => {
-    expect(runs.off?.resyncTold).toBe(false)
-    expect(runs.on?.resyncTold).toBe(true)
+  it('tells a pane attached to a cold session to attach again once it runs', () => {
+    expect(run.resyncTold).toBe(true)
   })
 
-  it('follows a headless agent across the restart with the switch on', () => {
-    expect(runs.off?.headlessAfterRestart).toBe(0)
-    expect(runs.on?.headlessAfterRestart).toBe(1)
+  it('follows a headless agent across the restart', () => {
+    expect(run.headlessAfterRestart).toBe(1)
   })
 })

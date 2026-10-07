@@ -1,7 +1,7 @@
 /**
- * The worktree manager with the Native server switch on, against the server
- * with it off: the same repository, the same calls through vornd, the same
- * answers once {@link normalizeWorktrees} has applied the accepted differences.
+ * The worktree manager in vornd: a repository with worktrees, the calls the
+ * app makes through vornd, and its answers once {@link normalizeWorktrees}
+ * has taken out what each run makes its own.
  *
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
  * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix: the agent is a shell
@@ -17,6 +17,7 @@ import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '../packages/shared/src/prot
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import { normalizeWorktrees } from './helpers/worktrees-parity'
 import { vorndStopped } from './helpers/real-server'
+import { recorded } from './helpers/vornd-fixtures'
 
 const TEST_CREDENTIAL = 'native-server-worktrees-credential'
 
@@ -108,7 +109,7 @@ interface RealServer {
 
 const realServers: RealServer[] = []
 
-async function startRealServer(nativeServer: boolean): Promise<RealServer> {
+async function startRealServer(): Promise<RealServer> {
   const made = (name: string): string =>
     fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `vorn-wt-${name}-`)))
   const dirs = { home: made('home'), data: made('data'), work: made('work') }
@@ -131,8 +132,6 @@ async function startRealServer(nativeServer: boolean): Promise<RealServer> {
         HOME: dirs.home,
         [BOOTSTRAP_ENV_VAR]: TEST_CREDENTIAL,
         VORN_VORND_PATH: vornd!,
-        VORN_NATIVE_SERVER: nativeServer ? '1' : '0',
-        VORND_NATIVE_SERVER: '',
         VORND_GROUPS: '',
         NODE_ENV: 'test',
         VITEST: ''
@@ -155,22 +154,19 @@ async function startRealServer(nativeServer: boolean): Promise<RealServer> {
   })
   const direct = await Client.open(server.port)
   await until('vornd to start', async () => {
-    const s = await direct.result<{ state: string; port?: number; nativeServer?: boolean }>(
-      'server:vornd'
-    )
+    const s = await direct.result<{ state: string; port?: number }>('server:vornd')
     if (s.state !== 'on' || !s.port) return false
-    expect(s.nativeServer).toBe(nativeServer)
     server.vornd = s.port
     return true
   })
-  await until('the session holder, and with the switch the copy fed', async () => {
+  await until('the session holder, and the copy fed', async () => {
     const res = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
     const health = (await res.json()) as {
       sessiond?: { current?: { pid?: number } }
       registry?: { fed?: boolean; decides?: boolean }
     }
     if (!health.sessiond?.current?.pid) return false
-    return !nativeServer || (health.registry?.fed === true && health.registry.decides === true)
+    return health.registry?.fed === true && health.registry.decides === true
   })
   direct.close()
   return server
@@ -327,24 +323,19 @@ async function scenario(
 spawnsRealServers()
 
 describe.skipIf(!runnable)('the worktree manager in vornd, against the server', () => {
-  const runs: Partial<Record<'off' | 'on', Record<string, unknown>>> = {}
+  let run: Record<string, unknown>
 
   beforeAll(async () => {
-    for (const [mode, on] of [
-      ['off', false],
-      ['on', true]
-    ] as const) {
-      const server = await startRealServer(on)
-      try {
-        const { transcript, sessions } = await scenario(server)
-        runs[mode] = normalizeWorktrees(transcript, server.dirs.work, sessions)
-      } catch (err) {
-        throw new Error(`${mode}: ${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
-          cause: err
-        })
-      } finally {
-        await stopRealServer(server)
-      }
+    const server = await startRealServer()
+    try {
+      const { transcript, sessions } = await scenario(server)
+      run = normalizeWorktrees(transcript, server.dirs.work, sessions)
+    } catch (err) {
+      throw new Error(`${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
+        cause: err
+      })
+    } finally {
+      await stopRealServer(server)
     }
   }, 240_000)
 
@@ -357,33 +348,28 @@ describe.skipIf(!runnable)('the worktree manager in vornd, against the server', 
   })
 
   it('keeps what an agent uses, reports uncommitted work and removes the rest', () => {
-    const off = runs.off as { replies: Record<string, unknown>; left: string[] }
-    expect(off.replies['remove where an agent works']).toEqual({
+    const { replies, left } = run as { replies: Record<string, unknown>; left: string[] }
+    expect(replies['remove where an agent works']).toEqual({
       error: '<work>/.vorn-worktrees/repo/busy has 1 active session — close them first'
     })
-    const removed = off.replies['remove uncommitted and merged'] as {
+    const removed = replies['remove uncommitted and merged'] as {
       result: { succeeded: string[]; failed: { path: string }[]; deletedBranches: string[] }
     }
     expect(removed.result.succeeded).toEqual(['<work>/.vorn-worktrees/repo/merged'])
     expect(removed.result.failed.map((f) => f.path)).toEqual(['<work>/.vorn-worktrees/repo/dirty'])
     expect(removed.result.deletedBranches).toEqual(['merged'])
-    expect(off.left).toEqual(['unmerged', 'busy'])
-    expect(runs.off?.answeredBy).toEqual({
-      worktree: { native: 0, forwarded: 8 },
-      git: { native: 0, forwarded: 1 }
-    })
+    expect(left).toEqual(['unmerged', 'busy'])
   })
 
-  it('has vornd answer them with the switch on', () => {
-    expect(runs.on?.answeredBy).toEqual({
+  it('has vornd answer them itself', () => {
+    expect(run.answeredBy).toEqual({
       worktree: { native: 8, forwarded: 0 },
       git: { native: 1, forwarded: 0 }
     })
   })
 
-  it('answers and removes the same with the switch on', () => {
-    for (const part of ['replies', 'left', 'buildOutput'] as const) {
-      expect([part, runs.on?.[part]]).toEqual([part, runs.off?.[part]])
-    }
+  it('answers every call as the app expects', () => {
+    const seen = { replies: run.replies, buildOutput: run.buildOutput }
+    expect(seen).toEqual(recorded('worktrees', seen))
   })
 })

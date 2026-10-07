@@ -273,7 +273,7 @@ interface Run {
 }
 
 async function scenario(): Promise<Run> {
-  const first = await startRealServer(true)
+  const first = await startRealServer()
   let started: Started
   try {
     started = { dirs: first.dirs, agents: await startAgents(first) }
@@ -283,7 +283,7 @@ async function scenario(): Promise<Run> {
   const ids = started.agents.map((a) => a.id)
 
   // (a) Vorn restarts; the holder never stopped.
-  const second = await startRealServer(true, started.dirs, { early: true })
+  const second = await startRealServer(started.dirs, { early: true })
   let warm: Run['warm']
   try {
     await appStarts(second)
@@ -304,7 +304,7 @@ async function scenario(): Promise<Run> {
     })
   }
 
-  const third = await startRealServer(true, started.dirs, { early: true })
+  const third = await startRealServer(started.dirs, { early: true })
   try {
     await appStarts(third)
     const terms = useAppStore.getState().terminals
@@ -340,13 +340,7 @@ describe.skipIf(!runnable)('automatic resume with Reopen sessions on', () => {
   let run: Run
 
   beforeAll(async () => {
-    try {
-      run = await scenario()
-    } catch (err) {
-      const { realServers } = await import('./helpers/real-server')
-      console.error(realServers.map((s) => s.log.join('').slice(-3000)).join('\n----\n'))
-      throw err
-    }
+    run = await scenario()
   }, 300_000)
 
   afterAll(() => removeRealServerDirs())

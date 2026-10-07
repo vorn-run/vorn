@@ -3,16 +3,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import WebSocket from 'ws'
-import { expect } from 'vitest'
 import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '../../packages/shared/src/protocol'
 import type { RunDirs } from './sessions-parity'
 
 /**
- * A real server started as a child, with the vornd it keeps in front of it,
- * for the tests that compare the Native server switch off against on. The
- * server runs on directories of its own under the temporary root: its home,
- * its data directory and a work directory for projects; a second server
- * started on the same directories is what a restart is.
+ * A real server started as a child, with the vornd it keeps in front of it.
+ * The server runs on directories of its own under the temporary root: its
+ * home, its data directory and a work directory for projects; a second
+ * server started on the same directories is what a restart is.
  */
 
 export const TEST_CREDENTIAL = 'native-server-sessions-credential'
@@ -120,7 +118,6 @@ export const realServers: RealServer[] = []
  * @param options.early Returns once vornd says where it is, as the app connects, without waiting for the holder.
  */
 export async function startRealServer(
-  nativeServer: boolean,
   dirs?: RunDirs,
   options: { early?: boolean } = {}
 ): Promise<RealServer> {
@@ -149,8 +146,6 @@ export async function startRealServer(
         HOME: dirs.home,
         [BOOTSTRAP_ENV_VAR]: TEST_CREDENTIAL,
         VORN_VORND_PATH: vornd!,
-        VORN_NATIVE_SERVER: nativeServer ? '1' : '0',
-        VORND_NATIVE_SERVER: '',
         VORND_GROUPS: '',
         NODE_ENV: 'test',
         VITEST: ''
@@ -173,11 +168,8 @@ export async function startRealServer(
   })
   const direct = await Watcher.open(server.port)
   await until('vornd to start', async () => {
-    const s = await direct.result<{ state: string; port?: number; nativeServer?: boolean }>(
-      'server:vornd'
-    )
+    const s = await direct.result<{ state: string; port?: number }>('server:vornd')
     if (s.state !== 'on' || !s.port) return false
-    expect(s.nativeServer).toBe(nativeServer)
     server.vornd = s.port
     return true
   })
@@ -185,14 +177,14 @@ export async function startRealServer(
     direct.close()
     return server
   }
-  await until('the session holder, and with the switch the copy deciding', async () => {
+  await until('the session holder, and the copy deciding', async () => {
     const res = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
     const health = (await res.json()) as {
       sessiond?: { current?: { pid?: number } }
       registry?: { fed?: boolean; decides?: boolean }
     }
     if (!health.sessiond?.current?.pid) return false
-    return !nativeServer || (health.registry?.fed === true && health.registry.decides === true)
+    return health.registry?.fed === true && health.registry.decides === true
   })
   direct.close()
   return server

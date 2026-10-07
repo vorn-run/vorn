@@ -1,0 +1,674 @@
+{
+  "replies": {
+    "close a card that is not there": {
+      "void": true
+    },
+    "close a shell": {
+      "void": true
+    },
+    "close the worktree agent": {
+      "void": true
+    },
+    "create claude": {
+      "result": {
+        "agentSessionId": "<minted 10>",
+        "agentType": "claude",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "id": "<minted 12>",
+        "pid": 0,
+        "projectName": "claude",
+        "projectPath": "<work>/claude",
+        "rows": 24
+      }
+    },
+    "create codex": {
+      "result": {
+        "agentType": "codex",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "id": "<minted 13>",
+        "pid": 0,
+        "projectName": "codex",
+        "projectPath": "<work>/codex",
+        "rows": 24
+      }
+    },
+    "create copilot": {
+      "result": {
+        "agentSessionId": "<minted 11>",
+        "agentType": "copilot",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "id": "<minted 14>",
+        "pid": 0,
+        "projectName": "copilot",
+        "projectPath": "<work>/copilot",
+        "rows": 24
+      }
+    },
+    "create gemini": {
+      "result": {
+        "agentType": "gemini",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "Named",
+        "id": "<minted 15>",
+        "pid": 0,
+        "projectName": "gemini",
+        "projectPath": "<work>/gemini",
+        "rows": 24
+      }
+    },
+    "create in a worktree": {
+      "result": {
+        "agentSessionId": "<minted 20>",
+        "agentType": "claude",
+        "branch": "feature",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "headCommit": "c3b48dce7c7683706e5bd37acd826f3248214aad",
+        "id": "<minted 21>",
+        "isWorktree": true,
+        "pid": 0,
+        "projectName": "repo",
+        "projectPath": "<work>/repo",
+        "rows": 24,
+        "worktreeName": "wt-one",
+        "worktreePath": "<work>/.vorn-worktrees/repo/wt-one-<id>"
+      }
+    },
+    "create opencode": {
+      "result": {
+        "agentType": "opencode",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "write the parity test",
+        "id": "<minted 16>",
+        "pid": 0,
+        "projectName": "opencode",
+        "projectPath": "<work>/opencode",
+        "rows": 24
+      }
+    },
+    "group": {
+      "void": true
+    },
+    "headless claude": {
+      "result": {
+        "agentSessionId": "<minted 7>",
+        "agentType": "claude",
+        "displayName": "print the claude parity line two",
+        "id": "<minted 1>",
+        "isWorktree": false,
+        "launchCommand": "<work>/bin/argv-agent --session-id <minted 7> -p",
+        "pid": 0,
+        "projectName": "claude",
+        "projectPath": "<work>/claude",
+        "startedAt": "<moment>",
+        "workflowId": "wf-1",
+        "workflowName": "Parity"
+      }
+    },
+    "headless codex": {
+      "result": {
+        "agentType": "codex",
+        "displayName": "print the codex parity line two",
+        "id": "<minted 2>",
+        "isWorktree": false,
+        "launchCommand": "<work>/bin/argv-agent exec",
+        "pid": 0,
+        "projectName": "codex",
+        "projectPath": "<work>/codex",
+        "startedAt": "<moment>",
+        "workflowId": "wf-1",
+        "workflowName": "Parity"
+      }
+    },
+    "headless copilot": {
+      "result": {
+        "agentSessionId": "<minted 8>",
+        "agentType": "copilot",
+        "displayName": "print the copilot parity line two",
+        "id": "<minted 3>",
+        "isWorktree": false,
+        "launchCommand": "<work>/bin/argv-agent --session-id <minted 8>",
+        "pid": 0,
+        "projectName": "copilot",
+        "projectPath": "<work>/copilot",
+        "startedAt": "<moment>",
+        "workflowId": "wf-1",
+        "workflowName": "Parity"
+      }
+    },
+    "headless gemini": {
+      "result": {
+        "agentType": "gemini",
+        "displayName": "print the gemini parity line two",
+        "id": "<minted 4>",
+        "isWorktree": false,
+        "launchCommand": "<work>/bin/argv-agent",
+        "pid": 0,
+        "projectName": "gemini",
+        "projectPath": "<work>/gemini",
+        "startedAt": "<moment>",
+        "workflowId": "wf-1",
+        "workflowName": "Parity"
+      }
+    },
+    "headless opencode": {
+      "result": {
+        "agentType": "opencode",
+        "displayName": "print the opencode parity line two",
+        "id": "<minted 5>",
+        "isWorktree": false,
+        "launchCommand": "<work>/bin/argv-agent run",
+        "pid": 0,
+        "projectName": "opencode",
+        "projectPath": "<work>/opencode",
+        "startedAt": "<moment>",
+        "workflowId": "wf-1",
+        "workflowName": "Parity"
+      }
+    },
+    "headless to stop": {
+      "result": {
+        "agentSessionId": "<minted 9>",
+        "agentType": "claude",
+        "displayName": "Waits",
+        "id": "<minted 6>",
+        "isWorktree": false,
+        "launchCommand": "<work>/bin/argv-agent --session-id <minted 9> -p",
+        "pid": 0,
+        "projectName": "claude",
+        "projectPath": "<work>/claude",
+        "startedAt": "<moment>"
+      }
+    },
+    "one conversation again": {
+      "same": true
+    },
+    "one conversation twice at once": {
+      "same": true
+    },
+    "rename": {
+      "void": true
+    },
+    "rename a card that is not there": {
+      "error": "Session not found: no-such-card"
+    },
+    "rename a worktree that moved": {
+      "result": null
+    },
+    "rename it to a branch that is taken": {
+      "result": false
+    },
+    "rename the worktree": {
+      "result": {
+        "name": "wt-two",
+        "newPath": "<work>/.vorn-worktrees/repo/wt-two-<id>"
+      }
+    },
+    "rename the worktree branch": {
+      "result": true
+    },
+    "reorder": {
+      "void": true
+    },
+    "reorder twice over": {
+      "error": "Duplicate session IDs"
+    },
+    "reorder with one missing": {
+      "error": "Session not found: no-such-card"
+    },
+    "shell after a close": {
+      "result": {
+        "agentType": "shell",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "Shell 2",
+        "id": "<minted 19>",
+        "pid": 0,
+        "projectName": "claude",
+        "projectPath": "<work>/claude",
+        "rows": 24,
+        "shellCwd": "<work>/claude"
+      }
+    },
+    "shell at home": {
+      "result": {
+        "agentType": "shell",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "Shell 2",
+        "id": "<minted 22>",
+        "pid": 0,
+        "projectName": "<home name>",
+        "projectPath": "<home>",
+        "rows": 24,
+        "shellCwd": "<home>"
+      }
+    },
+    "shell in a project": {
+      "result": {
+        "agentType": "shell",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "Shell 1",
+        "id": "<minted 18>",
+        "pid": 0,
+        "projectName": "claude",
+        "projectPath": "<work>/claude",
+        "rows": 24,
+        "shellCwd": "<work>/claude"
+      }
+    },
+    "stop a headless agent": {
+      "void": true
+    },
+    "stop one that ended": {
+      "void": true
+    },
+    "stop one that is not there": {
+      "void": true
+    },
+    "ungroup": {
+      "void": true
+    }
+  },
+  "argv": {
+    "claude": "ARGV:--session-id <minted 10>",
+    "codex": "ARGV:",
+    "copilot": "ARGV:--session-id <minted 11>",
+    "gemini": "ARGV:",
+    "opencode": "ARGV:--prompt write the parity test"
+  },
+  "told": {
+    "cleanup": [
+      {
+        "id": "<minted 21>",
+        "projectPath": "<work>/repo",
+        "worktreePath": "<work>/.vorn-worktrees/repo/wt-two-<id>"
+      }
+    ],
+    "created": [
+      {
+        "agentSessionId": "<minted 10>",
+        "agentType": "claude",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "id": "<minted 12>",
+        "pid": 0,
+        "projectName": "claude",
+        "projectPath": "<work>/claude",
+        "rows": 24
+      },
+      {
+        "agentType": "codex",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "id": "<minted 13>",
+        "pid": 0,
+        "projectName": "codex",
+        "projectPath": "<work>/codex",
+        "rows": 24
+      },
+      {
+        "agentSessionId": "<minted 11>",
+        "agentType": "copilot",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "id": "<minted 14>",
+        "pid": 0,
+        "projectName": "copilot",
+        "projectPath": "<work>/copilot",
+        "rows": 24
+      },
+      {
+        "agentType": "gemini",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "Named",
+        "id": "<minted 15>",
+        "pid": 0,
+        "projectName": "gemini",
+        "projectPath": "<work>/gemini",
+        "rows": 24
+      },
+      {
+        "agentType": "opencode",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "write the parity test",
+        "id": "<minted 16>",
+        "pid": 0,
+        "projectName": "opencode",
+        "projectPath": "<work>/opencode",
+        "rows": 24
+      },
+      {
+        "agentType": "shell",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "Shell 1",
+        "id": "<minted 18>",
+        "pid": 0,
+        "projectName": "claude",
+        "projectPath": "<work>/claude",
+        "rows": 24,
+        "shellCwd": "<work>/claude"
+      },
+      {
+        "agentType": "shell",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "Shell 2",
+        "id": "<minted 22>",
+        "pid": 0,
+        "projectName": "<home name>",
+        "projectPath": "<home>",
+        "rows": 24,
+        "shellCwd": "<home>"
+      },
+      {
+        "agentSessionId": "<minted 20>",
+        "agentType": "claude",
+        "branch": "feature",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "headCommit": "c3b48dce7c7683706e5bd37acd826f3248214aad",
+        "id": "<minted 21>",
+        "isWorktree": true,
+        "pid": 0,
+        "projectName": "repo",
+        "projectPath": "<work>/repo",
+        "rows": 24,
+        "worktreeName": "wt-one",
+        "worktreePath": "<work>/.vorn-worktrees/repo/wt-one-<id>"
+      },
+      {
+        "agentSessionId": "conversation-twice",
+        "agentType": "codex",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "id": "<minted 17>",
+        "pid": 0,
+        "projectName": "codex",
+        "projectPath": "<work>/codex",
+        "rows": 24
+      },
+      {
+        "agentType": "shell",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "Shell 2",
+        "id": "<minted 19>",
+        "pid": 0,
+        "projectName": "claude",
+        "projectPath": "<work>/claude",
+        "rows": 24,
+        "shellCwd": "<work>/claude"
+      }
+    ],
+    "exits": ["<minted 21>", "<minted 22>", "no-such-card"],
+    "exitsThrough": {
+      "ids": ["<minted 21>", "<minted 22>", "no-such-card"],
+      "once": true,
+      "unheard": []
+    },
+    "moved": [
+      "[\"feature-two\",\"<work>/.vorn-worktrees/repo/wt-one-<id>\",\"wt-one\"]",
+      "[\"feature-two\",\"<work>/.vorn-worktrees/repo/wt-two-<id>\",\"wt-two\"]"
+    ],
+    "renamed": [
+      {
+        "displayName": "Build",
+        "id": "<minted 18>"
+      },
+      {
+        "displayName": "Shell 2",
+        "groupId": "group-1",
+        "id": "<minted 22>"
+      }
+    ],
+    "reordered": [
+      [
+        "<minted 22>",
+        "<minted 12>",
+        "<minted 13>",
+        "<minted 14>",
+        "<minted 15>",
+        "<minted 16>",
+        "<minted 21>",
+        "<minted 17>",
+        "<minted 18>"
+      ]
+    ]
+  },
+  "listed": [
+    {
+      "agentSessionId": "<minted 10>",
+      "agentType": "claude",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "id": "<minted 12>",
+      "pid": "<pid>",
+      "projectName": "claude",
+      "projectPath": "<work>/claude",
+      "rows": 24
+    },
+    {
+      "agentType": "codex",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "id": "<minted 13>",
+      "pid": "<pid>",
+      "projectName": "codex",
+      "projectPath": "<work>/codex",
+      "rows": 24
+    },
+    {
+      "agentSessionId": "<minted 11>",
+      "agentType": "copilot",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "hookSessionId": "copilot-<minted 14>",
+      "id": "<minted 14>",
+      "pid": "<pid>",
+      "projectName": "copilot",
+      "projectPath": "<work>/copilot",
+      "rows": 24
+    },
+    {
+      "agentType": "gemini",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "Named",
+      "id": "<minted 15>",
+      "pid": "<pid>",
+      "projectName": "gemini",
+      "projectPath": "<work>/gemini",
+      "rows": 24
+    },
+    {
+      "agentType": "opencode",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "write the parity test",
+      "id": "<minted 16>",
+      "pid": "<pid>",
+      "projectName": "opencode",
+      "projectPath": "<work>/opencode",
+      "rows": 24
+    },
+    {
+      "agentSessionId": "conversation-twice",
+      "agentType": "codex",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "id": "<minted 17>",
+      "pid": "<pid>",
+      "projectName": "codex",
+      "projectPath": "<work>/codex",
+      "rows": 24
+    },
+    {
+      "agentType": "shell",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "Build",
+      "id": "<minted 18>",
+      "pid": "<pid>",
+      "projectName": "claude",
+      "projectPath": "<work>/claude",
+      "renamedByPerson": true,
+      "rows": 24,
+      "shellCwd": "<work>/claude"
+    },
+    {
+      "agentType": "shell",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "Shell 2",
+      "id": "<minted 19>",
+      "pid": "<pid>",
+      "projectName": "claude",
+      "projectPath": "<work>/claude",
+      "rows": 24,
+      "shellCwd": "<work>/claude"
+    }
+  ],
+  "agentsListed": {
+    "claude": {
+      "agentSessionId": "<minted 7>",
+      "agentType": "claude",
+      "displayName": "print the claude parity line two",
+      "endedAt": "<moment>",
+      "exitCode": 3,
+      "id": "<minted 1>",
+      "isWorktree": false,
+      "launchCommand": "<work>/bin/argv-agent --session-id <minted 7> -p",
+      "pid": "<pid>",
+      "projectName": "claude",
+      "projectPath": "<work>/claude",
+      "startedAt": "<moment>",
+      "status": "exited",
+      "workflowId": "wf-1",
+      "workflowName": "Parity"
+    },
+    "codex": {
+      "agentType": "codex",
+      "displayName": "print the codex parity line two",
+      "endedAt": "<moment>",
+      "exitCode": 3,
+      "id": "<minted 2>",
+      "isWorktree": false,
+      "launchCommand": "<work>/bin/argv-agent exec",
+      "pid": "<pid>",
+      "projectName": "codex",
+      "projectPath": "<work>/codex",
+      "startedAt": "<moment>",
+      "status": "exited",
+      "workflowId": "wf-1",
+      "workflowName": "Parity"
+    },
+    "copilot": {
+      "agentSessionId": "<minted 8>",
+      "agentType": "copilot",
+      "displayName": "print the copilot parity line two",
+      "endedAt": "<moment>",
+      "exitCode": 3,
+      "id": "<minted 3>",
+      "isWorktree": false,
+      "launchCommand": "<work>/bin/argv-agent --session-id <minted 8>",
+      "pid": "<pid>",
+      "projectName": "copilot",
+      "projectPath": "<work>/copilot",
+      "startedAt": "<moment>",
+      "status": "exited",
+      "workflowId": "wf-1",
+      "workflowName": "Parity"
+    },
+    "gemini": {
+      "agentType": "gemini",
+      "displayName": "print the gemini parity line two",
+      "endedAt": "<moment>",
+      "exitCode": 3,
+      "id": "<minted 4>",
+      "isWorktree": false,
+      "launchCommand": "<work>/bin/argv-agent",
+      "pid": "<pid>",
+      "projectName": "gemini",
+      "projectPath": "<work>/gemini",
+      "startedAt": "<moment>",
+      "status": "exited",
+      "workflowId": "wf-1",
+      "workflowName": "Parity"
+    },
+    "opencode": {
+      "agentType": "opencode",
+      "displayName": "print the opencode parity line two",
+      "endedAt": "<moment>",
+      "exitCode": 3,
+      "id": "<minted 5>",
+      "isWorktree": false,
+      "launchCommand": "<work>/bin/argv-agent run",
+      "pid": "<pid>",
+      "projectName": "opencode",
+      "projectPath": "<work>/opencode",
+      "startedAt": "<moment>",
+      "status": "exited",
+      "workflowId": "wf-1",
+      "workflowName": "Parity"
+    },
+    "stopped": {
+      "agentSessionId": "<minted 9>",
+      "agentType": "claude",
+      "displayName": "Waits",
+      "endedAt": "<moment>",
+      "exitCode": 143,
+      "id": "<minted 6>",
+      "isWorktree": false,
+      "launchCommand": "<work>/bin/argv-agent --session-id <minted 9> -p",
+      "pid": "<pid>",
+      "projectName": "claude",
+      "projectPath": "<work>/claude",
+      "startedAt": "<moment>",
+      "status": "exited"
+    }
+  },
+  "agentsOutput": {
+    "claude": "ARGV:--session-id <minted 7> -p\nPROMPT:print the claude parity\nline two\n",
+    "codex": "ARGV:exec\nPROMPT:print the codex parity\nline two\n",
+    "copilot": "ARGV:--session-id <minted 8>\nPROMPT:print the copilot parity\nline two\n",
+    "gemini": "ARGV:\nPROMPT:print the gemini parity\nline two\n",
+    "opencode": "ARGV:run\nPROMPT:print the opencode parity\nline two\n",
+    "stopped": "ARGV:--session-id <minted 9> -p\nPROMPT:wait here\n"
+  },
+  "agentsExits": {
+    "claude": {
+      "exitCode": 3,
+      "id": "<minted 1>"
+    },
+    "codex": {
+      "exitCode": 3,
+      "id": "<minted 2>"
+    },
+    "copilot": {
+      "exitCode": 3,
+      "id": "<minted 3>"
+    },
+    "gemini": {
+      "exitCode": 3,
+      "id": "<minted 4>"
+    },
+    "opencode": {
+      "exitCode": 3,
+      "id": "<minted 5>"
+    },
+    "stopped": {
+      "exitCode": 143,
+      "id": "<minted 6>"
+    }
+  }
+}

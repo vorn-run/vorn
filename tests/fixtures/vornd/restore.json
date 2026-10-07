@@ -1,0 +1,231 @@
+{
+  "agent": {
+    "result": {
+      "agentSessionId": "<minted 1>",
+      "agentType": "claude",
+      "branch": "main",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "Agent",
+      "headCommit": "c3b48dce7c7683706e5bd37acd826f3248214aad",
+      "id": "<minted 2>",
+      "pid": 0,
+      "projectName": "repo",
+      "projectPath": "<work>/repo",
+      "rows": 24
+    }
+  },
+  "attach after the resume": {
+    "live": true,
+    "replies": "vornd"
+  },
+  "attach to a carried agent": {
+    "live": true,
+    "replies": "vornd"
+  },
+  "attach to a carried shell": {
+    "cursor": true,
+    "live": true,
+    "replies": "vornd",
+    "showsItsScreen": true,
+    "sized": true
+  },
+  "attach to a cold shell": {
+    "data": "",
+    "live": false
+  },
+  "clear": {
+    "void": true
+  },
+  "close a cold shell": {
+    "void": true
+  },
+  "exits told for the cold shell": 0,
+  "group": {
+    "void": true
+  },
+  "headless": {
+    "result": {
+      "agentSessionId": "<minted 3>",
+      "agentType": "claude",
+      "branch": "main",
+      "displayName": "wait here",
+      "id": "<minted 4>",
+      "isWorktree": false,
+      "launchCommand": "<work>/bin/argv-agent --session-id <minted 3> -p",
+      "pid": 0,
+      "projectName": "repo",
+      "projectPath": "<work>/repo",
+      "startedAt": "<moment>"
+    }
+  },
+  "listed after the restart": [
+    {
+      "agentType": "claude",
+      "displayName": "Agent",
+      "id": "<minted 2>",
+      "live": true,
+      "projectName": "repo"
+    },
+    {
+      "agentType": "shell",
+      "displayName": "Build",
+      "groupId": "group-1",
+      "id": "<minted 5>",
+      "live": true,
+      "projectName": "repo"
+    },
+    {
+      "agentType": "shell",
+      "displayName": "Shell 2",
+      "id": "<minted 6>",
+      "live": true,
+      "projectName": "repo"
+    }
+  ],
+  "listed at the end": [
+    {
+      "displayName": "Agent",
+      "id": "<minted 2>",
+      "live": true
+    },
+    {
+      "displayName": "Build",
+      "groupId": "group-1",
+      "id": "<minted 5>",
+      "live": true
+    }
+  ],
+  "offered after the clear": [],
+  "offered after the close": [],
+  "offered after the restart": [
+    {
+      "displayName": "Agent",
+      "environment": {
+        "branch": {
+          "actual": "main",
+          "recorded": "main"
+        },
+        "head": {
+          "actual": "c3b48dce7c7683706e5bd37acd826f3248214aad"
+        },
+        "worktree": "ok"
+      },
+      "id": "<minted 2>",
+      "rebooted": false
+    },
+    {
+      "displayName": "Build",
+      "environment": {
+        "branch": {
+          "actual": "main",
+          "recorded": null
+        },
+        "head": {
+          "actual": "c3b48dce7c7683706e5bd37acd826f3248214aad"
+        },
+        "worktree": "ok"
+      },
+      "groupId": "group-1",
+      "id": "<minted 5>",
+      "rebooted": false
+    },
+    {
+      "displayName": "Shell 2",
+      "environment": {
+        "branch": {
+          "actual": "main",
+          "recorded": null
+        },
+        "head": {
+          "actual": "c3b48dce7c7683706e5bd37acd826f3248214aad"
+        },
+        "worktree": "ok"
+      },
+      "id": "<minted 6>",
+      "rebooted": false
+    }
+  ],
+  "rename": {
+    "void": true
+  },
+  "resume one already running": {
+    "result": {
+      "ok": false,
+      "reason": "gone"
+    }
+  },
+  "resume one that is not there": {
+    "result": {
+      "ok": false,
+      "reason": "gone"
+    }
+  },
+  "resume the agent": {
+    "result": {
+      "ok": true,
+      "session": {
+        "agentSessionId": "<minted 1>",
+        "agentType": "claude",
+        "branch": "main",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "Agent",
+        "headCommit": "c3b48dce7c7683706e5bd37acd826f3248214aad",
+        "id": "<minted 2>",
+        "pid": 0,
+        "projectName": "repo",
+        "projectPath": "<work>/repo",
+        "rows": 24
+      }
+    }
+  },
+  "resume the shell": {
+    "result": {
+      "ok": true,
+      "session": {
+        "agentType": "shell",
+        "cols": 80,
+        "createdAt": "<moment>",
+        "displayName": "Build",
+        "groupId": "group-1",
+        "id": "<minted 5>",
+        "pid": 0,
+        "projectName": "repo",
+        "projectPath": "<work>/repo",
+        "rows": 24,
+        "shellCwd": "<work>/repo"
+      }
+    }
+  },
+  "shell A": {
+    "result": {
+      "agentType": "shell",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "Shell 1",
+      "id": "<minted 5>",
+      "pid": 0,
+      "projectName": "repo",
+      "projectPath": "<work>/repo",
+      "rows": 24,
+      "shellCwd": "<work>/repo"
+    }
+  },
+  "shell B": {
+    "result": {
+      "agentType": "shell",
+      "cols": 80,
+      "createdAt": "<moment>",
+      "displayName": "Shell 2",
+      "id": "<minted 6>",
+      "pid": 0,
+      "projectName": "repo",
+      "projectPath": "<work>/repo",
+      "rows": 24,
+      "shellCwd": "<work>/repo"
+    }
+  },
+  "the agent was started once": 1,
+  "what the agent was resumed with": ["ARGV:--resume <minted 1>"]
+}

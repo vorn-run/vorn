@@ -2,8 +2,8 @@
  * vornd's own answers to the `git:`, `file:` and `ide:` calls, against the
  * server's answers to the same calls.
  *
- * One server is started, and three vornds in front of it: one with the
- * Native server switch on, one with the desktop's launch token as well, and
+ * One server is started, and three vornds in front of it: one answering
+ * them itself, one with the desktop's launch token as well, and
  * one shadowing the same groups. Every call is made directly to the server
  * and through vornd, and the two frames a client receives must be the same
  * but for the differences `helpers/git-parity` names. A call that changes a
@@ -318,8 +318,8 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
     storeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-native-server-store-'))
     const db = path.join(storeDir, 'vorn.db')
     writeStore(db, reads.repo)
-    native = await startVornd(serverPort, ['--native-server', '--db', db])
-    desktop = await startVornd(serverPort, ['--native-server', '--db', db], {
+    native = await startVornd(serverPort, ['--db', db])
+    desktop = await startVornd(serverPort, ['--db', db], {
       VORND_DESKTOP_TOKEN: TEST_CREDENTIAL
     })
     shadow = await startVornd(serverPort, [

@@ -630,8 +630,7 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
 
   it('relays an agent over stdio to vornd when vornd serves MCP', async () => {
     const { relay, relayHeaders, vorndMcpUrl } = await import('../packages/mcp/src/relay')
-    const status = (port: number) => async () =>
-      ({ state: 'on', port, nativeServer: true }) as const
+    const status = (port: number) => async () => ({ state: 'on', port }) as const
     expect(await vorndMcpUrl({ vorndStatus: status(forward!.port), fetch })).toBeNull()
     const url = await vorndMcpUrl({ vorndStatus: status(native!.port), fetch })
     expect(url?.href).toBe(`http://127.0.0.1:${native!.port}/mcp`)

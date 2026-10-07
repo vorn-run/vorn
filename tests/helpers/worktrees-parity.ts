@@ -1,14 +1,14 @@
 /**
- * What may differ between the worktree manager's answers from the server and
- * from vornd with the Native server switch on, and nothing else.
+ * What differs between two runs of the worktree manager in vornd, and nothing
+ * else.
  *
- * {@link normalizeWorktrees} applies each accepted difference below, and the
- * two transcripts must then be equal.
+ * {@link normalizeWorktrees} applies each difference below, so a run can be
+ * compared with the answers it must give.
  *
  * - {@link RUN_DIR}: each run's own work directory.
  * - {@link MOMENTS}: when the scan was taken and when each worktree was last
  *   touched, which is when the run made it.
- * - {@link BYTES}: sizes, which each side measures on its own copy of the
+ * - {@link BYTES}: sizes, which each run measures on its own copy of the
  *   repository with `du`. Compared as measured or not.
  * - {@link SESSION_IDS}: the ids of the sessions each run started, by the
  *   order they were started in.

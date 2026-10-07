@@ -170,8 +170,9 @@ jobs:
       - name: Build vorn_core.node
         run: yarn build:core
 
-      # The RPC test files again, with every client going through vornd: the
-      # vornd and sessiond the build above put beside vorn_core.node. Linux
+      # The RPC test files again, with every client going through vornd, which
+      # answers every group it implements: the vornd and sessiond the build
+      # above put beside vorn_core.node. Linux
       # only for now: the files themselves only run on Linux in the main suite.
       - name: Conformance through vornd
         if: runner.os == 'Linux'
@@ -191,14 +192,6 @@ jobs:
       # each platform.
       - name: Store against the JS reference
         run: yarn vitest run tests/store-reference.test.ts
-
-      # The same files with every group vornd can answer itself answered there.
-      - name: Conformance through vornd, native server
-        if: runner.os == 'Linux'
-        env:
-          VORN_CONFORMANCE_VORND: packages/core/vornd
-          VORND_NATIVE_SERVER: '1'
-        run: yarn test:conformance
 
       # The server driving its sessions through the real vornd and session
       # holder, on each platform: a named pipe and ConPTY on Windows. The
