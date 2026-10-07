@@ -10,6 +10,8 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    globalSetup: ['tests/setup/global-sandbox.ts'],
+    setupFiles: ['tests/setup/sandbox.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'text-summary', 'lcov'],
