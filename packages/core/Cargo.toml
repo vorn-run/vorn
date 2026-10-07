@@ -21,6 +21,7 @@ members = [
   "crates/mcp",
   "crates/cli",
   "crates/reach",
+  "crates/worktrees",
 ]
 
 # The app's version (scripts/sync-versions.sh); every binary that reports a version inherits it.

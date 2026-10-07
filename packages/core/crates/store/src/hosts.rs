@@ -115,7 +115,7 @@ impl ProjectHosts {
     }
 
     /// The first host other than this machine, when it is one that exists.
-    fn placement(&self, project: &ProjectHost) -> Placement {
+    pub fn placement(&self, project: &ProjectHost) -> Placement {
         let remote = project
             .host_ids
             .as_deref()

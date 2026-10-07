@@ -68,6 +68,8 @@ import { vorndSessions } from './vornd-sessions'
 import { nativeServerSwitch, VorndKeeper } from './vornd-process'
 import { peerAddress, relayThroughVornd, relaysThroughVornd } from './vornd-relay'
 import { linkReach, relayPairing, VORND_FORWARDED_HEADER } from './vornd-reach'
+import { linkWorktrees } from './vornd-worktrees'
+import { invalidateSizeCache } from './worktree-inventory'
 import { seedRestored, verifyRestored } from './restored-sessions'
 import { getGitBranchAsync, getGitHeadAsync } from './git-utils'
 import { sessionManager } from './session-persistence'
@@ -175,6 +177,7 @@ const vorndReach = linkReach({
   disconnectToken,
   host: getCurrentHost
 })
+linkWorktrees({ channel: vorndSessions, forgetSize: invalidateSizeCache })
 
 export async function startServer(
   options: {

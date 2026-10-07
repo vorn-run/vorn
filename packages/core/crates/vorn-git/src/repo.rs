@@ -401,6 +401,94 @@ impl Git {
             .ok()?;
         parse_github_remote(&url)
     }
+
+    /// The branch a project's work is measured against: `origin/HEAD`, then
+    /// the usual local names, then whatever is checked out.
+    pub fn default_branch(&self, project: &Path) -> Option<String> {
+        let symref = self
+            .exec_default(
+                &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+                project,
+                5000,
+            )
+            .unwrap_or_default();
+        if !symref.is_empty() {
+            return Some(symref.strip_prefix("origin/").unwrap_or(&symref).to_owned());
+        }
+        let locals = self.list_branches(project);
+        ["main", "master", "trunk", "develop"]
+            .into_iter()
+            .find(|c| locals.iter().any(|b| b == c))
+            .map(str::to_owned)
+            .or_else(|| self.branch(project))
+    }
+
+    /// Branches already contained in `base`; empty when git cannot say.
+    pub fn merged_branches(&self, project: &Path, base: &str) -> Vec<String> {
+        self.exec_default(
+            &["branch", "--merged", base, "--format=%(refname:short)"],
+            project,
+            10_000,
+        )
+        .map(|out| parse_lines(&out))
+        .unwrap_or_default()
+    }
+
+    /// Every local branch as `name\tupstream\tcommitter date`, in one call.
+    pub fn branch_refs(&self, project: &Path) -> Vec<String> {
+        self.exec_default(
+            &[
+                "for-each-ref",
+                "--format=%(refname:short)%09%(upstream:short)%09%(committerdate:iso-strict)",
+                "refs/heads",
+            ],
+            project,
+            10_000,
+        )
+        .map(|out| {
+            out.split('\n')
+                .filter(|l| !l.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    /// The strict ISO date of `rev`'s last commit, or `None` when unreadable.
+    pub fn last_commit_date(&self, cwd: &Path, rev: &str) -> Option<String> {
+        self.exec_default(&["log", "-1", "--format=%cI", rev], cwd, 5000)
+            .ok()
+            .filter(|out| !out.is_empty())
+    }
+
+    /// The git directory behind a path: `<repo>/.git/worktrees/<name>` for a
+    /// linked worktree. `None` outside a repository.
+    pub fn absolute_git_dir(&self, cwd: &Path) -> Option<String> {
+        self.exec_default(&["rev-parse", "--absolute-git-dir"], cwd, 5000)
+            .ok()
+            .filter(|out| !out.is_empty())
+    }
+}
+
+/// Whether `branch` is one vorn generated for a worktree: an adjective-noun
+/// pair from its lists, optionally with the worktree's 8-hex id, so cleanup
+/// never proposes deleting a branch a person named.
+pub fn is_generated_worktree_branch(branch: &str) -> bool {
+    let mut parts = branch.split('-');
+    let (Some(adjective), Some(noun)) = (parts.next(), parts.next()) else {
+        return false;
+    };
+    let id_ok = match (parts.next(), parts.next()) {
+        (None, _) => true,
+        (Some(id), None) => {
+            id.len() == 8
+                && id
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        }
+        _ => false,
+    };
+    id_ok && ADJECTIVES.contains(&adjective) && NOUNS.contains(&noun)
 }
 
 /// A repository on GitHub.
@@ -1047,6 +1135,26 @@ mod tests {
             let name = generate_name();
             let (adj, noun) = name.split_once('-').unwrap();
             assert!(ADJECTIVES.contains(&adj) && NOUNS.contains(&noun), "{name}");
+        }
+        for _ in 0..20 {
+            let name = generate_name();
+            assert!(is_generated_worktree_branch(&name), "{name}");
+            assert!(is_generated_worktree_branch(&format!(
+                "{name}-{}",
+                short_id()
+            )));
+        }
+        for named in [
+            "main",
+            "feature",
+            "gilded-fresco-ABCDEF12",
+            "gilded-fresco-1234567",
+            "gilded-fresco-12345678-x",
+            "gilded-person",
+            "Gilded-fresco",
+            "gilded--fresco",
+        ] {
+            assert!(!is_generated_worktree_branch(named), "{named}");
         }
         let id = short_id();
         assert_eq!(id.len(), 8);

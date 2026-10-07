@@ -44,6 +44,7 @@ vorn-mcp = { path = "../mcp" }
 vorn-protocol = { path = "../protocol" }
 vorn-reach = { path = "../reach" }
 vorn-term-proto = { path = "../term-proto" }
+vorn-worktrees = { path = "../worktrees" }
 uuid = { version = "1", features = ["v4"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
 
