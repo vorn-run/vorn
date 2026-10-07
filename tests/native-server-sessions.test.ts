@@ -1,7 +1,6 @@
 /**
  * vornd's copy of the server's session registry, against the registry itself;
- * then the terminals vornd creates and changes with the Native server switch
- * on, against the server's with it off.
+ * then the terminals vornd creates and changes.
  *
  * One server is started on a real database, and the vornd it keeps in front of
  * it shadows the calls that read the registry
@@ -41,6 +40,7 @@ import {
   type RealServer
 } from './helpers/real-server'
 import { normalizeRun, outputWhole, withoutHookLinks } from './helpers/sessions-parity'
+import { recorded } from './helpers/vornd-fixtures'
 
 const GROUPS = 'terminal=shadow,shell=shadow,headless=shadow,worktree=shadow,git=shadow'
 
@@ -290,7 +290,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
       return state.state === 'on' && !!state.port
     })
     vorndPort = state.port!
-    await until('vornd to ask for the records', () => server.vorndSessions.isNative())
+    await until('vornd to ask for the records', () => server.vorndSessions.inUse())
     // The holder too: the server asks for a spawn once it is up, and a
     // create's comparison waits for that spawn.
     await until('the copy to be fed and the session holder up', async () => {
@@ -804,59 +804,47 @@ function changesOf(told: string[]): string[] {
 }
 
 describe.skipIf(!runnable)('the terminals vornd creates and changes, against the server', () => {
-  const runs: Partial<Record<'off' | 'on', Record<string, unknown>>> = {}
+  let run: Record<string, unknown>
 
   beforeAll(async () => {
-    for (const [mode, on] of [
-      ['off', false],
-      ['on', true]
-    ] as const) {
-      const server = await startRealServer(on)
-      try {
-        runs[mode] = normalizeRun(await scenario(server), server.dirs)
-      } catch (err) {
-        throw new Error(`${mode}: ${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
-          cause: err
-        })
-      } finally {
-        await stopRealServer(server)
-      }
+    const server = await startRealServer()
+    try {
+      run = normalizeRun(await scenario(server), server.dirs)
+    } catch (err) {
+      throw new Error(`${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
+        cause: err
+      })
+    } finally {
+      await stopRealServer(server)
     }
   }, 240_000)
 
   afterAll(() => removeRealServerDirs())
 
-  it('creates, starts and changes terminals as the server does with the switch off', () => {
-    const off = runs.off as {
+  it('creates, starts and changes terminals', () => {
+    const seen = run as {
       replies: Record<string, unknown>
       told: { cleanup: unknown[]; moved: string[] }
+      agentsExits: Record<string, { exitCode: number }>
     }
-    // What the switch must not change, read off the server's own run.
-    expect(off.replies['one conversation twice at once']).toEqual({ same: true })
-    expect(off.replies['one conversation again']).toEqual({ same: true })
-    expect(off.told.cleanup).toHaveLength(1)
-    expect(JSON.parse(off.told.moved.at(-1)!)).toEqual([
+    expect(seen.replies['one conversation twice at once']).toEqual({ same: true })
+    expect(seen.replies['one conversation again']).toEqual({ same: true })
+    expect(seen.told.cleanup).toHaveLength(1)
+    expect(JSON.parse(seen.told.moved.at(-1)!)).toEqual([
       'feature-two',
       expect.stringMatching(/\/wt-two-<id>$/),
       'wt-two'
     ])
-    expect(runs.off?.answeredBy).toEqual({
-      terminal: { native: 0, forwarded: 19 },
-      shell: { native: 0, forwarded: 3 },
-      headless: { native: 0, forwarded: 9 },
-      git: { native: 0, forwarded: 4 }
-    })
-    const exits = runs.off as { agentsExits: Record<string, { exitCode: number }> }
-    expect(Object.values(exits.agentsExits).map((e) => e.exitCode)).toEqual([3, 3, 3, 3, 3, 143])
+    expect(Object.values(seen.agentsExits).map((e) => e.exitCode)).toEqual([3, 3, 3, 3, 3, 143])
   })
 
-  it('has vornd answer them with the switch on, and the server what is its own', () => {
+  it('has vornd answer them, and the server what is its own', () => {
     // Refused by the server in its words: a card that is not there, a
     // duplicate in an order, one missing from it; and a close of a card that
     // is not there, which the server tells clients of anyway.
     // A stop of an agent the registry does not hold is the server's, which
     // answers nothing for it too.
-    expect(runs.on?.answeredBy).toEqual({
+    expect(run.answeredBy).toEqual({
       terminal: { native: 15, forwarded: 4 },
       shell: { native: 3, forwarded: 0 },
       headless: { native: 8, forwarded: 1 },
@@ -864,8 +852,8 @@ describe.skipIf(!runnable)('the terminals vornd creates and changes, against the
     })
   })
 
-  it('answers, starts, tells and lists the same with the switch on', () => {
-    for (const part of [
+  it('answers, starts, tells and lists as the app expects', () => {
+    const parts = [
       'replies',
       'argv',
       'told',
@@ -873,8 +861,8 @@ describe.skipIf(!runnable)('the terminals vornd creates and changes, against the
       'agentsListed',
       'agentsOutput',
       'agentsExits'
-    ] as const) {
-      expect([part, runs.on?.[part]]).toEqual([part, runs.off?.[part]])
-    }
+    ]
+    const seen = Object.fromEntries(parts.map((part) => [part, run[part]]))
+    expect(seen).toEqual(recorded('terminals', seen))
   })
 })

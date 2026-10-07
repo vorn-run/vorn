@@ -134,10 +134,6 @@ export const fakeVornd = {
   release: vi.fn((_id: string): void => {}),
   readOutput: vi.fn(async (_id: string, _lines?: number): Promise<string[]> => []),
   inUse: vi.fn(() => true),
-  /** Whether vornd decides the statuses: off unless a test turns it on. */
-  decidesStatus: vi.fn(() => false),
-  /** Whether vornd owns the session records between runs: off unless a test turns it on. */
-  restoresSessions: vi.fn(() => false),
   hookStatus: vi.fn((_id: string, _status: string | null, _promote: boolean): void => {}),
   input: vi.fn((_id: string): void => {}),
   patch: vi.fn((_id: string, _fields: Record<string, unknown>): void => {}),
@@ -166,8 +162,6 @@ export const fakeVornd = {
     fakeVornd.release.mockClear()
     fakeVornd.readOutput.mockReset().mockResolvedValue([])
     fakeVornd.inUse.mockReset().mockReturnValue(true)
-    fakeVornd.decidesStatus.mockReset().mockReturnValue(false)
-    fakeVornd.restoresSessions.mockReset().mockReturnValue(false)
     fakeVornd.hookStatus.mockClear()
     fakeVornd.input.mockClear()
     fakeVornd.patch.mockClear()
@@ -177,4 +171,11 @@ export const fakeVornd = {
 /** The module `vi.mock` puts in place of `vornd-sessions`. */
 export function vorndModule(): Record<string, unknown> {
   return { vorndSessions: fakeVornd, VorndPty: FakeVorndPty }
+}
+
+/** The hook session last told to vornd as `id`'s link, which vornd sets on the record. */
+export function toldHookLink(id: string): unknown {
+  return fakeVornd.patch.mock.calls
+    .filter(([to, fields]) => to === id && 'hookSessionId' in fields)
+    .at(-1)?.[1].hookSessionId
 }

@@ -15,8 +15,7 @@
 //! them, and one rule decides each session's size ([`size`]).
 //!
 //! The groups of calls it has taken over from the server ([`native`]) are
-//! answered here when the Native server switch, or a per-group setting,
-//! says so ([`groups`]). So, under the `mcp` group, is Vorn's MCP server,
+//! answered here ([`groups`]). So, under the `mcp` group, is Vorn's MCP server,
 //! at `/mcp` ([`mcp`]).
 
 pub mod applink;

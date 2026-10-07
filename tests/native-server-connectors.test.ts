@@ -3,8 +3,7 @@
  * the server's answers to the same calls.
  *
  * One server is started on a real database, and three vornds in front of it:
- * one with the Native server switch on, one with the desktop's launch token
- * as well, and one shadowing the same groups. Calls that change nothing are
+ * one answering them itself, one with the desktop's launch token as well, and one shadowing the same groups. Calls that change nothing are
  * made directly to the server and through vornd on the same connections.
  * Calls that start an MCP connection's child are made once on each side, on
  * two connections with the same settings, against the fixture MCP server.
@@ -216,8 +215,8 @@ describe.skipIf(!vornd)('the native server answers connection calls as the serve
       process.stdout.write = origWrite
     }
     const db = path.join(dataDir, 'vorn.db')
-    native = await startVornd(serverPort, ['--native-server', '--db', db])
-    desktop = await startVornd(serverPort, ['--native-server', '--db', db], {
+    native = await startVornd(serverPort, ['--db', db])
+    desktop = await startVornd(serverPort, ['--db', db], {
       VORND_DESKTOP_TOKEN: TEST_CREDENTIAL
     })
     shadow = await startVornd(serverPort, [

@@ -66,7 +66,7 @@ import {
 import { ptyManager } from './pty-manager'
 import { vorndSessions } from './vornd-sessions'
 import { cancelScripts } from './vornd-scripts'
-import { nativeServerSwitch, VorndKeeper } from './vornd-process'
+import { VorndKeeper } from './vornd-process'
 import { peerAddress, relayThroughVornd, relaysThroughVornd } from './vornd-relay'
 import { linkReach, relayPairing, VORND_FORWARDED_HEADER } from './vornd-reach'
 import { linkWorktrees } from './vornd-worktrees'
@@ -163,14 +163,10 @@ const extensionRouteDeps: ExtensionRouteDeps = {
 /** The vornd in front of this server, kept running for as long as it runs. */
 const vorndKeeper = new VorndKeeper({
   connect: (endpoint) => vorndSessions.connect(endpoint),
-  desktopToken: localCredential,
-  nativeServer: () => nativeServerSwitch(configManager.loadConfig().defaults?.experimental)
+  desktopToken: localCredential
 })
 vorndSessions.setLauncher(vorndKeeper)
-// With the Native server switch on vornd owns the session records; this server writes none.
-sessionManager.setOwnedElsewhere(() => vorndSessions.restoresSessions())
-// vornd creates terminals for the clients with the Native server switch on, and
-// refuses them as this server does while it winds down.
+// vornd creates terminals for the clients, and refuses them as this server does while it winds down.
 vorndSessions.setClosingSource(() => ({ draining: isDraining(), handingOver: isHandingOver() }))
 onDraining(() => vorndSessions.tellClosing())
 onHandover(() => vorndSessions.tellClosing())

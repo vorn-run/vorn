@@ -23,7 +23,6 @@ import {
 import { buildRestorePayload } from '@vornrun/shared/session-restore'
 import { resumeCwdFor } from './resume-cwd'
 import {
-  claimTranscriptFor,
   freeTranscriptFor,
   sessionToBindOnCreate,
   transcriptScope,
@@ -31,7 +30,6 @@ import {
   transcriptNamedOnCreate
 } from './agent-transcript'
 import {
-  claimSpawningTranscript,
   holdClaimsWhilePreparing,
   releaseSpawningTranscript,
   releaseSpawningTranscriptsFor
@@ -710,13 +708,13 @@ function releaseClaimsFor(id: string): void {
 /** `holdClaimsWhilePreparing`, in vornd too while it holds the claims. */
 function holdClaims(id: string): () => void {
   const prepared = holdClaimsWhilePreparing(id)
-  const told = vorndSessions.preparing(id)
+  vorndSessions.preparing(id)
   let done = false
   return () => {
     if (done) return
     done = true
     prepared()
-    if (told) vorndSessions.prepared(id)
+    vorndSessions.prepared(id)
   }
 }
 
@@ -741,8 +739,7 @@ export function registerAllMethods(): void {
       // Claimed before preparing, under the id the session will have, so a
       // resume of the same conversation sees it in flight and chooses another.
       const id = crypto.randomUUID()
-      const inVornd = vorndSessions.createsTerminals()
-      const holder = inVornd ? await claimInVornd(named, id) : claimSpawningTranscript(named, id)
+      const holder = await claimInVornd(named, id)
       if (holder !== undefined) {
         // A resume got there first: wait for it, then show what it started.
         await resuming.get(holder)
@@ -750,7 +747,7 @@ export function registerAllMethods(): void {
         const bound =
           sessionToBindOnCreate(named, live) ?? live.find((session) => session.id === holder)
         if (bound) return bound
-        const again = inVornd ? await claimInVornd(named, id) : claimSpawningTranscript(named, id)
+        const again = await claimInVornd(named, id)
         if (again !== undefined) {
           throw new Error('This conversation is already starting in another pane')
         }
@@ -1125,7 +1122,6 @@ export function registerAllMethods(): void {
   registerMethod('sessions:clear', () => {
     // The offer is being declined for all of them at once.
     consumeAllRestored()
-    sessionManager.clear()
   })
 
   registerMethod('sessions:restored', () => listRestored())
@@ -1235,24 +1231,14 @@ export function registerAllMethods(): void {
       const scope = await transcriptScope(grounded)
       // Not lapsing while the workspace below is prepared, however long git takes.
       claimsPrepared = holdClaims(id)
-      if (vorndSessions.createsTerminals()) {
-        // Claimed in vornd, which its creates check: taken meanwhile, the agent chooses.
-        const free = freeTranscriptFor(
-          grounded,
-          ptyManager.getLiveSessions(),
-          headlessManager.getActiveSessions(),
-          scope
-        )
-        transcriptId = free && (await claimInVornd(free, id)) === undefined ? free : undefined
-      } else {
-        transcriptId = claimTranscriptFor(
-          grounded,
-          ptyManager.getLiveSessions(),
-          id,
-          headlessManager.getActiveSessions(),
-          scope
-        )
-      }
+      // Claimed in vornd, which its creates check: taken meanwhile, the agent chooses.
+      const free = freeTranscriptFor(
+        grounded,
+        ptyManager.getLiveSessions(),
+        headlessManager.getActiveSessions(),
+        scope
+      )
+      transcriptId = free && (await claimInVornd(free, id)) === undefined ? free : undefined
       // A create naming this conversation while it prepares waits for this spawn.
       const spawned = new Promise<TerminalSession | undefined>(
         (resolve) => (settleResume = resolve)
@@ -2288,10 +2274,8 @@ export function registerAllMethods(): void {
 
   // Wire manager events → broadcast to WS clients
   vorndSessions.on('notify', (id: string, title: string, body: string, effectId: string) => {
-    // The effect's id lets a client that hears it twice show it once. Only
-    // while vornd runs native work: otherwise the payload is as it always was.
-    const payload = vorndSessions.isNative() ? { id, title, body, effectId } : { id, title, body }
-    clientRegistry.broadcast(IPC.TERMINAL_NOTIFY, payload, id)
+    // The effect's id lets a client that hears it twice show it once.
+    clientRegistry.broadcast(IPC.TERMINAL_NOTIFY, { id, title, body, effectId }, id)
   })
   wireVorndRestore(announceSession)
 
@@ -2374,7 +2358,7 @@ export function registerAllMethods(): void {
       hookStatusMapper.forceLink(installation.sessionId, session.id)
       ptyManager.linkHookSession(session.id, installation.sessionId)
       // Don't set statusSource = 'hooks' eagerly — it disables the pattern-based
-      // fallback. If hooks actually fire, promoteToHookStatus is called on the
+      // fallback. If hooks actually fire, the session is promoted on the
       // first event. This fixes status stuck on 'waiting' when hooks don't work
       // (e.g. the agent CLI doesn't support hooks.json).
     }
@@ -2420,8 +2404,7 @@ export function registerAllMethods(): void {
     broadcastWidgetUpdate()
   })
 
-  // What vornd changed for a client (with the Native server switch on), told
-  // and saved as the methods that make the same changes here do.
+  // What vornd changed for a client, told and saved as the methods here that make the same changes.
   ptyManager.on('session-renamed', (id: string, displayName: string) => {
     logSessionEvent(id, 'renamed', { displayName })
   })

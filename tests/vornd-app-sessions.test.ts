@@ -106,6 +106,10 @@ describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
     const session = ptyManager.createShellPty(os.tmpdir())
     if (before === undefined) delete process.env.TERM
     else process.env.TERM = before
+    await until(
+      'its pid',
+      () => (ptyManager.getActiveSessions().find((s) => s.id === session.id)?.pid ?? 0) > 0
+    )
 
     const client = new BytesClient()
     await client.connect(vornd.port)

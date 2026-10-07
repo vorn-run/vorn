@@ -87,9 +87,6 @@
       },
       "defaults": {
         "domBlockRendering": true,
-        "experimental": {
-          "nativeServer": true
-        },
         "fontSize": 15,
         "keepSessionsRunning": true,
         "minimalShellPrompt": true,
@@ -1152,9 +1149,6 @@
       },
       "defaults": {
         "domBlockRendering": true,
-        "experimental": {
-          "nativeServer": true
-        },
         "fontSize": 15,
         "keepSessionsRunning": true,
         "minimalShellPrompt": true,
@@ -1259,9 +1253,6 @@
       },
       "defaults": {
         "domBlockRendering": true,
-        "experimental": {
-          "nativeServer": true
-        },
         "fontSize": 15,
         "keepSessionsRunning": true,
         "minimalShellPrompt": true,

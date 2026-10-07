@@ -1,10 +1,9 @@
 /**
- * The terminals' statuses with the Native server switch on, where vornd's copy
- * of the session registry decides them, against the switch off, where the
- * server does.
+ * The terminals' statuses, which vornd's copy of the session registry
+ * decides.
  *
- * One real server is started for each, on a home and a data directory of its
- * own, and runs the same stub agent under each of the five agent types: a
+ * One real server is started on a home and a data directory of its own, and
+ * runs the same stub agent under each of the five agent types: a
  * script that prints, on cue, a line that reads as running, a prompt that reads
  * as waiting and an error, then goes quiet until it is idle. Its cues come both
  * through the server (a write it sees, which wakes a waiting terminal) and
@@ -12,8 +11,8 @@
  * agent's hooks are posted to the server's hook endpoint as the agent would:
  * the session linked, waiting, a permission asked, stopped, running again, and
  * a screen error its hooks overrule. Every `session:updated` the server
- * broadcasts is collected, and each agent's statuses must come out the same,
- * in the same order, with the switch on and off.
+ * broadcasts is collected, and each agent must go through the scripted
+ * statuses in order.
  *
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on a
  * Unix: the agent is a shell script.
@@ -185,7 +184,7 @@ interface Server {
 
 const servers: Server[] = []
 
-async function startServer(nativeServer: boolean): Promise<Server> {
+async function startServer(): Promise<Server> {
   // Its own home: the hook endpoint's port and token are written there, and
   // the agents' hook settings, which a test must not touch for real.
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-status-home-')))
@@ -209,10 +208,6 @@ async function startServer(nativeServer: boolean): Promise<Server> {
         HOME: home,
         [BOOTSTRAP_ENV_VAR]: CREDENTIAL,
         VORN_VORND_PATH: vornd!,
-        // The switch, as the settings page sets it; vornd's own variable and
-        // a group setting would overrule it.
-        VORN_NATIVE_SERVER: nativeServer ? '1' : '0',
-        VORND_NATIVE_SERVER: '',
         VORND_GROUPS: '',
         NODE_ENV: 'test',
         VITEST: ''
@@ -234,12 +229,9 @@ async function startServer(nativeServer: boolean): Promise<Server> {
   })
   const direct = await Client.open(server.port)
   const status = await waitFor('vornd to start', async () => {
-    const s = await direct.result<{ state: string; port?: number; nativeServer?: boolean }>(
-      'server:vornd'
-    )
+    const s = await direct.result<{ state: string; port?: number }>('server:vornd')
     return s.state === 'on' && s.port ? s : null
   })
-  expect(status.nativeServer).toBe(nativeServer)
   server.vornd = status.port!
   // Terminals start once vornd's session holder is up.
   await waitFor('the session holder', async () => {
@@ -249,7 +241,6 @@ async function startServer(nativeServer: boolean): Promise<Server> {
       registry?: { fed?: boolean; decides?: boolean }
     }
     if (!health.sessiond?.current?.pid) return null
-    if (!nativeServer) return true
     return health.registry?.fed && health.registry.decides ? true : null
   })
   direct.close()
@@ -454,32 +445,22 @@ afterAll(async () => {
 }, 60_000)
 
 describe.skipIf(!runnable)('the statuses vornd decides, against the server', () => {
-  const runs: Partial<Record<'off' | 'on', Record<Agent, AgentStatus[]>>> = {}
+  let statuses: Record<Agent, AgentStatus[]>
 
   beforeAll(async () => {
-    for (const [mode, on] of [
-      ['off', false],
-      ['on', true]
-    ] as const) {
-      const server = await startServer(on)
-      try {
-        runs[mode] = await run(server)
-      } catch (err) {
-        throw new Error(`${mode}: ${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
-          cause: err
-        })
-      } finally {
-        await stop(server)
-      }
+    const server = await startServer()
+    try {
+      statuses = await run(server)
+    } catch (err) {
+      throw new Error(`${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
+        cause: err
+      })
+    } finally {
+      await stop(server)
     }
   }, 240_000)
 
-  it('goes through the scripted statuses with the switch off', () => {
-    for (const agent of AGENTS) expect([agent, runs.off?.[agent]]).toEqual([agent, EXPECTED])
-  })
-
-  it('goes through the same statuses, in the same order, with the switch on', () => {
-    for (const agent of AGENTS)
-      expect([agent, runs.on?.[agent]]).toEqual([agent, runs.off?.[agent]])
+  it('goes through the scripted statuses, in order', () => {
+    for (const agent of AGENTS) expect([agent, statuses[agent]]).toEqual([agent, EXPECTED])
   })
 })

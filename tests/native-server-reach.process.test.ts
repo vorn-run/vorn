@@ -1,8 +1,8 @@
 /**
  * vornd's own answers to the reach calls, on a real server that started its
  * own vornd: device tokens, phone pairing end to end, the Origin check and
- * the credential check, with the Native server switch on; and the same
- * calls and checks shadowed, every one compared with the server's.
+ * the credential check; and the same calls and checks shadowed, every one
+ * compared with the server's.
  *
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`).
  */
@@ -216,12 +216,12 @@ afterAll(async () => {
   }
 })
 
-describe.skipIf(!vornd)('reach with the Native server switch on', () => {
+describe.skipIf(!vornd)('reach answered by vornd', () => {
   let server: Server
   let desktop: Client
 
   beforeAll(async () => {
-    server = await startServer({ VORN_NATIVE_SERVER: '1' })
+    server = await startServer({})
     desktop = await Client.open(server.vornd)
   }, 120_000)
 
@@ -345,8 +345,6 @@ describe.skipIf(!vornd)('reach shadowed', () => {
 
   beforeAll(async () => {
     server = await startServer({
-      // The switch passes vornd the database; each group is then shadowed.
-      VORN_NATIVE_SERVER: '1',
       VORND_GROUPS: 'server=shadow,tailscale=shadow,token=shadow,pairing=shadow,auth=shadow'
     })
   }, 120_000)

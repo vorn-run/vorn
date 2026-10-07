@@ -96,7 +96,7 @@ function scenario(): Array<[string, unknown]> {
   step('loadConfig fresh', loaded)
   const config: AppConfig = {
     ...loaded,
-    defaults: { ...loaded.defaults, fontSize: 15, experimental: { nativeServer: true } },
+    defaults: { ...loaded.defaults, fontSize: 15 },
     projects: [project]
   }
   store.saveConfig(config)

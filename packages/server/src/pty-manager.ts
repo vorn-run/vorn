@@ -39,7 +39,6 @@ import {
 
 import { getShellIntegration } from './shell-integration'
 import { configManager } from './config-manager'
-import { NATIVE_STATUS } from './native-core'
 import { isDraining, DRAINING_MESSAGE } from './draining'
 import { isHandingOver, HANDOVER_MESSAGE } from './handoff/donor'
 import {
@@ -67,8 +66,6 @@ const INITIAL_COLS = 80
 const INITIAL_ROWS = 24
 /** The terminal type programs are told they run in. */
 const PTY_TERM = 'xterm-256color'
-const IDLE_TIMEOUT_MS = 5000
-const IDLE_TIMEOUT_HOOKS_MS = 30_000
 
 /** What `prepareSession` worked out, for `spawnPty` to use without doing any of it again. */
 export type PreparedSession = { remoteHost: RemoteHost } | { local: PreparedLocal }
@@ -144,7 +141,6 @@ class PtyManager extends EventEmitter {
   private agentCommands: Record<AiAgentType, AgentCommandConfig> = { ...DEFAULT_AGENT_COMMANDS }
   private remoteHosts: RemoteHost[] = []
   private tempKeyPaths = new Map<string, string>()
-  private idleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private sessionOrder: string[] = []
   private headlessWorktreeCounter?: WorktreeSessionCounter
 
@@ -177,7 +173,7 @@ class PtyManager extends EventEmitter {
     vorndSessions.on('native', (note: SessionNote) => this.fromVornd(note))
     vorndSessions.on('ask', (method: string, params: unknown) => {
       // The last terminal in a worktree vornd closed: offered as `killPty` offers it.
-      if (method === 'vornd:cleanupOffer' && vorndSessions.createsTerminals())
+      if (method === 'vornd:cleanupOffer')
         this.emit('client-message', IPC.WORKTREE_CONFIRM_CLEANUP, params)
     })
   }
@@ -197,20 +193,18 @@ class PtyManager extends EventEmitter {
   }
 
   /**
-   * A terminal record as vornd's copy holds it, while vornd decides the
-   * statuses (`vorndSessions.decidesStatus`): what it decided is taken here,
+   * A terminal record as vornd's copy holds it: the status vornd decided is taken here,
    * and a status that changed is broadcast as `setStatus` did. The copy's
    * changes arrive in the order it made them, so the record is always the
    * newer word. A session whose program ended keeps the status it ended with:
    * a change told before vornd heard of the end is older than it.
    *
-   * The fields only vornd sets while it decides (`PATCHED_FIELDS`) are taken
+   * The fields only vornd sets (`PATCHED_FIELDS`) are taken
    * from a snapshot and from a change vornd made for a client (a rename, a
    * group), ended or not, and told as `renameSession` and `setSessionGroup` tell
    * them. Changes this server asked for itself it has already made.
    */
   private fromMirror(record: TerminalSession, how: MirroredHow = 'note'): void {
-    if (!vorndSessions.decidesStatus()) return
     const session = this.sessions.get(record.id)
     if (!session || this.extensionPtys.has(record.id)) return
     let updated = false
@@ -264,7 +258,6 @@ class PtyManager extends EventEmitter {
       setVorndHolds(note.nativeHolds ?? {})
       return
     }
-    if (!vorndSessions.createsTerminals()) return
     if (note.op === 'upsert' && note.kind === 'terminal' && note.record) {
       const id = note.record.id
       // One the holder still held from the last run is taken on by `takeOnHeld`.
@@ -655,7 +648,7 @@ class PtyManager extends EventEmitter {
       ...(branch ? { branch } : {}),
       ...(headCommit ? { headCommit } : {}),
       ...(worktreePath ? { worktreePath, worktreeName, isWorktree: true } : {}),
-      // Don't set statusSource: 'hooks' eagerly — promoteToHookStatus() sets it
+      // Don't set statusSource: 'hooks' eagerly — vornd sets it
       // when the first hook event actually arrives. This provides graceful
       // degradation: if hooks fail (uninstalled, port conflict, etc.), the
       // pattern-based fallback keeps working instead of leaving status stuck.
@@ -953,12 +946,9 @@ class PtyManager extends EventEmitter {
     return program
   }
 
-  /** The status vornd last reported for each of its sessions. */
-  private vorndStatus = new Map<string, AgentStatus>()
-
   /**
    * A session in vornd. Its output never comes here: vornd keeps its screen
-   * and history and serves its clients, and says what the output meant.
+   * and history, serves its clients and decides its status (`fromMirror`).
    */
   private setupVorndEvents(id: string, held: VorndPty): void {
     held.on('started', (pid: number) => {
@@ -966,35 +956,7 @@ class PtyManager extends EventEmitter {
       if (session) session.pid = pid
       this.recordChanged(id)
     })
-    held.on('status', (code: number, note?: Stamp) => {
-      // vornd's copy decides it, and says so in its changes (`fromMirror`).
-      if (vorndSessions.decidesStatus()) return
-      const session = this.sessions.get(id)
-      const status = NATIVE_STATUS[code]
-      if (!session || !status) return
-      this.vorndStatus.set(id, status)
-      if (session.agentType === 'shell' || session.statusSource === 'hooks') return
-      this.setStatus(
-        id,
-        status,
-        note ? { epoch: note.epoch, rseq: note.rseq, index: note.index } : null
-      )
-    })
     held.on('cwd', (cwd: string) => this.noteShellCwd(id, cwd))
-    held.on('activity', () => {
-      if (vorndSessions.decidesStatus()) return
-      const session = this.sessions.get(id)
-      if (!session || session.agentType === 'shell') return
-      // Printing again after going idle, with nothing new to say: running.
-      if (
-        session.status === 'idle' &&
-        session.statusSource !== 'hooks' &&
-        this.vorndStatus.get(id) === 'running'
-      ) {
-        this.setStatus(id, 'running')
-      }
-      this.armIdle(id, session)
-    })
     held.onExit((exit) => this.processEnded(id, exit, held.exitAt ?? null))
   }
 
@@ -1022,28 +984,6 @@ class PtyManager extends EventEmitter {
 
   private clearSessionTracking(id: string): void {
     this.extensionPtys.delete(id)
-    this.vorndStatus.delete(id)
-    const idleTimer = this.idleTimers.get(id)
-    if (idleTimer) clearTimeout(idleTimer)
-    this.idleTimers.delete(id)
-  }
-
-  // Idle timer — if no output arrives within timeout, mark idle.
-  // Hook sessions use a longer timeout as safety net (hooks are primary).
-  private armIdle(id: string, session: TerminalSession): void {
-    const timeout = session.statusSource === 'hooks' ? IDLE_TIMEOUT_HOOKS_MS : IDLE_TIMEOUT_MS
-    const existingTimer = this.idleTimers.get(id)
-    if (existingTimer) clearTimeout(existingTimer)
-    this.idleTimers.set(
-      id,
-      setTimeout(() => {
-        this.idleTimers.delete(id)
-        const s = this.sessions.get(id)
-        if (s && s.status === 'running') {
-          this.setStatus(id, 'idle')
-        }
-      }, timeout)
-    )
   }
 
   /** A session's program ended. */
@@ -1054,7 +994,6 @@ class PtyManager extends EventEmitter {
     this.orderChanged()
 
     this.ptys.delete(id)
-    this.vorndStatus.delete(id)
     const session = this.sessions.get(id)
     if (session) {
       this.emit('session-exit', session)
@@ -1091,10 +1030,8 @@ class PtyManager extends EventEmitter {
       (session.status === 'idle' || session.status === 'waiting')
     // Told before the write, on the same channel, so vornd has it running
     // before anything the write makes the program print.
-    const decides = wakes && vorndSessions.decidesStatus()
-    if (decides) vorndSessions.input(id)
+    if (wakes) vorndSessions.input(id)
     this.ptys.get(id)?.write(data)
-    if (wakes && !decides) this.updateSessionStatus(id, 'running')
   }
 
   /**
@@ -1213,14 +1150,8 @@ class PtyManager extends EventEmitter {
     }
     for (const id of this.ptys.keys()) vorndSessions.release(id)
     this.ptys.clear()
-    this.vorndStatus.clear()
-    // Not vornd's records to let go of while it keeps them for the next server.
-    if (!vorndSessions.restoresSessions()) {
-      for (const id of this.sessions.keys()) this.recordRemoved(id)
-    }
+    // Not vornd's records to let go of: it keeps them for the next server.
     this.sessions.clear()
-    for (const timer of this.idleTimers.values()) clearTimeout(timer)
-    this.idleTimers.clear()
     this.sessionOrder = []
     this.orderChanged()
   }
@@ -1278,90 +1209,30 @@ class PtyManager extends EventEmitter {
 
   /** A status from outside the output (a hook, a permission request). */
   updateSessionStatus(id: string, status: AgentStatus): void {
-    if (vorndSessions.decidesStatus()) vorndSessions.hookStatus(id, status, false)
-    else this.setStatus(id, status)
+    vorndSessions.hookStatus(id, status, false)
   }
 
   /**
    * What an agent's hook said: its status, if it named one, and then the
-   * session's status taken from its hooks from now on (`promoteToHookStatus`).
-   * While vornd decides the statuses both go to it as one call, applied in
-   * that order, and come back as its changes.
+   * session's status taken from its hooks from now on. Both go to vornd as one
+   * call, applied in that order, and come back as its changes.
    */
   hookStatus(id: string, status: AgentStatus | null, promote: boolean): void {
-    if (vorndSessions.decidesStatus()) {
-      if (this.sessions.has(id)) vorndSessions.hookStatus(id, status, promote)
-      return
-    }
-    if (status) this.setStatus(id, status)
-    if (promote) this.promoteToHookStatus(id)
+    if (this.sessions.has(id)) vorndSessions.hookStatus(id, status, promote)
   }
 
   /**
-   * Link a session to the conversation an agent's hooks name it by. While
-   * vornd decides the statuses the link is its to set, and arrives back with
-   * its changes.
+   * Link a session to the conversation an agent's hooks name it by. The link
+   * is vornd's to set, and arrives back with its changes.
    */
   linkHookSession(id: string, hookSessionId: string): void {
-    const session = this.sessions.get(id)
-    if (!session) return
-    if (vorndSessions.decidesStatus()) {
-      vorndSessions.patch(id, { hookSessionId })
-      return
-    }
-    session.hookSessionId = hookSessionId
-    this.recordChanged(id)
-  }
-
-  /** @param at The effect that told it, when vornd did; null for a hook, a timer or input. */
-  private setStatus(id: string, status: AgentStatus, at: Stamp | null = null): void {
-    const session = this.sessions.get(id)
-    if (session && session.status !== status) {
-      session.status = status
-      sessionFeed.statusAt(id, at)
-      this.recordChanged(id)
-      this.emit('client-message', IPC.SESSION_UPDATED, session)
-    }
-  }
-
-  /** Promote a session to hook-based status detection (disables pattern fallback). */
-  promoteToHookStatus(id: string): void {
-    const session = this.sessions.get(id)
-    if (!session) return
-    if (vorndSessions.decidesStatus()) {
-      vorndSessions.hookStatus(id, null, true)
-      return
-    }
-
-    if (session.statusSource !== 'hooks') {
-      session.statusSource = 'hooks'
-      this.recordChanged(id)
-      log.info(`[pty] session ${id} promoted to hook-based status`)
-    }
-
-    // Always re-arm idle timer with the longer hook timeout — even if already
-    // promoted — so that repeated hook events keep the timer fresh and the
-    // short pattern-based timer doesn't linger from before promotion.
-    const existingTimer = this.idleTimers.get(id)
-    if (existingTimer) {
-      clearTimeout(existingTimer)
-      this.idleTimers.set(
-        id,
-        setTimeout(() => {
-          this.idleTimers.delete(id)
-          if (session.status === 'running') {
-            this.setStatus(id, 'idle')
-          }
-        }, IDLE_TIMEOUT_HOOKS_MS)
-      )
-    }
+    if (this.sessions.has(id)) vorndSessions.patch(id, { hookSessionId })
   }
 
   /**
-   * Set fields of a terminal's record that vornd keeps while it decides the
-   * statuses (`PATCHED_FIELDS`); null or undefined takes one away. Set here as
-   * any change is, and while vornd decides also told to it as a patch, without
-   * which its copy would keep what it had.
+   * Set fields of a terminal's record that vornd keeps (`PATCHED_FIELDS`);
+   * null or undefined takes one away. Set here as any change is, and told to
+   * vornd as a patch, without which its copy would keep what it had.
    */
   setRecordFields(id: string, fields: PatchedFields): void {
     const session = this.sessions.get(id)
@@ -1369,7 +1240,7 @@ class PtyManager extends EventEmitter {
     const keys = PATCHED_FIELDS.filter((key) => key in fields)
     for (const key of keys) setPatched(session, key, fields[key])
     this.recordChanged(id)
-    if (vorndSessions.decidesStatus()) this.tellPatched(id, keys)
+    this.tellPatched(id, keys)
   }
 
   /**
@@ -1379,7 +1250,7 @@ class PtyManager extends EventEmitter {
    */
   tellPatched(id: string, keys: readonly PatchedKey[] = PATCHED_FIELDS): void {
     const session = this.sessions.get(id)
-    if (!session || !vorndSessions.decidesStatus()) return
+    if (!session) return
     const fields: Partial<Record<PatchedKey, string | boolean | null>> = {}
     for (const key of keys) fields[key] = session[key] ?? null
     vorndSessions.patch(id, fields)

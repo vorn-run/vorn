@@ -64,9 +64,6 @@ describe('the terminals vornd creates and changes, followed here', () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vornd-follow-'))
     initDatabase(dataDir)
     fake = new FakeVornd(dataDir)
-    fake.native = true
-    fake.statuses = true
-    fake.terminals = true
     fake.state.registry = {
       gen: GEN,
       rev,
@@ -85,7 +82,6 @@ describe('the terminals vornd creates and changes, followed here', () => {
     }
     vorndSessions.setClosingSource(() => closing)
     expect(await vorndSessions.connect(fake.endpoint)).toBe(true)
-    expect(vorndSessions.createsTerminals()).toBe(true)
   })
 
   afterAll(async () => {
@@ -225,7 +221,7 @@ describe('the terminals vornd creates and changes, followed here', () => {
     ])
     vorndSessions.unclaim('s1', 'conv')
     vorndSessions.unclaim('s1')
-    expect(vorndSessions.preparing('s1')).toBe(true)
+    vorndSessions.preparing('s1')
     vorndSessions.prepared('s1')
     await until('the notes', () => fake.made('vornd:prepared').length === 1)
     expect(fake.made('vornd:unclaim')).toEqual([

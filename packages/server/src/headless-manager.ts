@@ -34,8 +34,7 @@ const FORCE_KILL_DELAY_MS = 5000
  * The headless agents: started on pipes in vornd's session holder, their
  * output read here for the clients and the workflow waiting on each.
  *
- * With the Native server switch on (`vorndSessions.createsHeadless`), vornd
- * answers the clients' `headless:create` and `headless:kill` itself and tells
+ * vornd answers the clients' `headless:create` and `headless:kill` itself and tells
  * this server the record through its copy of the registry (`fromVornd`); the
  * agent is then followed here as one this server started. How an agent ended
  * is read from its session by vornd and mirrored here, and told once, after
@@ -69,7 +68,6 @@ class HeadlessManager extends EventEmitter {
    */
   private fromVornd(note: SessionNote): void {
     if (note.kind !== 'headless' || note.op !== 'upsert' || !note.record) return
-    if (!vorndSessions.createsHeadless()) return
     const record = note.record as HeadlessSession
     // One the holder still held from the last run is taken on by `adoptHeld`.
     if (note.created && !note.adopted) this.adoptCreated(record)
@@ -306,9 +304,7 @@ class HeadlessManager extends EventEmitter {
     this.ended.add(id)
     log.info(`[headless] process ${id} exited with code ${exitCode}`)
     if (sess.status === 'running') {
-      const copy = vorndSessions.createsHeadless()
-        ? vorndSessions.mirror.headlessRecord(id)
-        : undefined
+      const copy = vorndSessions.mirror.headlessRecord(id)
       sess.status = 'exited'
       sess.exitCode = copy?.status === 'exited' ? copy.exitCode : exitCode
       sess.endedAt = copy?.status === 'exited' ? copy.endedAt : Date.now()
@@ -374,10 +370,7 @@ class HeadlessManager extends EventEmitter {
     // Left running: an agent in vornd outlives this server.
     for (const id of this.inVornd.keys()) vorndSessions.release(id)
     this.inVornd.clear()
-    // Not vornd's records to let go of while it keeps them for the next server.
-    if (!vorndSessions.restoresSessions()) {
-      for (const id of this.sessions.keys()) sessionFeed.remove('headless', id)
-    }
+    // Not vornd's records to let go of: it keeps them for the next server.
     this.sessions.clear()
     this.outputBuffers.clear()
     this.ended.clear()

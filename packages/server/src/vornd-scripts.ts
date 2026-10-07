@@ -3,8 +3,7 @@ import log from './logger'
 import { vorndSessions, type VorndSessions } from './vornd-sessions'
 
 /**
- * Project scripts run in vornd's session holder, with the Native server
- * switch on: vornd builds the process as `executeScript` does and starts it
+ * Project scripts run in vornd's session holder: vornd builds the process as `executeScript` does and starts it
  * on pipes under a session id chosen here, which this server follows as it
  * follows a headless agent, reading the output and the exit effect. In
  * shadow mode this server runs each script itself and sends vornd what it

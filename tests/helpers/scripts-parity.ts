@@ -1,8 +1,8 @@
 import type { ScriptExecutionResult } from '../../packages/server/src/script-runner'
 
 /**
- * What may differ between a project script the server runs and the same
- * script vornd runs with the Native server switch on, and nothing else.
+ * What may differ between a project script the server runs, while vornd is
+ * not connected, and the same script vornd runs, and nothing else.
  *
  * A run is what `script:execute` answered, the output the clients were told
  * (`SCRIPT_DATA`) and the exits they were told (`SCRIPT_EXIT`).

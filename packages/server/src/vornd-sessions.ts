@@ -36,18 +36,16 @@ import {
  * directory are states and setting one again changes nothing. A notification
  * and an exit are acted on once, by the receipt each leaves in the database.
  *
- * While vornd runs native work (Settings › Experimental › Native server, or a
- * per-group setting), it keeps a copy of this server's session records: this
- * server feeds it (`session-feed.ts`) and follows the copy's changes (`SessionMirror`).
+ * vornd keeps a copy of this server's session records: this server feeds it
+ * (`session-feed.ts`) and follows the copy's changes (`SessionMirror`).
  *
- * With the Native server switch on, the copy also decides each terminal's
- * status (`decidesStatus`): from what its screen shows, its output going quiet,
+ * The copy decides each terminal's status: from what its screen shows, its output going quiet,
  * what is written to it and what the agent's hooks report. This server then
  * tells vornd what only it sees (`hookStatus`, `input`, `patch`) and takes each
  * status from the copy's changes (`mirrored`); the rest of the records stay its own.
  *
- * vornd then also answers the clients' calls that create, close, rename,
- * regroup and reorder terminals (`createsTerminals`), in its copy, and says so
+ * vornd also answers the clients' calls that create, close, rename,
+ * regroup and reorder terminals, in its copy, and says so
  * in the changes it tells (`native`): a terminal it created and whether its
  * program started, one it closed, the order a client set. This server follows
  * them as it follows its own calls, telling clients, saving the records and
@@ -56,14 +54,13 @@ import {
  * resume, a create for a remote host) check one set of claims, and vornd is told
  * when this server winds down (`tellClosing`), when it creates nothing new.
  *
- * Likewise the clients' calls that start and stop headless agents
- * (`createsHeadless`): vornd starts the agent on pipes in its holder, puts the
+ * Likewise the clients' calls that start and stop headless agents: vornd starts the agent on pipes in its holder, puts the
  * record in its copy and tells it (`native`, `created`), then its program's
  * start and, from the session's exit effect, how it ended. This server follows
  * the agent as one it started itself: it reads the output for the clients and
  * the workflow waiting on it, and lets the record go a while after the exit.
  *
- * With both, vornd also owns the records between runs (`restoresSessions`):
+ * vornd also owns the records between runs:
  * it writes its copy down and reads it back when it starts, so a terminal the
  * holder still holds after this server restarts is live again in the copy
  * before this server connects (`adopted`), and the rest are offered to resume
@@ -102,12 +99,7 @@ export interface EffectNote {
 /** What `vornd:hello` says. */
 interface Hello {
   protocol?: number
-  native?: boolean
-  statuses?: boolean
-  terminals?: boolean
-  headless?: boolean
   scripts?: 'native' | 'shadow' | null
-  restores?: boolean
 }
 
 /** When this machine came up. Uptime counts through sleep, so a laptop closed overnight is not a reboot. */
@@ -360,22 +352,8 @@ export class VorndSessions extends EventEmitter {
   /** What starts vornd, and says whether it is coming. */
   private launcher: VorndLauncher | null = null
 
-  /** Whether vornd runs native work and keeps a copy of the session records. */
-  private nativeWork = false
-
-  /** Whether vornd's copy decides the terminals' statuses, as its `vornd:hello` said. */
-  private statusWork = false
-
-  /** Whether vornd creates and changes terminals for the clients, as its `vornd:hello` said. */
-  private terminalWork = false
-
-  /** Whether vornd starts and stops headless agents for the clients, as its `vornd:hello` said. */
-  private headlessWork = false
-
   /** Whether vornd runs the project scripts, or compares what this server runs, as its `vornd:hello` said. */
   private scriptWork: Hello['scripts'] = null
-  /** Whether vornd owns the session records between runs, as its `vornd:hello` said. */
-  private restoreWork = false
 
   /** Whether this server is winding down, as vornd needs to know while it creates terminals. */
   private closingSource: (() => Closing) | null = null
@@ -384,7 +362,7 @@ export class VorndSessions extends EventEmitter {
 
   /** Where `sessionFeed` sends this server's session records: this channel, when vornd wants them. */
   readonly recordSink: RecordSink = {
-    wants: () => this.nativeWork && this.inUse(),
+    wants: () => this.inUse(),
     send: (params) => this.channel?.notify('vornd:record', params)
   }
 
@@ -400,7 +378,7 @@ export class VorndSessions extends EventEmitter {
   /**
    * vornd's copy of the session records, as its changes are told. Each
    * terminal record it takes is emitted as `mirrored`, for the pty manager to
-   * take the statuses from while vornd decides them.
+   * take the statuses from.
    */
   readonly mirror = new SessionMirror(
     () => this.resyncMirror(),
@@ -408,55 +386,9 @@ export class VorndSessions extends EventEmitter {
     (note) => this.emit('native', note)
   )
 
-  /**
-   * Whether vornd runs native work, as its `vornd:hello` said: it then keeps a
-   * copy of the session records, and notifications carry their effect ids.
-   */
-  isNative(): boolean {
-    return this.nativeWork && this.inUse()
-  }
-
-  /**
-   * Whether vornd decides the terminals' statuses: the Native server switch is
-   * on and the channel is up. While the channel is down this server decides
-   * them itself, as it does with the switch off.
-   */
-  decidesStatus(): boolean {
-    return this.statusWork && this.nativeWork && this.inUse()
-  }
-
-  /**
-   * Whether vornd answers the clients' calls that create, close and change
-   * terminals: it says so, and decides the statuses. Its changes then come
-   * marked `native` (`SessionMirror`), and the conversations being started are
-   * claimed there.
-   */
-  createsTerminals(): boolean {
-    return this.terminalWork && this.decidesStatus()
-  }
-
-  /**
-   * Whether vornd answers the clients' calls that start and stop headless
-   * agents: it says so, and decides the statuses. Its records then come
-   * marked `native` (`SessionMirror`), and this server follows them.
-   */
-  createsHeadless(): boolean {
-    return this.headlessWork && this.decidesStatus()
-  }
-
   /** Whether vornd runs the project scripts (`native`) or compares the plans of this server's (`shadow`). */
   scriptMode(): 'native' | 'shadow' | null {
     return this.inUse() ? (this.scriptWork ?? null) : null
-  }
-
-  /**
-   * Whether vornd owns the session records between runs: it creates both
-   * terminals and headless agents, keeps its copy across runs and answers the
-   * calls about the sessions of earlier runs. This server then saves nothing
-   * to its own session records and takes them on from the copy.
-   */
-  restoresSessions(): boolean {
-    return this.restoreWork && this.createsTerminals() && this.createsHeadless()
   }
 
   /**
@@ -481,15 +413,12 @@ export class VorndSessions extends EventEmitter {
 
   /** Let go of a claim, or with no transcript every claim `sessionId` holds. */
   unclaim(sessionId: string, transcriptId?: string): void {
-    if (!this.createsTerminals()) return
     this.channel?.notify('vornd:unclaim', { sessionId, ...(transcriptId ? { transcriptId } : {}) })
   }
 
   /** `sessionId`'s workspace is being prepared: its claims do not lapse meanwhile. */
-  preparing(sessionId: string): boolean {
-    if (!this.createsTerminals()) return false
+  preparing(sessionId: string): void {
     this.channel?.notify('vornd:preparing', { sessionId })
-    return true
   }
 
   prepared(sessionId: string): void {
@@ -504,7 +433,7 @@ export class VorndSessions extends EventEmitter {
   /** Tell vornd whether this server is winding down, if that changed since it was told. */
   tellClosing(): void {
     const source = this.closingSource
-    if (!source || !this.createsTerminals()) return
+    if (!source || !this.inUse()) return
     const closing = source()
     const json = JSON.stringify(closing)
     if (json === this.toldClosing) return
@@ -520,7 +449,7 @@ export class VorndSessions extends EventEmitter {
   private watchClosing(): void {
     this.toldClosing = ''
     this.tellClosing()
-    if (this.closingTimer || !this.createsTerminals()) return
+    if (this.closingTimer) return
     this.closingTimer = setInterval(() => this.tellClosing(), CLOSING_CHECK_MS)
     this.closingTimer.unref?.()
   }
@@ -592,12 +521,7 @@ export class VorndSessions extends EventEmitter {
     }
     const old = this.channel
     this.channel = channel
-    this.nativeWork = hello?.native === true
-    this.statusWork = hello?.statuses === true
-    this.terminalWork = hello?.terminals === true
-    this.headlessWork = hello?.headless === true
     this.scriptWork = hello?.scripts ?? null
-    this.restoreWork = hello?.restores === true
     old?.close()
     channel.on('notification', (method: string, params: unknown) =>
       this.notified(channel, method, params)
@@ -629,9 +553,9 @@ export class VorndSessions extends EventEmitter {
     if (this.channel !== channel) return
     this.emit('subscribed')
     this.holderTold(state.connected)
-    if (this.nativeWork && state.registry) this.mirror.load(state.registry)
-    // vornd owns the records now: the database's records of the last run are handed over once.
-    if (this.restoresSessions()) this.emit('restores')
+    if (state.registry) this.mirror.load(state.registry)
+    // vornd owns the records: the database's records of the last run are handed over once.
+    this.emit('restores')
     this.watchClosing()
     try {
       pruneEffectReceipts('notify', Date.now() - NOTICE_RECEIPT_MS)
@@ -837,8 +761,7 @@ export class VorndSessions extends EventEmitter {
         this.ptys.get(id)?.emit('activity')
         return
       case 'vornd:session':
-        if (this.nativeWork && channel === this.channel)
-          this.mirror.apply(p as unknown as SessionNote)
+        if (channel === this.channel) this.mirror.apply(p as unknown as SessionNote)
         return
       case 'vornd:connected':
         // The holder came back: what it holds may have changed.
@@ -903,13 +826,12 @@ export class VorndSessions extends EventEmitter {
   }
 
   /**
-   * vornd's copy of the session records, whole; null without native work or a
-   * channel. Asked on the same channel the records go out on, so the answer
+   * vornd's copy of the session records, whole; null without a channel. Asked on the same channel the records go out on, so the answer
    * reflects every record sent before it.
    */
   async registry(): Promise<RegistrySnapshot | null> {
     const channel = this.channel
-    if (!channel || !this.nativeWork) return null
+    if (!channel) return null
     return channel.request<RegistrySnapshot>('vornd:registry')
   }
 
@@ -924,18 +846,18 @@ export class VorndSessions extends EventEmitter {
 
   /**
    * Hand vornd the records this server's database kept of its last run, for
-   * it to offer while it owns the records; answers how many it took. A vornd
+   * it to offer; answers how many it took. A vornd
    * that read its own records back takes none.
    */
-  async carry(terminals: TerminalSession[]): Promise<number> {
+  async carry(terminals: TerminalSession[]): Promise<number | null> {
     const channel = this.channel
-    if (!channel || !this.restoresSessions() || terminals.length === 0) return 0
+    if (!channel) return null
     try {
       const answer = await channel.request<{ carried?: number }>('vornd:carry', { terminals })
       return answer?.carried ?? 0
     } catch (err) {
       log.warn({ err }, '[vornd] could not hand the last run’s session records to vornd')
-      return 0
+      return null
     }
   }
 

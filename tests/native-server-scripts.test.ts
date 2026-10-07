@@ -1,7 +1,7 @@
 /**
- * Project scripts on a real server and its vornd, with the Native server
- * switch off against on: the same scripts answer and tell clients the same,
- * but for the differences `tests/helpers/scripts-parity.ts` names.
+ * Project scripts on a real server and its vornd: vornd runs each one in its
+ * directory with its arguments, and tells clients what it printed and how it
+ * ended, read as `tests/helpers/scripts-parity.ts` names.
  *
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
  * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix.
@@ -20,7 +20,7 @@ import {
   until,
   type RealServer
 } from './helpers/real-server'
-import { normalizeScriptRun, type ScriptRun, type ScriptSide } from './helpers/scripts-parity'
+import { normalizeScriptRun, type ScriptRun } from './helpers/scripts-parity'
 import { normalizeRun } from './helpers/sessions-parity'
 
 // Booting a server probes Tailscale with a real process; nothing here needs it.
@@ -74,53 +74,67 @@ async function scenario(server: RealServer): Promise<Record<string, ScriptRun>> 
   }
 }
 
-describe.skipIf(!runnable)('project scripts through vornd, against the server', () => {
-  const runs: Partial<Record<ScriptSide, unknown>> = {}
-  const answered: Partial<Record<ScriptSide, unknown>> = {}
+describe.skipIf(!runnable)('project scripts through vornd', () => {
+  let run: unknown
+  let answered: unknown
 
   beforeAll(async () => {
-    for (const [side, on] of [
-      ['server', false],
-      ['vornd', true]
-    ] as const) {
-      const server = await startRealServer(on)
-      try {
-        const run = await scenario(server)
-        runs[side] = normalizeRun(
-          Object.fromEntries(Object.entries(run).map(([k, r]) => [k, normalizeScriptRun(r, side)])),
-          server.dirs
-        )
-        const health = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-        const groups = (await health.json()) as {
-          groups: Record<string, { native?: number; forwarded?: number }>
-        }
-        answered[side] = groups.groups.script
-      } catch (err) {
-        throw new Error(`${side}: ${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
-          cause: err
-        })
-      } finally {
-        await stopRealServer(server)
+    const server = await startRealServer()
+    try {
+      const runs = await scenario(server)
+      run = normalizeRun(
+        Object.fromEntries(
+          Object.entries(runs).map(([k, r]) => [k, normalizeScriptRun(r, 'vornd')])
+        ),
+        server.dirs
+      )
+      const health = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
+      const groups = (await health.json()) as {
+        groups: Record<string, { native?: number; forwarded?: number }>
       }
+      answered = groups.groups.script
+    } catch (err) {
+      throw new Error(`${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
+        cause: err
+      })
+    } finally {
+      await stopRealServer(server)
     }
   }, 240_000)
 
   afterAll(() => removeRealServerDirs())
 
-  it('runs each script in its directory with its arguments, as the server does', () => {
-    expect(runs.server).toMatchObject({
-      succeeds: { success: true, exitCode: 0, printed: ['in proj', 'two'], exits: [0] },
-      fails: { success: false, exitCode: 3, printed: ['err', 'out'], exits: [3] },
-      args: { success: true, printed: ['a b|c|'] }
+  it('runs each script in its directory with its arguments', () => {
+    expect(run).toEqual({
+      succeeds: {
+        success: true,
+        exitCode: 0,
+        failed: false,
+        printed: ['in proj', 'two'],
+        told: ['in proj', 'two'],
+        exits: [0]
+      },
+      fails: {
+        success: false,
+        exitCode: 3,
+        failed: true,
+        printed: ['err', 'out'],
+        told: ['err', 'out'],
+        exits: [3]
+      },
+      args: {
+        success: true,
+        exitCode: 0,
+        failed: false,
+        printed: ['a b|c|'],
+        told: ['a b|c|'],
+        exits: [0]
+      }
     })
-    expect(runs.vornd).toEqual(runs.server)
   })
 
-  it('has vornd run them with the switch on', () => {
+  it('has vornd run them', () => {
     // The server stays the entry point and asks vornd to run each one.
-    expect(answered).toMatchObject({
-      server: { native: 0, forwarded: 3 },
-      vornd: { native: 3, forwarded: 3 }
-    })
+    expect(answered).toMatchObject({ native: 3, forwarded: 3 })
   })
 })

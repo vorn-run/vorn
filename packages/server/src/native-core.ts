@@ -45,9 +45,6 @@ export interface NativeGitRequest {
   maxBuffer: number
 }
 
-/** The agent status codes vornd's status effects carry, in order. */
-export const NATIVE_STATUS = [null, 'running', 'waiting', 'error'] as const
-
 export interface CoreSelection {
   /** Null when the binary could not be loaded. */
   native: NativeCore | null
@@ -171,7 +168,7 @@ const OPTIONAL_EXPORTS: Array<[keyof NativeCore, string]> = [
   ['NativeStore', 'the native store']
 ]
 
-/** What Settings › Experimental shows about the core. */
+/** What Settings › About shows about the core. */
 export function coreStatus(): CoreStatus {
   const selection = activeCore()
   const core = selection.native

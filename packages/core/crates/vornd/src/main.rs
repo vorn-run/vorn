@@ -1,4 +1,4 @@
-//! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--native-server] [--groups git=shadow] [--db PATH] [--log-file PATH] [--sessiond PATH --home DIR] [--debug-spawn]`
+//! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--groups workflow=shadow] [--db PATH] [--log-file PATH] [--sessiond PATH --home DIR] [--debug-spawn]`
 //!
 //! The app passes the desktop's launch token in `VORND_DESKTOP_TOKEN`: a
 //! WebSocket that opens with it is the desktop's (TP §10). It is read once
@@ -26,15 +26,13 @@ use vornd::holder::{self, Holder, HolderConfig};
 use vornd::protocol::VORND_PROTOCOL;
 use vornd::{proxy, Daemon, Groups};
 
-const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--native-server] [--groups group=mode,...] [--db PATH] [--log-file PATH] [--exit-with-stdin] [--sessiond PATH --home DIR] [--debug-spawn]
+const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--groups group=mode,...] [--db PATH] [--log-file PATH] [--exit-with-stdin] [--sessiond PATH --home DIR] [--debug-spawn]
 
   --upstream   the Node server to forward to
   --listen     where to listen; loopback only (default 127.0.0.1:0)
-  --native-server
-               answer every group that has joined the Native server switch
-               (also VORND_NATIVE_SERVER=1)
-  --groups     per-group switches, forward | shadow | native, over the switch
-               (default: all forward; also read from VORND_GROUPS)
+  --groups     per-group switches, forward | shadow | native, for tests
+               (default: every implemented group native, the rest forwarded;
+               also read from VORND_GROUPS)
   --db         the server's vorn.db, read to tell a local project from a remote
                one and to see how the agents are configured; without it those
                calls go to the server
@@ -66,7 +64,6 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut upstream = None;
     let mut listen: SocketAddr = ([127, 0, 0, 1], 0).into();
     let mut groups = std::env::var("VORND_GROUPS").ok();
-    let mut native_server = std::env::var("VORND_NATIVE_SERVER").is_ok_and(|v| v == "1");
     let mut db = None;
     let mut log_file = None;
     let mut exit_with_stdin = false;
@@ -89,7 +86,6 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
                     .map_err(|e| format!("--listen: {e}"))?
             }
             "--groups" => groups = Some(value("--groups")?),
-            "--native-server" => native_server = true,
             "--db" => db = Some(PathBuf::from(value("--db")?)),
             "--log-file" => log_file = Some(value("--log-file")?),
             "--exit-with-stdin" => exit_with_stdin = true,
@@ -109,8 +105,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             listen.ip()
         ));
     }
-    let groups =
-        Groups::new(native_server, groups.as_deref()).map_err(|e| format!("--groups: {e}"))?;
+    let groups = Groups::new(groups.as_deref()).map_err(|e| format!("--groups: {e}"))?;
     let holder = match (sessiond, home) {
         (Some(bundled), Some(home)) => Some(HolderConfig { home, bundled }),
         (None, None) => None,
@@ -257,7 +252,7 @@ fn serve_app(_: &HolderConfig, _: &Holder, _: &Arc<AppLink>) -> Option<String> {
     None
 }
 
-/// With the Native server switch on, the registry owns the session records
+/// With the sessions group native, the registry owns the session records
 /// between runs: what the last vornd wrote down is read back and offered,
 /// and this vornd writes its own down after each change. Answers the file,
 /// to write once more as vornd stops.
@@ -265,14 +260,15 @@ fn serve_app(_: &HolderConfig, _: &Holder, _: &Arc<AppLink>) -> Option<String> {
 fn carry_records(
     cfg: &HolderConfig,
     holder: &Holder,
-    native_server: bool,
+    owned: bool,
 ) -> Option<vornd::carry::CarryFile> {
-    if !native_server {
+    if !owned {
         return None;
     }
     let engine = holder.engine()?;
     let registry = engine.registry();
     registry.own_records();
+    registry.expect_holder();
     let file = vornd::carry::CarryFile::in_dir(&cfg.home.join("vornd"));
     if let Some(carried) = file.load() {
         let (offered, aged) = registry.carry(carried, vornd::registry::now_ms());
@@ -355,7 +351,8 @@ fn main() -> ExitCode {
                 }
                 let holder = Arc::new(new_holder(&cfg));
                 // Before the holder connects: what it holds is adopted then.
-                carry = carry_records(&cfg, &holder, args.groups.native_server());
+                let owned = args.groups.mode("sessions") == vornd::Mode::Native;
+                carry = carry_records(&cfg, &holder, owned);
                 grid = serve_grid(&cfg, &holder);
                 app = serve_app(&cfg, &holder, &link).map(|e| (cfg.home.clone(), e));
                 tokio::spawn(holder::keep(cfg, holder.clone()));
@@ -504,16 +501,14 @@ mod tests {
     }
 
     #[test]
-    fn the_native_server_switch_and_a_group_setting_combine() {
+    fn implemented_groups_run_natively_unless_a_group_setting_says_otherwise() {
         use vornd::Mode;
-        let off = parse(&["--upstream", "127.0.0.1:1"]).unwrap();
-        assert_eq!(off.groups.mode("git"), Mode::Forward);
-        let on = parse(&["--upstream", "127.0.0.1:1", "--native-server"]).unwrap();
-        assert_eq!(on.groups.mode("git"), Mode::Native);
+        let plain = parse(&["--upstream", "127.0.0.1:1"]).unwrap();
+        assert_eq!(plain.groups.mode("git"), Mode::Native);
+        assert_eq!(plain.groups.mode("workflow"), Mode::Forward);
         let shadowed = parse(&[
             "--upstream",
             "127.0.0.1:1",
-            "--native-server",
             "--groups",
             "git=shadow",
             "--db",

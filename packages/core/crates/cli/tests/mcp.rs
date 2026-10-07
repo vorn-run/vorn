@@ -492,7 +492,7 @@ async fn says_at_once_when_the_credential_was_never_taken() {
 async fn vorn_mcp(status: Value, input: &str) -> (i32, String, String) {
     let (mcp_port, _) = scripted().await;
     let status = match status {
-        Value::Null => json!({"state": "on", "port": mcp_port, "nativeServer": true}),
+        Value::Null => json!({"state": "on", "port": mcp_port}),
         other => other,
     };
     let ws_port = ws_server(move |method, _| {
@@ -540,15 +540,15 @@ async fn the_binary_relays_stdio_to_where_the_server_says() {
 }
 
 #[tokio::test]
-async fn the_binary_refuses_a_vornd_that_does_not_serve_mcp() {
+async fn the_binary_refuses_a_server_with_no_vornd_to_relay_to() {
     let (code, out, err) = vorn_mcp(
-        json!({"state": "on", "port": 1, "nativeServer": false}),
+        json!({"state": "failed", "detail": "no binary"}),
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n",
     )
     .await;
     assert_eq!(code, 4);
     assert_eq!(out, "");
-    assert!(err.contains("Native server"), "{err}");
+    assert!(err.contains("no binary"), "{err}");
 
     let (code, out, err) = vorn_mcp(json!({"state": "off"}), "").await;
     assert_eq!((code, out.as_str()), (4, ""));
@@ -560,7 +560,7 @@ async fn server_with_vornd_at(vornd_port: Arc<AtomicU16>) -> u16 {
     ws_server(move |method, _| {
         assert_eq!(method, "server:vornd");
         let port = vornd_port.load(Ordering::SeqCst);
-        Answer::Result(json!({"state": "on", "port": port, "nativeServer": true}))
+        Answer::Result(json!({"state": "on", "port": port}))
     })
     .await
 }

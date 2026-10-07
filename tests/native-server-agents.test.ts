@@ -6,8 +6,8 @@
  * five agents, and one PATH, holding a stand-in CLI for each agent that lists
  * models. The login shell both ask for its environment is a stand-in too,
  * which prints the environment it was given, so both see that PATH. One
- * server is started, and two vornds in front of it: one with the Native
- * server switch on, one shadowing the same groups. Every call is made to the
+ * server is started, and two vornds in front of it: one answering
+ * them itself, one shadowing the same groups. Every call is made to the
  * server and through vornd, and the two frames a client receives must be the
  * same but for the differences `helpers/agents-parity` names.
  *
@@ -461,7 +461,7 @@ describe.skipIf(!runnable)(
       }
       await shellEnvSettled(10_000)
       const db = path.join(shared.dataDir, 'vorn.db')
-      native = await startVornd(serverPort, ['--native-server', '--db', db])
+      native = await startVornd(serverPort, ['--db', db])
       shadow = await startVornd(serverPort, [
         '--groups',
         'agent=shadow,sessions=shadow,shell=shadow',

@@ -31,7 +31,7 @@
 //! ([`crate::size`]); the driver sends what it decides to sessiond, and
 //! tells every client who asked for each resize when its record comes back.
 //!
-//! With the Native server switch on, [`Engine::decide_statuses`] has the
+//! With terminals native, [`Engine::decide_statuses`] has the
 //! copy of the server's session records ([`crate::registry`]) decide each
 //! terminal's status from what its session does: its screen's status, its
 //! output and its going quiet.

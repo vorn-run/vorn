@@ -904,6 +904,14 @@ fn migrate(
         })?;
     }
 
+    // The Experimental settings are gone: their one switch is how Vorn always runs now.
+    if version < 27 {
+        step(conn, 27, |d| {
+            d.execute("DELETE FROM defaults WHERE key = 'experimental'", [])?;
+            Ok(())
+        })?;
+    }
+
     Ok(())
 }
 
@@ -1249,7 +1257,7 @@ mod tests {
     #[test]
     fn a_new_database_is_at_the_latest_version() {
         let store = test_support::store();
-        assert_eq!(store.schema_version().unwrap(), 26);
+        assert_eq!(store.schema_version().unwrap(), 27);
         let tables: Vec<String> = store
             .conn()
             .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -1272,6 +1280,33 @@ mod tests {
                 "{table} missing: {tables:?}"
             );
         }
+    }
+
+    #[test]
+    fn drops_the_experimental_settings_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vorn.db");
+        let (store, _) = Store::open(&path, test_support::options()).unwrap();
+        store
+            .conn()
+            .execute_batch(
+                r#"INSERT INTO defaults (key, value) VALUES ('experimental', '{"nativeServer":true}');
+                   INSERT OR REPLACE INTO defaults (key, value) VALUES ('theme', '"dark"');
+                   UPDATE schema_meta SET value = '26' WHERE key = 'schema_version';"#,
+            )
+            .unwrap();
+        drop(store);
+        let (store, _) = Store::open(&path, test_support::options()).unwrap();
+        let keys: Vec<String> = store
+            .conn()
+            .prepare("SELECT key FROM defaults WHERE key IN ('experimental', 'theme')")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(keys, ["theme"]);
+        assert_eq!(store.schema_version().unwrap(), 27);
     }
 
     #[test]
@@ -1314,6 +1349,6 @@ mod tests {
             panic!("expected a recovery, got {opened:?}");
         };
         assert!(backup.exists());
-        assert_eq!(store.schema_version().unwrap(), 26);
+        assert_eq!(store.schema_version().unwrap(), 27);
     }
 }

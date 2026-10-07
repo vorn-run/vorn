@@ -457,6 +457,20 @@ pub struct Native {
     sizes: vorn_worktrees::Sizes,
 }
 
+/// How long a call about what runs waits for the copy to settle as vornd
+/// starts: the server's own wait for the holder (`HOLDER_WAIT_MS`).
+const SETTLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The calls that say what runs and what is offered from the last run, which
+/// wait for the copy to settle ([`SessionRegistry::settle`]): a window opening
+/// as Vorn starts reads its board from them, and resumes what they offer.
+fn reads_what_runs(method: &str) -> bool {
+    matches!(
+        method,
+        "terminal:listActive" | "headless:list" | "sessions:restored" | "sessions:resume"
+    )
+}
+
 impl Native {
     pub fn new() -> Arc<Native> {
         Native::with_secrets(secrets::Secrets::new())
@@ -537,6 +551,11 @@ impl Native {
     /// calls [`connection::is_async`] names are answered by [`Native::answer`]
     /// only.
     pub fn call(&self, method: &str, params: &Value) -> Answer {
+        if reads_what_runs(method) {
+            if let Some(registry) = self.registry.get() {
+                registry.settle(SETTLE_LIMIT);
+            }
+        }
         match method.split_once(':').map(|(g, _)| g) {
             Some("git") if method == "git:removeWorktree" => worktree::call(self, method, params),
             Some("worktree") if method != "worktree:activeSessions" => {

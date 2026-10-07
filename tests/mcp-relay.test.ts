@@ -16,26 +16,21 @@ function health(groups: Record<string, { mode: string }>): typeof fetch {
   return (async () => new Response(JSON.stringify({ ok: true, groups }))) as typeof fetch
 }
 
-const on = (nativeServer: boolean) => async (): Promise<VorndStatus> => ({
-  state: 'on',
-  port: 4321,
-  nativeServer
-})
+const on = async (): Promise<VorndStatus> => ({ state: 'on', port: 4321 })
 
 describe('whether to relay to vornd', () => {
   it('relays only when vornd serves the mcp group natively', async () => {
     const native = health({ mcp: { mode: 'native' } })
-    expect((await vorndMcpUrl({ vorndStatus: on(true), fetch: native }))?.href).toBe(
+    expect((await vorndMcpUrl({ vorndStatus: on, fetch: native }))?.href).toBe(
       'http://127.0.0.1:4321/mcp'
     )
-    expect(await vorndMcpUrl({ vorndStatus: on(false), fetch: native })).toBeNull()
     expect(
       await vorndMcpUrl({ vorndStatus: async () => ({ state: 'off' }), fetch: native })
     ).toBeNull()
     expect(
-      await vorndMcpUrl({ vorndStatus: on(true), fetch: health({ mcp: { mode: 'forward' } }) })
+      await vorndMcpUrl({ vorndStatus: on, fetch: health({ mcp: { mode: 'forward' } }) })
     ).toBeNull()
-    expect(await vorndMcpUrl({ vorndStatus: on(true), fetch: health({}) })).toBeNull()
+    expect(await vorndMcpUrl({ vorndStatus: on, fetch: health({}) })).toBeNull()
   })
 
   it('serves the tools itself when the server or vornd cannot be asked', async () => {
@@ -48,7 +43,7 @@ describe('whether to relay to vornd', () => {
     const unreachable = (async () => {
       throw new TypeError('fetch failed')
     }) as typeof fetch
-    expect(await vorndMcpUrl({ vorndStatus: on(true), fetch: unreachable })).toBeNull()
+    expect(await vorndMcpUrl({ vorndStatus: on, fetch: unreachable })).toBeNull()
   })
 })
 

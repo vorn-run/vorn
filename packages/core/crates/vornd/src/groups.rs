@@ -3,19 +3,18 @@
 //! A group is the part of a method name before its first colon: `git:status`
 //! and `git:diff` are both `git`. Each group is in one of three modes:
 //!
-//! - **forward**: the Node server answers. Every group starts here.
+//! - **forward**: the Node server answers: every group vornd does not
+//!   implement.
 //! - **shadow**: the Node server still answers, and the native implementation
 //!   is run on the same input so the two can be compared ([`crate::native`]).
 //!   Only calls that change nothing are run twice; a commit made twice is not
 //!   a comparison.
 //! - **native**: vornd answers and the call never reaches Node, except the
 //!   calls the server has to keep, which [`crate::native`] forwards one by
-//!   one and says why.
+//!   one and says why. Every group in [`NATIVE_GROUPS`] starts here.
 //!
-//! The Native server switch in Settings › Experimental (`--native-server`)
-//! puts every group in [`NATIVE_SERVER_GROUPS`] in native mode. A per-group
-//! setting (`--groups` or `VORND_GROUPS`, such as `git=shadow`) is for
-//! development and comparison runs, and wins over the switch.
+//! A per-group setting (`--groups` or `VORND_GROUPS`, such as
+//! `workflow=shadow`) is for tests and comparison runs only.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -53,8 +52,7 @@ impl fmt::Display for Mode {
     }
 }
 
-/// Groups vornd has a native implementation of, which a per-group setting
-/// may put in native mode.
+/// Groups vornd has a native implementation of, and runs natively.
 pub const NATIVE_GROUPS: &[&str] = &[
     "git",
     "file",
@@ -86,29 +84,6 @@ pub const SHADOW_GROUPS: &[&str] = &[
     "artifact",
 ];
 
-/// Groups the Native server switch runs natively: the one place a group
-/// joins the switch. Each is also in [`NATIVE_GROUPS`].
-pub const NATIVE_SERVER_GROUPS: &[&str] = &[
-    "git",
-    "file",
-    "ide",
-    "agent",
-    "sessions",
-    "shell",
-    "connection",
-    "connector",
-    "server",
-    "tailscale",
-    "token",
-    "pairing",
-    "auth",
-    "mcp",
-    "terminal",
-    "headless",
-    "worktree",
-    "script",
-];
-
 /// The group a method belongs to: everything before the first colon.
 pub fn group_of(method: &str) -> &str {
     method.split_once(':').map_or(method, |(group, _)| group)
@@ -134,9 +109,6 @@ pub enum Counted {
 #[derive(Debug, Default)]
 pub struct Groups {
     modes: BTreeMap<String, Mode>,
-    /// Whether the Native server switch is on, whatever the per-group
-    /// settings say: it also has vornd decide the sessions' statuses.
-    native_server: bool,
     seen: Mutex<BTreeMap<String, GroupCounts>>,
 }
 
@@ -160,23 +132,24 @@ impl Groups {
         Groups::default()
     }
 
-    /// The modes for a vornd started with the Native server switch on or
-    /// off, then `spec`'s `group=mode` pairs separated by commas, such as
-    /// `git=shadow,terminal=forward`, on top. A group neither names is
-    /// forwarded.
-    pub fn new(native_server: bool, spec: Option<&str>) -> Result<Groups, String> {
-        let mut modes = BTreeMap::new();
-        if native_server {
-            for group in NATIVE_SERVER_GROUPS {
-                modes.insert((*group).to_owned(), Mode::Native);
-            }
+    /// Every group in [`NATIVE_GROUPS`] native, then `spec`'s `group=mode`
+    /// pairs separated by commas, such as `workflow=shadow`, on top. A group
+    /// neither names is forwarded.
+    pub fn new(spec: Option<&str>) -> Result<Groups, String> {
+        let mut groups = Groups::parse(spec.unwrap_or(""))?;
+        for group in NATIVE_GROUPS {
+            groups
+                .modes
+                .entry((*group).to_owned())
+                .or_insert(Mode::Native);
         }
-        for pair in spec
-            .unwrap_or("")
-            .split(',')
-            .map(str::trim)
-            .filter(|p| !p.is_empty())
-        {
+        Ok(groups)
+    }
+
+    /// Only `spec`'s modes, every other group forwarded: for tests of one group.
+    pub fn parse(spec: &str) -> Result<Groups, String> {
+        let mut modes = BTreeMap::new();
+        for pair in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
             let (group, mode) = pair
                 .split_once('=')
                 .ok_or_else(|| format!("expected group=mode, got `{pair}`"))?;
@@ -197,14 +170,8 @@ impl Groups {
         }
         Ok(Groups {
             modes,
-            native_server,
             seen: Mutex::default(),
         })
-    }
-
-    /// `spec`'s modes with the Native server switch off.
-    pub fn parse(spec: &str) -> Result<Groups, String> {
-        Groups::new(false, Some(spec))
     }
 
     pub fn mode(&self, group: &str) -> Mode {
@@ -233,11 +200,6 @@ impl Groups {
     /// The groups with a switch set, and their modes.
     pub fn modes(&self) -> impl Iterator<Item = (&str, Mode)> {
         self.modes.iter().map(|(g, m)| (g.as_str(), *m))
-    }
-
-    /// Whether vornd was started with the Native server switch on.
-    pub fn native_server(&self) -> bool {
-        self.native_server
     }
 
     /// Whether any group is native or shadowed, so vornd has native work to
@@ -272,24 +234,17 @@ mod tests {
     }
 
     #[test]
-    fn the_switch_runs_every_joined_group_natively_and_a_setting_wins() {
-        let on = Groups::new(true, None).unwrap();
-        for group in NATIVE_SERVER_GROUPS {
-            assert_eq!(on.mode(group), Mode::Native, "{group}");
+    fn every_implemented_group_runs_natively_and_a_setting_wins() {
+        let groups = Groups::new(None).unwrap();
+        for group in NATIVE_GROUPS {
+            assert_eq!(groups.mode(group), Mode::Native, "{group}");
         }
-        assert_eq!(on.mode("task"), Mode::Forward);
-        let shadowed = Groups::new(true, Some("git=shadow,file=forward")).unwrap();
-        assert_eq!(shadowed.mode("git"), Mode::Shadow);
+        assert_eq!(groups.mode("workflow"), Mode::Forward);
+        assert_eq!(groups.mode("task"), Mode::Forward);
+        let shadowed = Groups::new(Some("workflow=shadow,file=forward")).unwrap();
+        assert_eq!(shadowed.mode("workflow"), Mode::Shadow);
         assert_eq!(shadowed.mode("file"), Mode::Forward);
         assert_eq!(shadowed.mode("ide"), Mode::Native);
-        assert_eq!(Groups::new(false, None).unwrap().mode("git"), Mode::Forward);
-    }
-
-    #[test]
-    fn only_groups_with_an_implementation_join_the_switch() {
-        for group in NATIVE_SERVER_GROUPS {
-            assert!(NATIVE_GROUPS.contains(group), "{group}");
-        }
     }
 
     #[test]

@@ -24,9 +24,9 @@ import { until } from './helpers/vornd-sessions'
 import { normalizeScriptRun, type ScriptRun } from './helpers/scripts-parity'
 
 /**
- * Project scripts with the Native server switch off, where the server runs
- * them, and on, where vornd does and the server follows the session it ran
- * each in: the same scripts answer and tell clients the same, but for the
+ * Project scripts the server runs, as it does while vornd is not connected
+ * or forwards them, and those vornd runs, where the server follows the
+ * session it ran each in: the same scripts answer and tell clients the same, but for the
  * differences `scripts-parity.ts` names. A fake vornd stands in, running each
  * script it is asked to as the session holder would, on pipes read as one
  * stream, and telling its output as records and its end as an exit effect.
