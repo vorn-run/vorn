@@ -98,7 +98,10 @@ mod tests {
             key: Some(KeyFile::new(Secret::new("-----BEGIN KEY-----".into()))),
         };
         let shown = format!("{remote:?} {:?}", Credentials::default());
-        assert!(!shown.contains("hunter2") && !shown.contains("BEGIN KEY"), "{shown}");
+        assert!(
+            !shown.contains("hunter2") && !shown.contains("BEGIN KEY"),
+            "{shown}"
+        );
         assert!(shown.contains("Secret(<redacted>)"));
     }
 

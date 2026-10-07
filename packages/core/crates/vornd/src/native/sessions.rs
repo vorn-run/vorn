@@ -610,7 +610,9 @@ fn resume_agent(native: &Native, id: &str, previous: &TerminalSession) -> Answer
         return Answer::Forward;
     };
     // Scope read before the claim; claims do not lapse while the workspace is prepared.
-    let scope = (!remote).then(|| transcript_scope(native, &previous)).flatten();
+    let scope = (!remote)
+        .then(|| transcript_scope(native, &previous))
+        .flatten();
     claims.preparing(id);
     let now = Instant::now();
     let free = if remote {
@@ -946,7 +948,10 @@ fn create(native: &Native, req: &CreateRequest) -> Answer {
         return Answer::Forward;
     }
     // A host vornd cannot read is the server's to make what it will of.
-    if req.remote().is_some_and(|h| remote_host(native, h).is_none()) {
+    if req
+        .remote()
+        .is_some_and(|h| remote_host(native, h).is_none())
+    {
         return Answer::Forward;
     }
     let Some(named) = req.named().map(str::to_owned) else {
@@ -1244,8 +1249,8 @@ fn prepare_remote(
         platform: Platform::HOST,
         quoting: Quoting::local(Platform::HOST, &default_shell),
     };
-    let launch_line =
-        launch_line(&launch, Some(config), &env, &machine).map_err(|e| Answer::Error(e.to_string()))?;
+    let launch_line = launch_line(&launch, Some(config), &env, &machine)
+        .map_err(|e| Answer::Error(e.to_string()))?;
     let method = host.auth_method.as_ref().map(|m| m.0.as_str());
     let key = match (method, &req.credentials.key_content) {
         (Some("key-stored"), Some(content)) => Some(KeyFile::new(content.clone())),
@@ -1750,7 +1755,14 @@ fn plan_resume(native: &Native, id: &str) -> Option<Value> {
         let req = restore_request(&previous, transcript)?;
         let settings = agent::settings(native)?;
         let config = agent::command_of(&settings, req.agent)?;
-        return plan_remote(native, &req, &config, &settings, id, previous.group_id.clone());
+        return plan_remote(
+            native,
+            &req,
+            &config,
+            &settings,
+            id,
+            previous.group_id.clone(),
+        );
     }
     let cwd = resume_cwd_for(&previous)?;
     if previous.agent_type == "shell" {
@@ -2678,5 +2690,291 @@ pub(super) mod tests {
         assert_eq!(type_at(asked, Some(late)), late + TYPE_SETTLE);
         // It never came: typed anyway, at the longest wait.
         assert_eq!(type_at(asked, None), asked + TYPE_AT_MOST);
+    }
+
+    /// The server's database beside `fed`, with remote host `h` logging in by `auth`.
+    fn with_host(fed: &Fed, auth: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("vorn.db");
+        let options = vorn_store::StoreOptions {
+            default_shell: "/bin/sh".into(),
+            default_agent_commands: Map::new(),
+            default_workspace: serde_json::from_value(json!({
+                "id": "personal", "name": "Personal", "icon": "User",
+                "iconColor": "#6b7280", "order": 0,
+            }))
+            .unwrap(),
+            owner_name: "owner".into(),
+            seed_workflows: Vec::new(),
+        };
+        let (mut store, _) = vorn_store::Store::open(&db, options).unwrap();
+        let host = json!({
+            "id": "h", "label": "Box", "hostname": "box.example", "user": "me",
+            "port": 2222, "authMethod": auth, "sshOptions": "-A",
+        });
+        store
+            .call(
+                "saveConfig",
+                json!([{ "version": 1, "defaults": {}, "projects": [], "remoteHosts": [host] }, []]),
+            )
+            .unwrap();
+        fed.native.set_database(db);
+        dir
+    }
+
+    const PASSWORD: &str = "pw-hunter2-never-shown";
+    const KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY----- never-shown";
+
+    fn remote_create(extra: Value) -> Value {
+        let mut params = json!({
+            "agentType": "claude", "projectName": "far", "projectPath": "/srv/far",
+            "remoteHostId": "h", "initialPrompt": "fix the build",
+            "_decryptedPassword": PASSWORD, "_decryptedKeyContent": KEY,
+        });
+        if let (Value::Object(p), Value::Object(extra)) = (&mut params, extra) {
+            p.extend(extra);
+        }
+        params
+    }
+
+    fn remote_of(input: &Input) -> &Remote {
+        match input {
+            Input::Remote(remote) => remote,
+            other => panic!("not a login: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn starts_a_terminal_on_a_remote_host_in_a_local_shell_that_logs_in() {
+        let fed = fed();
+        let _db = with_host(&fed, "password");
+        let answer = call(&fed.native, "terminal:create", &remote_create(json!({})));
+        let Answer::Result(record) = answer else {
+            panic!("not created: {answer:?}");
+        };
+        assert_eq!(
+            (&record["remoteHostId"], &record["remoteHostLabel"]),
+            (&json!("h"), &json!("Box"))
+        );
+        assert_eq!(record["projectPath"], "/srv/far");
+        assert_eq!(record["displayName"], "fix the build");
+        // Not pinned: the agent is told no id on a host whose history this machine cannot read.
+        for absent in ["agentSessionId", "worktreePath", "branch", "headCommit"] {
+            assert!(record.get(absent).is_none(), "{absent}: {record}");
+        }
+        let (spec, input) = fed.host.last_start();
+        assert_eq!(spec.cwd, shell::home_dir());
+        assert_eq!(
+            spec.argv[1..],
+            launch_shell::default_shell_args(Platform::HOST)
+                .iter()
+                .map(|a| (*a).to_owned())
+                .collect::<Vec<_>>()[..]
+        );
+        let id = record["id"].as_str().unwrap();
+        let remote = remote_of(&input);
+        assert_eq!(remote.marker, login::marker(id));
+        assert!(
+            remote.line.starts_with(
+                "ssh -t -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no -A me@box.example 'echo __VORN_READY_'"
+            ),
+            "{}",
+            remote.line
+        );
+        assert!(remote.command.starts_with("cd /srv/far && claude"));
+        assert!(remote.command.contains("'fix the build'"));
+        assert_eq!(remote.password.as_ref().map(Secret::expose), Some(PASSWORD));
+        // A key goes with a stored-key login only.
+        assert_eq!(remote.key, None);
+        fed.host.up(7);
+        assert_eq!(
+            fed.registry.read(|r| r.terminal(id).unwrap().0.pid),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn hands_a_stored_key_to_ssh_as_a_file_written_only_once_it_logs_in() {
+        let fed = fed();
+        let _db = with_host(&fed, "key-stored");
+        let named = json!({ "resumeSessionId": "conv-far" });
+        let Answer::Result(record) = call(&fed.native, "terminal:create", &remote_create(named))
+        else {
+            panic!("not created");
+        };
+        assert_eq!(record["agentSessionId"], "conv-far");
+        let (_, input) = fed.host.last_start();
+        let remote = remote_of(&input);
+        let key = remote.key.as_ref().expect("the stored key");
+        assert!(remote.line.starts_with(&format!(
+            "ssh -t -p 2222 -i {} -A me@box.example",
+            key.path.display()
+        )));
+        assert!(!key.path.exists());
+        assert_eq!(remote.password, None);
+        assert!(remote.command.contains("--resume conv-far"));
+
+        // A stored key the desktop could not decrypt: ssh falls back to the agent.
+        let no_key = json!({ "_decryptedKeyContent": null });
+        call(&fed.native, "terminal:create", &remote_create(no_key));
+        let (_, input) = fed.host.last_start();
+        assert!(remote_of(&input)
+            .line
+            .starts_with("ssh -t -p 2222 -A me@box.example"));
+    }
+
+    #[test]
+    fn leaves_a_host_it_cannot_read_and_a_remote_headless_agent_to_the_server() {
+        let fed = fed();
+        // No database: vornd cannot tell the host.
+        assert_eq!(
+            call(&fed.native, "terminal:create", &remote_create(json!({}))),
+            Answer::Forward
+        );
+        let _db = with_host(&fed, "agent");
+        let other = json!({ "remoteHostId": "gone" });
+        assert_eq!(
+            call(&fed.native, "terminal:create", &remote_create(other)),
+            Answer::Forward
+        );
+        fed.link.set_creates_headless();
+        assert_eq!(
+            call(&fed.native, "headless:create", &remote_create(json!({}))),
+            Answer::Forward
+        );
+        assert!(plan(&fed.native, "headless:create", &remote_create(json!({})), 0).is_none());
+        assert!(fed.host.starts.lock().unwrap().is_empty());
+    }
+
+    /// Everything tracing writes, at every level.
+    #[derive(Clone, Default)]
+    struct Captured(std::sync::Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+        type Writer = Captured;
+        fn make_writer(&'a self) -> Captured {
+            self.clone()
+        }
+    }
+
+    #[test]
+    fn credentials_never_reach_a_log_a_record_a_plan_or_an_argv() {
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(captured.clone())
+            .with_max_level(tracing::Level::TRACE)
+            .finish();
+        let mut seen = Vec::new();
+        tracing::subscriber::with_default(subscriber, || {
+            for auth in ["password", "key-stored"] {
+                let fed = fed();
+                let _db = with_host(&fed, auth);
+                let params = remote_create(json!({}));
+                let answer = call(&fed.native, "terminal:create", &params);
+                seen.push(format!("{answer:?}"));
+                let (spec, input) = fed.host.last_start();
+                seen.push(format!("{spec:?} {input:?}"));
+                seen.push(format!("{:?}", CreateRequest::read(&params)));
+                seen.push(format!(
+                    "{:?}",
+                    plan(&fed.native, "terminal:create", &params, 0)
+                ));
+                // A failed start is logged with its reason.
+                fed.host.down("no holder");
+                fed.registry.read(|r| {
+                    seen.push(serde_json::to_string(&r.terminals()).unwrap());
+                });
+                seen.push(format!("{:?}", fed.registry.restored()));
+                // The stored key without its content warns, naming the host only.
+                call(
+                    &fed.native,
+                    "terminal:create",
+                    &remote_create(json!({ "_decryptedKeyContent": null })),
+                );
+            }
+        });
+        let logs = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        assert!(
+            logs.contains("vornd could not start this session"),
+            "{logs}"
+        );
+        seen.push(logs);
+        for text in &seen {
+            assert!(
+                !text.contains(PASSWORD) && !text.contains(KEY),
+                "a credential in: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn plans_a_remote_terminal_as_the_shell_it_starts_in() {
+        let fed = fed();
+        let _db = with_host(&fed, "password");
+        let planned =
+            plan(&fed.native, "terminal:create", &remote_create(json!({})), 0).expect("a plan");
+        assert_eq!(planned["cwd"], shell::home_dir());
+        assert_eq!(planned["record"]["remoteHostLabel"], "Box");
+        let keys = planned["envKeys"].as_array().unwrap();
+        assert!(keys.contains(&json!("VORN_SESSION_ID")));
+        assert!(fed.host.starts.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn resumes_a_remote_session_by_logging_in_again_on_its_conversation() {
+        let fed = fed();
+        let _db = with_host(&fed, "agent");
+        fed.link.set_creates_headless();
+        fed.registry.own_records();
+        // Its project is on the host, not here: a resume reconnects anyway.
+        let far = Path::new("/srv/far-not-here");
+        offer(
+            &fed,
+            vec![carried_agent(
+                "rr",
+                far,
+                json!({ "agentSessionId": "conv-rr", "remoteHostId": "h", "remoteHostLabel": "Box" }),
+            )],
+        );
+        let planned =
+            plan(&fed.native, "sessions:resume", &json!({ "id": "rr" }), 0).expect("a plan");
+        assert_eq!(planned["record"]["groupId"], "g");
+        let answer = call(&fed.native, "sessions:resume", &json!({ "id": "rr" }));
+        let Answer::Result(answer) = answer else {
+            panic!("not resumed: {answer:?}");
+        };
+        assert_eq!(answer["ok"], true, "{answer}");
+        let session = &answer["session"];
+        assert_eq!(
+            (
+                &session["id"],
+                &session["remoteHostId"],
+                &session["agentSessionId"]
+            ),
+            (&json!("rr"), &json!("h"), &json!("conv-rr"))
+        );
+        assert_eq!(session["groupId"], "g");
+        let (spec, input) = fed.host.last_start();
+        assert_eq!(spec.cwd, shell::home_dir());
+        let remote = remote_of(&input);
+        assert!(remote.line.starts_with("ssh -t -p 2222 -A me@box.example"));
+        assert!(remote.command.starts_with("cd /srv/far-not-here && claude"));
+        assert!(remote.command.contains("--resume conv-rr"));
+        assert_eq!(
+            (remote.password.as_ref(), remote.key.as_ref()),
+            (None, None)
+        );
+        fed.host.up(5);
+        assert_eq!(ids(&fed), ["a", "b", "sh", "rr"]);
     }
 }

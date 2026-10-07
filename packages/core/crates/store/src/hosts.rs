@@ -262,7 +262,7 @@ mod tests {
     fn reads_one_remote_host_whole() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("vorn.db");
-        assert_eq!(remote_host(&path, "h1").unwrap(), None);
+        assert!(remote_host(&path, "h1").unwrap().is_none());
         let (store, _) =
             crate::Store::open(&path, crate::test_support::options()).expect("a store opens");
         store
@@ -274,12 +274,16 @@ mod tests {
             .unwrap();
         let host = remote_host(&path, "h1").unwrap().expect("the host");
         assert_eq!(
-            (host.label.as_str(), host.hostname.as_str(), host.user.as_str()),
+            (
+                host.label.as_str(),
+                host.hostname.as_str(),
+                host.user.as_str()
+            ),
             ("Box", "box.example", "me")
         );
         assert_eq!(host.port, 2222.0);
         assert_eq!(host.auth_method.map(|m| m.0).as_deref(), Some("password"));
         assert_eq!(host.ssh_options.as_deref(), Some("-A"));
-        assert_eq!(remote_host(&path, "h2").unwrap(), None);
+        assert!(remote_host(&path, "h2").unwrap().is_none());
     }
 }

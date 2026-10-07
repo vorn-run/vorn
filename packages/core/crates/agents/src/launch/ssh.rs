@@ -86,7 +86,12 @@ pub fn ssh_line(target: &Target<'_>, marker: &str, local: Platform) -> String {
         Auth::Agent | Auth::KeyFile(None) | Auth::StoredKey(None) => {}
     }
     if let Some(options) = target.options {
-        parts.extend(options.split(js::is_space).filter(|o| !o.is_empty()).map(str::to_owned));
+        parts.extend(
+            options
+                .split(js::is_space)
+                .filter(|o| !o.is_empty())
+                .map(str::to_owned),
+        );
     }
     parts.push(format!("{}@{}", target.user, target.hostname));
     let shown = match (local, marker.strip_prefix("__VORN_READY_")) {
@@ -228,7 +233,11 @@ fn asks_password(chunk: &str) -> bool {
         let before = chunk[..at].chars().next_back();
         let after = &chunk[at + 3..];
         let Some(rest) = matches!(before, Some('P' | 'p'))
-            .then(|| after.strip_prefix("word").or_else(|| after.strip_prefix("phrase")))
+            .then(|| {
+                after
+                    .strip_prefix("word")
+                    .or_else(|| after.strip_prefix("phrase"))
+            })
             .flatten()
         else {
             return false;
@@ -319,7 +328,10 @@ mod tests {
 
     #[test]
     fn runs_the_agent_in_the_quoted_project() {
-        assert_eq!(remote_command("/srv/app", "claude"), "cd /srv/app && claude");
+        assert_eq!(
+            remote_command("/srv/app", "claude"),
+            "cd /srv/app && claude"
+        );
         assert_eq!(
             remote_command("/srv/it's here", "codex --x"),
             "cd '/srv/it'\\''s here' && codex --x"
@@ -353,10 +365,17 @@ mod tests {
         assert_eq!(login.feed("me@box's password: ", t), [LoginStep::Password]);
         assert_eq!(login.feed("Password: ", t), []);
         // The echo of the typed line is not the marker.
-        let echo = ssh_line(&target(Auth::Password), &marker("abcdefgh-1"), Platform::Posix);
+        let echo = ssh_line(
+            &target(Auth::Password),
+            &marker("abcdefgh-1"),
+            Platform::Posix,
+        );
         assert_eq!(login.feed(&echo, t), []);
         assert_eq!(login.feed("__VORN_RE", t), []);
-        assert_eq!(login.feed("ADY_abcdefgh__\r\n$ ", t), [LoginStep::Connected]);
+        assert_eq!(
+            login.feed("ADY_abcdefgh__\r\n$ ", t),
+            [LoginStep::Connected]
+        );
         assert!(login.connected());
         assert_eq!(login.feed("__VORN_READY_abcdefgh__", t), []);
         assert_eq!(login.due(FALLBACK_AFTER), None);
