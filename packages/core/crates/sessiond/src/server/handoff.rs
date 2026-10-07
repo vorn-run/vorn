@@ -172,18 +172,21 @@ impl Sessiond {
         if !matches!(rx.recv::<ToDonor>(), Ok(ToDonor::Took(Took))) {
             return;
         }
-        self.handed.store(true, Ordering::SeqCst);
         let sessions = std::mem::take(&mut frozen.sessions);
-        let mut map = self.sessions();
         for s in &sessions {
             s.hand_off(self.exit_file(&s.id));
-            map.remove(&s.id);
         }
-        drop(map);
+        // Reaped before they leave the map, so serve never sees nothing left to wait for.
         self.reaping
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .extend(sessions);
+            .extend(sessions.iter().cloned());
+        let mut map = self.sessions();
+        for s in &sessions {
+            map.remove(&s.id);
+        }
+        drop(map);
+        self.handed.store(true, Ordering::SeqCst);
         // Every vornd connection closes: the sessions are the adopter's.
         self.generation.send_modify(|n| *n += 1);
         self.stop.notify_waiters();

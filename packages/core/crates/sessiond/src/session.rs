@@ -417,8 +417,13 @@ impl Session {
             // Ready, and this thread is its only reader: the read returns at
             // once, and the lock is held only for that.
             let n = match r.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => n,
+                Ok(n) if n > 0 => n,
+                // Forgotten under this lock, so a freeze never sends an fd about to close.
+                _ => {
+                    st.forget(fd);
+                    self.stream_ended(st);
+                    return;
+                }
             };
             if !self.record(st, stream, &buf[..n]) {
                 self.lock().forget(fd);

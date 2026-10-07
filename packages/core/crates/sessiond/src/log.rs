@@ -705,10 +705,10 @@ impl SessionLog {
 }
 
 impl Drop for SessionLog {
-    /// A released session's spool file goes, and its bytes go back to the pool.
+    /// A released session's bytes go back to the pool; its spool file goes
+    /// with the spool unless a handoff keeps it.
     fn drop(&mut self) {
         self.pool.give(self.spool.bytes());
-        let _ = self.spool.clear();
     }
 }
 
@@ -1276,5 +1276,30 @@ mod tests {
         l.ack(after(9, 10));
         l.ack(after(0, 10));
         assert_eq!(l.delivered(), after(2, 10));
+    }
+
+    #[test]
+    fn a_log_handed_over_keeps_its_spool_file() {
+        let budget = Budget {
+            ring_bytes: 4 << 10,
+            spool_bytes: 40 << 10,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.log");
+        let mut l = log(&dir, budget, Overflow::Drop, SpoolPool::default());
+        for i in 0..10 {
+            l.append(data(1000, i)).unwrap();
+        }
+        assert!(l.spooled_bytes() > 0);
+        l.keep_spool(true);
+        drop(l);
+        assert!(path.exists());
+
+        let mut l = log(&dir, budget, Overflow::Drop, SpoolPool::default());
+        for i in 0..10 {
+            l.append(data(1000, i)).unwrap();
+        }
+        drop(l);
+        assert!(!path.exists());
     }
 }
