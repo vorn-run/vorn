@@ -239,7 +239,9 @@ function answered(frame: Frame): unknown {
 }
 
 /** The same calls, on one server, through its vornd; answers the transcript. */
-async function scenario(server: RealServer): Promise<Record<string, unknown>> {
+async function scenario(
+  server: RealServer
+): Promise<{ transcript: Record<string, unknown>; sessions: string[] }> {
   const { work } = server.dirs
   const stub = path.join(work, 'bin', 'waiting-agent')
   fs.mkdirSync(path.dirname(stub))
@@ -304,7 +306,7 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
         groups: Record<string, { native?: number; forwarded?: number }>
       }
     ).groups
-    return {
+    const transcript = {
       answeredBy: {
         worktree: { native: groups.worktree?.native, forwarded: groups.worktree?.forwarded },
         git: { native: groups.git?.native, forwarded: groups.git?.forwarded }
@@ -313,6 +315,7 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
       left: ['merged', 'unmerged', 'dirty', 'busy', 'orphan'].filter((n) => fs.existsSync(wt(n))),
       buildOutput: fs.existsSync(path.join(wt('unmerged'), 'node_modules'))
     }
+    return { transcript, sessions: [agent.id] }
   } finally {
     direct.close()
     through.close()
@@ -331,7 +334,8 @@ describe.skipIf(!runnable)('the worktree manager in vornd, against the server', 
     ] as const) {
       const server = await startRealServer(on)
       try {
-        runs[mode] = normalizeWorktrees(await scenario(server), server.dirs.work)
+        const { transcript, sessions } = await scenario(server)
+        runs[mode] = normalizeWorktrees(transcript, server.dirs.work, sessions)
       } catch (err) {
         throw new Error(`${mode}: ${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
           cause: err
