@@ -2045,8 +2045,6 @@ pub(super) mod tests {
         assert!(req.use_worktree);
         assert_eq!(req.args.as_deref(), Some(&["--x".to_owned()][..]));
         for theirs in [
-            // A remote host's session is started over SSH, by the server.
-            json!({ "agentType": "claude", "projectName": "p", "projectPath": project(), "remoteHostId": "h" }),
             // A param the handler does not read.
             json!({ "agentType": "claude", "projectName": "p", "projectPath": project(), "extra": 1 }),
             // Shapes it would not expect.
@@ -2059,10 +2057,14 @@ pub(super) mod tests {
             assert_eq!(CreateRequest::read(&theirs), None, "{theirs}");
         }
         // An empty remote host is none, as the handler reads it.
-        assert!(CreateRequest::read(&json!({
-            "agentType": "codex", "projectName": "p", "projectPath": project(), "remoteHostId": "",
-        }))
-        .is_some());
+        let read = |host: &str| {
+            CreateRequest::read(&json!({
+                "agentType": "codex", "projectName": "p", "projectPath": project(), "remoteHostId": host,
+            }))
+            .unwrap()
+        };
+        assert_eq!(read("").remote(), None);
+        assert_eq!(read("h").remote(), Some("h"));
     }
 
     #[test]
