@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
+import { execFile } from 'node:child_process'
 import { normalizePath } from '../packages/server/src/process-utils'
 
 /**
@@ -96,7 +97,12 @@ async function startHookServer() {
   }
 }
 
-function post(port: number, token: string, body: string): Promise<number> {
+function post(
+  port: number,
+  token: string,
+  body: string,
+  extraHeaders: Record<string, string> = {}
+): Promise<number> {
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
@@ -104,7 +110,11 @@ function post(port: number, token: string, body: string): Promise<number> {
         port,
         path: '/hooks',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          ...extraHeaders
+        }
       },
       (res) => {
         res.resume()
@@ -114,6 +124,10 @@ function post(port: number, token: string, body: string): Promise<number> {
     req.on('error', reject)
     req.end(body)
   })
+}
+
+async function until(check: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !check(); i++) await new Promise((r) => setTimeout(r, 10))
 }
 
 describe('the payload that crashed the server', () => {
@@ -235,6 +249,94 @@ describe('the payload that crashed the server', () => {
       )
     ).toBe(200)
   })
+})
+
+describe('the terminal a hook names', () => {
+  async function received(
+    body: Record<string, unknown>,
+    headers: Record<string, string> = {}
+  ): Promise<Record<string, unknown>> {
+    const started = await startHookServer()
+    server = started
+    const seen: Record<string, unknown>[] = []
+    started.instance.on('hook-event', (event) => seen.push(event))
+    const base = { hook_event_name: 'PreToolUse', session_id: 's1', cwd: '/tmp' }
+    expect(
+      await post(started.port, started.token, JSON.stringify({ ...base, ...body }), headers)
+    ).toBe(200)
+    expect(seen).toHaveLength(1)
+    return seen[0]
+  }
+
+  it('takes it from the header Claude fills from the environment', async () => {
+    expect(await received({}, { 'X-Vorn-Terminal': 'term-1' })).toMatchObject({
+      vorn_terminal_id: 'term-1'
+    })
+  })
+
+  it('takes it from the body Copilot posts, the header winning over it', async () => {
+    expect(await received({ vorn_terminal_id: 'term-2' })).toMatchObject({
+      vorn_terminal_id: 'term-2'
+    })
+    expect(
+      await received({ vorn_terminal_id: 'term-2' }, { 'X-Vorn-Terminal': 'term-1' })
+    ).toMatchObject({ vorn_terminal_id: 'term-1' })
+  })
+
+  it.each([
+    ['an empty header, as from an agent outside Vorn', {}, { 'X-Vorn-Terminal': '' }],
+    ['an empty body field', { vorn_terminal_id: '' }, {}],
+    ['a body field that is not a string', { vorn_terminal_id: 42 }, {}]
+  ])('names none for %s', async (_label, body, headers) => {
+    expect(await received(body, headers)).not.toHaveProperty('vorn_terminal_id')
+  })
+
+  it('is asked of Claude in the hooks Vorn installs', async () => {
+    const { installHooks } = await import('../packages/server/src/hook-installer')
+    installHooks(4242, 'tok')
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(home as string, '.claude', 'settings.json'), 'utf-8')
+    )
+    const hook = settings.hooks.PreToolUse.at(-1).hooks[0]
+    expect(hook.headers['x-vorn-terminal']).toBe('$VORN_SESSION_ID')
+    expect(hook.allowedEnvVars).toEqual(['VORN_SESSION_ID'])
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'is posted by the script Copilot runs, from its environment',
+    async () => {
+      const started = await startHookServer()
+      server = started
+      const seen: Record<string, unknown>[] = []
+      started.instance.on('hook-event', (event) => seen.push(event))
+
+      const { installCopilotHooks, uninstallCopilotHooks } =
+        await import('../packages/server/src/copilot-hook-installer')
+      const project = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-copilot-hooks-'))
+      const installation = installCopilotHooks(project, started.port)
+      try {
+        const hooks = JSON.parse(fs.readFileSync(installation.hooksJsonPath, 'utf-8'))
+        // Not the sync form: the script posts to this process, which must stay free to answer.
+        await new Promise<void>((resolve, reject) => {
+          const child = execFile(
+            'sh',
+            ['-c', hooks.hooks.preToolUse[0].bash],
+            { env: { ...process.env, VORN_SESSION_ID: 'term-copilot' } },
+            (err) => (err ? reject(err) : resolve())
+          )
+          child.stdin?.end(JSON.stringify({ cwd: project, toolName: 'bash' }))
+        })
+        await until(() => seen.length === 1)
+        expect(seen[0]).toMatchObject({
+          session_id: installation.sessionId,
+          vorn_terminal_id: 'term-copilot'
+        })
+      } finally {
+        uninstallCopilotHooks(installation)
+        fs.rmSync(project, { recursive: true, force: true })
+      }
+    }
+  )
 })
 
 describe('this test file itself', () => {

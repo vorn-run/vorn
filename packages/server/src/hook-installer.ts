@@ -6,6 +6,12 @@ import { mayReleaseHooks, readHookOwnerFile } from './hook-ownership'
 
 const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json')
 const VORN_HEADER = 'X-Vorn'
+/**
+ * The header naming the terminal a hook comes from (`HookEvent.vorn_terminal_id`).
+ * Claude fills it from the environment only for variables `allowedEnvVars` lists,
+ * and with an empty string outside Vorn. Lower case, as Node reads headers.
+ */
+export const HOOK_TERMINAL_HEADER = 'x-vorn-terminal'
 
 const HOOK_EVENTS = [
   'PreToolUse',
@@ -22,7 +28,12 @@ function makeHookEntry(port: number, token: string) {
   return {
     type: 'http',
     url: `http://localhost:${port}/hooks`,
-    headers: { [VORN_HEADER]: 'true', Authorization: `Bearer ${token}` },
+    headers: {
+      [VORN_HEADER]: 'true',
+      Authorization: `Bearer ${token}`,
+      [HOOK_TERMINAL_HEADER]: '$VORN_SESSION_ID'
+    },
+    allowedEnvVars: ['VORN_SESSION_ID'],
     timeout: 30
   }
 }

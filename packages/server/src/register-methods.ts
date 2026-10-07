@@ -2495,7 +2495,10 @@ export function registerAllMethods(): void {
       })
 
       hookServer.on('hook-event', (event) => {
-        log.info(`[hooks] ${event.hook_event_name}: session=${event.session_id} cwd=${event.cwd}`)
+        log.info(
+          `[hooks] ${event.hook_event_name}: session=${event.session_id} cwd=${event.cwd}` +
+            (event.vorn_terminal_id ? ` terminal=${event.vorn_terminal_id}` : '')
+        )
         const result = hookStatusMapper.mapEventToStatus(event)
         if (result) {
           ptyManager.hookStatus(result.terminalId, result.status, true)
@@ -2534,9 +2537,7 @@ export function registerAllMethods(): void {
       })
 
       hookServer.on('permission-request', ({ requestId, event }) => {
-        const terminalId =
-          hookStatusMapper.getLinkedTerminal(event.session_id) ??
-          hookStatusMapper.tryLink(event.session_id, event.cwd)
+        const terminalId = hookStatusMapper.resolveTerminal(event)
 
         log.info(
           `[hooks] permission-request: session=${event.session_id} tool=${event.tool_name} → terminal=${terminalId ?? 'none (passthrough)'}`

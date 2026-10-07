@@ -2752,6 +2752,12 @@ export interface HookEvent {
   message?: string
   title?: string
   permission_suggestions?: PermissionSuggestion[]
+  /**
+   * The Vorn terminal the agent runs in, from the `VORN_SESSION_ID` its launch
+   * gave it: an exact identity where `cwd` is only a guess. Absent for an agent
+   * started outside Vorn.
+   */
+  vorn_terminal_id?: string
 }
 
 export interface PermissionRequestInfo {

@@ -33,7 +33,7 @@ function buildNodeScript(sessionId: string, eventName: string): string {
     `const d=JSON.parse(require('fs').readFileSync(0,'utf8'));`,
     `let port,token;`,
     `try{port=require('fs').readFileSync('${portPath}','utf8').trim();token=require('fs').readFileSync('${tokenPath}','utf8').trim()}catch(e){process.stdout.write('{}');process.exit(0)}`,
-    `const body=JSON.stringify({session_id:'${sessionId}',hook_event_name:'${eventName}',cwd:d.cwd||'',tool_name:d.toolName||''});`,
+    `const body=JSON.stringify({session_id:'${sessionId}',hook_event_name:'${eventName}',cwd:d.cwd||'',tool_name:d.toolName||'',vorn_terminal_id:process.env.VORN_SESSION_ID||''});`,
     `const r=require('http').request({hostname:'127.0.0.1',port:+port,path:'/hooks',method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token}});`,
     `r.on('error',()=>{});r.end(body);`,
     `process.stdout.write('{}')`

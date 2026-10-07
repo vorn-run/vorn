@@ -7,6 +7,7 @@ import { EventEmitter } from 'node:events'
 import { HookEvent } from '@vornrun/shared/types'
 import log from './logger'
 import { HOOK_OWNER_FILE, mayClaimHooks, pidIsAlive, readHookOwnerFile } from './hook-ownership'
+import { HOOK_TERMINAL_HEADER } from './hook-installer'
 
 const PORT_FILE = path.join(os.homedir(), '.vorn', 'port')
 const TOKEN_FILE = path.join(os.homedir(), '.vorn', 'token')
@@ -57,6 +58,23 @@ function describe(value: unknown): string {
   // begin with a space and say nothing about what arrived.
   const name = typeof event.hook_event_name === 'string' && event.hook_event_name !== ''
   return `${name ? String(event.hook_event_name) : 'no name'} missing ${missing.join(', ')}`
+}
+
+/**
+ * The event with the terminal it says it comes from, or none: Claude's hook
+ * sends it as a header, Copilot's script in the body, and an agent outside
+ * Vorn interpolates an empty one.
+ */
+function withTerminal(event: HookEvent, header: string | string[] | undefined): HookEvent {
+  const fromBody: unknown = event.vorn_terminal_id
+  const terminalId =
+    typeof header === 'string' && header !== ''
+      ? header
+      : typeof fromBody === 'string' && fromBody !== ''
+        ? fromBody
+        : undefined
+  const { vorn_terminal_id: _, ...rest } = event
+  return terminalId ? { ...rest, vorn_terminal_id: terminalId } : rest
 }
 
 export class HookServer extends EventEmitter {
@@ -169,7 +187,7 @@ export class HookServer extends EventEmitter {
               res.end(JSON.stringify({ error: 'Malformed hook event' }))
               return
             }
-            this.handleEvent(parsed, res)
+            this.handleEvent(withTerminal(parsed, req.headers[HOOK_TERMINAL_HEADER]), res)
           } catch (err) {
             // Only if nothing has been sent. `handleEvent` answers before it
             // emits, so by the time anything downstream can fail the response is
