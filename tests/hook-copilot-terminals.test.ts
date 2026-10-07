@@ -22,7 +22,7 @@ vi.mock('../packages/server/src/git-utils', () => ({
 import type { HookEvent, TerminalSession } from '@vornrun/shared/types'
 import { ptyManager } from '../packages/server/src/pty-manager'
 import { hookStatusMapper } from '../packages/server/src/hook-status-mapper'
-import { fakeVornd } from './helpers/fake-vornd-pty'
+import { fakeVornd, toldHookLink } from './helpers/fake-vornd-pty'
 import {
   installCopilotHooks,
   uninstallAllCopilotHooks
@@ -103,9 +103,6 @@ async function until(check: () => boolean): Promise<void> {
   for (let i = 0; i < 300 && !check(); i++) await new Promise((r) => setTimeout(r, 10))
 }
 
-const listed = (id: string): TerminalSession | undefined =>
-  ptyManager.getActiveSessions().find((s) => s.id === id)
-
 describe.skipIf(process.platform === 'win32')('two Copilot terminals in one folder', () => {
   it(
     "each terminal's hooks reach that terminal under its own hook session",
@@ -133,8 +130,8 @@ describe.skipIf(process.platform === 'win32')('two Copilot terminals in one fold
         second.id
       ])
       expect(seen[0].session_id).not.toBe(seen[1].session_id)
-      expect(listed(first.id)?.hookSessionId).toBe(seen[0].session_id)
-      expect(listed(second.id)?.hookSessionId).toBe(seen[1].session_id)
+      expect(toldHookLink(first.id)).toBe(seen[0].session_id)
+      expect(toldHookLink(second.id)).toBe(seen[1].session_id)
       expect(installs[0].sessionId).toBe(seen[0].session_id)
       expect(installs[1].sessionId).toBe(seen[1].session_id)
     }

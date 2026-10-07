@@ -827,10 +827,10 @@ describe('taking on a terminal vornd still holds', () => {
     expect(fakeVornd.adopt.mock.calls[0][1]).toBe(false)
   })
 
-  it('follows what vornd says about it, from the state it was told on adoption', () => {
+  it('leaves its status to vornd, and follows its exit', () => {
     const session = saved()
     ptyManager.adoptVornd(session, held(session.id, WAITING))
-    expect(session.status).toBe('waiting')
+    expect(session.status).toBe('running')
 
     const pty = fakeVornd.adopt.mock.results[0].value as FakeVorndPty
     pty.exit(0)

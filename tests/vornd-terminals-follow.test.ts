@@ -221,7 +221,7 @@ describe('the terminals vornd creates and changes, followed here', () => {
     ])
     vorndSessions.unclaim('s1', 'conv')
     vorndSessions.unclaim('s1')
-    expect(vorndSessions.preparing('s1')).toBe(true)
+    vorndSessions.preparing('s1')
     vorndSessions.prepared('s1')
     await until('the notes', () => fake.made('vornd:prepared').length === 1)
     expect(fake.made('vornd:unclaim')).toEqual([

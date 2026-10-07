@@ -172,3 +172,10 @@ export const fakeVornd = {
 export function vorndModule(): Record<string, unknown> {
   return { vorndSessions: fakeVornd, VorndPty: FakeVorndPty }
 }
+
+/** The hook session last told to vornd as `id`'s link, which vornd sets on the record. */
+export function toldHookLink(id: string): unknown {
+  return fakeVornd.patch.mock.calls
+    .filter(([to, fields]) => to === id && 'hookSessionId' in fields)
+    .at(-1)?.[1].hookSessionId
+}

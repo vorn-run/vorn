@@ -24,6 +24,19 @@ vi.mock('../packages/server/src/tailscale', () => ({
   clearBinaryCache: vi.fn()
 }))
 
+// The server here is the one a client reaches directly; a vornd of its own would answer pairing out of its sight.
+vi.mock('../packages/server/src/vornd-process', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../packages/server/src/vornd-process')>()
+  return {
+    ...real,
+    VorndKeeper: class extends real.VorndKeeper {
+      constructor(options: ConstructorParameters<typeof real.VorndKeeper>[0]) {
+        super({ ...options, find: () => null })
+      }
+    }
+  }
+})
+
 // Mock database to avoid SQLite dependency
 // The keys are constrained to names the module actually exports. A mock naming a
 // function the module does not have is a mock that can never be wrong: it stands

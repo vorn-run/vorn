@@ -24,7 +24,7 @@ vi.mock('../packages/server/src/git-utils', () => ({
 import type { AgentType, HookEvent, TerminalSession } from '@vornrun/shared/types'
 import { ptyManager } from '../packages/server/src/pty-manager'
 import { hookStatusMapper } from '../packages/server/src/hook-status-mapper'
-import { fakeVornd } from './helpers/fake-vornd-pty'
+import { fakeVornd, toldHookLink } from './helpers/fake-vornd-pty'
 
 let folders = 0
 
@@ -57,9 +57,6 @@ function event(name: string, sessionId: string, cwd: string, terminalId?: string
   }
 }
 
-const listed = (id: string): TerminalSession | undefined =>
-  ptyManager.getActiveSessions().find((s) => s.id === id)
-
 beforeEach(() => {
   fakeVornd.reset()
   hookStatusMapper.clear()
@@ -82,8 +79,8 @@ describe('two agents in one folder', () => {
       hookStatusMapper.mapEventToStatus(event('SessionStart', newer.agentSessionId!, cwd))
     ).toEqual({ terminalId: newer.id, status: 'running' })
 
-    expect(listed(older.id)?.hookSessionId).toBe(older.agentSessionId)
-    expect(listed(newer.id)?.hookSessionId).toBe(newer.agentSessionId)
+    expect(toldHookLink(older.id)).toBe(older.agentSessionId)
+    expect(toldHookLink(newer.id)).toBe(newer.agentSessionId)
     expect(log.warn).not.toHaveBeenCalled()
   })
 
@@ -107,7 +104,7 @@ describe('two agents in one folder', () => {
       term.id
     )
     expect(hookStatusMapper.getLinkedTerminal(term.agentSessionId!)).toBeUndefined()
-    expect(listed(term.id)?.hookSessionId).toBe('next')
+    expect(toldHookLink(term.id)).toBe('next')
   })
 
   it('corrects a link the folder guessed once an exact identity arrives', async () => {
