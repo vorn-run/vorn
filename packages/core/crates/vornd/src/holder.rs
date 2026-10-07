@@ -2,7 +2,8 @@
 //!
 //! vornd finds the vorn-sessiond of its own build announced under
 //! `$VORN_HOME/run`, or installs and starts one, and stays connected so it
-//! knows when that one goes away. A sessiond of another build is drained: it
+//! knows when that one goes away. A sessiond of another build, including one
+//! of the same version running a different binary, is drained: it
 //! takes no new sessions and exits after its last one ends. One that speaks a
 //! protocol this vornd cannot is left alone, still holding its sessions, and
 //! reported so the app can ask before ending them.
@@ -181,16 +182,16 @@ async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<(C
     let home = cfg.home.clone();
     let bundled = cfg.bundled.clone();
     let version_owned = version.to_owned();
-    let (installed, running) = tokio::task::spawn_blocking(move || {
+    // Resolving paths touches the disk, so the sorting happens off the runtime.
+    let (installed, mine, others) = tokio::task::spawn_blocking(move || {
         let installed = launch::install(&bundled, &home, &version_owned)?;
-        io::Result::Ok((installed, launch::running(&home)))
+        let (mine, others): (Vec<Instance>, Vec<Instance>) = launch::running(&home)
+            .into_iter()
+            .partition(|i| i.build == version_owned && i.proto == PROTO && i.runs(&installed));
+        io::Result::Ok((installed, mine, others))
     })
     .await
     .map_err(io::Error::other)??;
-
-    let (mine, others): (Vec<Instance>, Vec<Instance>) = running
-        .into_iter()
-        .partition(|i| i.build == version && i.proto == PROTO);
 
     let mut older = Vec::new();
     for i in others {
