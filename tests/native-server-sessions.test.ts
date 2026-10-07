@@ -664,6 +664,13 @@ function repository(dir: string): void {
   git('commit', '-q', '-m', 'first')
 }
 
+/** How many times each of `ids` occurs. */
+function timesEach(ids: readonly string[]): Record<string, number> {
+  const times: Record<string, number> = {}
+  for (const id of ids) times[id] = (times[id] ?? 0) + 1
+  return times
+}
+
 /** A call's answer as the transcript keeps it: its result, or its error's message. */
 function answered(frame: Frame): unknown {
   if (frame.error) return { error: (frame.error as { message?: string }).message }
@@ -884,8 +891,11 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
         cleanup: toldOf('worktree:confirmCleanup'),
         // In the order they were closed: each waited for the one before.
         exits: toldOf('terminal:exit').map((p) => (p as { id: string }).id),
-        // As a client through vornd hears them: once each, whoever tells it.
-        exitsThrough: through.toldBy('terminal:exit').map((p) => (p as { id: string }).id),
+        // As a client through vornd hears them: once each, whoever tells it,
+        // in an order of its own.
+        exitsThrough: timesEach(
+          through.toldBy('terminal:exit').map((p) => (p as { id: string }).id)
+        ),
         renamed: toldOf('session:updated')
           .map((p) => p as TerminalSession)
           .filter((s) => s.displayName === 'Build' || s.groupId === 'group-1')
