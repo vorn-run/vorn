@@ -35,6 +35,7 @@ const FILES = [
   'tests/vornd-stop.test.ts',
   'tests/native-server-status.test.ts',
   'tests/native-server-mcp.test.ts',
+  'tests/native-server-work.test.ts',
   'tests/native-cli.test.ts'
 ]
 
