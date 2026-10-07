@@ -190,13 +190,10 @@ pub fn publish(
         .to_owned();
     let file = request.get("file").filter(|v| !v.is_null());
     let content = request.get("content").filter(|v| !v.is_null());
-    if file.is_some() == content.is_some() {
-        return Err("Publish either a file or content, not both and not neither.".into());
-    }
     let body = match (file, content) {
-        (Some(f), _) => read_inside_root(session.root.as_deref(), &js::to_string(f), &kind)?,
-        (_, Some(c)) => js::to_string(c),
-        _ => unreachable!("exactly one of file and content is set"),
+        (Some(f), None) => read_inside_root(session.root.as_deref(), &js::to_string(f), &kind)?,
+        (None, Some(c)) => js::to_string(c),
+        _ => return Err("Publish either a file or content, not both and not neither.".into()),
     };
     if body.trim().is_empty() {
         return Err("The artifact is empty.".into());

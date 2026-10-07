@@ -136,21 +136,38 @@ const WORK_GROUPS = new Set(['workflow', 'workflowRun', 'scheduler', 'webhook', 
 /** How long vornd gets to answer one: publishing may wait on the pane opening. */
 const WORK_CALL_TIMEOUT_MS = 60_000
 
+/** How long a call waits for vornd's channel while vornd starts. */
+const CHANNEL_WAIT_MS = 10_000
+const CHANNEL_RETRY_MS = 100
+
 /**
  * A client connected to this server, not vornd, still reaches the work model:
  * its calls are handed to vornd on the channel, and vornd's answer returned.
+ * A call made while vornd is still starting waits for its channel a while.
  */
-export function relayWorkCall(channel: {
-  ask<T>(method: string, params: unknown, timeoutMs?: number): Promise<T | null>
-}): (method: string, params: unknown) => Promise<unknown> | undefined {
+export function relayWorkCall(
+  channel: {
+    ask<T>(method: string, params: unknown, timeoutMs?: number): Promise<T | null>
+  },
+  waitMs = CHANNEL_WAIT_MS
+): (method: string, params: unknown) => Promise<unknown> | undefined {
   return (method, params) => {
     if (!WORK_GROUPS.has(method.split(':')[0])) return undefined
-    return channel
-      .ask<{ result?: unknown }>('vornd:work', { method, params }, WORK_CALL_TIMEOUT_MS)
-      .then((answer) => {
-        if (answer === null)
+    const deadline = Date.now() + waitMs
+    const attempt = async (): Promise<unknown> => {
+      for (;;) {
+        const answer = await channel.ask<{ result?: unknown }>(
+          'vornd:work',
+          { method, params },
+          WORK_CALL_TIMEOUT_MS
+        )
+        if (answer !== null) return answer.result
+        if (Date.now() >= deadline) {
           throw new Error(`vornd is not running, so ${method} cannot be answered`)
-        return answer.result
-      })
+        }
+        await new Promise((r) => setTimeout(r, CHANNEL_RETRY_MS))
+      }
+    }
+    return attempt()
   }
 }

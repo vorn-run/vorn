@@ -121,8 +121,16 @@ describe('a work call made to the server', () => {
     )
   })
 
+  it('waits for vornd while it starts', async () => {
+    let calls = 0
+    const ask = async (): Promise<unknown> => (++calls < 3 ? null : { result: 'late' })
+    const relay = relayWorkCall({ ask: ask as never }, 5_000)
+    await expect(relay('scheduler:getLog', 'w')).resolves.toBe('late')
+    expect(calls).toBe(3)
+  })
+
   it('leaves every other call to the server, and fails without vornd', async () => {
-    const relay = relayWorkCall({ ask: (async () => null) as never })
+    const relay = relayWorkCall({ ask: (async () => null) as never }, 50)
     expect(relay('task:list', undefined)).toBeUndefined()
     await expect(relay('artifact:get', { artifactId: 'a' })).rejects.toThrow(/vornd is not running/)
   })

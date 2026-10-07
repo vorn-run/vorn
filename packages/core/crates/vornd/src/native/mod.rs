@@ -28,7 +28,8 @@
 //! The work runs on blocking threads, at most [`MAX_CONCURRENT`] at a time,
 //! and the calls that change a repository take turns per repository
 //! ([`Turns`]), as the server's do. Calls on an MCP connection's child wait on
-//! the child rather than a thread, and run on the runtime instead.
+//! the child rather than a thread, and run on the runtime instead. The work
+//! model's calls ([`work`]) are async too: they run workflows.
 //!
 //! With the `connection` group native, vornd also reads the calls that change
 //! what the server holds of a connection's secrets as they pass to it

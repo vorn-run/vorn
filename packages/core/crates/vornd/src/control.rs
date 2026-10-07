@@ -63,6 +63,14 @@
 //!   starting on it or null when the claim is taken, and the notifications
 //!   `vornd:unclaim {sessionId, transcriptId?}`, `vornd:preparing
 //!   {sessionId}` and `vornd:prepared {sessionId}`.
+//! - The work model is vornd's ([`crate::native::work`]); the server
+//!   hands it what only it sees. `vornd:trigger {effectId, kind, task,
+//!   from?, to?}` answers `{received}`: a task created or moved, received
+//!   once by its effect id. `vornd:work {method, params}` answers
+//!   `{result?}`, a work call a client made to the server. The
+//!   notifications `vornd:signedIn {connectionId}`, after which the steps
+//!   waiting on that connection run again, and `vornd:configChanged`, after
+//!   which the scheduler reads the workflows again.
 //!
 //! A subscribed connection is also sent what vornd asks of the server
 //! ([`crate::applink`]): `vornd:broadcast {method, params}`, a notification

@@ -14,7 +14,7 @@
 //!   one and says why. Every group in [`NATIVE_GROUPS`] starts here.
 //!
 //! A per-group setting (`--groups` or `VORND_GROUPS`, such as
-//! `workflow=shadow`) is for tests and comparison runs only.
+//! `git=shadow`) is for tests and comparison runs only.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -128,7 +128,7 @@ impl Groups {
     }
 
     /// Every group in [`NATIVE_GROUPS`] native, then `spec`'s `group=mode`
-    /// pairs separated by commas, such as `workflow=shadow`, on top. A group
+    /// pairs separated by commas, such as `git=shadow`, on top. A group
     /// neither names is forwarded.
     pub fn new(spec: Option<&str>) -> Result<Groups, String> {
         let mut groups = Groups::parse(spec.unwrap_or(""))?;

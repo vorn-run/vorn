@@ -1263,8 +1263,8 @@ mod tests {
     use std::net::SocketAddr;
 
     /// A work model on a fresh database, its endpoint nowhere: steps that
-    /// call out fail, the rest run.
-    fn work(dir: &std::path::Path) -> Arc<Work> {
+    /// call out fail, the rest run. The native side is kept beside it.
+    fn work(dir: &std::path::Path) -> (Arc<Native>, Arc<Work>) {
         let db_path = dir.join("vorn.db");
         drop(test_store(&db_path));
         let native = Native::new();
@@ -1273,9 +1273,7 @@ mod tests {
         let nowhere: SocketAddr = "127.0.0.1:9".parse().expect("an address");
         let work = Work::new(&native, db, Arc::new(Loopback::new(nowhere, b"token")));
         native.set_work(Arc::clone(&work));
-        // The test keeps the native side alive for as long as the work model.
-        std::mem::forget(native);
-        work
+        (native, work)
     }
 
     fn conditional(id: &str, trigger: Value) -> Value {
@@ -1316,7 +1314,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_webhook_delivered_twice_runs_once() {
         let dir = tempfile::tempdir().unwrap();
-        let work = work(dir.path());
+        let (_native, work) = work(dir.path());
         work.start();
         let wf = conditional(
             "hook",
@@ -1350,7 +1348,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_task_trigger_delivered_twice_starts_its_workflow_once() {
         let dir = tempfile::tempdir().unwrap();
-        let work = work(dir.path());
+        let (_native, work) = work(dir.path());
         let wf = conditional(
             "moved",
             json!({ "triggerType": "taskStatusChanged", "toStatus": "in_progress" }),

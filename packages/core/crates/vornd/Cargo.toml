@@ -45,6 +45,7 @@ vorn-protocol = { path = "../protocol" }
 vorn-reach = { path = "../reach" }
 vorn-term-proto = { path = "../term-proto" }
 vorn-work = { path = "../work" }
+# The workflow engine, which vornd hosts.
 vorn-workflow = { path = "../workflow" }
 # The system's time zone, which a schedule without one fires in.
 jiff = "0.2"
