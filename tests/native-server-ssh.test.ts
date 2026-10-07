@@ -27,7 +27,7 @@ import {
   type Frame,
   type RealServer
 } from './helpers/real-server'
-import { normalizeRun } from './helpers/sessions-parity'
+import { PASSWORD_BEFORE_PROMPT, normalizeRun } from './helpers/sessions-parity'
 
 // Booting a server probes Tailscale with a real process; nothing here needs it.
 vi.mock('../packages/server/src/tailscale', () => ({
@@ -175,10 +175,9 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
       remoteHostId: 'key',
       displayName: 'Keyed'
     })
-    const shown = {
-      password: await said(byPassword, /ARGV:/),
-      key: await said(byKey, /ARGV:/)
-    }
+    const shown = { key: await said(byKey, /ARGV:/) }
+    // The server's password login can type the command as the password: see PASSWORD_BEFORE_PROMPT.
+    const passwordShown = await said(byPassword, /ARGV:/).catch(() => '')
     const listedAtFirst = await listed()
 
     // The agent ended and ssh with it: the local shell is told to end too.
@@ -201,12 +200,18 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     return {
       replies,
       shown: { ...shown, resumed: resumedShown },
+      passwordLogin: {
+        shown: passwordShown,
+        passwords: lines(path.join(log, 'passwords')),
+        remote: lines(path.join(log, 'remote')).filter((l) => l.includes('fix the remote build'))
+      },
       // The two creates log in at once, in an order of their own.
       sshArgv: lines(path.join(log, 'argv'))
         .sort()
         .map((l) => l.split('\x1f').filter(Boolean)),
-      passwords: lines(path.join(log, 'passwords')),
-      remote: lines(path.join(log, 'remote')).sort(),
+      remote: lines(path.join(log, 'remote'))
+        .filter((l) => !l.includes('fix the remote build'))
+        .sort(),
       listedAtFirst,
       listed: await listed(),
       created: direct.toldBy('session:created')
@@ -245,8 +250,8 @@ describe.skipIf(!runnable)('terminals on a remote host, against the server', () 
 
   afterAll(() => removeRealServerDirs())
 
-  it('logs in by ssh with the password typed once, and runs the agent there', () => {
-    const off = runs.off as { sshArgv: string[][]; passwords: string[]; remote: string[] }
+  it('logs in by ssh with the options of each host, as the server does', () => {
+    const off = runs.off as { sshArgv: string[][] }
     expect(off.sshArgv[2]).toEqual([
       '-t',
       '-p',
@@ -269,8 +274,14 @@ describe.skipIf(!runnable)('terminals on a remote host, against the server', () 
     ])
     // The resume logs in again as the session did.
     expect(off.sshArgv[1]).toEqual(off.sshArgv[0])
-    expect(off.passwords).toEqual([PASSWORD])
-    expect(off.remote).toContain("cd <work>/far && <work>/bin/argv-agent 'fix the remote build'")
+  })
+
+  it(`types the password once ssh asks, then the agent there (${PASSWORD_BEFORE_PROMPT})`, () => {
+    expect(runs.on?.passwordLogin).toEqual({
+      shown: 'ARGV:fix the remote build',
+      passwords: [PASSWORD],
+      remote: ["cd <work>/far && <work>/bin/argv-agent 'fix the remote build'"]
+    })
   })
 
   it('has vornd create and resume them with the switch on', () => {
@@ -283,7 +294,6 @@ describe.skipIf(!runnable)('terminals on a remote host, against the server', () 
       'replies',
       'shown',
       'sshArgv',
-      'passwords',
       'remote',
       'listedAtFirst',
       'listed',

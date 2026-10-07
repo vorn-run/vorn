@@ -43,6 +43,11 @@
  *   line after a fixed wait, which on a busy machine can come before the
  *   shell's prompt, and the line is then echoed twice; vornd types it once the
  *   shell has printed. Asserted on the switch-on run only.
+ * - {@link PASSWORD_BEFORE_PROMPT}: the server takes the local shell's echo
+ *   of the ssh line for the remote shell's ready marker, so it can type a
+ *   remote session's command before ssh asks for the password, which then
+ *   reads the command as the password; vornd waits for the remote shell to
+ *   print the marker. A password login is asserted on the switch-on run only.
  * - {@link SAVED_HEAD_COMMIT}: the server looks up each record's head commit
  *   again as it saves, so a shell's record carries one; vornd writes a record
  *   down as it stands. What an offered session records of its head is left
@@ -60,6 +65,7 @@ export const OUTPUT_CHUNKS = 'headless-output-chunk-boundaries'
 export const RESYNC_AFTER_RESUME = 'resync-told-after-a-cold-resume'
 export const HEADLESS_CARRIED = 'headless-agents-carried-over-a-restart'
 export const TYPED_BEFORE_PROMPT = 'launch-line-typed-before-the-prompt'
+export const PASSWORD_BEFORE_PROMPT = 'remote-command-typed-before-the-password'
 export const SAVED_HEAD_COMMIT = 'head-commit-refreshed-by-the-servers-save'
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
