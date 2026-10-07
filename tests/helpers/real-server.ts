@@ -70,7 +70,9 @@ export class Watcher {
     const id = this.next++
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`timeout: ${method}`)), 30_000)
-      const onMessage = (raw: WebSocket.RawData): void => {
+      const onMessage = (raw: WebSocket.RawData, isBinary: boolean): void => {
+        // An attached session's bytes: a throw here would stop the socket reading replies.
+        if (isBinary) return
         const frame = JSON.parse(String(raw)) as Frame
         if (frame.id !== id) return
         this.ws.off('message', onMessage)

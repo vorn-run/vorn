@@ -316,36 +316,46 @@ async function coldRun(
   }
 }
 
+/** Runs `phase` on `server`; a failure names the phase, the switch and that server's log. */
+async function phase<T>(
+  name: string,
+  nativeServer: boolean,
+  server: RealServer,
+  run: () => Promise<T>
+): Promise<T> {
+  try {
+    return await run()
+  } catch (err) {
+    const log = server.log.join('').slice(-4000)
+    const which = `${name}, switch ${nativeServer ? 'on' : 'off'}`
+    throw new Error(`${which}: ${(err as Error).message}\n${log}`, { cause: err })
+  }
+}
+
 async function scenario(nativeServer: boolean): Promise<Observed> {
   const first = await startRealServer(nativeServer)
   const dirs: RunDirs = first.dirs
-  let observed: Observed
+  const { ids, replies } = await phase('first run', nativeServer, first, () => firstRun(first))
+  await stopRealServer(first, true)
+  const second = await startRealServer(nativeServer, dirs)
+  let warm: Awaited<ReturnType<typeof warmRun>>
   try {
-    const { ids, replies } = await firstRun(first)
-    await stopRealServer(first, true)
-    const second = await startRealServer(nativeServer, dirs)
-    let warm: Awaited<ReturnType<typeof warmRun>>
-    try {
-      warm = await warmRun(second, ids)
-    } finally {
-      await stopRealServer(second)
-    }
-    const third = await startRealServer(nativeServer, dirs)
-    let cold: Awaited<ReturnType<typeof coldRun>>
-    try {
-      cold = await coldRun(third, ids)
-    } finally {
-      await stopRealServer(third)
-    }
-    observed = {
-      transcript: normalizeRun({ ...replies, ...warm.replies, ...cold.replies }, dirs),
-      resyncTold: cold.resyncTold,
-      headlessAfterRestart: warm.headless
-    }
-  } catch (err) {
-    throw new Error(`${(err as Error).message}\n${first.log.join('').slice(-4000)}`, { cause: err })
+    warm = await phase('restart with the holder', nativeServer, second, () => warmRun(second, ids))
+  } finally {
+    await stopRealServer(second)
   }
-  return observed
+  const third = await startRealServer(nativeServer, dirs)
+  let cold: Awaited<ReturnType<typeof coldRun>>
+  try {
+    cold = await phase('restart without the holder', nativeServer, third, () => coldRun(third, ids))
+  } finally {
+    await stopRealServer(third)
+  }
+  return {
+    transcript: normalizeRun({ ...replies, ...warm.replies, ...cold.replies }, dirs),
+    resyncTold: cold.resyncTold,
+    headlessAfterRestart: warm.headless
+  }
 }
 
 describe.skipIf(!runnable)('sessions carried over a restart, against the server', () => {
