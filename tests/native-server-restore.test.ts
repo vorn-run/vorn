@@ -69,6 +69,8 @@ interface Observed {
   resyncTold: boolean
   /** The headless agents a server lists after a restart that kept the holder. */
   headlessAfterRestart: number
+  /** How often the shell echoed the resumed agent's launch line. */
+  launchLinesEchoed: number
 }
 
 function byName(sessions: TerminalSession[]): TerminalSession[] {
@@ -217,7 +219,7 @@ async function warmRun(
 async function coldRun(
   server: RealServer,
   ids: Record<string, string>
-): Promise<{ replies: Record<string, unknown>; resyncTold: boolean }> {
+): Promise<{ replies: Record<string, unknown>; resyncTold: boolean; echoed: number }> {
   const direct = await Watcher.open(server.port)
   const through = await Watcher.open(server.vornd)
   const watcher = await Watcher.open(server.vornd)
@@ -281,8 +283,8 @@ async function coldRun(
     await shown(through, ids.agent, 'ARGV:')
     const screen = await through.result<string[]>('terminal:readOutput', { id: ids.agent })
     replies['the agent was started once'] = screen.filter((l) => l.includes('ARGV:')).length
-    // Typed once the shell was ready: the command line is echoed once.
-    replies['launch lines echoed'] = screen.filter(
+    // Compared on its own: the server's fixed wait can type before the prompt (TYPED_BEFORE_PROMPT).
+    const echoed = screen.filter(
       (l) => l.includes('/bin/argv-agent --resume') && !l.includes('ARGV:')
     ).length
     replies['what the agent was resumed with'] = screen
@@ -308,7 +310,7 @@ async function coldRun(
       groupId: s.groupId,
       live: s.pid > 0
     }))
-    return { replies, resyncTold }
+    return { replies, resyncTold, echoed }
   } finally {
     direct.close()
     through.close()
@@ -354,7 +356,8 @@ async function scenario(nativeServer: boolean): Promise<Observed> {
   return {
     transcript: normalizeRun({ ...replies, ...warm.replies, ...cold.replies }, dirs),
     resyncTold: cold.resyncTold,
-    headlessAfterRestart: warm.headless
+    headlessAfterRestart: warm.headless,
+    launchLinesEchoed: cold.echoed
   }
 }
 
@@ -382,7 +385,7 @@ describe.skipIf(!runnable)('sessions carried over a restart, against the server'
       showsItsScreen: true
     })
     expect(runs.on?.transcript['the agent was started once']).toBe(1)
-    expect(runs.on?.transcript['launch lines echoed']).toBe(1)
+    expect(runs.on?.launchLinesEchoed).toBe(1)
     expect(runs.on?.transcript['what the agent was resumed with']).toEqual([
       expect.stringMatching(/^ARGV:--resume <minted \d+>$/)
     ])
