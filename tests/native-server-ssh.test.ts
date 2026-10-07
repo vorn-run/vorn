@@ -188,7 +188,9 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     const resumedShown = await said(byKey, /ARGV:/)
     await until('the resume to log in', () => lines(path.join(log, 'argv')).length === 3).catch(
       (err: Error) => {
-        throw new Error(`${err.message}; ${JSON.stringify({ replies, log: lines(path.join(log, 'argv')) })}`)
+        throw new Error(
+          `${err.message}; ${JSON.stringify({ replies, log: lines(path.join(log, 'argv')) })}`
+        )
       }
     )
 
