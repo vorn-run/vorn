@@ -53,9 +53,9 @@ function buildNodeScript(eventName: string): string {
   ].join('')
 }
 
-// A Copilot outside Vorn skips starting node for every event.
+// A Copilot outside Vorn skips starting node for every event, but still reads the event so its write never meets a closed pipe.
 function buildBashCommand(script: string): string {
-  return `[ -z "$VORN_SESSION_ID" ] || node -e "${script.replace(/"/g, '\\"')}"`
+  return `if [ -z "$VORN_SESSION_ID" ]; then cat >/dev/null; else node -e "${script.replace(/"/g, '\\"')}"; fi`
 }
 
 function buildPowershellCommand(script: string): string {
