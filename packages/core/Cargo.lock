@@ -2989,9 +2989,12 @@ name = "vorn-work"
 version = "0.0.0"
 dependencies = [
  "jiff",
+ "regex",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
+ "vorn-protocol",
  "vorn-store",
 ]
 
