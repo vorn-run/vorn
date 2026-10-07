@@ -48,6 +48,7 @@ pub mod script;
 pub mod secrets;
 pub mod sessions;
 pub mod shell;
+pub mod work;
 pub mod worktree;
 pub mod worktree_move;
 
@@ -159,6 +160,21 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("worktree:reclaimArtifacts", Effect::Change),
     ("worktree:pruneOrphans", Effect::Change),
     ("git:removeWorktree", Effect::Change),
+    // Read from the server's database in shadow mode only ([`work`]).
+    ("workflow:list", Effect::Read),
+    ("workflow:get", Effect::Read),
+    ("workflowRun:list", Effect::Read),
+    ("workflowRun:listByTask", Effect::Read),
+    ("workflowRun:listWaiting", Effect::Read),
+    ("workflowRun:listRunning", Effect::Read),
+    ("workflowRun:listAll", Effect::Read),
+    ("scheduler:getLog", Effect::Read),
+    ("scheduler:getNextRun", Effect::Read),
+    ("webhook:info", Effect::Read),
+    ("artifact:list", Effect::Read),
+    ("artifact:versionUrl", Effect::Read),
+    ("artifact:forGate", Effect::Read),
+    ("artifact:readSource", Effect::Read),
 ];
 
 /// Calls in a native group that the server keeps answering, and why.
@@ -544,6 +560,9 @@ impl Native {
             }
             Some("headless") if method != "headless:list" => headless::call(self, method, params),
             Some("terminal" | "headless" | "worktree") => self.sessions(method, params),
+            Some("workflow" | "workflowRun" | "scheduler" | "webhook" | "artifact") => {
+                work::call(self, method, params)
+            }
             Some("shell") => match method {
                 "shell:listExecutables" => Answer::Result(self.shells.executables(&self.env)),
                 "shell:listInstalled" => Answer::Result(self.shells.installed()),
@@ -1402,9 +1421,24 @@ mod tests {
             assert!(!why.is_empty());
             assert!(crate::groups::NATIVE_GROUPS.contains(&crate::groups::group_of(method)));
         }
-        for (method, _) in METHODS {
+        for (method, effect) in METHODS {
             let group = crate::groups::group_of(method);
-            assert!(crate::groups::NATIVE_GROUPS.contains(&group), "{method}");
+            if crate::groups::SHADOW_GROUPS.contains(&group) {
+                assert_eq!(*effect, Effect::Read, "{method}");
+            } else {
+                assert!(crate::groups::NATIVE_GROUPS.contains(&group), "{method}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_group_vornd_only_compares_is_never_answered_natively() {
+        for group in crate::groups::SHADOW_GROUPS {
+            assert!(!crate::groups::NATIVE_GROUPS.contains(group), "{group}");
+            let err = crate::groups::Groups::parse(&format!("{group}=native")).unwrap_err();
+            assert!(err.contains("no native implementation"), "{err}");
+            let shadowed = crate::groups::Groups::parse(&format!("{group}=shadow")).unwrap();
+            assert_eq!(shadowed.mode(group), crate::groups::Mode::Shadow);
         }
     }
 

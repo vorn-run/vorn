@@ -76,6 +76,16 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "script",
 ];
 
+/// Groups vornd only compares in shadow mode, reading the server's database,
+/// while the server still owns them: `native` is refused.
+pub const SHADOW_GROUPS: &[&str] = &[
+    "workflow",
+    "workflowRun",
+    "scheduler",
+    "webhook",
+    "artifact",
+];
+
 /// Groups the Native server switch runs natively: the one place a group
 /// joins the switch. Each is also in [`NATIVE_GROUPS`].
 pub const NATIVE_SERVER_GROUPS: &[&str] = &[

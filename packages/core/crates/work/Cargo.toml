@@ -1,0 +1,20 @@
+[package]
+name = "vorn-work"
+# Never published and never versioned on its own; vorn-core carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Vorn's work model without a host: workflow schedules as node-cron reads them, trigger receipts, and the workflow, run and artifact reads"
+
+[dependencies]
+# Wall-clock time in a schedule's time zone, as node-cron reads it through Intl.
+jiff = "0.2"
+serde_json = { version = "1", features = ["preserve_order"] }
+vorn-store = { path = "../store" }
+
+[dev-dependencies]
+# To take the receipts table away under a store, as a broken database would.
+rusqlite = { version = "0.37", features = ["bundled"] }
+tempfile = "3"

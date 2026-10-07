@@ -21,6 +21,7 @@ members = [
   "crates/mcp",
   "crates/cli",
   "crates/reach",
+  "crates/work",
   "crates/worktrees",
 ]
 
