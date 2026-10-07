@@ -336,10 +336,10 @@ impl Session {
                             // At-most-once: a failed write is reported as what
                             // got through, never retried.
                             let written = write_some(&mut w, &bytes);
-                            on_written(&id, Written { input_seq, written });
                             if let Some(s) = s.upgrade() {
                                 s.lock().inflight -= 1;
                             }
+                            on_written(&id, Written { input_seq, written });
                         }
                         Input::CloseStdin => {
                             closing = true;

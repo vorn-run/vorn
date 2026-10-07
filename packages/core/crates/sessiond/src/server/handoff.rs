@@ -36,6 +36,8 @@ use super::Sessiond;
 /// handoff off. The donor does not time out its wait for [`Took`]: past
 /// [`Commit`] the adopter may already run the sessions.
 const FRAME_WAIT: Duration = Duration::from_secs(10);
+/// How long the donor retries a session that cannot freeze yet.
+const FREEZE_WAIT: Duration = Duration::from_secs(2);
 /// Output bytes per [`RingChunk`]: well under the frame cap.
 const CHUNK_BYTES: u64 = 1 << 20;
 /// How long the adopter gives a donor that hung up before the commit to
@@ -187,18 +189,38 @@ impl Sessiond {
         self.stop.notify_waiters();
     }
 
+    /// Freeze every session, or none: one still writing input or waiting
+    /// for room in its log is retried for a while, the others thawed
+    /// meanwhile so they keep running.
     fn freeze_all(
         &self,
         sessions: &[Arc<Session>],
         frozen: &mut Thaw<'_>,
     ) -> Result<Vec<Handover>, String> {
         self.at(Step::Freeze).map_err(|e| e.to_string())?;
-        let mut out = Vec::with_capacity(sessions.len());
-        for s in sessions {
-            out.push(s.freeze()?);
-            frozen.sessions.push(Arc::clone(s));
+        let deadline = Instant::now() + FREEZE_WAIT;
+        'again: loop {
+            let mut out = Vec::with_capacity(sessions.len());
+            for s in sessions {
+                match s.freeze() {
+                    Ok(h) => {
+                        out.push(h);
+                        frozen.sessions.push(Arc::clone(s));
+                    }
+                    Err(why) => {
+                        for s in frozen.sessions.drain(..) {
+                            s.thaw();
+                        }
+                        if Instant::now() >= deadline {
+                            return Err(why);
+                        }
+                        std::thread::sleep(Duration::from_millis(50));
+                        continue 'again;
+                    }
+                }
+            }
+            return Ok(out);
         }
-        Ok(out)
     }
 
     /// Send the offer and every session, wait for Ready, then commit.
