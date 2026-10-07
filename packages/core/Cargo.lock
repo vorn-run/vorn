@@ -2985,6 +2985,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-work"
+version = "0.0.0"
+dependencies = [
+ "jiff",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "vorn-store",
+]
+
+[[package]]
 name = "vorn-worktrees"
 version = "0.0.0"
 dependencies = [
