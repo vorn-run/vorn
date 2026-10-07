@@ -63,6 +63,11 @@ struct Vornd {
 
 impl Vornd {
     fn start(home: &Path, env: &[(&str, &str)]) -> Vornd {
+        Vornd::start_with(home, &sessiond_bin(), env)
+    }
+
+    /// Started with `bundled` as the sessiond shipped with the app.
+    fn start_with(home: &Path, bundled: &Path, env: &[(&str, &str)]) -> Vornd {
         let log = home.join("vornd.log");
         let mut cmd = Command::new(VORND);
         // Nothing listens on the discard port: the holder does not need the
@@ -73,7 +78,7 @@ impl Vornd {
             "--exit-with-stdin",
             "--sessiond",
         ])
-        .arg(sessiond_bin())
+        .arg(bundled)
         .arg("--home")
         .arg(home)
         .arg("--log-file")
@@ -299,6 +304,94 @@ fn an_older_build_is_drained_and_exits() {
     v.stop();
 }
 
+/// The sessiond binary copied into an app bundle of its own under `home`.
+fn bundle(home: &Path, name: &str) -> PathBuf {
+    let dir = home.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    let bin = dir.join(format!("vorn-sessiond{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(sessiond_bin(), &bin).unwrap();
+    bin
+}
+
+/// The same build of this version from another bundle, as after the app is
+/// moved or reinstalled, keeps the sessiond already running it.
+#[test]
+fn the_same_build_from_another_bundle_keeps_its_sessiond() {
+    let home = tempfile::tempdir().unwrap();
+    let mut reap = Reap::default();
+
+    let v = Vornd::start_with(home.path(), &bundle(home.path(), "a"), &[]);
+    let first = v.current();
+    reap.add(pid(&first));
+    v.stop();
+
+    let v = Vornd::start_with(home.path(), &bundle(home.path(), "b"), &[]);
+    let again = v.current();
+    assert_eq!(again["instance"], first["instance"]);
+    assert_eq!(v.health()["sessiond"]["older"], serde_json::json!([]));
+    assert_eq!(launch::running(home.path()).len(), 1, "no second one");
+    let installs = std::fs::read_dir(home.path().join("bin")).unwrap().count();
+    assert_eq!(installs, 1, "installed once");
+    v.stop();
+}
+
+/// A local rebuild with the version unchanged is a new build: it is
+/// installed beside the stale one, which is drained and exits.
+#[test]
+fn a_rebuild_of_the_same_version_replaces_its_sessiond() {
+    let home = tempfile::tempdir().unwrap();
+    let mut reap = Reap::default();
+
+    let bundled = bundle(home.path(), "app");
+    let v = Vornd::start_with(home.path(), &bundled, &[]);
+    let first = v.current();
+    reap.add(pid(&first));
+    v.stop();
+    let stale = launch::installed_path(home.path(), &sessiond_version());
+
+    // Trailing bytes change the binary but not what it runs as.
+    let mut f = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&bundled)
+        .unwrap();
+    f.write_all(b"rebuilt").unwrap();
+    drop(f);
+
+    let v = Vornd::start_with(home.path(), &bundled, &[]);
+    let holder = v.wait_for("the stale one reported", |s| {
+        s["current"].is_object() && s["older"].as_array().is_some_and(|o| !o.is_empty())
+    });
+    let current = &holder["current"];
+    reap.add(pid(current));
+    assert_ne!(current["instance"], first["instance"]);
+    assert_eq!(current["build"], first["build"], "the same version");
+    let older = holder["older"].as_array().unwrap();
+    assert_eq!(older.len(), 1, "{holder}");
+    assert_eq!(older[0]["instance"], first["instance"]);
+    assert_eq!(older[0]["compatible"], true);
+    assert!(
+        gone_within(pid(&first), PATIENCE),
+        "the drained sessiond did not exit: {}",
+        v.log_text()
+    );
+
+    let running = launch::running(home.path());
+    assert_eq!(running.len(), 1);
+    let exe = running[0].exe.clone().expect("it names its binary");
+    assert_eq!(
+        std::fs::read(&exe).unwrap(),
+        std::fs::read(&bundled).unwrap()
+    );
+    assert!(stale.exists(), "the stale install is left where it was");
+    assert!(!running[0].runs(&stale));
+    v.stop();
+
+    // Started again, the rebuild finds its own install and sessiond.
+    let v = Vornd::start_with(home.path(), &bundled, &[]);
+    assert_eq!(v.current()["instance"], current["instance"]);
+    v.stop();
+}
+
 /// A sessiond speaking a protocol this vornd does not is left running with
 /// its sessions, and reported as incompatible so the app can ask first.
 #[test]
@@ -313,6 +406,7 @@ fn an_incompatible_sessiond_is_left_alone() {
         proto: 999,
         build: "99.0.0".into(),
         instance: 0xf00,
+        exe: None,
     };
     launch::announce(home.path(), &foreign).unwrap();
 

@@ -583,6 +583,7 @@ pub fn bind(d: &Sessiond) -> std::io::Result<crate::os::Listener> {
             proto: PROTO,
             build: d.cfg.build.clone(),
             instance: d.cfg.instance,
+            exe: std::env::current_exe().ok(),
         },
     )?;
     Ok(listener)

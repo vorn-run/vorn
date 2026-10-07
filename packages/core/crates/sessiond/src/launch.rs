@@ -3,7 +3,9 @@
 //!
 //! - Each version is copied out of the app bundle into a directory of its
 //!   own, `$VORN_HOME/bin/sessiond-<version>/`, so replacing the bundle never
-//!   touches a running binary. The files that must sit beside the binary go
+//!   touches a running binary. A bundle whose binary differs from the one
+//!   installed for its version (a local rebuild) goes beside it, in
+//!   `sessiond-<version>+<fingerprint>/`. The files that must sit beside the binary go
 //!   with it ([`COMPANIONS`]): on Windows, the ConPTY that sessiond loads in
 //!   place of the system's (`conpty.dll`) and the console host it starts
 //!   (`<arch>/OpenConsole.exe`).
@@ -28,6 +30,20 @@ pub struct Instance {
     pub proto: u16,
     pub build: String,
     pub instance: u128,
+    /// The binary it runs, so a launcher can tell two builds of one version
+    /// apart. Absent from announcements written before it was added.
+    pub exe: Option<PathBuf>,
+}
+
+impl Instance {
+    /// Whether it runs `binary`, comparing resolved paths. One that did not
+    /// say what it runs is taken to run something else.
+    pub fn runs(&self, binary: &Path) -> bool {
+        let resolve = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_owned());
+        self.exe
+            .as_deref()
+            .is_some_and(|exe| resolve(exe) == resolve(binary))
+    }
 }
 
 fn info_path(home: &Path, instance: u128) -> PathBuf {
@@ -37,10 +53,17 @@ fn info_path(home: &Path, instance: u128) -> PathBuf {
 /// Write this instance's announcement.
 pub fn announce(home: &Path, i: &Instance) -> io::Result<()> {
     fs::create_dir_all(home.join("run"))?;
-    let body = format!(
+    let mut body = format!(
         "endpoint={}\npid={}\nproto={}\nbuild={}\ninstance={:x}\n",
         i.endpoint, i.pid, i.proto, i.build, i.instance
     );
+    // A path with a line break cannot be announced; leaving it out reads as
+    // another build, which is only drained.
+    if let Some(exe) = i.exe.as_deref().and_then(Path::to_str) {
+        if !exe.contains(['\n', '\r']) {
+            body.push_str(&format!("exe={exe}\n"));
+        }
+    }
     let path = info_path(home, i.instance);
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, body)?;
@@ -58,6 +81,7 @@ fn parse(text: &str) -> Option<Instance> {
     let mut proto = None;
     let mut build = None;
     let mut instance = None;
+    let mut exe = None;
     for line in text.lines() {
         let (k, v) = line.split_once('=')?;
         match k {
@@ -66,6 +90,7 @@ fn parse(text: &str) -> Option<Instance> {
             "proto" => proto = v.parse().ok(),
             "build" => build = Some(v.to_owned()),
             "instance" => instance = u128::from_str_radix(v, 16).ok(),
+            "exe" => exe = Some(PathBuf::from(v)),
             _ => {}
         }
     }
@@ -75,6 +100,7 @@ fn parse(text: &str) -> Option<Instance> {
         proto: proto?,
         build: build?,
         instance: instance?,
+        exe,
     })
 }
 
@@ -125,7 +151,7 @@ pub fn installed_dir(home: &Path, version: &str) -> PathBuf {
     home.join("bin").join(format!("sessiond-{version}"))
 }
 
-/// The installed binary for a version.
+/// The binary installed first for a version.
 pub fn installed_path(home: &Path, version: &str) -> PathBuf {
     installed_dir(home, version).join(exe_name())
 }
@@ -134,22 +160,89 @@ fn exe_name() -> String {
     format!("vorn-sessiond{}", std::env::consts::EXE_SUFFIX)
 }
 
+/// Where a bundle whose binary differs from the one installed for its
+/// version goes, named for its contents so the same rebuild is found again.
+fn rebuilt_dir(home: &Path, version: &str, print: Fingerprint) -> PathBuf {
+    home.join("bin").join(format!("sessiond-{version}+{print}"))
+}
+
+/// A binary's length and CRC-32: enough to tell a rebuild from the build it
+/// replaces without keeping a second copy to compare against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Fingerprint {
+    len: u64,
+    crc: u32,
+}
+
+impl Fingerprint {
+    fn of(path: &Path) -> io::Result<Fingerprint> {
+        let mut file = fs::File::open(path)?;
+        let mut hasher = crc32fast::Hasher::new();
+        let mut buf = vec![0u8; 64 << 10];
+        let mut len = 0u64;
+        loop {
+            let n = io::Read::read(&mut file, &mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            len += n as u64;
+        }
+        Ok(Fingerprint {
+            len,
+            crc: hasher.finalize(),
+        })
+    }
+
+    /// Whether `path` has these contents; a different length answers
+    /// without reading it.
+    fn matches(self, path: &Path) -> io::Result<bool> {
+        if fs::metadata(path)?.len() != self.len {
+            return Ok(false);
+        }
+        Ok(Fingerprint::of(path)? == self)
+    }
+}
+
+impl std::fmt::Display for Fingerprint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:x}-{:08x}", self.len, self.crc)
+    }
+}
+
 /// Install the bundled binary and its [`COMPANIONS`] under their version,
-/// unless that version is already installed, and answer the installed
-/// binary. The directory is built under a temporary name and renamed into
-/// place, so a reader never sees half an install, and an installed version
-/// is never overwritten while it may be running. When another launcher
-/// installs the same version first, its install is used.
+/// unless the same binary is already installed, and answer the installed
+/// binary. A version is installed in [`installed_dir`]; a bundle of that
+/// version with a different binary, as a local rebuild has, is installed
+/// beside it rather than over it. The directory is built under a temporary
+/// name and renamed into place, so a reader never sees half an install, and
+/// an install is never overwritten while it may be running. When another
+/// launcher installs the same build first, its install is used.
 pub fn install(bundled: &Path, home: &Path, version: &str) -> io::Result<PathBuf> {
-    let dest = installed_path(home, version);
+    let first = installed_path(home, version);
+    if !first.exists() {
+        return install_in(bundled, home, version, &installed_dir(home, version));
+    }
+    let print = Fingerprint::of(bundled)?;
+    if print.matches(&first)? {
+        return Ok(first);
+    }
+    let dir = rebuilt_dir(home, version, print);
+    let dest = dir.join(exe_name());
     if dest.exists() {
         return Ok(dest);
     }
+    install_in(bundled, home, version, &dir)
+}
+
+/// Stage the bundle and rename it to `dir`, unless another launcher has.
+fn install_in(bundled: &Path, home: &Path, version: &str, dir: &Path) -> io::Result<PathBuf> {
+    let dest = dir.join(exe_name());
     let bin = home.join("bin");
     fs::create_dir_all(&bin)?;
     let tmp = bin.join(format!(".sessiond-{version}.{}.tmp", unique()));
     let built = stage(bundled, &tmp, &tmp.join(exe_name()));
-    let done = built.and_then(|()| rename_dir(&tmp, &installed_dir(home, version), &dest));
+    let done = built.and_then(|()| rename_dir(&tmp, dir, &dest));
     match done {
         Ok(()) => Ok(dest),
         Err(e) => {
@@ -464,6 +557,7 @@ mod tests {
             proto,
             build: "0.8.0".into(),
             instance,
+            exe: Some(PathBuf::from(format!("/bin/s{instance}"))),
         }
     }
 
@@ -528,10 +622,8 @@ mod tests {
             Some(installed_dir(home.path(), "0.8.0").as_path())
         );
         assert_eq!(fs::read(&a).unwrap(), b"v1");
-        // The bundle changes; the installed version stays as it was.
-        fs::write(&src, b"v2").unwrap();
         assert_eq!(install(&src, home.path(), "0.8.0").unwrap(), a);
-        assert_eq!(fs::read(&a).unwrap(), b"v1");
+        fs::write(&src, b"v2").unwrap();
         let b = install(&src, home.path(), "0.8.1").unwrap();
         assert_ne!(a, b);
         assert_eq!(fs::read(&b).unwrap(), b"v2");
@@ -550,6 +642,78 @@ mod tests {
             .collect();
         left.sort();
         assert_eq!(left, ["sessiond-0.8.0", "sessiond-0.8.1"]);
+    }
+
+    /// A bundle of an installed version with the same binary, from wherever
+    /// it is, reuses the install.
+    #[test]
+    fn the_same_build_of_a_version_is_reused() {
+        let home = tempfile::tempdir().unwrap();
+        let src = home.path().join("bundled");
+        fs::write(&src, b"build").unwrap();
+        let a = install(&src, home.path(), "0.8.0").unwrap();
+        let moved = home.path().join("moved");
+        fs::write(&moved, b"build").unwrap();
+        assert_eq!(install(&moved, home.path(), "0.8.0").unwrap(), a);
+        assert_eq!(fs::read_dir(home.path().join("bin")).unwrap().count(), 1);
+    }
+
+    /// A rebuild of an installed version goes beside the install, which
+    /// stays as it was, and is found again by its contents.
+    #[test]
+    fn a_rebuild_of_a_version_is_installed_beside_it() {
+        let home = tempfile::tempdir().unwrap();
+        let src = home.path().join("bundled");
+        fs::write(&src, b"v1").unwrap();
+        let a = install(&src, home.path(), "0.8.0").unwrap();
+        // Same length, other bytes: only the checksum tells them apart.
+        fs::write(&src, b"v2").unwrap();
+        let b = install(&src, home.path(), "0.8.0").unwrap();
+        assert_ne!(a, b);
+        assert_eq!(fs::read(&a).unwrap(), b"v1");
+        assert_eq!(fs::read(&b).unwrap(), b"v2");
+        let dir = b.parent().unwrap().file_name().unwrap().to_string_lossy();
+        assert!(dir.starts_with("sessiond-0.8.0+2-"), "{dir}");
+        assert_eq!(install(&src, home.path(), "0.8.0").unwrap(), b);
+        fs::write(&src, b"longer").unwrap();
+        let c = install(&src, home.path(), "0.8.0").unwrap();
+        assert!(c != a && c != b);
+        // Going back to the first build finds its install.
+        fs::write(&src, b"v1").unwrap();
+        assert_eq!(install(&src, home.path(), "0.8.0").unwrap(), a);
+        assert_eq!(fs::read_dir(home.path().join("bin")).unwrap().count(), 3);
+    }
+
+    #[test]
+    fn an_instance_runs_the_binary_it_announced() {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let exe = bin.join("vorn-sessiond");
+        fs::write(&exe, b"x").unwrap();
+        let mut i = inst(1, 1);
+        // Announced through another spelling of the same path.
+        i.exe = Some(bin.join("..").join("bin").join("vorn-sessiond"));
+        assert!(i.runs(&exe));
+        assert!(!i.runs(&bin.join("other")));
+        i.exe = None;
+        assert!(!i.runs(&exe));
+    }
+
+    /// Announcements from sessionds that did not name their binary still
+    /// list; one whose path cannot be written on a line leaves it out.
+    #[test]
+    fn the_announced_binary_is_optional() {
+        let home = tempfile::tempdir().unwrap();
+        let older = "endpoint=e\npid=1\nproto=1\nbuild=0.8.0\ninstance=5\n";
+        assert_eq!(parse(older).unwrap().exe, None);
+        let mut i = inst(1, 2);
+        i.exe = Some(PathBuf::from("/a\nb"));
+        announce(home.path(), &i).unwrap();
+        assert_eq!(running(home.path())[0].exe, None);
+        let i = inst(1, 2);
+        announce(home.path(), &i).unwrap();
+        assert_eq!(running(home.path()), vec![i]);
     }
 
     /// An older build's single-file install of the same version is a
