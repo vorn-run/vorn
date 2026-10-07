@@ -1,19 +1,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import crypto from 'node:crypto'
 import os from 'node:os'
 import log from './logger'
 
+/** One terminal's view of the hooks file every terminal shares; its script names the terminal from `VORN_SESSION_ID`. */
 export interface CopilotHookInstallation {
-  projectPath: string
+  /** The `session_id` this terminal's hooks post, derived from its terminal id. */
   sessionId: string
   hooksJsonPath: string
-  hadExistingFile: boolean
-  existingContent?: string
 }
-
-// Track all active installations for bulk cleanup
-const activeInstallations = new Map<string, CopilotHookInstallation>()
 
 // Copilot camelCase -> Vorn PascalCase event mapping
 const EVENT_MAP: Record<string, string> = {
@@ -25,35 +20,54 @@ const EVENT_MAP: Record<string, string> = {
   errorOccurred: 'PostToolUseFailure'
 }
 
+const SESSION_PREFIX = 'copilot-'
+
+/** The file this process wrote, removed at shutdown. */
+let installedPath: string | null = null
+
+/** Vorn's routing id for a Copilot terminal's hooks, as its script posts it. */
+export function copilotHookSessionId(terminalId: string): string {
+  return SESSION_PREFIX + terminalId
+}
+
+/** Copilot CLI loads every `*.json` in `$COPILOT_HOME/hooks` (default `~/.copilot/hooks`), never a project-root `hooks.json`. */
+function hooksJsonPath(): string {
+  const copilotHome = process.env.COPILOT_HOME || path.join(os.homedir(), '.copilot')
+  return path.join(copilotHome, 'hooks', 'vorn.json')
+}
+
 // The node script is cross-platform -- only the shell invocation differs
-function buildNodeScript(sessionId: string, eventName: string): string {
+function buildNodeScript(eventName: string): string {
   const portPath = path.join(os.homedir(), '.vorn', 'port').replace(/\\/g, '/')
   const tokenPath = path.join(os.homedir(), '.vorn', 'token').replace(/\\/g, '/')
   return [
+    `const t=process.env.VORN_SESSION_ID||'';`,
+    `if(!t){process.stdout.write('{}');process.exit(0)}`,
     `const d=JSON.parse(require('fs').readFileSync(0,'utf8'));`,
     `let port,token;`,
     `try{port=require('fs').readFileSync('${portPath}','utf8').trim();token=require('fs').readFileSync('${tokenPath}','utf8').trim()}catch(e){process.stdout.write('{}');process.exit(0)}`,
-    `const body=JSON.stringify({session_id:'${sessionId}',hook_event_name:'${eventName}',cwd:d.cwd||'',tool_name:d.toolName||'',vorn_terminal_id:process.env.VORN_SESSION_ID||''});`,
+    `const body=JSON.stringify({session_id:'${SESSION_PREFIX}'+t,hook_event_name:'${eventName}',cwd:d.cwd||'',tool_name:d.toolName||'',vorn_terminal_id:t});`,
     `const r=require('http').request({hostname:'127.0.0.1',port:+port,path:'/hooks',method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token}});`,
     `r.on('error',()=>{});r.end(body);`,
     `process.stdout.write('{}')`
   ].join('')
 }
 
+// A Copilot outside Vorn skips starting node for every event.
 function buildBashCommand(script: string): string {
-  return `node -e "${script.replace(/"/g, '\\"')}"`
+  return `[ -z "$VORN_SESSION_ID" ] || node -e "${script.replace(/"/g, '\\"')}"`
 }
 
 function buildPowershellCommand(script: string): string {
   // PowerShell uses single quotes for the -e argument; escape internal single quotes
-  return `node -e '${script.replace(/'/g, "''")}'`
+  return `if ($env:VORN_SESSION_ID) { node -e '${script.replace(/'/g, "''")}' }`
 }
 
-function buildHooksJson(sessionId: string): string {
+function buildHooksJson(): string {
   const hooks: Record<string, unknown[]> = {}
 
   for (const [copilotEvent, vornEvent] of Object.entries(EVENT_MAP)) {
-    const script = buildNodeScript(sessionId, vornEvent)
+    const script = buildNodeScript(vornEvent)
     hooks[copilotEvent] = [
       {
         type: 'command',
@@ -66,75 +80,50 @@ function buildHooksJson(sessionId: string): string {
   return JSON.stringify({ version: 1, _vorn: true, hooks }, null, 2)
 }
 
-export function installCopilotHooks(projectPath: string, _port: number): CopilotHookInstallation {
-  const sessionId = crypto.randomUUID()
-  const hooksJsonPath = path.join(projectPath, 'hooks.json')
-
-  let hadExistingFile = false
-  let existingContent: string | undefined
-
-  // Back up existing hooks.json if present and not Vorn-managed
+/** The file's content, and whether Vorn wrote it; null when there is none. */
+function readHooksFile(file: string): { content: string; ours: boolean } | null {
+  let content: string
   try {
-    if (fs.existsSync(hooksJsonPath)) {
-      const content = fs.readFileSync(hooksJsonPath, 'utf-8')
-      const parsed = JSON.parse(content)
-      if (parsed._vorn) {
-        // Already a Vorn file -- overwrite without backup
-        hadExistingFile = false
-      } else {
-        hadExistingFile = true
-        existingContent = content
-      }
-    }
+    content = fs.readFileSync(file, 'utf-8')
   } catch {
-    // If we can't read/parse it, treat as no existing file
-    hadExistingFile = false
+    return null
   }
-
-  // Write hooks.json
-  fs.writeFileSync(hooksJsonPath, buildHooksJson(sessionId), 'utf-8')
-
-  const installation: CopilotHookInstallation = {
-    projectPath,
-    sessionId,
-    hooksJsonPath,
-    hadExistingFile,
-    existingContent
+  try {
+    return { content, ours: JSON.parse(content)?._vorn === true }
+  } catch {
+    return { content, ours: false }
   }
+}
 
-  activeInstallations.set(projectPath, installation)
-  log.info(`[copilot-hooks] installed hooks.json at ${hooksJsonPath} (session: ${sessionId})`)
+/** Puts the shared hooks file in place if missing or stale, never over a file of the user's own. */
+export function installCopilotHooks(terminalId: string): CopilotHookInstallation {
+  const file = hooksJsonPath()
+  const installation = { sessionId: copilotHookSessionId(terminalId), hooksJsonPath: file }
+  const content = buildHooksJson()
+  const existing = readHooksFile(file)
 
+  if (existing && !existing.ours) {
+    log.warn(`[copilot-hooks] ${file} is not Vorn's; leaving it alone`)
+    return installation
+  }
+  if (existing?.content !== content) {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, content, 'utf-8')
+    log.info(`[copilot-hooks] installed ${file}`)
+  }
+  installedPath = file
   return installation
 }
 
-export function uninstallCopilotHooks(installation: CopilotHookInstallation): void {
+/** Removes the shared hooks file at shutdown if this process installed it and it is still Vorn's. */
+export function uninstallAllCopilotHooks(): void {
+  const file = installedPath
+  installedPath = null
+  if (!file || !readHooksFile(file)?.ours) return
   try {
-    if (installation.hadExistingFile && installation.existingContent) {
-      // Restore original content
-      fs.writeFileSync(installation.hooksJsonPath, installation.existingContent, 'utf-8')
-      log.info(`[copilot-hooks] restored original hooks.json at ${installation.hooksJsonPath}`)
-    } else {
-      // Only remove if it's still our file
-      if (fs.existsSync(installation.hooksJsonPath)) {
-        const content = fs.readFileSync(installation.hooksJsonPath, 'utf-8')
-        const parsed = JSON.parse(content)
-        if (parsed._vorn) {
-          fs.unlinkSync(installation.hooksJsonPath)
-          log.info(`[copilot-hooks] removed hooks.json at ${installation.hooksJsonPath}`)
-        }
-      }
-    }
+    fs.unlinkSync(file)
+    log.info(`[copilot-hooks] removed ${file}`)
   } catch {
     // Best-effort cleanup
   }
-
-  activeInstallations.delete(installation.projectPath)
-}
-
-export function uninstallAllCopilotHooks(): void {
-  for (const installation of activeInstallations.values()) {
-    uninstallCopilotHooks(installation)
-  }
-  activeInstallations.clear()
 }

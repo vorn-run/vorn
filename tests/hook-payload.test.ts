@@ -42,10 +42,14 @@ let home: string | null = null
 let realHome: string | undefined
 
 let realProfile: string | undefined
+let realCopilotHome: string | undefined
 
 beforeAll(() => {
   realHome = process.env.HOME
   realProfile = process.env.USERPROFILE
+  realCopilotHome = process.env.COPILOT_HOME
+  // Copilot's hooks would otherwise land in a developer's own COPILOT_HOME.
+  delete process.env.COPILOT_HOME
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-hooks-'))
   // Both, because `os.homedir()` reads HOME on POSIX and USERPROFILE on Windows.
   // Setting only HOME leaves a developer on Windows running this suite against
@@ -62,7 +66,7 @@ beforeAll(() => {
  * machine where one of these was never set to begin with, restoring it by
  * assignment is how a test leaves the process dirtier than it found it.
  */
-function restore(name: 'HOME' | 'USERPROFILE', value: string | undefined): void {
+function restore(name: 'HOME' | 'USERPROFILE' | 'COPILOT_HOME', value: string | undefined): void {
   if (value === undefined) delete process.env[name]
   else process.env[name] = value
 }
@@ -70,6 +74,7 @@ function restore(name: 'HOME' | 'USERPROFILE', value: string | undefined): void 
 afterAll(() => {
   restore('HOME', realHome)
   restore('USERPROFILE', realProfile)
+  restore('COPILOT_HOME', realCopilotHome)
   if (home) fs.rmSync(home, { recursive: true, force: true })
 })
 
@@ -310,10 +315,10 @@ describe('the terminal a hook names', () => {
       const seen: Record<string, unknown>[] = []
       started.instance.on('hook-event', (event) => seen.push(event))
 
-      const { installCopilotHooks, uninstallCopilotHooks } =
+      const { installCopilotHooks, uninstallAllCopilotHooks } =
         await import('../packages/server/src/copilot-hook-installer')
       const project = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-copilot-hooks-'))
-      const installation = installCopilotHooks(project, started.port)
+      const installation = installCopilotHooks('term-copilot')
       try {
         const hooks = JSON.parse(fs.readFileSync(installation.hooksJsonPath, 'utf-8'))
         // Not the sync form: the script posts to this process, which must stay free to answer.
@@ -332,7 +337,7 @@ describe('the terminal a hook names', () => {
           vorn_terminal_id: 'term-copilot'
         })
       } finally {
-        uninstallCopilotHooks(installation)
+        uninstallAllCopilotHooks()
         fs.rmSync(project, { recursive: true, force: true })
       }
     }
