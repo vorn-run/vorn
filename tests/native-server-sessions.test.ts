@@ -36,7 +36,7 @@ import {
 } from './helpers/sessions-parity'
 
 const TEST_CREDENTIAL = 'native-server-sessions-credential'
-const GROUPS = 'terminal=shadow,shell=shadow,headless=shadow,worktree=shadow'
+const GROUPS = 'terminal=shadow,shell=shadow,headless=shadow,worktree=shadow,git=shadow'
 
 const vornd = [
   process.env.VORN_CONFORMANCE_VORND,
@@ -471,6 +471,43 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
       async () => (await counts()).terminal?.shadowMismatched === 1
     )
   }, 120_000)
+
+  it('foresees a worktree’s branch rename and move as the server answers them', async () => {
+    const base = path.join(dataDir, 'work')
+    const repo = path.join(base, 'shadow-repo')
+    repository(repo)
+    const wt = path.join(base, 'shadow-1a2b3c4d')
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'shadowed', wt], {
+      cwd: repo,
+      stdio: 'ignore'
+    })
+    const git = async (): Promise<Required<Counts[string]> & { shadowUnported: number }> => {
+      const g = (await counts()).git as Counts[string] & { shadowUnported?: number }
+      return {
+        mode: g?.mode ?? '',
+        forwarded: g?.forwarded ?? 0,
+        shadowMatched: g?.shadowMatched ?? 0,
+        shadowMismatched: g?.shadowMismatched ?? 0,
+        shadowUnported: g?.shadowUnported ?? 0
+      }
+    }
+    const before = await git()
+    expect(before.mode).toBe('shadow')
+    const rename = (newBranch: string): Promise<unknown> =>
+      through.result('git:renameWorktreeBranch', { worktreePath: wt, newBranch })
+    expect(await rename('main')).toBe(false)
+    expect(await rename('renamed')).toBe(true)
+    expect(
+      await through.result('git:renameWorktree', { worktreePath: wt, newName: 'moved' })
+    ).toEqual({ newPath: path.join(base, 'moved-1a2b3c4d'), name: 'moved' })
+    const settled = (g: Awaited<ReturnType<typeof git>>): number =>
+      g.shadowMatched + g.shadowMismatched + g.shadowUnported
+    await until('the comparisons', async () => settled(await git()) - settled(before) === 3)
+    const after = await git()
+    // A branch name is judged only where gix reads the repository; the move always is.
+    expect(after.shadowMismatched - before.shadowMismatched).toBe(0)
+    expect(after.shadowMatched - before.shadowMatched).toBeGreaterThanOrEqual(1)
+  })
 })
 
 spawnsRealServers()
@@ -755,6 +792,27 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     })
     await live([inWorktree])
 
+    // The worktree's branch renamed and the worktree moved, and a rename refused.
+    const worktreeOf = async (): Promise<string> =>
+      (await listed()).find((s) => s.id === inWorktree)!.worktreePath!
+    const renamed = { worktreePath: await worktreeOf(), newBranch: 'feature-two' }
+    await call('rename the worktree branch', 'git:renameWorktreeBranch', renamed)
+    await call('rename it to a branch that is taken', 'git:renameWorktreeBranch', {
+      worktreePath: renamed.worktreePath,
+      newBranch: 'main'
+    })
+    await call('rename the worktree', 'git:renameWorktree', {
+      worktreePath: renamed.worktreePath,
+      newName: 'wt two'
+    })
+    await call('rename a worktree that moved', 'git:renameWorktree', {
+      worktreePath: renamed.worktreePath,
+      newName: 'wt three'
+    })
+    await until(
+      'the moved worktree to be listed',
+      async () => (await worktreeOf()) !== renamed.worktreePath
+    )
     // One conversation asked for twice at once: one session, both answered with it.
     const named = {
       agentType: 'codex',
@@ -879,7 +937,12 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     const exitsTold = toldOf('terminal:exit').map((p) => (p as { id: string }).id)
     const heardThrough = through.toldBy('terminal:exit').map((p) => (p as { id: string }).id)
     return {
-      answeredBy: { terminal: by('terminal'), shell: by('shell'), headless: by('headless') },
+      answeredBy: {
+        terminal: by('terminal'),
+        shell: by('shell'),
+        headless: by('headless'),
+        git: by('git')
+      },
       replies: withoutHookLinks(replies),
       argv,
       listed: await listed(),
@@ -906,7 +969,16 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
         renamed: toldOf('session:updated')
           .map((p) => p as TerminalSession)
           .filter((s) => s.displayName === 'Build' || s.groupId === 'group-1')
-          .map((s) => ({ id: s.id, displayName: s.displayName, groupId: s.groupId }))
+          .map((s) => ({ id: s.id, displayName: s.displayName, groupId: s.groupId })),
+        // Each change to the worktree agent's branch, path and name, once.
+        moved: [
+          ...new Set(
+            toldOf('session:updated')
+              .map((p) => p as TerminalSession)
+              .filter((s) => s.id === inWorktree)
+              .map((s) => JSON.stringify([s.branch, s.worktreePath, s.worktreeName]))
+          )
+        ]
       }
     }
   } finally {
@@ -945,15 +1017,24 @@ describe.skipIf(!runnable)('the terminals vornd creates and changes, against the
   })
 
   it('creates, starts and changes terminals as the server does with the switch off', () => {
-    const off = runs.off as { replies: Record<string, unknown>; told: { cleanup: unknown[] } }
+    const off = runs.off as {
+      replies: Record<string, unknown>
+      told: { cleanup: unknown[]; moved: string[] }
+    }
     // What the switch must not change, read off the server's own run.
     expect(off.replies['one conversation twice at once']).toEqual({ same: true })
     expect(off.replies['one conversation again']).toEqual({ same: true })
     expect(off.told.cleanup).toHaveLength(1)
+    expect(JSON.parse(off.told.moved.at(-1)!)).toEqual([
+      'feature-two',
+      expect.stringMatching(/\/wt-two-<id>$/),
+      'wt-two'
+    ])
     expect(runs.off?.answeredBy).toEqual({
       terminal: { native: 0, forwarded: 19 },
       shell: { native: 0, forwarded: 3 },
-      headless: { native: 0, forwarded: 9 }
+      headless: { native: 0, forwarded: 9 },
+      git: { native: 0, forwarded: 4 }
     })
     const exits = runs.off as { agentsExits: Record<string, { exitCode: number }> }
     expect(Object.values(exits.agentsExits).map((e) => e.exitCode)).toEqual([3, 3, 3, 3, 3, 143])
@@ -968,7 +1049,8 @@ describe.skipIf(!runnable)('the terminals vornd creates and changes, against the
     expect(runs.on?.answeredBy).toEqual({
       terminal: { native: 15, forwarded: 4 },
       shell: { native: 3, forwarded: 0 },
-      headless: { native: 8, forwarded: 1 }
+      headless: { native: 8, forwarded: 1 },
+      git: { native: 4, forwarded: 0 }
     })
   })
 

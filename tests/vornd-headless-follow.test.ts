@@ -176,6 +176,27 @@ describe('the headless agents vornd starts, followed here', () => {
     expect(listed('gemini')).toMatchObject({ status: 'exited', exitCode: 1 })
   })
 
+  it('takes the worktree vornd moved for a client and tells it as the server’s own move', async () => {
+    const updates = toldOn(IPC.SESSION_UPDATED).length
+    note({
+      op: 'upsert',
+      kind: 'headless',
+      record: record('opencode', {
+        agentType: 'opencode',
+        branch: 'renamed',
+        worktreePath: '/w/new-1a2b3c4d',
+        worktreeName: 'new'
+      }),
+      native: true,
+      moved: true
+    })
+    await until('the move', () => listed('opencode')?.worktreePath === '/w/new-1a2b3c4d')
+    expect(listed('opencode')).toMatchObject({ branch: 'renamed', worktreeName: 'new' })
+    expect(toldOn(IPC.SESSION_UPDATED).slice(updates)).toEqual([
+      expect.objectContaining({ id: 'opencode', branch: 'renamed' })
+    ])
+  })
+
   it('asks vornd to stop an agent it follows, and lets go of them all on the way out', async () => {
     note({
       op: 'upsert',

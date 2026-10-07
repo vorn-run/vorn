@@ -532,7 +532,7 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
     await through.call('config:load')
     const before = await counts(native!)
     // A project on a remote host, a file on one, and a call that moves the
-    // server's sessions to another branch.
+    // server's sessions to another branch while the server holds them.
     await through.call('git:listBranches', '/srv/remote-project')
     await through.call('git:diffStat', '/srv/remote-project/sub')
     await through.call('file:listDir', { dirPath: reads.repo, remoteHostId: 'host-1' })

@@ -50,6 +50,7 @@ import {
   type SessionNote,
   type VorndExit
 } from './vornd-sessions'
+import { applyWorktreeUpdates, type WorktreeUpdates } from './worktree-moves'
 import { sessionFeed, type Stamp } from './session-feed'
 
 /**
@@ -272,6 +273,8 @@ class PtyManager extends EventEmitter {
         log.warn({ id, why: note.failed }, '[pty] vornd could not start this session')
         this.ptys.get(id)?.finish(1)
       }
+      const moved = note.moved ? this.sessions.get(id) : undefined
+      if (moved) this.worktreeMoved(moved, note.record)
     } else if (note.op === 'remove' && note.kind === 'terminal' && note.id) {
       this.closedByVornd(note.id)
     } else if (note.op === 'order' && note.reordered && note.order) {
@@ -1397,20 +1400,17 @@ class PtyManager extends EventEmitter {
     return { count: sessionIds.length, sessionIds }
   }
 
-  updateSessionsForWorktree(
-    worktreePath: string,
-    updates: { branch?: string; worktreePath?: string; worktreeName?: string }
-  ): void {
+  updateSessionsForWorktree(worktreePath: string, updates: WorktreeUpdates): void {
     for (const s of this.sessions.values()) {
-      if (s.worktreePath === worktreePath) {
-        if (updates.branch !== undefined) s.branch = updates.branch
-        if (updates.worktreeName !== undefined) s.worktreeName = updates.worktreeName
-        if (updates.worktreePath !== undefined) s.worktreePath = updates.worktreePath
-        this.heads.invalidate(s.id)
-        this.recordChanged(s.id)
-        this.emit('client-message', IPC.SESSION_UPDATED, s)
-      }
+      if (s.worktreePath === worktreePath) this.worktreeMoved(s, updates)
     }
+  }
+
+  private worktreeMoved(s: TerminalSession, updates: WorktreeUpdates): void {
+    applyWorktreeUpdates(s, updates)
+    this.heads.invalidate(s.id)
+    this.recordChanged(s.id)
+    this.emit('client-message', IPC.SESSION_UPDATED, s)
   }
 
   /**

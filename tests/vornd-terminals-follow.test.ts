@@ -157,6 +157,29 @@ describe('the terminals vornd creates and changes, followed here', () => {
       fields: { displayName: 'ours', renamedByPerson: true }
     })
 
+    // Its worktree moved by vornd for a client: told as the server's own move is.
+    const updates = toldOn(IPC.SESSION_UPDATED).length
+    note({
+      op: 'upsert',
+      kind: 'terminal',
+      record: record('n', {
+        pid: 42,
+        displayName: 'ours',
+        renamedByPerson: true,
+        groupId: 'g',
+        branch: 'renamed',
+        worktreePath: '/w/new-1a2b3c4d',
+        worktreeName: 'new'
+      }),
+      native: true,
+      moved: true
+    })
+    await until('the move', () => listed('n')?.worktreePath === '/w/new-1a2b3c4d')
+    expect(listed('n')).toMatchObject({ branch: 'renamed', worktreeName: 'new' })
+    expect(toldOn(IPC.SESSION_UPDATED).slice(updates)).toEqual([
+      expect.objectContaining({ id: 'n', branch: 'renamed', worktreeName: 'new' })
+    ])
+
     // Closed by vornd: let go of here; its exit comes when the program ends.
     note({ op: 'remove', kind: 'terminal', id: 'n', native: true })
     await until('the close', () => listed('n') === undefined)
