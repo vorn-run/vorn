@@ -87,6 +87,10 @@ cd ../..
 # holds no screens; use it only for work that needs no Ghostty.
 yarn build:core
 yarn lint && yarn format:check && yarn typecheck
+# The whole CI pipeline, including the 80 % patch-coverage gate (diff-cover
+# against origin/main). CI collects coverage from vitest shards that have no
+# native binary, so switch-on branches need tests that fake the binary's side.
+yarn ci:local
 
 # Acceptance runs with the switch off and on: the tests that cover a switched
 # path turn it on themselves, as the server would read it from the settings.
