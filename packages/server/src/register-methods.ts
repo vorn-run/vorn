@@ -212,7 +212,8 @@ import { captureAgentSessionId } from './agent-session-capture'
 import { listAgentModels } from './agent-model-catalog'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
 import log from './logger'
-import { vorndSessions, type HeldSession } from './vornd-sessions'
+import { vorndSessions } from './vornd-sessions'
+import { wireVorndRestore } from './vornd-restore'
 import { onePerKey } from './one-per-key'
 import { isWorkspaceHeld } from './workspace-holds'
 import { coreStatus } from './native-core'
@@ -573,58 +574,6 @@ async function activationStates(sessionId: string): Promise<ExtensionActivationS
  * windows but not the extensions would show a card with no bands and no way to
  * tell why.
  */
-/**
- * Terminals vornd still holds from this server's previous run: each is taken on
- * again under the record that run saved, rather than offered to resume. One
- * with no record is left where it is, and said so.
- *
- * While vornd owns the records between runs the record is its copy's, which
- * has it live again already (`adopted`), and a headless agent it holds is
- * followed again too; otherwise it is the one this server's database kept.
- */
-function takeOnHeld(held: HeldSession[]): void {
-  const fromVornd = vorndSessions.restoresSessions()
-  for (const one of held) {
-    if (one.kind === 'piped') {
-      const record = fromVornd ? vorndSessions.mirror.headlessRecord(one.id) : undefined
-      if (record) headlessManager.adoptHeld(ownRecord(record), one)
-      continue
-    }
-    const session = fromVornd
-      ? vorndSessions.mirror.terminal(one.id)
-      : consumeRestored(one.id)?.session
-    if (!session) {
-      log.info({ id: one.id }, '[vornd] vornd holds a terminal this server has no record of')
-      continue
-    }
-    const own = ownRecord(session)
-    ptyManager.adoptVornd(own, one)
-    announceSession(own)
-  }
-  sessionManager.scheduleSave()
-}
-
-/** A record from vornd's copy as this server's own: without the copy's revision and stamps. */
-function ownRecord<T extends object>(record: T): T {
-  const own = { ...record } as T & { rev?: unknown; statusAt?: unknown; exitAt?: unknown }
-  delete own.rev
-  delete own.statusAt
-  delete own.exitAt
-  return own
-}
-
-/**
- * vornd owns the session records now: what this server's database kept of its
- * last run is handed to it, once, for a vornd with nothing of its own to offer.
- * Either way nothing is offered from here any more.
- */
-async function carryToVornd(): Promise<void> {
-  const records = consumeAllRestored().map((one) => one.session)
-  if (records.length === 0) return
-  const carried = await vorndSessions.carry(records)
-  log.info({ records: records.length, carried }, '[restored] handed the last run’s sessions to vornd')
-}
-
 export function announceSession(session: TerminalSession): void {
   clientRegistry.broadcast(IPC.SESSION_CREATED, session)
   syncExtensionsFor(session)
@@ -2344,8 +2293,7 @@ export function registerAllMethods(): void {
     const payload = vorndSessions.isNative() ? { id, title, body, effectId } : { id, title, body }
     clientRegistry.broadcast(IPC.TERMINAL_NOTIFY, payload, id)
   })
-  vorndSessions.on('held', (held: HeldSession[]) => takeOnHeld(held))
-  vorndSessions.on('restores', () => void carryToVornd())
+  wireVorndRestore(announceSession)
 
   ptyManager.on('client-message', (channel: string, payload: unknown) => {
     // A payload's `id` is the instance this notification is about, which lets a

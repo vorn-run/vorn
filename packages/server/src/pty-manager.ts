@@ -339,7 +339,7 @@ class PtyManager extends EventEmitter {
     this.normalizedPaths.delete(id)
     this.clearSessionTracking(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
-    this.ptys.delete(id)
+    if (this.ptys.delete(id)) vorndSessions.release(id)
   }
 
   /**

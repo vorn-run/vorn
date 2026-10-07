@@ -23,12 +23,7 @@ import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import log from './logger'
 import { holdWorkspace } from './workspace-holds'
 import { isDraining, DRAINING_MESSAGE } from './draining'
-import {
-  vorndSessions,
-  type HeldSession,
-  type SessionNote,
-  type VorndPty
-} from './vornd-sessions'
+import { vorndSessions, type HeldSession, type SessionNote, type VorndPty } from './vornd-sessions'
 import { applyWorktreeUpdates, type WorktreeUpdates } from './worktree-moves'
 import { sessionFeed } from './session-feed'
 
