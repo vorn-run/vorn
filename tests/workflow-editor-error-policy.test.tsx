@@ -59,10 +59,6 @@ vi.mock('../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPan
   WorkflowPropertiesPanel: () => <div />
 }))
 
-vi.mock('../packages/server/src/workflows/engine', () => ({
-  executeWorkflow: vi.fn().mockResolvedValue(undefined)
-}))
-
 const step = {
   id: 's1',
   type: 'script' as const,

@@ -576,26 +576,6 @@ export function resolveTemplateVars(
 }
 
 /**
- * A template's value as data rather than text.
- *
- * A template that is exactly one `{{path}}` yields what the path names —
- * a list stays a list, and is never cut to the text limit, which would leave
- * half a JSON document. Anything else is text, as resolveTemplateVars gives it.
- */
-export function resolveTemplateValue(
-  template: string,
-  context?: WorkflowExecutionContext,
-  stepOutputs?: StepOutputs
-): unknown {
-  const whole = /^\s*\{\{\s*([a-zA-Z_][\w.-]*)\s*\}\}\s*$/.exec(template ?? '')
-  if (whole && (context || stepOutputs)) {
-    const value = lookupTemplatePath(whole[1], context, stepOutputs)
-    if (value !== UNRESOLVED) return value ?? ''
-  }
-  return resolveTemplateVars(template, context, stepOutputs)
-}
-
-/**
  * Resolve a `{{context.*}}` field. The workflow runtime synthesizes a
  * `context.source` (TerminalSession-shaped) for card launches by looking up
  * the task's project, so all path-like fields read from `source`. `task`

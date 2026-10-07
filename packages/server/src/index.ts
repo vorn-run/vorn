@@ -16,7 +16,8 @@ import {
   setServerIdentity,
   setLiveSessionCount,
   disconnectToken,
-  isLoopbackAddress
+  isLoopbackAddress,
+  setMethodFallback
 } from './ws-handler'
 import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
 import { browserBridge } from './browser-bridge'
@@ -52,7 +53,7 @@ import {
 } from './ws-auth'
 import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
 import { registerWorkRoutes } from './vornd-routes'
-import { armedScheduleCount } from './workflow-triggers'
+import { armedScheduleCount, relayWorkCall } from './workflow-triggers'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
 import {
   DEFAULT_SERVER_PORT,
@@ -476,6 +477,8 @@ export async function startServer(
 
   // Register all RPC methods
   registerAllMethods()
+  // The work model's calls are vornd's; a client connected here reaches it through vornd.
+  setMethodFallback(relayWorkCall(vorndSessions))
 
   // Connects the rung-none packs installed before installing meant connecting.
   reconcileImplicitConnections()

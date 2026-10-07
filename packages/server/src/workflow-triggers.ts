@@ -129,3 +129,28 @@ export function armedScheduleCount(workflows: WorkflowDefinition[], now = Date.n
     return false
   }).length
 }
+
+/** The groups whose calls vornd answers, for clients connected to this server. */
+const WORK_GROUPS = new Set(['workflow', 'workflowRun', 'scheduler', 'webhook', 'artifact'])
+
+/** How long vornd gets to answer one: publishing may wait on the pane opening. */
+const WORK_CALL_TIMEOUT_MS = 60_000
+
+/**
+ * A client connected to this server, not vornd, still reaches the work model:
+ * its calls are handed to vornd on the channel, and vornd's answer returned.
+ */
+export function relayWorkCall(channel: {
+  ask<T>(method: string, params: unknown, timeoutMs?: number): Promise<T | null>
+}): (method: string, params: unknown) => Promise<unknown> | undefined {
+  return (method, params) => {
+    if (!WORK_GROUPS.has(method.split(':')[0])) return undefined
+    return channel
+      .ask<{ result?: unknown }>('vornd:work', { method, params }, WORK_CALL_TIMEOUT_MS)
+      .then((answer) => {
+        if (answer === null)
+          throw new Error(`vornd is not running, so ${method} cannot be answered`)
+        return answer.result
+      })
+  }
+}

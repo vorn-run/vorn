@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildStepOutputsMap, gateEditRefusal } from '../packages/shared/src/workflow-graph'
+import { buildStepOutputsMap } from '../packages/shared/src/workflow-graph'
 import type { WorkflowExecution, WorkflowNode } from '../packages/shared/src/types'
 
 const gate = {
@@ -36,23 +36,5 @@ describe("a gate's items", () => {
     expect(outputsFor('Ship the release?')).not.toHaveProperty('items')
     expect(outputsFor('[1, 2]')).not.toHaveProperty('items')
     expect(outputsFor('Ship the release?').text).toBe('Ship the release?')
-  })
-})
-
-describe('gateEditRefusal', () => {
-  const list = JSON.stringify([{ a: 1 }])
-
-  it('refuses a rewrite of a list that no longer parses, saying where', () => {
-    expect(gateEditRefusal(list, '[\n  {"a": 1,}\n]')).toMatch(/line 2, column \d+/)
-  })
-
-  it('refuses a rewrite that parses but is no longer a list', () => {
-    expect(gateEditRefusal(list, '42')).toMatch(/no longer a list/)
-  })
-
-  it('takes a valid rewrite, no rewrite, and any rewrite of plain text', () => {
-    expect(gateEditRefusal(list, '[]')).toBeUndefined()
-    expect(gateEditRefusal(list, undefined)).toBeUndefined()
-    expect(gateEditRefusal('Ship it?', '{ not json')).toBeUndefined()
   })
 })

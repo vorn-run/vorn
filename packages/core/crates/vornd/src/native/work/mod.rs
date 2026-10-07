@@ -1256,3 +1256,120 @@ pub(crate) fn test_store(path: &std::path::Path) -> vorn_store::Store {
     };
     vorn_store::Store::open(path, options).expect("a store").0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::SocketAddr;
+
+    /// A work model on a fresh database, its endpoint nowhere: steps that
+    /// call out fail, the rest run.
+    fn work(dir: &std::path::Path) -> Arc<Work> {
+        let db_path = dir.join("vorn.db");
+        drop(test_store(&db_path));
+        let native = Native::new();
+        native.set_database(db_path.clone());
+        let db = Db::open(&db_path).expect("the database opens");
+        let nowhere: SocketAddr = "127.0.0.1:9".parse().expect("an address");
+        let work = Work::new(&native, db, Arc::new(Loopback::new(nowhere, b"token")));
+        native.set_work(Arc::clone(&work));
+        // The test keeps the native side alive for as long as the work model.
+        std::mem::forget(native);
+        work
+    }
+
+    fn conditional(id: &str, trigger: Value) -> Value {
+        json!({
+            "id": id, "name": id, "icon": "x", "iconColor": "#000", "enabled": true,
+            "nodes": [
+                { "id": "t", "type": "trigger", "label": "T", "position": { "x": 0, "y": 0 }, "config": trigger },
+                { "id": "c", "type": "condition", "label": "C", "slug": "c", "position": { "x": 0, "y": 0 }, "config": { "variable": "{{trigger.body.n}}{{task.title}}", "operator": "isNotEmpty", "value": "" } }
+            ],
+            "edges": [{ "id": "e", "source": "t", "target": "c" }]
+        })
+    }
+
+    async fn runs(work: &Arc<Work>, id: &str) -> Vec<Value> {
+        match work
+            .call("workflowRun:list", &json!({ "workflowId": id }))
+            .await
+        {
+            Answer::Result(Value::Array(list)) => list,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    async fn settled(work: &Arc<Work>, id: &str, count: usize) -> Vec<Value> {
+        for _ in 0..200 {
+            let list = runs(work, id).await;
+            if list.len() >= count && list.iter().all(|r| r["status"] != "running") {
+                return list;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!(
+            "no {count} finished run(s) of {id}: {:?}",
+            runs(work, id).await
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_webhook_delivered_twice_runs_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = work(dir.path());
+        work.start();
+        let wf = conditional(
+            "hook",
+            json!({ "triggerType": "webhook", "method": "POST", "token": "tok" }),
+        );
+        assert!(matches!(
+            work.call("workflow:create", &json!({ "workflow": wf }))
+                .await,
+            Answer::Result(_)
+        ));
+        let request = |key: &str| vorn_work::inbox::Request {
+            method: "POST".into(),
+            body: json!({ "n": 7 }),
+            delivery_id: Some(key.into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            work.webhook("hook", "tok", request("d1")).await,
+            vorn_work::inbox::Received::Queued
+        );
+        assert_eq!(
+            work.webhook("hook", "tok", request("d1")).await,
+            vorn_work::inbox::Received::Repeat
+        );
+        let done = settled(&work, "hook", 1).await;
+        assert_eq!(done[0]["status"], "success");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(runs(&work, "hook").await.len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_task_trigger_delivered_twice_starts_its_workflow_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = work(dir.path());
+        let wf = conditional(
+            "moved",
+            json!({ "triggerType": "taskStatusChanged", "toStatus": "in_progress" }),
+        );
+        work.call("workflow:create", &json!({ "workflow": wf }))
+            .await;
+        let trigger = json!({
+            "effectId": "task-status/t1/todo/in_progress/now", "kind": "taskStatusChanged",
+            "task": { "id": "t1", "title": "Moved", "projectName": "p" }, "from": "todo", "to": "in_progress"
+        });
+        assert_eq!(work.trigger(&trigger).await, Ok(true));
+        assert_eq!(work.trigger(&trigger).await, Ok(false));
+        let done = settled(&work, "moved", 1).await;
+        assert_eq!(done[0]["triggerTaskId"], "t1");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(runs(&work, "moved").await.len(), 1);
+        assert!(work
+            .trigger(&json!({ "kind": "taskCreated" }))
+            .await
+            .is_err());
+    }
+}

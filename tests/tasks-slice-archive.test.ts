@@ -1,11 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('../packages/server/src/workflows/triggers', () => ({
-  fireTaskCreatedTrigger: vi.fn(),
-  fireTaskStatusChangedTrigger: vi.fn()
-}))
-
 import { create } from 'zustand'
 import { createTasksSlice } from '../src/renderer/stores/tasks-slice'
 import type { AppStore } from '../src/renderer/stores/types'

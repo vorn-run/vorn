@@ -740,6 +740,54 @@ mod tests {
         .starts_with("This session has no project folder"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_link_out_of_the_folder_and_answers_the_sent_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = store(dir.path());
+        let root = dir.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(dir.path().join("secret.html"), "<p>secret</p>").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("secret.html"), root.join("link.html")).unwrap();
+        let me = Publisher {
+            id: "s1".into(),
+            project_name: Some("triage".into()),
+            root: Some(root.to_string_lossy().into()),
+        };
+        assert!(publish(
+            &mut s,
+            dir.path(),
+            &me,
+            &json!({ "kind": "page", "title": "x", "file": "link.html" })
+        )
+        .unwrap_err()
+        .contains("outside"));
+        let first = publish(
+            &mut s,
+            dir.path(),
+            &me,
+            &json!({ "kind": "doc", "title": "Draft", "content": "# Draft" }),
+        )
+        .unwrap();
+        let id = first["artifact"]["id"].as_str().unwrap().to_owned();
+        for body in ["Shorter", "Add a link"] {
+            call(
+                &mut s,
+                "insertArtifactComment",
+                json!([{ "artifactId": id, "version": 1, "anchor": null, "body": body }]),
+            )
+            .unwrap();
+        }
+        call(&mut s, "sendArtifactDrafts", json!([id])).unwrap();
+        let other = Publisher {
+            id: "s2".into(),
+            ..me.clone()
+        };
+        let next = publish(&mut s, dir.path(), &other, &json!({ "kind": "doc", "title": "Draft, shorter", "content": "# Draft", "artifactId": id })).unwrap();
+        assert_eq!(next["version"]["version"], json!(2));
+        assert_eq!(next["answered"], json!(2));
+    }
+
     #[test]
     fn a_doc_is_rendered_and_edited_in_place() {
         let dir = tempfile::tempdir().unwrap();

@@ -788,10 +788,10 @@ export class VorndSessions extends EventEmitter {
   }
 
   /** Ask vornd `method` with `params`: its answer, or null with no channel. Throws when it refuses. */
-  async ask<T>(method: string, params: unknown): Promise<T | null> {
+  async ask<T>(method: string, params: unknown, timeoutMs?: number): Promise<T | null> {
     const channel = this.channel
     if (!channel || channel.isClosed) return null
-    return channel.request<T>(method, params)
+    return channel.request<T>(method, params, timeoutMs)
   }
 
   /** Tell vornd `method` with `params`; false when there is no channel or it refused. */

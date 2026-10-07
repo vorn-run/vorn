@@ -597,6 +597,11 @@ export function clearScheduleLog(): void {
   return nativeCall('clearScheduleLog')
 }
 
+/** Writes a run; answers the ids of the runs trimmed to make room. */
+export function saveWorkflowRun(execution: WorkflowExecution): string[] {
+  return nativeCall('saveWorkflowRun', execution)
+}
+
 /** Every run id kept, so review pages of runs trimmed while the server was down can go too. */
 export function listWorkflowRunIds(): string[] {
   return nativeCall('listWorkflowRunIds')

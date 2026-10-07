@@ -133,6 +133,18 @@ type Handler = (params: unknown) => Promise<unknown> | unknown
 const handlers = new Map<string, Handler>()
 
 /**
+ * Where a method this server has no handler for may still be answered: the
+ * work model's calls are vornd's, and a client connected here gets vornd's
+ * answer to them. Undefined for a method nobody answers.
+ */
+type Fallback = (method: string, params: unknown) => Promise<unknown> | undefined
+let fallback: Fallback | null = null
+
+export function setMethodFallback(answer: Fallback | null): void {
+  fallback = answer
+}
+
+/**
  * Methods callable only over the local endpoint. `server:handoff` execs a path the
  * caller names, which is an escalation over TCP and none through a 0700 directory.
  */
@@ -490,13 +502,14 @@ export function handleConnection(
       return
     }
     const handler = handlers.get(method)
-    if (!handler) {
+    const elsewhere = handler ? undefined : fallback?.(method, params)
+    if (!handler && !elsewhere) {
       ws.send(JSON.stringify(createErrorResponse(id, -32601, `Method not found: ${method}`)))
       return
     }
 
     try {
-      const result = await handler(params)
+      const result = handler ? await handler(params) : await elsewhere
       ws.send(JSON.stringify(createResponse(id, result)))
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

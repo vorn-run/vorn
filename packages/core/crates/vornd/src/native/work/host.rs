@@ -179,13 +179,19 @@ pub fn without_definition(run: &WorkflowExecution) -> Value {
 }
 
 impl Host for VorndHost {
+    /// What the engine reads of the configuration: projects, tasks,
+    /// workflows and the stored defaults. A store beside the server has none
+    /// of the app's fallbacks, so `loadConfig` is not read whole.
     async fn config(&self) -> Option<Value> {
         self.db
             .run(|store| {
-                store
-                    .call("loadConfig", json!([]))
-                    .ok()
-                    .map(vorn_work::js_numbers)
+                let config = json!({
+                    "projects": store.call("dbListProjects", json!([])).ok()?,
+                    "tasks": store.call("dbListTasks", json!([null, null])).ok()?,
+                    "workflows": store.call("dbListWorkflows", json!([])).ok()?,
+                    "defaults": store.stored_defaults().ok()?,
+                });
+                Some(vorn_work::js_numbers(config))
             })
             .await
             .flatten()

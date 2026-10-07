@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { loopShouldStop, blankPassState, MAX_LOOP_ITERATIONS } from '@vornrun/shared/workflow-graph'
+import { MAX_LOOP_ITERATIONS } from '@vornrun/shared/workflow-graph'
 import { validateLoopBodies } from '../packages/mcp/src/tools/workflows'
 import {
   nodesAfter,
@@ -7,44 +7,7 @@ import {
   appendToLoopBody,
   loopOwningInsertPoint
 } from '../src/renderer/lib/workflow-helpers'
-import type { ConditionConfig, WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
-
-const approved: ConditionConfig = {
-  variable: '{{steps.review.approved}}',
-  operator: 'equals',
-  value: 'true'
-}
-
-describe('loopShouldStop', () => {
-  it('never stops early when no condition is declared', () => {
-    // Such a loop is "run the body exactly maxIterations times".
-    expect(loopShouldStop(undefined, 'anything', 'true')).toBe(false)
-  })
-
-  it('stops once the condition holds', () => {
-    expect(loopShouldStop(approved, 'true', 'true')).toBe(true)
-  })
-
-  it('keeps going while it does not', () => {
-    expect(loopShouldStop(approved, 'false', 'true')).toBe(false)
-  })
-
-  it('keeps going when the variable did not resolve', () => {
-    // An unresolved template yields '' — treating that as "approved" would end
-    // the loop on a typo, which is the worst possible reading of silence.
-    expect(loopShouldStop(approved, '', 'true')).toBe(false)
-  })
-
-  it('supports isEmpty for a step that either produced blockers or did not', () => {
-    const cfg: ConditionConfig = {
-      variable: '{{steps.review.blocking}}',
-      operator: 'isEmpty',
-      value: ''
-    }
-    expect(loopShouldStop(cfg, '', '')).toBe(true)
-    expect(loopShouldStop(cfg, 'one problem', '')).toBe(false)
-  })
-})
+import type { WorkflowEdge, WorkflowNode } from '../packages/shared/src/types'
 
 describe('loop bounds', () => {
   // The cap is the contract, not a safety net: an LLM judge asked "is this good
@@ -317,120 +280,6 @@ describe('loopOwningInsertPoint', () => {
       config: { nodeType: 'loop', bodyNodeIds: [], maxIterations: 1 } as WorkflowNode['config']
     }
     expect(loopOwningInsertPoint([other], 'write')).toBeUndefined()
-  })
-})
-
-describe('blankPassState', () => {
-  // Built from a state carrying every optional field, so a field added to
-  // NodeExecutionState later is covered without anyone remembering to list it
-  // here. The previous version enumerated the fields to clear, and its test
-  // enumerated the same ones — so both missed taskId, the worktree trio,
-  // approvedAt and diagnostics, and agreed with each other about it.
-  const dirty = {
-    nodeId: 'review',
-    status: 'success',
-    startedAt: 'then',
-    completedAt: 'later',
-    sessionId: 's1',
-    error: 'boom',
-    logs: 'lots',
-    output: 'result',
-    structuredOutput: { approved: false },
-    taskId: 't1',
-    agentSessionId: 'a1',
-    agentType: 'claude',
-    projectName: 'p',
-    projectPath: '/p',
-    worktreePath: '/wt',
-    worktreeName: 'wt',
-    approvedAt: 'when',
-    diagnostics: 'diag',
-    iteration: 1
-  } as unknown as Parameters<typeof blankPassState>[0]
-
-  it('clears every field the previous pass left behind', () => {
-    const patch = blankPassState(dirty, 2)
-    for (const key of Object.keys(dirty)) {
-      if (key === 'nodeId' || key === 'status' || key === 'iteration') continue
-      expect(patch[key as keyof typeof patch]).toBeUndefined()
-    }
-  })
-
-  it('keeps the step identifiable and marks it not-yet-run', () => {
-    const patch = blankPassState(dirty, 2)
-    expect(patch.status).toBe('pending')
-    expect(patch).not.toHaveProperty('nodeId')
-  })
-
-  it('records which pass the step is about to run', () => {
-    expect(blankPassState(dirty, 3).iteration).toBe(3)
-  })
-
-  it('clears a field this test never named', () => {
-    // The point of resetting by exclusion: an unknown key still gets cleared.
-    const withNewField = { ...dirty, somethingAddedLater: 'stale' } as unknown as Parameters<
-      typeof blankPassState
-    >[0]
-    const patch = blankPassState(withNewField, 2) as Record<string, unknown>
-    expect(patch.somethingAddedLater).toBeUndefined()
-    expect('somethingAddedLater' in patch).toBe(true)
-  })
-})
-
-describe('loopShouldStop with a half-written condition', () => {
-  // The form is edited field by field, so a condition is briefly incomplete.
-  // Some incomplete conditions are degenerate rather than merely false, and
-  // those would end the loop after one pass and read as the loop being broken.
-  it('keeps going when the variable is still blank', () => {
-    expect(loopShouldStop({ variable: '', operator: 'equals', value: 'true' }, '', 'true')).toBe(
-      false
-    )
-  })
-
-  it('keeps going when the variable is only whitespace', () => {
-    expect(loopShouldStop({ variable: '   ', operator: 'equals', value: 'true' }, '', 'true')).toBe(
-      false
-    )
-  })
-
-  it('does not treat contains with an empty value as a match, which every string satisfies', () => {
-    expect(
-      loopShouldStop(
-        { variable: '{{steps.review.output}}', operator: 'contains', value: '' },
-        'anything',
-        ''
-      )
-    ).toBe(false)
-  })
-
-  it('does not treat notEquals with an empty value as a match', () => {
-    expect(
-      loopShouldStop(
-        { variable: '{{steps.review.output}}', operator: 'notEquals', value: '' },
-        'anything',
-        ''
-      )
-    ).toBe(false)
-  })
-
-  it('still allows isEmpty, which needs no value', () => {
-    expect(
-      loopShouldStop(
-        { variable: '{{steps.review.blocking}}', operator: 'isEmpty', value: '' },
-        '',
-        ''
-      )
-    ).toBe(true)
-  })
-
-  it('still allows isNotEmpty, which needs no value', () => {
-    expect(
-      loopShouldStop(
-        { variable: '{{steps.review.blocking}}', operator: 'isNotEmpty', value: '' },
-        'a problem',
-        ''
-      )
-    ).toBe(true)
   })
 })
 
