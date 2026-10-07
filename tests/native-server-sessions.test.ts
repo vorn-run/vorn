@@ -17,6 +17,7 @@
  * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix: the agents are shell
  * scripts.
  */
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
