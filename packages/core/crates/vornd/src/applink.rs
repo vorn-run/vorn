@@ -17,13 +17,14 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, Notify};
 
 use crate::claims::Claims;
+use crate::native::script::Scripts;
 
 /// Notes queued for slow subscribers before the oldest are dropped.
 const BACKLOG: usize = 256;
@@ -71,6 +72,8 @@ pub struct AppLink {
     terminals: AtomicBool,
     /// The same for `headless:create` and `headless:kill`.
     headless: AtomicBool,
+    /// What runs or compares the server's scripts, while vornd does.
+    scripts: OnceLock<Arc<Scripts>>,
     closing: Mutex<Closing>,
     /// The conversations being started, by vornd's creates and the
     /// server's own starts alike.
@@ -89,6 +92,7 @@ impl Default for AppLink {
             reached: Notify::new(),
             terminals: AtomicBool::new(false),
             headless: AtomicBool::new(false),
+            scripts: OnceLock::new(),
             closing: Mutex::new(Closing::Open),
             claims: Claims::default(),
             spawns: Mutex::new(VecDeque::new()),
@@ -158,6 +162,16 @@ impl AppLink {
 
     pub fn creates_headless(&self) -> bool {
         self.headless.load(Ordering::Acquire)
+    }
+
+    /// What runs the server's scripts, which `vornd:hello` tells it. Only
+    /// the first one given is kept.
+    pub fn set_scripts(&self, scripts: Arc<Scripts>) {
+        let _ = self.scripts.set(scripts);
+    }
+
+    pub fn scripts(&self) -> Option<&Arc<Scripts>> {
+        self.scripts.get()
     }
 
     /// What the server said of its winding down.

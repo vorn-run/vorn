@@ -65,6 +65,7 @@ import {
 } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
 import { vorndSessions } from './vornd-sessions'
+import { cancelScripts } from './vornd-scripts'
 import { nativeServerSwitch, VorndKeeper } from './vornd-process'
 import { peerAddress, relayThroughVornd, relaysThroughVornd } from './vornd-relay'
 import { linkReach, relayPairing, VORND_FORWARDED_HEADER } from './vornd-reach'
@@ -764,6 +765,7 @@ export async function startServer(
     scheduler.stopAll()
     headlessManager.killAll()
     ptyManager.killAll()
+    cancelScripts()
     vorndSessions.close()
     // Its sessions carry on in the session holder, for the next server.
     vorndKeeper.stop()

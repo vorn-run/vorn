@@ -406,6 +406,7 @@ fn call(app: App<'_>, text: &str) {
             "statuses": engine.registry().decides(),
             "terminals": link.creates_terminals() && engine.registry().decides(),
             "headless": link.creates_headless() && engine.registry().decides(),
+            "scripts": link.scripts().map(|s| s.mode().name()),
         })),
         "vornd:subscribe" => {
             let state = state(engine);
@@ -470,6 +471,9 @@ fn call(app: App<'_>, text: &str) {
                 Closing::Open
             });
             Ok(Value::Null)
+        }
+        "vornd:script" | "vornd:scriptCancel" | "vornd:scriptPlan" => {
+            return crate::native::script::call(engine, link.scripts(), fwd, rpc, method, params);
         }
         "vornd:claim" | "vornd:unclaim" | "vornd:preparing" | "vornd:prepared" => {
             claim(link, method, &params)

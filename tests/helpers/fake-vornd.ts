@@ -48,6 +48,12 @@ export class FakeVornd {
   terminals = false
   /** Whether `vornd:hello` says vornd starts and stops headless agents itself. */
   headless = false
+  /** What `vornd:hello` says of the project scripts: run by vornd, compared, or neither. */
+  scripts: 'native' | 'shadow' | null = null
+  /** Set, every `vornd:script` is refused with it. */
+  scriptError: string | null = null
+  /** Called with each `vornd:script` once it is answered, to run it as vornd would. */
+  onScript: ((params: Record<string, unknown>) => void) | null = null
   /** What `vornd:claim` answers as the holder: null for a claim taken. */
   claimHolder: string | null = null
   /** What `vornd:registry` answers. */
@@ -123,8 +129,14 @@ export class FakeVornd {
   ): void {
     this.calls.push({ method: msg.method, params: msg.params ?? {} })
     let result: unknown = null
-    if (msg.method === 'vornd:spawn' && this.spawnError !== null && msg.id !== undefined) {
-      const error = { code: -32000, message: this.spawnError }
+    const refusal =
+      msg.method === 'vornd:spawn'
+        ? this.spawnError
+        : msg.method === 'vornd:script'
+          ? this.scriptError
+          : null
+    if (refusal !== null && msg.id !== undefined) {
+      const error = { code: -32000, message: refusal }
       socket.write(
         encodeFrame(KIND_TEXT, Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error })))
       )
@@ -137,13 +149,16 @@ export class FakeVornd {
         ...(this.native && { native: true }),
         ...(this.statuses && { statuses: true }),
         ...(this.terminals && { terminals: true }),
-        ...(this.headless && { headless: true })
+        ...(this.headless && { headless: true }),
+        ...(this.scripts && { scripts: this.scripts })
       }
     } else if (msg.method === 'vornd:claim') result = { holder: this.claimHolder }
     else if (msg.method === 'vornd:registry') result = this.registry
     else if (msg.method === 'vornd:subscribe') result = this.state
     else if (msg.method === 'vornd:spawn') {
       result = { id: msg.params?.name, pid: this.nextPid++, epoch: 7 }
+    } else if (msg.method === 'vornd:script') {
+      result = { id: msg.params?.id, pid: this.nextPid++, epoch: 7 }
     } else if (msg.method === 'terminal:attach') {
       result = { live: true, continued: true, cursor: msg.params?.cursor }
     } else if (msg.method === 'terminal:readOutput') result = this.output
@@ -151,6 +166,7 @@ export class FakeVornd {
     socket.write(
       encodeFrame(KIND_TEXT, Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result })))
     )
+    if (msg.method === 'vornd:script') this.onScript?.(msg.params ?? {})
   }
 }
 

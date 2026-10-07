@@ -94,6 +94,7 @@ interface Hello {
   statuses?: boolean
   terminals?: boolean
   headless?: boolean
+  scripts?: 'native' | 'shadow' | null
 }
 
 /** Whether this server is winding down, as vornd is told it. */
@@ -353,6 +354,9 @@ export class VorndSessions extends EventEmitter {
   /** Whether vornd starts and stops headless agents for the clients, as its `vornd:hello` said. */
   private headlessWork = false
 
+  /** Whether vornd runs the project scripts, or compares what this server runs, as its `vornd:hello` said. */
+  private scriptWork: Hello['scripts'] = null
+
   /** Whether this server is winding down, as vornd needs to know while it creates terminals. */
   private closingSource: (() => Closing) | null = null
   private toldClosing = ''
@@ -418,6 +422,11 @@ export class VorndSessions extends EventEmitter {
    */
   createsHeadless(): boolean {
     return this.headlessWork && this.decidesStatus()
+  }
+
+  /** Whether vornd runs the project scripts (`native`) or compares the plans of this server's (`shadow`). */
+  scriptMode(): 'native' | 'shadow' | null {
+    return this.inUse() ? (this.scriptWork ?? null) : null
   }
 
   /**
@@ -557,6 +566,7 @@ export class VorndSessions extends EventEmitter {
     this.statusWork = hello?.statuses === true
     this.terminalWork = hello?.terminals === true
     this.headlessWork = hello?.headless === true
+    this.scriptWork = hello?.scripts ?? null
     old?.close()
     channel.on('notification', (method: string, params: unknown) =>
       this.notified(channel, method, params)
@@ -813,6 +823,13 @@ export class VorndSessions extends EventEmitter {
         // What vornd asks of this server beyond its sessions.
         if (method.startsWith('vornd:')) this.emit('ask', method, params)
     }
+  }
+
+  /** Ask vornd `method` with `params`: its answer, or null with no channel. Throws when it refuses. */
+  async ask<T>(method: string, params: unknown): Promise<T | null> {
+    const channel = this.channel
+    if (!channel || channel.isClosed) return null
+    return channel.request<T>(method, params)
   }
 
   /** Tell vornd `method` with `params`; false when there is no channel or it refused. */
