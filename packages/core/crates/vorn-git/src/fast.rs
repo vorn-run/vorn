@@ -197,6 +197,39 @@ fn abbrev_head(cwd: &Path) -> Option<String> {
     Some(line(short))
 }
 
+/// Whether a branch named `name` could be made in `cwd` now, by renaming
+/// the one checked out or starting one at a detached HEAD: a valid branch
+/// name that no other branch holds or nests with. `None` when gix declines.
+pub(crate) fn branch_name_free(cwd: &Path, name: &str) -> Option<bool> {
+    if !available() {
+        return None;
+    }
+    let repo = open(cwd)?;
+    let head = repo.head().ok()?;
+    if head.is_unborn() {
+        return None;
+    }
+    let full = format!("refs/heads/{name}");
+    if name == "HEAD" || gix::refs::FullName::try_from(full.as_str()).is_err() {
+        return Some(false);
+    }
+    let current = head.referent_name().map(|n| n.as_bstr().to_owned());
+    let branches = repo.references().ok()?;
+    for branch in branches.local_branches().ok()? {
+        let branch = branch.ok()?;
+        let other = branch.name().as_bstr();
+        if current.as_ref().is_some_and(|c| c == other) {
+            continue;
+        }
+        let other = other.to_str().ok()?;
+        let nests = |a: &str, b: &str| a.strip_prefix(b).is_some_and(|r| r.starts_with('/'));
+        if other == full || nests(other, &full) || nests(&full, other) {
+            return Some(false);
+        }
+    }
+    Some(true)
+}
+
 trait ToStr {
     fn to_str(&self) -> Result<&str, std::str::Utf8Error>;
 }

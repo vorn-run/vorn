@@ -380,3 +380,71 @@ fn checks_out_a_branch_reads_head_and_names_a_worktree_before_making_it() {
         Some("fresh")
     );
 }
+
+#[test]
+fn renames_a_worktree_branch_and_moves_a_worktree_as_foreseen() {
+    use vorn_git::repo::{Git, MovedWorktree};
+    let t = tmp();
+    let dir = repo(t.path(), "rename");
+    git(&dir, &["branch", "taken"]);
+    git(&dir, &["branch", "nest/inner"]);
+    let g = Git {
+        bin: "git".into(),
+        env: std::env::vars().collect(),
+    };
+    let made = g
+        .create_worktree(dir.to_str().unwrap(), "first", Some("tree"))
+        .unwrap();
+    let wt = PathBuf::from(&made.worktree_path);
+    // What gix foresees, when it does, is what the rename then does.
+    let rename = |name: &str| {
+        let foreseen = g.foresee_branch_rename(&wt, name);
+        assert!(
+            foreseen.is_some() || !vorn_git::gix_answers_here(),
+            "{name:?}"
+        );
+        let done = g.rename_branch(&wt, name);
+        if let Some(foreseen) = foreseen {
+            assert_eq!(foreseen, done, "{name:?}");
+        }
+        done
+    };
+    assert!(!rename("  "));
+    assert!(!rename("-x"));
+    assert!(!rename("taken"));
+    assert!(!rename("nest"));
+    assert!(!rename("bad..name"));
+    assert!(rename("  second  "));
+    assert_eq!(g.branch(&wt).as_deref(), Some("second"));
+    assert!(rename("second"));
+    // Detached: a branch is started there instead.
+    git(&wt, &["checkout", "-q", "--detach"]);
+    assert!(!rename("taken"));
+    assert!(rename("third"));
+    assert_eq!(g.branch(&wt).as_deref(), Some("third"));
+
+    let path = made.worktree_path.as_str();
+    let parent = &path[..path.rfind('/').unwrap()];
+    let id = &path[path.len() - 8..];
+    let moved = |p: &str, name: &str| {
+        let foreseen = g.foresee_worktree_move(p, name);
+        let done = g.move_worktree(p, name);
+        assert_eq!(foreseen, done, "{p} {name:?}");
+        done
+    };
+    assert_eq!(moved(path, "!!"), None);
+    assert_eq!(moved(path, "tree"), None);
+    assert_eq!(moved(dir.to_str().unwrap(), "x"), None);
+    std::fs::create_dir(format!("{parent}/blocked-{id}")).unwrap();
+    assert_eq!(moved(path, "blocked"), None);
+    let to = moved(path, " New  Name! ").unwrap();
+    assert_eq!(
+        to,
+        MovedWorktree {
+            path: format!("{parent}/New-Name-{id}"),
+            name: "New-Name".into()
+        }
+    );
+    assert!(!wt.exists());
+    assert_eq!(g.branch(Path::new(&to.path)).as_deref(), Some("third"));
+}

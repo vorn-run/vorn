@@ -127,6 +127,13 @@ impl DiffTarget {
 }
 
 /// A change that either happened or did not, with git's reason when not.
+/// A worktree moved to a new name, as `renameWorktree` answers it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MovedWorktree {
+    pub path: String,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Done {
     Ok,
@@ -206,6 +213,51 @@ impl Git {
             Ok(_) => Done::Ok,
             Err(err) => Done::Failed(err.to_string()),
         }
+    }
+
+    /// Renames the branch checked out in `worktree` to `new_branch`, trimmed,
+    /// or starts it there when HEAD is detached (`renameWorktreeBranch`).
+    /// False when the name is refused or git fails.
+    pub fn rename_branch(&self, worktree: &Path, new_branch: &str) -> bool {
+        let Some(name) = branch_rename_name(new_branch) else {
+            return false;
+        };
+        let args = match self.branch(worktree) {
+            Some(_) => ["branch", "-m", name],
+            None => ["switch", "-c", name],
+        };
+        self.exec_default(&args, worktree, 10_000).is_ok()
+    }
+
+    /// Whether [`Git::rename_branch`] would succeed now, read with gix and
+    /// without changing anything. `None` when gix cannot tell as git would.
+    pub fn foresee_branch_rename(&self, worktree: &Path, new_branch: &str) -> Option<bool> {
+        let Some(name) = branch_rename_name(new_branch) else {
+            return Some(false);
+        };
+        crate::fast::branch_name_free(worktree, name)
+    }
+
+    /// Moves a vorn worktree to `<parent>/<new name>-<its id>`
+    /// (`renameWorktree`). `None` when the name sanitizes to nothing, the
+    /// directory carries no id, the target is the worktree itself or is
+    /// taken, or git refuses the move.
+    pub fn move_worktree(&self, worktree: &str, new_name: &str) -> Option<MovedWorktree> {
+        let target = worktree_move_target(worktree, new_name)?;
+        if Path::new(&target.path).exists() {
+            return None;
+        }
+        let args = ["worktree", "move", worktree, target.path.as_str()];
+        self.exec_default(&args, Path::new(worktree), 10_000).ok()?;
+        Some(target)
+    }
+
+    /// What [`Git::move_worktree`] would answer now, read without moving
+    /// anything: git moves a linked worktree, whose `.git` is a file.
+    pub fn foresee_worktree_move(&self, worktree: &str, new_name: &str) -> Option<MovedWorktree> {
+        let target = worktree_move_target(worktree, new_name)?;
+        let linked = Path::new(worktree).join(".git").is_file();
+        (linked && !Path::new(&target.path).exists()).then_some(target)
     }
 
     /// Makes a worktree for `branch` at
@@ -758,6 +810,44 @@ fn parse_worktree_list(out: &str) -> Vec<WorktreeEntry> {
     worktrees
 }
 
+/// A branch name as `renameWorktreeBranch` takes it: trimmed, and never
+/// one git would read as an option.
+fn branch_rename_name(raw: &str) -> Option<&str> {
+    let name = js_trim(raw);
+    (!name.is_empty() && !name.starts_with('-')).then_some(name)
+}
+
+/// Where `renameWorktree` moves `worktree` for `new_name`: the name
+/// sanitized, runs of `-` collapsed and one stripped from each end, beside
+/// the worktree and keeping its `-<8 hex>` id.
+pub fn worktree_move_target(worktree: &str, new_name: &str) -> Option<MovedWorktree> {
+    let mut name = String::new();
+    for c in sanitize_name(js_trim(new_name)).chars() {
+        if !(c == '-' && name.ends_with('-')) {
+            name.push(c);
+        }
+    }
+    let name = name.strip_prefix('-').unwrap_or(&name);
+    let name = name.strip_suffix('-').unwrap_or(name);
+    if name.is_empty() {
+        return None;
+    }
+    let base = node_basename(worktree);
+    let at = base.len().checked_sub(9)?;
+    if base.as_bytes()[at] != b'-' {
+        return None;
+    }
+    let id = base.get(at + 1..)?;
+    if !id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+        return None;
+    }
+    let path = format!("{}{SEP}{name}-{id}", node_dirname(worktree));
+    (path != worktree).then(|| MovedWorktree {
+        path,
+        name: name.to_owned(),
+    })
+}
+
 /// A worktree's name: its directory without the `-<8 hex>` id vorn adds.
 pub fn extract_worktree_name(worktree: &str) -> String {
     let base = node_basename(worktree);
@@ -1021,6 +1111,38 @@ impl fmt::Display for FileStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_worktree_moves_beside_itself_under_its_new_name_and_id() {
+        let target = |p: &str, n: &str| worktree_move_target(p, n).map(|t| (t.path, t.name));
+        let at = |name: &str| format!("/w{SEP}{name}");
+        assert_eq!(
+            target("/w/old-1a2b3c4d", "--a  b--"),
+            Some((at("a-b-1a2b3c4d"), "a-b".into()))
+        );
+        assert_eq!(
+            target("/w/old-1a2b3c4d", "é"),
+            None,
+            "one dash per UTF-16 unit, stripped"
+        );
+        assert_eq!(
+            target("/w/old-1a2b3c4d", "x😀"),
+            Some((at("x-1a2b3c4d"), "x".into()))
+        );
+        assert_eq!(target("/w/old-1a2b3c4d", "old"), None);
+        assert_eq!(target("/w/old-1A2B3C4D", "new"), None);
+        assert_eq!(target("/w/1a2b3c4d", "new"), None);
+        assert_eq!(target("/w/old_1a2b3c4d", "new"), None);
+        assert_eq!(target("/w/é1a2b3c4", "new"), None);
+        assert_eq!(target("/w/old-1a2b3c4d", "  "), None);
+    }
+
+    #[test]
+    fn a_branch_name_is_trimmed_and_never_an_option() {
+        assert_eq!(branch_rename_name("  a/b \n"), Some("a/b"));
+        assert_eq!(branch_rename_name(" -d"), None);
+        assert_eq!(branch_rename_name("\t"), None);
+    }
 
     #[test]
     fn reads_branch_lists_trimmed_and_without_blanks() {
