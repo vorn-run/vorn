@@ -3017,6 +3017,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "jiff",
  "keyring-core",
  "libghostty-vt",
  "rmcp",
@@ -3043,6 +3044,7 @@ dependencies = [
  "vorn-size",
  "vorn-store",
  "vorn-term-proto",
+ "vorn-work",
  "vorn-worktrees",
  "windows-native-keyring-store",
 ]

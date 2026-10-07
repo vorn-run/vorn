@@ -170,7 +170,15 @@ impl Daemon {
     /// call naming a project goes to the server.
     pub fn set_database(&self, db: std::path::PathBuf) {
         if let Some(native) = &self.native {
-            native.set_database(db);
+            native.set_database(db.clone());
+        }
+        // The scheduler is shadowed by watching the server fire its schedules.
+        if self.groups.mode("scheduler") == Mode::Shadow {
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                let locks = crate::native::work::lock_dir();
+                let groups = Arc::clone(&self.groups);
+                runtime.spawn(crate::native::work::watch(db, locks, groups));
+            }
         }
     }
 

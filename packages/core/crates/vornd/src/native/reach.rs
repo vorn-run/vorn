@@ -74,7 +74,7 @@ impl Reach {
         let _ = self.server_port.set(port);
     }
 
-    fn server_port(&self) -> Option<u16> {
+    pub(super) fn server_port(&self) -> Option<u16> {
         self.server_port.get().copied()
     }
 
