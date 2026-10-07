@@ -22,10 +22,18 @@ function bodyOf(req: FastifyRequest): string | undefined {
   return typeof req.body === 'string' ? req.body : JSON.stringify(req.body)
 }
 
+/** The path relayed: rebuilt from what the router matched, never the raw URL, so vornd sees what matched here. */
+function relayedPath(req: FastifyRequest, prefix: string, names: string[]): string {
+  const params = req.params as Record<string, string>
+  const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''
+  return `/${prefix}/${names.map((n) => encodeURIComponent(params[n] ?? '')).join('/')}${query}`
+}
+
 async function relay(
   req: FastifyRequest,
   reply: FastifyReply,
-  vorndPort: () => number | null
+  vorndPort: () => number | null,
+  path: string
 ): Promise<unknown> {
   const port = vorndPort()
   if (port === null) return reply.code(503).send({ error: 'vornd is not running' })
@@ -38,7 +46,7 @@ async function relay(
     }
   }
   try {
-    const res = await fetch(`http://127.0.0.1:${port}${req.url}`, {
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
       method: req.method,
       headers,
       body: bodyOf(req),
@@ -58,8 +66,12 @@ async function relay(
 }
 
 export function registerWorkRoutes(app: FastifyInstance, vorndPort: () => number | null): void {
-  app.get('/artifact/:artifactId/:version', (req, reply) => relay(req, reply, vorndPort))
-  app.get('/gate-view/:runId/:nodeId', (req, reply) => relay(req, reply, vorndPort))
+  app.get('/artifact/:artifactId/:version', (req, reply) =>
+    relay(req, reply, vorndPort, relayedPath(req, 'artifact', ['artifactId', 'version']))
+  )
+  app.get('/gate-view/:runId/:nodeId', (req, reply) =>
+    relay(req, reply, vorndPort, relayedPath(req, 'gate-view', ['runId', 'nodeId']))
+  )
   app.route({
     method: ['GET', 'POST'],
     url: '/wf-hooks/:workflowId/:token',
@@ -67,7 +79,7 @@ export function registerWorkRoutes(app: FastifyInstance, vorndPort: () => number
       if (!isLoopbackAddress(req.socket.remoteAddress)) {
         return reply.code(403).send({ error: 'Local machine only' })
       }
-      return relay(req, reply, vorndPort)
+      return relay(req, reply, vorndPort, relayedPath(req, 'wf-hooks', ['workflowId', 'token']))
     }
   })
 }

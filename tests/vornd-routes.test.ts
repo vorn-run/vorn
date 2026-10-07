@@ -91,6 +91,12 @@ describe('the work pages on the server', () => {
     expect(seen.headers['content-type']).toContain('application/json')
   })
 
+  it('relays the path it matched, so an encoded one cannot loop back here', async () => {
+    const res = await app.inject({ method: 'GET', url: '/%61rtifact/a%20b/1?t=tok' })
+    expect(res.statusCode).toBe(200)
+    expect(seen.url).toBe('/artifact/a%20b/1?t=tok')
+  })
+
   it('takes a webhook from this machine only', async () => {
     const res = await app.inject({
       method: 'GET',

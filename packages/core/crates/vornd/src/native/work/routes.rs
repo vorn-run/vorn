@@ -26,11 +26,19 @@ use crate::proxy::{full, Body};
 /// The largest webhook body taken, the server's own limit.
 const MAX_BODY: usize = 1 << 20;
 
+/// The work model's path a request names, its first segment decoded as
+/// the server's router decodes it; `None` for any other path.
+pub fn route_path(path: &str) -> Option<String> {
+    let rest = path.strip_prefix('/')?;
+    let (first, tail) = rest.split_once('/')?;
+    let first = percent_decode(first);
+    matches!(first.as_str(), "artifact" | "gate-view" | "wf-hooks")
+        .then(|| format!("/{first}/{tail}"))
+}
+
 /// Whether this is one of the work model's paths.
 pub fn is_route(path: &str) -> bool {
-    path.starts_with("/artifact/")
-        || path.starts_with("/gate-view/")
-        || path.starts_with("/wf-hooks/")
+    route_path(path).is_some()
 }
 
 fn json_reply(status: StatusCode, body: Value) -> Response<Body> {
@@ -112,7 +120,7 @@ fn segments(path: &str, prefix: &str) -> Vec<String> {
 
 /// Answers a request to one of the work model's paths.
 pub async fn answer(work: &Work, req: Request<Incoming>, peer: SocketAddr) -> Response<Body> {
-    let path = req.uri().path().to_owned();
+    let path = route_path(req.uri().path()).unwrap_or_default();
     let token = query(&req)
         .get("t")
         .and_then(Value::as_str)
@@ -259,6 +267,12 @@ mod tests {
         assert_eq!(percent_decode("é%C3%A9"), "éé");
         assert_eq!(segments("r%2F1/node", ""), ["r/1", "node"]);
         assert!(is_route("/artifact/a/1"));
+        assert_eq!(
+            route_path("/%61rtifact/a/1").as_deref(),
+            Some("/artifact/a/1")
+        );
+        assert!(is_route("/gate-view/r/n"));
+        assert!(!is_route("/artifact"));
         assert!(is_route("/wf-hooks/w/t"));
         assert!(!is_route("/ws"));
     }
