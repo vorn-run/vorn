@@ -51,6 +51,7 @@ use tracing::{debug, info, warn};
 use crate::applink::AppLink;
 use crate::groups::{Counted, Groups, Mode};
 use crate::holder::Holder;
+use crate::native::script::Scripts;
 use crate::native::{Conn, Native, Offer, AUTH_GROUP, ORIGIN_METHOD};
 use crate::protocol::{
     inspect_server_frame, method_of, ServerFrame, SERVER_PROTOCOLS, VORND_PROTOCOL,
@@ -204,6 +205,10 @@ impl Daemon {
         }
         if self.groups.mode("headless") == Mode::Native {
             link.set_creates_headless();
+        }
+        match self.groups.mode("script") {
+            Mode::Forward => {}
+            mode => link.set_scripts(Scripts::new(mode, native, Arc::clone(&self.groups))),
         }
         let native = Arc::clone(native);
         tokio::spawn(async move {

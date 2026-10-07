@@ -8,6 +8,8 @@ import { getLaunchDataDir, getLaunchEnv } from './process-utils'
 import { getDecryptedCreds } from './connectors/decrypted-creds'
 import { SECRET_ENV_FIELD, isEnvName } from './connectors/keys'
 import log from './logger'
+import { vorndSessions } from './vornd-sessions'
+import { comparePlan, runInVornd, SCRIPT_FILE } from './vornd-scripts'
 
 /** `apiKey` names the variable `API_KEY`, the way a connector's own env does. */
 function envNameFor(key: string): string {
@@ -131,6 +133,28 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
     return { success: false, output, error: message }
   }
 
+  const cwd = config.cwd || config.projectPath || process.cwd()
+  const secretEnv = secretEnvFor(config.secretsFrom)
+  const mode = vorndSessions.scriptMode()
+  if (mode === 'native') {
+    const { scriptType, scriptContent } = config
+    const script = { scriptType, scriptContent, cwd, args: config.args ?? [], secretEnv }
+    const ran = await runInVornd(script, (data) => {
+      if (runId) scriptRunnerEvents.emit(IPC.SCRIPT_DATA, { runId, data })
+    })
+    if (ran) {
+      const { output, exitCode } = ran
+      if (runId) scriptRunnerEvents.emit(IPC.SCRIPT_EXIT, { runId, exitCode })
+      return {
+        success: exitCode === 0,
+        output,
+        // One stream: what it printed is the error, stderr and stdout alike.
+        error: exitCode !== 0 ? output || `Exited with code ${exitCode}` : undefined,
+        exitCode
+      }
+    }
+  }
+
   let file = ''
   if (interpreter.file) {
     try {
@@ -144,8 +168,6 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
     const command = interpreter.command(process.platform === 'win32')
     const args = [...interpreter.args(file), ...(config.args ?? [])]
 
-    const cwd = config.cwd || config.projectPath || process.cwd()
-
     log.info(`[script-runner] executing ${config.scriptType} script in ${cwd}`)
 
     /** The script's own copy goes with it, so nothing is left behind after the answer. */
@@ -154,15 +176,22 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
       resolve(result)
     }
 
+    // Only this child sees them: the secrets are read here rather than held
+    // anywhere the definition, a run record or an export could reach.
+    const env = { ...getLaunchEnv(), ...secretEnv }
+    if (mode === 'shadow') {
+      const argv = [command, ...interpreter.args(file && SCRIPT_FILE), ...(config.args ?? [])]
+      const script = { scriptType: config.scriptType, cwd, args: config.args ?? [] }
+      comparePlan(script, Object.keys(secretEnv), { argv, cwd, envKeys: Object.keys(env) })
+    }
+
     let child: ReturnType<typeof spawn>
     try {
       child = spawn(command, args, {
         cwd,
         // A script that came as a file has no use for stdin, and cannot block waiting on it.
         stdio: [file ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-        // Only this child sees them: the secrets are read here rather than held
-        // anywhere the definition, a run record or an export could reach.
-        env: { ...getLaunchEnv(), ...secretEnvFor(config.secretsFrom) },
+        env,
         windowsHide: true
       })
     } catch (err) {

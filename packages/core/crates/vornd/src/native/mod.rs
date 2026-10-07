@@ -44,6 +44,7 @@ pub mod headless;
 pub mod ide;
 pub mod mcp;
 pub mod reach;
+pub mod script;
 pub mod secrets;
 pub mod sessions;
 pub mod shell;
@@ -1053,6 +1054,10 @@ impl Conn {
             {
                 self.groups.count(method, Counted::Forwarded);
                 self.foresee(method, &id, &params);
+                Offer::Pass
+            }
+            (Mode::Shadow, _) if script::compared_by_server(method) => {
+                self.groups.count(method, Counted::Forwarded);
                 Offer::Pass
             }
             (Mode::Shadow, _) => {
