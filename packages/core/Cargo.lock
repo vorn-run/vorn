@@ -2989,10 +2989,30 @@ name = "vorn-work"
 version = "0.0.0"
 dependencies = [
  "jiff",
+ "regex",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
+ "uuid",
+ "vorn-protocol",
  "vorn-store",
+]
+
+[[package]]
+name = "vorn-workflow"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "jiff",
+ "regex",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "vorn-protocol",
+ "vorn-work",
 ]
 
 [[package]]
@@ -3045,6 +3065,7 @@ dependencies = [
  "vorn-store",
  "vorn-term-proto",
  "vorn-work",
+ "vorn-workflow",
  "vorn-worktrees",
  "windows-native-keyring-store",
 ]

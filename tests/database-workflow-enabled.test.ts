@@ -27,8 +27,7 @@ import type { AppConfig, WorkflowDefinition } from '@vornrun/shared/types'
  * missing from it, where the mocked socket suite went on passing because its
  * idea of what the function accepts is a hand-copy of somebody's belief.
  *
- * So this runs against the real table. If the branch is removed, this goes red
- * and `workflow-methods.test.ts` does not, which is the whole reason both exist.
+ * So this runs against the real table: if the branch is removed, this goes red.
  */
 
 let teardown: () => void

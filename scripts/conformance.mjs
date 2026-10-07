@@ -20,7 +20,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const FILES = [
   'tests/server-integration.test.ts',
   'tests/task-write-methods.test.ts',
-  'tests/workflow-methods.test.ts',
   'tests/vornd-terminal.test.ts',
   'tests/vornd-attach.test.ts',
   'tests/vornd-app-channel.test.ts',
@@ -38,7 +37,7 @@ const FILES = [
   'tests/vornd-stop.test.ts',
   'tests/native-server-status.test.ts',
   'tests/native-server-mcp.test.ts',
-  'tests/native-server-work.test.ts',
+  'tests/native-server-workflows.test.ts',
   'tests/native-cli.test.ts'
 ]
 

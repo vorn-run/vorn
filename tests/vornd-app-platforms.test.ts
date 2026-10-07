@@ -17,7 +17,6 @@ import { initDatabase, closeDatabase } from '../packages/server/src/database'
 import { IPC } from '../packages/shared/src/types'
 import { ptyManager } from '../packages/server/src/pty-manager'
 import { headlessManager } from '../packages/server/src/headless-manager'
-import { onHeadlessExit } from '../packages/server/src/workflows/host'
 import { VorndSessions, vorndSessions, type VorndExit } from '../packages/server/src/vornd-sessions'
 import {
   vorndBinariesAvailable,
@@ -36,6 +35,16 @@ import {
  * its sessions run in ConPTY. The programs are Node scripts, so nothing here
  * depends on a POSIX shell.
  */
+
+/** Every headless exit the server tells clients of, until the returned stop. */
+function onHeadlessExit(cb: (e: { id: string; exitCode: number }) => void): () => void {
+  const listener = (channel: string, payload: unknown): void => {
+    if (channel === IPC.HEADLESS_EXIT) cb(payload as { id: string; exitCode: number })
+  }
+  headlessManager.on('client-message', listener)
+  return () => headlessManager.off('client-message', listener)
+}
+
 describe.skipIf(!vorndBinariesAvailable)('sessions through vornd on this platform', () => {
   let up: Awaited<ReturnType<typeof upstream>>
   let h: ReturnType<typeof testHome>
@@ -110,7 +119,7 @@ describe.skipIf(!vorndBinariesAvailable)('sessions through vornd on this platfor
     )
     headlessManager.setAgentCommands({ claude: { command: command!, args } })
     const exits: Array<{ id: string; exitCode: number }> = []
-    const stop = onHeadlessExit((e) => exits.push(e))
+    const stop = onHeadlessExit((e: { id: string; exitCode: number }) => exits.push(e))
     const session = await headlessManager.createHeadless({
       agentType: 'claude',
       projectName: 'p',

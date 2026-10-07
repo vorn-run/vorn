@@ -6,17 +6,25 @@ import { VORN_PEER_HEADER } from './vornd-relay'
  * What vornd asks of this server, and tells it, once it answers the pairing
  * and token calls itself.
  *
- * vornd holds pairing and writes device tokens, but the clients are this
- * server's: some connect here directly, and every socket a token opened is
- * one of this server's. So vornd asks for a broadcast when a phone asks to
- * pair or collects its token, and says which token it revoked so the sockets
+ * vornd holds pairing and writes device tokens, and runs workflows and
+ * artifacts, but the clients are this server's: some connect here directly,
+ * and every socket a token opened is one of this server's. So vornd asks for
+ * a broadcast when a phone asks to pair or collects its token, and as runs
+ * move and artifacts change, and says which token it revoked so the sockets
  * holding it are closed. In turn it is told where this server is bound, which
  * decides the addresses a browser on the network can use, and when to read
  * again the names a browser may load the web client from.
  */
 
-/** The broadcasts vornd may ask for: only what pairing announces. */
-const BROADCASTS: ReadonlySet<string> = new Set([IPC.PAIRING_REQUESTED, IPC.PAIRING_COLLECTED])
+/** The broadcasts vornd may ask for: what pairing, runs and artifacts announce. */
+const BROADCASTS: ReadonlySet<string> = new Set([
+  IPC.PAIRING_REQUESTED,
+  IPC.PAIRING_COLLECTED,
+  IPC.WORKFLOW_RUN_UPDATED,
+  IPC.WORKFLOW_GATE_RESOLVED,
+  IPC.ARTIFACT_PUBLISHED,
+  IPC.ARTIFACT_COMMENTS_CHANGED
+])
 
 export interface ReachDeps {
   /** vornd's channel: what it asks, when it is (re)subscribed, and telling it. */

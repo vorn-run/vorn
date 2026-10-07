@@ -17,7 +17,6 @@ import { initDatabase, closeDatabase } from '../packages/server/src/database'
 import { IPC } from '../packages/shared/src/types'
 import { ptyManager } from '../packages/server/src/pty-manager'
 import { headlessManager } from '../packages/server/src/headless-manager'
-import { onHeadlessExit } from '../packages/server/src/workflows/host'
 import { vorndSessions } from '../packages/server/src/vornd-sessions'
 import {
   vorndSessionsAvailable,
@@ -34,6 +33,16 @@ import {
  * The app's terminals and headless agents, started in vornd's holder rather
  * than here, and outliving vornd.
  */
+
+/** Every headless exit the server tells clients of, until the returned stop. */
+function onHeadlessExit(cb: (e: { id: string; exitCode: number }) => void): () => void {
+  const listener = (channel: string, payload: unknown): void => {
+    if (channel === IPC.HEADLESS_EXIT) cb(payload as { id: string; exitCode: number })
+  }
+  headlessManager.on('client-message', listener)
+  return () => headlessManager.off('client-message', listener)
+}
+
 describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
   let up: Awaited<ReturnType<typeof upstream>>
   let h: ReturnType<typeof testHome>
@@ -175,7 +184,7 @@ describe.skipIf(!vorndSessionsAvailable)('sessions through vornd', () => {
     fs.writeFileSync(agent, '#!/bin/sh\nprintf "prompt: "\ncat\nexit 5\n', { mode: 0o755 })
     headlessManager.setAgentCommands({ claude: { command: agent, args: [] } })
     const exits: Array<{ id: string; exitCode: number }> = []
-    const stop = onHeadlessExit((e) => exits.push(e))
+    const stop = onHeadlessExit((e: { id: string; exitCode: number }) => exits.push(e))
 
     const session = await headlessManager.createHeadless({
       agentType: 'claude',

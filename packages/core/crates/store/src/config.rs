@@ -98,6 +98,18 @@ impl Store {
     /// row for a key not listed here does not load. `??` keys fall back when
     /// the row is missing or holds `null`; the conditional keys appear when
     /// the row exists, even holding `null`.
+    /// The `defaults` rows as stored, without the app's fallbacks: what a
+    /// store opened beside the server can read of them.
+    pub fn stored_defaults(&self) -> Result<Map<String, Value>> {
+        let mut stmt = self.conn().prepare("SELECT key, value FROM defaults")?;
+        let mut rows = stmt.query([])?;
+        let mut stored = Map::new();
+        while let Some(row) = rows.next()? {
+            stored.insert(get_text(row, "key")?, parse_json(&get_text(row, "value")?)?);
+        }
+        Ok(stored)
+    }
+
     fn load_defaults(&self) -> Result<Map<String, Value>> {
         let stored = {
             let mut stmt = self.conn().prepare("SELECT key, value FROM defaults")?;

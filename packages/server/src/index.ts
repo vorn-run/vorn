@@ -16,7 +16,8 @@ import {
   setServerIdentity,
   setLiveSessionCount,
   disconnectToken,
-  isLoopbackAddress
+  isLoopbackAddress,
+  setMethodFallback
 } from './ws-handler'
 import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
 import { browserBridge } from './browser-bridge'
@@ -29,7 +30,6 @@ import {
   setServerPort,
   sessionsToPersist
 } from './register-methods'
-import { registerWebhookRoute } from './webhook-trigger'
 import { registerExtensionBridge, type ExtensionRouteDeps } from './extensions/bridge'
 import { registerSessionBridge, setSessionBridgeOrigin } from './connectors/session-bridge'
 import { sessionGrantFor } from './connectors/mcp-clients'
@@ -51,12 +51,9 @@ import {
   clearLocalCredential,
   bearerFrom
 } from './ws-auth'
-import { getDataDir, dbCountActiveConnectorInboxLeases, listWorkflowRunIds } from './database'
-import { artifactPage, sweepArtifacts } from './artifacts/service'
-import { registerArtifactRoute } from './artifact-route'
-import { registerGateViewRoute } from './gate-view-route'
-import { gateViewPage } from './workflows/engine'
-import { sweepGateViews } from './workflows/gate-views'
+import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
+import { registerWorkRoutes } from './vornd-routes'
+import { armedScheduleCount, relayWorkCall } from './workflow-triggers'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
 import {
   DEFAULT_SERVER_PORT,
@@ -75,8 +72,6 @@ import { seedRestored, verifyRestored } from './restored-sessions'
 import { getGitBranchAsync, getGitHeadAsync } from './git-utils'
 import { sessionManager } from './session-persistence'
 import { headlessManager } from './headless-manager'
-import { scheduler } from './scheduler'
-import { resumeRunsAfterStart } from './workflows/resume'
 import { getTaskImagePath as resolveTaskImagePath } from './task-images'
 import { redeemCode, pollRequest, pendingRequests } from './pairing'
 import { getTailscaleStatus } from './tailscale'
@@ -246,7 +241,6 @@ export async function startServer(
   ptyManager.setAgentCommands(config.agentCommands)
   ptyManager.setRemoteHosts(config.remoteHosts ?? [])
   headlessManager.setAgentCommands(config.agentCommands)
-  scheduler.syncSchedules(config.workflows ?? [])
 
   // Re-sync managers and broadcast to clients when config changes
   configManager.onConfigChanged((cfg) => {
@@ -254,7 +248,8 @@ export async function startServer(
     ptyManager.setAgentCommands(cfg.agentCommands)
     ptyManager.setRemoteHosts(cfg.remoteHosts ?? [])
     headlessManager.setAgentCommands(cfg.agentCommands)
-    scheduler.syncSchedules(cfg.workflows ?? [])
+    // vornd fires the schedules; it reads the workflows again when told.
+    void vorndSessions.tell('vornd:configChanged', {})
     clientRegistry.broadcast(IPC.CONFIG_CHANGED, cfg)
     // Auto-rebind when networkAccessEnabled changes, and re-read the names the
     // web client may be served from on the same transition.
@@ -319,7 +314,6 @@ export async function startServer(
           // for another machine is judged by where that machine is.
           { transport: 'tcp', address: peerAddress(remote, req.headers) }
         )
-        scheduler.deliverPendingConnectorInbox()
       }
       // From another machine: through vornd, which holds every terminal.
       const vorndPort = vorndKeeper.port
@@ -333,7 +327,7 @@ export async function startServer(
 
   app.get('/health', async () => ({ status: 'ok' }))
 
-  registerWebhookRoute(app, () => scheduler.deliverPendingConnectorInbox())
+  registerWorkRoutes(app, () => vorndKeeper.port)
 
   // An extension's own bridge, which its child process reaches with the token it
   // was started with. The pages its panes are drawn from are served on their own
@@ -404,9 +398,6 @@ export async function startServer(
     }
     return result
   })
-
-  registerGateViewRoute(app, gateViewPage)
-  registerArtifactRoute(app, (id, version, token) => artifactPage(getDataDir(), id, version, token))
 
   // Serve task images via HTTP (used by web app instead of file:// protocol)
   app.get('/api/task-images/:taskId/:filename', async (req, reply) => {
@@ -486,14 +477,11 @@ export async function startServer(
 
   // Register all RPC methods
   registerAllMethods()
+  // The work model's calls are vornd's; a client connected here reaches it through vornd.
+  setMethodFallback(relayWorkCall(vorndSessions))
 
   // Connects the rung-none packs installed before installing meant connecting.
   reconcileImplicitConnections()
-  scheduler.startInboxWorker()
-  // After the methods, because picking a run back up uses them.
-  void resumeRunsAfterStart()
-  sweepGateViews(getDataDir(), listWorkflowRunIds())
-  sweepArtifacts(getDataDir())
 
   // Server shutdown method (callable from clients)
   registerMethod('server:shutdown', async () => {
@@ -606,7 +594,7 @@ export async function startServer(
   // Opened after the listen rather than before: a server that cannot claim the
   // name still serves whatever is already attached to it, and losing the claim
   // must never be the reason a startup fails.
-  const claimed = await openLocalEndpoint(dataDir, () => scheduler.deliverPendingConnectorInbox())
+  const claimed = await openLocalEndpoint(dataDir, () => {})
 
   // Arriving second is not a failure, and it is not something to carry on
   // through. This process would be a second server on one database, and
@@ -694,7 +682,7 @@ export async function startServer(
       const listening = await retakeListener()
       // A fresh listener: an anonymous inode cannot be linked back to a path. The
       // old one stays open, because this request's socket is still on it.
-      const again = await openLocalEndpoint(dataDir, () => scheduler.deliverPendingConnectorInbox())
+      const again = await openLocalEndpoint(dataDir, () => {})
       if (again.kind === 'held') endpoint = again.endpoint
       // Restored on both paths. `release` pointed the watch at `true` so giving
       // the name up deliberately would not latch draining; left there after a
@@ -765,7 +753,6 @@ export async function startServer(
     uninstallHooks()
     uninstallAllCopilotHooks()
     hookStatusMapper.clear()
-    scheduler.stopAll()
     headlessManager.killAll()
     ptyManager.killAll()
     cancelScripts()
@@ -832,8 +819,8 @@ export async function startServer(
   }
 
   // The server outlives the app now, so something has to decide when it is done.
-  // Nothing here waits for the event loop to drain: the scheduler's inbox
-  // interval is not unref'd, so this process would sit empty for ever.
+  // Nothing here waits for the event loop to drain: open handles such as the
+  // channel to vornd would keep this process sitting empty for ever.
   const idleWatch = new IdleWatch(
     () => ({
       sessions: ptyManager.livePtyCount(),
@@ -846,7 +833,7 @@ export async function startServer(
       pendingPermissions: hookServer.getPendingPermissions().length,
       pendingPairings: pendingRequests().length,
       connectorLeases: dbCountActiveConnectorInboxLeases(new Date().toISOString()),
-      enabledSchedules: scheduler.serverSideScheduleCount(),
+      enabledSchedules: armedScheduleCount(configManager.loadConfig().workflows ?? []),
       servesOthers: getCurrentHost() === '0.0.0.0',
       // Looked at rather than waited for. Losing the endpoint is something that
       // happens *to* this process -- another server that found it unreachable is

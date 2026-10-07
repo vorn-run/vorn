@@ -1,0 +1,24 @@
+[package]
+name = "vorn-workflow"
+# Never published and never versioned on its own; vorn-core carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Vorn's workflow engine: runs a stored workflow's steps through a host, with gates, loops, retries and stops"
+
+[dependencies]
+jiff = "0.2"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tokio-util = { version = "0.7", default-features = false }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+vorn-protocol = { path = "../protocol" }
+vorn-work = { path = "../work" }
+
+[dev-dependencies]
+regex = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "test-util"] }

@@ -10,13 +10,6 @@ vi.mock('../src/renderer/lib/use-connections', () => ({
   // A step with no connection draws its node-type glyph instead.
   connectorLookFor: () => undefined
 }))
-vi.mock('../packages/server/src/workflows/engine', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../packages/server/src/workflows/engine')>()),
-  isRunStoppable: () => false,
-  stopWorkflowRun: vi.fn(),
-  approveWorkflowGate: vi.fn(),
-  rejectWorkflowGate: vi.fn()
-}))
 vi.mock('../src/renderer/components/Tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>
 }))

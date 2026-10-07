@@ -6,13 +6,17 @@ edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 publish = false
-description = "Vorn's work model without a host: workflow schedules as node-cron reads them, trigger receipts, and the workflow, run and artifact reads"
+description = "Vorn's work model without a host: workflow graphs, templates and prompts, schedules as node-cron reads them, trigger receipts, artifacts, and the workflow, run and artifact reads"
 
 [dependencies]
 # Wall-clock time in a schedule's time zone, as node-cron reads it through Intl.
 jiff = "0.2"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+vorn-protocol = { path = "../protocol" }
 vorn-store = { path = "../store" }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 # To take the receipts table away under a store, as a broken database would.

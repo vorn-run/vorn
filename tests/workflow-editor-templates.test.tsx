@@ -48,10 +48,6 @@ vi.mock('../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPan
     return <div data-testid="properties-panel" />
   }
 }))
-vi.mock('../packages/server/src/workflows/engine', async (importActual) => ({
-  ...(await importActual<Record<string, unknown>>()),
-  executeWorkflow: vi.fn().mockResolvedValue(undefined)
-}))
 
 const toasts = vi.hoisted(() => ({
   success: vi.fn(),

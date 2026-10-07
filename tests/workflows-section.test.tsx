@@ -28,10 +28,6 @@ vi.mock('../src/renderer/hooks/useWaitingApprovals', () => ({
   useWaitingApprovals: () => waitingMock()
 }))
 
-vi.mock('../packages/server/src/workflows/engine', () => ({
-  executeWorkflow: vi.fn()
-}))
-
 const { WorkflowsSection } =
   await import('../src/renderer/components/project-sidebar/WorkflowsSection')
 

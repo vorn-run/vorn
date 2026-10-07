@@ -574,6 +574,24 @@ export interface RequestMethods {
     result: { ok: boolean }
   }
 
+  /** Store a new workflow; its schedule is armed at once. */
+  'workflow:create': {
+    params: { workflow: WorkflowDefinition }
+    result: WorkflowDefinition
+  }
+
+  /** Change some of a workflow's fields; `ok` is false for an id that names none. */
+  'workflow:update': {
+    params: { id: string; updates: Partial<WorkflowDefinition> }
+    result: { ok: boolean }
+  }
+
+  /** Remove a workflow; `ok` is false for an id that names none. */
+  'workflow:delete': {
+    params: { id: string }
+    result: { ok: boolean }
+  }
+
   /**
    * Answer a run that is parked on an approval gate.
    *
@@ -1087,8 +1105,13 @@ export interface RequestMethods {
     }
     result: { taskId: string; created: boolean }
   }
-  /** A renderer accepted a durable connector event and finished its workflow.
-   * Failures are retried with bounded exponential backoff. */
+  /** Fetch a connector-poll workflow's new items into the inbox, for vornd to run. */
+  'connector:poll': {
+    params: { workflowId: string }
+    result: { pages: number }
+  }
+  /** A run settled the connector event it was delivered. Failures are retried
+   * with bounded exponential backoff. */
   'connector:inboxComplete': {
     params: {
       id: number

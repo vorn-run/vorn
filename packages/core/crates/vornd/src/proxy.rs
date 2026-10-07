@@ -61,6 +61,9 @@ use crate::streams::{Forwarder, Streams};
 /// The path vornd answers itself. Everything else belongs to the server.
 pub const HEALTH_PATH: &str = "/vornd/health";
 
+/// The server's local credential, beside the database.
+const LOCAL_TOKEN_FILE: &str = "local-token";
+
 /// Sent with every accepted WebSocket, so a client can tell it is behind vornd
 /// and which version, without anything changing in the frames.
 pub const VORND_PROTOCOL_HEADER: HeaderName = HeaderName::from_static("vornd-protocol");
@@ -167,16 +170,46 @@ impl Daemon {
     /// call naming a project goes to the server.
     pub fn set_database(&self, db: std::path::PathBuf) {
         if let Some(native) = &self.native {
-            native.set_database(db.clone());
+            native.set_database(db);
         }
-        // The scheduler is shadowed by watching the server fire its schedules.
-        if self.groups.mode("scheduler") == Mode::Shadow {
-            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-                let locks = crate::native::work::lock_dir();
-                let groups = Arc::clone(&self.groups);
-                runtime.spawn(crate::native::work::watch(db, locks, groups));
-            }
-        }
+    }
+
+    /// Starts the work model ([`crate::native::work`]) once vornd has a
+    /// database, its own address and a credential for it: the desktop's, or
+    /// the server's local one published beside the database. It reaches the
+    /// endpoint as a client does, listening for the sessions' and scripts'
+    /// broadcasts only.
+    pub fn start_work(&self, link: &Arc<AppLink>) {
+        use crate::native::work::{db::Db, host::TOPICS, Work};
+        let Some(native) = self
+            .native
+            .as_ref()
+            .filter(|_| self.groups.mode("workflow") == Mode::Native)
+        else {
+            return;
+        };
+        let (Some(db_path), Some(addr)) = (
+            native.database().map(std::path::Path::to_path_buf),
+            self.listen.get().copied(),
+        ) else {
+            return;
+        };
+        let token = self.desktop_token.get().cloned().or_else(|| {
+            let file = db_path.parent()?.join(LOCAL_TOKEN_FILE);
+            std::fs::read(file).ok().map(|t| t.trim_ascii().to_vec())
+        });
+        let Some(token) = token.filter(|t| !t.is_empty()) else {
+            warn!("the work model has no credential to reach vornd's endpoint");
+            return;
+        };
+        let Some(db) = Db::open(&db_path) else {
+            return;
+        };
+        let loopback = Arc::new(crate::mcp::Loopback::with_topics(addr, &token, TOPICS));
+        let work = Work::new(native, db, loopback);
+        native.set_work(Arc::clone(&work));
+        link.set_work(Arc::clone(&work));
+        work.start();
     }
 
     /// Answers `vornd:spawn` from now on: sessions started in sessiond
@@ -307,6 +340,19 @@ async fn handle(
     }
     if is_websocket_upgrade(req.headers()) {
         return Ok(websocket(daemon, req).await);
+    }
+    if crate::native::work::routes::is_route(req.uri().path()) {
+        // The server relays these paths here, so they are never sent back to it.
+        return Ok(match daemon.native.as_ref().and_then(|n| n.work()) {
+            Some(work) => {
+                let work = Arc::clone(work);
+                crate::native::work::routes::answer(&work, req, peer).await
+            }
+            None => plain(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "vornd is not running workflows",
+            ),
+        });
     }
     if req.method() == Method::POST && crate::pair::is_pair_path(req.uri().path()) {
         if let Some(native) = daemon

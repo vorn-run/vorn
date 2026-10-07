@@ -1,16 +1,28 @@
-//! Vorn's work model without a host: when workflows fire, how a fire is
+//! Vorn's work model without a host: what a workflow's graph decides, its
+//! templates, prompts and typed outputs, when workflows fire, how a fire is
 //! received once however often it is delivered, and the reads of workflows,
-//! their runs, the schedule log and artifacts, from the server's `vorn.db`.
+//! their runs, the schedule log and artifacts, from `vorn.db`.
 //!
-//! The server's TypeScript is the reference. Every reply here is what its
-//! handler returns for the same database, or [`reads::Reply::Server`] where
-//! only the server can tell; nothing here writes a workflow, a run or an
-//! artifact.
+//! The TypeScript that ran workflows before is the reference: every answer
+//! here is what it gave for the same input. Nothing here waits on anything;
+//! running a workflow is `vorn-workflow`'s.
 
+pub mod artifacts;
+pub mod claims;
 pub mod cron;
+pub mod gates;
+pub mod graph;
+pub mod inbox;
+pub mod items;
+pub mod js;
+pub mod markdown;
+pub mod model;
+pub mod prompt;
 pub mod reads;
 pub mod receipts;
 pub mod schedule;
+pub mod structured;
+pub mod template;
 pub mod trigger;
 
 use serde_json::Value;
@@ -37,7 +49,7 @@ pub fn js_numbers(value: Value) -> Value {
 }
 
 /// JavaScript truthiness of a field.
-pub(crate) fn is_truthy(value: Option<&Value>) -> bool {
+pub fn is_truthy(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) => false,
         Some(Value::Bool(b)) => *b,

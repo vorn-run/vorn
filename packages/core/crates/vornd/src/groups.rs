@@ -14,7 +14,7 @@
 //!   one and says why. Every group in [`NATIVE_GROUPS`] starts here.
 //!
 //! A per-group setting (`--groups` or `VORND_GROUPS`, such as
-//! `workflow=shadow`) is for tests and comparison runs only.
+//! `git=shadow`) is for tests and comparison runs only.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -72,11 +72,6 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "headless",
     "worktree",
     "script",
-];
-
-/// Groups vornd only compares in shadow mode, reading the server's database,
-/// while the server still owns them: `native` is refused.
-pub const SHADOW_GROUPS: &[&str] = &[
     "workflow",
     "workflowRun",
     "scheduler",
@@ -133,7 +128,7 @@ impl Groups {
     }
 
     /// Every group in [`NATIVE_GROUPS`] native, then `spec`'s `group=mode`
-    /// pairs separated by commas, such as `workflow=shadow`, on top. A group
+    /// pairs separated by commas, such as `git=shadow`, on top. A group
     /// neither names is forwarded.
     pub fn new(spec: Option<&str>) -> Result<Groups, String> {
         let mut groups = Groups::parse(spec.unwrap_or(""))?;
@@ -239,10 +234,10 @@ mod tests {
         for group in NATIVE_GROUPS {
             assert_eq!(groups.mode(group), Mode::Native, "{group}");
         }
-        assert_eq!(groups.mode("workflow"), Mode::Forward);
+        assert_eq!(groups.mode("workflow"), Mode::Native);
         assert_eq!(groups.mode("task"), Mode::Forward);
-        let shadowed = Groups::new(Some("workflow=shadow,file=forward")).unwrap();
-        assert_eq!(shadowed.mode("workflow"), Mode::Shadow);
+        let shadowed = Groups::new(Some("git=shadow,file=forward")).unwrap();
+        assert_eq!(shadowed.mode("git"), Mode::Shadow);
         assert_eq!(shadowed.mode("file"), Mode::Forward);
         assert_eq!(shadowed.mode("ide"), Mode::Native);
     }

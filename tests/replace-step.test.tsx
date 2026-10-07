@@ -58,10 +58,6 @@ vi.mock('../src/renderer/components/workflow-editor/panels/WorkflowPropertiesPan
   WorkflowPropertiesPanel: () => <div data-testid="properties-panel" />
 }))
 
-vi.mock('../packages/server/src/workflows/engine', () => ({
-  executeWorkflow: vi.fn().mockResolvedValue(undefined)
-}))
-
 const workflow: WorkflowDefinition = {
   id: 'wf-replace',
   name: 'Replace me',

@@ -3,7 +3,6 @@ import os from 'node:os'
 import fs from 'node:fs'
 import log from './logger'
 import { getDefaultShell } from './process-utils'
-import { removeGateViews } from './workflows/gate-views'
 import { activeCore, nativeCore, type NativeStore, type NativeStoreClass } from './native-core'
 import type {
   ArtifactCommentChange,
@@ -598,10 +597,9 @@ export function clearScheduleLog(): void {
   return nativeCall('clearScheduleLog')
 }
 
-export function saveWorkflowRun(execution: WorkflowExecution): void {
-  const trimmed = nativeCall<string[]>('saveWorkflowRun', execution)
-  for (const id of trimmed) removeGateViews(getDataDir(), id)
-  return
+/** Writes a run; answers the ids of the runs trimmed to make room. */
+export function saveWorkflowRun(execution: WorkflowExecution): string[] {
+  return nativeCall('saveWorkflowRun', execution)
 }
 
 /** Every run id kept, so review pages of runs trimmed while the server was down can go too. */

@@ -63,6 +63,14 @@
 //!   starting on it or null when the claim is taken, and the notifications
 //!   `vornd:unclaim {sessionId, transcriptId?}`, `vornd:preparing
 //!   {sessionId}` and `vornd:prepared {sessionId}`.
+//! - The work model is vornd's ([`crate::native::work`]); the server
+//!   hands it what only it sees. `vornd:trigger {effectId, kind, task,
+//!   from?, to?}` answers `{received}`: a task created or moved, received
+//!   once by its effect id. `vornd:work {method, params}` answers
+//!   `{result?}`, a work call a client made to the server. The
+//!   notifications `vornd:signedIn {connectionId}`, after which the steps
+//!   waiting on that connection run again, and `vornd:configChanged`, after
+//!   which the scheduler reads the workflows again.
 //!
 //! A subscribed connection is also sent what vornd asks of the server
 //! ([`crate::applink`]): `vornd:broadcast {method, params}`, a notification
@@ -526,6 +534,69 @@ fn call(app: App<'_>, text: &str) {
         }
         "vornd:claim" | "vornd:unclaim" | "vornd:preparing" | "vornd:prepared" => {
             claim(link, method, &params)
+        }
+        "vornd:trigger" => match link.work() {
+            Some(work) => {
+                let (work, fwd) = (Arc::clone(work), fwd.clone());
+                tokio::spawn(async move {
+                    let received = work.trigger(&params).await;
+                    if let Some(rpc) = rpc {
+                        match received {
+                            Ok(first) => fwd.send_now(&answer(&rpc, json!({ "received": first }))),
+                            Err(e) => fwd.send_now(&refuse(&rpc, &e)),
+                        }
+                    }
+                });
+                return;
+            }
+            None => Err("vornd does not run workflows".to_owned()),
+        },
+        "vornd:signedIn" => match (
+            link.work(),
+            params.get("connectionId").and_then(Value::as_str),
+        ) {
+            (Some(work), Some(connection)) => {
+                let (work, connection) = (Arc::clone(work), connection.to_owned());
+                tokio::spawn(async move { work.signed_in(&connection).await });
+                Ok(Value::Null)
+            }
+            (None, _) => Err("vornd does not run workflows".to_owned()),
+            (_, None) => Err("vornd:signedIn needs a connectionId".to_owned()),
+        },
+        "vornd:work" => match link.work() {
+            Some(work) => {
+                let (work, fwd) = (Arc::clone(work), fwd.clone());
+                let method = params
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
+                let inner = params.get("params").cloned().unwrap_or(Value::Null);
+                tokio::spawn(async move {
+                    let answered = work.answer(&method, &inner).await;
+                    if let Some(rpc) = rpc {
+                        match answered {
+                            crate::native::Answer::Result(v) => {
+                                fwd.send_now(&answer(&rpc, json!({ "result": v })))
+                            }
+                            crate::native::Answer::Void => fwd.send_now(&answer(&rpc, json!({}))),
+                            crate::native::Answer::Error(e) => fwd.send_now(&refuse(&rpc, &e)),
+                            crate::native::Answer::Forward => fwd.send_now(&refuse(
+                                &rpc,
+                                &format!("vornd does not answer {method}"),
+                            )),
+                        }
+                    }
+                });
+                return;
+            }
+            None => Err("vornd does not run workflows".to_owned()),
+        },
+        "vornd:configChanged" => {
+            if let Some(work) = link.work() {
+                work.workflows_changed_elsewhere();
+            }
+            Ok(Value::Null)
         }
         _ => {
             if method == "vornd:spawn" {

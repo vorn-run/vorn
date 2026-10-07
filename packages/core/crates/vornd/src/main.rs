@@ -373,7 +373,8 @@ fn main() -> ExitCode {
         if let Ok(addr) = listener.local_addr() {
             daemon.set_listen_addr(addr);
         }
-        daemon.set_app_link(link);
+        daemon.set_app_link(Arc::clone(&link));
+        daemon.start_work(&link);
         proxy::log_upstream(&daemon).await;
         info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
         let mut stdout = std::io::stdout().lock();
@@ -505,7 +506,8 @@ mod tests {
         use vornd::Mode;
         let plain = parse(&["--upstream", "127.0.0.1:1"]).unwrap();
         assert_eq!(plain.groups.mode("git"), Mode::Native);
-        assert_eq!(plain.groups.mode("workflow"), Mode::Forward);
+        assert_eq!(plain.groups.mode("workflow"), Mode::Native);
+        assert_eq!(plain.groups.mode("task"), Mode::Forward);
         let shadowed = parse(&[
             "--upstream",
             "127.0.0.1:1",
