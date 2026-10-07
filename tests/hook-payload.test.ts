@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
+import { runCopilotHook } from './helpers/copilot-hook'
 import { normalizePath } from '../packages/server/src/process-utils'
 
 /**
@@ -322,15 +322,11 @@ describe('the terminal a hook names', () => {
       try {
         const hooks = JSON.parse(fs.readFileSync(installation.hooksJsonPath, 'utf-8'))
         // Not the sync form: the script posts to this process, which must stay free to answer.
-        await new Promise<void>((resolve, reject) => {
-          const child = execFile(
-            'sh',
-            ['-c', hooks.hooks.preToolUse[0].bash],
-            { env: { ...process.env, VORN_SESSION_ID: 'term-copilot' } },
-            (err) => (err ? reject(err) : resolve())
-          )
-          child.stdin?.end(JSON.stringify({ cwd: project, toolName: 'bash' }))
-        })
+        await runCopilotHook(
+          hooks.hooks.preToolUse[0].bash,
+          { VORN_SESSION_ID: 'term-copilot' },
+          JSON.stringify({ cwd: project, toolName: 'bash' })
+        )
         await until(() => seen.length === 1)
         expect(seen[0]).toMatchObject({
           session_id: installation.sessionId,

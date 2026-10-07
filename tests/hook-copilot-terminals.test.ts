@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
+import { runCopilotHook } from './helpers/copilot-hook'
 
 // Two Copilot terminals in one folder used to share, and overwrite, one hook session id.
 
@@ -92,18 +92,11 @@ async function launchCopilot(): Promise<TerminalSession> {
 function runHook(
   hooksJsonPath: string,
   event: string,
-  env: Record<string, string | undefined>
-): Promise<void> {
+  env: Record<string, string | undefined>,
+  payload: string | Buffer = JSON.stringify({ cwd: project, toolName: 'bash' })
+): Promise<NodeJS.ErrnoException | null> {
   const hooks = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf-8'))
-  return new Promise<void>((resolve, reject) => {
-    const child = execFile(
-      'sh',
-      ['-c', hooks.hooks[event][0].bash],
-      { env: { ...process.env, ...env } },
-      (err) => (err ? reject(err) : resolve())
-    )
-    child.stdin?.end(JSON.stringify({ cwd: project, toolName: 'bash' }))
-  })
+  return runCopilotHook(hooks.hooks[event][0].bash, env, payload)
 }
 
 async function until(check: () => boolean): Promise<void> {
@@ -173,6 +166,15 @@ describe.skipIf(process.platform === 'win32')('the shared Copilot hooks file', (
     await until(() => seen.length === 1)
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(seen).toEqual([expect.objectContaining({ vorn_terminal_id: 'term-x' })])
+  })
+
+  it('reads the whole event for a Copilot started outside Vorn', { timeout: 20_000 }, async () => {
+    const { hooksJsonPath } = installCopilotHooks('term-x')
+    // Larger than a pipe's buffer, so a hook that exits unread would fail the write.
+    const big = Buffer.alloc(256 * 1024, ' ')
+    expect(
+      await runHook(hooksJsonPath, 'preToolUse', { VORN_SESSION_ID: undefined }, big)
+    ).toBeNull()
   })
 
   it('is written under COPILOT_HOME when that is set', () => {
