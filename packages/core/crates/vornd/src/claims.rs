@@ -98,6 +98,13 @@ impl Claims {
         None
     }
 
+    /// Every conversation claimed now (`spawningTranscripts`).
+    pub fn held(&self, now: Instant) -> Vec<String> {
+        let mut st = self.lock();
+        evict_lapsed(&mut st, now, self.window);
+        st.spawning.keys().cloned().collect()
+    }
+
     /// The session holding `transcript`, if one does.
     pub fn holder(&self, transcript: &str, now: Instant) -> Option<String> {
         let mut st = self.lock();

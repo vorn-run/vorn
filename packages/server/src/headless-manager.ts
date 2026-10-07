@@ -23,7 +23,12 @@ import { DEFAULT_AGENT_COMMANDS } from '@vornrun/shared/agent-defaults'
 import log from './logger'
 import { holdWorkspace } from './workspace-holds'
 import { isDraining, DRAINING_MESSAGE } from './draining'
-import { vorndSessions, type SessionNote, type VorndPty } from './vornd-sessions'
+import {
+  vorndSessions,
+  type HeldSession,
+  type SessionNote,
+  type VorndPty
+} from './vornd-sessions'
 import { applyWorktreeUpdates, type WorktreeUpdates } from './worktree-moves'
 import { sessionFeed } from './session-feed'
 
@@ -71,7 +76,9 @@ class HeadlessManager extends EventEmitter {
     if (note.kind !== 'headless' || note.op !== 'upsert' || !note.record) return
     if (!vorndSessions.createsHeadless()) return
     const record = note.record as HeadlessSession
-    if (note.created) this.adoptCreated(record)
+    // One the holder still held from the last run is taken on with its
+    // states, from the subscription that lists it (`adoptHeld`).
+    if (note.created && !note.adopted) this.adoptCreated(record)
     const agent = this.inVornd.get(record.id)
     if (note.started) agent?.started(note.started.pid, note.started.epoch)
     if (note.failed !== undefined) {
@@ -96,6 +103,18 @@ class HeadlessManager extends EventEmitter {
     log.info(`[headless] vornd launched ${session.id}: ${session.launchCommand ?? ''}`)
     this.follow(session, vorndSessions.follow(session.id, true))
     this.emit('session-created', session)
+  }
+
+  /**
+   * An agent vornd still holds from this server's previous run, under the
+   * record vornd's copy carried: followed again from the start of its output,
+   * with its states told again. Not announced: it was created in that run.
+   */
+  adoptHeld(record: HeadlessSession, held: HeldSession): void {
+    if (this.sessions.has(record.id)) return
+    const session: HeadlessSession = { ...record, pid: held.pid }
+    log.info(`[headless] following ${session.id} again, held by vornd from the last run`)
+    vorndSessions.adopt(held, true, (agent) => this.follow(session, agent))
   }
 
   /**

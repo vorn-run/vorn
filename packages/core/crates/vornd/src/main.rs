@@ -254,6 +254,39 @@ fn serve_app(_: &HolderConfig, _: &Holder, _: &Arc<AppLink>) -> Option<String> {
     None
 }
 
+/// With the Native server switch on, the registry owns the session records
+/// between runs: what the last vornd wrote down is read back and offered,
+/// and this vornd writes its own down after each change. Answers the file,
+/// to write once more as vornd stops.
+#[cfg(feature = "engine")]
+fn carry_records(
+    cfg: &HolderConfig,
+    holder: &Holder,
+    native_server: bool,
+) -> Option<vornd::carry::CarryFile> {
+    if !native_server {
+        return None;
+    }
+    let engine = holder.engine()?;
+    let registry = engine.registry();
+    registry.own_records();
+    let file = vornd::carry::CarryFile::in_dir(&cfg.home.join("vornd"));
+    if let Some(carried) = file.load() {
+        let (offered, aged) = registry.carry(carried, vornd::registry::now_ms());
+        info!(offered, aged, "sessions carried over from the last run");
+        for id in registry.restored_ids() {
+            engine.streams().expect(&id);
+        }
+    }
+    tokio::spawn(vornd::carry::keep(Arc::clone(registry), file.clone()));
+    Some(file)
+}
+
+#[cfg(not(feature = "engine"))]
+fn carry_records(_: &HolderConfig, _: &Holder, _: bool) -> Option<vornd::carry::CarryFile> {
+    None
+}
+
 /// Where the app passes the desktop's launch token.
 const DESKTOP_TOKEN_VAR: &str = "VORND_DESKTOP_TOKEN";
 
@@ -307,6 +340,7 @@ fn main() -> ExitCode {
         let mut grid: Option<String> = None;
         let mut app: Option<(PathBuf, String)> = None;
         let link = Arc::new(AppLink::default());
+        let mut carry = None;
         let daemon = match args.holder {
             Some(cfg) => {
                 let home = cfg.home.clone();
@@ -317,6 +351,8 @@ fn main() -> ExitCode {
                     Err(err) => error!(%err, "could not sweep run/"),
                 }
                 let holder = Arc::new(new_holder(&cfg));
+                // Before the holder connects: what it holds is adopted then.
+                carry = carry_records(&cfg, &holder, args.groups.native_server());
                 grid = serve_grid(&cfg, &holder);
                 app = serve_app(&cfg, &holder, &link).map(|e| (cfg.home.clone(), e));
                 tokio::spawn(holder::keep(cfg, holder.clone()));
@@ -386,7 +422,13 @@ fn main() -> ExitCode {
         #[cfg(feature = "engine")]
         if let Some(engine) = kept.as_ref().and_then(|h| h.engine()) {
             engine.flush().await;
+            // The records as they stand, for the next vornd.
+            if let Some(file) = &carry {
+                vornd::carry::save_now(engine.registry(), file).await;
+            }
         }
+        #[cfg(not(feature = "engine"))]
+        drop(carry);
         drop(kept);
         info!("stopped");
         ExitCode::SUCCESS

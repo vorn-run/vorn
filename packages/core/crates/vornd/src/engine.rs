@@ -566,8 +566,23 @@ impl Engine {
             }
             let kind = if open.pty { Kind::Pty } else { Kind::Piped };
             self.journal().opened(&id, kind, info.pid);
+            // A record carried from the last run is live again under it.
+            let held = crate::registry::Held {
+                id: id.clone(),
+                kind: match kind {
+                    Kind::Pty => crate::registry::Kind::Terminal,
+                    Kind::Piped => crate::registry::Kind::Headless,
+                },
+                pid: info.pid,
+                epoch: info.epoch,
+            };
+            if self.registry.owns() && !self.registry.adopt(&held) {
+                info!(session = %id, "the holder has a session no carried record names");
+            }
             pool.open(&id, open);
         }
+        self.registry.holder_listed();
+        self.streams.holder_up();
         {
             let ids: std::collections::HashSet<String> = welcome
                 .sessions
@@ -1219,9 +1234,11 @@ impl crate::native::sessions::Host for EngineHost {
         input: crate::native::sessions::Input,
         then: crate::native::sessions::Then,
     ) {
-        use crate::native::sessions::Input;
+        use crate::native::sessions::{type_at, Input, TYPE_AT_MOST};
         let engine = Arc::clone(&self.engine);
         let asked = tokio::time::Instant::now();
+        // Taken before the spawn, so the shell's first output is not missed.
+        let mut events = engine.subscribe();
         self.runtime.spawn(async move {
             match engine.spawn_as(spec, Some(name)).await {
                 Ok(s) => {
@@ -1232,8 +1249,11 @@ impl crate::native::sessions::Host for EngineHost {
                     match input {
                         Input::None => {}
                         Input::Typed(bytes) => {
-                            tokio::time::sleep_until(asked + crate::native::sessions::TYPE_AFTER)
-                                .await;
+                            // Once the shell has drawn its prompt: typed
+                            // before that, the line is echoed twice over.
+                            let printed =
+                                first_output(&mut events, &s.id, asked + TYPE_AT_MOST).await;
+                            tokio::time::sleep_until(type_at(asked, printed)).await;
                             if let Err(err) = engine.write(&s.id, bytes) {
                                 warn!(id = %s.id, %err, "could not type the agent's launch line");
                             }
@@ -1268,6 +1288,32 @@ impl crate::native::sessions::Host for EngineHost {
             // One that ended meanwhile is not there to signal: nothing to say.
             let _ = engine.signal(&id, sig);
         });
+    }
+
+    fn expect(&self, id: &str) {
+        self.engine.streams.expect(id);
+    }
+
+    fn forget(&self, id: &str) {
+        self.engine.streams.forget(id);
+    }
+}
+
+/// When session `id` first prints, or `None` once `deadline` passes first.
+async fn first_output(
+    events: &mut broadcast::Receiver<Event>,
+    id: &str,
+    deadline: tokio::time::Instant,
+) -> Option<tokio::time::Instant> {
+    loop {
+        let next = tokio::time::timeout_at(deadline, events.recv()).await;
+        match next {
+            Ok(Ok(Event::Activity(session))) if session == id => {
+                return Some(tokio::time::Instant::now())
+            }
+            Ok(Ok(_)) | Ok(Err(broadcast::error::RecvError::Lagged(_))) => {}
+            Ok(Err(broadcast::error::RecvError::Closed)) | Err(_) => return None,
+        }
     }
 }
 

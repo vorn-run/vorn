@@ -54,6 +54,10 @@ export class FakeVornd {
   scriptError: string | null = null
   /** Called with each `vornd:script` once it is answered, to run it as vornd would. */
   onScript: ((params: Record<string, unknown>) => void) | null = null
+  /** Whether `vornd:hello` says vornd owns the session records between runs. */
+  restores = false
+  /** What `vornd:carry` answers as the number of records taken. */
+  carried = 0
   /** What `vornd:claim` answers as the holder: null for a claim taken. */
   claimHolder: string | null = null
   /** What `vornd:registry` answers. */
@@ -150,9 +154,11 @@ export class FakeVornd {
         ...(this.statuses && { statuses: true }),
         ...(this.terminals && { terminals: true }),
         ...(this.headless && { headless: true }),
-        ...(this.scripts && { scripts: this.scripts })
+        ...(this.scripts && { scripts: this.scripts }),
+        ...(this.restores && { restores: true })
       }
     } else if (msg.method === 'vornd:claim') result = { holder: this.claimHolder }
+    else if (msg.method === 'vornd:carry') result = { carried: this.carried }
     else if (msg.method === 'vornd:registry') result = this.registry
     else if (msg.method === 'vornd:subscribe') result = this.state
     else if (msg.method === 'vornd:spawn') {

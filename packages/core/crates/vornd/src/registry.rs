@@ -45,6 +45,18 @@
 //! so an upsert the server sent before it heard does not bring it back. The
 //! workspaces vornd holds while it prepares a session are told beside the
 //! server's own, as `nativeHolds`.
+//!
+//! With the switch on the registry also owns the records between runs
+//! ([`Registry::own_records`]): what it holds is written down
+//! ([`crate::carry`]) and read back when vornd starts. A record read back is
+//! carried ([`Registry::carry`]): a terminal the session holder still holds
+//! is adopted as live when the holder says so ([`Registry::adopt`]), told as
+//! a terminal vornd made (`adopted`); any other becomes a session a previous
+//! run left (`restored`, the server's `RestoredSession`), listed by
+//! `sessions:restored` and started again under its id by `sessions:resume`
+//! ([`Registry::resume`]). The server's snapshot then adds to the registry
+//! rather than replacing it, and its own list of restored sessions is not
+//! taken: vornd's is the one there is.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
@@ -319,6 +331,50 @@ pub struct HeadlessSession {
     pub other: Map<String, Value>,
 }
 
+/// A session a previous run left, offered to start again under its id
+/// (`RestoredSession` in packages/shared, less what every one says the
+/// same: nothing was replayed, and it was not closed cleanly).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Restored {
+    pub session: TerminalSession,
+    /// Roughly when it ended: the last save of the run that held it.
+    pub ended_at: i64,
+    /// What is there now against what was recorded, once looked at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Value>,
+}
+
+/// How long a session a previous run left is offered, from when it was
+/// last written down (`MAX_RESTORED_AGE_MS`).
+pub const MAX_RESTORED_AGE_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+/// The records as vornd writes them down between runs ([`crate::carry`]):
+/// every terminal held, the headless agents still running, the order, and
+/// the sessions of earlier runs still offered.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Carried {
+    #[serde(default)]
+    pub terminals: Vec<TerminalSession>,
+    #[serde(default)]
+    pub headless: Vec<HeadlessSession>,
+    #[serde(default)]
+    pub order: Vec<String>,
+    #[serde(default)]
+    pub restored: Vec<Restored>,
+}
+
+/// A session the holder held when vornd connected, as [`Registry::adopt`]
+/// takes it on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Held {
+    pub id: String,
+    pub kind: Kind,
+    pub pid: u32,
+    pub epoch: u32,
+}
+
 /// What a record kind has in common for the registry: an id, a status and
 /// an exit that an older stamp must not overwrite, and the revision it is
 /// told with.
@@ -590,6 +646,9 @@ pub enum Change {
     Holds(BTreeMap<String, u32>),
     /// Everything, as the server holds it when it connects.
     Snapshot(Snapshot),
+    /// The sessions of earlier runs the server still offers to resume. Not
+    /// taken while vornd owns the records: its own list is the one there is.
+    Restored(Vec<Restored>),
 }
 
 /// A record of either kind.
@@ -610,6 +669,9 @@ pub struct Snapshot {
     /// The terminals whose programs ended, as [`Change::Upsert`]'s `ended`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ended: Vec<String>,
+    /// The sessions of earlier runs still offered, as [`Change::Restored`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub restored: Vec<Restored>,
 }
 
 /// Why a `vornd:record` note was not taken.
@@ -669,6 +731,7 @@ struct Wire {
     ended: Option<Value>,
     terminals: Option<Vec<TerminalSession>>,
     headless: Option<Vec<HeadlessSession>>,
+    restored: Option<Vec<Restored>>,
 }
 
 impl TryFrom<&Value> for Change {
@@ -719,7 +782,9 @@ impl TryFrom<&Value> for Change {
                     None | Some(Value::Null) => Vec::new(),
                     Some(ids) => Vec::deserialize(ids).map_err(|e| bad(e.to_string()))?,
                 },
+                restored: w.restored.unwrap_or_default(),
             }),
+            "restored" => Change::Restored(w.restored.ok_or_else(|| missing("restored"))?),
             other => return Err(bad(format!("unknown op `{other}`"))),
         })
     }
@@ -840,6 +905,19 @@ pub struct Registry {
     closed: HashSet<String>,
     /// Set while the registry decides the terminals' statuses.
     statuses: Option<Statuses>,
+    /// The sessions of earlier runs still offered to resume.
+    restored: Vec<Restored>,
+    /// Headless agents read back that were running: adopted if the holder
+    /// still has them, dropped once it has said what it holds.
+    pending_headless: Vec<HeadlessSession>,
+    /// The order the terminals read back were listed in, for the ones the
+    /// holder still has.
+    carried_order: Vec<String>,
+    /// Whether vornd owns the records between runs ([`Registry::own_records`]).
+    owned: bool,
+    /// When this machine came up, as the server told it: a session that ended
+    /// before then was interrupted by the machine going down.
+    boot_time: i64,
 }
 
 impl Registry {
@@ -855,6 +933,11 @@ impl Registry {
             own_holds: BTreeMap::new(),
             closed: HashSet::new(),
             statuses: None,
+            restored: Vec::new(),
+            pending_headless: Vec::new(),
+            carried_order: Vec::new(),
+            owned: false,
+            boot_time: 0,
         }
     }
 
@@ -896,6 +979,8 @@ impl Registry {
                     Session::Terminal(r) if self.closed.contains(&r.id) => return None,
                     Session::Terminal(r) => {
                         let id = r.id.clone();
+                        // The server holds it: it is no longer only offered.
+                        self.restored.retain(|o| o.session.id != id);
                         match self.terminals.upsert(r, at, ended, decided, next) {
                             Upserted::Unchanged => return None,
                             Upserted::Created => self.seed(&id),
@@ -950,6 +1035,18 @@ impl Registry {
                 self.holds = holds;
                 self.holds_fields()
             }
+            Change::Restored(list) => {
+                if self.owned || list == self.restored {
+                    return None;
+                }
+                self.restored = list;
+                self.rev = next;
+                let fields = json!({ "op": "restored", "restored": self.restored() });
+                return Some(self.note(fields));
+            }
+            Change::Snapshot(s) if self.owned => {
+                return Some(self.merge_snapshot(s, next, decided))
+            }
             Change::Snapshot(mut s) => {
                 // A terminal vornd closed stays closed; one the server no
                 // longer has, it has let go of.
@@ -976,6 +1073,7 @@ impl Registry {
                 }
                 self.order = s.order;
                 self.holds = s.holds;
+                self.restored = s.restored;
                 self.rev = next;
                 let mut note = self.snapshot();
                 note["op"] = json!("snapshot");
@@ -984,6 +1082,55 @@ impl Registry {
         };
         self.rev = next;
         Some(self.note(fields))
+    }
+
+    /// The server's snapshot while vornd owns the records: what the server
+    /// holds is put in or changed, and nothing it lacks goes, since a server
+    /// that has just connected has not heard of the terminals vornd carried
+    /// yet. Its order comes first, then the terminals it does not name as
+    /// they were. Its restored sessions are not taken.
+    fn merge_snapshot(&mut self, s: Snapshot, next: Rev, decided: bool) -> Value {
+        for t in s.terminals {
+            if self.closed.contains(&t.id) {
+                continue;
+            }
+            let id = t.id.clone();
+            self.restored.retain(|o| o.session.id != id);
+            let ended = s.ended.contains(&id);
+            if self
+                .terminals
+                .upsert(t, Stamps::default(), ended, decided, next)
+                == Upserted::Created
+            {
+                self.seed(&id);
+            }
+            if ended {
+                self.quiet(&id);
+            }
+        }
+        for h in s.headless {
+            let id = h.id.clone();
+            let ended = h.status == HeadlessStatus::Exited;
+            if self
+                .headless
+                .upsert(h, Stamps::default(), ended, decided, next)
+                == Upserted::Created
+            {
+                self.seed_headless(&id);
+            }
+        }
+        let mut order = s.order;
+        for id in &self.order {
+            if !order.contains(id) {
+                order.push(id.clone());
+            }
+        }
+        self.order = order;
+        self.holds = s.holds;
+        self.rev = next;
+        let mut note = self.snapshot();
+        note["op"] = json!("snapshot");
+        note
     }
 
     /// A note at the current revision, with `fields` after the generation and
@@ -1294,6 +1441,9 @@ impl Registry {
         });
         if !self.own_holds.is_empty() {
             snapshot["nativeHolds"] = json!(self.own_holds);
+        }
+        if !self.restored.is_empty() {
+            snapshot["restored"] = json!(self.restored());
         }
         snapshot
     }
@@ -1630,6 +1780,283 @@ impl Registry {
     }
 }
 
+/// The records vornd owns between runs, with the Native server switch on:
+/// what is carried from the last run, which of it the session holder still
+/// has, the sessions offered to resume, and resuming one.
+impl Registry {
+    /// Owns the records from now on: what is read back is carried, the
+    /// server's snapshot adds to the registry rather than replacing it, and
+    /// its list of restored sessions is not taken. It cannot be undone.
+    pub fn own_records(&mut self) {
+        self.owned = true;
+    }
+
+    pub fn owns(&self) -> bool {
+        self.owned
+    }
+
+    /// When this machine came up, as the server works it out.
+    pub fn set_boot_time(&mut self, at: i64) {
+        self.boot_time = at;
+    }
+
+    /// Everything to write down for the next run: every terminal, stamped
+    /// as saved at `now`, the headless agents still running, the order,
+    /// and the sessions still offered.
+    pub fn carried(&self, now: i64) -> Carried {
+        Carried {
+            terminals: self
+                .terminals
+                .records()
+                .map(|t| TerminalSession {
+                    saved_at: Some(now),
+                    ..t.clone()
+                })
+                .collect(),
+            headless: self
+                .headless
+                .records()
+                .filter(|h| h.status == HeadlessStatus::Running)
+                .cloned()
+                .collect(),
+            order: self.order.clone(),
+            restored: self.restored.clone(),
+        }
+    }
+
+    /// Takes what the last run wrote down, at `now`. Every terminal is
+    /// offered to resume unless it was written down more than
+    /// [`MAX_RESTORED_AGE_MS`] ago, as are the sessions that run was still
+    /// offering; the holder then says which it still has
+    /// ([`Registry::adopt`]). Answers how many are offered and how many
+    /// aged out.
+    pub fn carry(&mut self, c: Carried, now: i64) -> (usize, usize) {
+        let mut aged = 0;
+        let mut offered: Vec<Restored> = Vec::with_capacity(c.terminals.len() + c.restored.len());
+        let fresh = |ended_at: i64| now - ended_at <= MAX_RESTORED_AGE_MS;
+        for t in c.terminals {
+            let ended_at = t.saved_at.unwrap_or(t.created_at);
+            if !fresh(ended_at) {
+                aged += 1;
+                continue;
+            }
+            offered.push(Restored {
+                session: t,
+                ended_at,
+                environment: None,
+            });
+        }
+        for r in c.restored {
+            if offered.iter().any(|o| o.session.id == r.session.id) {
+                continue;
+            }
+            if !fresh(r.ended_at) {
+                aged += 1;
+                continue;
+            }
+            offered.push(r);
+        }
+        self.pending_headless = c
+            .headless
+            .into_iter()
+            .filter(|h| h.status == HeadlessStatus::Running)
+            .collect();
+        self.carried_order = c.order;
+        self.restored = offered;
+        (self.restored.len(), aged)
+    }
+
+    /// A session the holder held when vornd connected: the record its id
+    /// names is live again, told as a terminal or agent vornd made
+    /// (`created`, `adopted`, `started`). Nothing for an id no record names.
+    pub fn adopt(&mut self, held: &Held) -> Vec<Value> {
+        if !self.owned {
+            return Vec::new();
+        }
+        let next = Rev(self.rev.0 + 1);
+        let started = json!({ "created": true, "adopted": true, "started": { "pid": held.pid, "epoch": held.epoch } });
+        match held.kind {
+            Kind::Terminal => {
+                let Some(at) = self.restored.iter().position(|r| r.session.id == held.id) else {
+                    return Vec::new();
+                };
+                let record = TerminalSession {
+                    pid: held.pid,
+                    status: AgentStatus::Running,
+                    shell_exit_code: None,
+                    saved_at: None,
+                    rev: None,
+                    status_at: None,
+                    exit_at: None,
+                    ..self.restored.remove(at).session
+                };
+                self.closed.remove(&held.id);
+                self.terminals
+                    .upsert(record, Stamps::default(), false, true, next);
+                self.seed(&held.id);
+                let mut notes = Vec::with_capacity(2);
+                notes.extend(self.native_upsert(&held.id, started));
+                self.place_carried(&held.id);
+                let order = json!({ "op": "order", "order": self.order });
+                notes.push(self.native_note(order));
+                notes
+            }
+            Kind::Headless => {
+                let Some(at) = self.pending_headless.iter().position(|h| h.id == held.id) else {
+                    return Vec::new();
+                };
+                let record = HeadlessSession {
+                    pid: held.pid,
+                    rev: None,
+                    exit_at: None,
+                    ..self.pending_headless.remove(at)
+                };
+                self.headless
+                    .upsert(record, Stamps::default(), false, true, next);
+                self.seed_headless(&held.id);
+                self.native_upsert_headless(&held.id, started)
+                    .into_iter()
+                    .collect()
+            }
+        }
+    }
+
+    /// Puts an adopted terminal where the last run listed it, among the
+    /// terminals adopted before it; one the last run did not list goes last.
+    fn place_carried(&mut self, id: &str) {
+        let rank = |id: &str| {
+            self.carried_order
+                .iter()
+                .position(|o| o == id)
+                .unwrap_or(usize::MAX)
+        };
+        let mine = rank(id);
+        let at = self
+            .order
+            .iter()
+            .position(|o| rank(o) > mine)
+            .unwrap_or(self.order.len());
+        self.order.insert(at, id.to_owned());
+    }
+
+    /// The holder has said what it holds: the headless agents read back
+    /// that it no longer has are let go of.
+    pub fn holder_listed(&mut self) {
+        self.pending_headless.clear();
+    }
+
+    /// The sessions still offered, as `sessions:restored` lists them.
+    pub fn restored(&self) -> Vec<Value> {
+        self.restored
+            .iter()
+            .map(|r| {
+                let mut v = json!({
+                    "session": r.session,
+                    "endedAt": r.ended_at,
+                    "replayable": false,
+                    "partial": false,
+                    "closedCleanly": false,
+                    "rebooted": r.ended_at < self.boot_time,
+                });
+                if let Some(env) = &r.environment {
+                    v["environment"] = env.clone();
+                }
+                v
+            })
+            .collect()
+    }
+
+    /// The offered sessions as they are now, at the next revision.
+    fn restored_note(&mut self) -> Value {
+        let fields = json!({ "op": "restored", "restored": self.restored() });
+        self.native_note(fields)
+    }
+
+    /// Takes the offered session `id`, once, with the note; `None` when it
+    /// is not offered, which the second of two clients to ask is told.
+    pub fn consume_restored(&mut self, id: &str) -> Option<(Restored, Value)> {
+        let at = self.restored.iter().position(|r| r.session.id == id)?;
+        let taken = self.restored.remove(at);
+        Some((taken, self.restored_note()))
+    }
+
+    /// Offers `r` again, because what it was taken for did not happen.
+    pub fn restore_held(&mut self, r: Restored) -> Value {
+        self.restored.retain(|o| o.session.id != r.session.id);
+        self.restored.push(r);
+        self.restored_note()
+    }
+
+    /// Declines every offered session at once.
+    pub fn consume_all_restored(&mut self) -> (Vec<Restored>, Value) {
+        let all = std::mem::take(&mut self.restored);
+        (all, self.restored_note())
+    }
+
+    /// What is there now for offered session `id`, once looked at.
+    pub fn set_environment(&mut self, id: &str, environment: Value) -> Option<Value> {
+        let r = self.restored.iter_mut().find(|r| r.session.id == id)?;
+        r.environment = Some(environment);
+        Some(self.restored_note())
+    }
+
+    /// The terminal `id` names whose program ended during this run: what
+    /// `sessions:resume` starts again when no offered session goes by the id.
+    pub fn ended_terminal(&self, id: &str) -> Option<&TerminalSession> {
+        self.terminals
+            .get(id)
+            .filter(|r| r.ended)
+            .map(|r| &r.record)
+    }
+
+    /// Lets go of the ended terminal `id` whose conversation runs elsewhere
+    /// (`releaseForResume`): the record goes, told `released` so the server
+    /// lets go of it as quietly.
+    pub fn release_for_resume(&mut self, id: &str) -> Vec<Value> {
+        if !self.terminals.remove(id) {
+            return Vec::new();
+        }
+        self.quiet(id);
+        let mut notes = Vec::with_capacity(2);
+        let removed = json!({ "op": "remove", "kind": Kind::Terminal, "id": id, "released": true });
+        notes.push(self.native_note(removed));
+        if self.order.iter().any(|o| o == id) {
+            self.order.retain(|o| o != id);
+            let order = json!({ "op": "order", "order": self.order });
+            notes.push(self.native_note(order));
+        }
+        notes
+    }
+
+    /// Starts terminal `record.id` again under its id: the record replaces
+    /// the one the id names, if any, last in the order, told as a terminal
+    /// vornd made (`created`, `resumed`). Its program is not up yet:
+    /// [`Registry::started`] or [`Registry::failed`] says how that went.
+    pub fn resume(&mut self, record: TerminalSession) -> Result<Vec<Value>, RegistryError> {
+        if !self.decides() {
+            return Err(RegistryError::NotDeciding {
+                call: "sessions:resume",
+            });
+        }
+        let id = record.id.clone();
+        self.terminals.remove(&id);
+        self.quiet(&id);
+        self.closed.remove(&id);
+        self.restored.retain(|r| r.session.id != id);
+        let next = Rev(self.rev.0 + 1);
+        self.terminals
+            .upsert(record, Stamps::default(), false, true, next);
+        self.seed(&id);
+        let mut notes = Vec::with_capacity(2);
+        notes.extend(self.native_upsert(&id, json!({ "created": true, "resumed": true })));
+        self.order.retain(|o| o != &id);
+        self.order.push(id);
+        let order = json!({ "op": "order", "order": self.order });
+        notes.push(self.native_note(order));
+        Ok(notes)
+    }
+}
+
 /// Marks a headless agent's record exited with `code` at `at` (none for a
 /// program that never started), unless it ended so already or `at` is
 /// older than the exit it holds. Answers whether the record changed.
@@ -1646,7 +2073,7 @@ fn end_headless(row: &mut Row<HeadlessSession>, code: i32, at: Option<Stamp>) ->
     true
 }
 
-fn now_ms() -> i64 {
+pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
@@ -1851,6 +2278,88 @@ impl SessionRegistry {
         fed.feeder.is_some().then(|| f(&fed.registry))
     }
 
+    /// Owns the records between runs ([`Registry::own_records`]).
+    pub fn own_records(&self) {
+        self.lock().registry.own_records();
+    }
+
+    pub fn owns(&self) -> bool {
+        self.lock().registry.owns()
+    }
+
+    /// [`Registry::carry`], before anything is fed or subscribed.
+    pub fn carry(&self, c: Carried, now: i64) -> (usize, usize) {
+        self.lock().registry.carry(c, now)
+    }
+
+    /// The server's records of its last run, taken as what is carried when
+    /// vornd owns the records and has nothing carried of its own yet.
+    /// Answers how many are offered.
+    pub fn carry_once(&self, terminals: Vec<TerminalSession>, now: i64) -> usize {
+        let mut fed = self.lock();
+        let r = &mut fed.registry;
+        if !r.owns() || !r.restored.is_empty() {
+            return 0;
+        }
+        let carried = Carried {
+            terminals,
+            ..Carried::default()
+        };
+        let (offered, _) = r.carry(carried, now);
+        let note = r.restored_note();
+        self.tell([note]);
+        offered
+    }
+
+    /// The ids of the sessions still offered.
+    pub fn restored_ids(&self) -> Vec<String> {
+        self.lock()
+            .registry
+            .restored
+            .iter()
+            .map(|r| r.session.id.clone())
+            .collect()
+    }
+
+    /// [`Registry::adopt`], and tells subscribers.
+    pub fn adopt(&self, held: &Held) -> bool {
+        let mut fed = self.lock();
+        let notes = fed.registry.adopt(held);
+        let adopted = !notes.is_empty();
+        self.tell(notes);
+        adopted
+    }
+
+    /// [`Registry::holder_listed`].
+    pub fn holder_listed(&self) {
+        self.lock().registry.holder_listed();
+    }
+
+    /// [`Registry::carried`], while vornd owns the records; `None` otherwise.
+    pub fn carried(&self, now: i64) -> Option<Carried> {
+        let fed = self.lock();
+        fed.registry.owns().then(|| fed.registry.carried(now))
+    }
+
+    /// [`Registry::set_boot_time`].
+    pub fn set_boot_time(&self, at: i64) {
+        self.lock().registry.set_boot_time(at);
+    }
+
+    /// The sessions still offered ([`Registry::restored`]): vornd's own
+    /// list while it owns the records, else the server's copy once fed.
+    pub fn restored(&self) -> Option<Vec<Value>> {
+        let fed = self.lock();
+        (fed.registry.owns() || fed.feeder.is_some()).then(|| fed.registry.restored())
+    }
+
+    /// [`Registry::set_environment`], and tells subscribers.
+    pub fn set_environment(&self, id: &str, environment: Value) {
+        let mut fed = self.lock();
+        let note = fed.registry.set_environment(id, environment);
+        self.tell(note);
+    }
+
     /// For `/vornd/health`: where the registry stands, without its records.
     pub fn report(&self) -> Value {
         let fed = self.lock();
@@ -1859,8 +2368,10 @@ impl SessionRegistry {
             "rev": fed.registry.rev,
             "fed": fed.feeder.is_some(),
             "decides": fed.registry.decides(),
+            "owns": fed.registry.owns(),
             "terminals": fed.registry.terminals.rows.len(),
             "headless": fed.registry.headless.rows.len(),
+            "restored": fed.registry.restored.len(),
         })
     }
 }
@@ -2726,5 +3237,261 @@ mod tests {
             .apply(headless_upsert(told, json!({ "ended": true })))
             .is_none());
         assert_eq!(r.snapshot()["headless"].as_array().unwrap().len(), 2);
+    }
+
+    fn carried_shell(id: &str, saved_at: i64) -> TerminalSession {
+        serde_json::from_value(json!({
+            "id": id, "agentType": "shell", "projectName": "p", "projectPath": "/p",
+            "status": "idle", "createdAt": 1, "pid": 9, "displayName": "Build",
+            "groupId": "g", "shellExitCode": 3, "savedAt": saved_at,
+        }))
+        .unwrap()
+    }
+
+    fn owning() -> Registry {
+        let mut r = deciding();
+        r.own_records();
+        r
+    }
+
+    #[test]
+    fn carries_the_last_runs_records_and_adopts_what_the_holder_still_holds() {
+        let mut r = Registry::new(Gen(1));
+        r.decide_statuses();
+        r.own_records();
+        r.set_boot_time(500);
+        let running = HeadlessSession::deserialize(&headless("h")).unwrap();
+        let mut exited = HeadlessSession::deserialize(&headless("x")).unwrap();
+        exited.status = HeadlessStatus::Exited;
+        let carried = Carried {
+            terminals: vec![carried_shell("a", 900), carried_shell("b", 100)],
+            headless: vec![running, exited],
+            order: vec!["b".into(), "a".into()],
+            restored: vec![
+                Restored {
+                    session: carried_shell("old", 1),
+                    ended_at: 1_000 - MAX_RESTORED_AGE_MS - 1,
+                    environment: None,
+                },
+                Restored {
+                    session: carried_shell("c", 950),
+                    ended_at: 950,
+                    environment: Some(json!({ "worktree": "ok" })),
+                },
+            ],
+        };
+        assert_eq!(r.carry(carried, 1_000), (3, 1));
+        // Offered, oldest run's record aged out, nothing live yet.
+        let offered = r.restored();
+        let ids: Vec<&str> = offered
+            .iter()
+            .map(|o| o["session"]["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+        assert_eq!(offered[0]["endedAt"], 900);
+        assert_eq!(offered[0]["rebooted"], false);
+        assert_eq!(offered[1]["rebooted"], true);
+        assert_eq!(offered[2]["environment"], json!({ "worktree": "ok" }));
+        assert_eq!(
+            (
+                offered[0]["replayable"].clone(),
+                offered[0]["closedCleanly"].clone()
+            ),
+            (json!(false), json!(false))
+        );
+        assert!(r.terminals().is_empty());
+        let agents = r.headless().count();
+
+        // The holder still has b and the running agent: live again, b where
+        // the last run listed it, as a terminal vornd made.
+        let notes = r.adopt(&Held {
+            id: "b".into(),
+            kind: Kind::Terminal,
+            pid: 42,
+            epoch: 2,
+        });
+        assert_eq!(notes.len(), 2);
+        assert_eq!(
+            (notes[0]["created"].clone(), notes[0]["adopted"].clone()),
+            (json!(true), json!(true))
+        );
+        assert_eq!(notes[0]["started"], json!({ "pid": 42, "epoch": 2 }));
+        let b = &notes[0]["record"];
+        assert_eq!(
+            (b["status"].clone(), b["pid"].clone(), b["groupId"].clone()),
+            (json!("running"), json!(42), json!("g"))
+        );
+        assert!(b.get("shellExitCode").is_none() && b.get("savedAt").is_none());
+        assert_eq!(notes[1]["order"], json!(["b"]));
+        let notes = r.adopt(&Held {
+            id: "a".into(),
+            kind: Kind::Terminal,
+            pid: 43,
+            epoch: 2,
+        });
+        assert_eq!(notes[1]["order"], json!(["b", "a"]));
+        let notes = r.adopt(&Held {
+            id: "h".into(),
+            kind: Kind::Headless,
+            pid: 44,
+            epoch: 2,
+        });
+        assert_eq!(notes.len(), 1);
+        assert_eq!(
+            (notes[0]["kind"].clone(), notes[0]["adopted"].clone()),
+            (json!("headless"), json!(true))
+        );
+        assert_eq!(notes[0]["record"]["pid"], 44);
+        assert_eq!(r.headless().count(), agents + 1);
+        // One no record names, and one the holder does not hold once it has
+        // said what it holds.
+        assert!(r
+            .adopt(&Held {
+                id: "z".into(),
+                kind: Kind::Terminal,
+                pid: 1,
+                epoch: 1
+            })
+            .is_empty());
+        r.holder_listed();
+        assert!(r
+            .adopt(&Held {
+                id: "x".into(),
+                kind: Kind::Headless,
+                pid: 1,
+                epoch: 1
+            })
+            .is_empty());
+        assert_eq!(r.restored().len(), 1);
+        assert_eq!(r.snapshot()["restored"].as_array().unwrap().len(), 1);
+        // Written down again: the live ones stamped now, the offered one as it was.
+        let again = r.carried(2_000);
+        assert_eq!(
+            again
+                .terminals
+                .iter()
+                .map(|t| (t.id.as_str(), t.saved_at))
+                .collect::<Vec<_>>(),
+            [("b", Some(2_000)), ("a", Some(2_000))]
+        );
+        assert_eq!(again.headless.len(), 1);
+        assert_eq!(again.order, ["b", "a"]);
+        assert_eq!(again.restored[0].session.id, "c");
+        // Not owning: nothing is adopted.
+        let mut other = deciding();
+        other.carry(
+            Carried {
+                terminals: vec![carried_shell("q", 1)],
+                ..Carried::default()
+            },
+            2,
+        );
+        assert!(other
+            .adopt(&Held {
+                id: "q".into(),
+                kind: Kind::Terminal,
+                pid: 1,
+                epoch: 1
+            })
+            .is_empty());
+    }
+
+    #[test]
+    fn the_servers_snapshot_adds_to_owned_records_and_its_offers_are_not_taken() {
+        let mut r = owning();
+        r.carry(
+            Carried {
+                terminals: vec![carried_shell("a", 1), carried_shell("b", 1)],
+                ..Carried::default()
+            },
+            2,
+        );
+        r.adopt(&Held {
+            id: "a".into(),
+            kind: Kind::Terminal,
+            pid: 1,
+            epoch: 1,
+        });
+        // A server that has just connected: a shell of its own, and a list
+        // of offered sessions of its own.
+        let note = r
+            .apply(change(json!({
+                "op": "snapshot", "terminals": [terminal("sh")], "headless": [], "order": ["sh"],
+                "restored": [{ "session": terminal("srv"), "endedAt": 1 }],
+            })))
+            .unwrap();
+        assert_eq!(ids(&r), ["sh", "a"]);
+        assert_eq!(note["restored"].as_array().unwrap().len(), 1);
+        assert_eq!(note["restored"][0]["session"]["id"], "b");
+        assert!(r
+            .apply(change(json!({ "op": "restored", "restored": [] })))
+            .is_none());
+        assert_eq!(r.restored().len(), 1);
+        // The server holds b now: it is no longer only offered.
+        r.apply(upsert(terminal("b"))).unwrap();
+        assert!(r.restored().is_empty());
+        // One that does not own the records takes the server's offers.
+        let mut other = deciding();
+        let note = other
+            .apply(change(json!({ "op": "restored", "restored": [{ "session": terminal("srv"), "endedAt": 7, "rebooted": true }] })))
+            .unwrap();
+        assert_eq!(note["op"], "restored");
+        assert_eq!(other.restored()[0]["endedAt"], 7);
+        other
+            .apply(change(
+                json!({ "op": "snapshot", "terminals": [], "headless": [] }),
+            ))
+            .unwrap();
+        assert!(other.restored().is_empty());
+    }
+
+    #[test]
+    fn resumes_a_terminal_under_its_id_and_takes_an_offer_once() {
+        let mut r = owning();
+        r.apply(change(json!({ "op": "order", "order": ["a", "b", "sh"] })))
+            .unwrap();
+        let mut ended = agent("b");
+        ended["status"] = json!("idle");
+        r.apply(change(
+            json!({ "op": "upsert", "kind": "terminal", "record": ended, "ended": true }),
+        ))
+        .unwrap();
+        assert_eq!(r.ended_terminal("b").map(|t| t.id.as_str()), Some("b"));
+        assert!(r.ended_terminal("a").is_none());
+        let notes = r.resume(record("b")).unwrap();
+        assert_eq!(notes.len(), 2);
+        assert_eq!(
+            (notes[0]["created"].clone(), notes[0]["resumed"].clone()),
+            (json!(true), json!(true))
+        );
+        assert_eq!(notes[1]["order"], json!(["a", "sh", "b"]));
+        assert!(r.ended_terminal("b").is_none());
+        assert!(r.live_terminals().any(|t| t.id == "b"));
+
+        r.carry(
+            Carried {
+                terminals: vec![carried_shell("o", 1)],
+                ..Carried::default()
+            },
+            2,
+        );
+        let (taken, note) = r.consume_restored("o").unwrap();
+        assert_eq!(taken.session.id, "o");
+        assert_eq!(note["restored"], json!([]));
+        assert!(r.consume_restored("o").is_none());
+        let note = r.restore_held(taken);
+        assert_eq!(note["restored"][0]["session"]["id"], "o");
+        let (all, note) = r.consume_all_restored();
+        assert_eq!((all.len(), note["restored"].clone()), (1, json!([])));
+        // Let go of for a conversation running elsewhere: quietly.
+        let notes = r.release_for_resume("sh");
+        assert_eq!(
+            (notes[0]["op"].clone(), notes[0]["released"].clone()),
+            (json!("remove"), json!(true))
+        );
+        assert_eq!(notes[1]["order"], json!(["a", "b"]));
+        assert!(r.release_for_resume("sh").is_empty());
+        // Not deciding: a resume is the server's.
+        assert!(Registry::new(Gen(1)).resume(record("x")).is_err());
     }
 }

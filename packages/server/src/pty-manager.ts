@@ -267,7 +267,10 @@ class PtyManager extends EventEmitter {
     if (!vorndSessions.createsTerminals()) return
     if (note.op === 'upsert' && note.kind === 'terminal' && note.record) {
       const id = note.record.id
-      if (note.created) this.adoptCreated(note.record as TerminalSession)
+      // One the holder still held from the last run is taken on with its
+      // states, from the subscription that lists it (`takeOnHeld`).
+      if (note.created && note.resumed) this.adoptResumed(note.record as TerminalSession)
+      else if (note.created && !note.adopted) this.adoptCreated(note.record as TerminalSession)
       if (note.started) this.ptys.get(id)?.started(note.started.pid, note.started.epoch)
       if (note.failed !== undefined) {
         log.warn({ id, why: note.failed }, '[pty] vornd could not start this session')
@@ -276,7 +279,8 @@ class PtyManager extends EventEmitter {
       const moved = note.moved ? this.sessions.get(id) : undefined
       if (moved) this.worktreeMoved(moved, note.record)
     } else if (note.op === 'remove' && note.kind === 'terminal' && note.id) {
-      this.closedByVornd(note.id)
+      if (note.released) this.letGo(note.id)
+      else this.closedByVornd(note.id)
     } else if (note.op === 'order' && note.reordered && note.order) {
       this.sessionOrder = [...note.order]
       this.orderChanged()
@@ -312,6 +316,30 @@ class PtyManager extends EventEmitter {
       projectPath: session.projectPath
     } as CreateTerminalPayload
     this.emit('session-created', session, payload)
+  }
+
+  /**
+   * A terminal vornd started again under the id it had, for a client's
+   * `sessions:resume`: the record it replaces goes without a word, as
+   * `releaseForResume` lets one go, and the new one is taken on as a terminal
+   * vornd created. Nothing is told the copy: it made the change.
+   */
+  private adoptResumed(record: TerminalSession): void {
+    this.letGo(record.id)
+    this.adoptCreated(record)
+  }
+
+  /**
+   * Let go of a record whose session starts again or runs elsewhere: the maps
+   * only, without an exit or a word to the copy, which let go of it first.
+   */
+  private letGo(id: string): void {
+    this.sessions.delete(id)
+    this.heads.forget(id)
+    this.normalizedPaths.delete(id)
+    this.clearSessionTracking(id)
+    this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
+    this.ptys.delete(id)
   }
 
   /**

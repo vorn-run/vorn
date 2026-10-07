@@ -21,15 +21,25 @@
 //! ([`crate::claims`]). Nothing new is started while the server is winding
 //! down (`vornd:draining`).
 //!
+//! While vornd owns the records between runs ([`crate::applink::AppLink::restores`])
+//! it also answers `sessions:restored`, `sessions:resume` and
+//! `sessions:clear`, and a `terminal:kill` of a session of an earlier run,
+//! as the server's handlers do: a resume takes the offered session once,
+//! hands back the terminal already writing its conversation if one is, or
+//! starts a shell where the session was, or the agent on the conversation
+//! it had, under the same id ([`resume`]). The launch line is typed once
+//! the shell has drawn its prompt ([`type_at`]).
+//!
 //! The server keeps a call vornd cannot answer as it would: one for a
 //! remote host, one whose params are not the shape its handler reads, one
-//! naming a terminal the registry does not hold (a session carried over from
-//! a previous run), and every call while the registry does not hold the
-//! server's records or vornd's session holder is not connected.
+//! naming a terminal the registry does not hold, and every call while the
+//! registry does not hold the server's records or vornd's session holder
+//! is not connected.
 //!
-//! In shadow mode nothing here changes anything: a create is compared with
-//! the server's as the spawn each would ask for ([`plan`]), and the other
-//! calls as what each would answer ([`foresee`]), read from the copy.
+//! In shadow mode nothing here changes anything: a create or a resume is
+//! compared with the server's as the spawn each would ask for ([`plan`]),
+//! and the other calls as what each would answer ([`foresee`]), read from
+//! the copy.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -39,6 +49,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 use tracing::warn;
+use vorn_agents::history::{recent_sessions_for, Homes, ProjectScope, RecentSession};
 use vorn_agents::launch::shell as launch_shell;
 use vorn_agents::launch::{
     display_name_from_prompt, launch_line, LaunchRequest, Machine, Platform, Quoting,
@@ -49,7 +60,11 @@ use vorn_sessiond_wire::{Io, Sig, SpawnSpec};
 
 use super::{agent, headless, shell, Answer, Native};
 use crate::claims::{Claims, OnePerKey};
-use crate::registry::{AgentStatus, Registry, TerminalSession};
+use crate::registry::{AgentStatus, HeadlessStatus, Registry, Restored, TerminalSession};
+
+/// How many of an agent's past sessions a resume looks through for the
+/// conversation to continue (`getRecentSessionsFor`).
+const RECENT_LIMIT: usize = 20;
 
 /// The size a terminal starts at, before any client has fitted it.
 pub const INITIAL_COLS: u16 = 80;
@@ -57,10 +72,6 @@ pub const INITIAL_ROWS: u16 = 24;
 
 /// The terminal type programs are told they run in, off Windows.
 const PTY_TERM: &str = "xterm-256color";
-
-/// How long after a create the agent's launch line is typed into its
-/// shell, as the server waits.
-pub const TYPE_AFTER: Duration = Duration::from_millis(300);
 
 /// How long a create naming a conversation that a start of the server's
 /// holds waits for it before it says the conversation is busy, and how
@@ -109,6 +120,43 @@ pub trait Host: Send + Sync + fmt::Debug {
 
     /// Sends `sig` to session `id`'s program `after` a while, if it still runs.
     fn signal_after(&self, id: &str, sig: Sig, after: Duration);
+
+    /// Answers attaches for `id` although nothing runs under it: a session
+    /// carried from the last run ([`crate::streams::Streams::expect`]).
+    fn expect(&self, id: &str) {
+        let _ = id;
+    }
+
+    /// `id` was let go of without starting ([`crate::streams::Streams::forget`]).
+    fn forget(&self, id: &str) {
+        let _ = id;
+    }
+}
+
+/// The shortest wait before an agent's launch line is typed: the shell
+/// has to be reading its terminal.
+pub const TYPE_AFTER: Duration = Duration::from_millis(300);
+
+/// How long after the shell's first output the line is typed: the prompt
+/// is drawn, and the line editor that echoes the line once is up.
+pub const TYPE_SETTLE: Duration = Duration::from_millis(100);
+
+/// The longest wait for a shell that prints nothing before the line is
+/// typed anyway.
+pub const TYPE_AT_MOST: Duration = Duration::from_millis(1500);
+
+/// When to type the launch line of a session started at `asked`, given
+/// when its shell first printed, if it has: once the shell has settled
+/// after its prompt, never sooner than [`TYPE_AFTER`], and at
+/// [`TYPE_AT_MOST`] if it never prints.
+pub fn type_at(
+    asked: tokio::time::Instant,
+    printed: Option<tokio::time::Instant>,
+) -> tokio::time::Instant {
+    match printed {
+        Some(at) => (at + TYPE_SETTLE).max(asked + TYPE_AFTER),
+        None => asked + TYPE_AT_MOST,
+    }
 }
 
 /// What a session's program is given once it is up.
@@ -162,6 +210,12 @@ fn claims(native: &Native) -> Option<&Claims> {
     native.link.get().map(|l| l.claims())
 }
 
+/// Whether vornd owns the records between runs, and so answers the calls
+/// about the sessions of earlier runs.
+fn restores(native: &Native) -> bool {
+    native.link.get().is_some_and(|l| l.restores())
+}
+
 /// Answers `method` with `params`.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     match method {
@@ -169,6 +223,12 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
             Some(req) => create(native, &req),
             None => Answer::Forward,
         },
+        "sessions:restored" => restored(native),
+        "sessions:resume" => match params.get("id").and_then(Value::as_str) {
+            Some(id) if restores(native) => resume(native, id),
+            _ => Answer::Forward,
+        },
+        "sessions:clear" => clear(native),
         "shell:create" => match params {
             Value::Null => shell_create(native, None),
             Value::String(cwd) if cwd.is_empty() => shell_create(native, None),
@@ -230,7 +290,11 @@ fn asked(method: &str, params: &Value) -> Option<Asked> {
 pub fn foresees(method: &str) -> bool {
     matches!(
         method,
-        "terminal:kill" | "terminal:rename" | "terminal:setGroup" | "terminal:reorder"
+        "terminal:kill"
+            | "terminal:rename"
+            | "terminal:setGroup"
+            | "terminal:reorder"
+            | "sessions:clear"
     ) || headless::foresees(method)
         || super::worktree_move::foresees(method)
 }
@@ -247,12 +311,469 @@ pub fn foresee(native: &Native, method: &str, params: &Value) -> Option<Answer> 
     if super::worktree_move::foresees(method) {
         return super::worktree_move::foresee(native, method, params);
     }
+    if method == "sessions:clear" {
+        return native.registry.get()?.read(|_| Answer::Void);
+    }
     let asked = asked(method, params)?;
     native.registry.get()?.read(|r| match &asked {
-        Asked::Kill(id) => r.terminal(id).map(|_| Answer::Void),
+        // A session of an earlier run closes without an exit, as the
+        // server closes one.
+        Asked::Kill(id) => r
+            .terminal(id)
+            .map(|_| ())
+            .or_else(|| {
+                r.restored()
+                    .iter()
+                    .find(|o| o["session"]["id"] == *id)
+                    .map(|_| ())
+            })
+            .map(|()| Answer::Void),
         Asked::Fields(id, _) => Some(refused(r.check_terminal(id))),
         Asked::Order(ids) => Some(refused(r.check_order(ids))),
     })?
+}
+
+/// `sessions:restored`: the sessions of earlier runs still offered.
+fn restored(native: &Native) -> Answer {
+    if !restores(native) {
+        return Answer::Forward;
+    }
+    match native.registry.get().and_then(|r| r.restored()) {
+        Some(list) => Answer::Result(Value::Array(list)),
+        None => Answer::Forward,
+    }
+}
+
+/// `sessions:clear`: every offered session declined at once.
+fn clear(native: &Native) -> Answer {
+    if !restores(native) {
+        return Answer::Forward;
+    }
+    let Some(registry) = native.registry.get() else {
+        return Answer::Forward;
+    };
+    let declined = registry.change(|r| {
+        let (all, note) = r.consume_all_restored();
+        (all, vec![note])
+    });
+    let Some(declined) = declined else {
+        return Answer::Forward;
+    };
+    if let Some(host) = native.host.get() {
+        for r in &declined {
+            host.forget(&r.session.id);
+        }
+    }
+    Answer::Void
+}
+
+/// What `sessions:resume` found under an id.
+#[derive(Debug)]
+enum Taken {
+    /// A session of an earlier run, taken once.
+    Offered(Restored),
+    /// A terminal whose program ended during this run.
+    Ended(TerminalSession),
+}
+
+impl Taken {
+    fn session(&self) -> &TerminalSession {
+        match self {
+            Taken::Offered(r) => &r.session,
+            Taken::Ended(s) => s,
+        }
+    }
+}
+
+/// `sessions:resume {id}`: the session the id names, offered from an
+/// earlier run or ended during this one, started again under its id. One
+/// whose conversation is already being written is not started: the
+/// terminal writing it is handed back (`boundTo`).
+fn resume(native: &Native, id: &str) -> Answer {
+    let Some(registry) = native.registry.get() else {
+        return Answer::Forward;
+    };
+    if !fed_and_held(native) {
+        return Answer::Error("Terminals cannot start: the session holder is not connected".into());
+    }
+    // Taken before anything is started: the second of two clients looking
+    // at one cold pane is told it is gone.
+    let taken = registry.change(|r| match r.consume_restored(id) {
+        Some((offered, note)) => (Some(Taken::Offered(offered)), vec![note]),
+        None => (r.ended_terminal(id).cloned().map(Taken::Ended), Vec::new()),
+    });
+    let Some(taken) = taken else {
+        return Answer::Error("The Vorn server is not connected to vornd".to_owned());
+    };
+    let Some(taken) = taken else {
+        return Answer::Result(json!({ "ok": false, "reason": "gone" }));
+    };
+    let previous = taken.session();
+    let holder = given(previous.agent_session_id.as_deref()).and_then(|t| running_on(native, t));
+    if let Some(holder) = holder {
+        if let Taken::Ended(_) = &taken {
+            registry.change(|r| ((), r.release_for_resume(id)));
+        }
+        let bound = holder["id"].clone();
+        return Answer::Result(json!({ "ok": true, "session": holder, "boundTo": bound }));
+    }
+    let answer = if previous.agent_type == "shell" {
+        resume_shell(native, id, previous)
+    } else {
+        resume_agent(native, id, previous)
+    };
+    let started = matches!(&answer, Answer::Result(v) if v["ok"] == true);
+    if !started {
+        // Offered again: a resume that did not start is not the end of it.
+        if let Taken::Offered(offered) = taken {
+            registry.change(|r| ((), vec![r.restore_held(offered)]));
+        }
+    }
+    answer
+}
+
+/// The directory a session starts again in: the most specific of where
+/// its shell was, its worktree and its project that is still a directory
+/// (`resumeCwdFor`).
+pub fn resume_cwd_for(previous: &TerminalSession) -> Option<String> {
+    [
+        previous.shell_cwd.as_deref(),
+        previous.worktree_path.as_deref(),
+        Some(previous.project_path.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|p| Path::new(p).is_dir())
+    .map(str::to_owned)
+}
+
+fn workspace_gone(previous: &TerminalSession) -> Answer {
+    Answer::Result(json!({
+        "ok": false,
+        "reason": "workspace-gone",
+        "message": format!("{} is gone", previous.project_path),
+    }))
+}
+
+/// The record a session starts again with: a shell's as `createShellPty`
+/// makes it, under the id and with the fields carried over from the one
+/// before (`sessions:resume`).
+fn resumed_shell(previous: &TerminalSession, cwd: &str, count: usize) -> TerminalSession {
+    let project_name = match node_basename(cwd) {
+        "" => "shell".to_owned(),
+        name => name.to_owned(),
+    };
+    TerminalSession {
+        display_name: previous
+            .display_name
+            .clone()
+            .or_else(|| Some(format!("Shell {}", count + 1))),
+        project_name: previous.project_name.clone(),
+        project_path: previous.project_path.clone(),
+        worktree_path: previous.worktree_path.clone(),
+        worktree_name: previous.worktree_name.clone(),
+        branch: previous.branch.clone(),
+        is_worktree: previous.is_worktree,
+        group_id: previous.group_id.clone(),
+        shell_cwd: Some(cwd.to_owned()),
+        ..skeleton(&previous.id, "shell", &project_name, cwd)
+    }
+}
+
+/// How many shells a resumed one is numbered after: those there are, less
+/// the one it replaces, which the server lets go of first.
+fn shells_before(native: &Native, id: &str) -> Option<usize> {
+    native.registry.get()?.read(|r| {
+        let replaced = r
+            .ended_terminal(id)
+            .is_some_and(|t| t.agent_type == "shell");
+        r.shells() - usize::from(replaced)
+    })
+}
+
+/// A shell started again where it was.
+fn resume_shell(native: &Native, id: &str, previous: &TerminalSession) -> Answer {
+    let Some(cwd) = resume_cwd_for(previous) else {
+        return workspace_gone(previous);
+    };
+    let settings = agent::settings(native).unwrap_or_default();
+    let setup = native.shells.setup(
+        &native.env,
+        settings.shell.as_deref(),
+        settings.minimal_shell_prompt,
+    );
+    let (shell, setup) = match setup {
+        Ok(ready) => ready,
+        Err(e) => return failed(e.to_string()),
+    };
+    let mut argv = vec![shell];
+    match setup.args {
+        Some(args) => argv.extend(args),
+        None => argv.extend(
+            launch_shell::default_shell_args(Platform::HOST)
+                .iter()
+                .map(|a| (*a).to_owned()),
+        ),
+    }
+    let mut env = native.env.get();
+    for (k, v) in setup.env {
+        set(&mut env, &k, v);
+    }
+    let Some(count) = shells_before(native, id) else {
+        return Answer::Forward;
+    };
+    let record = resumed_shell(previous, &cwd, count);
+    resumed(register(
+        native,
+        record,
+        &cwd,
+        argv,
+        env,
+        Input::None,
+        Made::Resumed,
+    ))
+}
+
+/// A resume's answer from the start's: the record, or why it failed.
+fn resumed(answer: Answer) -> Answer {
+    match answer {
+        Answer::Result(session) => Answer::Result(json!({ "ok": true, "session": session })),
+        Answer::Error(message) => failed(message),
+        other => other,
+    }
+}
+
+fn failed(message: String) -> Answer {
+    Answer::Result(json!({ "ok": false, "reason": "failed", "message": message }))
+}
+
+/// The create a session of an earlier run starts again as
+/// (`buildRestorePayload`), on `transcript` when it has one. `None` for a
+/// remote host's session, or an agent this build does not know.
+fn restore_request(
+    previous: &TerminalSession,
+    transcript: Option<String>,
+) -> Option<CreateRequest> {
+    if given(previous.remote_host_id.as_deref()).is_some() {
+        return None;
+    }
+    let in_worktree = previous.is_worktree == Some(true);
+    Some(CreateRequest {
+        agent: Agent::from_id(&previous.agent_type)?,
+        model: None,
+        project_name: previous.project_name.clone(),
+        project_path: previous.project_path.clone(),
+        resume_session_id: transcript,
+        session_id: None,
+        display_name: previous.display_name.clone(),
+        branch: previous.branch.clone().filter(|_| in_worktree),
+        existing_worktree_path: previous.worktree_path.clone().filter(|_| in_worktree),
+        worktree_name: previous.worktree_name.clone(),
+        use_worktree: in_worktree && previous.worktree_path.is_none(),
+        initial_prompt: None,
+        args: None,
+        workflow_id: None,
+        workflow_name: None,
+    })
+}
+
+/// The session as it starts again when its worktree is gone: in the
+/// project, as no worktree session.
+fn grounded(previous: &TerminalSession, cwd: &str) -> TerminalSession {
+    if previous.worktree_path.is_some() && cwd == previous.project_path {
+        TerminalSession {
+            worktree_path: None,
+            is_worktree: Some(false),
+            ..previous.clone()
+        }
+    } else {
+        previous.clone()
+    }
+}
+
+/// An agent started again on the conversation it had.
+fn resume_agent(native: &Native, id: &str, previous: &TerminalSession) -> Answer {
+    let Some(cwd) = resume_cwd_for(previous) else {
+        return workspace_gone(previous);
+    };
+    let previous = grounded(previous, &cwd);
+    if given(previous.remote_host_id.as_deref()).is_some() {
+        return failed("Resuming a session on a remote host is the server's; it is not available while vornd owns the session records".into());
+    }
+    let Some(claims) = claims(native) else {
+        return Answer::Forward;
+    };
+    // Read before the claim, so the claim and what it is checked against
+    // are one step; and not lapsing while the workspace is prepared.
+    let scope = transcript_scope(native, &previous);
+    claims.preparing(id);
+    let now = Instant::now();
+    let transcript = free_transcript_for(native, &previous, scope.as_ref())
+        .filter(|t| claims.claim(t, id, now).is_none());
+    let Some(req) = restore_request(&previous, transcript.clone()) else {
+        claims.prepared(id, Instant::now());
+        return failed(format!(
+            "{} is not an agent this build can start",
+            previous.agent_type
+        ));
+    };
+    let answer = start_agent(native, &req, id, previous.group_id.clone(), Made::Resumed);
+    claims.prepared(id, Instant::now());
+    match &answer {
+        // The record names the conversation now: the claim standing in for it is spent.
+        Answer::Result(record) if record.get("agentSessionId").is_some() => claims.release_for(id),
+        Answer::Result(_) => {}
+        _ => {
+            if let Some(t) = &transcript {
+                claims.release(t, id);
+            }
+        }
+    }
+    resumed(answer)
+}
+
+/// The project and its worktrees, where the agent may have recorded the
+/// session's conversation (`transcriptScope`).
+fn transcript_scope(native: &Native, session: &TerminalSession) -> Option<ProjectScope> {
+    let git = Git {
+        bin: native.env.git_bin(),
+        env: native.env.get(),
+    };
+    let project = Path::new(&session.project_path);
+    let worktrees: Vec<String> = git
+        .list_worktrees(project)
+        .into_iter()
+        .map(|w| w.path)
+        .collect();
+    Some(ProjectScope::new(
+        &session.project_path,
+        worktrees.iter().map(String::as_str),
+    ))
+}
+
+/// The conversations being written now: by the terminals and headless
+/// agents running, and by the starts claiming one (`heldTranscripts`,
+/// `spawningTranscripts`).
+fn held_transcripts(native: &Native) -> Vec<String> {
+    let mut held: Vec<String> = native
+        .registry
+        .get()
+        .and_then(|r| {
+            r.read(|r| {
+                r.live_terminals()
+                    .filter_map(|t| t.agent_session_id.clone())
+                    .chain(
+                        r.headless()
+                            .filter(|h| h.status == HeadlessStatus::Running)
+                            .filter_map(|h| h.agent_session_id.clone()),
+                    )
+                    .collect::<Vec<_>>()
+            })
+        })
+        .unwrap_or_default();
+    if let Some(claims) = claims(native) {
+        held.extend(claims.held(Instant::now()));
+    }
+    held
+}
+
+/// The conversation a resume continues, among those nothing holds
+/// (`freeTranscriptFor`): the one the record names, else the agent's most
+/// recent in the project, preferring its worktree and project directories.
+/// `None` lets the agent choose.
+fn free_transcript_for(
+    native: &Native,
+    session: &TerminalSession,
+    scope: Option<&ProjectScope>,
+) -> Option<String> {
+    let agent = Agent::from_id(&session.agent_type)?;
+    if !agent.resumes_exactly() {
+        return None;
+    }
+    let held = held_transcripts(native);
+    if let Some(pinned) = given(session.agent_session_id.as_deref()) {
+        if !held.iter().any(|h| h == pinned) {
+            return Some(pinned.to_owned());
+        }
+    }
+    let homes = Homes::from_env()?;
+    let wanted: Vec<String> = [
+        session.worktree_path.as_deref(),
+        Some(&session.project_path),
+    ]
+    .into_iter()
+    .flatten()
+    .map(paths::comparable)
+    .collect();
+    let available = |c: &RecentSession| c.agent == agent && !held.contains(&c.session_id);
+    let at_preferred = |candidates: &[RecentSession]| {
+        wanted.iter().find_map(|path| {
+            candidates
+                .iter()
+                .find(|c| available(c) && paths::comparable(&c.project_path) == *path)
+                .map(|c| c.session_id.clone())
+        })
+    };
+    let scoped = recent_sessions_for(agent, &homes, scope, RECENT_LIMIT);
+    if let Some(found) = at_preferred(&scoped).or_else(|| {
+        scoped
+            .iter()
+            .find(|c| available(c))
+            .map(|c| c.session_id.clone())
+    }) {
+        return Some(found);
+    }
+    // Unscoped matches by path only: a loose match here would cross projects.
+    at_preferred(&recent_sessions_for(agent, &homes, None, RECENT_LIMIT))
+}
+
+/// What is there now for each offered session against what its record
+/// says (`verifyRestored`), for the local ones: whether its directory is
+/// still there, and the branch and commit it stands at. Each answer is
+/// kept on the record, for `sessions:restored`.
+pub fn verify_restored(native: &Native) {
+    let Some(registry) = native.registry.get() else {
+        return;
+    };
+    let Some(offered) = registry.restored() else {
+        return;
+    };
+    let git = Git {
+        bin: native.env.git_bin(),
+        env: native.env.get(),
+    };
+    let mut answers: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+    for one in offered {
+        let session = &one["session"];
+        let Some(id) = session.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if given(session.get("remoteHostId").and_then(Value::as_str)).is_some() {
+            continue;
+        }
+        let cwd = session
+            .get("worktreePath")
+            .and_then(Value::as_str)
+            .or_else(|| session.get("projectPath").and_then(Value::as_str))
+            .unwrap_or_default()
+            .to_owned();
+        let present = Path::new(&cwd).is_dir();
+        let (branch, head) = if present {
+            // One git answer per directory: records share them.
+            answers
+                .entry(cwd.clone())
+                .or_insert_with(|| (git.branch(Path::new(&cwd)), git.head(Path::new(&cwd))))
+                .clone()
+        } else {
+            (None, None)
+        };
+        let environment = json!({
+            "worktree": if present { "ok" } else { "missing" },
+            "branch": { "recorded": session.get("branch").cloned().unwrap_or(Value::Null), "actual": branch },
+            "head": { "recorded": session.get("headCommit").cloned().unwrap_or(Value::Null), "actual": head },
+        });
+        registry.set_environment(id, environment);
+    }
 }
 
 /// A check's outcome as the server answers it: nothing, or its refusal.
@@ -399,7 +920,7 @@ fn create(native: &Native, req: &CreateRequest) -> Answer {
         return Answer::Forward;
     }
     let Some(named) = req.named().map(str::to_owned) else {
-        return start_agent(native, req, &new_id());
+        return start_agent(native, req, &new_id(), None, Made::Created);
     };
     // Naming a conversation that is already running: show what is writing
     // it rather than starting a second agent on it.
@@ -439,7 +960,7 @@ fn create_named(native: &Native, claims: &Claims, req: &CreateRequest, named: &s
         }
     }
     claims.preparing(&id);
-    let answer = start_agent(native, req, &id);
+    let answer = start_agent(native, req, &id, None, Made::Created);
     claims.prepared(&id, Instant::now());
     let pinned = match &answer {
         Answer::Result(record) => record.get("agentSessionId").is_some(),
@@ -522,8 +1043,23 @@ impl Drop for Holds<'_> {
     }
 }
 
-/// Prepares and starts agent session `id`.
-fn start_agent(native: &Native, req: &CreateRequest, id: &str) -> Answer {
+/// How a record comes to be in the registry: made new, or started again
+/// under an id it had.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Made {
+    Created,
+    Resumed,
+}
+
+/// Prepares and starts agent session `id`, in `group_id` when it is filed
+/// under one (a resume carries the group over).
+fn start_agent(
+    native: &Native,
+    req: &CreateRequest,
+    id: &str,
+    group_id: Option<String>,
+    made: Made,
+) -> Answer {
     if let Some(why) = refusal(native) {
         return Answer::Error(why.to_owned());
     }
@@ -572,10 +1108,11 @@ fn start_agent(native: &Native, req: &CreateRequest, id: &str) -> Answer {
             .and(prepared.worktree_name.clone()),
         worktree_path: prepared.worktree_path,
         agent_session_id: prepared.agent_session_id.filter(|a| !a.is_empty()),
+        group_id,
         ..skeleton(id, req.agent.id(), &req.project_name, &req.project_path)
     };
     let typed = Input::Typed(format!("{}\r", prepared.launch_line).into_bytes());
-    let answer = register(native, record, &prepared.cwd, argv, env, typed);
+    let answer = register(native, record, &prepared.cwd, argv, env, typed, made);
     drop(holds);
     answer
 }
@@ -811,7 +1348,7 @@ fn shell_create(native: &Native, cwd: Option<&str>) -> Answer {
         shell_cwd: Some(dir.clone()),
         ..skeleton(&id, "shell", &project_name, &dir)
     };
-    register(native, record, &dir, argv, env, Input::None)
+    register(native, record, &dir, argv, env, Input::None, Made::Created)
 }
 
 /// Sets `key` in `env`, replacing a value it had, as an object spread does.
@@ -831,6 +1368,7 @@ fn register(
     argv: Vec<String>,
     mut env: Vec<(String, String)>,
     input: Input,
+    made: Made,
 ) -> Answer {
     let (Some(registry), Some(host)) = (native.registry.get(), native.host.get()) else {
         return Answer::Forward;
@@ -843,9 +1381,15 @@ fn register(
         set(&mut env, "TERM", PTY_TERM.to_owned());
     }
     let answer = record_json(&record);
-    let made = registry.change(|r| match r.create(record) {
-        Ok(notes) => (Ok(()), notes),
-        Err(e) => (Err(e), Vec::new()),
+    let made = registry.change(|r| {
+        let put = match made {
+            Made::Created => r.create(record),
+            Made::Resumed => r.resume(record),
+        };
+        match put {
+            Ok(notes) => (Ok(()), notes),
+            Err(e) => (Err(e), Vec::new()),
+        }
     });
     match made {
         Some(Ok(())) => {}
@@ -922,6 +1466,20 @@ fn kill(native: &Native, id: &str) -> Answer {
     let Some(registry) = native.registry.get() else {
         return Answer::Forward;
     };
+    // A session of an earlier run has no program to hang up: closing it
+    // is a decision about the record, as a resume is, taken once.
+    let offered = registry.change(
+        |r| match r.owns().then(|| r.consume_restored(id)).flatten() {
+            Some((_, note)) => (true, vec![note]),
+            None => (false, Vec::new()),
+        },
+    );
+    if offered == Some(true) {
+        if let Some(host) = native.host.get() {
+            host.forget(id);
+        }
+        return Answer::Void;
+    }
     let closed = registry.change(|r| match r.close(id) {
         Ok((record, live, notes)) => {
             let offer = record
@@ -995,7 +1553,7 @@ fn reorder(native: &Native, ids: Vec<String>) -> Answer {
 pub fn plans(method: &str) -> bool {
     matches!(
         method,
-        "terminal:create" | "shell:create" | "headless:create"
+        "terminal:create" | "shell:create" | "headless:create" | "sessions:resume"
     )
 }
 
@@ -1019,8 +1577,93 @@ pub fn plan(native: &Native, method: &str, params: &Value, shells: usize) -> Opt
             };
             plan_shell(native, cwd, shells)
         }
+        "sessions:resume" => plan_resume(native, params.get("id")?.as_str()?),
         _ => None,
     }
+}
+
+/// What a resume would start: a shell where the session was, or the agent
+/// on the conversation the record names, under its id. `None` when the id
+/// names no session to resume, or the start needs a change (a worktree to
+/// make) or a conversation looked up in the agent's history.
+fn plan_resume(native: &Native, id: &str) -> Option<Value> {
+    let previous = native.registry.get()?.read(|r| {
+        r.restored()
+            .iter()
+            .find(|o| o["session"]["id"] == id)
+            .and_then(|o| serde_json::from_value::<TerminalSession>(o["session"].clone()).ok())
+            .or_else(|| r.ended_terminal(id).cloned())
+    })??;
+    let cwd = resume_cwd_for(&previous)?;
+    if previous.agent_type == "shell" {
+        let settings = agent::settings(native).unwrap_or_default();
+        let (shell, setup) = native
+            .shells
+            .setup(
+                &native.env,
+                settings.shell.as_deref(),
+                settings.minimal_shell_prompt,
+            )
+            .ok()?;
+        let mut argv = vec![shell];
+        match setup.args {
+            Some(args) => argv.extend(args),
+            None => argv.extend(
+                launch_shell::default_shell_args(Platform::HOST)
+                    .iter()
+                    .map(|a| (*a).to_owned()),
+            ),
+        }
+        let mut env = native.env.get();
+        for (k, v) in setup.env {
+            set(&mut env, &k, v);
+        }
+        let count = shells_before(native, id)?;
+        return Some(plan_json(
+            argv,
+            &cwd,
+            env,
+            &resumed_shell(&previous, &cwd, count),
+        ));
+    }
+    let previous = grounded(&previous, &cwd);
+    // Only a conversation the record names: a lookup in the agent's
+    // history is the server's to make, and the plan would guess at it.
+    let transcript = given(previous.agent_session_id.as_deref()).map(str::to_owned);
+    let req = restore_request(&previous, transcript)?;
+    let settings = agent::settings(native)?;
+    let config = agent::command_of(&settings, req.agent)?;
+    if given(req.existing_worktree_path.as_deref()).is_none_or(|e| !Path::new(e).exists())
+        && req.use_worktree
+    {
+        return None;
+    }
+    let mut holds = Holds::new(native);
+    let prepared = prepare(native, &req, &config, &mut holds).ok()?;
+    let shell = launch_shell::default_shell(settings.shell.as_deref(), Platform::HOST, var);
+    let mut argv = vec![shell];
+    argv.extend(
+        launch_shell::default_shell_args(Platform::HOST)
+            .iter()
+            .map(|a| (*a).to_owned()),
+    );
+    let data_dir = native.db.get().and_then(|db| db.parent());
+    let env = native.env.launch(&settings.env_passthrough, data_dir);
+    let record = TerminalSession {
+        display_name: given(req.display_name.as_deref()).map(str::to_owned),
+        branch: prepared.branch.filter(|b| !b.is_empty()),
+        head_commit: prepared.head_commit.filter(|h| !h.is_empty()),
+        is_worktree: prepared.worktree_path.as_ref().map(|_| true),
+        worktree_name: prepared
+            .worktree_path
+            .as_ref()
+            .and(prepared.worktree_name.clone()),
+        worktree_path: prepared.worktree_path,
+        agent_session_id: prepared.agent_session_id.filter(|a| !a.is_empty()),
+        group_id: previous.group_id.clone(),
+        ..skeleton(id, req.agent.id(), &req.project_name, &req.project_path)
+    };
+    Some(plan_json(argv, &prepared.cwd, env, &record))
 }
 
 fn plan_agent(native: &Native, req: &CreateRequest) -> Option<Value> {
@@ -1260,6 +1903,7 @@ pub(super) mod tests {
     pub(in crate::native) struct FakeHost {
         pub(in crate::native) starts: Mutex<Vec<(String, SpawnSpec, Input, Then)>>,
         signals: Mutex<Vec<(String, Sig)>>,
+        forgotten: Mutex<Vec<String>>,
     }
 
     impl fmt::Debug for FakeHost {
@@ -1280,6 +1924,9 @@ pub(super) mod tests {
         }
         fn signal_after(&self, id: &str, sig: Sig, _: Duration) {
             self.signals.lock().unwrap().push((id.to_owned(), sig));
+        }
+        fn forget(&self, id: &str) {
+            self.forgotten.lock().unwrap().push(id.to_owned());
         }
     }
 
@@ -1406,6 +2053,7 @@ pub(super) mod tests {
             vec!["sh".into()],
             Vec::new(),
             Input::None,
+            Made::Created,
         );
         assert!(matches!(answer, Answer::Result(ref r) if r["id"] == "n" && r["pid"] == 0));
         assert_eq!(ids(&fed), ["a", "b", "sh", "n"]);
@@ -1427,6 +2075,7 @@ pub(super) mod tests {
             vec!["sh".into()],
             Vec::new(),
             Input::None,
+            Made::Created,
         );
         fed.registry
             .feed(1, &json!({ "op": "remove", "kind": "terminal", "id": "m" }))
@@ -1610,5 +2259,251 @@ pub(super) mod tests {
                 .read(|r| r.terminal("a").unwrap().0.display_name.clone()),
             Some(None)
         );
+    }
+
+    /// vornd owning the records between runs, with a project directory
+    /// that is there, so a resume has somewhere to start.
+    fn owning() -> (Fed, tempfile::TempDir) {
+        let fed = fed();
+        fed.link.set_creates_headless();
+        fed.native.set_database(
+            std::env::temp_dir()
+                .join("vornd-no-such-db")
+                .join("vorn.db"),
+        );
+        fed.registry.own_records();
+        (fed, tempfile::tempdir().unwrap())
+    }
+
+    fn carried_agent(id: &str, dir: &Path, extra: Value) -> TerminalSession {
+        let mut v = json!({
+            "id": id, "agentType": "claude", "projectName": "proj", "projectPath": dir,
+            "status": "idle", "createdAt": 1, "pid": 9, "groupId": "g", "savedAt": 5,
+        });
+        if let (Value::Object(v), Value::Object(extra)) = (&mut v, extra) {
+            v.extend(extra);
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    fn offer(fed: &Fed, records: Vec<TerminalSession>) {
+        fed.registry.carry(
+            crate::registry::Carried {
+                terminals: records,
+                ..Default::default()
+            },
+            10,
+        );
+    }
+
+    #[test]
+    fn resumes_an_offered_agent_on_its_conversation_under_its_id_once() {
+        let (fed, dir) = owning();
+        offer(
+            &fed,
+            vec![carried_agent(
+                "r",
+                dir.path(),
+                json!({ "agentSessionId": "conv-r" }),
+            )],
+        );
+        let listed = call(&fed.native, "sessions:restored", &Value::Null);
+        let Answer::Result(Value::Array(offered)) = listed else {
+            panic!("not listed: {listed:?}");
+        };
+        assert_eq!(offered[0]["session"]["id"], "r");
+
+        let answer = call(&fed.native, "sessions:resume", &json!({ "id": "r" }));
+        let Answer::Result(answer) = answer else {
+            panic!("not resumed: {answer:?}");
+        };
+        assert_eq!(answer["ok"], true);
+        let session = &answer["session"];
+        assert_eq!(
+            (session["id"].clone(), session["agentType"].clone()),
+            (json!("r"), json!("claude"))
+        );
+        assert_eq!(
+            (
+                session["agentSessionId"].clone(),
+                session["groupId"].clone()
+            ),
+            (json!("conv-r"), json!("g"))
+        );
+        assert_eq!(session["status"], "running");
+        let (spec, input) = fed.host.last_start();
+        assert_eq!(spec.cwd, dir.path().to_str().unwrap());
+        let Input::Typed(line) = input else {
+            panic!("not typed: {input:?}");
+        };
+        assert!(String::from_utf8_lossy(&line).contains("conv-r"));
+        // Live again in the registry, last in the order; no longer offered.
+        assert_eq!(ids(&fed), ["a", "b", "sh", "r"]);
+        assert!(fed.registry.restored().unwrap().is_empty());
+        fed.host.up(42);
+        assert_eq!(
+            fed.registry
+                .read(|r| r.terminal("r").unwrap().0.pid)
+                .unwrap(),
+            42
+        );
+        // The second client to ask is told it is gone.
+        assert_eq!(
+            call(&fed.native, "sessions:resume", &json!({ "id": "r" })),
+            Answer::Result(json!({ "ok": false, "reason": "gone" }))
+        );
+        // Nothing while vornd does not own the records.
+        let other = self::fed();
+        assert_eq!(
+            call(&other.native, "sessions:resume", &json!({ "id": "r" })),
+            Answer::Forward
+        );
+        assert_eq!(
+            call(&other.native, "sessions:restored", &Value::Null),
+            Answer::Forward
+        );
+    }
+
+    #[test]
+    fn a_resume_whose_workspace_is_gone_keeps_the_offer() {
+        let (fed, _dir) = owning();
+        let gone = std::env::temp_dir().join("vornd-no-such-project");
+        offer(&fed, vec![carried_agent("g", &gone, json!({}))]);
+        let answer = call(&fed.native, "sessions:resume", &json!({ "id": "g" }));
+        let Answer::Result(answer) = answer else {
+            panic!("{answer:?}");
+        };
+        assert_eq!(
+            (answer["ok"].clone(), answer["reason"].clone()),
+            (json!(false), json!("workspace-gone"))
+        );
+        assert!(answer["message"].as_str().unwrap().ends_with("is gone"));
+        assert_eq!(fed.registry.restored().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn hands_back_the_terminal_already_writing_the_conversation() {
+        let (fed, dir) = owning();
+        let mut fields = Map::new();
+        fields.insert("agentSessionId".into(), json!("conv"));
+        fed.registry
+            .change(|r| ((), r.set_fields("a", fields).unwrap().into_iter().collect()));
+        offer(
+            &fed,
+            vec![carried_agent(
+                "o",
+                dir.path(),
+                json!({ "agentSessionId": "conv" }),
+            )],
+        );
+        let answer = call(&fed.native, "sessions:resume", &json!({ "id": "o" }));
+        let Answer::Result(answer) = answer else {
+            panic!("{answer:?}");
+        };
+        assert_eq!(
+            (answer["ok"].clone(), answer["boundTo"].clone()),
+            (json!(true), json!("a"))
+        );
+        assert_eq!(answer["session"]["id"], "a");
+        assert!(fed.host.starts.lock().unwrap().is_empty());
+        // An ended terminal on the same conversation is let go of quietly.
+        let mut ended = json!({
+            "id": "b", "agentType": "claude", "projectName": "p", "projectPath": "/p",
+            "status": "idle", "createdAt": 1, "pid": 9, "agentSessionId": "conv",
+        });
+        ended["worktreePath"] = json!("/w");
+        fed.registry
+            .feed(
+                1,
+                &json!({ "op": "upsert", "kind": "terminal", "record": ended, "ended": true }),
+            )
+            .unwrap();
+        // The conversation it names is the registry's to set, not an upsert's.
+        let mut fields = Map::new();
+        fields.insert("agentSessionId".into(), json!("conv"));
+        fed.registry
+            .change(|r| ((), r.set_fields("b", fields).unwrap().into_iter().collect()));
+        let answer = call(&fed.native, "sessions:resume", &json!({ "id": "b" }));
+        let Answer::Result(answer) = answer else {
+            panic!("{answer:?}");
+        };
+        assert_eq!(answer["boundTo"], "a", "{answer}");
+        assert_eq!(ids(&fed), ["a", "sh"]);
+    }
+
+    #[test]
+    fn closes_an_offered_session_without_a_program_and_declines_them_all() {
+        let (fed, dir) = owning();
+        offer(
+            &fed,
+            vec![
+                carried_agent("x", dir.path(), json!({})),
+                carried_agent("y", dir.path(), json!({})),
+            ],
+        );
+        assert_eq!(
+            call(&fed.native, "terminal:kill", &json!("x")),
+            Answer::Void
+        );
+        assert!(fed.host.signalled().is_empty());
+        assert_eq!(fed.host.forgotten.lock().unwrap().as_slice(), ["x"]);
+        assert_eq!(fed.registry.restored().unwrap().len(), 1);
+        assert_eq!(
+            call(&fed.native, "sessions:clear", &Value::Null),
+            Answer::Void
+        );
+        assert!(fed.registry.restored().unwrap().is_empty());
+        assert_eq!(fed.host.forgotten.lock().unwrap().as_slice(), ["x", "y"]);
+        // In shadow, a close of an offered session is foreseen as nothing.
+        let other = self::fed();
+        other.registry.feed(1, &json!({ "op": "restored", "restored": [{ "session": carried_agent("q", dir.path(), json!({})), "endedAt": 1 }] })).unwrap();
+        assert_eq!(
+            foresee(&other.native, "terminal:kill", &json!("q")),
+            Some(Answer::Void)
+        );
+        assert_eq!(
+            foresee(&other.native, "terminal:kill", &json!("nope")),
+            None
+        );
+        assert_eq!(
+            foresee(&other.native, "sessions:clear", &Value::Null),
+            Some(Answer::Void)
+        );
+    }
+
+    #[test]
+    fn plans_a_resume_as_the_start_it_would_make_without_taking_the_offer() {
+        let (fed, dir) = owning();
+        offer(
+            &fed,
+            vec![carried_agent(
+                "p",
+                dir.path(),
+                json!({ "agentSessionId": "conv-p" }),
+            )],
+        );
+        let planned = plan(&fed.native, "sessions:resume", &json!({ "id": "p" }), 0).unwrap();
+        assert_eq!(planned["cwd"], dir.path().to_str().unwrap());
+        assert_eq!(planned["record"]["agentType"], "claude");
+        assert_eq!(planned["record"]["groupId"], "g");
+        assert_eq!(planned["record"]["agentSessionId"], true);
+        assert!(planned["argv"].as_array().unwrap().len() >= 2);
+        assert_eq!(fed.registry.restored().unwrap().len(), 1);
+        assert!(plan(&fed.native, "sessions:resume", &json!({ "id": "nope" }), 0).is_none());
+    }
+
+    #[test]
+    fn types_the_launch_line_once_the_shell_has_drawn_its_prompt() {
+        let asked = tokio::time::Instant::now();
+        // The prompt came quickly: no sooner than the shortest wait.
+        assert_eq!(
+            type_at(asked, Some(asked + Duration::from_millis(50))),
+            asked + TYPE_AFTER
+        );
+        // It came late: a settle after it.
+        let late = asked + Duration::from_millis(800);
+        assert_eq!(type_at(asked, Some(late)), late + TYPE_SETTLE);
+        // It never came: typed anyway, at the longest wait.
+        assert_eq!(type_at(asked, None), asked + TYPE_AT_MOST);
     }
 }

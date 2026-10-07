@@ -134,6 +134,9 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("agent:detectInstalled", Effect::Read),
     ("agent:listModels", Effect::Change),
     ("sessions:getRecent", Effect::Read),
+    ("sessions:restored", Effect::Read),
+    ("sessions:resume", Effect::Change),
+    ("sessions:clear", Effect::Change),
     ("shell:listExecutables", Effect::Read),
     ("shell:listInstalled", Effect::Read),
     // Answered from the copy of the server's records ([`crate::registry`]),
@@ -276,18 +279,6 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
     (
         "connector:probeAuth",
         "asks a connector in the server's registry whether it is signed in",
-    ),
-    (
-        "sessions:restored",
-        "lists the sessions the server carried over from its last run",
-    ),
-    (
-        "sessions:resume",
-        "starts a session in the server's registry, under the id it had",
-    ),
-    (
-        "sessions:clear",
-        "declines the server's carried-over sessions and saves the registry",
     ),
 ];
 
@@ -543,6 +534,9 @@ impl Native {
             Some("server" | "tailscale" | "token" | "pairing") => self.reach_call(method, params),
             Some("connection" | "connector") if !connection::is_async(method) => {
                 connection::read(self, method, params)
+            }
+            Some("sessions") if method != "sessions:getRecent" => {
+                sessions::call(self, method, params)
             }
             Some("agent" | "sessions") => agent::call(self, method, params),
             Some("terminal") if method != "terminal:listActive" => {
@@ -1207,7 +1201,10 @@ impl Conn {
         planned: Planned,
         frame: &serde_json::Map<String, Value>,
     ) {
-        let record = frame.get("result").cloned();
+        // A resume answers `{ok, session}`; a create, the record itself.
+        let record = frame
+            .get("result")
+            .map(|r| r.get("session").cloned().unwrap_or_else(|| r.clone()));
         let name = record
             .as_ref()
             .and_then(|r| r.get("id"))
