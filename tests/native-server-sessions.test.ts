@@ -664,13 +664,6 @@ function repository(dir: string): void {
   git('commit', '-q', '-m', 'first')
 }
 
-/** How many times each of `ids` occurs. */
-function timesEach(ids: readonly string[]): Record<string, number> {
-  const times: Record<string, number> = {}
-  for (const id of ids) times[id] = (times[id] ?? 0) + 1
-  return times
-}
-
 /** A call's answer as the transcript keeps it: its result, or its error's message. */
 function answered(frame: Frame): unknown {
   if (frame.error) return { error: (frame.error as { message?: string }).message }
@@ -845,6 +838,16 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
       })
     }
     await headlessEnded(Object.values(headless))
+    // Stopped once it has said its prompt: a stop can reach an agent before it prints.
+    await until('the waiting agent to say its prompt', () =>
+      direct
+        .toldBy('headless:data')
+        .some(
+          (p) =>
+            (p as { id: string; data: string }).id === stopped &&
+            /wait here/.test((p as { data: string }).data)
+        )
+    )
     await call('stop a headless agent', 'headless:kill', stopped)
     await headlessEnded([stopped])
     await call('stop one that ended', 'headless:kill', headless.claude)
@@ -873,6 +876,8 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
       forwarded: groups[group]?.forwarded
     })
     const exits = toldOf('headless:exit') as { id: string; exitCode: number }[]
+    const exitsTold = toldOf('terminal:exit').map((p) => (p as { id: string }).id)
+    const heardThrough = through.toldBy('terminal:exit').map((p) => (p as { id: string }).id)
     return {
       answeredBy: { terminal: by('terminal'), shell: by('shell'), headless: by('headless') },
       replies: withoutHookLinks(replies),
@@ -890,12 +895,14 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
         reordered: toldOf('session:reordered'),
         cleanup: toldOf('worktree:confirmCleanup'),
         // In the order they were closed: each waited for the one before.
-        exits: toldOf('terminal:exit').map((p) => (p as { id: string }).id),
+        exits: exitsTold,
         // As a client through vornd hears them: once each, whoever tells it,
-        // in an order of its own.
-        exitsThrough: timesEach(
-          through.toldBy('terminal:exit').map((p) => (p as { id: string }).id)
-        ),
+        // in an order of its own, so listed in the server's.
+        exitsThrough: {
+          once: new Set(heardThrough).size === heardThrough.length,
+          ids: exitsTold.filter((id) => heardThrough.includes(id)),
+          unheard: exitsTold.filter((id) => !heardThrough.includes(id))
+        },
         renamed: toldOf('session:updated')
           .map((p) => p as TerminalSession)
           .filter((s) => s.displayName === 'Build' || s.groupId === 'group-1')
