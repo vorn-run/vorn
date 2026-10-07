@@ -34,7 +34,7 @@ import {
   type Frame,
   type RealServer
 } from './helpers/real-server'
-import { normalizeRun, type RunDirs } from './helpers/sessions-parity'
+import { normalizeRun, withoutRecordedHeads, type RunDirs } from './helpers/sessions-parity'
 
 // Booting a server probes Tailscale with a real process; nothing here needs it.
 vi.mock('../packages/server/src/tailscale', () => ({
@@ -69,6 +69,10 @@ interface Observed {
   resyncTold: boolean
   /** The headless agents a server lists after a restart that kept the holder. */
   headlessAfterRestart: number
+}
+
+function byName(sessions: TerminalSession[]): TerminalSession[] {
+  return [...sessions].sort((a, b) => (a.displayName ?? '').localeCompare(b.displayName ?? ''))
 }
 
 async function listed(client: Watcher): Promise<TerminalSession[]> {
@@ -170,7 +174,8 @@ async function warmRun(
   try {
     await live(through, [ids.shellA, ids.shellB, ids.agent])
     const all = await listed(through)
-    replies['listed after the restart'] = all.map((s) => ({
+    // Taken on in the order the holder lists them, which is no order: by name.
+    replies['listed after the restart'] = byName(all).map((s) => ({
       id: s.id,
       agentType: s.agentType,
       displayName: s.displayName,
@@ -193,8 +198,14 @@ async function warmRun(
     await shown(through, ids.shellA, 'again-42')
     const fresh = (await through.call('terminal:attach', { id: ids.agent })).result as AttachAnswer
     replies['attach to a carried agent'] = { replies: fresh.replies, live: fresh.live }
-    const headless = await direct.result<HeadlessSession[]>('headless:list')
-    const carried = headless.filter((h) => h.id === ids.headless && h.status === 'running')
+    // Followed again a moment after the server takes stock of the holder.
+    let carried: HeadlessSession[] = []
+    const asked = Date.now()
+    while (carried.length === 0 && Date.now() - asked < 5_000) {
+      const headless = await direct.result<HeadlessSession[]>('headless:list')
+      carried = headless.filter((h) => h.id === ids.headless && h.status === 'running')
+      if (carried.length === 0) await new Promise((r) => setTimeout(r, 100))
+    }
     for (const h of carried) await through.call('headless:kill', h.id)
     return { replies, headless: carried.length }
   } finally {
@@ -227,15 +238,18 @@ async function coldRun(
         ) && offered.length === 3
       )
     })
-    replies['offered after the restart'] = offered
-      .map((o) => ({
-        id: o.session.id,
-        displayName: o.session.displayName,
-        groupId: o.session.groupId,
-        rebooted: o.rebooted,
-        environment: o.environment
-      }))
-      .sort((a, b) => a.id.localeCompare(b.id))
+    replies['offered after the restart'] = withoutRecordedHeads(
+      byName(offered.map((o) => o.session)).map((s) => {
+        const o = offered.find((one) => one.session.id === s.id)!
+        return {
+          id: s.id,
+          displayName: s.displayName,
+          groupId: s.groupId,
+          rebooted: o.rebooted,
+          environment: o.environment
+        }
+      })
+    )
     expect(await listed(through)).toEqual([])
 
     // A pane attached to the cold shell before anyone resumes it.
@@ -268,6 +282,13 @@ async function coldRun(
     await shown(through, ids.agent, 'ARGV:')
     const screen = await through.result<string[]>('terminal:readOutput', { id: ids.agent })
     replies['the agent was started once'] = screen.filter((l) => l.includes('ARGV:')).length
+    // Typed once the shell was ready: the command line is echoed once.
+    replies['launch lines echoed'] = screen.filter(
+      (l) => l.includes('/bin/argv-agent --resume') && !l.includes('ARGV:')
+    ).length
+    replies['what the agent was resumed with'] = screen
+      .filter((l) => l.includes('ARGV:'))
+      .map((l) => l.slice(l.indexOf('ARGV:')).trimEnd())
 
     await call('resume one already running', 'sessions:resume', { id: ids.shellA })
     await call('resume one that is not there', 'sessions:resume', { id: 'no-such-session' })
@@ -282,7 +303,7 @@ async function coldRun(
     await call('clear', 'sessions:clear')
     replies['offered after the clear'] =
       await through.result<RestoredSession[]>('sessions:restored')
-    replies['listed at the end'] = (await listed(through)).map((s) => ({
+    replies['listed at the end'] = byName(await listed(through)).map((s) => ({
       id: s.id,
       displayName: s.displayName,
       groupId: s.groupId,
@@ -352,6 +373,10 @@ describe.skipIf(!runnable)('sessions carried over a restart, against the server'
       showsItsScreen: true
     })
     expect(runs.on?.transcript['the agent was started once']).toBe(1)
+    expect(runs.on?.transcript['launch lines echoed']).toBe(1)
+    expect(runs.on?.transcript['what the agent was resumed with']).toEqual([
+      expect.stringMatching(/^ARGV:--resume <minted \d+>$/)
+    ])
   })
 
   it('tells a pane attached to a cold session to attach again once it runs, with the switch on', () => {

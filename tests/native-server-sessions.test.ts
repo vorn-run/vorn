@@ -348,7 +348,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
       else process.env[key] = value
     }
     if (dataDir) {
-      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
     }
   }, 30_000)
 

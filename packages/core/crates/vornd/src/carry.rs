@@ -107,6 +107,12 @@ pub async fn save_now(registry: &SessionRegistry, file: &CarryFile) {
     };
     let file = file.clone();
     let _ = tokio::task::spawn_blocking(move || {
+        tracing::debug!(
+            terminals = carried.terminals.len(),
+            headless = carried.headless.len(),
+            offered = carried.restored.len(),
+            "session records written down"
+        );
         if let Err(e) = file.save(&carried) {
             warn!(path = %file.path().display(), %e, "could not write the session records down");
         }

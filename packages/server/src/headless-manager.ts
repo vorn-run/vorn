@@ -375,7 +375,10 @@ class HeadlessManager extends EventEmitter {
     // Left running: an agent in vornd outlives this server.
     for (const id of this.inVornd.keys()) vorndSessions.release(id)
     this.inVornd.clear()
-    for (const id of this.sessions.keys()) sessionFeed.remove('headless', id)
+    // Not vornd's records to let go of while it keeps them for the next server.
+    if (!vorndSessions.restoresSessions()) {
+      for (const id of this.sessions.keys()) sessionFeed.remove('headless', id)
+    }
     this.sessions.clear()
     this.outputBuffers.clear()
     this.ended.clear()

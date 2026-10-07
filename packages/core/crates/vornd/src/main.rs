@@ -144,7 +144,11 @@ async fn stdin_closed() {
 
 fn init_logging(log_file: Option<&str>) -> Result<(), String> {
     let filter = EnvFilter::try_from_env("VORND_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
-    let builder = tracing_subscriber::fmt().with_env_filter(filter);
+    // The server reads vornd's stderr and exits first: a line it can no
+    // longer take is dropped, where reporting it would panic vornd mid-stop.
+    let builder = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .log_internal_errors(false);
     match log_file {
         Some(path) => {
             let file = OpenOptions::new()
@@ -395,6 +399,13 @@ fn main() -> ExitCode {
         let _ = stdout.flush();
         drop(stdout);
         let exit_with_stdin = args.exit_with_stdin;
+        // The records are written down the moment a stop is asked for: the
+        // server that closed the pipe kills a vornd still winding down.
+        #[cfg(feature = "engine")]
+        let saving = kept
+            .as_ref()
+            .and_then(|h| h.engine().map(Arc::clone))
+            .zip(carry.clone());
         let stop = async move {
             if exit_with_stdin {
                 tokio::select! {
@@ -403,6 +414,10 @@ fn main() -> ExitCode {
                 }
             } else {
                 shutdown_signal().await;
+            }
+            #[cfg(feature = "engine")]
+            if let Some((engine, file)) = saving {
+                vornd::carry::save_now(engine.registry(), &file).await;
             }
         };
         proxy::serve(listener, daemon, stop).await;
@@ -421,11 +436,12 @@ fn main() -> ExitCode {
         // the next vornd has nothing to replay.
         #[cfg(feature = "engine")]
         if let Some(engine) = kept.as_ref().and_then(|h| h.engine()) {
-            engine.flush().await;
-            // The records as they stand, for the next vornd.
+            // The records first: they are small, and the server that closed
+            // the pipe kills a vornd still flushing a moment later.
             if let Some(file) = &carry {
                 vornd::carry::save_now(engine.registry(), file).await;
             }
+            engine.flush().await;
         }
         #[cfg(not(feature = "engine"))]
         drop(carry);

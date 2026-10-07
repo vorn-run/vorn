@@ -47,7 +47,9 @@ export class Watcher {
   readonly told: Array<{ method: string; params: unknown }> = []
 
   private constructor(private ws: WebSocket) {
-    ws.on('message', (raw) => {
+    ws.on('message', (raw, isBinary) => {
+      // A session's bytes, once attached, are not frames.
+      if (isBinary) return
       const frame = JSON.parse(String(raw)) as { method?: string; params?: unknown }
       if (frame.method) this.told.push({ method: frame.method, params: frame.params })
     })
@@ -191,6 +193,14 @@ export async function stopRealServer(server: RealServer, keepHolder = false): Pr
     server.child.kill()
     await exited
   }
+  // vornd finishes its stop after the server (its records, its last
+  // checkpoints): nothing of its directories is touched until it is gone.
+  await until('vornd to stop', () =>
+    fetch(`http://127.0.0.1:${server.vornd}/vornd/health`).then(
+      () => false,
+      () => true
+    )
+  )
   // The session holder outlives the server, by design, and its sessions with it.
   if (holder && !keepHolder) {
     try {

@@ -1215,7 +1215,10 @@ class PtyManager extends EventEmitter {
     for (const id of this.ptys.keys()) vorndSessions.release(id)
     this.ptys.clear()
     this.vorndStatus.clear()
-    for (const id of this.sessions.keys()) this.recordRemoved(id)
+    // Not vornd's records to let go of while it keeps them for the next server.
+    if (!vorndSessions.restoresSessions()) {
+      for (const id of this.sessions.keys()) this.recordRemoved(id)
+    }
     this.sessions.clear()
     for (const timer of this.idleTimers.values()) clearTimeout(timer)
     this.idleTimers.clear()
