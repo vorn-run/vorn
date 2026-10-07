@@ -99,7 +99,8 @@ export interface Vornd {
   native?: string[]
   /** Called once if it exits, with why, unless `stop` was called first. */
   onExit(listener: (detail: string) => void): void
-  stop(): void
+  /** Resolves once the process has exited, after it has written what it keeps. */
+  stop(): Promise<void>
 }
 
 /**
@@ -166,6 +167,7 @@ export function startVornd(
     let stopped = false
     let exitListener: ((detail: string) => void) | null = null
     let exitDetail: string | null = null
+    const gone = new Promise<void>((resolve) => child.once('exit', () => resolve()))
 
     const fail = (err: Error): void => {
       if (settled) return
@@ -233,7 +235,7 @@ export function startVornd(
           else exitListener = listener
         },
         stop() {
-          if (stopped) return
+          if (stopped) return gone
           stopped = true
           // Closing stdin is enough. The signal is for a vornd too busy to see
           // it, and unref'd: a server on its way out closes the pipe by exiting.
@@ -241,6 +243,7 @@ export function startVornd(
           setTimeout(() => {
             if (exitDetail === null) child.kill()
           }, STOP_GRACE_MS).unref()
+          return gone
         }
       })
     })
@@ -351,7 +354,7 @@ export class VorndKeeper {
       return
     }
     if (this.stopped) {
-      started.stop()
+      void started.stop()
       return
     }
     this.running = started
@@ -388,14 +391,14 @@ export class VorndKeeper {
     this.restartTimer.unref?.()
   }
 
-  /** Stop vornd, for good: the holder and its sessions carry on. */
-  stop(): void {
+  /** Stop vornd, for good: the holder and its sessions carry on. Resolves once it has exited. */
+  stop(): Promise<void> {
     this.stopped = true
     clearTimeout(this.restartTimer)
     this.restartTimer = undefined
     const running = this.running
     this.running = null
-    running?.stop()
     this.status = { state: 'off' }
+    return running?.stop() ?? Promise.resolve()
   }
 }

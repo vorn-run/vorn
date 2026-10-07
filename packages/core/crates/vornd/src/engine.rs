@@ -448,7 +448,8 @@ impl Engine {
 
     /// Starts a session in sessiond under `name` ([`crate::names`]), or
     /// under sessiond's id with none, and runs it through the engine.
-    /// Refused when another session goes by the name.
+    /// Refused when another session goes by the name, unless that session's
+    /// program has ended: then started once it leaves the engine.
     pub async fn spawn_as(&self, spec: SpawnSpec, name: Option<String>) -> Result<Spawned, String> {
         let (tx, rx) = oneshot::channel();
         self.command(Command::Spawn(spec, name, tx))?;
@@ -638,6 +639,8 @@ impl Engine {
             next_req: 0,
             input_seq: 0,
             repumping: std::collections::HashSet::new(),
+            exited: std::collections::HashSet::new(),
+            parked: HashMap::new(),
         };
         let mut ping = tokio::time::interval(PING_EVERY);
         ping.tick().await;
@@ -668,6 +671,9 @@ impl Engine {
         };
         for (_, p) in d.spawns.drain() {
             let _ = p.reply.send(Err(why.clone()));
+        }
+        for (_, (_, reply)) in d.parked.drain() {
+            let _ = reply.send(Err(why.clone()));
         }
         self.streams.suspended();
         // The pool stops with the last reference, without last checkpoints:
@@ -857,6 +863,13 @@ struct Driver<'a> {
     /// Sessions re-attached from vornd's own cursor after a refused fetch,
     /// until sessiond answers.
     repumping: std::collections::HashSet<String>,
+    /// Sessions whose exit has been told and that have not left the engine
+    /// yet: their names are about to be free.
+    exited: std::collections::HashSet<String>,
+    /// Spawns under the name of an [`Driver::exited`] session, started once
+    /// it leaves. Whoever was told of the exit may start the session again
+    /// at once, as a resume does, before the engine has closed the old one.
+    parked: HashMap<String, (SpawnSpec, oneshot::Sender<Result<Spawned, String>>)>,
 }
 
 impl Driver<'_> {
@@ -998,8 +1011,12 @@ impl Driver<'_> {
                     ?effect,
                     "effect"
                 );
-                if matches!(effect, Effect::Bell) {
-                    self.engine.streams.bell(id);
+                match &effect {
+                    Effect::Bell => self.engine.streams.bell(id),
+                    Effect::Exit { .. } => {
+                        self.exited.insert(session);
+                    }
+                    _ => {}
                 }
                 self.engine.journal().record(&fx, &effect);
                 let _ = self.engine.events.send(Event::Effect(fx, effect));
@@ -1129,11 +1146,19 @@ impl Driver<'_> {
             }
             closed.push_back(b.clone());
         }
-        self.engine.untap(&b.session);
+        // A tap taken for a spawn parked under the name is the next run's.
+        if !self.parked.contains_key(&b.session) {
+            self.engine.untap(&b.session);
+        }
         self.engine
             .streams
             .closed(&b.session, b.exited, &summary.screen);
+        let id = summary.brief.session.clone();
         let _ = self.engine.events.send(Event::Closed(Arc::from(summary)));
+        self.exited.remove(&id);
+        if let Some((spec, reply)) = self.parked.remove(&id) {
+            self.spawn(spec, Some(id), reply);
+        }
     }
 
     /// Starts the session's records flowing again after a refused fetch.
@@ -1156,6 +1181,7 @@ impl Driver<'_> {
     fn name_free(&self, name: &str) -> Result<(), String> {
         let running = |id: &str| self.pool.briefs().iter().any(|b| b.session == id);
         if running(name)
+            || self.parked.contains_key(name)
             || self
                 .spawns
                 .values()
@@ -1169,6 +1195,39 @@ impl Driver<'_> {
             .map_err(|e| e.to_string())
     }
 
+    /// Starts a session in sessiond under `name`, or under sessiond's id
+    /// with none. A name still held by a session whose program has ended
+    /// waits for that session to leave the engine; any other taken name is
+    /// refused.
+    fn spawn(
+        &mut self,
+        spec: SpawnSpec,
+        name: Option<String>,
+        reply: oneshot::Sender<Result<Spawned, String>>,
+    ) {
+        if let Some(name) = &name {
+            if let Err(e) = self.name_free(name) {
+                if self.exited.contains(name) && !self.parked.contains_key(name) {
+                    self.parked.insert(name.clone(), (spec, reply));
+                } else {
+                    let _ = reply.send(Err(e));
+                }
+                return;
+            }
+        }
+        self.next_req += 1;
+        let size = match spec.io {
+            Io::Pty { cols, rows } => Some((cols, rows)),
+            Io::Piped { .. } => None,
+        };
+        self.spawns
+            .insert(self.next_req, Pending { reply, size, name });
+        self.send(ToSessiond::Spawn(Spawn {
+            req: self.next_req,
+            spec,
+        }));
+    }
+
     fn write(&mut self, session: String, bytes: Vec<u8>) {
         self.input_seq += 1;
         self.send(ToSessiond::Write(Write {
@@ -1180,25 +1239,7 @@ impl Driver<'_> {
 
     async fn command(&mut self, c: Command, outs: &mut mpsc::UnboundedReceiver<(String, Out)>) {
         match c {
-            Command::Spawn(spec, name, reply) => {
-                if let Some(name) = &name {
-                    if let Err(e) = self.name_free(name) {
-                        let _ = reply.send(Err(e));
-                        return;
-                    }
-                }
-                self.next_req += 1;
-                let size = match spec.io {
-                    Io::Pty { cols, rows } => Some((cols, rows)),
-                    Io::Piped { .. } => None,
-                };
-                self.spawns
-                    .insert(self.next_req, Pending { reply, size, name });
-                self.send(ToSessiond::Spawn(Spawn {
-                    req: self.next_req,
-                    spec,
-                }));
-            }
+            Command::Spawn(spec, name, reply) => self.spawn(spec, name, reply),
             Command::Write(session, bytes) => self.write(session, bytes),
             Command::Signal(session, signal) => {
                 self.send(ToSessiond::Signal(Signal { session, signal }));

@@ -196,6 +196,10 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     await call('close the password session', 'terminal:kill', byPassword)
     await exited(byPassword)
     await call('close the resumed session', 'terminal:kill', byKey)
+    // vornd answers the close before the server hears of it.
+    await until('the server to drop the resumed session', async () =>
+      (await listed()).every((s) => s.id !== byKey)
+    )
 
     return {
       replies,

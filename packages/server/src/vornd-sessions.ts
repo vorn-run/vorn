@@ -299,8 +299,13 @@ export class VorndPty extends EventEmitter {
     this.exitTimer = setTimeout(() => this.finish(note.exitCode ?? 0), EXIT_WAIT_MS)
   }
 
-  /** @internal `terminal:exit`: after the last of the output, for a session being read. */
+  /**
+   * @internal `terminal:exit`: after the last of the output, for a session being read.
+   * Every other session ends by its exit effect: vornd tells this notice to every
+   * connection, and one for an earlier run under the same id can arrive after a resume.
+   */
   exitNotice(exitCode: number): void {
+    if (!this.watched || this.epoch === null) return
     this.finish(this.exitSeen?.exitCode ?? exitCode)
   }
 

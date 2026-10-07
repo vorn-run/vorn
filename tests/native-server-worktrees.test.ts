@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '../packages/shared/src/protocol'
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import { normalizeWorktrees } from './helpers/worktrees-parity'
-import { vorndStopped } from './helpers/real-server'
+import { stopServerChild } from './helpers/real-server'
 import { recorded } from './helpers/vornd-fixtures'
 
 const TEST_CREDENTIAL = 'native-server-worktrees-credential'
@@ -172,24 +172,8 @@ async function startRealServer(): Promise<RealServer> {
   return server
 }
 
-async function stopRealServer(server: RealServer): Promise<void> {
-  const holder = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-    .then((r) => r.json() as Promise<{ sessiond?: { current?: { pid?: number } } }>)
-    .then((h) => h.sessiond?.current?.pid)
-    .catch(() => undefined)
-  if (server.child.exitCode === null) {
-    const exited = new Promise((r) => server.child.once('exit', r))
-    server.child.kill()
-    await exited
-  }
-  await vorndStopped(server.vornd)
-  if (holder) {
-    try {
-      process.kill(holder, 'SIGTERM')
-    } catch {
-      /* already gone */
-    }
-  }
+function stopRealServer(server: RealServer): Promise<void> {
+  return stopServerChild(server.child, server.vornd, server.dirs.data)
 }
 
 /**

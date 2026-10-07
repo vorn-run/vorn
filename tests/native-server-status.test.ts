@@ -26,7 +26,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '@vornrun/shared/protocol'
 import type { AgentStatus, TerminalSession } from '@vornrun/shared/types'
 import { spawnsRealServers } from './helpers/one-at-a-time'
-import { vorndStopped } from './helpers/real-server'
+import { stopServerChild } from './helpers/real-server'
 
 const repoRoot = path.join(__dirname, '..')
 const CREDENTIAL = 'native-status-test-credential'
@@ -413,26 +413,8 @@ async function run(server: Server): Promise<Record<Agent, AgentStatus[]>> {
   }
 }
 
-async function stop(server: Server): Promise<void> {
-  const holder = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-    .then((r) => r.json() as Promise<{ sessiond?: { current?: { pid?: number } } }>)
-    .then((h) => h.sessiond?.current?.pid)
-    .catch(() => undefined)
-  if (server.child.exitCode === null) {
-    const exited = new Promise((r) => server.child.once('exit', r))
-    server.child.kill()
-    await exited
-  }
-  await vorndStopped(server.vornd)
-  // The session holder outlives the server, by design, and its sessions
-  // with it.
-  if (holder) {
-    try {
-      process.kill(holder, 'SIGTERM')
-    } catch {
-      /* already gone */
-    }
-  }
+function stop(server: Server): Promise<void> {
+  return stopServerChild(server.child, server.vornd, server.dirs[1]!)
 }
 
 afterAll(async () => {

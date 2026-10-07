@@ -30,10 +30,12 @@ import {
   TEST_CREDENTIAL,
   Watcher,
   answered,
+  holderPid,
   removeRealServerDirs,
   repository,
   runnable,
   startRealServer,
+  stopHolder,
   stopRealServer,
   vornd,
   type Frame,
@@ -330,20 +332,10 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
         return (report.sessions ?? []).length === 0
       }).catch(() => {})
     }
-    const holder = vorndPort
-      ? await fetch(`http://127.0.0.1:${vorndPort}/vornd/health`)
-          .then((r) => r.json() as Promise<{ sessiond?: { current?: { pid?: number } } }>)
-          .then((h) => h.sessiond?.current?.pid)
-          .catch(() => undefined)
-      : undefined
+    const holder = vorndPort ? await holderPid(vorndPort) : undefined
+    // Resolves once vornd has exited, after its last writes to the data directory.
     await closeServer?.()
-    if (holder) {
-      try {
-        process.kill(holder, 'SIGTERM')
-      } catch {
-        /* already gone */
-      }
-    }
+    await stopHolder(holder)
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
@@ -351,7 +343,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     if (dataDir) {
       fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
     }
-  }, 30_000)
+  }, 90_000)
 
   it('agrees after every change the app makes to its sessions', async () => {
     await compare([work.wt])

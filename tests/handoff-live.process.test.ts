@@ -29,7 +29,7 @@ const started: ChildProcess[] = []
 const dirs: string[] = []
 const transcript: string[] = []
 
-afterEach((ctx) => {
+afterEach(async (ctx) => {
   // The replacement writes to `server.log`: a handoff has no parent to pipe to.
   if (ctx.task.result?.state === 'fail') {
     for (const dir of dirs) {
@@ -60,8 +60,8 @@ afterEach((ctx) => {
       // Same.
     }
   }
-  // The session holder is detached and may still be writing as it goes, so a
-  // directory it keeps filling is left for the OS rather than failing the test.
+  // vornd and the session holder write their last records as they exit.
+  for (const dir of dirs) await gone(dir)
   for (const dir of dirs.splice(0)) {
     try {
       fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
@@ -69,7 +69,15 @@ afterEach((ctx) => {
       process.stderr.write(`left ${dir}: ${(err as Error).message}\n`)
     }
   }
-})
+}, 60_000)
+
+/** Waits for every process started on `dir` to exit, briefly. */
+async function gone(dir: string): Promise<void> {
+  const until = Date.now() + 15_000
+  while (Date.now() < until && spawnSync('pgrep', ['-f', dir]).status === 0) {
+    await new Promise((r) => setTimeout(r, 100))
+  }
+}
 
 /** What a server is started with, and what it is handed for its replacement. */
 function serverCommand(dataDir: string): {

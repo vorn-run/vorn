@@ -200,9 +200,12 @@ describe('starting vornd', () => {
     const vornd = await startVornd('vornd', 50091, { spawnImpl: stubSpawn('ok') })
     const onExit = vi.fn()
     vornd.onExit(onExit)
-    vornd.stop()
-    await exited(children[0]!)
+    const exit = exited(children[0]!)
+    await vornd.stop()
+    expect(children[0]!.exitCode ?? children[0]!.signalCode).not.toBeNull()
+    await exit
     expect(onExit).not.toHaveBeenCalled()
+    await vornd.stop()
   })
 
   it('reports an exit nobody asked for', async () => {
@@ -280,7 +283,7 @@ describe('keeping vornd running', () => {
       ...(app ? { app } : {}),
       stopped: false,
       onExit: (listener) => void (exit = listener),
-      stop: () => void (vornd.stopped = true),
+      stop: async () => void (vornd.stopped = true),
       exit: (detail) => exit?.(detail)
     }
     return vornd
@@ -315,10 +318,11 @@ describe('keeping vornd running', () => {
     expect(keeper.port).toBe(47001)
     expect(keeper.answers('pairing')).toBe(false)
     expect(keeper.starting).toBe(false)
-    keeper.stop()
+    await keeper.stop()
     expect(running.stopped).toBe(true)
     expect(keeper.state).toEqual({ state: 'off' })
     expect(keeper.port).toBeNull()
+    await keeper.stop()
   })
 
   it('says which groups the vornd it started answers itself', async () => {

@@ -139,6 +139,30 @@ describe('the server with a stand-in vornd', () => {
     expect(claimEffect(exit.effectId, 'exit')).toBe(false)
   })
 
+  it('ends a session by its exit, not by the exit notice of an earlier run under its id', async () => {
+    await sessions.connect(fake.endpoint)
+    const resumed = sessions.spawn('pane-4', { argv: ['sh'], cwd: '/', env: {} }, false)
+    const exits: VorndExit[] = []
+    resumed.onExit((e) => exits.push(e))
+    // The notice of the run the resume replaced, told to every connection.
+    fake.send('terminal:exit', { id: 'pane-4', exitCode: 3 })
+    await until('the spawn', () => resumed.pid !== 0)
+    fake.send('terminal:exit', { id: 'pane-4', exitCode: 3 })
+    // Read in order: once this is seen, so were the notices.
+    fake.send('vornd:effect', effect('pane-4', 'status', 2, { status: 1 }))
+    await new Promise<void>((r) => resumed.once('status', () => r()))
+    expect(resumed.isEnded).toBe(false)
+
+    const read = sessions.spawn('read-4', { argv: ['sh'], cwd: '/', env: {} }, true)
+    fake.send('terminal:exit', { id: 'read-4', exitCode: 3 })
+    await until('the second spawn', () => read.pid !== 0)
+    expect(read.isEnded).toBe(false)
+
+    fake.send('vornd:effect', effect('pane-4', 'exit', 9, { code: 0, exitCode: 0 }))
+    await until('the exit', () => exits.length === 1)
+    expect(exits).toEqual([{ exitCode: 0, repeated: false }])
+  })
+
   it('takes states as states: status and cwd told twice change nothing more', async () => {
     await sessions.connect(fake.endpoint)
     const pty = sessions.spawn('pane-2', { argv: ['sh'], cwd: '/', env: {} }, false)
