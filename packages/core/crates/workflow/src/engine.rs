@@ -1885,11 +1885,7 @@ pub(crate) fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// Compares tokens without stopping at the first difference.
-pub fn same_token(expected: &str, given: &str) -> bool {
-    let (a, b) = (expected.as_bytes(), given.as_bytes());
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
+pub use vorn_work::gates::same_token;
 
 /// The configuration's workflows.
 pub fn workflows_of(config: &Value) -> Vec<Workflow> {

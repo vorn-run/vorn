@@ -91,6 +91,12 @@ pub fn publish(
     Ok(new_token())
 }
 
+/// Compares tokens without stopping at the first difference.
+pub fn same_token(expected: &str, given: &str) -> bool {
+    let (a, b) = (expected.as_bytes(), given.as_bytes());
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 /// Removes a run's pages.
 pub fn remove(data_dir: &Path, run_id: &str) {
     let _ = fs::remove_dir_all(run_dir(data_dir, run_id));

@@ -7,9 +7,11 @@
 //! here is what it gave for the same input. Nothing here waits on anything;
 //! running a workflow is `vorn-workflow`'s.
 
+pub mod artifacts;
 pub mod claims;
 pub mod cron;
 pub mod gates;
+pub mod inbox;
 pub mod graph;
 pub mod items;
 pub mod js;
