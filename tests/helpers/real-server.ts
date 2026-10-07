@@ -183,6 +183,20 @@ export async function startRealServer(nativeServer: boolean, dirs?: RunDirs): Pr
   return server
 }
 
+/**
+ * Waits for the vornd on `port` to finish stopping: it writes its session
+ * records and last checkpoints after its server has exited.
+ */
+export async function vorndStopped(port: number): Promise<void> {
+  if (!port) return
+  await until('vornd to stop', () =>
+    fetch(`http://127.0.0.1:${port}/vornd/health`).then(
+      () => false,
+      () => true
+    )
+  )
+}
+
 /** @param keepHolder Leaves the session holder and its sessions running, for a server to start again on. */
 export async function stopRealServer(server: RealServer, keepHolder = false): Promise<void> {
   const holder = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
@@ -194,13 +208,7 @@ export async function stopRealServer(server: RealServer, keepHolder = false): Pr
     server.child.kill()
     await exited
   }
-  // vornd finishes its stop after the server: its directories are left until it is gone.
-  await until('vornd to stop', () =>
-    fetch(`http://127.0.0.1:${server.vornd}/vornd/health`).then(
-      () => false,
-      () => true
-    )
-  )
+  await vorndStopped(server.vornd)
   // The session holder outlives the server, by design, and its sessions with it.
   if (holder && !keepHolder) {
     try {

@@ -404,6 +404,8 @@ fn main() -> ExitCode {
             .as_ref()
             .and_then(|h| h.engine().map(Arc::clone))
             .zip(carry.clone());
+        #[cfg(not(feature = "engine"))]
+        drop(carry);
         let stop = async move {
             if exit_with_stdin {
                 tokio::select! {
@@ -434,14 +436,8 @@ fn main() -> ExitCode {
         // the next vornd has nothing to replay.
         #[cfg(feature = "engine")]
         if let Some(engine) = kept.as_ref().and_then(|h| h.engine()) {
-            // Records before the flush: the server kills a vornd still flushing.
-            if let Some(file) = &carry {
-                vornd::carry::save_now(engine.registry(), file).await;
-            }
             engine.flush().await;
         }
-        #[cfg(not(feature = "engine"))]
-        drop(carry);
         drop(kept);
         info!("stopped");
         ExitCode::SUCCESS
