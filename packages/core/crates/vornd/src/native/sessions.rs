@@ -48,9 +48,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
-use tracing::warn;
+use tracing::{debug, warn};
 use vorn_agents::history::{recent_sessions_for, Homes, ProjectScope, RecentSession};
 use vorn_agents::launch::shell as launch_shell;
+use vorn_agents::launch::ssh as login;
 use vorn_agents::launch::{
     display_name_from_prompt, launch_line, LaunchRequest, Machine, Platform, Quoting,
 };
@@ -58,6 +59,7 @@ use vorn_agents::{paths, Agent};
 use vorn_git::repo::{extract_worktree_name, node_basename, Git};
 use vorn_sessiond_wire::{Io, Sig, SpawnSpec};
 
+use super::ssh::{Credentials, KeyFile, Remote, Secret};
 use super::{agent, headless, shell, Answer, Native};
 use crate::claims::{Claims, OnePerKey};
 use crate::registry::{AgentStatus, HeadlessStatus, Registry, Restored, TerminalSession};
@@ -84,7 +86,7 @@ const PROMPT_NAME_LEN: usize = 60;
 
 /// The params of `terminal:create` the server's handler reads; any other
 /// is a call for the server.
-const CREATE_KEYS: [&str; 18] = [
+const CREATE_KEYS: [&str; 20] = [
     "agentType",
     "model",
     "projectName",
@@ -103,6 +105,8 @@ const CREATE_KEYS: [&str; 18] = [
     "workflowId",
     "workflowName",
     "args",
+    "_decryptedKeyContent",
+    "_decryptedPassword",
 ];
 
 /// What starts and signals the sessions vornd creates: the engine, which
@@ -169,6 +173,8 @@ pub enum Input {
     /// Written to a piped program's stdin, which then closes: a headless
     /// agent's prompt, or nothing when it has none.
     Prompt(Option<Vec<u8>>),
+    /// A login to a remote host, typed into the shell as its output asks.
+    Remote(Box<Remote>),
 }
 
 /// What a start's outcome is handed to.
@@ -546,15 +552,12 @@ fn failed(message: String) -> Answer {
 }
 
 /// The create a session of an earlier run starts again as
-/// (`buildRestorePayload`), on `transcript` when it has one. `None` for a
-/// remote host's session, or an agent this build does not know.
+/// (`buildRestorePayload`), on `transcript` when it has one. `None` for an
+/// agent this build does not know.
 fn restore_request(
     previous: &TerminalSession,
     transcript: Option<String>,
 ) -> Option<CreateRequest> {
-    if given(previous.remote_host_id.as_deref()).is_some() {
-        return None;
-    }
     let in_worktree = previous.is_worktree == Some(true);
     Some(CreateRequest {
         agent: Agent::from_id(&previous.agent_type)?,
@@ -570,6 +573,8 @@ fn restore_request(
         use_worktree: in_worktree && previous.worktree_path.is_none(),
         initial_prompt: None,
         args: None,
+        remote_host_id: previous.remote_host_id.clone(),
+        credentials: Credentials::default(),
         workflow_id: None,
         workflow_name: None,
     })
@@ -591,22 +596,29 @@ fn grounded(previous: &TerminalSession, cwd: &str) -> TerminalSession {
 
 /// An agent started again on the conversation it had.
 fn resume_agent(native: &Native, id: &str, previous: &TerminalSession) -> Answer {
-    let Some(cwd) = resume_cwd_for(previous) else {
-        return workspace_gone(previous);
+    // A remote session's directories are on its host: it reconnects whatever this machine has.
+    let remote = given(previous.remote_host_id.as_deref()).is_some();
+    let previous = if remote {
+        previous.clone()
+    } else {
+        let Some(cwd) = resume_cwd_for(previous) else {
+            return workspace_gone(previous);
+        };
+        grounded(previous, &cwd)
     };
-    let previous = grounded(previous, &cwd);
-    if given(previous.remote_host_id.as_deref()).is_some() {
-        return failed("Resuming a session on a remote host is the server's; it is not available while vornd owns the session records".into());
-    }
     let Some(claims) = claims(native) else {
         return Answer::Forward;
     };
     // Scope read before the claim; claims do not lapse while the workspace is prepared.
-    let scope = transcript_scope(native, &previous);
+    let scope = (!remote).then(|| transcript_scope(native, &previous)).flatten();
     claims.preparing(id);
     let now = Instant::now();
-    let transcript = free_transcript_for(native, &previous, scope.as_ref())
-        .filter(|t| claims.claim(t, id, now).is_none());
+    let free = if remote {
+        pinned_free(native, &previous)
+    } else {
+        free_transcript_for(native, &previous, scope.as_ref())
+    };
+    let transcript = free.filter(|t| claims.claim(t, id, now).is_none());
     let Some(req) = restore_request(&previous, transcript.clone()) else {
         claims.prepared(id, Instant::now());
         return failed(format!(
@@ -724,6 +736,13 @@ fn free_transcript_for(
     at_preferred(&recent_sessions_for(agent, &homes, None, RECENT_LIMIT))
 }
 
+/// The conversation a remote session's record names, when nothing holds it: this machine has no history of the host's.
+fn pinned_free(native: &Native, session: &TerminalSession) -> Option<String> {
+    let agent = Agent::from_id(&session.agent_type)?;
+    let pinned = given(session.agent_session_id.as_deref()).filter(|_| agent.resumes_exactly())?;
+    (!held_transcripts(native).iter().any(|h| h == pinned)).then(|| pinned.to_owned())
+}
+
 /// What is there now for each offered session against what its record
 /// says (`verifyRestored`), for the local ones: whether its directory is
 /// still there, and the branch and commit it stands at. Each answer is
@@ -805,6 +824,9 @@ pub struct CreateRequest {
     pub worktree_name: Option<String>,
     pub initial_prompt: Option<String>,
     pub args: Option<Vec<String>>,
+    /// The remote host the session runs on, over ssh.
+    pub remote_host_id: Option<String>,
+    pub credentials: Credentials,
     /// Read by a headless create only: the workflow that asked for it.
     pub workflow_id: Option<String>,
     pub workflow_name: Option<String>,
@@ -812,7 +834,7 @@ pub struct CreateRequest {
 
 impl CreateRequest {
     /// Reads `params` as the server's handler does. `None` for a call that
-    /// is the server's: a remote host's, an agent this build does not know,
+    /// is the server's: an agent this build does not know,
     /// a param it does not read or one of a shape it would not expect.
     pub fn read(params: &Value) -> Option<CreateRequest> {
         let p = params.as_object()?;
@@ -833,9 +855,6 @@ impl CreateRequest {
                 Some(_) => None,
             }
         };
-        if text("remoteHostId")?.is_some_and(|h| !h.is_empty()) {
-            return None;
-        }
         // Read for its shape only: the server's handlers ignore it.
         flag("headless")?;
         match p.get("promptDelayMs") {
@@ -864,9 +883,19 @@ impl CreateRequest {
             worktree_name: text("worktreeName")?,
             initial_prompt: text("initialPrompt")?,
             args,
+            remote_host_id: text("remoteHostId")?,
+            credentials: Credentials {
+                key_content: text("_decryptedKeyContent")?.map(Secret::new),
+                password: text("_decryptedPassword")?.map(Secret::new),
+            },
             workflow_id: text("workflowId")?,
             workflow_name: text("workflowName")?,
         })
+    }
+
+    /// The remote host the session runs on, when it names one.
+    pub fn remote(&self) -> Option<&str> {
+        given(self.remote_host_id.as_deref())
     }
 
     /// The conversation the create names, when its agent can be sent back
@@ -914,6 +943,10 @@ pub(super) fn fed_and_held(native: &Native) -> bool {
 /// `terminal:create` for a local agent.
 fn create(native: &Native, req: &CreateRequest) -> Answer {
     if !can_start(native) {
+        return Answer::Forward;
+    }
+    // A host vornd cannot read is the server's to make what it will of.
+    if req.remote().is_some_and(|h| remote_host(native, h).is_none()) {
         return Answer::Forward;
     }
     let Some(named) = req.named().map(str::to_owned) else {
@@ -1066,6 +1099,20 @@ fn start_agent(
     let Some(config) = agent::command_of(&settings, req.agent) else {
         return Answer::Forward;
     };
+    if req.remote().is_some() {
+        return match prepare_remote(native, req, &config, &settings, id, group_id) {
+            Ok(start) => register(
+                native,
+                start.record,
+                &start.cwd,
+                start.argv,
+                start.env,
+                Input::Remote(Box::new(start.remote)),
+                made,
+            ),
+            Err(answer) => answer,
+        };
+    }
     let mut holds = Holds::new(native);
     // Held from here until the record is in, so a worktree action in between
     // sees it as in use: the worktree it names, and one it creates.
@@ -1147,6 +1194,114 @@ fn skeleton(id: &str, agent: &str, project_name: &str, project_path: &str) -> Te
         exit_at: None,
         other: Map::new(),
     }
+}
+
+/// Remote host `id` as the server keeps it, or `None` when vornd cannot read it.
+fn remote_host(native: &Native, id: &str) -> Option<vorn_protocol::RemoteHost> {
+    let db = native.db.get()?;
+    match vorn_store::remote_host(db, id) {
+        Ok(host) => host,
+        Err(err) => {
+            debug!(%err, "could not read the remote host; the server starts the session");
+            None
+        }
+    }
+}
+
+/// A terminal on a remote host, worked out: the local shell it starts in, and the login typed into it.
+#[derive(Debug)]
+struct RemoteStart {
+    argv: Vec<String>,
+    cwd: String,
+    env: Vec<(String, String)>,
+    record: TerminalSession,
+    remote: Remote,
+}
+
+/// What `createRemotePty` starts for `req`: a login shell in the home directory, with the safe environment.
+fn prepare_remote(
+    native: &Native,
+    req: &CreateRequest,
+    config: &vorn_agents::AgentCommand,
+    settings: &vorn_store::AgentSettings,
+    id: &str,
+    group_id: Option<String>,
+) -> Result<RemoteStart, Answer> {
+    let host_id = req.remote().unwrap_or_default();
+    let host = remote_host(native, host_id).ok_or(Answer::Forward)?;
+    let env = native.env.get();
+    let launch = LaunchRequest {
+        agent: req.agent,
+        args: req.args.clone(),
+        model: req.model.clone(),
+        remote_host_id: Some(host_id.to_owned()),
+        resume_session_id: req.resume_session_id.clone(),
+        session_id: req.session_id.clone(),
+        initial_prompt: req.initial_prompt.clone(),
+    };
+    let default_shell = launch_shell::default_shell(None, Platform::HOST, var);
+    let machine = Machine {
+        platform: Platform::HOST,
+        quoting: Quoting::local(Platform::HOST, &default_shell),
+    };
+    let launch_line =
+        launch_line(&launch, Some(config), &env, &machine).map_err(|e| Answer::Error(e.to_string()))?;
+    let method = host.auth_method.as_ref().map(|m| m.0.as_str());
+    let key = match (method, &req.credentials.key_content) {
+        (Some("key-stored"), Some(content)) => Some(KeyFile::new(content.clone())),
+        (Some("key-stored"), None) => {
+            warn!(host = %host.label, "key-stored auth selected but no decrypted key available; falling back to agent");
+            None
+        }
+        _ => None,
+    };
+    let key_path = key.as_ref().map(|k| k.path.to_string_lossy().into_owned());
+    let target = login::Target {
+        hostname: &host.hostname,
+        user: &host.user,
+        port: host.port,
+        auth: login::Auth::from_stored(method, host.ssh_key_path.as_deref(), key_path.as_deref()),
+        options: host.ssh_options.as_deref().filter(|o| !o.is_empty()),
+    };
+    let marker = login::marker(id);
+    let remote = Remote {
+        line: login::ssh_line(&target, &marker, Platform::HOST),
+        command: login::remote_command(&req.project_path, &launch_line),
+        marker,
+        password: req
+            .credentials
+            .password
+            .clone()
+            .filter(|_| target.auth == login::Auth::Password),
+        key,
+    };
+    let shell = launch_shell::default_shell(settings.shell.as_deref(), Platform::HOST, var);
+    let mut argv = vec![shell];
+    argv.extend(
+        launch_shell::default_shell_args(Platform::HOST)
+            .iter()
+            .map(|a| (*a).to_owned()),
+    );
+    let record = TerminalSession {
+        display_name: given(req.display_name.as_deref())
+            .map(str::to_owned)
+            .or_else(|| {
+                given(req.initial_prompt.as_deref())
+                    .and_then(|p| display_name_from_prompt(p, PROMPT_NAME_LEN))
+            }),
+        remote_host_id: Some(host.id.clone()),
+        remote_host_label: Some(host.label.clone()),
+        agent_session_id: req.named().map(str::to_owned),
+        group_id,
+        ..skeleton(id, req.agent.id(), &req.project_name, &req.project_path)
+    };
+    Ok(RemoteStart {
+        argv,
+        cwd: shell::home_dir(),
+        env,
+        record,
+        remote,
+    })
 }
 
 pub(super) fn var(name: &str) -> Option<String> {
@@ -1590,6 +1745,13 @@ fn plan_resume(native: &Native, id: &str) -> Option<Value> {
             .and_then(|o| serde_json::from_value::<TerminalSession>(o["session"].clone()).ok())
             .or_else(|| r.ended_terminal(id).cloned())
     })??;
+    if given(previous.remote_host_id.as_deref()).is_some() {
+        let transcript = given(previous.agent_session_id.as_deref()).map(str::to_owned);
+        let req = restore_request(&previous, transcript)?;
+        let settings = agent::settings(native)?;
+        let config = agent::command_of(&settings, req.agent)?;
+        return plan_remote(native, &req, &config, &settings, id, previous.group_id.clone());
+    }
     let cwd = resume_cwd_for(&previous)?;
     if previous.agent_type == "shell" {
         let settings = agent::settings(native).unwrap_or_default();
@@ -1664,6 +1826,9 @@ fn plan_resume(native: &Native, id: &str) -> Option<Value> {
 fn plan_agent(native: &Native, req: &CreateRequest) -> Option<Value> {
     let settings = agent::settings(native)?;
     let config = agent::command_of(&settings, req.agent)?;
+    if req.remote().is_some() {
+        return plan_remote(native, req, &config, &settings, "", None);
+    }
     let existing = given(req.existing_worktree_path.as_deref());
     // Making a worktree or checking out a branch is a change.
     let reuses = existing.is_some_and(|e| Path::new(e).exists());
@@ -1703,6 +1868,19 @@ fn plan_agent(native: &Native, req: &CreateRequest) -> Option<Value> {
         ..skeleton("", req.agent.id(), &req.project_name, &req.project_path)
     };
     Some(plan_json(argv, &prepared.cwd, env, &record))
+}
+
+/// A remote terminal's plan: what [`prepare_remote`] works out, its login typed later and not compared.
+fn plan_remote(
+    native: &Native,
+    req: &CreateRequest,
+    config: &vorn_agents::AgentCommand,
+    settings: &vorn_store::AgentSettings,
+    id: &str,
+    group_id: Option<String>,
+) -> Option<Value> {
+    let start = prepare_remote(native, req, config, settings, id, group_id).ok()?;
+    Some(plan_json(start.argv, &start.cwd, start.env, &start.record))
 }
 
 fn plan_shell(native: &Native, cwd: Option<&str>, count: usize) -> Option<Value> {

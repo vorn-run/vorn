@@ -48,6 +48,7 @@ pub mod script;
 pub mod secrets;
 pub mod sessions;
 pub mod shell;
+pub mod ssh;
 pub mod work;
 pub mod worktree;
 pub mod worktree_move;

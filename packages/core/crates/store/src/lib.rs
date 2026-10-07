@@ -36,7 +36,7 @@ mod worktrees;
 
 pub use agents::AgentSettings;
 pub use connectors::MAX_INBOX_ATTEMPTS;
-pub use hosts::{Placement, ProjectHost, ProjectHosts};
+pub use hosts::{remote_host, Placement, ProjectHost, ProjectHosts};
 pub use sql::now_iso;
 pub use tokens::DeviceTokens;
 pub use worktrees::WorktreeSettings;
