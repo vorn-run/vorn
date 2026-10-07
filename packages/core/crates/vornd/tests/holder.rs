@@ -217,6 +217,11 @@ fn a_relaunched_vornd_finds_the_same_sessiond() {
     let first = v.current();
     reap.add(pid(&first));
     assert_eq!(first["build"], sessiond_version().as_str());
+    assert_eq!(
+        sessiond_version(),
+        env!("CARGO_PKG_VERSION"),
+        "sessiond reports vornd's version"
+    );
     assert_eq!(first["proto"], PROTO);
     assert_eq!(first["compatible"], true);
     let installed = launch::installed_path(home.path(), &sessiond_version());
@@ -253,7 +258,8 @@ fn an_older_build_is_drained_and_exits() {
     let old = Sessiond::new(Config {
         home: home.path().to_owned(),
         instance: 0x01d,
-        build: "0.0.1".into(),
+        // The label every sessiond carried before it took the app's version.
+        build: "0.7.5".into(),
         // Only the drain may end it.
         idle_exit: Duration::from_secs(600),
         spool_cap: 1 << 20,
@@ -269,7 +275,7 @@ fn an_older_build_is_drained_and_exits() {
     });
     let older = holder["older"].as_array().unwrap();
     assert_eq!(older.len(), 1, "{holder}");
-    assert_eq!(older[0]["build"], "0.0.1");
+    assert_eq!(older[0]["build"], "0.7.5");
     assert_eq!(older[0]["instance"], "1d");
     assert_eq!(older[0]["compatible"], true);
     assert_eq!(older[0]["sessions"], 0);

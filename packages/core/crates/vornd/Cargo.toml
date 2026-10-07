@@ -1,7 +1,6 @@
 [package]
 name = "vornd"
-# Never published and never versioned on its own; vorn-core carries the app version.
-version = "0.0.0"
+version.workspace = true
 edition = "2021"
 rust-version = "1.90"
 license = "MIT"
