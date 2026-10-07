@@ -99,7 +99,11 @@ describe('the headless agents vornd starts, followed here', () => {
       note({
         op: 'upsert',
         kind: 'headless',
-        record: record(agentType, { agentType, rev: 9, exitAt: { epoch: 7, rseq: 1, index: 0 } }),
+        record: {
+          ...record(agentType, { agentType }),
+          rev: 9,
+          exitAt: { epoch: 7, rseq: 1, index: 0 }
+        } as HeadlessSession,
         native: true,
         created: true
       })

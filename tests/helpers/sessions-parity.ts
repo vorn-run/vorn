@@ -13,7 +13,8 @@
  *   transcript first names it (an object's fields read in the order of their
  *   names, since the two sides write them in orders of their own), so an id
  *   has to recur where the other side's recurs.
- * - {@link MOMENTS}: when a record was made, and the process it runs as.
+ * - {@link MOMENTS}: when a record was made, started or ended, and the process
+ *   it runs as.
  * - {@link REGISTRY_FIELDS}: the revision and stamps of vornd's copy of the
  *   registry, on the records it answers.
  * - {@link RUN_DIRS}: each run's own home and work directories, and their
@@ -27,6 +28,9 @@
  *   link; the server's own answer had it while it set the link in place. The
  *   record has it from its next change on, and the clients are told it then.
  *   Applied by {@link withoutHookLinks} to the answers of creates only.
+ * - {@link OUTPUT_CHUNKS}: a headless agent's output reaches the clients in
+ *   chunks cut where the pipe happened to deliver them, so each agent's output
+ *   is compared whole ({@link outputWhole}).
  */
 
 export const MINTED = 'ids-each-side-makes-up'
@@ -36,6 +40,7 @@ export const RUN_DIRS = 'each-runs-own-directories'
 export const WORKTREE_ID = 'random-worktree-directory-ids'
 export const STATUS = 'statuses-decided-as-agents-run'
 export const HOOK_LINK_LATER = 'copilot-hook-link-after-the-create-answer'
+export const OUTPUT_CHUNKS = 'headless-output-chunk-boundaries'
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
 
@@ -75,7 +80,11 @@ export function normalizeRun<T>(value: T, dirs: RunDirs): T {
     for (const [key, field] of fields) {
       if (key === 'rev' || key === 'statusAt' || key === 'exitAt') continue
       if (key === 'status' && typeof field === 'string' && isAgentStatus(field)) continue
-      if (key === 'createdAt' && typeof field === 'number') out[key] = '<moment>'
+      if (
+        (key === 'createdAt' || key === 'startedAt' || key === 'endedAt') &&
+        typeof field === 'number'
+      )
+        out[key] = '<moment>'
       else if (key === 'pid' && typeof field === 'number') out[key] = field > 0 ? '<pid>' : 0
       else out[key] = walk(field)
     }
@@ -100,4 +109,20 @@ export function withoutHookLinks<T>(answers: T): T {
     return out
   }
   return walk(answers) as T
+}
+
+/** Each agent's output whole, from the `headless:data` chunks the clients were told. */
+export function outputWhole(
+  told: readonly { id: string; data: string }[],
+  ids: Readonly<Record<string, string>>
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(ids).map(([name, id]) => [
+      name,
+      told
+        .filter((t) => t.id === id)
+        .map((t) => t.data)
+        .join('')
+    ])
+  )
 }
