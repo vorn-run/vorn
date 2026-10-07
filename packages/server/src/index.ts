@@ -267,6 +267,11 @@ export async function startServer(
   // Set up Fastify + WebSocket
   const app = Fastify({ logger: false })
   await app.register(websocket)
+  // A server closed without `shutdown`, as one started in-process is, still stops its vornd.
+  app.addHook('onClose', async () => {
+    vorndSessions.close()
+    await vorndKeeper.stop()
+  })
 
   // Who owns this data directory's published names, decided once and used by
   // every publisher below.

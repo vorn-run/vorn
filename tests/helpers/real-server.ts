@@ -204,26 +204,76 @@ export async function vorndStopped(port: number): Promise<void> {
   )
 }
 
-/** @param keepHolder Leaves the session holder and its sessions running, for a server to start again on. */
-export async function stopRealServer(server: RealServer, keepHolder = false): Promise<void> {
-  const holder = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
+/** The pid vornd announced in `dataDir`, read before it stops and withdraws it. */
+export function announcedVornd(dataDir: string): number | undefined {
+  try {
+    const said = JSON.parse(fs.readFileSync(path.join(dataDir, 'run', 'vornd-app'), 'utf8')) as {
+      pid?: unknown
+    }
+    return typeof said.pid === 'number' ? said.pid : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The session holder's pid, as the vornd on `port` reports it. */
+export function holderPid(port: number): Promise<number | undefined> {
+  return fetch(`http://127.0.0.1:${port}/vornd/health`)
     .then((r) => r.json() as Promise<{ sessiond?: { current?: { pid?: number } } }>)
     .then((h) => h.sessiond?.current?.pid)
     .catch(() => undefined)
-  if (server.child.exitCode === null) {
-    const exited = new Promise((r) => server.child.once('exit', r))
-    server.child.kill()
+}
+
+/** Waits for `pid` to exit: a process still exiting may still write to its directories. */
+export async function processGone(pid: number | undefined): Promise<void> {
+  if (!pid) return
+  await until(`process ${pid} to exit`, () => {
+    try {
+      process.kill(pid, 0)
+      return false
+    } catch {
+      return true
+    }
+  })
+}
+
+/** Ends the session holder `pid` and waits for it to exit. */
+export async function stopHolder(pid: number | undefined): Promise<void> {
+  if (!pid) return
+  try {
+    process.kill(pid, 'SIGTERM')
+  } catch {
+    return
+  }
+  await processGone(pid)
+}
+
+/** @param keepHolder Leaves the session holder and its sessions running, for a server to start again on. */
+export function stopRealServer(server: RealServer, keepHolder = false): Promise<void> {
+  return stopServerChild(server.child, server.vornd, server.dirs.data, keepHolder)
+}
+
+/**
+ * Stops a server started as a child on `dataDir`, its vornd on `vorndPort`
+ * and, unless kept, its session holder, and waits for each to exit.
+ */
+export async function stopServerChild(
+  child: ChildProcess,
+  vorndPort: number,
+  dataDir: string,
+  keepHolder = false
+): Promise<void> {
+  const holder = await holderPid(vorndPort)
+  const vorndPid = announcedVornd(dataDir)
+  if (child.exitCode === null) {
+    const exited = new Promise((r) => child.once('exit', r))
+    child.kill()
     await exited
   }
-  await vorndStopped(server.vornd)
+  await vorndStopped(vorndPort)
+  await processGone(vorndPid)
   // The session holder outlives the server, by design, and its sessions with it.
-  if (holder && !keepHolder) {
-    try {
-      process.kill(holder, 'SIGTERM')
-    } catch {
-      /* already gone */
-    }
-  }
+  if (!keepHolder) await stopHolder(holder)
 }
 
 /** A repository with one commit, the same commit on every run. */

@@ -14,7 +14,7 @@ import WebSocket from 'ws'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '@vornrun/shared/protocol'
 import { spawnsRealServers } from './helpers/one-at-a-time'
-import { vorndStopped } from './helpers/real-server'
+import { stopServerChild } from './helpers/real-server'
 
 const repoRoot = path.join(__dirname, '..')
 const CREDENTIAL = 'native-reach-test-credential'
@@ -200,12 +200,7 @@ async function refusal(port: number, headers: Record<string, string>) {
 
 afterAll(async () => {
   for (const s of servers) {
-    if (s.child.exitCode === null) {
-      const exited = new Promise((r) => s.child.once('exit', r))
-      s.child.kill()
-      await exited
-    }
-    await vorndStopped(s.vornd)
+    await stopServerChild(s.child, s.vornd, s.dataDir)
     try {
       fs.rmSync(s.dataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
     } catch (err) {
