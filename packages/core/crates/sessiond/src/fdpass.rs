@@ -8,6 +8,7 @@
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
+use std::net::Shutdown;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
 
@@ -129,6 +130,18 @@ impl Receiver {
     /// Descriptors received that no frame claimed.
     pub fn unclaimed(&self) -> usize {
         self.fds.len()
+    }
+
+    /// Hang up and read until the other end closes too, or the read timeout
+    /// passes, closing every descriptor that comes: a plain read would leave
+    /// them for the kernel to dispose of, which macOS may not do soon.
+    pub fn drain(&mut self) {
+        let _ = self.sock.shutdown(Shutdown::Write);
+        while matches!(self.recv_some(), Ok(n) if n > 0) {
+            self.fds.clear();
+            self.frames = FrameReader::default();
+        }
+        self.fds.clear();
     }
 
     fn recv_some(&mut self) -> io::Result<usize> {

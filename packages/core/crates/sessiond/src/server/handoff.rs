@@ -158,18 +158,24 @@ impl Sessiond {
             d: self,
             sessions: Vec::new(),
         };
+        // On failure every session is thawed before the adopter hears of it.
         let handovers = match self.freeze_all(&sessions, &mut frozen) {
             Ok(h) => h,
-            Err(why) => return refuse(&mut sock, why),
+            Err(why) => {
+                drop(frozen);
+                return refuse(&mut sock, why);
+            }
         };
         let mut rx = Receiver::new(sock);
         if let Err(e) = self.offer(&mut rx, &handovers) {
+            drop(frozen);
             return refuse(rx.socket(), e.to_string());
         }
         // Past Commit only the adopter's Took, or the end of the connection
         // without it, says who has the sessions.
         let _ = rx.socket().set_read_timeout(None);
         if !matches!(rx.recv::<ToDonor>(), Ok(ToDonor::Took(Took))) {
+            drop(frozen);
             return;
         }
         let sessions = std::mem::take(&mut frozen.sessions);
@@ -276,12 +282,36 @@ impl Sessiond {
         };
         fdpass::send(&mut sock, &ToSessiond::Handoff(hello), &[])?;
         let mut rx = Receiver::new(sock);
+        let staged = match self.take(&mut rx) {
+            Ok(staged) => staged,
+            Err(e) => {
+                // The donor thaws every session before it closes, so the
+                // failure is reported only once they are all live again.
+                rx.drain();
+                return Err(e);
+            }
+        };
+        let mut map = self.sessions();
+        let ids = staged
+            .into_iter()
+            .map(|s| {
+                let id = s.id().to_owned();
+                map.insert(id.clone(), s.start(self.exit_file(&id), on_written.clone()));
+                id
+            })
+            .collect();
+        Ok(ids)
+    }
+
+    /// From the donor's offer to [`Took`]: every session staged here, or an
+    /// error with the donor still holding them all.
+    fn take(&self, rx: &mut Receiver) -> io::Result<Vec<Staged>> {
         let offer = match rx.recv::<ToAdopter>()? {
             ToAdopter::Offer(o) if o.version == HANDOFF => o,
             ToAdopter::Refuse(r) => return Err(io::Error::other(r.why)),
             other => return Err(io::Error::other(format!("expected Offer, got {other:?}"))),
         };
-        let staged = self.stage_all(&mut rx, &offer)?;
+        let staged = self.stage_all(rx, &offer)?;
         self.at(Step::Ready)?;
         fdpass::send(rx.socket(), &ToDonor::Ready(Ready), &[])?;
         match rx.recv::<ToAdopter>() {
@@ -295,16 +325,7 @@ impl Sessiond {
             Ok(other) => return Err(io::Error::other(format!("expected Commit, got {other:?}"))),
             Err(e) => return Err(e),
         }
-        let mut map = self.sessions();
-        let ids = staged
-            .into_iter()
-            .map(|s| {
-                let id = s.id().to_owned();
-                map.insert(id.clone(), s.start(self.exit_file(&id), on_written.clone()));
-                id
-            })
-            .collect();
-        Ok(ids)
+        Ok(staged)
     }
 
     fn stage_all(&self, rx: &mut Receiver, offer: &Offer) -> io::Result<Vec<Staged>> {
