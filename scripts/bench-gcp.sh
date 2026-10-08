@@ -70,7 +70,8 @@ echo "creating $vm ($machine, Spot, $zone)"
 wait_boot none
 
 echo "copying packages/core at $commit"
-git archive --format=tar --prefix=vorn/ HEAD packages/core | ssh_vm 'tar -x -C "$HOME"'
+# vornd compiles packages/mcp/package.json in.
+git archive --format=tar --prefix=vorn/ HEAD packages/core packages/mcp/package.json | ssh_vm 'tar -x -C "$HOME"'
 
 echo "setting up"
 ssh_vm 'bash "$HOME/vorn/packages/core/bench/scale/setup-vm.sh"'
