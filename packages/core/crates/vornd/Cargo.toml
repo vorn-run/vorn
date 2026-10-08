@@ -55,6 +55,7 @@ vorn-workflow = { path = "../workflow" }
 jiff = "0.2"
 vorn-worktrees = { path = "../worktrees" }
 vorn-remote = { path = "../remote" }
+vorn-hooks = { path = "../hooks" }
 uuid = { version = "1", features = ["v4"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
 

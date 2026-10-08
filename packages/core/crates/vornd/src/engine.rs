@@ -1447,6 +1447,10 @@ impl crate::native::sessions::Host for EngineHost {
         });
     }
 
+    fn head_stamp(&self, id: &str) -> Option<Stamp> {
+        self.engine.head_stamp(id)
+    }
+
     fn signal(&self, id: &str, sig: Sig) {
         if let Err(err) = self.engine.signal(id, sig) {
             debug!(%id, %err, "could not signal a session vornd closed");

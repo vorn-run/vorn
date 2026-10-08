@@ -212,6 +212,20 @@ impl Daemon {
         work.start();
     }
 
+    /// Starts the endpoint agents' hooks post to ([`crate::native::hooks`]).
+    pub async fn start_hooks(&self) {
+        if let Some(native) = self.native.as_ref() {
+            native.start_hooks().await;
+        }
+    }
+
+    /// Gives the hook registration up as vornd stops.
+    pub fn stop_hooks(&self) {
+        if let Some(native) = self.native.as_ref() {
+            native.stop_hooks();
+        }
+    }
+
     /// Tells the status widget's list as the sessions change ([`crate::native::widget`]).
     pub fn start_widget(&self) {
         if let Some(native) = self.native.as_ref() {
@@ -622,6 +636,7 @@ async fn health(daemon: &Daemon) -> Response<Body> {
         "groups": groups,
         "sessiond": daemon.holder.as_ref().map(|h| h.report()),
         "registry": registry_report(daemon),
+        "hooks": daemon.native.as_ref().and_then(|n| n.hooks_activity()),
     });
     let status = if reachable {
         StatusCode::OK

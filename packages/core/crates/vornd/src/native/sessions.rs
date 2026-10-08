@@ -127,6 +127,12 @@ pub trait Host: Send + Sync + fmt::Debug {
     /// Sends `sig` to session `id`'s program.
     fn signal(&self, id: &str, sig: Sig);
 
+    /// Where session `id`'s output has got to, which a status set now is stamped with.
+    fn head_stamp(&self, id: &str) -> Option<crate::registry::Stamp> {
+        let _ = id;
+        None
+    }
+
     /// Sends `sig` to session `id`'s program `after` a while, if it still runs.
     fn signal_after(&self, id: &str, sig: Sig, after: Duration);
 

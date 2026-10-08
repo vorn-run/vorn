@@ -28,6 +28,7 @@ members = [
   "crates/vault",
   "crates/connectors",
   "crates/remote",
+  "crates/hooks",
 ]
 
 # The app's version (scripts/sync-versions.sh); every binary that reports a version inherits it.

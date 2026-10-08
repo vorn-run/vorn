@@ -45,6 +45,7 @@ pub mod extensions;
 pub mod file;
 pub mod git;
 pub mod headless;
+pub mod hooks;
 pub mod ide;
 pub mod mcp;
 pub mod reach;
@@ -67,7 +68,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, Semaphore};
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use vorn_store::{Placement, ProjectHosts, Store};
 
 use crate::applink::AppLink;
@@ -200,6 +201,7 @@ pub fn effect(method: &str) -> Option<Effect> {
         || about::METHODS.contains(&method)
         || method == script::METHOD
         || credential::METHODS.contains(&method)
+        || hooks::METHODS.contains(&method)
     {
         return Some(Effect::Change);
     }
@@ -351,6 +353,8 @@ pub struct Native {
     shells: shell::Shells,
     /// The copy of the server's session records, when vornd holds sessions.
     registry: OnceLock<Arc<SessionRegistry>>,
+    /// The endpoint agents' hooks post to, once it listens ([`hooks`]).
+    hooks: OnceLock<Arc<hooks::Hooks>>,
     /// Woken when a client asks for the widget's list ([`widget`]).
     widget: tokio::sync::Notify,
     /// What starts the sessions vornd creates: the engine, when it runs one.
@@ -405,6 +409,7 @@ impl Native {
             shells: shell::Shells::default(),
             registry: OnceLock::new(),
             widget: tokio::sync::Notify::new(),
+            hooks: OnceLock::new(),
             host: OnceLock::new(),
             sessions: Arc::default(),
             sizes: vorn_worktrees::Sizes::default(),
@@ -426,6 +431,37 @@ impl Native {
     pub fn set_registry(&self, registry: Arc<SessionRegistry>) {
         registry.want();
         let _ = self.registry.set(registry);
+    }
+
+    /// Starts the endpoint agents' hooks post to, once.
+    pub async fn start_hooks(self: &Arc<Self>) {
+        let Some(homes) = hooks::Homes::from_env() else {
+            warn!("no home directory; agents' hooks are not received");
+            return;
+        };
+        match hooks::Hooks::start(self, homes).await {
+            Ok(h) => {
+                info!(
+                    port = h.port(),
+                    owner = h.owns_registration(),
+                    "the hook endpoint listens"
+                );
+                let _ = self.hooks.set(h);
+            }
+            Err(err) => warn!(%err, "the hook endpoint could not listen"),
+        }
+    }
+
+    /// Denies open permission requests and gives the hook registration up.
+    pub fn stop_hooks(&self) {
+        if let Some(h) = self.hooks.get() {
+            h.stop();
+        }
+    }
+
+    /// How the hook endpoint is doing, for the health report.
+    pub fn hooks_activity(&self) -> Option<Value> {
+        self.hooks.get().map(|h| h.activity())
     }
 
     /// Tells the status widget's list as the registry changes, once there is one.
@@ -599,6 +635,9 @@ impl Native {
         }
         if credential::METHODS.contains(&method.as_str()) {
             return credential::answer(self, &method, params).await;
+        }
+        if hooks::METHODS.contains(&method.as_str()) {
+            return hooks::answer(self, &method, &params);
         }
         if extensions::METHODS.contains(&method.as_str()) {
             let Some(host) = self.extensions.get().cloned() else {
