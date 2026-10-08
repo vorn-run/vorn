@@ -127,16 +127,6 @@ class PtyManager extends EventEmitter {
   readonly heads = new HeadRefresh(getGitHead, undefined, (s) => this.recordChanged(s.id))
   private ptys = new Map<string, VorndPty>()
   private sessions = new Map<string, TerminalSession>()
-  /**
-   * PTYs an extension's pane is drawing, which are not sessions.
-   *
-   * They need everything a session's PTY needs — bytes in, bytes out, a resize,
-   * a kill — so they live in the same maps. What they are not is work a person
-   * started: no window is told about them, nothing persists them, and nothing
-   * that walks the sessions of a project should find one and start settling
-   * extensions onto it.
-   */
-  private extensionPtys = new Set<string>()
   private normalizedPaths = new Map<string, string>()
   private agentCommands: Record<AiAgentType, AgentCommandConfig> = { ...DEFAULT_AGENT_COMMANDS }
   private remoteHosts: RemoteHost[] = []
@@ -183,12 +173,11 @@ class PtyManager extends EventEmitter {
    *
    * Called after every change to a record: here, and by the places outside
    * that change one in place (a hook linking it, an agent's id captured, a
-   * resume carrying fields over). Telling it twice costs nothing. An
-   * extension's pane is not a session and is never told.
+   * resume carrying fields over). Telling it twice costs nothing.
    */
   recordChanged(id: string): void {
     const session = this.sessions.get(id)
-    if (!session || this.extensionPtys.has(id)) return
+    if (!session) return
     sessionFeed.terminal(session, !this.ptys.has(id))
   }
 
@@ -206,7 +195,7 @@ class PtyManager extends EventEmitter {
    */
   private fromMirror(record: TerminalSession, how: MirroredHow = 'note'): void {
     const session = this.sessions.get(record.id)
-    if (!session || this.extensionPtys.has(record.id)) return
+    if (!session) return
     let updated = false
     let linked = false
     let renamed = false
@@ -329,7 +318,6 @@ class PtyManager extends EventEmitter {
     this.sessions.delete(id)
     this.heads.forget(id)
     this.normalizedPaths.delete(id)
-    this.clearSessionTracking(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     if (this.ptys.delete(id)) vorndSessions.release(id)
   }
@@ -346,7 +334,6 @@ class PtyManager extends EventEmitter {
     this.sessions.delete(id)
     this.heads.forget(id)
     this.normalizedPaths.delete(id)
-    this.clearSessionTracking(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.ptys.delete(id)
     this.recordRemoved(id)
@@ -882,47 +869,6 @@ class PtyManager extends EventEmitter {
   }
 
   /**
-   * A terminal running an extension's own program, in the worktree it is about.
-   *
-   * Its own spawn rather than `createShellPty` with arguments: this runs one
-   * named program instead of a login shell, so it takes none of the shell
-   * integration, and it carries the extension's bridge names so the program can
-   * ask the host the same things a footer can.
-   */
-  createExtensionPty(params: {
-    command: string
-    args: string[]
-    cwd: string
-    displayName: string
-    env: Record<string, string>
-  }): TerminalSession {
-    const id = crypto.randomUUID()
-    const ptyProcess = this.startProcess(id, params.command, params.args, {
-      cwd: params.cwd,
-      env: { ...getSafeEnv(), ...params.env, VORN_SESSION_ID: id }
-    })
-    this.ptys.set(id, ptyProcess)
-
-    const session: TerminalSession = {
-      id,
-      agentType: 'shell',
-      projectName: path.basename(params.cwd) || 'extension',
-      projectPath: params.cwd,
-      status: 'running',
-      createdAt: Date.now(),
-      cols: INITIAL_COLS,
-      rows: INITIAL_ROWS,
-      pid: ptyProcess.pid,
-      displayName: params.displayName,
-      shellCwd: params.cwd
-    }
-    this.sessions.set(id, session)
-    this.extensionPtys.add(id)
-    this.normalizedPaths.set(id, normalizePath(params.cwd))
-    return session
-  }
-
-  /**
    * Start a session's program in vornd, which keeps it in its session holder so
    * it outlives this server.
    *
@@ -977,19 +923,9 @@ class PtyManager extends EventEmitter {
     this.orderChanged()
   }
 
-  /** Whether this PTY is an extension's pane rather than a session someone started. */
-  isExtensionPty(id: string): boolean {
-    return this.extensionPtys.has(id)
-  }
-
-  private clearSessionTracking(id: string): void {
-    this.extensionPtys.delete(id)
-  }
-
   /** A session's program ended. */
   private processEnded(id: string, { exitCode, repeated }: VorndExit, exitAt: Stamp | null): void {
     this.deleteTempKey(id)
-    this.clearSessionTracking(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.orderChanged()
 
@@ -1068,7 +1004,6 @@ class PtyManager extends EventEmitter {
     this.sessions.delete(id)
     this.heads.forget(id)
     this.normalizedPaths.delete(id)
-    this.clearSessionTracking(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.ptys.delete(id)
     this.recordRemoved(id)
@@ -1106,7 +1041,6 @@ class PtyManager extends EventEmitter {
     this.sessions.delete(id)
     this.heads.forget(id)
     this.normalizedPaths.delete(id)
-    this.clearSessionTracking(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.ptys.delete(id)
     this.recordRemoved(id)
@@ -1187,22 +1121,18 @@ class PtyManager extends EventEmitter {
   }
 
   getActiveSessions(): TerminalSession[] {
-    // An extension's pane PTY is deliberately absent: this list is what the app
-    // is told about and what is persisted, and a pane is neither.
-    if (this.sessionOrder.length === 0) {
-      return Array.from(this.sessions.values()).filter((s) => !this.extensionPtys.has(s.id))
-    }
+    if (this.sessionOrder.length === 0) return Array.from(this.sessions.values())
     const ordered: TerminalSession[] = []
     const seen = new Set<string>()
     for (const id of this.sessionOrder) {
       const s = this.sessions.get(id)
-      if (s && !this.extensionPtys.has(id)) {
+      if (s) {
         ordered.push(s)
         seen.add(id)
       }
     }
     for (const s of this.sessions.values()) {
-      if (!seen.has(s.id) && !this.extensionPtys.has(s.id)) ordered.push(s)
+      if (!seen.has(s.id)) ordered.push(s)
     }
     return ordered
   }

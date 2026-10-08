@@ -425,6 +425,25 @@ impl Git {
         })
     }
 
+    /// The working tree's diff as git prints it (`getGitDiffText`), cut at
+    /// [`MAX_DIFF_TEXT_BYTES`].
+    pub fn diff_text(&self, cwd: &Path) -> Result<String, Error> {
+        self.exec(&["diff", "-U3"], cwd, 15_000, MAX_DIFF_TEXT_BYTES * 2)
+            .map(truncate_diff)
+    }
+
+    /// `git status --porcelain` (`getGitStatusPorcelain`).
+    pub fn status_porcelain(&self, cwd: &Path) -> Result<String, Error> {
+        self.exec_default(&["status", "--porcelain"], cwd, 5000)
+    }
+
+    /// Where `cwd`'s `origin` points; `None` for no repository, no origin
+    /// or no git.
+    pub fn origin_url(&self, cwd: &Path) -> Option<String> {
+        self.exec_default(&["remote", "get-url", "origin"], cwd, 3000)
+            .ok()
+    }
+
     /// Commits, after staging everything with `include_unstaged`.
     pub fn commit(&self, cwd: &Path, message: &str, include_unstaged: bool) -> Done {
         if include_unstaged {
@@ -450,10 +469,7 @@ impl Git {
     /// `detectRepoSlug` reads it: `None` for no repository, no origin, no git
     /// or a remote that is not on GitHub.
     pub fn github_origin(&self, cwd: &Path) -> Option<GitHubRepo> {
-        let url = self
-            .exec_default(&["remote", "get-url", "origin"], cwd, 3000)
-            .ok()?;
-        parse_github_remote(&url)
+        parse_github_remote(&self.origin_url(cwd)?)
     }
 
     /// The branch a project's work is measured against: `origin/HEAD`, then

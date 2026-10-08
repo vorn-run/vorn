@@ -136,7 +136,7 @@ describe.runIf(runnable)('the configuration in vornd', () => {
     expect(groups.config?.forwarded ?? 0).toBe(0)
     expect(groups.config?.native ?? 0).toBeGreaterThan(0)
     expect(unexpectedForwards).toEqual({})
-    expect(stillForwarded.extension).toBe('extension host')
+    expect(stillForwarded.extension).toBeUndefined()
     expect(stillForwarded.config).toBeUndefined()
   })
 })

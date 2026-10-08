@@ -375,6 +375,7 @@ fn main() -> ExitCode {
         }
         daemon.set_app_link(Arc::clone(&link));
         daemon.start_work(&link);
+        daemon.start_extensions().await;
         proxy::log_upstream(&daemon).await;
         info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
         let mut stdout = std::io::stdout().lock();

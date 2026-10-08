@@ -77,6 +77,7 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "scheduler",
     "webhook",
     "artifact",
+    "extension",
     "config",
 ];
 
@@ -103,7 +104,6 @@ impl StillForwarded {
 /// endpoint reports (`unexpectedForwards`) and the tests fail on. It shrinks
 /// to nothing.
 pub const STILL_FORWARDED: &[(&str, StillForwarded)] = &[
-    ("extension", StillForwarded::ExtensionHost),
     ("bridge", StillForwarded::ExtensionHost),
     ("browser", StillForwarded::ExtensionHost),
     ("device", StillForwarded::ExtensionHost),
@@ -390,7 +390,7 @@ mod tests {
             BTreeMap::from([("config:save".to_owned(), 2)])
         );
         assert_eq!(
-            still_forwarded("extension:list"),
+            still_forwarded("browser:navigate"),
             Some(StillForwarded::ExtensionHost)
         );
         assert_eq!(still_forwarded("config:load"), None);

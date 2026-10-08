@@ -3396,6 +3396,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-extensions"
+version = "0.0.0"
+dependencies = [
+ "data-encoding",
+ "getrandom 0.4.3",
+ "libc",
+ "regress",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "vorn-git"
 version = "0.0.0"
 dependencies = [
@@ -3630,6 +3645,7 @@ dependencies = [
  "uuid",
  "vorn-agents",
  "vorn-engine",
+ "vorn-extensions",
  "vorn-git",
  "vorn-grid-client",
  "vorn-mcp",

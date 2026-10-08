@@ -33,18 +33,6 @@ import {
   releaseSpawningTranscriptsFor
 } from './transcript-claims'
 import { browserBridge } from './browser-bridge'
-import { activationFor, subjectOf } from './extensions/activation'
-import { footerReadings, stopFooters, syncFooters } from './extensions/footers'
-import { matchLinks, runHandler } from './extensions/handlers'
-import { installedExtensions, stopHostsForExtension, stopHostsForProject } from './extensions/hosts'
-import {
-  closePane,
-  closePaneForTerminal,
-  closePanesForExtension,
-  closePanesForSession,
-  openPane
-} from './extensions/panes'
-import { resolveSelection } from './extensions/selection'
 import { hookServer } from './hook-server'
 import { hookStatusMapper } from './hook-status-mapper'
 import { installHooks } from './hook-installer'
@@ -64,7 +52,6 @@ import type {
   TaskStatus,
   ConnectorConfigField,
   ConnectorManifest,
-  ExtensionActivationState,
   ExternalItem,
   HeadlessSession,
   ProjectConfig,
@@ -366,7 +353,6 @@ export function reconcileImplicitConnections(): void {
 
 /** Settle every connection of a connector whose files just changed; its next call starts on the new files. */
 async function onPackChanged(connectorId: string): Promise<void> {
-  await syncExtensionsAfterPackChange(connectorId)
   await stopClientsForConnector(connectorId)
   syncImplicitConnection(connectorId, installedPack(connectorId), implicitConnectionDeps)
 }
@@ -519,93 +505,9 @@ export function setServerPort(port: number): void {
   serverPort = port
 }
 
-/** An extension answers about a running session or not at all. */
-function liveSession(sessionId: string): TerminalSession {
-  const session = ptyManager.getLiveSessions().find((one) => one.id === sessionId)
-  if (!session) throw new Error(`Session not found: ${sessionId}`)
-  return session
-}
-
-/** What every installed extension shows on one session's card. */
-async function activationStates(sessionId: string): Promise<ExtensionActivationState[]> {
-  const packs = installedExtensions()
-  const subject = await subjectOf(liveSession(sessionId), packs)
-  return packs.map((pack) => ({
-    extensionId: pack.id,
-    extensionName: pack.name,
-    ...activationFor(pack, subject)
-  }))
-}
-
-/**
- * Say a session exists, and settle what the extensions show on it.
- *
- * Both halves together because they are one event. Sessions are created from
- * several places -- a shell, an agent, a restore -- and a site that told the
- * windows but not the extensions would show a card with no bands and no way to
- * tell why.
- */
+/** Say a session exists; vornd settles what the extensions show on it from the records. */
 export function announceSession(session: TerminalSession): void {
   clientRegistry.broadcast(IPC.SESSION_CREATED, session)
-  syncExtensionsFor(session)
-}
-
-/**
- * Settle what an extension shows on a session, and tell the windows drawing it.
- *
- * Called when a session appears and when its packs change, which are the two
- * ways the answer moves. A footer already running for a contribution that no
- * longer shows is stopped by the same call.
- */
-export function syncExtensionsFor(session: TerminalSession): void {
-  const settle = async (): Promise<void> => {
-    await syncFooters(session)
-    clientRegistry.broadcast(
-      IPC.EXTENSION_ACTIVATION,
-      { sessionId: session.id, states: await activationStates(session.id) },
-      session.id
-    )
-  }
-  // Not awaited: a session is announced now, and what its extensions show
-  // follows once any git remote they name has been read.
-  settle().catch((err) => log.warn(`[extensions] could not settle ${session.id}: ${err}`))
-}
-
-/**
- * Record a rename an extension made, the way a person's rename is recorded.
- *
- * The bridge has already changed the name in the manager; what is left is what
- * `terminal:rename` does afterwards, and doing less than it would mean a name
- * that no window outside the asking one sees and that a restart forgets.
- */
-export function extensionRenamedSession(sessionId: string, displayName: string): void {
-  logSessionEvent(sessionId, 'renamed', { displayName })
-  sessionManager.scheduleSave()
-  broadcastWidgetUpdate()
-}
-
-/**
- * Everything held for a session, released when it ends.
- *
- * The project's child goes too once nothing is left that could ask it anything:
- * an extension is started for the sessions of a project, so a project with no
- * sessions has no reason to be running one.
- */
-export function releaseExtensionsFor(session: TerminalSession): void {
-  stopFooters(session.id)
-  closePanesForSession(session.id)
-  closePaneForTerminal(session.id)
-  const stillOpen = ptyManager
-    .getLiveSessions()
-    .some((other) => other.id !== session.id && other.projectPath === session.projectPath)
-  if (!stillOpen) void stopHostsForProject(session.projectPath)
-}
-
-/** After a pack changed, no child keeps running its old files and every card is settled again. */
-export async function syncExtensionsAfterPackChange(extensionId: string): Promise<void> {
-  closePanesForExtension(extensionId)
-  await stopHostsForExtension(extensionId)
-  for (const session of ptyManager.getLiveSessions()) syncExtensionsFor(session)
 }
 
 /** Whether a path is a directory right now, answering false for every other case. */
@@ -1822,32 +1724,6 @@ export function registerAllMethods(): void {
 
   registerMethod('connector:listPacks', () => listInstalledPacks())
 
-  registerMethod('extension:list', () => installedExtensions())
-
-  registerMethod('extension:activation', ({ sessionId }) => activationStates(sessionId))
-
-  registerMethod('extension:footerItems', ({ sessionId }) => footerReadings(sessionId))
-
-  registerMethod('extension:openPane', async ({ extensionId, paneId, sessionId }) => {
-    const session = liveSession(sessionId)
-    return openPane(extensionId, paneId, session)
-  })
-
-  registerMethod('extension:closePane', ({ nonce }) => ({ closed: closePane(nonce) }))
-
-  registerMethod('extension:runHandler', async ({ extensionId, handlerId, sessionId, url }) => {
-    const session = liveSession(sessionId)
-    return runHandler(extensionId, handlerId, session, url)
-  })
-
-  registerMethod('extension:matchLinks', ({ sessionId, text }) =>
-    matchLinks(liveSession(sessionId), text)
-  )
-
-  registerNotification('extension:selectionResult', ({ requestId, text }) =>
-    resolveSelection(requestId, text)
-  )
-
   /**
    * One-shot backfill for a connection. Calls listItems() (not poll()) so it
    * bypasses the "since now" cursor and pulls everything matching the current
@@ -2053,11 +1929,6 @@ export function registerAllMethods(): void {
       const p = payload as { id: string; exitCode: number }
       logSessionEvent(p.id, 'exited', { exitCode: p.exitCode })
     }
-    // A session whose worktree or agent moved shows different extensions than it did.
-    if (channel === IPC.SESSION_UPDATED) {
-      const session = payload as TerminalSession | null
-      if (session?.id) syncExtensionsFor(session)
-    }
   })
   headlessManager.on('client-message', (channel: string, payload: unknown) => {
     clientRegistry.broadcast(channel, payload, terminalScope(payload))
@@ -2185,7 +2056,6 @@ export function registerAllMethods(): void {
     // A session that died early holds nothing; without this its conversation
     // stays unreachable for the rest of the spawn window.
     releaseClaimsFor(session.id)
-    releaseExtensionsFor(session)
 
     sessionManager.scheduleSave()
     broadcastWidgetUpdate()

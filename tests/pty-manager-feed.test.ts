@@ -91,7 +91,7 @@ describe('the records vornd is told', () => {
     expect(sent.at(-1)).toEqual({ op: 'remove', kind: 'terminal', id: shell.id })
   })
 
-  it('tells the order and a resume, and nothing of an extension pane', () => {
+  it('tells the order and a resume', () => {
     const a = ptyManager.createShellPty('/tmp')
     const b = ptyManager.createShellPty('/tmp')
     opened.push(a.id, b.id)
@@ -104,20 +104,6 @@ describe('the records vornd is told', () => {
       { op: 'remove', kind: 'terminal', id: a.id },
       { op: 'order', order: [b.id] }
     ])
-
-    const told = sent.length
-    const pane = ptyManager.createExtensionPty({
-      command: 'lazygit',
-      args: [],
-      cwd: '/tmp',
-      displayName: 'Git',
-      env: {}
-    })
-    fakeVornd.last().start(99)
-    ptyManager.resizePty(pane.id, 90, 30)
-    ptyManager.recordChanged(pane.id)
-    ptyManager.killPty(pane.id)
-    expect(sent.slice(told).filter((s) => s.op !== 'order')).toEqual([])
   })
 })
 

@@ -235,7 +235,7 @@ impl Family {
 }
 
 /// Node's `os.homedir()`: `HOME`, or on Windows `USERPROFILE`.
-pub(super) fn home_dir() -> String {
+pub(crate) fn home_dir() -> String {
     let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     std::env::var(var).unwrap_or_default()
 }

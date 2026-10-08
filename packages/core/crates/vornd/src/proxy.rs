@@ -212,6 +212,72 @@ impl Daemon {
         work.start();
     }
 
+    /// Starts the extension host ([`crate::native::extensions`]) once vornd
+    /// has a database, its own address and a credential for its endpoint,
+    /// which it reads the extensions' terminals through.
+    pub async fn start_extensions(self: &Arc<Self>) {
+        use crate::native::extensions::{routes, Extensions, Wired};
+        use vorn_extensions::host::{HostSettings, Supervisor};
+        use vorn_extensions::{pack::PackStore, page};
+        let Some(native) = self
+            .native
+            .as_ref()
+            .filter(|_| self.groups.mode("extension") == Mode::Native)
+        else {
+            return;
+        };
+        let (Some(db_dir), Some(mut addr)) = (
+            native
+                .database()
+                .and_then(std::path::Path::parent)
+                .map(std::path::Path::to_path_buf),
+            self.listen.get().copied(),
+        ) else {
+            return;
+        };
+        if addr.ip().is_unspecified() {
+            addr.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
+        }
+        let token = self.desktop_token.get().cloned().or_else(|| {
+            std::fs::read(db_dir.join(LOCAL_TOKEN_FILE))
+                .ok()
+                .map(|t| t.trim_ascii().to_vec())
+        });
+        let Some(token) = token.filter(|t| !t.is_empty()) else {
+            warn!("the extension host has no credential to reach vornd's endpoint");
+            return;
+        };
+        let bridge_origin = format!("http://{addr}");
+        let settings = HostSettings {
+            program: "node".into(),
+            base_env: native.child_env(),
+            bridge_origin: bridge_origin.clone(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+        };
+        let supervisor = Supervisor::new(PackStore::new(db_dir.join("connectors")), settings);
+        let daemon = Arc::downgrade(self);
+        let around = Wired {
+            native: Arc::downgrade(native),
+            loopback: Arc::new(crate::mcp::Loopback::new(addr, &token)),
+            clients: Box::new(move || {
+                daemon
+                    .upgrade()
+                    .map_or(0, |d| d.open.load(Ordering::Relaxed))
+            }),
+        };
+        let declared = std::env::var("VORN_APP_ORIGINS").ok();
+        let ancestors =
+            page::frame_ancestors(&[addr.port(), self.upstream.port()], declared.as_deref());
+        let home = crate::native::shell::home_dir().into();
+        let extensions =
+            Extensions::new(supervisor, Arc::new(around), bridge_origin, ancestors, home);
+        if let Err(err) = routes::start_pages(&extensions).await {
+            warn!(%err, "pane pages have no origin; panes will not open");
+        }
+        native.set_extensions(Arc::clone(&extensions));
+        extensions.start();
+    }
+
     /// Answers `vornd:spawn` from now on: sessions started in sessiond
     /// through vornd, for tests until the app creates sessions this way.
     pub fn allow_spawn(&self) {
@@ -354,6 +420,16 @@ async fn handle(
             ),
         });
     }
+    if let Some(route) =
+        crate::native::extensions::routes::bridge_route(req.method(), req.uri().path())
+    {
+        if let Some(extensions) = daemon.native.as_ref().and_then(|n| n.extensions()) {
+            let extensions = Arc::clone(extensions);
+            return Ok(
+                crate::native::extensions::routes::answer(&extensions, route, req, peer).await,
+            );
+        }
+    }
     if req.method() == Method::POST && crate::pair::is_pair_path(req.uri().path()) {
         if let Some(native) = daemon
             .native
@@ -420,6 +496,13 @@ async fn health(daemon: &Daemon) -> Response<Body> {
         entry["shadowMatched"] = json!(c.shadow_matched);
         entry["shadowMismatched"] = json!(c.shadow_mismatched);
         entry["shadowUnported"] = json!(c.shadow_unported);
+    }
+    if let (Some(extensions), Some(entry)) = (
+        daemon.native.as_ref().and_then(|n| n.extensions()),
+        groups.get_mut("extension"),
+    ) {
+        entry["hosts"] = json!(extensions.hosts());
+        entry["panes"] = json!(extensions.panes());
     }
     if let (Some(mcp), Some(entry)) = (daemon.mcp.get(), groups.get_mut(crate::mcp::GROUP)) {
         entry["sessions"] = json!(mcp.sessions());

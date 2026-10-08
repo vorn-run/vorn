@@ -66,9 +66,22 @@ describe('vornd asking the server', () => {
     fake.send('vornd:broadcast', { method: 'pairing:collected', params: { requestId: 'r1' } })
     await until('the broadcasts', () => broadcast.mock.calls.length === 3)
     expect(broadcast.mock.calls).toEqual([
-      ['pairing:requested', request],
-      ['config:changed', {}],
-      ['pairing:collected', { requestId: 'r1' }]
+      ['pairing:requested', request, undefined],
+      ['config:changed', {}, undefined],
+      ['pairing:collected', { requestId: 'r1' }, undefined]
+    ])
+  })
+
+  it('broadcasts an extension push to the clients of its session', async () => {
+    linkReach({ channel: sessions, broadcast, disconnectToken, host: () => host })
+    await sessions.connect(fake.endpoint)
+    const readings = { sessionId: 's1', readings: [] }
+    fake.send('vornd:broadcast', { method: 'extension:footerItems', params: readings, scope: 's1' })
+    fake.send('vornd:broadcast', { method: 'extension:selectionRequest', params: {}, scope: 7 })
+    await until('the broadcasts', () => broadcast.mock.calls.length === 2)
+    expect(broadcast.mock.calls).toEqual([
+      ['extension:footerItems', readings, 's1'],
+      ['extension:selectionRequest', {}, undefined]
     ])
   })
 
