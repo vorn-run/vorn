@@ -33,6 +33,15 @@ fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// `p` resolved, without the `\\?\` prefix Windows adds, which git cannot read.
+fn real(p: &Path) -> PathBuf {
+    let real = std::fs::canonicalize(p).unwrap();
+    match s(&real).strip_prefix(r"\\?\") {
+        Some(plain) => PathBuf::from(plain),
+        None => real,
+    }
+}
+
 /// A project on `main` with worktrees: `gilded-fresco` merged and clean,
 /// `amber-muse` with an unmerged commit, `royal-chapel` with uncommitted
 /// work, `quiet-loom` where a session runs, and `stray`, a directory git
@@ -47,7 +56,7 @@ impl Fixture {
     fn new() -> Fixture {
         let tmp = tempfile::tempdir().unwrap();
         // Git reports resolved paths; macOS's temp directory is a symlink.
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let root = real(tmp.path());
         let project = root.join("proj");
         std::fs::create_dir_all(&project).unwrap();
         git(&project, &["init", "-q", "-b", "main"]);
@@ -84,8 +93,10 @@ impl Fixture {
         }
     }
 
+    /// A worktree's path as git lists it and so as a client sends it back:
+    /// with forward slashes, on Windows too.
     fn wt(&self, name: &str) -> String {
-        s(&self.base.join(name))
+        s(&self.base.join(name)).replace(std::path::MAIN_SEPARATOR, "/")
     }
 
     fn projects(&self) -> Vec<Project> {
@@ -167,7 +178,7 @@ fn entry<'a>(inv: &'a Value, path: &str) -> &'a Value {
         .as_array()
         .unwrap()
         .iter()
-        .find(|e| e["path"] == path)
+        .find(|e| e["path"].as_str().map(Path::new) == Some(Path::new(path)))
         .unwrap_or_else(|| panic!("no entry for {path}"))
 }
 
