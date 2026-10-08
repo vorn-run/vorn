@@ -3807,6 +3807,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-hooks"
+version = "0.0.0"
+dependencies = [
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "vorn-mcp"
 version = "0.0.0"
 dependencies = [
