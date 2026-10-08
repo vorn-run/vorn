@@ -693,6 +693,9 @@
         "encryptedPassword": {
           "type": "string"
         },
+        "password": {
+          "type": "string"
+        },
         "sshOptions": {
           "type": "string"
         }
