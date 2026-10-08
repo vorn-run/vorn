@@ -7,14 +7,12 @@
 
 pub mod activation;
 pub mod bridge;
-pub mod child;
 pub mod footer;
 pub mod grants;
 pub mod host;
-pub mod js;
 pub mod links;
-pub mod manifest;
-pub mod pack;
 pub mod page;
 pub mod token;
 pub mod usage;
+
+pub use vorn_connectors::{child, js, manifest, pack};

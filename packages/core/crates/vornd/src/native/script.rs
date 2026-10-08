@@ -249,7 +249,14 @@ impl Scripts {
             .filter(|id| !id.is_empty())
             .ok_or("a script needs an id")?
             .to_owned();
-        let req = Request::read(params)?;
+        let mut req = Request::read(params)?;
+        if let Some(from) = params
+            .get("secretsFrom")
+            .and_then(Value::as_str)
+            .filter(|f| !f.is_empty())
+        {
+            req.secrets = native.script_secrets(from);
+        }
         let content = params
             .get("scriptContent")
             .and_then(Value::as_str)

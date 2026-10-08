@@ -147,6 +147,8 @@ export async function startRealServer(
         [BOOTSTRAP_ENV_VAR]: TEST_CREDENTIAL,
         VORN_VORND_PATH: vornd!,
         VORND_GROUPS: '',
+        // Secrets go to a private file in the data directory, never this machine's keychain.
+        VORND_KEYCHAIN: '0',
         NODE_ENV: 'test',
         VITEST: ''
       },

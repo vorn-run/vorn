@@ -19,16 +19,7 @@ function describeUsage(count: number): string {
   return count === 1 ? 'used by 1 step' : `used by ${count} steps`
 }
 
-function KeyRow({
-  entry,
-  canSeal,
-  onRotated
-}: {
-  entry: ConnectorKey
-  /** The keychain can seal a replacement, so rotating is worth offering. */
-  canSeal: boolean
-  onRotated: () => void
-}) {
+function KeyRow({ entry, onRotated }: { entry: ConnectorKey; onRotated: () => void }) {
   // The same resolution the run surfaces use, so a packaged connector shows
   // its own mark here rather than the generic one.
   const look = useConnectorLook(entry.connectionId)
@@ -58,12 +49,9 @@ function KeyRow({
     setSaving(true)
     setError(null)
     try {
-      // Sealed here because the keychain lives in this process; the plaintext rides along for immediate use.
-      const sealed = await window.api.encryptString(value)
       const outcome = await window.api.rotateConnectionSecret({
         connectionId: entry.connectionId,
         field,
-        value: sealed,
         plaintext: value
       })
       if (!outcome.ok) {
@@ -122,8 +110,6 @@ function KeyRow({
               setValue('')
               setError(null)
             }}
-            disabled={!canSeal}
-            title={canSeal ? undefined : 'The keychain cannot seal a replacement on this system'}
             className="text-[11px] text-gray-400 hover:text-gray-200 px-2 py-1 border border-white/[0.1] rounded-sm flex items-center gap-1 disabled:opacity-50"
           >
             <RefreshCw size={11} />
@@ -158,7 +144,7 @@ function KeyRow({
           />
           <button
             onClick={() => save(rotating)}
-            disabled={saving || value.trim() === '' || !canSeal}
+            disabled={saving || value.trim() === ''}
             className="text-[11px] text-gray-200 px-2.5 py-1 border border-white/[0.1] rounded-sm hover:bg-white/[0.06] disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Save'}
@@ -182,7 +168,6 @@ function KeyRow({
 
 export function KeysSettings() {
   const [keys, setKeys] = useState<ConnectorKey[]>([])
-  const [safeStorageAvailable, setSafeStorageAvailable] = useState(true)
   const [loaded, setLoaded] = useState(false)
 
   const load = useCallback(async () => {
@@ -197,19 +182,11 @@ export function KeysSettings() {
 
   useEffect(() => {
     void Promise.resolve().then(load)
-    let cancelled = false
-    window.api
-      .isSafeStorageAvailable?.()
-      ?.then((available) => {
-        if (!cancelled) setSafeStorageAvailable(available)
-      })
-      .catch(() => {})
     // A key can change from another window; a list read once would go stale.
     const unsubscribe = window.api.onConfigChanged?.(() => {
       void load()
     })
     return () => {
-      cancelled = true
       unsubscribe?.()
     }
   }, [load])
@@ -221,24 +198,9 @@ export function KeysSettings() {
         The secrets your connections hold, stored encrypted with your OS keychain
       </p>
 
-      {!safeStorageAvailable && (
-        <div
-          className="mb-4 px-4 py-3 rounded-sm border border-amber-500/30 text-sm text-amber-400"
-          style={{ background: 'rgba(245, 158, 11, 0.08)' }}
-        >
-          Keychain encryption is not available on this system, so a key cannot be replaced from
-          here.
-        </div>
-      )}
-
       <div className="space-y-2">
         {keys.map((entry) => (
-          <KeyRow
-            key={entry.connectionId}
-            entry={entry}
-            canSeal={safeStorageAvailable}
-            onRotated={load}
-          />
+          <KeyRow key={entry.connectionId} entry={entry} onRotated={load} />
         ))}
       </div>
 

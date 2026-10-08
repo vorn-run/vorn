@@ -257,7 +257,7 @@ pub fn route(method: &str, path: &str) -> Option<Route> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pack::{tests::install, PackStore};
+    use crate::pack::{fixture::install, PackStore};
     use serde_json::json;
 
     fn caller() -> Caller {

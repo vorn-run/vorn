@@ -68,32 +68,19 @@ describe('connecting a connector', () => {
     expect(save).toBeDisabled()
   })
 
-  it('saves what was typed, with the secret encrypted first', async () => {
+  it('saves what was typed, leaving the secret for vornd to keep', async () => {
     const { onDone } = form()
     fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'work' } })
     fireEvent.change(screen.getByLabelText(/Token/), { target: { value: 'hunter2' } })
     fireEvent.click(screen.getByRole('button', { name: /Connect|Save/ }))
 
     await waitFor(() => expect(onDone).toHaveBeenCalled())
-    expect(encryptString).toHaveBeenCalledWith('hunter2')
+    expect(encryptString).not.toHaveBeenCalled()
     const params = createConnection.mock.calls[0][0]
     expect(params.connectorId).toBe('acme')
     expect(params.name).toBe('work')
-    expect(params.filters.token).toBe('cipher')
-    // The plain field travels as it was typed; only the password is wrapped.
+    expect(params.filters.token).toBe('hunter2')
     expect(params.filters.profileName).toBe('work')
-  })
-
-  it('says so when the keychain will not encrypt', async () => {
-    encryptString.mockRejectedValue(new Error('keychain locked'))
-    const { onDone } = form()
-    fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'work' } })
-    fireEvent.change(screen.getByLabelText(/Token/), { target: { value: 'hunter2' } })
-    fireEvent.click(screen.getByRole('button', { name: /Connect|Save/ }))
-
-    await waitFor(() => expect(screen.getByText(/keychain/i)).toBeInTheDocument())
-    expect(createConnection).not.toHaveBeenCalled()
-    expect(onDone).not.toHaveBeenCalled()
   })
 
   // Asked for in the manifest, so any connector can have it -- including one

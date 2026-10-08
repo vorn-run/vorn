@@ -171,9 +171,8 @@ export function SdkConnectorForm({
       }
 
       if (Object.keys(secret).length > 0) {
-        // Encrypted here, before it reaches the database, exactly as the
-        // generic MCP form does for its own secret env blob.
-        filters.secretEnv = await window.api.encryptString(JSON.stringify(secret))
+        // vornd keeps it in the OS keychain; the row never holds it.
+        filters.secretEnv = JSON.stringify(secret)
       }
 
       const created = await window.api.createConnection({

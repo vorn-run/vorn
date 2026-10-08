@@ -31,14 +31,12 @@
 //! the child rather than a thread, and run on the runtime instead. The work
 //! model's calls ([`work`]) are async too: they run workflows.
 //!
-//! With the `connection` group native, vornd also reads the calls that change
-//! what the server holds of a connection's secrets as they pass to it
-//! ([`secrets`]): the desktop's pushes as they go, a rotated secret or a
-//! deleted connection once the server's answer says it was done.
+//! Connections and connectors, their secrets included, are vornd's
+//! ([`connectors`]).
 
 pub mod agent;
 pub mod config;
-pub mod connection;
+pub mod connectors;
 pub mod env;
 pub mod extensions;
 pub mod file;
@@ -128,14 +126,6 @@ pub const METHODS: &[(&str, Effect)] = &[
     ("pairing:approve", Effect::Change),
     ("pairing:deny", Effect::Change),
     ("pairing:cancel", Effect::Change),
-    ("connection:list", Effect::Read),
-    ("connection:getSourceLink", Effect::Read),
-    ("connection:listMcpTools", Effect::Read),
-    ("connection:listActions", Effect::Read),
-    ("connection:preflight", Effect::Read),
-    ("connection:refreshMcpTools", Effect::Change),
-    ("connection:executeAction", Effect::Change),
-    ("connector:detectRepo", Effect::Read),
     ("agent:detectInstalled", Effect::Read),
     ("agent:listModels", Effect::Change),
     ("sessions:getRecent", Effect::Read),
@@ -190,108 +180,15 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
         "auth:authenticate",
         "admits the server's own socket; vornd checks the credential beside it",
     ),
-    (
-        "connection:create",
-        "seeds the connector's workflows from the server's registry and starts discovery there",
-    ),
-    (
-        "connection:update",
-        "stops the server's own child for the connection; vornd restarts its own when the launch changes",
-    ),
-    (
-        "connection:delete",
-        "removes the connection's workflows, its signed-in window and the server's child",
-    ),
-    (
-        "connection:browserAuth",
-        "reads how a package signs in, from the server's packs and checkouts",
-    ),
-    (
-        "connection:signedIn",
-        "resumes the workflow runs waiting on the sign-in",
-    ),
-    (
-        "connection:signedOut",
-        "ends the signed-in window the server holds for the connection",
-    ),
-    (
-        "connection:listKeys",
-        "needs every connector's manifest, which the server's registry holds",
-    ),
-    (
-        "connection:rotateSecret",
-        "needs the connector's manifest to tell a secret from a plain field",
-    ),
-    (
-        "connection:backfill",
-        "polls through the server's connectors and writes the task board",
-    ),
-    (
-        "connection:upsertFromItem",
-        "writes the task board, which the server owns",
-    ),
-    (
-        "connector:list",
-        "the connectors and their manifests are the server's registry, packages included",
-    ),
-    (
-        "connector:get",
-        "the connectors and their manifests are the server's registry, packages included",
-    ),
-    (
-        "connector:poll",
-        "fetches a connection's new items through the server's connectors",
-    ),
-    (
-        "connector:probeSdk",
-        "starts a package in the connector protocol, which the server speaks",
-    ),
-    (
-        "connector:catalog",
-        "the server fetches and keeps the catalog",
-    ),
-    (
-        "connector:catalogRefresh",
-        "the server fetches and keeps the catalog",
-    ),
-    (
-        "connector:inspectPack",
-        "packages are verified, installed and loaded by the server",
-    ),
-    (
-        "connector:installPack",
-        "packages are verified, installed and loaded by the server",
-    ),
-    (
-        "connector:removePack",
-        "packages are verified, installed and loaded by the server",
-    ),
-    (
-        "connector:rollbackPack",
-        "packages are verified, installed and loaded by the server",
-    ),
-    (
-        "connector:listPacks",
-        "packages are verified, installed and loaded by the server",
-    ),
-    (
-        "connector:seedWorkflow",
-        "needs the connector's manifest from the server's registry",
-    ),
-    (
-        "connector:status",
-        "asks each connector in the server's registry whether it is signed in",
-    ),
-    (
-        "connector:probeAuth",
-        "asks a connector in the server's registry whether it is signed in",
-    ),
 ];
 
 /// The effect of a call vornd answers, or `None` for one it does not. The
 /// work model's calls are all answered here, never compared.
 pub fn effect(method: &str) -> Option<Effect> {
-    if work::METHODS.contains(&method) || extensions::METHODS.contains(&method) {
+    if work::METHODS.contains(&method)
+        || extensions::METHODS.contains(&method)
+        || connectors::METHODS.contains(&method)
+    {
         return Some(Effect::Change);
     }
     METHODS.iter().find(|(m, _)| *m == method).map(|(_, e)| *e)
@@ -450,6 +347,8 @@ pub struct Native {
     sizes: vorn_worktrees::Sizes,
     /// The work model, once vornd has a database and its own address.
     work: OnceLock<Arc<work::Work>>,
+    /// Connections and connectors, once vornd has a database and its own address.
+    connectors: OnceLock<Arc<connectors::Connectors>>,
     /// The extension host, once vornd has a database and its own address.
     extensions: OnceLock<Arc<extensions::Extensions>>,
 }
@@ -493,6 +392,7 @@ impl Native {
             sessions: Arc::default(),
             sizes: vorn_worktrees::Sizes::default(),
             work: OnceLock::new(),
+            connectors: OnceLock::new(),
             extensions: OnceLock::new(),
         })
     }
@@ -522,6 +422,29 @@ impl Native {
 
     pub fn work(&self) -> Option<&Arc<work::Work>> {
         self.work.get()
+    }
+
+    /// Connections and connectors. Only the first one given is kept.
+    pub fn set_connectors(&self, connectors: Arc<connectors::Connectors>) {
+        let _ = self.connectors.set(connectors);
+    }
+
+    pub fn connectors(&self) -> Option<&Arc<connectors::Connectors>> {
+        self.connectors.get()
+    }
+
+    /// The environment a script step's named connection gives it, from the vault.
+    pub(crate) fn script_secrets(&self, connection_id: &str) -> Vec<(String, String)> {
+        match self.secrets.lookup(connection_id) {
+            secrets::Known::Fields(fields) => {
+                let plain: Vec<(String, String)> = fields
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.expose().to_owned()))
+                    .collect();
+                vorn_connectors::connections::script_env(&plain)
+            }
+            _ => Vec::new(),
+        }
     }
 
     /// The extension host. Only the first one given is kept.
@@ -593,9 +516,6 @@ impl Native {
             Some("file") => self.file(method, params),
             Some("ide") => self.ide(method, params),
             Some("server" | "tailscale" | "token" | "pairing") => self.reach_call(method, params),
-            Some("connection" | "connector") if !connection::is_async(method) => {
-                connection::read(self, method, params)
-            }
             Some("sessions") if method != "sessions:getRecent" => {
                 sessions::call(self, method, params)
             }
@@ -655,16 +575,16 @@ impl Native {
                 Answer::Error(format!("{method} failed in vornd"))
             });
         }
-        if connection::is_async(&method) {
-            let running =
-                tokio::spawn(connection::change(Arc::clone(self), method.clone(), params));
-            return match running.await {
-                Ok(answer) => answer,
-                Err(err) => {
-                    warn!(%method, %err, "a native call failed");
-                    Answer::Error(format!("{method} failed in vornd"))
-                }
+        if connectors::METHODS.contains(&method.as_str()) {
+            let Some(connectors) = self.connectors.get().cloned() else {
+                return Answer::Forward;
             };
+            let m = method.clone();
+            let running = tokio::spawn(async move { connectors.answer(&m, params).await });
+            return running.await.unwrap_or_else(|err| {
+                warn!(%method, %err, "a connector call failed");
+                Answer::Error(format!("{method} failed in vornd"))
+            });
         }
         let Ok(_slot) = self.slots.acquire().await else {
             return Answer::Forward;
@@ -704,42 +624,6 @@ impl Native {
             .map_or(0, |d| d.as_millis());
         if let Err(err) = std::fs::write(dir.join(".db-signal"), now.to_string()) {
             debug!(%err, "could not signal a configuration change");
-        }
-    }
-
-    /// Reads a call on its way to the server that changes a connection's
-    /// secrets there, and returns what to do once the server answers it, if
-    /// anything.
-    fn observe(&self, method: &str, params: &Value) -> Option<AfterOk> {
-        if self.secrets.observe(method, params) {
-            return None;
-        }
-        match method {
-            "connection:rotateSecret" => {
-                let text = |k| params.get(k).and_then(Value::as_str).map(str::to_owned);
-                Some(AfterOk::Rotated {
-                    id: text("connectionId")?,
-                    field: text("field")?,
-                    plaintext: text("plaintext")?,
-                })
-            }
-            "connection:delete" => Some(AfterOk::Deleted(params.as_str()?.to_owned())),
-            _ => None,
-        }
-    }
-
-    /// The server did what [`Native::observe`] saw asked of it.
-    fn done(&self, after: AfterOk) {
-        match after {
-            AfterOk::Rotated {
-                id,
-                field,
-                plaintext,
-            } => self.secrets.merge(&id, &field, &plaintext),
-            AfterOk::Deleted(id) => {
-                self.secrets.forget(&id);
-                self.mcp.stop(&id);
-            }
         }
     }
 
@@ -1026,10 +910,6 @@ pub struct Conn {
     /// Who this connection is, as its credential says.
     viewer: Mutex<config::Viewer>,
     shadows: Arc<Shadows>,
-    /// Calls on their way to the server that change a connection's secrets
-    /// there, by request id: applied here once the server answers them.
-    pending: Mutex<HashMap<String, AfterOk>>,
-    waiting: AtomicUsize,
     /// Shadowed creates whose plan is compared, by request id.
     plans: Mutex<HashMap<String, Planned>>,
 }
@@ -1043,19 +923,6 @@ struct Planned {
     /// How many shells there were when the call came, before the server's
     /// answer adds one: a new shell is numbered after them.
     shells: usize,
-}
-
-/// What a call the server answers changes in what vornd knows.
-#[derive(Debug)]
-enum AfterOk {
-    /// `connection:rotateSecret`: one secret field has a new value.
-    Rotated {
-        id: String,
-        field: String,
-        plaintext: String,
-    },
-    /// `connection:delete`.
-    Deleted(String),
 }
 
 impl Conn {
@@ -1080,8 +947,6 @@ impl Conn {
                 config::Viewer::Local
             }),
             shadows: Arc::default(),
-            pending: Mutex::default(),
-            waiting: AtomicUsize::new(0),
             plans: Mutex::default(),
         })
     }
@@ -1156,7 +1021,6 @@ impl Conn {
 
     /// Decides who answers a client's call to `method`, whose frame is `text`.
     pub fn offer(self: &Arc<Self>, method: &str, text: &str) -> Offer {
-        self.watch(method, text);
         if method == AUTH_METHOD {
             if let Some(token) = request_of(text)
                 .and_then(|(_, params)| params.get("token")?.as_str().map(str::to_owned))
@@ -1239,34 +1103,6 @@ impl Conn {
             _ => {
                 self.groups.count(method, Counted::Forwarded);
                 Offer::Pass
-            }
-        }
-    }
-
-    /// Keeps what vornd knows of connection secrets in step with the
-    /// server's, while vornd answers connection calls.
-    fn watch(&self, method: &str, text: &str) {
-        let watched = matches!(
-            method,
-            "credentials:setDecrypted"
-                | "credentials:clearDecrypted"
-                | "connection:rotateSecret"
-                | "connection:delete"
-        );
-        if !watched || !self.admitted() || self.groups.mode("connection") != Mode::Native {
-            return;
-        }
-        let Ok(Value::Object(frame)) = serde_json::from_str::<Value>(text) else {
-            return;
-        };
-        let params = frame.get("params").unwrap_or(&Value::Null);
-        let Some(after) = self.native.observe(method, params) else {
-            return;
-        };
-        if let Some(id) = frame.get("id").filter(|id| !id.is_null()) {
-            let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-            if pending.insert(id.to_string(), after).is_none() {
-                self.waiting.fetch_add(1, Ordering::AcqRel);
             }
         }
     }
@@ -1431,8 +1267,7 @@ impl Conn {
                 || text.contains("\"error\"")
                 || text.contains("\"auth:ok\""));
         let shadowed = self.shadows.waiting() && text.contains("\"id\"");
-        let pending = self.waiting.load(Ordering::Acquire) > 0 && text.contains("\"id\"");
-        if !admitting && !shadowed && !pending {
+        if !admitting && !shadowed {
             return;
         }
         let Ok(Value::Object(frame)) = serde_json::from_str::<Value>(text) else {
@@ -1458,11 +1293,6 @@ impl Conn {
                     .settle(CREDENTIAL, Side::Server, json!(true), &self.groups);
             }
         }
-        if pending && method.is_none() {
-            if let Some(id) = id {
-                self.settle_pending(&id.to_string(), &frame);
-            }
-        }
         if shadowed && method.is_none() {
             if let Some(key) = id.map(Value::to_string) {
                 if let Some(planned) = self.lock_plans().remove(&key) {
@@ -1479,34 +1309,6 @@ impl Conn {
                     &self.groups,
                 );
             }
-        }
-    }
-}
-
-impl Conn {
-    /// The server answered `id`: what it changed, vornd applies too.
-    fn settle_pending(&self, id: &str, frame: &serde_json::Map<String, Value>) {
-        let after = self
-            .pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(id);
-        let Some(after) = after else {
-            return;
-        };
-        self.waiting.fetch_sub(1, Ordering::AcqRel);
-        let ok = match &after {
-            AfterOk::Rotated { .. } => {
-                frame
-                    .get("result")
-                    .and_then(|r| r.get("ok"))
-                    .and_then(Value::as_bool)
-                    == Some(true)
-            }
-            AfterOk::Deleted(_) => !frame.contains_key("error"),
-        };
-        if ok {
-            self.native.done(after);
         }
     }
 }
@@ -1700,34 +1502,5 @@ mod tests {
             t.join().unwrap();
         }
         assert_eq!(most.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn follows_the_secrets_the_server_is_asked_to_change() {
-        let native = Native::with_secrets(secrets::Secrets::with_keychain(None));
-        let push = json!({ "connectionId": "c", "fields": { "token": "t", "secretEnv": "{}" } });
-        assert!(native.observe("credentials:setDecrypted", &push).is_none());
-        let rotate = json!({ "connectionId": "c", "field": "token", "plaintext": "u" });
-        let after = native.observe("connection:rotateSecret", &rotate).unwrap();
-        // Nothing changes until the server says it did.
-        assert!(
-            matches!(native.secrets.lookup("c"), secrets::Known::Fields(f) if f["token"].expose() == "t")
-        );
-        native.done(after);
-        let secrets::Known::Fields(fields) = native.secrets.lookup("c") else {
-            panic!("the secrets are known");
-        };
-        assert_eq!(fields["token"].expose(), "u");
-        assert_eq!(fields["secretEnv"].expose(), "{}");
-
-        let after = native.observe("connection:delete", &json!("c")).unwrap();
-        native.done(after);
-        assert!(matches!(
-            native.secrets.lookup("c"),
-            secrets::Known::Unknown
-        ));
-        assert!(native
-            .observe("connection:rotateSecret", &json!({ "connectionId": "c" }))
-            .is_none());
     }
 }

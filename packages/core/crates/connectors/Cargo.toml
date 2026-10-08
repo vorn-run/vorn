@@ -1,0 +1,38 @@
+[package]
+name = "vorn-connectors"
+# Never published and never versioned on its own; vorn-core carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Connectors for Vorn: the packs on disk and their manifests, the child each runs in the connector protocol, the catalog, and the built-in HTTP and MCP connectors"
+
+[features]
+# The pack fixture, for the tests of crates built on this one.
+test-support = []
+
+[dependencies]
+data-encoding = "2"
+flate2 = "1"
+getrandom = "0.4"
+sha2 = "0.10"
+tar = { version = "0.4", default-features = false }
+# Blocking HTTP over rustls with ring, so nothing needs a C toolchain to build.
+vorn-agents = { path = "../agents" }
+vorn-store = { path = "../store" }
+url = "2"
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
+regress = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt", "process", "io-util", "sync", "time", "macros"] }
+tracing = "0.1"
+
+[target.'cfg(unix)'.dependencies]
+# SIGTERM for a child that does not leave when its stdin closes.
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros"] }

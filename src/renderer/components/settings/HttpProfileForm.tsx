@@ -41,9 +41,8 @@ export function HttpProfileForm({
     setTested(null)
     try {
       const filters: Record<string, unknown> = { profileName, baseUrl, authHeader }
-      // Encrypted here rather than stored: the same treatment every password
-      // field in the connector forms gets.
-      if (secret) filters.secret = await window.api.encryptString(secret)
+      // vornd keeps it in the OS keychain; the row never holds it.
+      if (secret) filters.secret = secret
       const named = profileName.trim() || name
       const connectionId = madeId
         ? ((await window.api.updateConnection(madeId, { name: named, filters }))?.id ?? madeId)

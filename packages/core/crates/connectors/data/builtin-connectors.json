@@ -1,0 +1,271 @@
+[
+  {
+    "id": "http",
+    "name": "HTTP",
+    "icon": "http",
+    "capabilities": ["actions"],
+    "manifest": {
+      "auth": [
+        {
+          "key": "profileName",
+          "label": "Profile name",
+          "type": "text",
+          "required": true,
+          "placeholder": "Acme API"
+        },
+        {
+          "key": "baseUrl",
+          "label": "Base URL",
+          "type": "text",
+          "placeholder": "https://api.example.com"
+        },
+        {
+          "key": "authHeader",
+          "label": "Header added to every request",
+          "type": "text",
+          "placeholder": "Authorization: Bearer {{secret}}"
+        },
+        {
+          "key": "authQuery",
+          "label": "Query parameter added to every request",
+          "type": "text",
+          "placeholder": "api_key={{secret}}"
+        },
+        {
+          "key": "authBody",
+          "label": "JSON merged into every request body",
+          "type": "text",
+          "placeholder": "{\"token\": \"{{secret}}\"}"
+        },
+        {
+          "key": "secret",
+          "label": "Secret",
+          "type": "password",
+          "description": "Stored encrypted. {{secret}} in the fields above stands for this value."
+        }
+      ],
+      "actions": [
+        {
+          "type": "request",
+          "label": "HTTP request",
+          "description": "Send a request through this profile",
+          "configFields": [
+            {
+              "key": "method",
+              "label": "Method",
+              "type": "select",
+              "options": [
+                {
+                  "value": "GET",
+                  "label": "GET"
+                },
+                {
+                  "value": "POST",
+                  "label": "POST"
+                },
+                {
+                  "value": "PUT",
+                  "label": "PUT"
+                },
+                {
+                  "value": "PATCH",
+                  "label": "PATCH"
+                },
+                {
+                  "value": "DELETE",
+                  "label": "DELETE"
+                }
+              ]
+            },
+            {
+              "key": "url",
+              "label": "URL or path",
+              "type": "text",
+              "required": true,
+              "placeholder": "/v1/items",
+              "supportsTemplates": true
+            },
+            {
+              "key": "body",
+              "label": "Body",
+              "type": "textarea",
+              "supportsTemplates": true
+            }
+          ],
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "number"
+              },
+              "headers": {
+                "type": "object"
+              },
+              "body": {
+                "type": ["object", "array", "string", "number", "boolean", "null"]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "mcp",
+    "name": "MCP",
+    "icon": "mcp",
+    "capabilities": ["actions", "triggers", "tasks"],
+    "manifest": {
+      "auth": [
+        {
+          "key": "command",
+          "label": "Command",
+          "type": "text",
+          "required": true,
+          "placeholder": "npx",
+          "description": "Executable to run the MCP server (npx, node, uv, python, …)."
+        },
+        {
+          "key": "args",
+          "label": "Arguments (JSON array)",
+          "type": "textarea",
+          "description": "JSON array of args passed to the command.",
+          "required": true,
+          "placeholder": "[\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/tmp\"]"
+        },
+        {
+          "key": "env",
+          "label": "Environment (JSON object)",
+          "type": "textarea",
+          "description": "Non-secret env vars. JSON object of string values.",
+          "placeholder": "{\"MCP_LOG_LEVEL\": \"info\"}"
+        },
+        {
+          "key": "secretEnv",
+          "label": "Secret env (JSON object)",
+          "type": "password",
+          "description": "Secret env vars encrypted via OS keychain. JSON object of string values.",
+          "placeholder": "{\"AZURE_DEVOPS_EXT_PAT\": \"<token>\"}"
+        },
+        {
+          "key": "pollTool",
+          "label": "Poll tool (optional)",
+          "type": "text",
+          "placeholder": "list_pull_requests",
+          "description": "MCP tool to run on the poll interval. Setting this makes the connection a trigger source (event: MCP Poll)."
+        },
+        {
+          "key": "pollArgs",
+          "label": "Poll args (JSON object)",
+          "type": "textarea",
+          "placeholder": "{\"status\": \"active\"}",
+          "description": "Static arguments passed to the poll tool. JSON object."
+        },
+        {
+          "key": "itemsPath",
+          "label": "Items path",
+          "type": "text",
+          "placeholder": "pullRequests",
+          "description": "Dotted path into the tool result that holds the array of items (e.g. `value` or `data.pullRequests`). Blank = the result is itself the array."
+        },
+        {
+          "key": "idField",
+          "label": "ID field",
+          "type": "text",
+          "placeholder": "pullRequestId",
+          "description": "Field on each item used as the dedup key (recommended for at-most-once)."
+        },
+        {
+          "key": "timestampField",
+          "label": "Timestamp field",
+          "type": "text",
+          "placeholder": "creationDate",
+          "description": "Field used to advance the cursor and only fire for items newer than the last poll. Blank = every item fires each poll (deduped by ID field)."
+        },
+        {
+          "key": "titleField",
+          "label": "Title field",
+          "type": "text",
+          "placeholder": "title",
+          "description": "Field mapped into the created task title."
+        },
+        {
+          "key": "urlField",
+          "label": "URL field",
+          "type": "text",
+          "placeholder": "url",
+          "description": "Field mapped into the created task URL."
+        },
+        {
+          "key": "cursorArg",
+          "label": "Cursor argument",
+          "type": "text",
+          "placeholder": "cursor",
+          "description": "Tool argument that receives the previous cursor. Set this when the tool tracks what it has already returned; Vorn then fires for every item it hands back instead of filtering by timestamp field."
+        },
+        {
+          "key": "cursorPath",
+          "label": "Cursor path",
+          "type": "text",
+          "placeholder": "nextCursor",
+          "description": "Dotted path to the next cursor in the tool result. Only used with a cursor argument. Blank = `nextCursor`."
+        }
+      ],
+      "triggers": [
+        {
+          "type": "mcpPoll",
+          "label": "MCP Poll",
+          "description": "Runs this connection's configured poll tool on a schedule and fires once per new item.",
+          "configFields": [],
+          "defaultIntervalMs": 300000
+        }
+      ],
+      "actions": []
+    }
+  },
+  {
+    "id": "sdk",
+    "name": "Connector package",
+    "icon": "mcp",
+    "capabilities": ["actions", "triggers", "tasks"],
+    "addable": false,
+    "manifest": {
+      "auth": [
+        {
+          "key": "command",
+          "label": "Command",
+          "type": "text",
+          "description": "Executable that starts the connector, when it is not an installed pack."
+        },
+        {
+          "key": "args",
+          "label": "Arguments (JSON array)",
+          "type": "textarea",
+          "description": "JSON array of args passed to the command."
+        },
+        {
+          "key": "env",
+          "label": "Environment (JSON object)",
+          "type": "textarea",
+          "description": "Non-secret env vars. JSON object of string values."
+        },
+        {
+          "key": "secretEnv",
+          "label": "Secret env (JSON object)",
+          "type": "password",
+          "description": "Secret env vars encrypted via OS keychain. JSON object of string values."
+        }
+      ],
+      "triggers": [
+        {
+          "type": "mcpPoll",
+          "label": "Poll",
+          "description": "Polls the connection's trigger on a schedule and fires once per new item.",
+          "configFields": [],
+          "defaultIntervalMs": 300000
+        }
+      ],
+      "actions": []
+    }
+  }
+]

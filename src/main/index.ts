@@ -4,7 +4,7 @@ import { registerIpcHandlers, setBridge } from './ipc-handlers'
 import * as browserRegistry from './browser-registry'
 import * as deviceRegistry from './device-registry'
 import { installCompanionQuitHook } from './device-companion'
-import { installConnectorCredentialsSync } from './connector-credentials-sync'
+import { installConnectorCredentialsImport } from './connector-credentials-import'
 import { closeConnectionWindows, installConnectionSessions } from './connection-sessions'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
@@ -653,10 +653,8 @@ app.whenReady().then(async () => {
     }
   }
 
-  // Decrypt connector credentials via safeStorage and push plaintext into
-  // the server's in-memory store. Runs once on boot, re-syncs on every
-  // config change so newly added connections are picked up without restart.
-  installConnectorCredentialsSync(bridge)
+  // Secrets sealed before vornd kept them go to its vault, once.
+  installConnectorCredentialsImport(bridge)
   installConnectionSessions(bridge, { sweep: readHostSettings().mode !== 'host' })
 
   // Load config for widget + update channel

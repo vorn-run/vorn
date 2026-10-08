@@ -1244,7 +1244,6 @@ const api = {
   rotateConnectionSecret: (params: {
     connectionId: string
     field: string
-    value: string
     plaintext: string
   }): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke(IPC.CONNECTION_ROTATE_SECRET, params),

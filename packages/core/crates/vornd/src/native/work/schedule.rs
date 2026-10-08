@@ -9,7 +9,7 @@
 //! [`CATCH_UP_MS`] of them. A first start plans from now.
 //!
 //! A connector poll is fetched by the server, which holds the connectors
-//! (`connector:poll`), and its items, like webhook requests, are run from
+//! ([`crate::native::connectors::Connectors::poll`]), and its items, like webhook requests, are run from
 //! the inbox here: leased, run, and settled by the run.
 
 use std::path::{Path, PathBuf};
@@ -19,7 +19,6 @@ use std::time::Duration;
 use jiff::tz::TimeZone;
 use serde_json::{json, Value};
 use tracing::{info, warn};
-use vorn_mcp::Rpc;
 use vorn_work::receipts::{deliver_due, CATCH_UP_MS};
 use vorn_work::schedule::Schedule;
 
@@ -149,17 +148,15 @@ impl Work {
         let work = Arc::clone(self);
         let id = workflow_id.to_owned();
         tokio::spawn(async move {
-            let polled = work
-                .host()
-                .loopback
-                .call(
-                    "connector:poll",
-                    Some(json!({ "workflowId": id })),
-                    POLL_LIMIT,
-                )
-                .await;
-            if let Err(err) = polled {
-                warn!(workflow = %id, err = %err.0, "a connector poll failed");
+            let connectors = work.native.upgrade().and_then(|n| n.connectors().cloned());
+            match connectors {
+                Some(connectors) => {
+                    let polled = tokio::time::timeout(POLL_LIMIT, connectors.poll(&id)).await;
+                    if polled.is_err() {
+                        warn!(workflow = %id, "a connector poll took too long");
+                    }
+                }
+                None => warn!(workflow = %id, "no connectors to poll with"),
             }
             work.polls
                 .lock()

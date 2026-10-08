@@ -415,12 +415,6 @@ export function registerIpcHandlers(): void {
   safeHandle(IPC.CONNECTION_BACKFILL, (_, params) =>
     requireBridge().request(IPC.CONNECTION_BACKFILL, params)
   )
-  safeHandle(IPC.CREDENTIALS_SET_DECRYPTED, (_, params) =>
-    requireBridge().request(IPC.CREDENTIALS_SET_DECRYPTED, params)
-  )
-  safeHandle(IPC.CREDENTIALS_CLEAR_DECRYPTED, (_, params) =>
-    requireBridge().request(IPC.CREDENTIALS_CLEAR_DECRYPTED, params)
-  )
   safeHandle(IPC.CONNECTION_EXECUTE_ACTION, (_, params) =>
     requireBridge().request(IPC.CONNECTION_EXECUTE_ACTION, params)
   )

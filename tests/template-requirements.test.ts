@@ -11,7 +11,7 @@ import {
   type TemplateRequirement
 } from '../src/renderer/lib/template-requirements'
 import type { ConnectorListing } from '../src/renderer/lib/connector-browse'
-import { TEMPLATE_SEED } from '../packages/server/src/connectors/template-seed'
+import { TEMPLATE_SEED } from './helpers/template-seed'
 import type {
   ConnectorManifest,
   SourceConnection,

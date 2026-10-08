@@ -16,9 +16,11 @@ import { VORN_PEER_HEADER } from './vornd-relay'
  * again the names a browser may load the web client from.
  */
 
-/** The broadcasts vornd may ask for: what pairing, runs, artifacts, extensions and the configuration announce. */
+/** The broadcasts vornd may ask for: what pairing, runs, artifacts, extensions, connectors and the configuration announce. */
 const BROADCASTS: ReadonlySet<string> = new Set([
   IPC.CONFIG_CHANGED,
+  IPC.CONNECTOR_INSTALL_PROGRESS,
+  IPC.CONNECTOR_CATALOG_CHANGED,
   IPC.PAIRING_REQUESTED,
   IPC.PAIRING_COLLECTED,
   IPC.WORKFLOW_RUN_UPDATED,
@@ -39,6 +41,8 @@ export interface ReachDeps {
   }
   /** `scope` is the session a push is about, for the clients subscribed to one. */
   broadcast: (method: string, params: unknown, scope?: string) => void
+  /** The desktop's bridge, which vornd asks through this server until it holds the desktop itself. */
+  bridge?: { request(method: string, params: unknown, timeoutMs?: number): Promise<unknown> }
   disconnectToken: (tokenId: string) => number
   /** The address this server is bound to now. */
   host: () => string
@@ -60,6 +64,20 @@ export function linkReach(deps: ReachDeps): { hostChanged(): void } {
           log.warn({ method: p.method }, '[vornd] refused to broadcast for vornd')
         }
         return
+      case 'vornd:ask': {
+        const id = p.id
+        if (typeof id !== 'number' || typeof p.method !== 'string' || !deps.bridge) return
+        const timeoutMs = typeof p.timeoutMs === 'number' ? p.timeoutMs : undefined
+        void deps.bridge.request(p.method, p.params, timeoutMs).then(
+          (result) => deps.channel.tell('vornd:answer', { id, result }),
+          (err: unknown) =>
+            deps.channel.tell('vornd:answer', {
+              id,
+              error: err instanceof Error ? err.message : String(err)
+            })
+        )
+        return
+      }
       case 'vornd:tokenRevoked':
         if (typeof p.tokenId === 'string') deps.disconnectToken(p.tokenId)
         return

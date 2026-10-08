@@ -161,7 +161,7 @@ describe('SdkConnectorForm', () => {
     })
   })
 
-  it('encrypts a secret variable before it reaches the database', async () => {
+  it('hands a secret variable to vornd apart from the plain ones', async () => {
     const utils = setup()
     await lookUp(utils)
 
@@ -171,9 +171,9 @@ describe('SdkConnectorForm', () => {
     fireEvent.click(utils.getByText('Connect'))
 
     await waitFor(() => expect(createConnection).toHaveBeenCalled())
-    expect(encryptString).toHaveBeenCalledWith(JSON.stringify({ KUSTO_APP_KEY: 'super-secret' }))
+    expect(encryptString).not.toHaveBeenCalled()
     const { filters } = createConnection.mock.calls[0][0]
-    expect(filters.secretEnv).toBe(`enc(${JSON.stringify({ KUSTO_APP_KEY: 'super-secret' })})`)
+    expect(filters.secretEnv).toBe(JSON.stringify({ KUSTO_APP_KEY: 'super-secret' }))
     // The secret must not also travel in the plaintext env blob.
     expect(filters.env).toBe(JSON.stringify({ KUSTO_CLUSTER: 'https://help.kusto.windows.net' }))
   })

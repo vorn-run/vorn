@@ -574,6 +574,17 @@ fn call(app: App<'_>, text: &str) {
             }
             None => Err("vornd does not run workflows".to_owned()),
         },
+        "vornd:answer" => match params.get("id").and_then(Value::as_u64) {
+            Some(id) => {
+                let answer = match params.get("error").and_then(Value::as_str) {
+                    Some(error) => Err(error.to_owned()),
+                    None => Ok(params.get("result").cloned().unwrap_or(Value::Null)),
+                };
+                link.answered(id, answer);
+                Ok(Value::Null)
+            }
+            None => Err("vornd:answer needs an id".to_owned()),
+        },
         "vornd:configChanged" => {
             if let Some(work) = link.work() {
                 work.workflows_changed_elsewhere();

@@ -9,6 +9,7 @@ publish = false
 description = "Extensions for Vorn: installed packs, where their contributions show, the child each runs as per project, and the channel it talks back on"
 
 [dependencies]
+vorn-connectors = { path = "../connectors" }
 data-encoding = "2"
 getrandom = "0.4"
 # Link handler patterns are JavaScript regular expressions, matched as a browser would.
@@ -23,5 +24,6 @@ tracing = "0.1"
 libc = "0.2"
 
 [dev-dependencies]
+vorn-connectors = { path = "../connectors", features = ["test-support"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros"] }

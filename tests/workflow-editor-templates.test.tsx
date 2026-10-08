@@ -193,7 +193,7 @@ const CONNECTION = {
   saveTextFile
 }
 
-const { TEMPLATE_SEED } = await import('../packages/server/src/connectors/template-seed')
+const { TEMPLATE_SEED } = await import('./helpers/template-seed')
 const { __resetConnectionsCacheForTests, refreshConnections } =
   await import('../src/renderer/lib/use-connections')
 const { __resetCatalogCacheForTests } = await import('../src/renderer/lib/use-connector-catalog')

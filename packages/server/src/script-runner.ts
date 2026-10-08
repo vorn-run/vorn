@@ -5,50 +5,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { ScriptConfig, IPC } from '@vornrun/shared/types'
 import { getLaunchDataDir, getLaunchEnv } from './process-utils'
-import { getDecryptedCreds } from './connectors/decrypted-creds'
-import { SECRET_ENV_FIELD, isEnvName } from './connectors/keys'
 import log from './logger'
 import { vorndSessions } from './vornd-sessions'
 import { comparePlan, runInVornd, SCRIPT_FILE } from './vornd-scripts'
-
-/** `apiKey` names the variable `API_KEY`, the way a connector's own env does. */
-function envNameFor(key: string): string {
-  return key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toUpperCase()
-}
-
-/**
- * The environment a step's named connection contributes.
- *
- * A connector's env blob already speaks in variable names, so it is spread as
- * written; a single-value field is named after itself. Nothing is read unless
- * a step asked for it by connection id.
- */
-export function secretEnvFor(
-  connectionId: string | undefined,
-  lookup: (id: string) => Record<string, string> | undefined = getDecryptedCreds
-): Record<string, string> {
-  if (!connectionId) return {}
-  const decrypted = lookup(connectionId)
-  if (!decrypted) return {}
-  const env: Record<string, string> = Object.create(null)
-  for (const [key, value] of Object.entries(decrypted)) {
-    if (key !== SECRET_ENV_FIELD) {
-      env[envNameFor(key)] = value
-      continue
-    }
-    try {
-      const parsed: unknown = JSON.parse(value)
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
-      for (const [name, v] of Object.entries(parsed as Record<string, unknown>)) {
-        if (typeof v === 'string' && isEnvName(name)) env[name] = v
-      }
-    } catch {
-      // A blob this build cannot read contributes nothing, and the step runs
-      // without it rather than failing on a value nobody can see.
-    }
-  }
-  return { ...env }
-}
 
 export interface ScriptExecutionResult {
   success: boolean
@@ -134,11 +93,16 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
   }
 
   const cwd = config.cwd || config.projectPath || process.cwd()
-  const secretEnv = secretEnvFor(config.secretsFrom)
   const mode = vorndSessions.scriptMode()
   if (mode === 'native') {
     const { scriptType, scriptContent } = config
-    const script = { scriptType, scriptContent, cwd, args: config.args ?? [], secretEnv }
+    const script = {
+      scriptType,
+      scriptContent,
+      cwd,
+      args: config.args ?? [],
+      ...(config.secretsFrom && { secretsFrom: config.secretsFrom })
+    }
     const ran = await runInVornd(script, (data) => {
       if (runId) scriptRunnerEvents.emit(IPC.SCRIPT_DATA, { runId, data })
     })
@@ -178,11 +142,11 @@ export async function executeScript(config: ScriptConfig): Promise<ScriptExecuti
 
     // Only this child sees them: the secrets are read here rather than held
     // anywhere the definition, a run record or an export could reach.
-    const env = { ...getLaunchEnv(), ...secretEnv }
+    const env = getLaunchEnv()
     if (mode === 'shadow') {
       const argv = [command, ...interpreter.args(file && SCRIPT_FILE), ...(config.args ?? [])]
       const script = { scriptType: config.scriptType, cwd, args: config.args ?? [] }
-      comparePlan(script, Object.keys(secretEnv), { argv, cwd, envKeys: Object.keys(env) })
+      comparePlan(script, [], { argv, cwd, envKeys: Object.keys(env) })
     }
 
     let child: ReturnType<typeof spawn>
