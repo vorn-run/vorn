@@ -12,7 +12,7 @@ use vorn_extensions::pack::PackStore;
 
 use super::*;
 
-const FIXTURE: &str = include_str!("../../../../extensions/tests/fixtures/extension.js");
+const FIXTURE: &str = include_str!("../../../../extensions/tests/fixtures/extension.mjs");
 
 #[derive(Default)]
 struct Fake {
@@ -116,6 +116,7 @@ fn install(root: &Path, id: &str, manifest: Value) {
     let dir = root.join(id).join("1.0.0");
     fs::create_dir_all(dir.join("web")).unwrap();
     fs::write(dir.join("index.js"), FIXTURE).unwrap();
+    fs::write(dir.join("package.json"), r#"{"type":"module"}"#).unwrap();
     fs::write(dir.join("web/index.html"), "<p>pane</p>").unwrap();
     fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
     fs::write(

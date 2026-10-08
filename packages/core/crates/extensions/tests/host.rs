@@ -11,12 +11,13 @@ use serde_json::{json, Value};
 use vorn_extensions::host::{Asked, HostKey, HostSettings, Supervisor};
 use vorn_extensions::pack::PackStore;
 
-const FIXTURE: &str = include_str!("fixtures/extension.js");
+const FIXTURE: &str = include_str!("fixtures/extension.mjs");
 
 fn install(root: &Path, id: &str, manifest: Value) {
     let dir = root.join(id).join("1.0.0");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("index.js"), FIXTURE).unwrap();
+    fs::write(dir.join("package.json"), r#"{"type":"module"}"#).unwrap();
     fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
     fs::write(
         root.join(id).join("current.json"),
