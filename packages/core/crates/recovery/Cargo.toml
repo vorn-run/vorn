@@ -14,6 +14,10 @@ serde = { version = "1", features = ["derive"] }
 vorn-screen = { path = "../screen" }
 vorn-term-proto = { path = "../term-proto", features = ["serde"] }
 
+[dev-dependencies]
+tempfile = "3"
+vorn-sessiond-wire = { path = "../sessiond-wire" }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
 

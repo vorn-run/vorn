@@ -5,7 +5,8 @@ import type { SessionHolder, SessionHolders } from '@vornrun/shared/types'
 /**
  * vorn-sessiond, the session holder vornd keeps running.
  *
- * vornd finds or starts it and drains one left by an older build. The app
+ * vornd finds or starts it, and has it take over the sessions of one left by
+ * an older build or else drains that one. The app
  * reads what vornd reports about the holders, and ends an older one when the
  * person asks it to.
  */

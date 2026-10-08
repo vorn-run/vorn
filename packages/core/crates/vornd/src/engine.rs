@@ -820,7 +820,9 @@ fn outbound_session(m: &mut ToSessiond) -> Option<&mut String> {
         ToSessiond::Hello(_)
         | ToSessiond::Spawn(_)
         | ToSessiond::Ping(_)
-        | ToSessiond::Drain(_) => None,
+        | ToSessiond::Drain(_)
+        | ToSessiond::Handoff(_)
+        | ToSessiond::Adopt(_) => None,
     }
 }
 
@@ -832,7 +834,11 @@ fn inbound_session(m: &mut ToVornd) -> Option<&mut String> {
         ToVornd::Refused(r) => Some(&mut r.session),
         ToVornd::Entries(e) => Some(&mut e.session),
         ToVornd::InputDone(d) => Some(&mut d.session),
-        ToVornd::Welcome(_) | ToVornd::Spawned(_) | ToVornd::Failed(_) | ToVornd::Pong(_) => None,
+        ToVornd::Welcome(_)
+        | ToVornd::Spawned(_)
+        | ToVornd::Failed(_)
+        | ToVornd::Pong(_)
+        | ToVornd::Adopted(_) => None,
     }
 }
 
@@ -967,7 +973,7 @@ impl Driver<'_> {
                     );
                 }
             }
-            ToVornd::Pong(_) | ToVornd::Welcome(_) => {}
+            ToVornd::Pong(_) | ToVornd::Welcome(_) | ToVornd::Adopted(_) => {}
         }
     }
 

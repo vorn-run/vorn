@@ -2913,7 +2913,9 @@ dependencies = [
  "libghostty-vt",
  "postcard",
  "serde",
+ "tempfile",
  "vorn-screen",
+ "vorn-sessiond-wire",
  "vorn-term-proto",
  "windows-sys",
 ]

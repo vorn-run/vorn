@@ -33,6 +33,10 @@ pub struct Instance {
     /// The binary it runs, so a launcher can tell two builds of one version
     /// apart. Absent from announcements written before it was added.
     pub exe: Option<PathBuf>,
+    /// The newest handoff protocol it speaks ([`crate::wire::HANDOFF`]):
+    /// whether it can hand its sessions to a newer holder rather than be
+    /// drained. Absent from holders that cannot.
+    pub handoff: Option<u16>,
 }
 
 impl Instance {
@@ -64,6 +68,9 @@ pub fn announce(home: &Path, i: &Instance) -> io::Result<()> {
             body.push_str(&format!("exe={exe}\n"));
         }
     }
+    if let Some(v) = i.handoff {
+        body.push_str(&format!("handoff={v}\n"));
+    }
     let path = info_path(home, i.instance);
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, body)?;
@@ -82,6 +89,7 @@ pub(crate) fn parse(text: &str) -> Option<Instance> {
     let mut build = None;
     let mut instance = None;
     let mut exe = None;
+    let mut handoff = None;
     for line in text.lines() {
         let (k, v) = line.split_once('=')?;
         match k {
@@ -91,6 +99,7 @@ pub(crate) fn parse(text: &str) -> Option<Instance> {
             "build" => build = Some(v.to_owned()),
             "instance" => instance = u128::from_str_radix(v, 16).ok(),
             "exe" => exe = Some(PathBuf::from(v)),
+            "handoff" => handoff = v.parse().ok(),
             _ => {}
         }
     }
@@ -101,6 +110,7 @@ pub(crate) fn parse(text: &str) -> Option<Instance> {
         build: build?,
         instance: instance?,
         exe,
+        handoff,
     })
 }
 
@@ -559,6 +569,7 @@ mod tests {
             build: "0.8.0".into(),
             instance,
             exe: Some(PathBuf::from(format!("/bin/s{instance}"))),
+            handoff: (instance % 2 == 1).then_some(1),
         }
     }
 

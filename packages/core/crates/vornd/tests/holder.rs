@@ -251,11 +251,11 @@ fn a_relaunched_vornd_finds_the_same_sessiond() {
     v.stop();
 }
 
-/// A sessiond of an older build is told to drain: it is reported under
-/// `older`, a new one of this build takes its place, and it exits once it
-/// holds no sessions.
+/// A sessiond of an older build that cannot hand its sessions over is told
+/// to drain: it is reported under `older`, a new one of this build takes its
+/// place, and it exits once it holds no sessions.
 #[test]
-fn an_older_build_is_drained_and_exits() {
+fn an_older_build_without_handoff_is_drained_and_exits() {
     let home = tempfile::tempdir().unwrap();
     let mut reap = Reap::default();
 
@@ -274,6 +274,10 @@ fn an_older_build_is_drained_and_exits() {
         spool_cap: 1 << 20,
     });
     let listener = rt.block_on(async { server::bind(&old) }).expect("bind");
+    // Announced as a sessiond from before handoffs.
+    let mut announced = launch::running(home.path()).pop().expect("announced");
+    announced.handoff = None;
+    launch::announce(home.path(), &announced).unwrap();
     let serving = rt.spawn(server::serve(Arc::clone(&old), listener));
 
     let v = Vornd::start(home.path(), &[]);
@@ -288,7 +292,10 @@ fn an_older_build_is_drained_and_exits() {
     assert_eq!(older[0]["instance"], "1d");
     assert_eq!(older[0]["compatible"], true);
     assert_eq!(older[0]["sessions"], 0);
+    assert_eq!(older[0]["handedOff"], false);
     assert_ne!(current["instance"], "1d");
+    #[cfg(unix)]
+    assert!(!old.handed_off());
 
     let t = Instant::now();
     while !serving.is_finished() {
@@ -340,7 +347,8 @@ fn the_same_build_from_another_bundle_keeps_its_sessiond() {
 }
 
 /// A local rebuild with the version unchanged is a new build: it is
-/// installed beside the stale one, which is drained and exits.
+/// installed beside the stale one, which hands over its sessions (none
+/// here) and exits.
 #[test]
 fn a_rebuild_of_the_same_version_replaces_its_sessiond() {
     let home = tempfile::tempdir().unwrap();
@@ -373,9 +381,10 @@ fn a_rebuild_of_the_same_version_replaces_its_sessiond() {
     assert_eq!(older.len(), 1, "{holder}");
     assert_eq!(older[0]["instance"], first["instance"]);
     assert_eq!(older[0]["compatible"], true);
+    assert_eq!(older[0]["handedOff"], cfg!(unix));
     assert!(
         gone_within(pid(&first), PATIENCE),
-        "the drained sessiond did not exit: {}",
+        "the older sessiond did not exit: {}",
         v.log_text()
     );
 
@@ -411,6 +420,7 @@ fn an_incompatible_sessiond_is_left_alone() {
         build: "99.0.0".into(),
         instance: 0xf00,
         exe: None,
+        handoff: None,
     };
     launch::announce(home.path(), &foreign).unwrap();
 
@@ -560,4 +570,307 @@ fn run_holds_only_live_sockets() {
         .join("run")
         .join(vornd::control::ANNOUNCEMENT)
         .exists());
+}
+
+/// A blocking client of one sessiond, as vornd: keeps each session's
+/// records and acks them.
+#[cfg(unix)]
+struct Client {
+    sock: std::os::unix::net::UnixStream,
+    frames: vorn_sessiond_wire::FrameReader,
+    logs: std::collections::HashMap<String, Vec<vorn_term_proto::Entry>>,
+}
+
+#[cfg(unix)]
+impl Client {
+    fn hello(endpoint: &str) -> (Client, vorn_sessiond_wire::Welcome) {
+        use vorn_sessiond_wire::{Hello, ToSessiond, ToVornd};
+        let sock = std::os::unix::net::UnixStream::connect(endpoint).expect("connect");
+        sock.set_read_timeout(Some(PATIENCE)).unwrap();
+        let mut c = Client {
+            sock,
+            frames: Default::default(),
+            logs: Default::default(),
+        };
+        c.send(&ToSessiond::Hello(Hello {
+            proto_min: PROTO,
+            proto_max: PROTO,
+            vornd_instance: 7,
+            vornd_build: "test".into(),
+        }));
+        match c.recv() {
+            ToVornd::Welcome(w) => (c, w),
+            other => panic!("expected Welcome, got {other:?}"),
+        }
+    }
+
+    fn send(&mut self, m: &vorn_sessiond_wire::ToSessiond) {
+        use vorn_sessiond_wire::Message;
+        self.sock.write_all(&m.encode()).expect("send");
+    }
+
+    fn recv(&mut self) -> vorn_sessiond_wire::ToVornd {
+        use vorn_sessiond_wire::{Ack, ToSessiond, ToVornd};
+        let mut buf = vec![0u8; 64 << 10];
+        loop {
+            if let Some(m) = self.frames.read::<ToVornd>().expect("well-formed") {
+                if let ToVornd::Entries(e) = &m {
+                    let delivered = e.entries.last().expect("non-empty").after();
+                    self.logs
+                        .entry(e.session.clone())
+                        .or_default()
+                        .extend(e.entries.iter().cloned());
+                    self.send(&ToSessiond::Ack(Ack {
+                        session: e.session.clone(),
+                        delivered,
+                    }));
+                }
+                return m;
+            }
+            let n = self.sock.read(&mut buf).expect("sessiond answers");
+            assert_ne!(n, 0, "sessiond closed the connection");
+            self.frames.push(&buf[..n]);
+        }
+    }
+
+    /// A shell that echoes each line it reads, attached from its start.
+    fn spawn_echo(&mut self) -> String {
+        use vorn_sessiond_wire::{Attach, AttachFrom, Io, Spawn, SpawnSpec, ToSessiond, ToVornd};
+        self.send(&ToSessiond::Spawn(Spawn {
+            req: 1,
+            spec: SpawnSpec {
+                argv: ["sh", "-c", r#"while read l; do echo "got:$l"; done"#]
+                    .map(String::from)
+                    .to_vec(),
+                cwd: std::env::temp_dir().to_string_lossy().into_owned(),
+                env: Vec::new(),
+                io: Io::Pty { cols: 80, rows: 24 },
+                ring_bytes: None,
+            },
+        }));
+        let id = loop {
+            match self.recv() {
+                ToVornd::Spawned(s) => break s.session,
+                ToVornd::Failed(f) => panic!("spawn failed: {}", f.error),
+                _ => {}
+            }
+        };
+        self.send(&ToSessiond::Attach(Attach {
+            session: id.clone(),
+            from: AttachFrom::SessionStart,
+        }));
+        id
+    }
+
+    /// Types `line` and reads until the shell echoed it back.
+    fn echo(&mut self, session: &str, seq: u64, line: &str) {
+        use vorn_sessiond_wire::{ToSessiond, Write as In};
+        self.send(&ToSessiond::Write(In {
+            session: session.into(),
+            input_seq: seq,
+            bytes: format!("{line}\n").into_bytes(),
+        }));
+        let want = format!("got:{line}");
+        while !String::from_utf8_lossy(&self.output(session)).contains(&want) {
+            self.recv();
+        }
+    }
+
+    fn output(&self, session: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        for e in self.logs.get(session).into_iter().flatten() {
+            if let vorn_term_proto::Record::Data { bytes, .. } = &e.rec {
+                out.extend(bytes);
+            }
+        }
+        out
+    }
+
+    fn cursor(&self, session: &str) -> vorn_term_proto::Cursor {
+        self.logs[session].last().expect("records").after()
+    }
+}
+
+/// An older sessiond of another build, in this process, holding one live
+/// shell that has answered a line.
+#[cfg(unix)]
+struct Older {
+    rt: tokio::runtime::Runtime,
+    d: Arc<Sessiond>,
+    serving: tokio::task::JoinHandle<std::io::Result<()>>,
+    client: Client,
+    session: String,
+}
+
+#[cfg(unix)]
+impl Older {
+    fn start(home: &Path) -> Older {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let d = Sessiond::new(Config {
+            home: home.to_owned(),
+            instance: 0x01d,
+            build: "0.7.5".into(),
+            idle_exit: Duration::from_secs(600),
+            spool_cap: 1 << 20,
+        });
+        let listener = rt.block_on(async { server::bind(&d) }).expect("bind");
+        let serving = rt.spawn(server::serve(Arc::clone(&d), listener));
+        let (mut client, _) = Client::hello(&d.endpoint());
+        let session = client.spawn_echo();
+        client.echo(&session, 1, "one");
+        Older {
+            rt,
+            d,
+            serving,
+            client,
+            session,
+        }
+    }
+
+    fn pid(&self) -> u32 {
+        let (_, w) = Client::hello(&self.d.endpoint());
+        w.sessions
+            .iter()
+            .find(|s| s.session == self.session)
+            .expect("listed")
+            .pid
+    }
+
+    fn exits_within(self, d: Duration) -> bool {
+        let t = Instant::now();
+        while !self.serving.is_finished() {
+            if t.elapsed() > d {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        self.rt.block_on(self.serving).unwrap().is_ok()
+    }
+}
+
+/// An older build's sessiond hands its live sessions to the new one: the
+/// shell carries on there from the cursor its last client reached, and the
+/// older one stays only until it has reaped the shell.
+#[cfg(unix)]
+#[test]
+fn an_older_build_hands_its_live_sessions_over() {
+    use vorn_sessiond_wire::{Attach, AttachFrom, ToSessiond};
+    let home = tempfile::tempdir().unwrap();
+    let mut reap = Reap::default();
+    let old = Older::start(home.path());
+    let id = old.session.clone();
+    let shell = old.pid();
+
+    let v = Vornd::start(home.path(), &[]);
+    let holder = v.wait_for("the older one reported", |s| {
+        s["current"].is_object() && s["older"].as_array().is_some_and(|o| !o.is_empty())
+    });
+    let current = holder["current"].clone();
+    reap.add(pid(&current));
+    let older = &holder["older"][0];
+    assert_eq!(older["instance"], "1d");
+    assert_eq!(older["handedOff"], true, "{holder}\n{}", v.log_text());
+    assert_eq!(older["sessions"], 0);
+    assert!(old.d.handed_off() && !old.d.holds(&id));
+    assert!(launch::alive(shell), "the shell runs on");
+    v.stop();
+
+    // The new sessiond holds the shell and continues its log from where the
+    // older one's client stopped, with nothing in between.
+    let endpoint = launch::running(home.path())
+        .into_iter()
+        .find(|i| i.pid == pid(&current))
+        .expect("the current one is announced")
+        .endpoint;
+    let (mut c, w) = Client::hello(&endpoint);
+    let info = w
+        .sessions
+        .iter()
+        .find(|s| s.session == id)
+        .expect("adopted");
+    assert_eq!(info.pid, shell);
+    let at = old.client.cursor(&id);
+    c.send(&ToSessiond::Attach(Attach {
+        session: id.clone(),
+        from: AttachFrom::Cursor(at),
+    }));
+    c.echo(&id, 2, "two");
+    let first = c.logs[&id].first().expect("records");
+    assert!(at.is_followed_by(&first.hdr), "{at:?} then {:?}", first.hdr);
+    let mut all = old.client.output(&id);
+    all.extend(c.output(&id));
+    let text = String::from_utf8_lossy(&all);
+    assert!(
+        text.contains("got:one") && text.contains("got:two"),
+        "{text}"
+    );
+
+    launch::kill(shell).unwrap();
+    assert!(
+        old.exits_within(PATIENCE),
+        "the older sessiond stays after reaping the shell"
+    );
+}
+
+/// A handoff that fails leaves every session on the older sessiond, which
+/// is then drained as before handoffs.
+#[cfg(unix)]
+#[test]
+fn a_failed_handoff_drains_the_older_build_instead() {
+    use vorn_sessiond::server::{Fault, Step};
+    let home = tempfile::tempdir().unwrap();
+    let mut reap = Reap::default();
+    let old = Older::start(home.path());
+    old.d.inject(Fault {
+        step: Step::Send,
+        stall: false,
+    });
+    let id = old.session.clone();
+    let shell = old.pid();
+
+    let v = Vornd::start(home.path(), &[]);
+    let holder = v.wait_for("the older one reported", |s| {
+        s["current"].is_object() && s["older"].as_array().is_some_and(|o| !o.is_empty())
+    });
+    reap.add(pid(&holder["current"]));
+    let older = &holder["older"][0];
+    assert_eq!(older["handedOff"], false, "{holder}");
+    assert_eq!(older["sessions"], 1);
+    assert!(!old.d.handed_off() && old.d.holds(&id));
+    assert!(
+        v.log_text().contains("could not hand over"),
+        "{}",
+        v.log_text()
+    );
+
+    v.stop();
+
+    // Still the older one's, carrying on from where its client stopped.
+    use vorn_sessiond_wire::{Attach, AttachFrom, ToSessiond};
+    let at = old.client.cursor(&id);
+    let (mut c, _) = Client::hello(&old.d.endpoint());
+    c.send(&ToSessiond::Attach(Attach {
+        session: id.clone(),
+        from: AttachFrom::Cursor(at),
+    }));
+    c.echo(&id, 2, "two");
+    let first = c.logs[&id].first().expect("records");
+    assert!(at.is_followed_by(&first.hdr), "{at:?} then {:?}", first.hdr);
+
+    // It exits once its last session has ended and been released.
+    launch::kill(shell).unwrap();
+    while !c.logs[&id]
+        .iter()
+        .any(|e| matches!(e.rec, vorn_term_proto::Record::Exit { .. }))
+    {
+        c.recv();
+    }
+    c.send(&ToSessiond::Release(vorn_sessiond_wire::SessionRef {
+        session: id.clone(),
+    }));
+    assert!(old.exits_within(PATIENCE), "the drained sessiond stays");
 }

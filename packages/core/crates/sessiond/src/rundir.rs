@@ -209,6 +209,7 @@ mod tests {
                 build: "test".into(),
                 instance,
                 exe,
+                handoff: None,
             },
         )
         .unwrap();

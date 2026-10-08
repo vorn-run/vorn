@@ -8,6 +8,8 @@
 //! small on purpose: sessiond's crash rate is the ceiling on every guarantee
 //! the contract makes.
 
+#[cfg(unix)]
+mod fdpass;
 pub mod launch;
 pub mod log;
 pub mod os;

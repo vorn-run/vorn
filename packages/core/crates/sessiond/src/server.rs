@@ -24,6 +24,11 @@ use crate::log::SpoolPool;
 use crate::session::Session;
 use crate::wire::*;
 
+#[cfg(unix)]
+mod handoff;
+#[cfg(unix)]
+pub use handoff::{Fault, Step};
+
 /// How far the pump may run ahead of vornd's acks.
 pub const WINDOW_BYTES: u64 = 4 << 20;
 /// Data per Entries frame, well under the frame cap.
@@ -57,6 +62,20 @@ pub struct Sessiond {
     /// between waits when `stop` was notified.
     stopping: AtomicBool,
     pub stop: Notify,
+    /// Set while the sessions are being handed to a newer sessiond: no new
+    /// sessions, and none released, until it is done or called off.
+    #[cfg(unix)]
+    handing: AtomicBool,
+    /// Set once a newer sessiond took the sessions: this one only reaps.
+    #[cfg(unix)]
+    handed: AtomicBool,
+    /// Sessions handed off whose programs this process still has to reap.
+    #[cfg(unix)]
+    reaping: Mutex<Vec<Arc<Session>>>,
+    #[cfg(unix)]
+    adopting: AtomicBool,
+    #[cfg(unix)]
+    fault: Mutex<Option<Fault>>,
 }
 
 impl Sessiond {
@@ -73,7 +92,38 @@ impl Sessiond {
             draining: AtomicBool::new(false),
             stopping: AtomicBool::new(false),
             stop: Notify::new(),
+            #[cfg(unix)]
+            handing: AtomicBool::new(false),
+            #[cfg(unix)]
+            handed: AtomicBool::new(false),
+            #[cfg(unix)]
+            reaping: Mutex::new(Vec::new()),
+            #[cfg(unix)]
+            adopting: AtomicBool::new(false),
+            #[cfg(unix)]
+            fault: Mutex::new(None),
         })
+    }
+
+    /// Make the handoff fail or hang at one step, for tests.
+    #[cfg(unix)]
+    pub fn inject(&self, fault: Fault) {
+        *self.fault.lock().unwrap_or_else(|e| e.into_inner()) = Some(fault);
+    }
+
+    /// Whether a newer sessiond took this one's sessions.
+    #[cfg(unix)]
+    pub fn handed_off(&self) -> bool {
+        self.handed.load(Ordering::SeqCst)
+    }
+
+    /// Whether this one takes new sessions.
+    fn closed_to_new(&self) -> bool {
+        #[cfg(unix)]
+        if self.handing.load(Ordering::SeqCst) || self.handed.load(Ordering::SeqCst) {
+            return true;
+        }
+        self.draining.load(Ordering::SeqCst)
     }
 
     /// Ends [`serve`], which then removes the endpoint and the announcement:
@@ -148,6 +198,14 @@ impl Sessiond {
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
+        self.serve_read(stream, &[]).await;
+    }
+
+    /// Serve a connection whose first bytes, `read`, were read already.
+    async fn serve_read<S>(self: Arc<Self>, stream: S, read: &[u8])
+    where
+        S: AsyncRead + AsyncWrite + Send + 'static,
+    {
         *self.idle_since.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let (mut rd, mut wr) = tokio::io::split(stream);
         let (tx, mut rx) = mpsc::channel::<ToVornd>(256);
@@ -165,6 +223,7 @@ impl Sessiond {
             pumps: HashMap::new(),
         };
         let mut frames = FrameReader::default();
+        frames.push(read);
         let mut buf = vec![0u8; 64 << 10];
         let mut generation = self.generation.subscribe();
         'read: loop {
@@ -270,6 +329,10 @@ impl Conn {
             if h.proto_min > PROTO || h.proto_max < PROTO {
                 return false;
             }
+            #[cfg(unix)]
+            if self.d.handed_off() {
+                return false;
+            }
             let mut g = 0;
             self.d.generation.send_modify(|n| {
                 *n += 1;
@@ -291,11 +354,16 @@ impl Conn {
         match msg {
             ToSessiond::Hello(_) => return false,
             ToSessiond::Attach(a) => return self.attach(a).await,
-            ToSessiond::Spawn(sp) if self.d.draining.load(Ordering::SeqCst) => {
+            ToSessiond::Spawn(sp) if self.d.closed_to_new() => {
                 let reply = ToVornd::Failed(Failed {
                     req: sp.req,
                     error: "draining: start new sessions on the newer sessiond".into(),
                 });
+                return self.send(reply).await;
+            }
+            ToSessiond::Handoff(_) => return false,
+            ToSessiond::Adopt(a) => {
+                let reply = self.adopt(a).await;
                 return self.send(reply).await;
             }
             ToSessiond::Drain(_) => self.d.draining.store(true, Ordering::SeqCst),
@@ -334,11 +402,12 @@ impl Conn {
             }
             ToSessiond::PutCheckpoint(cp) => {
                 if let Some(s) = self.d.session(&cp.session) {
-                    // A refused checkpoint changes nothing; vornd cuts another.
-                    let _ = s.with_log(|l| l.put_checkpoint(cp));
-                    s.room_made();
+                    s.put_checkpoint(cp);
                 }
             }
+            // A session handed over mid-release goes on to be released there.
+            #[cfg(unix)]
+            ToSessiond::Release(_) if self.d.handing.load(Ordering::SeqCst) => {}
             ToSessiond::Release(r) => {
                 let mut map = self.d.sessions();
                 if map
@@ -357,11 +426,10 @@ impl Conn {
         true
     }
 
-    fn spawn(&self, sp: Spawn) -> ToVornd {
-        let n = self.d.next_id.fetch_add(1, Ordering::SeqCst);
-        let id = format!("{:08x}-{n}", self.d.cfg.instance as u32);
+    /// Reports each write the kernel took to whichever vornd is connected.
+    fn on_written(&self) -> impl Fn(&str, crate::session::Written) + Send + Clone + 'static {
         let d = Arc::downgrade(&self.d);
-        let on_written = move |session: &str, w: crate::session::Written| {
+        move |session: &str, w: crate::session::Written| {
             if let Some(d) = d.upgrade() {
                 d.send_async(ToVornd::InputDone(InputDone {
                     session: session.to_owned(),
@@ -369,7 +437,42 @@ impl Conn {
                     written: w.written,
                 }));
             }
-        };
+        }
+    }
+
+    /// Take every session of the older sessiond at `a.from`, or none.
+    async fn adopt(&self, a: Adopt) -> ToVornd {
+        #[cfg(unix)]
+        {
+            let failed = |error: String| ToVornd::Failed(Failed { req: a.req, error });
+            if self.d.adopting.swap(true, Ordering::SeqCst) {
+                return failed("already adopting".into());
+            }
+            let d = Arc::clone(&self.d);
+            let on_written = self.on_written();
+            let from = a.from.clone();
+            let res = tokio::task::spawn_blocking(move || d.adopt(&from, on_written)).await;
+            self.d.adopting.store(false, Ordering::SeqCst);
+            match res {
+                Ok(Ok(sessions)) => ToVornd::Adopted(Adopted {
+                    req: a.req,
+                    sessions,
+                }),
+                Ok(Err(e)) => failed(e.to_string()),
+                Err(e) => failed(e.to_string()),
+            }
+        }
+        #[cfg(windows)]
+        ToVornd::Failed(Failed {
+            req: a.req,
+            error: "sessions cannot move between processes here".into(),
+        })
+    }
+
+    fn spawn(&self, sp: Spawn) -> ToVornd {
+        let n = self.d.next_id.fetch_add(1, Ordering::SeqCst);
+        let id = format!("{:08x}-{n}", self.d.cfg.instance as u32);
+        let on_written = self.on_written();
         if let Err(e) = std::fs::create_dir_all(self.d.spool_dir()) {
             return ToVornd::Failed(Failed {
                 req: sp.req,
@@ -385,7 +488,16 @@ impl Conn {
         ) {
             Ok(s) => {
                 let pid = s.pid;
-                self.d.sessions().insert(id.clone(), s);
+                let mut map = self.d.sessions();
+                // A handoff that began meanwhile would not take it along.
+                if self.d.closed_to_new() {
+                    drop(map);
+                    return ToVornd::Failed(Failed {
+                        req: sp.req,
+                        error: "draining: start new sessions on the newer sessiond".into(),
+                    });
+                }
+                map.insert(id.clone(), s);
                 ToVornd::Spawned(Spawned {
                     req: sp.req,
                     session: id,
@@ -596,6 +708,7 @@ pub fn bind(d: &Sessiond) -> std::io::Result<crate::os::Listener> {
             build: d.cfg.build.clone(),
             instance: d.cfg.instance,
             exe: std::env::current_exe().ok(),
+            handoff: cfg!(unix).then_some(HANDOFF),
         },
     )?;
     Ok(listener)
@@ -609,10 +722,17 @@ pub async fn serve(d: Arc<Sessiond>, mut listener: crate::os::Listener) -> std::
         tokio::select! {
             conn = listener.accept() => {
                 let stream = conn?;
+                #[cfg(unix)]
+                tokio::spawn(first_frame(Arc::clone(&d), stream));
+                #[cfg(windows)]
                 tokio::spawn(Arc::clone(&d).serve_conn(stream));
             }
             _ = tokio::time::sleep(Duration::from_millis(250)) => {
                 if d.idle_for(idle) || d.stopping.load(Ordering::SeqCst) {
+                    break;
+                }
+                #[cfg(unix)]
+                if d.handed_off() {
                     break;
                 }
             }
@@ -623,5 +743,43 @@ pub async fn serve(d: Arc<Sessiond>, mut listener: crate::os::Listener) -> std::
     crate::launch::withdraw(&d.cfg.home, d.cfg.instance);
     // Connections still open end with the endpoint.
     d.stop.notify_waiters();
+    #[cfg(unix)]
+    reap_handed(&d).await;
     Ok(())
+}
+
+/// After a handoff, stay only until every program this process started is
+/// reaped: nobody else can reap them and write down how they ended.
+#[cfg(unix)]
+async fn reap_handed(d: &Sessiond) {
+    loop {
+        let reaping = d
+            .reaping
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|s| s.reaping());
+        if !reaping || d.stopping.load(Ordering::SeqCst) {
+            return;
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(250)) => {}
+            _ = d.stop.notified() => {}
+        }
+    }
+}
+
+/// Serve a connection by its first frame: a newer sessiond's handoff, or
+/// vornd.
+#[cfg(unix)]
+async fn first_frame(d: Arc<Sessiond>, mut stream: crate::os::Stream) {
+    let mut head = [0u8; 5];
+    if stream.read_exact(&mut head).await.is_err() {
+        return;
+    }
+    if head[4] == HANDOFF_FRAME {
+        handoff::serve(d, stream, head).await;
+    } else {
+        d.serve_read(stream, &head).await;
+    }
 }

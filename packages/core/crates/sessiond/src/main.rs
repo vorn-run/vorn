@@ -5,6 +5,9 @@
 //! stdout for whoever runs it by hand, and serves until it has held no sessions and had no
 //! vornd for `SECS` (default 60, or `VORN_SESSIOND_IDLE_EXIT`), or until
 //! SIGTERM or Ctrl-C. Either way it takes its endpoint and announcement back.
+//!
+//! `VORN_SESSIOND_HANDOFF_FAULT=<step>:<fail|stall>` (Unix) makes a handoff
+//! fail or hang at that step, for tests that check nothing is lost when it does.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -51,6 +54,13 @@ fn main() {
         idle_exit: Duration::from_secs(idle),
         spool_cap: 512 << 20,
     });
+    #[cfg(unix)]
+    if let Some(f) = std::env::var("VORN_SESSIOND_HANDOFF_FAULT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        d.inject(f);
+    }
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
