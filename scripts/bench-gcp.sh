@@ -7,7 +7,7 @@
 #   scripts/bench-gcp.sh [TIER...]          (default: 100 1000 10000)
 #
 # Env: PROJECT (vorn-bench-1008k), ZONE (us-central1-a),
-#      MACHINE (n2-standard-16), MAX_RUN (3h).
+#      MACHINE (n2-standard-16), MAX_RUN (3h), PHASES (holder,stack).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -16,6 +16,7 @@ project=${PROJECT:-vorn-bench-1008k}
 zone=${ZONE:-us-central1-a}
 machine=${MACHINE:-n2-standard-16}
 max_run=${MAX_RUN:-3h}
+phases=${PHASES:-holder,stack}
 tiers=("$@")
 vm="vorn-scale-bench-$(date +%Y%m%d-%H%M%S)"
 commit=$(git rev-parse --short HEAD)
@@ -81,7 +82,8 @@ wait_boot "$boot"
 
 # Detached on the VM, so a dropped ssh connection does not end the run.
 echo "building and running tiers ${tiers[*]:-100 1000 10000}"
-ssh_vm "mkdir -p \"\$HOME/results\" && setsid nohup bash -c 'bash \"\$HOME/vorn/packages/core/bench/scale/run-tiers.sh\" \"\$HOME/results\" ${tiers[*]:-}; touch \"\$HOME/results/done\"' >\"\$HOME/run.log\" 2>&1 </dev/null &"
+# The timeout only frees this side should ssh linger after the launch.
+timeout 120 "${gc[@]}" compute ssh "$vm" --zone "$zone" -- "mkdir -p \"\$HOME/results\" && PHASES=$phases setsid nohup bash -c 'bash \"\$HOME/vorn/packages/core/bench/scale/run-tiers.sh\" \"\$HOME/results\" ${tiers[*]:-}; touch \"\$HOME/results/done\"' >\"\$HOME/run.log\" 2>&1 </dev/null &" </dev/null || true
 misses=0
 while :; do
   sleep 60

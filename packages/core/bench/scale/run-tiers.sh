@@ -4,6 +4,7 @@
 # JSON with what it measured and the limit it hit.
 #
 #   run-tiers.sh OUT_DIR [TIER...]     (default tiers: 100 1000 10000)
+#   PHASES=holder,stack picks the phases (default both).
 set -euo pipefail
 
 out=${1:?usage: run-tiers.sh OUT_DIR [TIER...]}
@@ -41,6 +42,7 @@ for tier in "${tiers[@]}"; do
   echo "tier $tier (timeout ${limit}s)"
   VORN_BENCH_HOST=1 timeout --kill-after=30 "$limit" "$bin/vorn-scale-bench" run \
     --tier "$tier" \
+    --phases "${PHASES:-holder,stack}" \
     --sessiond "$bin/vorn-sessiond" \
     --vornd "$bin/vornd" \
     --work "$work" \

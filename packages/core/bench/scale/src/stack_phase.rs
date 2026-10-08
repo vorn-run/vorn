@@ -22,6 +22,8 @@ use crate::Plan;
 const MARKER: &str = "FLOOD-DONE";
 const ATTACH_SAMPLES: usize = 20;
 const WAIT: Duration = Duration::from_secs(60);
+/// vornd's refusal while its holder is still starting.
+const NOT_CONNECTED: &str = "no session holder connected";
 
 type Argv = Box<dyn Fn(usize) -> Vec<String> + Send>;
 
@@ -150,13 +152,21 @@ async fn measure(
         argv: bash,
         cwd: cwd.clone(),
     };
-    let probe = spawn_many(&mut s, 1, 1, 1).await?;
-    let probe = probe
-        .ids
-        .into_iter()
-        .next()
-        .ok_or_else(|| Error::Failed(probe.refused.unwrap_or_default()))?;
-    // The holder is started on the first spawn at the latest.
+    // vornd refuses spawns until it has connected to the holder it launched.
+    let deadline = Instant::now() + WAIT;
+    let mut req = 1;
+    let probe = loop {
+        let mut probe = spawn_many(&mut s, 1, 1, req).await?;
+        req += 1;
+        if let Some(id) = probe.ids.pop() {
+            break id;
+        }
+        let why = probe.refused.unwrap_or_default();
+        if !why.contains(NOT_CONNECTED) || Instant::now() > deadline {
+            return Err(Error::Failed(why));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
     let holder = holder_pid(home).ok_or(Error::Failed("no holder announced".into()))?;
     out.vornd.base = procfs::usage(vornd.pid).ok();
     out.holder.base = procfs::usage(holder).ok();
