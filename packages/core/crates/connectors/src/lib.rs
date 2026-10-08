@@ -7,6 +7,7 @@
 
 pub mod catalog;
 pub mod child;
+pub mod connections;
 pub mod fetch;
 pub mod install;
 pub mod js;

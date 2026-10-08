@@ -3542,6 +3542,7 @@ dependencies = [
  "tokio",
  "tracing",
  "ureq",
+ "vorn-store",
 ]
 
 [[package]]
