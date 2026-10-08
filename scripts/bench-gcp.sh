@@ -85,12 +85,12 @@ ssh_vm "mkdir -p \"\$HOME/results\" && setsid nohup bash -c 'bash \"\$HOME/vorn/
 misses=0
 while :; do
   sleep 60
-  state=$(ssh_vm 'tail -n 1 "$HOME/run.log"; [ -f "$HOME/results/done" ] && echo DONE' 2>/dev/null) || state=
+  state=$(ssh_vm 'if [ -f "$HOME/results/done" ]; then echo DONE; else echo "running: $(tail -n 1 "$HOME/run.log")"; fi' 2>/dev/null) || state=
   [ -n "$state" ] && misses=0 || misses=$((misses + 1))
-  # Ten silent minutes: the Spot VM was preempted or hit its run limit.
+  # Ten minutes without ssh: the Spot VM was preempted or hit its run limit.
   [ "$misses" -lt 10 ] || { echo "lost the VM" >&2; exit 1; }
-  echo "$state" | head -n 1
-  case $state in *DONE) break ;; esac
+  [ "$state" = DONE ] && break
+  [ -n "$state" ] && echo "$state"
 done
 ssh_vm 'cp "$HOME/run.log" "$HOME/results/run.log"; rm -f "$HOME/results/done"'
 
