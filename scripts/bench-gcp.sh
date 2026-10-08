@@ -44,6 +44,16 @@ trap cleanup EXIT INT TERM
 
 ssh_vm() { "${gc[@]}" compute ssh "$vm" --zone "$zone" -- "$@"; }
 
+# Waits until ssh answers with a boot other than `$1`.
+wait_boot() {
+  for _ in $(seq 1 60); do
+    now=$(ssh_vm cat /proc/sys/kernel/random/boot_id 2>/dev/null) && [ -n "$now" ] && [ "$now" != "$1" ] && return
+    sleep 10
+  done
+  echo "the VM did not come up" >&2
+  return 1
+}
+
 echo "creating $vm ($machine, Spot, $zone)"
 "${gc[@]}" compute instances create "$vm" \
   --zone "$zone" \
@@ -57,25 +67,31 @@ echo "creating $vm ($machine, Spot, $zone)"
   --boot-disk-type=pd-balanced \
   --labels=purpose=vorn-scale-bench >/dev/null
 
-for _ in $(seq 1 30); do
-  ssh_vm true 2>/dev/null && break
-  sleep 10
-done
+wait_boot none
 
 echo "copying packages/core at $commit"
 git archive --format=tar --prefix=vorn/ HEAD packages/core | ssh_vm 'tar -x -C "$HOME"'
 
 echo "setting up"
 ssh_vm 'bash "$HOME/vorn/packages/core/bench/scale/setup-vm.sh"'
+boot=$(ssh_vm cat /proc/sys/kernel/random/boot_id)
 ssh_vm 'sudo systemctl reboot' || true
-sleep 20
-for _ in $(seq 1 30); do
-  ssh_vm true 2>/dev/null && break
-  sleep 10
-done
+wait_boot "$boot"
 
+# Detached on the VM, so a dropped ssh connection does not end the run.
 echo "building and running tiers ${tiers[*]:-100 1000 10000}"
-ssh_vm "bash \"\$HOME/vorn/packages/core/bench/scale/run-tiers.sh\" \"\$HOME/results\" ${tiers[*]:-}" || true
+ssh_vm "mkdir -p \"\$HOME/results\" && setsid nohup bash -c 'bash \"\$HOME/vorn/packages/core/bench/scale/run-tiers.sh\" \"\$HOME/results\" ${tiers[*]:-}; touch \"\$HOME/results/done\"' >\"\$HOME/run.log\" 2>&1 </dev/null &"
+misses=0
+while :; do
+  sleep 60
+  state=$(ssh_vm 'tail -n 1 "$HOME/run.log"; [ -f "$HOME/results/done" ] && echo DONE' 2>/dev/null) || state=
+  [ -n "$state" ] && misses=0 || misses=$((misses + 1))
+  # Ten silent minutes: the Spot VM was preempted or hit its run limit.
+  [ "$misses" -lt 10 ] || { echo "lost the VM" >&2; exit 1; }
+  echo "$state" | head -n 1
+  case $state in *DONE) break ;; esac
+done
+ssh_vm 'cp "$HOME/run.log" "$HOME/results/run.log"; rm -f "$HOME/results/done"'
 
 mkdir -p "$dest"
 ssh_vm 'tar -c -C "$HOME/results" .' | tar -x -C "$dest"
