@@ -4,7 +4,7 @@ import { registerIpcHandlers, setBridge } from './ipc-handlers'
 import * as browserRegistry from './browser-registry'
 import * as deviceRegistry from './device-registry'
 import { installCompanionQuitHook } from './device-companion'
-import { installConnectorCredentialsImport } from './connector-credentials-import'
+import { installCredentialsImport } from './credentials-import'
 import { closeConnectionWindows, installConnectionSessions } from './connection-sessions'
 import { createMenu } from './menu'
 import { updateManager } from './update-manager'
@@ -654,7 +654,7 @@ app.whenReady().then(async () => {
   }
 
   // Secrets sealed before vornd kept them go to its vault, once.
-  installConnectorCredentialsImport(bridge)
+  installCredentialsImport(bridge)
   installConnectionSessions(bridge, { sweep: readHostSettings().mode !== 'host' })
 
   // Load config for widget + update channel

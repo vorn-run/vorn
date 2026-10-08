@@ -214,7 +214,10 @@ export interface RemoteHost {
   authMethod?: AuthMethod
   sshKeyPath?: string
   credentialId?: string
+  /** `vorn-vault` once vornd keeps the password. */
   encryptedPassword?: string
+  /** A new password, sent once with a save for vornd to keep; never stored or loaded. */
+  password?: string
   sshOptions?: string
 }
 
@@ -1616,10 +1619,6 @@ export interface CreateTerminalPayload {
   workflowName?: string
   /** Per-invocation arg overrides (replaces settings-level args when set) */
   args?: string[]
-  /** Transient: decrypted private key content for stored-key auth. Never persisted. */
-  _decryptedKeyContent?: string
-  /** Transient: decrypted password for password auth. Never persisted. */
-  _decryptedPassword?: string
 }
 
 export interface HeadlessSession {
@@ -2140,7 +2139,6 @@ export const IPC = {
   CREDENTIAL_DELETE_KEY: 'credential:deleteKey',
   CREDENTIAL_LIST_KEYS: 'credential:listKeys',
   CREDENTIAL_GET_ENCRYPTED_KEY: 'credential:getEncryptedKey',
-  CREDENTIAL_ENCRYPT: 'credential:encrypt',
   CREDENTIAL_SAFE_STORAGE_AVAILABLE: 'credential:safeStorageAvailable',
   SSH_TEST_CONNECTION: 'ssh:testConnection',
   OPEN_EXTERNAL: 'shell:openExternal',

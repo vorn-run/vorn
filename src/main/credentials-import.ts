@@ -1,6 +1,7 @@
 /**
- * Hand vornd, once, the connection secrets this app sealed with its own
- * keychain before vornd kept them in the OS keychain itself.
+ * Hand vornd, once, the secrets this app sealed with its own keychain before
+ * vornd kept them in the OS keychain itself: connections' secret fields,
+ * stored SSH keys and remote hosts' passwords.
  *
  * A row still holding sealed text is decrypted here and sent with
  * `credentials:import`; vornd files it in its vault and leaves its marker in
@@ -8,7 +9,13 @@
  */
 import { safeStorage } from 'electron'
 import { IPC } from '../shared/types'
-import type { ConnectorManifest, SourceConnection } from '../shared/types'
+import type {
+  AppConfig,
+  ConnectorManifest,
+  SSHKey,
+  SSHKeyMeta,
+  SourceConnection
+} from '../shared/types'
 import type { ServerBridge } from './server/server-bridge'
 import log from './logger'
 
@@ -43,6 +50,20 @@ export function sealedSecrets(
   return out
 }
 
+/** Each value still sealed, decrypted, by id; those that will not decrypt are left out. */
+export function sealedById(
+  sealed: Array<[string, string | undefined]>,
+  decrypt: (sealed: string) => string | undefined
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [id, value] of sealed) {
+    if (!value || value === IN_VAULT) continue
+    const plain = decrypt(value)
+    if (plain !== undefined) out[id] = plain
+  }
+  return out
+}
+
 function decryptSealed(sealed: string): string | undefined {
   if (!safeStorage.isEncryptionAvailable()) return undefined
   try {
@@ -58,17 +79,39 @@ async function importSealed(bridge: ServerBridge): Promise<void> {
       bridge.request<SourceConnection[]>(IPC.CONNECTION_LIST, { connectorId: undefined }),
       bridge.request<ConnectorListEntry[]>(IPC.CONNECTOR_LIST)
     ])
+    const [config, keys] = await Promise.all([
+      bridge.request<AppConfig>(IPC.CONFIG_LOAD),
+      bridge.request<SSHKeyMeta[]>(IPC.CREDENTIAL_LIST_KEYS)
+    ])
+    const rows = await Promise.all(
+      (keys ?? []).map((k) => bridge.request<SSHKey | null>(IPC.CREDENTIAL_GET_ENCRYPTED_KEY, k.id))
+    )
     const sealed = sealedSecrets(connections ?? [], connectors ?? [], decryptSealed)
-    const count = Object.keys(sealed).length
-    if (count === 0) return
-    await bridge.request(IPC.CREDENTIALS_IMPORT, { connections: sealed })
-    log.info(`[credentials] handed ${count} connection(s) to the vault`)
+    const sshKeys = sealedById(
+      rows.flatMap(
+        (row): Array<[string, string]> => (row ? [[row.id, row.encryptedPrivateKey]] : [])
+      ),
+      decryptSealed
+    )
+    const hostPasswords = sealedById(
+      (config?.remoteHosts ?? []).map((h): [string, string | undefined] => [
+        h.id,
+        h.encryptedPassword
+      ]),
+      decryptSealed
+    )
+    const counts = [sealed, sshKeys, hostPasswords].map((m) => Object.keys(m).length)
+    if (counts.every((n) => n === 0)) return
+    await bridge.request(IPC.CREDENTIALS_IMPORT, { connections: sealed, sshKeys, hostPasswords })
+    log.info(
+      `[credentials] handed ${counts[0]} connection(s), ${counts[1]} SSH key(s) and ${counts[2]} host password(s) to the vault`
+    )
   } catch (err) {
     log.warn(`[credentials] could not hand sealed secrets to the vault: ${err}`)
   }
 }
 
 /** Runs once the bridge is up; a start that finds nothing sealed does nothing. */
-export function installConnectorCredentialsImport(bridge: ServerBridge): void {
+export function installCredentialsImport(bridge: ServerBridge): void {
   setTimeout(() => void importSealed(bridge), 500)
 }

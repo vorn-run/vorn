@@ -1,5 +1,3 @@
-import type { ScriptExecutionResult } from '../../packages/server/src/script-runner'
-
 /**
  * What may differ between a project script the server runs, while vornd is
  * not connected, and the same script vornd runs, and nothing else.
@@ -22,6 +20,14 @@ import type { ScriptExecutionResult } from '../../packages/server/src/script-run
 
 export const SCRIPT_STREAMS = 'script-stdout-and-stderr-read-as-one'
 export const SCRIPT_CHUNKS = 'script-output-chunk-boundaries'
+
+/** What `script:execute` answers. */
+export interface ScriptExecutionResult {
+  success: boolean
+  output: string
+  error?: string
+  exitCode?: number
+}
 
 /** One run of a script, as the server's caller and its clients saw it. */
 export interface ScriptRun {

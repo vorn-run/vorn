@@ -896,11 +896,11 @@ export interface RequestMethods {
   /** Where clients reach this server through vornd, or why they cannot; waits for a start in flight. */
   'server:vornd': { params: void; result: VorndStatus }
 
-  // Credential vault (server-side storage)
+  // SSH keys, which vornd keeps in the OS keychain
   'credential:storeKey': {
     params: {
       label: string
-      encryptedPrivateKey: string
+      privateKey: string
       publicKey?: string
       certificate?: string
       keyType?: string
@@ -909,6 +909,7 @@ export interface RequestMethods {
   }
   'credential:listKeys': { params: void; result: SSHKeyMeta[] }
   'credential:deleteKey': { params: string; result: void }
+  /** A key's row: its private half reads `vorn-vault` once vornd keeps it. */
   'credential:getEncryptedKey': { params: string; result: SSHKey | null }
 
   // File explorer
@@ -1047,10 +1048,14 @@ export interface RequestMethods {
     params: { connectionId: string; field: string; plaintext: string }
     result: { ok: boolean; error?: string }
   }
-  /** Secrets this app sealed before vornd kept them, decrypted once, by connection then field. */
+  /** Secrets this app sealed before vornd kept them, decrypted once: by connection then field, by SSH key, by remote host. */
   'credentials:import': {
-    params: { connections: Record<string, Record<string, string>> }
-    result: { connections: number }
+    params: {
+      connections?: Record<string, Record<string, string>>
+      sshKeys?: Record<string, string>
+      hostPasswords?: Record<string, string>
+    }
+    result: { connections: number; sshKeys: number; hostPasswords: number }
   }
   /** Invoke a connector's action (createIssue, commentOnIssue, ...) via the
    *  connection's auth. Used by callConnectorAction workflow nodes. */

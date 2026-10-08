@@ -181,10 +181,10 @@ describe('server integration', () => {
     const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
     await new Promise<void>((r) => ws.on('open', r))
 
-    const res = await sendRpc(ws, 1, 'project:list')
+    const res = await sendRpc(ws, 1, 'server:vornd')
     expect(res.jsonrpc).toBe('2.0')
     expect(res.id).toBe(1)
-    expect(Array.isArray(res.result)).toBe(true)
+    expect(res.result).toMatchObject({ state: expect.any(String) })
 
     ws.close()
   })
@@ -251,7 +251,7 @@ describe('server integration', () => {
       )
       await ok
 
-      const res = await sendRpc(ws, 50, 'project:list')
+      const res = await sendRpc(ws, 50, 'server:vornd')
       expect(res.result).toBeDefined()
       ws.close()
     })

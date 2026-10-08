@@ -211,7 +211,7 @@ describe.runIf(runnable)('connections and connectors in vornd', () => {
       await client.result('credentials:import', {
         connections: { [conn.id]: { secret: 'tok-123' } }
       })
-    ).toEqual({ connections: 1 })
+    ).toEqual({ connections: 1, sshKeys: 0, hostPasswords: 0 })
     const rows = await client.result<Connection[]>('connection:list', {})
     expect(rows.find((c) => c.id === conn.id)?.filters.secret).toBe(IN_VAULT)
 

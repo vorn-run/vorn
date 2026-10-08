@@ -724,6 +724,8 @@ pub(crate) fn row_to_remote_host(row: &Row<'_>) -> Result<RemoteHost> {
         ssh_key_path: get_opt_text(row, "ssh_key_path")?,
         credential_id: get_opt_text(row, "credential_id")?,
         encrypted_password: get_opt_text(row, "encrypted_password")?,
+        // Never stored: vornd keeps a host's password in its vault.
+        password: None,
         ssh_options: get_opt_text(row, "ssh_options")?,
     })
 }

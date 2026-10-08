@@ -49,7 +49,6 @@ import {
 } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
 import { vorndSessions } from './vornd-sessions'
-import { cancelScripts } from './vornd-scripts'
 import { VorndKeeper } from './vornd-process'
 import { peerAddress, relayThroughVornd, relaysThroughVornd } from './vornd-relay'
 import { linkReach, relayPairing, VORND_FORWARDED_HEADER } from './vornd-reach'
@@ -694,7 +693,6 @@ export async function startServer(
     hookStatusMapper.clear()
     headlessManager.killAll()
     ptyManager.killAll()
-    cancelScripts()
     vorndSessions.close()
     // Its sessions carry on in the session holder, for the next server.
     const vorndStopped = vorndKeeper.stop()

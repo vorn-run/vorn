@@ -34,9 +34,11 @@
 //! Connections and connectors, their secrets included, are vornd's
 //! ([`connectors`]).
 
+pub mod about;
 pub mod agent;
 pub mod config;
 pub mod connectors;
+pub mod credential;
 pub mod desktop;
 pub mod env;
 pub mod extensions;
@@ -51,6 +53,8 @@ pub mod secrets;
 pub mod sessions;
 pub mod shell;
 pub mod ssh;
+pub mod tasks;
+pub mod widget;
 pub mod work;
 pub mod worktree;
 pub mod worktree_move;
@@ -109,6 +113,7 @@ pub const METHODS: &[(&str, Effect)] = &[
     // Answered once vornd holds the session records ([`worktree_move`]).
     ("git:renameWorktreeBranch", Effect::Change),
     ("git:renameWorktree", Effect::Change),
+    ("git:checkoutBranch", Effect::Change),
     ("file:listDir", Effect::Read),
     ("file:readContent", Effect::Read),
     ("file:stamp", Effect::Read),
@@ -164,10 +169,6 @@ pub const METHODS: &[(&str, Effect)] = &[
 
 /// Calls in a native group that the server keeps answering, and why.
 pub const SERVER_ONLY: &[(&str, &str)] = &[
-    (
-        "git:checkoutBranch",
-        "moves the server's sessions on that worktree to the new branch and tells clients",
-    ),
     ("server:shutdown", "stops the server itself"),
     (
         "server:handoff",
@@ -194,6 +195,11 @@ pub fn effect(method: &str) -> Option<Effect> {
         || connectors::METHODS.contains(&method)
         || desktop::answers(method)
         || method == IDENTIFY
+        || tasks::METHODS.contains(&method)
+        || widget::METHODS.contains(&method)
+        || about::METHODS.contains(&method)
+        || method == script::METHOD
+        || credential::METHODS.contains(&method)
     {
         return Some(Effect::Change);
     }
@@ -345,6 +351,8 @@ pub struct Native {
     shells: shell::Shells,
     /// The copy of the server's session records, when vornd holds sessions.
     registry: OnceLock<Arc<SessionRegistry>>,
+    /// Woken when a client asks for the widget's list ([`widget`]).
+    widget: tokio::sync::Notify,
     /// What starts the sessions vornd creates: the engine, when it runs one.
     host: OnceLock<Arc<dyn sessions::Host>>,
     sessions: Arc<sessions::Sessions>,
@@ -396,6 +404,7 @@ impl Native {
             catalog: vorn_agents::models::Catalog::default(),
             shells: shell::Shells::default(),
             registry: OnceLock::new(),
+            widget: tokio::sync::Notify::new(),
             host: OnceLock::new(),
             sessions: Arc::default(),
             sizes: vorn_worktrees::Sizes::default(),
@@ -417,6 +426,13 @@ impl Native {
     pub fn set_registry(&self, registry: Arc<SessionRegistry>) {
         registry.want();
         let _ = self.registry.set(registry);
+    }
+
+    /// Tells the status widget's list as the registry changes, once there is one.
+    pub fn start_widget(self: &Arc<Self>) {
+        if let Some(registry) = self.registry.get() {
+            tokio::spawn(widget::follow(Arc::clone(self), Arc::clone(registry)));
+        }
     }
 
     /// The server's port, which the addresses a browser uses name.
@@ -568,6 +584,21 @@ impl Native {
         }
         if config::METHODS.contains(&method.as_str()) {
             return config::answer(self, &method, params, viewer).await;
+        }
+        if tasks::METHODS.contains(&method.as_str()) {
+            return tasks::answer(self, &method, params).await;
+        }
+        if widget::METHODS.contains(&method.as_str()) {
+            return widget::answer(self);
+        }
+        if about::METHODS.contains(&method.as_str()) {
+            return about::answer(self, &method, params).await;
+        }
+        if method == script::METHOD {
+            return script::execute(self, params).await;
+        }
+        if credential::METHODS.contains(&method.as_str()) {
+            return credential::answer(self, &method, params).await;
         }
         if extensions::METHODS.contains(&method.as_str()) {
             let Some(host) = self.extensions.get().cloned() else {

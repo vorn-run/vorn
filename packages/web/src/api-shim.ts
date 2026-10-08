@@ -1048,7 +1048,6 @@ export function createApiShim(wsUrl: string) {
     storeSSHKey: unsupportedInWeb('Storing an SSH key'),
     importSSHKeyFile: unsupportedInWeb('Importing an SSH key'),
     deleteSSHKey: unsupportedInWeb('Deleting an SSH key'),
-    encryptString: unsupportedInWeb('Encrypting a credential'),
 
     // ── Browser and device panes (unavailable in web) ──
     // Both drive something on the host machine — an embedded Electron view, and a

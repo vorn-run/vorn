@@ -136,20 +136,16 @@ export function SSHSettings() {
     }
   }
 
-  const handlePasswordCommit = async (hostId: string): Promise<void> => {
+  const handlePasswordCommit = (hostId: string): void => {
     const pw = passwordInputs[hostId]
     if (!pw) return
-    try {
-      const encrypted = await window.api.encryptString(pw)
-      updateHost(hostId, { encryptedPassword: encrypted })
-      setPasswordInputs((prev) => {
-        const next = { ...prev }
-        delete next[hostId]
-        return next
-      })
-    } catch {
-      /* encryption not available */
-    }
+    // Sent once with the save; vornd keeps it in the OS keychain and the row keeps a marker.
+    updateHost(hostId, { password: pw })
+    setPasswordInputs((prev) => {
+      const next = { ...prev }
+      delete next[hostId]
+      return next
+    })
   }
 
   const handleStoredKeyChange = (hostId: string, credentialId: string): void => {

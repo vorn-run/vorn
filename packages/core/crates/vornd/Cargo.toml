@@ -54,6 +54,7 @@ vorn-workflow = { path = "../workflow" }
 # The system's time zone, which a schedule without one fires in.
 jiff = "0.2"
 vorn-worktrees = { path = "../worktrees" }
+vorn-remote = { path = "../remote" }
 uuid = { version = "1", features = ["v4"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
 

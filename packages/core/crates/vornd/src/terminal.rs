@@ -121,7 +121,7 @@ fn route(
             }
             return true;
         }
-        return false;
+        return unheld(engine, reply, rpc, method, session);
     }
     let sizes = engine.sizes();
     // The app's calls leave the size rule alone.
@@ -218,6 +218,38 @@ fn route(
 }
 
 /// Answers a call that was sent as a request; a notification gets nothing.
+/// The reads of a session nothing holds, as the server answered them: no
+/// screen, no output, not live. Whether vornd answered.
+fn unheld(
+    engine: &Engine,
+    reply: &Forwarder,
+    rpc: Option<Value>,
+    method: &str,
+    session: &str,
+) -> bool {
+    let answered = match method {
+        "terminal:attach" => Ok(json!({ "data": "", "seq": 0, "live": false })),
+        "terminal:readScrollback" => Ok(json!({ "data": "" })),
+        "terminal:readOutput" => {
+            let known = engine.registry().read(|r| r.terminal(session).is_some());
+            match known {
+                Some(true) => Ok(json!([])),
+                Some(false) => Err(format!("Session not found: {session}")),
+                // No copy of the records yet: the server says.
+                None => return false,
+            }
+        }
+        _ => return false,
+    };
+    if let Some(rpc) = rpc {
+        match answered {
+            Ok(v) => reply.send_now(&answer(&rpc, v)),
+            Err(e) => reply.send_now(&refuse(&rpc, &e)),
+        }
+    }
+    true
+}
+
 fn settle(reply: &Forwarder, rpc: Option<Value>, done: Result<(), String>) {
     let Some(rpc) = rpc else { return };
     match done {

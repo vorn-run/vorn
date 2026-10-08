@@ -206,6 +206,18 @@ impl Work {
     async fn hear(self: &Arc<Self>, frame: &Value) {
         self.host().hear(frame);
         let id = frame["params"]["id"].as_str().unwrap_or("").to_owned();
+        if matches!(
+            frame["method"].as_str(),
+            Some("terminal:exit" | "headless:exit")
+        ) {
+            if let Some(native) = self.native.upgrade() {
+                let code = frame["params"]
+                    .get("exitCode")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                super::tasks::log_event(&native, &id, "exited", Some(json!({ "exitCode": code })));
+            }
+        }
         match frame["method"].as_str() {
             Some("session:updated") => self.session_status_changed(&id).await,
             Some("terminal:exit") => {

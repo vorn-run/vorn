@@ -794,9 +794,6 @@ const api = {
 
   listSSHKeys: (): Promise<SSHKeyMeta[]> => ipcRenderer.invoke(IPC.CREDENTIAL_LIST_KEYS),
 
-  encryptString: (plaintext: string): Promise<string> =>
-    ipcRenderer.invoke(IPC.CREDENTIAL_ENCRYPT, plaintext),
-
   isSafeStorageAvailable: (): Promise<boolean> =>
     ipcRenderer.invoke(IPC.CREDENTIAL_SAFE_STORAGE_AVAILABLE),
 
