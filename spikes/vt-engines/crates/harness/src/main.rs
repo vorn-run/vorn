@@ -4,6 +4,7 @@
 //! ```text
 //! vt-harness throughput --engine E --corpus C [--mb N] [--runs N]
 //! vt-harness memory     --engine E --corpus C [--mb N] [--sessions N]
+//! vt-harness resize     --engine E [--runs N]
 //! vt-harness compare    --engine E
 //! vt-harness features   --engine E
 //! ```
@@ -89,6 +90,7 @@ fn main() -> ExitCode {
         match a.cmd.as_str() {
             "throughput" => dispatch!(a.engine.as_str(), throughput(&a)),
             "memory" => dispatch!(a.engine.as_str(), memory(&a)),
+            "resize" => dispatch!(a.engine.as_str(), resize(&a)),
             "compare" => dispatch!(a.engine.as_str(), compare_all()),
             "features" => dispatch!(a.engine.as_str(), features_all()),
             other => Err(format!("unknown command {other}")),
@@ -203,8 +205,41 @@ fn memory<E: Engine>(a: &Args) {
     black_box(sessions);
 }
 
+/// Time of one resize with a full history: the build log fills it at
+/// 120x40, then the screen alternates between 100x30 and 120x40.
+fn resize<E: Engine>(a: &Args) {
+    let c = corpus::build_log(7, 4 << 20);
+    let mut e = E::new(c.cols, c.rows, SCROLLBACK);
+    play(&mut e, &c.ops);
+    let history = e.scrollback_lines();
+    let mut ms: Vec<f64> = (0..a.runs)
+        .map(|i| {
+            let (w, h) = if i % 2 == 0 {
+                (100, 30)
+            } else {
+                (c.cols, c.rows)
+            };
+            let t = Instant::now();
+            e.resize(w, h);
+            black_box(e.cursor());
+            t.elapsed().as_secs_f64() * 1000.0
+        })
+        .collect();
+    let [min, _, med, _, max] = stats(&mut ms);
+    println!(
+        "{}",
+        Obj::new()
+            .str("engine", E::NAME)
+            .num("history_lines", history as f64)
+            .num("runs", a.runs as f64)
+            .num("median_ms", med)
+            .num("min_ms", min)
+            .num("max_ms", max)
+    );
+}
+
 fn compare_all<E: Engine>() {
-    for name in corpus::NAMES {
+    for name in corpus::NAMES.into_iter().chain(["seeded-fixed"]) {
         for line in compare::run::<E>(name) {
             println!("{line}");
         }

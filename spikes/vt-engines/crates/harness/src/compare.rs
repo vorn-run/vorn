@@ -10,6 +10,7 @@
 //! attributes are invisible, and a spacer is only checked for being one.
 
 use std::collections::BTreeMap;
+use std::panic::{self, AssertUnwindSafe};
 
 use vorn_recovery::Profile;
 use vt_api::{Attrs, Cell, Engine, Grid, Width};
@@ -17,13 +18,15 @@ use vt_ghostty::Ghostty;
 
 use crate::corpus::{self, Corpus, Op};
 use crate::json::{str_array, Obj};
-use crate::SCROLLBACK;
+use crate::{play, SCROLLBACK};
 
 /// Examples kept per kind of difference.
 const EXAMPLES: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
+    /// The candidate panicked on the input; the session stops there.
+    Panicked,
     Dimensions,
     /// A row's text differs after a resize the screens have not converged
     /// from: the engines reflow differently.
@@ -50,6 +53,7 @@ pub enum Kind {
 impl Kind {
     fn name(self) -> &'static str {
         match self {
+            Kind::Panicked => "engine panicked",
             Kind::Dimensions => "dimensions",
             Kind::Reflow => "text after resize (reflow)",
             Kind::RowsShifted => "rows shifted (scroll/wrap)",
@@ -270,21 +274,22 @@ fn compare_cells(t: &mut Tally, at: &str, g: &Grid, c: &Grid, since_resize: bool
 }
 
 /// Feeds `corpus` to both engines, checking every `every` ops and at the end.
+/// A candidate that panics ends the session there, counted as a difference.
 fn lockstep<E: Engine>(t: &mut Tally, label: &str, c: &Corpus, every: usize) {
     let mut base = Ghostty::new(c.cols, c.rows, SCROLLBACK);
     let mut cand = E::new(c.cols, c.rows, SCROLLBACK);
     let mut since_resize = false;
     for (i, op) in c.ops.iter().enumerate() {
-        match op {
-            Op::Data(b) => {
-                base.feed(b);
-                cand.feed(b);
-            }
-            &Op::Resize(w, h) => {
-                base.resize(w, h);
-                cand.resize(w, h);
-                since_resize = true;
-            }
+        play(&mut base, std::slice::from_ref(op));
+        since_resize |= matches!(op, Op::Resize(..));
+        let fed = panic::catch_unwind(AssertUnwindSafe(|| {
+            play(&mut cand, std::slice::from_ref(op));
+        }));
+        if fed.is_err() {
+            t.checkpoints += 1;
+            t.note(Kind::Panicked, 0, || format!("{label}@{}", i + 1));
+            t.kinds.get_mut(&Kind::Panicked).expect("noted").checkpoints += 1;
+            return;
         }
         if (i + 1) % every == 0 || i + 1 == c.ops.len() {
             base.take_replies();
@@ -311,9 +316,14 @@ pub fn run<E: Engine>(name: &str) -> Vec<String> {
     match name {
         "vim" | "htop" | "agent" => lockstep::<E>(&mut t, name, &corpus::load_once(name, 0), 1),
         "build-log" => lockstep::<E>(&mut t, name, &corpus::build_log(7, 2 << 20), 16),
-        "seeded" => {
+        "seeded" | "seeded-fixed" => {
+            let profile = if name == "seeded" {
+                Profile::mixed()
+            } else {
+                Profile::mixed().mix(corpus::NO_RESIZE)
+            };
             for seed in 1..=SEEDS {
-                let c = corpus::seeded(seed, Profile::mixed(), 256 << 10);
+                let c = corpus::seeded(seed, profile, 256 << 10);
                 lockstep::<E>(&mut t, &format!("seed{seed}"), &c, 16);
             }
         }

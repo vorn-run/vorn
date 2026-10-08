@@ -89,14 +89,12 @@ impl Engine for Wezterm {
         let (cols, rows) = (screen.physical_cols, screen.physical_rows);
         let mut g = Grid::blank(cols as u16, rows as u16);
         let range = screen.phys_range(&(0..rows as i64));
-        let mut y = 0usize;
-        screen.with_phys_lines(range, |lines| {
-            for line in lines {
-                let start = y * cols;
-                read_line(line, &mut g.cells[start..start + cols]);
-                y += 1;
-            }
-        });
+        // `with_phys_lines` would avoid the clone, but it indexes the second
+        // half of its ring buffer by absolute row and panics once it wraps.
+        for (y, line) in screen.lines_in_phys_range(range).iter().enumerate() {
+            let start = y * cols;
+            read_line(line, &mut g.cells[start..start + cols]);
+        }
         g
     }
 
@@ -148,7 +146,8 @@ impl Engine for Wezterm {
         let screen = self.term.screen();
         let mut cells = vec![Cell::default(); screen.physical_cols];
         // Physical line 0 is the oldest history line.
-        screen.with_phys_lines(n..n + 1, |lines| read_line(lines[0], &mut cells));
+        let line = screen.lines_in_phys_range(n..n + 1).pop()?;
+        read_line(&line, &mut cells);
         Some(line_text(&cells))
     }
 }
@@ -240,6 +239,15 @@ mod tests {
         let mut e = Wezterm::new(10, 3, 0);
         e.feed(b"\x1b[38;2;1;128;254mx");
         assert_eq!(e.grid().row(0)[0].fg, Color::Rgb(1, 128, 254));
+    }
+
+    #[test]
+    fn reads_the_screen_after_history_wraps_its_ring() {
+        let mut e = Wezterm::new(10, 3, 5);
+        let text: Vec<String> = (0..100).map(|i| i.to_string()).collect();
+        e.feed(text.join("\r\n").as_bytes());
+        assert_eq!(e.grid().row_text(2), "99");
+        assert_eq!(e.history_line(4).as_deref(), Some("96"));
     }
 
     #[test]

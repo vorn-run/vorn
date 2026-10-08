@@ -1,0 +1,20 @@
+Cold release builds, one adapter at a time, fresh CARGO_TARGET_DIR, `cargo build --release -j 3 -p <crate>`,
+Apple M-series laptop, rustc 1.97.0, LTO release profile. Wall seconds via `date +%s`.
+
+crate         seconds  crates compiled  notes
+vt-ghostty    170      16               empty ZIG_GLOBAL_CACHE_DIR; includes the git clone of Ghostty and Zig package fetch (target 332 MB + zig cache 469 MB)
+vt-ghostty     56      16               warm ~/.cache/zig (what a second checkout sees)
+vt-alacritty   13      35
+vt-wezterm     65      204              wezterm-term and termwiz built from the upstream repo at 372548295b0b
+vt-vt100        1      8
+
+Cross targets, `cargo check --release -j 3 -p <crate> --target <t>`, no extra toolchain installed
+(rustup std for both targets only; no MSVC, no Xcode iOS SDK flags, no Zig cross setup):
+
+crate         x86_64-pc-windows-msvc                         aarch64-apple-ios
+vt-ghostty    FAIL: libghostty-vt-sys build script, simdutf.cpp  FAIL: libghostty-vt-sys build.rs:431 panics
+              "'cstring' file not found" (Zig needs the         "unsupported Rust target for vendored build"
+              Windows SDK/MSVC headers)
+vt-alacritty  ok                                             ok
+vt-wezterm    ok                                             FAIL: termios 0.3.3 has no iOS module (pulled in by termwiz)
+vt-vt100      ok                                             ok

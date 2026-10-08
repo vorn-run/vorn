@@ -6,7 +6,7 @@
 //! - `vim`, `htop`, `agent`: the PTY transcripts vorn-recovery ships.
 //! - `seeded`: vorn-recovery's generator with every piece family on.
 
-use vorn_recovery::gen::{Generator, Profile};
+use vorn_recovery::gen::{Generator, Mix, Profile};
 use vorn_recovery::log::Log;
 use vorn_recovery::{transcript, Rng};
 use vorn_term_proto::Record;
@@ -53,14 +53,32 @@ impl Corpus {
         }
     }
 
-    /// The same corpus played until it holds at least `bytes` of output,
-    /// each pass starting from the first size again.
+    /// The corpus without its resizes, at the size of its first one: what
+    /// is left is parsing. Repeated thousands of times, the resizes would
+    /// measure reflowing a full history instead (the `resize` command times
+    /// that on its own).
+    fn without_resizes(self) -> Corpus {
+        let (cols, rows) = self
+            .ops
+            .iter()
+            .find_map(|op| match *op {
+                Op::Resize(c, r) => Some((c, r)),
+                Op::Data(_) => None,
+            })
+            .unwrap_or((self.cols, self.rows));
+        let ops = self
+            .ops
+            .into_iter()
+            .filter(|op| matches!(op, Op::Data(_)))
+            .collect();
+        Corpus { cols, rows, ops }
+    }
+
+    /// The same corpus played until it holds at least `bytes` of output.
     fn repeated(self, bytes: usize) -> Corpus {
-        let one = self.data_bytes().max(1);
-        let passes = bytes.div_ceil(one);
-        let mut ops = Vec::with_capacity(self.ops.len() * passes + passes);
+        let passes = bytes.div_ceil(self.data_bytes().max(1));
+        let mut ops = Vec::with_capacity(self.ops.len() * passes);
         for _ in 0..passes {
-            ops.push(Op::Resize(self.cols, self.rows));
             ops.extend(self.ops.iter().cloned());
         }
         Corpus { ops, ..self }
@@ -83,23 +101,35 @@ fn transcript_log(name: &str) -> Log {
     transcript::parse(bytes).expect("shipped transcript parses")
 }
 
-/// A corpus at least `bytes` long (transcripts repeat to get there).
+/// A corpus at least `bytes` long with no resizes, for timing the parser
+/// (transcripts repeat to get there).
 pub fn load(name: &str, bytes: usize) -> Corpus {
     match name {
         "build-log" => build_log(7, bytes),
-        "vim" | "htop" | "agent" => Corpus::from_log(&transcript_log(name)).repeated(bytes),
-        "seeded" => seeded(7, Profile::mixed(), bytes),
+        "vim" | "htop" | "agent" => Corpus::from_log(&transcript_log(name))
+            .without_resizes()
+            .repeated(bytes),
+        "seeded" => seeded(7, Profile::mixed().mix(NO_RESIZE), bytes),
         other => panic!("unknown corpus {other}"),
     }
 }
 
-/// One pass of a corpus: transcripts once, the others at `bytes`.
+/// One pass of a corpus as recorded, resizes included: transcripts once,
+/// the others at `bytes`.
 pub fn load_once(name: &str, bytes: usize) -> Corpus {
     match name {
         "vim" | "htop" | "agent" => Corpus::from_log(&transcript_log(name)),
+        "seeded" => seeded(7, Profile::mixed(), bytes),
         _ => load(name, bytes),
     }
 }
+
+/// The generator's mix with resizes off, so timings and the fixed-size
+/// comparison exercise parsing alone.
+pub const NO_RESIZE: Mix = Mix {
+    resize: 0,
+    ..Mix::EVERYTHING
+};
 
 pub fn seeded(seed: u64, profile: Profile, bytes: usize) -> Corpus {
     let log = Generator::log(seed, profile.bytes(bytes as u64));
@@ -219,13 +249,27 @@ mod tests {
     use vorn_recovery::log::Size;
 
     #[test]
-    fn corpora_reach_their_size_and_repeat_from_the_first_size() {
+    fn corpora_reach_their_size() {
         for name in NAMES {
             let c = load(name, 256 << 10);
             assert!(c.data_bytes() >= 256 << 10, "{name}");
         }
         let vim = load("vim", 64 << 10);
-        assert!(matches!(vim.ops[0], Op::Resize(c, r) if (c, r) == (vim.cols, vim.rows)));
+        assert!(vim.data_bytes() >= 64 << 10);
+    }
+
+    #[test]
+    fn timed_corpora_have_no_resizes_and_start_at_the_first_one() {
+        for name in NAMES {
+            let c = load(name, 64 << 10);
+            assert!(c.ops.iter().all(|op| matches!(op, Op::Data(_))), "{name}");
+        }
+        let first = load_once("vim", 0).ops.iter().find_map(|op| match *op {
+            Op::Resize(c, r) => Some((c, r)),
+            Op::Data(_) => None,
+        });
+        let timed = load("vim", 0);
+        assert_eq!(Some((timed.cols, timed.rows)), first);
     }
 
     #[test]

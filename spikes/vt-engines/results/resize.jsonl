@@ -1,0 +1,5 @@
+{"engine":"libghostty-vt","history_lines":10547,"runs":20,"median_ms":4.69,"min_ms":4.445,"max_ms":6.008}
+{"engine":"libghostty-vt (raw)","history_lines":10547,"runs":20,"median_ms":4.66,"min_ms":4.425,"max_ms":6.088}
+{"engine":"alacritty_terminal","history_lines":10000,"runs":20,"median_ms":2.852,"min_ms":1.796,"max_ms":6.039}
+{"engine":"wezterm-term","history_lines":10000,"runs":20,"median_ms":14.239,"min_ms":11.016,"max_ms":21.219}
+{"engine":"vt100","history_lines":10000,"runs":20,"median_ms":0.002,"min_ms":0,"max_ms":0.031}
