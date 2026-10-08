@@ -375,6 +375,45 @@ pub fn update(store: &mut Store, id: &str, updates: Map<String, Value>, cleared:
     Ok(())
 }
 
+/// The environment a script step's named connection gives it
+/// (`secretEnvFor`): its `secretEnv` blob's variables, and each other secret
+/// field under its name in capitals.
+pub fn script_env(fields: &[(String, String)]) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = Vec::new();
+    let mut put = |k: String, v: String| match env.iter_mut().find(|(key, _)| *key == k) {
+        Some(slot) => slot.1 = v,
+        None => env.push((k, v)),
+    };
+    for (key, value) in fields {
+        if key != SECRET_ENV {
+            put(env_name_for(key), value.clone());
+            continue;
+        }
+        if let Ok(Value::Object(blob)) = serde_json::from_str::<Value>(value) {
+            for (name, v) in blob {
+                if let (Some(v), true) = (v.as_str(), is_env_name(&name)) {
+                    put(name, v.to_owned());
+                }
+            }
+        }
+    }
+    env
+}
+
+/// `fooBar` as `FOO_BAR`.
+fn env_name_for(key: &str) -> String {
+    let mut out = String::with_capacity(key.len() + 4);
+    let mut prev: Option<char> = None;
+    for c in key.chars() {
+        if c.is_ascii_uppercase() && prev.is_some_and(|p| p.is_ascii_lowercase() || p.is_ascii_digit()) {
+            out.push('_');
+        }
+        out.push(c);
+        prev = Some(c);
+    }
+    out.to_uppercase()
+}
+
 // ---- keys ----
 
 /// Published key prefixes: naming one says which service a value belongs to.
@@ -493,6 +532,16 @@ pub fn list_keys(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_a_script_step_s_secrets() {
+        let fields = vec![
+            ("apiKey".to_owned(), "k".to_owned()),
+            ("secretEnv".to_owned(), r#"{"A":"1","B":2,"__proto__":"x"}"#.to_owned()),
+        ];
+        assert_eq!(script_env(&fields), [("API_KEY".to_owned(), "k".to_owned()), ("A".to_owned(), "1".to_owned())]);
+        assert_eq!(env_name_for("token2Value"), "TOKEN2_VALUE");
+    }
 
     #[test]
     fn masks_a_secret_as_a_card_is_quoted() {

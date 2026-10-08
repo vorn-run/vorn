@@ -83,6 +83,9 @@ pub struct AppLink {
     spawned: Notify,
     /// The work model, which takes the triggers the server delivers.
     work: OnceLock<Arc<crate::native::work::Work>>,
+    /// What vornd asked the server for and waits on, by the id it gave.
+    asked: Mutex<std::collections::HashMap<u64, tokio::sync::oneshot::Sender<Result<Value, String>>>>,
+    next_ask: std::sync::atomic::AtomicU64,
 }
 
 impl Default for AppLink {
@@ -100,6 +103,8 @@ impl Default for AppLink {
             spawns: Mutex::new(VecDeque::new()),
             spawned: Notify::new(),
             work: OnceLock::new(),
+            asked: Mutex::default(),
+            next_ask: std::sync::atomic::AtomicU64::new(1),
         }
     }
 }
@@ -113,6 +118,35 @@ impl AppLink {
         }
         let note = json!({ "jsonrpc": "2.0", "method": method, "params": params });
         self.notes.send(note).is_ok()
+    }
+
+    /// Asks the server `method` and waits up to `timeout` for its answer,
+    /// which comes back as `vornd:answer`.
+    pub async fn ask(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+        let id = self.next_ask.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.asked.lock().unwrap_or_else(|e| e.into_inner()).insert(id, tx);
+        let sent = self.tell(
+            "vornd:ask",
+            json!({ "id": id, "method": method, "params": params, "timeoutMs": timeout.as_millis() as u64 }),
+        );
+        let answer = if sent {
+            tokio::time::timeout(timeout + Duration::from_secs(1), rx).await.ok()
+        } else {
+            None
+        };
+        self.asked.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        match answer {
+            Some(Ok(answer)) => answer,
+            _ => Err(format!("{method} got no answer from the desktop")),
+        }
+    }
+
+    /// The server's answer to [`AppLink::ask`] `id`.
+    pub fn answered(&self, id: u64, answer: Result<Value, String>) {
+        if let Some(tx) = self.asked.lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
+            let _ = tx.send(answer);
+        }
     }
 
     /// Whether a server has subscribed and is still connected.
