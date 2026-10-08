@@ -115,7 +115,7 @@ jobs:
       # target/ holds the Ghostty checkout and Zig's caches as well as cargo's,
       # which is most of a cold build. v2 holds the ci profile's dependencies
       # too, and starts from the release-only cache before it.
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
