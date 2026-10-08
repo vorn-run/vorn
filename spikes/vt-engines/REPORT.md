@@ -19,8 +19,9 @@ target with no extra toolchain. It still falls short:
 Switching would mean rewriting vorn-screen's checkpoint code (1,661 lines),
 porting its emulator wrapper and the grid crate (about 4,800 more lines that
 call into Ghostty), and accepting visible behaviour changes. wezterm-term is
-5–15× slower than Ghostty, is not published, and does not build for iOS. vt100
-panics on valid input, does not reflow, and has no link or reply support.
+2.6–17× slower than raw Ghostty and slower than today's product path on every
+corpus but htop. It is not published, and it does not build for iOS. vt100
+panics on the seeded input, does not reflow, and has no link or reply support.
 
 ## Engines
 
