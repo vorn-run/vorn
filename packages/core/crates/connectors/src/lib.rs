@@ -5,7 +5,9 @@
 //! Extensions are packs too, so the extension host builds on the same packs,
 //! manifests and children.
 
+pub mod catalog;
 pub mod child;
+pub mod fetch;
 pub mod install;
 pub mod js;
 pub mod manifest;

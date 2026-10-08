@@ -16,6 +16,7 @@ use tracing::{info, warn};
 
 use crate::manifest::{self, Kind, Manifest};
 use crate::pack::{is_safe_id, InstalledPack, PackStore, ENTRY_FILE};
+use crate::fetch::Fetch;
 use crate::sdk::outdated_message;
 
 /// Largest archive Vorn will install, matched by the SDK's own pack gate.
@@ -118,10 +119,6 @@ fn usable_url(url: &str) -> Result<(), String> {
 /// How an install is going, for the clients watching it.
 pub type Progress<'a> = &'a (dyn Fn(Value) + Send + Sync);
 
-/// Reads the bytes behind a URL, saying how far it got as `(received, total)`.
-pub trait Download: Send + Sync {
-    fn get(&self, url: &str, progress: &dyn Fn(u64, u64)) -> Result<Vec<u8>, String>;
-}
 
 struct Staged {
     staging: PathBuf,
@@ -179,7 +176,7 @@ impl Installer {
 
     /// Verifies a pack and describes it without installing it
     /// (`ConnectorPackPreview`).
-    pub fn inspect(&self, source: &Source, download: &dyn Download) -> Value {
+    pub fn inspect(&self, source: &Source, download: &dyn Fetch) -> Value {
         self.sweep();
         let staging = match self.staging_dir() {
             Ok(dir) => dir,
@@ -230,7 +227,7 @@ impl Installer {
     }
 
     /// Installs a pack (`ConnectorPackResult`); the rename is the commit point.
-    pub fn install(&self, source: &Source, download: &dyn Download, progress: Progress) -> Value {
+    pub fn install(&self, source: &Source, download: &dyn Fetch, progress: Progress) -> Value {
         let held = match source {
             Source::Staged(token) => match self.staged().remove(token) {
                 Some(held) => Some(held),
@@ -465,7 +462,7 @@ fn unpacked_message(bytes: u64) -> String {
 /// The archive's bytes, from a file or a download.
 fn read_source(
     source: &Source,
-    download: &dyn Download,
+    download: &dyn Fetch,
     report: &dyn Fn(Value),
 ) -> Result<Vec<u8>, String> {
     match source {
@@ -481,7 +478,7 @@ fn read_source(
         }
         Source::Url { url, sha256 } => {
             let last = std::cell::Cell::new(-1i64);
-            let bytes = download.get(url, &|received, total| {
+            let bytes = download.get(url, DOWNLOAD_TIMEOUT, MAX_PACK_BYTES, &|received, total| {
                 if total == 0 {
                     return;
                 }
@@ -508,7 +505,7 @@ fn read_source(
 /// Fetches, unpacks and verifies into `staging`: the pack's root and manifest.
 fn stage(
     source: &Source,
-    download: &dyn Download,
+    download: &dyn Fetch,
     staging: &Path,
     report: &dyn Fn(Value),
 ) -> Result<(PathBuf, Manifest), String> {
@@ -734,16 +731,16 @@ mod tests {
     use super::*;
 
     struct NoNetwork;
-    impl Download for NoNetwork {
-        fn get(&self, _: &str, _: &dyn Fn(u64, u64)) -> Result<Vec<u8>, String> {
+    impl Fetch for NoNetwork {
+        fn get(&self, _: &str, _: Duration, _: u64, _: &dyn Fn(u64, u64)) -> Result<Vec<u8>, String> {
             Err("offline".into())
         }
     }
 
     /// Bytes served from memory, as a download would serve them.
     struct Served(Vec<u8>);
-    impl Download for Served {
-        fn get(&self, _: &str, progress: &dyn Fn(u64, u64)) -> Result<Vec<u8>, String> {
+    impl Fetch for Served {
+        fn get(&self, _: &str, _: Duration, _: u64, progress: &dyn Fn(u64, u64)) -> Result<Vec<u8>, String> {
             let total = self.0.len() as u64;
             progress(total / 2, total);
             progress(total, total);

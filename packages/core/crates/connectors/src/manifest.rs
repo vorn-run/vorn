@@ -628,7 +628,7 @@ fn action_outputs(value: Option<&Value>) -> Vec<ActionOutput> {
 }
 
 /// A malformed icon costs the pack its glyph, nothing more.
-fn icon(value: Option<&Value>) -> Option<Icon> {
+pub fn icon(value: Option<&Value>) -> Option<Icon> {
     let value = record(value)?;
     let paths = value
         .get("paths")
@@ -796,7 +796,7 @@ fn https_host(url: &str) -> Option<String> {
 }
 
 /// Headers a sign-in check may send: never a credential or a routing header.
-fn session_headers(value: Option<&Value>) -> Map<String, Value> {
+pub fn session_headers(value: Option<&Value>) -> Map<String, Value> {
     const FORBIDDEN: [&str; 7] = [
         "cookie",
         "cookie2",
@@ -824,7 +824,7 @@ fn session_headers(value: Option<&Value>) -> Map<String, Value> {
 }
 
 /// Permissions this build can enforce, once each, in the order asked.
-fn permissions(value: Option<&Value>) -> Option<Vec<Permission>> {
+pub fn permissions(value: Option<&Value>) -> Option<Vec<Permission>> {
     let raw = value?.as_array()?;
     let mut kept = Vec::new();
     for p in raw
