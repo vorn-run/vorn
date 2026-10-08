@@ -31,7 +31,8 @@ const VORND_GROUPS = new Set([
   'core',
   'env',
   'ssh',
-  'script'
+  'script',
+  'credential'
 ])
 
 /** How long vornd gets to answer one: publishing may wait on the pane opening. */

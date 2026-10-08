@@ -130,7 +130,6 @@ class PtyManager extends EventEmitter {
   private normalizedPaths = new Map<string, string>()
   private agentCommands: Record<AiAgentType, AgentCommandConfig> = { ...DEFAULT_AGENT_COMMANDS }
   private remoteHosts: RemoteHost[] = []
-  private tempKeyPaths = new Map<string, string>()
   private sessionOrder: string[] = []
   private headlessWorktreeCounter?: WorktreeSessionCounter
 
@@ -392,18 +391,6 @@ class PtyManager extends EventEmitter {
       }
     } catch {
       /* tmpdir read failed, not critical */
-    }
-  }
-
-  private deleteTempKey(sessionId: string): void {
-    const keyPath = this.tempKeyPaths.get(sessionId)
-    if (keyPath) {
-      try {
-        fs.unlinkSync(keyPath)
-      } catch {
-        /* already deleted */
-      }
-      this.tempKeyPaths.delete(sessionId)
     }
   }
 
@@ -672,16 +659,9 @@ class PtyManager extends EventEmitter {
 
     if (authMethod === 'key-file' && host.sshKeyPath) {
       sshParts.push('-i', host.sshKeyPath)
-    } else if (authMethod === 'key-stored' && !payload._decryptedKeyContent) {
-      log.warn(
-        `[pty] key-stored auth selected for host ${host.label} but no decrypted key available — falling back to agent`
-      )
-    } else if (authMethod === 'key-stored' && payload._decryptedKeyContent) {
-      // Write decrypted key to a temp file (mode 0600)
-      const tmpKeyPath = path.join(os.tmpdir(), `vorn-key-${crypto.randomUUID()}`)
-      fs.writeFileSync(tmpKeyPath, payload._decryptedKeyContent, { mode: 0o600 })
-      this.tempKeyPaths.set(id, tmpKeyPath)
-      sshParts.push('-i', tmpKeyPath)
+    } else if (authMethod === 'key-stored') {
+      // The key is in vornd's vault: only a session vornd starts can use it.
+      log.warn(`[pty] stored key for host ${host.label} is vornd's to use — falling back to agent`)
     } else if (authMethod === 'password') {
       sshParts.push('-o', 'PreferredAuthentications=password')
       sshParts.push('-o', 'PubkeyAuthentication=no')
@@ -706,27 +686,6 @@ class PtyManager extends EventEmitter {
       if (this.ptys.has(id)) ptyProcess.write(sshParts.join(' ') + '\r')
     }, 300)
 
-    // Password prompt auto-detection
-    if (authMethod === 'password' && payload._decryptedPassword) {
-      // Captured in a closure: the credentials are stripped from the payload a
-      // few lines below, long before a prompt ever arrives.
-      const password = payload._decryptedPassword
-      let passwordSent = false
-      const pwListener = ptyProcess.onData((data: string) => {
-        if (!passwordSent && /[Pp]ass(word|phrase)[^:]*:\s*$/.test(data)) {
-          passwordSent = true
-          setTimeout(() => {
-            if (this.ptys.has(id)) ptyProcess.write(password + '\r')
-          }, 50)
-        }
-      })
-      setTimeout(() => pwListener.dispose(), 15_000)
-    }
-
-    // Clear transient credentials from payload
-    delete payload._decryptedKeyContent
-    delete payload._decryptedPassword
-
     let connected = false
     let sshOutput = ''
 
@@ -736,7 +695,6 @@ class PtyManager extends EventEmitter {
         connected = true
         log.warn(`[pty] SSH marker not detected for ${id}, using fallback`)
         if (this.ptys.has(id)) ptyProcess.write(remoteCmd + '\r')
-        this.deleteTempKey(id)
       }
     }, 8000)
 
@@ -751,7 +709,6 @@ class PtyManager extends EventEmitter {
         // Small delay to let the login shell fully initialize
         setTimeout(() => {
           if (this.ptys.has(id)) ptyProcess.write(remoteCmd + '\r')
-          this.deleteTempKey(id)
         }, 200)
         return
       }
@@ -770,7 +727,6 @@ class PtyManager extends EventEmitter {
         if (sshOutput.includes(pattern)) {
           log.error(`[pty] SSH connection error for ${id}: ${pattern}`)
           clearTimeout(fallbackTimer)
-          this.deleteTempKey(id)
           // Don't set connected — let the PTY show the error to the user
           return
         }
@@ -925,7 +881,6 @@ class PtyManager extends EventEmitter {
 
   /** A session's program ended. */
   private processEnded(id: string, { exitCode, repeated }: VorndExit, exitAt: Stamp | null): void {
-    this.deleteTempKey(id)
     this.sessionOrder = this.sessionOrder.filter((sid) => sid !== id)
     this.orderChanged()
 
@@ -1079,9 +1034,6 @@ class PtyManager extends EventEmitter {
 
   /** Let go of every session for a server on its way out: vornd keeps them running. */
   killAll(): void {
-    for (const sessionId of this.tempKeyPaths.keys()) {
-      this.deleteTempKey(sessionId)
-    }
     for (const id of this.ptys.keys()) vorndSessions.release(id)
     this.ptys.clear()
     // Not vornd's records to let go of: it keeps them for the next server.

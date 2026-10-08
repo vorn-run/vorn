@@ -56,13 +56,7 @@ import {
 import { fileStamp, listDir, readFileContent, writeFileContent } from './file-utils'
 import { listShellExecutables } from './shell-integration'
 import { listInstalledShells } from './shell-integration/installed'
-import {
-  dbSaveSSHKey,
-  dbListSSHKeys,
-  dbGetSSHKey,
-  dbDeleteSSHKey,
-  insertSessionEvent
-} from './database'
+import { insertSessionEvent } from './database'
 import { getTailscaleStatus, clearBinaryCache } from './tailscale'
 import { reachableUrls } from './reachable-urls'
 import { listTokens, mintOwnerToken, revokeToken } from './token-manager'
@@ -705,24 +699,6 @@ export function registerAllMethods(): void {
     // so it happens when the setting changes, and at no other time.
     return getTailscaleStatus(serverPort)
   })
-
-  // Credential vault (storage — encryption handled by main process)
-  registerMethod('credential:storeKey', (params) => {
-    const id = crypto.randomUUID()
-    dbSaveSSHKey({
-      id,
-      label: params.label,
-      encryptedPrivateKey: params.encryptedPrivateKey,
-      publicKey: params.publicKey,
-      certificate: params.certificate,
-      keyType: params.keyType,
-      createdAt: new Date().toISOString()
-    })
-    return { id }
-  })
-  registerMethod('credential:listKeys', () => dbListSSHKeys())
-  registerMethod('credential:deleteKey', (id) => dbDeleteSSHKey(id))
-  registerMethod('credential:getEncryptedKey', (id) => dbGetSSHKey(id))
 
   // Device tokens. Until now these existed only behind `vorn-server token`, so
   // pairing a phone meant finding a terminal on the machine running the server.

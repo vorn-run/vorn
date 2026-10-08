@@ -39,6 +39,7 @@ pub mod agent;
 pub mod config;
 pub mod connectors;
 pub mod desktop;
+pub mod credential;
 pub mod env;
 pub mod extensions;
 pub mod file;
@@ -201,6 +202,7 @@ pub fn effect(method: &str) -> Option<Effect> {
         || widget::METHODS.contains(&method)
         || about::METHODS.contains(&method)
         || method == script::METHOD
+        || credential::METHODS.contains(&method)
     {
         return Some(Effect::Change);
     }
@@ -597,6 +599,9 @@ impl Native {
         }
         if method == script::METHOD {
             return script::execute(self, params).await;
+        }
+        if credential::METHODS.contains(&method.as_str()) {
+            return credential::answer(self, &method, params).await;
         }
         if extensions::METHODS.contains(&method.as_str()) {
             let Some(host) = self.extensions.get().cloned() else {

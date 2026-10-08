@@ -16,6 +16,7 @@ use vorn_agents::launch::shell as launch_shell;
 use vorn_agents::launch::Platform;
 use vorn_agents::Agent;
 use vorn_store::{Store, StoreOptions};
+use vorn_vault::Kind;
 
 use super::{Answer, Native};
 
@@ -114,13 +115,22 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
             }
         }
         "config:save" => {
-            let sent = params.clone();
+            let mut sent = params;
+            let passwords = super::credential::take_host_passwords(&mut sent);
+            let to_save = sent.clone();
             let saved = blocking(method, move || {
-                with_store(&n, |store| save(store, &sent, key.as_deref()))
+                for (id, password) in &passwords {
+                    n.secrets.put_item(Kind::HostPassword, id, password)?;
+                }
+                let saved = with_store(&n, |store| save(store, &to_save, key.as_deref()))?;
+                for id in super::credential::dropped_host_passwords(&saved.before, &saved.after) {
+                    n.secrets.remove_item(Kind::HostPassword, &id);
+                }
+                Ok(saved)
             });
             match saved.await {
                 Ok(Saved { before, after }) => {
-                    fire_triggers(native, &before, &params).await;
+                    fire_triggers(native, &before, &sent).await;
                     native.broadcast("config:changed", after);
                     Answer::Void
                 }

@@ -59,7 +59,7 @@ use vorn_agents::{paths, Agent};
 use vorn_git::repo::{extract_worktree_name, node_basename, Git};
 use vorn_sessiond_wire::{Io, Sig, SpawnSpec};
 
-use super::ssh::{Credentials, KeyFile, Remote, Secret};
+use super::ssh::{KeyFile, Remote, Secret};
 use super::{agent, headless, shell, Answer, Native};
 use crate::claims::{Claims, OnePerKey};
 use crate::registry::{AgentStatus, HeadlessStatus, Registry, Restored, TerminalSession};
@@ -86,7 +86,7 @@ const PROMPT_NAME_LEN: usize = 60;
 
 /// The params of `terminal:create` the server's handler reads; any other
 /// is a call for the server.
-const CREATE_KEYS: [&str; 20] = [
+const CREATE_KEYS: [&str; 18] = [
     "agentType",
     "model",
     "projectName",
@@ -105,8 +105,6 @@ const CREATE_KEYS: [&str; 20] = [
     "workflowId",
     "workflowName",
     "args",
-    "_decryptedKeyContent",
-    "_decryptedPassword",
 ];
 
 /// What starts and signals the sessions vornd creates: the engine, which
@@ -588,7 +586,6 @@ fn restore_request(
         initial_prompt: None,
         args: None,
         remote_host_id: previous.remote_host_id.clone(),
-        credentials: Credentials::default(),
         workflow_id: None,
         workflow_name: None,
     })
@@ -842,7 +839,6 @@ pub struct CreateRequest {
     pub args: Option<Vec<String>>,
     /// The remote host the session runs on, over ssh.
     pub remote_host_id: Option<String>,
-    pub credentials: Credentials,
     /// Read by a headless create only: the workflow that asked for it.
     pub workflow_id: Option<String>,
     pub workflow_name: Option<String>,
@@ -906,10 +902,6 @@ impl CreateRequest {
             initial_prompt: text("initialPrompt")?,
             args,
             remote_host_id,
-            credentials: Credentials {
-                key_content: text("_decryptedKeyContent")?.map(Secret::new),
-                password: text("_decryptedPassword")?.map(Secret::new),
-            },
             workflow_id: text("workflowId")?,
             workflow_name: text("workflowName")?,
         })
@@ -1272,10 +1264,22 @@ fn prepare_remote(
     let launch_line = launch_line(&launch, Some(config), &env, &machine)
         .map_err(|e| Answer::Error(e.to_string()))?;
     let method = host.auth_method.as_ref().map(|m| m.0.as_str());
-    let key = match (method, &req.credentials.key_content) {
-        (Some("key-stored"), Some(content)) => Some(KeyFile::new(content.clone())),
+    // From the vault, for this one login: never in a create's params.
+    let vaulted = |kind, id: &str| {
+        native
+            .secrets
+            .item(kind, id)
+            .map(|s| Secret::new(s.expose().to_owned()))
+    };
+    let stored_key = host
+        .credential_id
+        .as_deref()
+        .filter(|c| method == Some("key-stored") && !c.is_empty())
+        .and_then(|c| vaulted(vorn_vault::Kind::SshKey, c));
+    let key = match (method, stored_key) {
+        (Some("key-stored"), Some(content)) => Some(KeyFile::new(content)),
         (Some("key-stored"), None) => {
-            warn!(host = %host.label, "key-stored auth selected but no decrypted key available; falling back to agent");
+            warn!(host = %host.label, "key-stored auth selected but the vault has no key for it; falling back to agent");
             None
         }
         _ => None,
@@ -1293,11 +1297,9 @@ fn prepare_remote(
         line: login::ssh_line(&target, &marker, Platform::HOST),
         command: login::remote_command(&req.project_path, &launch_line),
         marker,
-        password: req
-            .credentials
-            .password
-            .clone()
-            .filter(|_| target.auth == login::Auth::Password),
+        password: (target.auth == login::Auth::Password)
+            .then(|| vaulted(vorn_vault::Kind::HostPassword, host_id))
+            .flatten(),
         key,
     };
     let shell = launch_shell::default_shell(settings.shell.as_deref(), Platform::HOST, var);
@@ -2765,7 +2767,7 @@ pub(super) mod tests {
         let (mut store, _) = vorn_store::Store::open(&db, options).unwrap();
         let host = json!({
             "id": "h", "label": "Box", "hostname": "box.example", "user": "me",
-            "port": 2222, "authMethod": auth, "sshOptions": "-A",
+            "port": 2222, "authMethod": auth, "sshOptions": "-A", "credentialId": "k",
         });
         store
             .call(
@@ -2774,6 +2776,13 @@ pub(super) mod tests {
             )
             .unwrap();
         fed.native.set_database(db);
+        let secrets = &fed.native.secrets;
+        secrets
+            .put_item(vorn_vault::Kind::SshKey, "k", &KEY.into())
+            .unwrap();
+        secrets
+            .put_item(vorn_vault::Kind::HostPassword, "h", &PASSWORD.into())
+            .unwrap();
         dir
     }
 
@@ -2784,7 +2793,6 @@ pub(super) mod tests {
         let mut params = json!({
             "agentType": "claude", "projectName": "far", "projectPath": "/srv/far",
             "remoteHostId": "h", "initialPrompt": "fix the build",
-            "_decryptedPassword": PASSWORD, "_decryptedKeyContent": KEY,
         });
         if let (Value::Object(p), Value::Object(extra)) = (&mut params, extra) {
             p.extend(extra);
@@ -2869,9 +2877,11 @@ pub(super) mod tests {
         assert_eq!(remote.password, None);
         assert!(remote.command.contains("--resume conv-far"));
 
-        // A stored key the desktop could not decrypt: ssh falls back to the agent.
-        let no_key = json!({ "_decryptedKeyContent": null });
-        call(&fed.native, "terminal:create", &remote_create(no_key));
+        // A stored key the vault does not hold: ssh falls back to the agent.
+        fed.native
+            .secrets
+            .remove_item(vorn_vault::Kind::SshKey, "k");
+        call(&fed.native, "terminal:create", &remote_create(json!({})));
         let (_, input) = fed.host.last_start();
         assert!(remote_of(&input)
             .line
@@ -2951,11 +2961,10 @@ pub(super) mod tests {
                 });
                 seen.push(format!("{:?}", fed.registry.restored()));
                 // The stored key without its content warns, naming the host only.
-                call(
-                    &fed.native,
-                    "terminal:create",
-                    &remote_create(json!({ "_decryptedKeyContent": null })),
-                );
+                fed.native
+                    .secrets
+                    .remove_item(vorn_vault::Kind::SshKey, "k");
+                call(&fed.native, "terminal:create", &remote_create(json!({})));
             }
         });
         let logs = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();

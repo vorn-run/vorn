@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{Map, Value};
 use tracing::{debug, warn};
-use vorn_vault::{Keychain, Secret};
+use vorn_vault::{Keychain, Kind, Secret};
 
 /// A connection's secret fields, by field key.
 pub type Fields = BTreeMap<String, Secret>;
@@ -71,7 +71,8 @@ impl Secrets {
     /// Opens the vault: the OS keychain unless `VORND_KEYCHAIN=0` or there
     /// is none, else a private file in `dir`. Only the first call counts.
     pub fn settle(&self, dir: &Path) {
-        let use_os = !std::env::var("VORND_KEYCHAIN").is_ok_and(|v| v == "0");
+        // A test never reaches this machine's keychain.
+        let use_os = !cfg!(test) && !std::env::var("VORND_KEYCHAIN").is_ok_and(|v| v == "0");
         self.settle_in(dir, use_os);
     }
 
@@ -133,6 +134,32 @@ impl Secrets {
         };
         // A push that came in meanwhile is newer than the item.
         self.lock().entry(id.to_owned()).or_insert(found).clone()
+    }
+
+    /// An SSH key's or a host's password, from the vault. Blocks.
+    pub fn item(&self, kind: Kind, id: &str) -> Option<Secret> {
+        match self.keychain.get()?.get(kind, id) {
+            Ok(found) => found,
+            Err(err) => {
+                warn!(%err, "could not read the vault");
+                None
+            }
+        }
+    }
+
+    /// Files an SSH key or a host's password. Blocks.
+    pub fn put_item(&self, kind: Kind, id: &str, secret: &Secret) -> Result<(), String> {
+        let keychain = self.keychain.get().ok_or("vornd has no vault yet")?;
+        keychain.set(kind, id, secret).map_err(|e| e.to_string())
+    }
+
+    /// Removes an SSH key or a host's password; none there is not an error. Blocks.
+    pub fn remove_item(&self, kind: Kind, id: &str) {
+        if let Some(keychain) = self.keychain.get() {
+            if let Err(err) = keychain.delete(kind, id) {
+                warn!(%err, "could not remove an item from the vault");
+            }
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Known>> {
