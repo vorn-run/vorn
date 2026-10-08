@@ -25,6 +25,7 @@ import WebSocket from 'ws'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { HeadlessSession, TerminalSession } from '../packages/shared/src/types'
 import type { SessionMirror as Mirror } from '../packages/server/src/vornd-sessions'
+import { hookEndpoint, postHook } from './helpers/hooks'
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import {
   TEST_CREDENTIAL,
@@ -143,7 +144,6 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     headlessManager: typeof import('../packages/server/src/headless-manager').headlessManager
     vorndSessions: typeof import('../packages/server/src/vornd-sessions').vorndSessions
     SessionMirror: typeof Mirror
-    hookServer: typeof import('../packages/server/src/hook-server').hookServer
   }
   /**
    * How many compared calls went through vornd, to check the counts against:
@@ -238,8 +238,15 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     return server.ptyManager.getActiveSessions().find((s) => s.id === id)
   }
 
-  function hook(session_id: string, cwd: string, hook_event_name = 'SessionStart'): void {
-    server.hookServer.emit('hook-event', { session_id, cwd, hook_event_name })
+  async function hook(
+    session_id: string,
+    cwd: string,
+    hook_event_name = 'SessionStart'
+  ): Promise<void> {
+    let endpoint = hookEndpoint()
+    await until('vornd to register its hook endpoint', () => !!(endpoint = hookEndpoint()))
+    const res = await postHook(endpoint!, { session_id, cwd, hook_event_name })
+    expect(res.status).toBe(200)
   }
 
   beforeAll(async () => {
@@ -283,8 +290,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
       ptyManager: (await import('../packages/server/src/pty-manager')).ptyManager,
       headlessManager: (await import('../packages/server/src/headless-manager')).headlessManager,
       vorndSessions: (await import('../packages/server/src/vornd-sessions')).vorndSessions,
-      SessionMirror: (await import('../packages/server/src/vornd-sessions')).SessionMirror,
-      hookServer: (await import('../packages/server/src/hook-server')).hookServer
+      SessionMirror: (await import('../packages/server/src/vornd-sessions')).SessionMirror
     }
     let state: { state?: string; port?: number } = {}
     await until('vornd', async () => {
@@ -364,7 +370,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     })
     await until('the agent to start', () => record(claude.id)!.pid > 0)
     made.terminal++
-    hook('claude-conversation', work.wt)
+    await hook('claude-conversation', work.wt)
     await until(
       'the hook to link it',
       () =>
@@ -388,7 +394,7 @@ describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agre
     made.terminal++
     const linked = record(copilot.id)?.hookSessionId
     if (linked) {
-      hook(linked, work.projC)
+      await hook(linked, work.projC)
       await until('copilot on hooks', () => record(copilot.id)?.statusSource === 'hooks')
     }
     await compare([work.wt, work.projC])

@@ -92,6 +92,7 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "env",
     "ssh",
     "credential",
+    "permission",
 ];
 
 /// Why vornd may still hand a call to the server.
@@ -117,7 +118,6 @@ pub const STILL_FORWARDED: &[(&str, StillForwarded)] = &[
     ("auth:authenticate", StillForwarded::NotYetNative),
     ("subscribe", StillForwarded::NotYetNative),
     ("session", StillForwarded::NotYetNative),
-    ("permission", StillForwarded::NotYetNative),
     ("server", StillForwarded::NotYetNative),
     ("terminal", StillForwarded::NotYetNative),
     ("git", StillForwarded::NotYetNative),
@@ -323,7 +323,7 @@ mod tests {
             assert_eq!(groups.mode(group), Mode::Native, "{group}");
         }
         assert_eq!(groups.mode("workflow"), Mode::Native);
-        assert_eq!(groups.mode("permission"), Mode::Forward);
+        assert_eq!(groups.mode("subscribe"), Mode::Forward);
         let shadowed = Groups::new(Some("git=shadow,file=forward")).unwrap();
         assert_eq!(shadowed.mode("git"), Mode::Shadow);
         assert_eq!(shadowed.mode("file"), Mode::Forward);
@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn refuses_native_for_a_group_nothing_implements() {
-        let err = Groups::parse("permission=native").unwrap_err();
+        let err = Groups::parse("subscribe=native").unwrap_err();
         assert!(err.contains("no native implementation"), "{err}");
         assert_eq!(
             Groups::parse("git=native").unwrap().mode("git"),

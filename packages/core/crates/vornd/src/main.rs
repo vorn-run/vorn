@@ -377,6 +377,7 @@ fn main() -> ExitCode {
         daemon.start_connectors().await;
         daemon.start_work(&link);
         daemon.start_widget();
+        daemon.start_hooks().await;
         daemon.start_extensions().await;
         proxy::log_upstream(&daemon).await;
         info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
@@ -421,7 +422,9 @@ fn main() -> ExitCode {
                 vornd::carry::save_now(engine.registry(), &file).await;
             }
         };
+        let stopping = Arc::clone(&daemon);
         proxy::serve(listener, daemon, stop).await;
+        stopping.stop_hooks();
         // The endpoints go first, so a kill during the flush leaves none.
         #[cfg(unix)]
         if let Some(endpoint) = &grid {
@@ -510,7 +513,7 @@ mod tests {
         let plain = parse(&["--upstream", "127.0.0.1:1"]).unwrap();
         assert_eq!(plain.groups.mode("git"), Mode::Native);
         assert_eq!(plain.groups.mode("workflow"), Mode::Native);
-        assert_eq!(plain.groups.mode("permission"), Mode::Forward);
+        assert_eq!(plain.groups.mode("subscribe"), Mode::Forward);
         let shadowed = parse(&[
             "--upstream",
             "127.0.0.1:1",
@@ -528,7 +531,7 @@ mod tests {
     #[test]
     fn passes_group_errors_on() {
         let err =
-            parse(&["--upstream", "127.0.0.1:1", "--groups", "permission=native"]).unwrap_err();
+            parse(&["--upstream", "127.0.0.1:1", "--groups", "subscribe=native"]).unwrap_err();
         assert!(err.starts_with("--groups"), "{err}");
     }
 }

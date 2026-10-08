@@ -30,10 +30,6 @@ import {
   releaseSpawningTranscript,
   releaseSpawningTranscriptsFor
 } from './transcript-claims'
-import { hookServer } from './hook-server'
-import { hookStatusMapper } from './hook-status-mapper'
-import { installHooks } from './hook-installer'
-import { installCopilotHooks } from './copilot-hook-installer'
 import {
   IPC,
   PermissionRequestInfo,
@@ -68,7 +64,6 @@ import {
   startPairing
 } from './pairing'
 import { disconnectToken } from './ws-handler'
-import { captureAgentSessionId } from './agent-session-capture'
 import { listAgentModels } from './agent-model-catalog'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
 import log from './logger'
@@ -754,19 +749,6 @@ export function registerAllMethods(): void {
     ptyManager.resizePty(id, cols, rows)
   )
 
-  // Permission resolution
-  registerMethod('permission:resolve', ({ requestId, allow, updatedPermissions, updatedInput }) => {
-    hookServer.resolvePermission(requestId, allow, { updatedPermissions, updatedInput })
-  })
-
-  // Resolve top pending permission (for global shortcuts)
-  registerMethod('permission:resolve-top', ({ allow }) => {
-    const pending = hookServer.getPendingPermissions()
-    if (pending.length > 0) {
-      hookServer.resolvePermission(pending[0].requestId, allow)
-    }
-  })
-
   // Widget status update request
 
   /**
@@ -827,52 +809,6 @@ export function registerAllMethods(): void {
         ...(session.branch && { branch: session.branch })
       })
 
-    if (payload.agentType === 'copilot' && hookServer.getPort() > 0) {
-      const installation = installCopilotHooks(session.id)
-      hookStatusMapper.forceLink(installation.sessionId, session.id)
-      ptyManager.linkHookSession(session.id, installation.sessionId)
-      // Don't set statusSource = 'hooks' eagerly — it disables the pattern-based
-      // fallback. If hooks actually fire, the session is promoted on the
-      // first event. This fixes status stuck on 'waiting' when hooks don't work
-      // (e.g. the agent CLI doesn't support hooks.json).
-    }
-
-    // A local lookup for agents that cannot pin an id; a known id or a remote session is never replaced.
-    if (
-      supportsExactSessionResume(payload.agentType) &&
-      !supportsSessionIdPinning(payload.agentType) &&
-      !session.agentSessionId &&
-      !session.remoteHostId
-    ) {
-      const captureSessionId = session.id
-      // Asked more than once: an agent slow to write its own history used to be
-      // read at five seconds, come up empty, and never be asked again -- leaving
-      // the session holding a conversation it could not name, which a later
-      // resume was then free to take.
-      const attempt = (remaining: number[]): void => {
-        const [delay, ...rest] = remaining
-        if (delay === undefined) return
-        setTimeout(() => {
-          const s = ptyManager.getActiveSessions().find((t) => t.id === captureSessionId)
-          if (!s) {
-            releaseClaimsFor(captureSessionId)
-            return
-          }
-          if (s.agentSessionId) return
-          const cwd = s.worktreePath || s.projectPath
-          const capturedId = captureAgentSessionId(s.agentType, cwd)
-          if (!capturedId) return attempt(rest)
-          ptyManager.setRecordFields(s.id, { agentSessionId: capturedId })
-          // Its own record names the conversation now, so the spawn claim is spent.
-          releaseClaimsFor(captureSessionId)
-          sessionManager.scheduleSave()
-          clientRegistry.broadcast(IPC.SESSION_UPDATED, s)
-          log.info(`[session] captured ${s.agentType} session ID: ${capturedId}`)
-        }, delay)
-      }
-      attempt([5000, 5000, 10_000, 20_000])
-    }
-
     sessionManager.scheduleSave()
   })
 
@@ -895,115 +831,4 @@ export function registerAllMethods(): void {
 
     sessionManager.scheduleSave()
   })
-
-  // Start hook server
-  hookServer
-    .start()
-    .then((port) => {
-      try {
-        // Only the instance that claimed the shared hook files writes the
-        // settings entry that points at them. A dev server beside the packaged
-        // app used to redirect its hooks here and, killed before it could tidy
-        // up, leave them pointing at a port with no server behind it.
-        if (hookServer.ownsRegistration()) {
-          installHooks(port, hookServer.getAuthToken())
-        } else {
-          log.info('[hooks] another Vorn owns the registration; leaving it alone')
-          hookServer.once('claimed', () => installHooks(port, hookServer.getAuthToken()))
-        }
-      } catch (err) {
-        log.error({ err }, '[hooks] failed to install hooks:')
-      }
-
-      hookServer.on('permission-cancelled', (requestId: string) => {
-        clientRegistry.broadcast(IPC.WIDGET_PERMISSION_CANCELLED, requestId)
-      })
-
-      hookServer.on('hook-event', (event) => {
-        log.info(
-          `[hooks] ${event.hook_event_name}: session=${event.session_id} cwd=${event.cwd}` +
-            (event.vorn_terminal_id ? ` terminal=${event.vorn_terminal_id}` : '')
-        )
-        const result = hookStatusMapper.mapEventToStatus(event)
-        if (result) {
-          ptyManager.hookStatus(result.terminalId, result.status, true)
-
-          // Persist after hookSessionId is set (SessionStart links the session)
-          if (event.hook_event_name === 'SessionStart') {
-            sessionManager.scheduleSave()
-            try {
-              const config = configManager.loadConfig()
-              const task = config.tasks?.find(
-                (t) =>
-                  t.assignedSessionId === result.terminalId &&
-                  t.status === 'in_progress' &&
-                  !t.agentSessionId
-              )
-              if (task) {
-                task.agentSessionId = event.session_id
-                task.updatedAt = new Date().toISOString()
-                configManager.saveConfig(config)
-                configManager.notifyChanged()
-                log.info(
-                  `[hooks] stored agentSessionId ${event.session_id} on task "${task.title}"`
-                )
-              }
-            } catch (err) {
-              log.error({ err }, '[hooks] failed to persist agentSessionId:')
-            }
-          }
-        }
-
-        const dismissEvents = ['PostToolUse', 'PostToolUseFailure', 'Stop', 'UserPromptSubmit']
-        if (dismissEvents.includes(event.hook_event_name)) {
-          hookServer.cancelSessionPermissions(event.session_id)
-        }
-      })
-
-      hookServer.on('permission-request', ({ requestId, event }) => {
-        const terminalId = hookStatusMapper.resolveTerminal(event)
-
-        log.info(
-          `[hooks] permission-request: session=${event.session_id} tool=${event.tool_name} → terminal=${terminalId ?? 'none (passthrough)'}`
-        )
-
-        if (!terminalId) {
-          hookServer.passthroughPermission(requestId)
-          return
-        }
-
-        ptyManager.hookStatus(terminalId, null, true)
-
-        const session = ptyManager.getActiveSessions().find((s) => s.id === terminalId)
-
-        const permReq: PermissionRequestInfo = {
-          requestId,
-          sessionId: event.session_id,
-          terminalId,
-          toolName: event.tool_name || 'unknown',
-          toolInput: event.tool_input || {},
-          description:
-            typeof event.tool_input?.file_path === 'string'
-              ? (event.tool_input.file_path as string)
-              : typeof event.tool_input?.command === 'string'
-                ? (event.tool_input.command as string)
-                : typeof event.tool_input?.description === 'string'
-                  ? (event.tool_input.description as string)
-                  : undefined,
-          agentType: session?.agentType,
-          projectName: session?.projectName,
-          permissionSuggestions: event.permission_suggestions,
-          questions:
-            event.tool_name === 'AskUserQuestion'
-              ? (event.tool_input?.questions as PermissionRequestInfo['questions'] | undefined)
-              : undefined
-        }
-
-        clientRegistry.broadcast(IPC.WIDGET_PERMISSION_REQUEST, permReq)
-        ptyManager.hookStatus(terminalId, 'waiting', false)
-      })
-    })
-    .catch((err) => {
-      log.error('Failed to start hook server:', err)
-    })
 }

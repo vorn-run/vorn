@@ -4035,6 +4035,7 @@ dependencies = [
  "vorn-extensions",
  "vorn-git",
  "vorn-grid-client",
+ "vorn-hooks",
  "vorn-mcp",
  "vorn-pipeline",
  "vorn-protocol",

@@ -32,8 +32,18 @@ const BROADCASTS: ReadonlySet<string> = new Set([
   IPC.EXTENSION_SELECTION_REQUEST,
   IPC.WIDGET_STATUS_UPDATE,
   IPC.SCRIPT_DATA,
-  IPC.SCRIPT_EXIT
+  IPC.SCRIPT_EXIT,
+  IPC.WIDGET_PERMISSION_REQUEST,
+  IPC.WIDGET_PERMISSION_CANCELLED
 ])
+
+/** What vornd last said of agents' hooks (`vornd:hooks`), which keeps this server from stopping as idle. */
+const hooks = { lastAt: Date.now(), pending: 0 }
+
+/** How long since a hook posted to vornd, and how many permission requests it holds open. */
+export function hookActivity(): { msSinceHookActivity: number; pendingPermissions: number } {
+  return { msSinceHookActivity: Date.now() - hooks.lastAt, pendingPermissions: hooks.pending }
+}
 
 export interface ReachDeps {
   /** vornd's channel: what it asks, when it is (re)subscribed, and telling it. */
@@ -64,6 +74,10 @@ export function linkReach(deps: ReachDeps): { hostChanged(): void } {
         } else {
           log.warn({ method: p.method }, '[vornd] refused to broadcast for vornd')
         }
+        return
+      case 'vornd:hooks':
+        hooks.lastAt = Date.now()
+        if (typeof p.pending === 'number') hooks.pending = p.pending
         return
       case 'vornd:tokenRevoked':
         if (typeof p.tokenId === 'string') deps.disconnectToken(p.tokenId)
