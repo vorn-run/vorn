@@ -2,7 +2,7 @@
 //! (`scanWorktreeInventory`).
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -398,8 +398,14 @@ fn days_since(iso: Option<&str>, now: DateTime<Utc>) -> Option<u64> {
 
 /// Directories under `.vorn-worktrees/<project>` git no longer tracks.
 /// `registered` is compared both as written and resolved, since git reports
-/// resolved paths and a parent such as `/tmp` may be a symlink.
+/// resolved paths and a parent such as `/tmp` may be a symlink. Compared as
+/// paths, not strings: on Windows git writes `C:/a/b` and vorn `C:\a\b`.
 pub fn list_orphan_dirs(project: &str, registered: &HashSet<String>) -> Vec<String> {
+    let known: HashSet<PathBuf> = registered
+        .iter()
+        .flat_map(|p| [Some(PathBuf::from(p)), std::fs::canonicalize(p).ok()])
+        .flatten()
+        .collect();
     let base = worktree_base_dir(project);
     let Ok(entries) = std::fs::read_dir(&base) else {
         return Vec::new();
@@ -416,13 +422,9 @@ pub fn list_orphan_dirs(project: &str, registered: &HashSet<String>) -> Vec<Stri
         .into_iter()
         .map(|n| Path::new(&base).join(n))
         .filter(|full| is_real_dir(full))
+        .filter(|full| !known.contains(full))
+        .filter(|full| std::fs::canonicalize(full).map_or(true, |real| !known.contains(&real)))
         .map(|full| full.to_string_lossy().into_owned())
-        .filter(|full| !registered.contains(full))
-        .filter(|full| {
-            std::fs::canonicalize(full)
-                .map(|real| !registered.contains(real.to_string_lossy().as_ref()))
-                .unwrap_or(true)
-        })
         .collect()
 }
 
@@ -531,10 +533,13 @@ mod tests {
         }
         std::fs::write(base.join("file"), "x").unwrap();
         let s = |p: &Path| p.to_string_lossy().into_owned();
-        let registered: HashSet<String> = [s(&base.join("kept"))].into();
+        let paths = |v: Vec<String>| v.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+        // As git writes it: forward slashes, which on Windows join a path too.
+        let git_style = |p: &Path| s(p).replace(std::path::MAIN_SEPARATOR, "/");
+        let registered: HashSet<String> = [git_style(&base.join("kept"))].into();
         assert_eq!(
-            list_orphan_dirs(&s(&project), &registered),
-            vec![s(&base.join("gone"))]
+            paths(list_orphan_dirs(&s(&project), &registered)),
+            vec![base.join("gone")]
         );
         // Registered under its resolved path only: still not an orphan.
         let real = std::fs::canonicalize(base.join("gone")).unwrap();

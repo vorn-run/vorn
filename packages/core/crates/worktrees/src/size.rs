@@ -280,7 +280,9 @@ mod tests {
         let set: HashSet<&str> = ["node_modules", "dist"].into();
         walk_dirs(tmp.path(), &set, &mut walked);
         walked.sort();
-        let at = |p: &str| tmp.path().join(p).to_string_lossy().into_owned();
+        let at = |p: &str| tmp.path().join(p);
+        let found: Vec<PathBuf> = found.into_iter().map(PathBuf::from).collect();
+        let walked: Vec<PathBuf> = walked.into_iter().map(PathBuf::from).collect();
         // `find` enters `.git`; the walk does not, as the server's does not.
         assert!(found.contains(&at("node_modules")) && found.contains(&at("pkg/dist")));
         assert!(!found.contains(&at("node_modules/a/node_modules")));
@@ -315,7 +317,12 @@ mod tests {
         let sizes = Sizes::default();
         let gone = std::env::temp_dir().join("vorn-worktrees-no-such-dir");
         let size = sizes.measure(&gone.to_string_lossy(), &names(), false, &[]);
-        assert_eq!(size, Size::default());
+        // Without `du`, the walk reads a missing tree as empty, as the server's does.
+        let walked = Size {
+            measured: true,
+            ..Size::default()
+        };
+        assert_eq!(size, if cfg!(unix) { Size::default() } else { walked });
     }
 
     #[test]
