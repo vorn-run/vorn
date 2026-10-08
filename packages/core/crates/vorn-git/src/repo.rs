@@ -248,7 +248,9 @@ impl Git {
             return None;
         }
         let args = ["worktree", "move", worktree, target.path.as_str()];
-        self.exec_default(&args, Path::new(worktree), 10_000).ok()?;
+        // Not from the worktree itself: Windows cannot move a process's working directory.
+        let cwd = common_git_dir(Path::new(worktree))?;
+        self.exec_default(&args, &cwd, 10_000).ok()?;
         Some(target)
     }
 
