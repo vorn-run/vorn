@@ -81,9 +81,9 @@ class FakeBridge extends EventEmitter {
   }
   async request(method: string): Promise<unknown> {
     this.requests.push(method)
-    // `server:vornd` is what the launcher uses to prove the credential was
+    // `subscribe:set` is what the launcher uses to prove the credential was
     // accepted; a server that refuses this app answers it with a rejection.
-    if (method === 'server:vornd' && published.rejectsCredential) {
+    if (method === 'subscribe:set' && published.rejectsCredential) {
       throw new Error('not authenticated')
     }
     return {}

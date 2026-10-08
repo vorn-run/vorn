@@ -730,10 +730,10 @@ async function tryAdopt(
   // exactly that and could never have been false.
   //
   // A timer would only guess. An authenticated round trip is the question
-  // itself: `server:vornd` is refused outright without a credential, so a reply
-  // to it *is* the proof, and the server answers it without its vornd.
+  // itself: an empty `subscribe:set` changes nothing and is refused outright
+  // without a credential, so a reply to it *is* the proof.
   const accepted = await candidate
-    .request('server:vornd', undefined, ADOPT_AUTH_TIMEOUT_MS)
+    .request('subscribe:set', {}, ADOPT_AUTH_TIMEOUT_MS)
     .then(() => true)
     .catch(() => false)
   if (!accepted) {

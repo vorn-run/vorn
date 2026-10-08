@@ -131,6 +131,8 @@ pub const STILL_FORWARDED: &[(&str, StillForwarded)] = &[
     ("worktree", StillForwarded::NotYetNative),
     ("headless", StillForwarded::NotYetNative),
     ("sessions", StillForwarded::NotYetNative),
+    ("shell", StillForwarded::NotYetNative),
+    ("agent", StillForwarded::NotYetNative),
 ];
 
 /// Whether neither vornd nor the server has `method`: no native group, and
@@ -405,7 +407,9 @@ mod tests {
     fn every_protocol_call_is_native_or_listed() {
         let protocol = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../shared/src/protocol.ts");
-        let text = std::fs::read_to_string(protocol).expect("the protocol");
+        let text = std::fs::read_to_string(protocol)
+            .expect("the protocol")
+            .replace("\r\n", "\n");
         let start = text
             .find("export interface RequestMethods")
             .expect("the request map");
