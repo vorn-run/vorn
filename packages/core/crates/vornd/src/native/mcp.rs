@@ -150,7 +150,7 @@ async fn start(
     base: Env,
 ) -> Result<RunningService<RoleClient, ClientConfig>, String> {
     let env = spawn_env(base, &launch.env);
-    let program = resolve_command(&launch.command, &env);
+    let program = resolve(&launch.command, &env);
     let mut command = tokio::process::Command::new(&program);
     command.args(&launch.args).env_clear().envs(env);
     #[cfg(windows)]
@@ -226,7 +226,7 @@ fn default_inherited() -> Vec<(String, String)> {
 /// The program to run. On Unix the child's PATH is searched as Node's spawn
 /// searches it; on Windows a bare name is looked up on that PATH with the
 /// extensions `PATHEXT` names, as cross-spawn does, so `npx` finds `npx.cmd`.
-fn resolve_command(command: &str, env: &[(String, String)]) -> std::path::PathBuf {
+pub fn resolve(command: &str, env: &[(String, String)]) -> std::path::PathBuf {
     #[cfg(windows)]
     {
         let var = |name: &str| {

@@ -75,9 +75,13 @@ pub fn prepare(
         let shown = if method.is_empty() { "(none)" } else { method.as_str() };
         return Err(failure(format!("Invalid HTTP method: {shown}")));
     }
-    let base = (!profile.base_url.is_empty())
-        .then(|| url::Url::parse(&profile.base_url).ok())
-        .flatten();
+    let base = match profile.base_url.as_str() {
+        "" => None,
+        given => match url::Url::parse(given) {
+            Ok(base) => Some(base),
+            Err(_) => return Err(failure(format!("Invalid URL: {url}"))),
+        },
+    };
     let parsed = match &base {
         Some(base) => base.join(url),
         None => url::Url::parse(url),

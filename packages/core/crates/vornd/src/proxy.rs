@@ -212,6 +212,32 @@ impl Daemon {
         work.start();
     }
 
+    /// Starts connections and connectors ([`crate::native::connectors`]) once
+    /// vornd has a database and its own address, which a browser connector's
+    /// child reaches its window through.
+    pub async fn start_connectors(&self, link: &Arc<AppLink>) {
+        let Some(native) = self.native.as_ref() else {
+            return;
+        };
+        let (Some(dir), Some(mut addr)) = (
+            native
+                .database()
+                .and_then(std::path::Path::parent)
+                .map(std::path::Path::to_path_buf),
+            self.listen.get().copied(),
+        ) else {
+            return;
+        };
+        if addr.ip().is_unspecified() {
+            addr.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
+        }
+        let bridge = Arc::new(crate::bridge::AppBridge(Arc::clone(link)));
+        let connectors =
+            crate::native::connectors::Connectors::new(native, &dir, format!("http://{addr}"), bridge);
+        native.set_connectors(Arc::clone(&connectors));
+        tokio::spawn(async move { connectors.reconcile().await });
+    }
+
     /// Starts the extension host ([`crate::native::extensions`]) once vornd
     /// has a database, its own address and a credential for its endpoint,
     /// which it reads the extensions' terminals through.
@@ -420,6 +446,11 @@ async fn handle(
             ),
         });
     }
+    if let Some(id) = window_route(req.method(), req.uri().path()) {
+        if let Some(connectors) = daemon.native.as_ref().and_then(|n| n.connectors()).cloned() {
+            return Ok(window_fetch(&connectors, &id, req, peer).await);
+        }
+    }
     if let Some(route) =
         crate::native::extensions::routes::bridge_route(req.method(), req.uri().path())
     {
@@ -459,6 +490,53 @@ async fn handle(
         }
     }
     Ok(forward_http(&daemon, req).await)
+}
+
+/// The connection a browser connector's child calls its window for:
+/// `POST /connections/<id>/browser/fetch`.
+fn window_route(method: &Method, path: &str) -> Option<String> {
+    let rest = path.strip_prefix("/connections/")?.strip_suffix("/browser/fetch")?;
+    (*method == Method::POST && !rest.is_empty() && !rest.contains('/')).then(|| rest.to_owned())
+}
+
+/// A browser connector's child calling through its window, from this machine only.
+async fn window_fetch(
+    connectors: &Arc<crate::native::connectors::Connectors>,
+    id: &str,
+    req: Request<Incoming>,
+    peer: SocketAddr,
+) -> Response<Body> {
+    let reply = |status: u16, body: serde_json::Value| {
+        let mut res = Response::new(full(body.to_string()));
+        *res.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        res.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        );
+        res
+    };
+    if !peer.ip().is_loopback() {
+        return reply(403, json!({ "error": "Local machine only" }));
+    }
+    let bearer = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(vorn_reach::token::bearer_from)
+        .map(str::to_owned);
+    let call = req
+        .headers()
+        .get("x-vorn-session-call")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    let limited = http_body_util::Limited::new(req.into_body(), 1024 * 1024 + 1);
+    let Ok(body) = limited.collect().await.map(|b| b.to_bytes()) else {
+        return reply(413, json!({ "error": "That request is too large" }));
+    };
+    let (status, answer) = connectors
+        .window_fetch(id, bearer.as_deref(), call.as_deref(), &body)
+        .await;
+    reply(status, answer)
 }
 
 /// `/mcp` answered here ([`crate::mcp`]), for a caller it lets in.

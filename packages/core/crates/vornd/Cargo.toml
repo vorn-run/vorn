@@ -42,6 +42,8 @@ vorn-git = { path = "../vorn-git" }
 vorn-extensions = { path = "../extensions" }
 vorn-store = { path = "../store" }
 vorn-vault = { path = "../vault" }
+vorn-connectors = { path = "../connectors" }
+url = "2"
 vorn-mcp = { path = "../mcp" }
 vorn-protocol = { path = "../protocol" }
 vorn-reach = { path = "../reach" }

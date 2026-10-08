@@ -13,13 +13,13 @@ import { vorndSessions, type VorndSessions } from './vornd-sessions'
 /** What stands for the script's file in a compared plan: each side writes its own. */
 export const SCRIPT_FILE = '<script>'
 
-/** A script as vornd is asked to run it: the cwd resolved, the secrets read. */
+/** A script as vornd is asked to run it: the cwd resolved, and the connection vornd reads its secrets from. */
 export interface VorndScript {
   scriptType: string
   scriptContent: string
   cwd: string
   args: string[]
-  secretEnv: Record<string, string>
+  secretsFrom?: string
 }
 
 /** What a script started as, compared in shadow mode. */
@@ -79,7 +79,7 @@ export async function runInVornd(
 
 /** Send vornd what this server started for a script, to compare with what it would have. */
 export function comparePlan(
-  script: Omit<VorndScript, 'scriptContent' | 'secretEnv'>,
+  script: Omit<VorndScript, 'scriptContent' | 'secretsFrom'>,
   secretKeys: string[],
   plan: ScriptPlan,
   sessions: VorndSessions = vorndSessions

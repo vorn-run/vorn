@@ -125,17 +125,17 @@ pub fn seeded_workflow_prefix(connection_id: &str) -> String {
 }
 
 /// `cronEveryMinutes`.
-fn cron_every(minutes: i64) -> String {
-    if minutes <= 1 {
+pub fn cron_every_minutes(minutes: f64) -> String {
+    if minutes <= 1.0 {
         return "* * * * *".to_owned();
     }
-    if minutes < 60 {
-        return format!("*/{minutes} * * * *");
+    if minutes < 60.0 {
+        return format!("*/{} * * * *", crate::js::to_string(&crate::js::json_number(minutes)));
     }
-    let hours = (minutes as f64 / 60.0).round() as i64;
-    if hours <= 1 {
+    let hours = (minutes / 60.0 + 0.5).floor();
+    if hours <= 1.0 {
         "0 * * * *".to_owned()
-    } else if hours >= 24 {
+    } else if hours >= 24.0 {
         "0 0 * * *".to_owned()
     } else {
         format!("0 */{hours} * * *")
@@ -149,7 +149,7 @@ pub fn seeded_workflow(conn: &Value, manifest: &Value, event: &Value) -> Value {
     let minutes = event
         .get("defaultCronFromMinutes")
         .and_then(Value::as_f64)
-        .map_or(1, |m| (m.round() as i64).max(1));
+        .map_or(1.0, |m| (m + 0.5).floor().max(1.0));
     let initial = manifest
         .pointer("/statusMapping/0/suggestedLocal")
         .and_then(Value::as_str)
@@ -182,7 +182,7 @@ pub fn seeded_workflow(conn: &Value, manifest: &Value, event: &Value) -> Value {
                     "triggerType": "connectorPoll",
                     "connectionId": id,
                     "event": event_name,
-                    "cron": cron_every(minutes),
+                    "cron": cron_every_minutes(minutes),
                 },
             },
             {
@@ -414,6 +414,70 @@ fn env_name_for(key: &str) -> String {
     out.to_uppercase()
 }
 
+/// An action as the step editor draws it (`sdkActionDef`).
+pub fn sdk_action_def(action: &Value) -> Value {
+    let mut out = Map::new();
+    out.insert("type".into(), action.get("type").cloned().unwrap_or(Value::Null));
+    out.insert("label".into(), action.get("label").cloned().unwrap_or(Value::Null));
+    if let Some(d) = action.get("description").filter(|d| crate::js::truthy(d)) {
+        out.insert("description".into(), d.clone());
+    }
+    let fields: Vec<Value> = action
+        .get("inputs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(action_input_field)
+        .collect();
+    out.insert("configFields".into(), Value::Array(fields));
+    let outputs: Vec<&Value> = action.get("outputs").and_then(Value::as_array).into_iter().flatten().collect();
+    if !outputs.is_empty() {
+        let properties: Map<String, Value> = outputs
+            .iter()
+            .map(|o| {
+                let mut p = Map::new();
+                if let Some(t) = o.get("type").filter(|t| crate::js::truthy(t)) {
+                    p.insert("type".into(), t.clone());
+                }
+                if let Some(d) = o.get("description").filter(|d| crate::js::truthy(d)) {
+                    p.insert("description".into(), d.clone());
+                }
+                (text(o, "key").to_owned(), Value::Object(p))
+            })
+            .collect();
+        out.insert("outputSchema".into(), json!({ "type": "object", "properties": properties }));
+    }
+    Value::Object(out)
+}
+
+/// An action argument as a step form draws it (`actionInputField`).
+fn action_input_field(input: &Value) -> Value {
+    let mut out = Map::new();
+    out.insert("key".into(), input.get("key").cloned().unwrap_or(Value::Null));
+    out.insert("label".into(), input.get("label").cloned().unwrap_or(Value::Null));
+    out.insert("required".into(), input.get("required").cloned().unwrap_or(json!(false)));
+    out.insert("supportsTemplates".into(), json!(true));
+    if let Some(d) = input.get("description").filter(|d| crate::js::truthy(d)) {
+        out.insert("description".into(), d.clone());
+    }
+    let options = input.get("options").and_then(Value::as_array).filter(|o| !o.is_empty());
+    let kind = text(input, "type");
+    if let (true, Some(options)) = (kind == "select", options) {
+        out.insert("type".into(), json!("select"));
+        let choices: Vec<Value> = options
+            .iter()
+            .map(|o| json!({ "value": o.get("value"), "label": o.get("label").filter(|l| !l.is_null()).or_else(|| o.get("value")) }))
+            .collect();
+        out.insert("options".into(), Value::Array(choices));
+    } else if kind == "json" {
+        out.insert("type".into(), json!("textarea"));
+        out.insert("placeholder".into(), json!("{} or []"));
+    } else {
+        out.insert("type".into(), json!("text"));
+    }
+    Value::Object(out)
+}
+
 // ---- keys ----
 
 /// Published key prefixes: naming one says which service a value belongs to.
@@ -568,10 +632,10 @@ mod tests {
         assert_eq!(wf["nodes"][0]["config"]["cron"], "0 */2 * * *");
         assert_eq!(wf["nodes"][0]["label"], "Poll Poll");
         assert_eq!(wf["nodes"][1]["config"]["initialStatus"], "in_progress");
-        assert_eq!(cron_every(5), "*/5 * * * *");
-        assert_eq!(cron_every(1), "* * * * *");
-        assert_eq!(cron_every(80), "0 * * * *");
-        assert_eq!(cron_every(1440), "0 0 * * *");
+        assert_eq!(cron_every_minutes(5.0), "*/5 * * * *");
+        assert_eq!(cron_every_minutes(1.0), "* * * * *");
+        assert_eq!(cron_every_minutes(80.0), "0 * * * *");
+        assert_eq!(cron_every_minutes(1440.0), "0 0 * * *");
     }
 
     #[test]

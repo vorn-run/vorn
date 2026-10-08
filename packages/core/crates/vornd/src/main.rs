@@ -374,6 +374,7 @@ fn main() -> ExitCode {
             daemon.set_listen_addr(addr);
         }
         daemon.set_app_link(Arc::clone(&link));
+        daemon.start_connectors(&link).await;
         daemon.start_work(&link);
         daemon.start_extensions().await;
         proxy::log_upstream(&daemon).await;

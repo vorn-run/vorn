@@ -23,14 +23,7 @@ import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
 import { browserBridge } from './browser-bridge'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
-import {
-  reconcileImplicitConnections,
-  registerAllMethods,
-  setServerPort,
-  sessionsToPersist
-} from './register-methods'
-import { registerSessionBridge, setSessionBridgeOrigin } from './connectors/session-bridge'
-import { sessionGrantFor } from './connectors/mcp-clients'
+import { registerAllMethods, setServerPort, sessionsToPersist } from './register-methods'
 import { configManager } from './config-manager'
 import { clearAgentDetectionCache } from './agent-detector'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
@@ -154,7 +147,11 @@ const vorndReach = linkReach({
       ? configManager.notifyChanged()
       : clientRegistry.broadcast(method, params, scope),
   disconnectToken,
-  host: getCurrentHost
+  host: getCurrentHost,
+  bridge: {
+    request: (method, params, timeoutMs) =>
+      browserBridge.request(method as never, params as never, timeoutMs)
+  }
 })
 linkWorktrees({ channel: vorndSessions, forgetSize: invalidateSizeCache })
 
@@ -208,15 +205,6 @@ export async function startServer(
     pid: process.pid,
     buildChannel: resolveBuildChannel()
   })
-
-  // Built-in connectors are transports; everything that speaks to a named service is a pack.
-  const { connectorRegistry } = await import('./connectors')
-  const { httpConnector } = await import('./connectors/http')
-  const { mcpConnector } = await import('./connectors/mcp')
-  const { sdkConnector } = await import('./connectors/sdk')
-  connectorRegistry.register(httpConnector)
-  connectorRegistry.register(mcpConnector)
-  connectorRegistry.register(sdkConnector)
 
   // Load initial config and wire up managers
   const config = configManager.loadConfig()
@@ -312,8 +300,6 @@ export async function startServer(
   app.get('/health', async () => ({ status: 'ok' }))
 
   registerWorkRoutes(app, () => vorndKeeper.port)
-
-  registerSessionBridge(app, sessionGrantFor)
 
   /**
    * Pairing, the phone's half.
@@ -460,9 +446,6 @@ export async function startServer(
   // The work model's calls are vornd's; a client connected here reaches it through vornd.
   setMethodFallback(relayVorndCall(vorndSessions))
 
-  // Connects the rung-none packs installed before installing meant connecting.
-  reconcileImplicitConnections()
-
   // Server shutdown method (callable from clients)
   registerMethod('server:shutdown', async () => {
     log.info('[server] shutdown requested via RPC')
@@ -540,7 +523,6 @@ export async function startServer(
 
   // Store port for RPC methods (e.g. tailscale:status needs it)
   setServerPort(actualPort)
-  setSessionBridgeOrigin(`http://127.0.0.1:${actualPort}`)
 
   // Enable hot-rebind when network access / Tailscale state changes
   initRebind(app.server, host, actualPort)
@@ -695,8 +677,7 @@ export async function startServer(
   // is a live process still holding the port with nothing able to reach it.
   //
   // So a throw takes the hard exit at the call site, and a hang -- which is
-  // reachable, `stopAllMcpClients()` awaits child processes -- takes the
-  // deadline armed here. Re-entry is refused because SIGTERM can arrive while
+  // reachable -- takes the deadline armed here. Re-entry is refused because SIGTERM can arrive while
   // one of those is already in flight. Unref'd: a backstop, not a reason to
   // stay alive.
   let shuttingDown = false
@@ -722,8 +703,6 @@ export async function startServer(
     vorndSessions.close()
     // Its sessions carry on in the session holder, for the next server.
     const vorndStopped = vorndKeeper.stop()
-    const { stopAllMcpClients } = await import('./connectors')
-    await stopAllMcpClients()
     configManager.close()
     removePortFile(dataDir, ownsPublished)
     // Never removes the canonical entry: this listener bound a scratch name that

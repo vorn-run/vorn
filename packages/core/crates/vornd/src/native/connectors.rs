@@ -496,7 +496,7 @@ impl Connectors {
             MCP => Value::Array(discovered_tools(&conn).iter().filter_map(mcp::tool_action).collect()),
             SDK => {
                 let manifest = self.sdk_manifest(&conn).await?;
-                Value::Array(manifest.get("actions").and_then(Value::as_array).into_iter().flatten().map(sdk_action_def).collect())
+                Value::Array(manifest.get("actions").and_then(Value::as_array).into_iter().flatten().map(conns::sdk_action_def).collect())
             }
             other => conns::builtin(other)
                 .and_then(|c| c.pointer("/manifest/actions").cloned())
@@ -1664,69 +1664,6 @@ struct Spawn {
     browser: Option<Value>,
 }
 
-/// An action as the step editor draws it (`sdkActionDef`).
-fn sdk_action_def(action: &Value) -> Value {
-    let mut out = Map::new();
-    out.insert("type".into(), action.get("type").cloned().unwrap_or(Value::Null));
-    out.insert("label".into(), action.get("label").cloned().unwrap_or(Value::Null));
-    if let Some(d) = action.get("description").filter(|d| vorn_connectors::js::truthy(d)) {
-        out.insert("description".into(), d.clone());
-    }
-    let fields: Vec<Value> = action
-        .get("inputs")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .map(action_input_field)
-        .collect();
-    out.insert("configFields".into(), Value::Array(fields));
-    let outputs: Vec<&Value> = action.get("outputs").and_then(Value::as_array).into_iter().flatten().collect();
-    if !outputs.is_empty() {
-        let properties: Map<String, Value> = outputs
-            .iter()
-            .map(|o| {
-                let mut p = Map::new();
-                if let Some(t) = o.get("type").filter(|t| vorn_connectors::js::truthy(t)) {
-                    p.insert("type".into(), t.clone());
-                }
-                if let Some(d) = o.get("description").filter(|d| vorn_connectors::js::truthy(d)) {
-                    p.insert("description".into(), d.clone());
-                }
-                (text(o, "key").to_owned(), Value::Object(p))
-            })
-            .collect();
-        out.insert("outputSchema".into(), json!({ "type": "object", "properties": properties }));
-    }
-    Value::Object(out)
-}
-
-/// An action argument as a step form draws it (`actionInputField`).
-fn action_input_field(input: &Value) -> Value {
-    let mut out = Map::new();
-    out.insert("key".into(), input.get("key").cloned().unwrap_or(Value::Null));
-    out.insert("label".into(), input.get("label").cloned().unwrap_or(Value::Null));
-    out.insert("required".into(), input.get("required").cloned().unwrap_or(json!(false)));
-    out.insert("supportsTemplates".into(), json!(true));
-    if let Some(d) = input.get("description").filter(|d| vorn_connectors::js::truthy(d)) {
-        out.insert("description".into(), d.clone());
-    }
-    let options = input.get("options").and_then(Value::as_array).filter(|o| !o.is_empty());
-    let kind = text(input, "type");
-    if let (true, Some(options)) = (kind == "select", options) {
-        out.insert("type".into(), json!("select"));
-        let choices: Vec<Value> = options
-            .iter()
-            .map(|o| json!({ "value": o.get("value"), "label": o.get("label").filter(|l| !l.is_null()).or_else(|| o.get("value")) }))
-            .collect();
-        out.insert("options".into(), Value::Array(choices));
-    } else if matches!(kind, "json" | "object" | "array") {
-        out.insert("type".into(), json!("textarea"));
-    } else {
-        out.insert("type".into(), json!("text"));
-    }
-    Value::Object(out)
-}
-
 /// A window request the child sent: `{url, method, headers?, body?, binaryBody?}`.
 fn read_window_request(body: &[u8]) -> Option<Value> {
     let value: Value = serde_json::from_slice(body).ok()?;
@@ -1762,7 +1699,7 @@ mod tests {
             { "key": "kind", "label": "Kind", "type": "select", "required": true, "options": [{ "value": "a" }] },
             { "key": "data", "label": "Data", "type": "json", "required": false },
         ], "outputs": [{ "key": "id", "type": "string" }] });
-        let def = sdk_action_def(&action);
+        let def = conns::sdk_action_def(&action);
         assert_eq!(def["configFields"][0]["type"], "select");
         assert_eq!(def["configFields"][0]["options"][0], json!({ "value": "a", "label": "a" }));
         assert_eq!(def["configFields"][1]["type"], "textarea");

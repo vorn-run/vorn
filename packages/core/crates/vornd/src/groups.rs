@@ -79,6 +79,8 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "artifact",
     "extension",
     "config",
+    "credentials",
+    "http",
 ];
 
 /// Why vornd may still hand a call to the server.
@@ -109,16 +111,12 @@ pub const STILL_FORWARDED: &[(&str, StillForwarded)] = &[
     ("device", StillForwarded::ExtensionHost),
     ("auth:authenticate", StillForwarded::NotYetNative),
     ("subscribe", StillForwarded::NotYetNative),
-    ("credentials", StillForwarded::NotYetNative),
     ("credential", StillForwarded::NotYetNative),
-    ("connection", StillForwarded::NotYetNative),
-    ("connector", StillForwarded::NotYetNative),
     ("task", StillForwarded::NotYetNative),
     ("project", StillForwarded::NotYetNative),
     ("sessionEvent", StillForwarded::NotYetNative),
     ("session", StillForwarded::NotYetNative),
     ("env", StillForwarded::NotYetNative),
-    ("http", StillForwarded::NotYetNative),
     ("core", StillForwarded::NotYetNative),
     ("ssh", StillForwarded::NotYetNative),
     ("permission", StillForwarded::NotYetNative),
