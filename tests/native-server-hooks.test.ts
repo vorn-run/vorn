@@ -177,6 +177,14 @@ describe.runIf(runnable)('agents’ hooks in vornd', () => {
       const task = await client.result<TaskConfig>('task:get', { id: created.task.id })
       return task.agentSessionId === 'conv-b'
     })
+    // The next conversation the terminal starts leaves the task's alone.
+    await postHook(endpoint, event('SessionStart', 'conv-c'), { terminal: claude.id })
+    await until(
+      'the terminal linked again',
+      async () => (await record(claude.id))?.hookSessionId === 'conv-c'
+    )
+    const task = await client.result<TaskConfig>('task:get', { id: created.task.id })
+    expect(task.agentSessionId).toBe('conv-b')
   })
 
   it('writes Copilot’s hooks file, whose script posts only inside Vorn', async () => {
