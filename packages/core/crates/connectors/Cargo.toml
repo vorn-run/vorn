@@ -20,6 +20,7 @@ sha2 = "0.10"
 tar = { version = "0.4", default-features = false }
 # Blocking HTTP over rustls with ring, so nothing needs a C toolchain to build.
 vorn-store = { path = "../store" }
+url = "2"
 ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
 regress = "0.12"
 serde = { version = "1", features = ["derive"] }

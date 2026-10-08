@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod child;
 pub mod connections;
 pub mod fetch;
+pub mod http;
 pub mod install;
 pub mod js;
 pub mod manifest;
