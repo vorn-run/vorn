@@ -6,14 +6,14 @@
 #
 #   scripts/bench-gcp.sh [TIER...]          (default: 100 1000 10000)
 #
-# Env: PROJECT (vorn-bench-1008k), ZONE (us-central1-a),
+# Env: PROJECT (required, the GCP project to bill), ZONE (us-central1-c),
 #      MACHINE (n2-standard-16), MAX_RUN (3h), PHASES (holder,stack).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 root=$(pwd)
-project=${PROJECT:-vorn-bench-1008k}
-zone=${ZONE:-us-central1-a}
+project=${PROJECT:?set PROJECT to the GCP project the bench VM runs in}
+zone=${ZONE:-us-central1-c}
 machine=${MACHINE:-n2-standard-16}
 max_run=${MAX_RUN:-3h}
 phases=${PHASES:-holder,stack}
