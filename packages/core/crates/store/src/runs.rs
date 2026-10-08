@@ -252,7 +252,7 @@ impl Store {
     /// run ids, whose gate views the caller removes.
     pub fn save_workflow_run(&mut self, execution: &WorkflowExecution) -> Result<Vec<String>> {
         let run_id = workflow_run_id(execution);
-        let tx = self.conn_mut().transaction()?;
+        let tx = self.write_transaction()?;
         tx.execute(
             "INSERT OR REPLACE INTO workflow_runs (
          id, workflow_id, started_at, completed_at, status, trigger_task_id,

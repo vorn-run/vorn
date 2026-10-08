@@ -428,7 +428,7 @@ fn set_version(conn: &Connection, v: i64) -> Result<()> {
 
 /// Runs `body` in one transaction and records version `v` with it.
 fn step(conn: &mut Connection, v: i64, body: impl FnOnce(&Connection) -> Result<()>) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = crate::write_transaction(conn)?;
     body(&tx)?;
     set_version(&tx, v)?;
     tx.commit()?;

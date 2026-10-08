@@ -204,7 +204,7 @@ impl Store {
 
     /// Removes the project and its tasks together.
     pub fn db_delete_project(&mut self, name: &str) -> Result<()> {
-        let tx = self.conn_mut().transaction()?;
+        let tx = self.write_transaction()?;
         tx.execute("DELETE FROM tasks WHERE project_name = ?", [name])?;
         tx.execute("DELETE FROM projects WHERE name = ?", [name])?;
         tx.commit()?;
@@ -388,7 +388,7 @@ impl Store {
     /// Moves the workspace's projects and workflows to `personal`; its
     /// session groups die with it, and their sessions come back ungrouped.
     pub fn db_delete_workspace(&mut self, id: &str) -> Result<()> {
-        let tx = self.conn_mut().transaction()?;
+        let tx = self.write_transaction()?;
         tx.execute(
             "UPDATE sessions SET group_id = NULL WHERE group_id IN (SELECT id FROM session_groups WHERE workspace_id = ?)",
             [id],
@@ -458,7 +458,7 @@ impl Store {
 
     /// Ungroups the group's sessions first: deleting a group never kills one.
     pub fn db_delete_session_group(&mut self, id: &str) -> Result<()> {
-        let tx = self.conn_mut().transaction()?;
+        let tx = self.write_transaction()?;
         tx.execute(
             "UPDATE sessions SET group_id = NULL WHERE group_id = ?",
             [id],

@@ -215,7 +215,7 @@ impl Store {
     pub fn save_config(&mut self, config: &Value, deleted_defaults: &[String]) -> Result<()> {
         let config = SavedConfig::deserialize(config)?;
         let default_workspace = self.options()?.default_workspace.clone();
-        let tx = self.conn_mut().transaction()?;
+        let tx = self.write_transaction()?;
 
         let base = config.revision.unwrap_or(NO_BASE_REVISION);
         let revision = read_config_revision(&tx)? + 1.0;
@@ -904,5 +904,31 @@ mod tests {
             )
             .unwrap();
         assert_eq!(read_config_revision(store.conn()).unwrap(), 0.0);
+    }
+
+    #[test]
+    fn a_save_waits_for_another_process_writing_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vorn.db");
+        let (mut store, _) = Store::open(&path, test_support::options()).unwrap();
+        let beside = Store::open_beside(&path).unwrap().unwrap();
+        beside.conn().execute_batch("BEGIN IMMEDIATE").unwrap();
+        beside
+            .conn()
+            .execute(
+                "INSERT OR REPLACE INTO defaults (key, value) VALUES ('theme', '\"dark\"')",
+                [],
+            )
+            .unwrap();
+        let commit = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            beside.conn().execute_batch("COMMIT").unwrap();
+        });
+
+        let saved = store.save_config(&snapshot(None), &[]);
+        commit.join().unwrap();
+
+        saved.unwrap();
+        assert_eq!(store.load_config().unwrap()["revision"], json!(1));
     }
 }

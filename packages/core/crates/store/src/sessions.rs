@@ -107,7 +107,7 @@ impl Store {
     /// age they had.
     pub fn save_sessions(&mut self, sessions: &[TerminalSession]) -> Result<()> {
         let saved_at = now_millis() as f64;
-        let tx = self.conn_mut().transaction()?;
+        let tx = self.write_transaction()?;
         tx.execute("DELETE FROM sessions", [])?;
         {
             let mut insert = tx.prepare(
