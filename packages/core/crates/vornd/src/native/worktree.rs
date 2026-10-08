@@ -342,7 +342,10 @@ impl Guard for Live<'_> {
         project: &Path,
         f: &mut dyn FnMut() -> Result<(), String>,
     ) -> Result<(), String> {
-        self.0.turns.take(project, f)
+        // A remote project's repository takes turns under its host, as its other changes do.
+        let project = project.to_string_lossy();
+        let place = self.0.project_place(&project);
+        self.0.turns.take(&place.turn(&project), f)
     }
 }
 

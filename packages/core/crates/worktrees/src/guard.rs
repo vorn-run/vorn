@@ -46,6 +46,12 @@ pub(crate) fn canonical_remote(p: &str) -> String {
 pub fn assert_removable_remote_path(target: &str) -> Result<(), String> {
     refuse_empty(target)?;
     let segments: Vec<&str> = target.split('/').filter(|s| !s.is_empty()).collect();
+    // Taken as written, so a step up could lead anywhere on the host.
+    if segments.contains(&"..") {
+        return Err(format!(
+            "Refusing to delete {target}: it climbs out with .."
+        ));
+    }
     check_segments(target, &segments)
 }
 
@@ -130,6 +136,21 @@ mod tests {
     fn resolves_dots_without_the_file_system() {
         assert_eq!(resolve("/a/./b/../c/"), PathBuf::from("/a/c"));
         assert_eq!(resolve("/.."), PathBuf::from("/"));
+    }
+
+    #[test]
+    fn checks_a_remote_path_as_written() {
+        assert_eq!(
+            assert_removable_remote_path("/srv/.vorn-worktrees/p/wt"),
+            Ok(())
+        );
+        assert!(assert_removable_remote_path("/srv/.vorn-worktrees/p/wt/../../..").is_err());
+        assert!(assert_removable_remote_path("/srv/.vorn-worktrees/p").is_err());
+        assert_eq!(
+            assert_inside_remote_worktree("/w/a/node_modules", "/w/a/"),
+            Ok(())
+        );
+        assert!(assert_inside_remote_worktree("/w/ab", "/w/a").is_err());
     }
 
     #[test]

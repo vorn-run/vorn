@@ -453,12 +453,6 @@ impl Native {
         }
     }
 
-    /// Whether pairing is held here: the server is listening on the app's
-    /// channel, to announce a phone asking and collecting.
-    pub fn holds_pairing(&self) -> bool {
-        self.link().is_some_and(|l| l.listening())
-    }
-
     pub(super) fn link(&self) -> Option<&Arc<AppLink>> {
         self.link.get()
     }
