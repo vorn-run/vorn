@@ -113,6 +113,7 @@ pub const METHODS: &[(&str, Effect)] = &[
     // Answered once vornd holds the session records ([`worktree_move`]).
     ("git:renameWorktreeBranch", Effect::Change),
     ("git:renameWorktree", Effect::Change),
+    ("git:checkoutBranch", Effect::Change),
     ("file:listDir", Effect::Read),
     ("file:readContent", Effect::Read),
     ("file:stamp", Effect::Read),
@@ -168,10 +169,6 @@ pub const METHODS: &[(&str, Effect)] = &[
 
 /// Calls in a native group that the server keeps answering, and why.
 pub const SERVER_ONLY: &[(&str, &str)] = &[
-    (
-        "git:checkoutBranch",
-        "moves the server's sessions on that worktree to the new branch and tells clients",
-    ),
     ("server:shutdown", "stops the server itself"),
     (
         "server:handoff",

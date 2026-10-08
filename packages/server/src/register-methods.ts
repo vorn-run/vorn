@@ -246,16 +246,6 @@ export function registerAllMethods(): void {
     ptyManager.reorderSessions(ids)
     sessionManager.scheduleSave()
   })
-  // vornd answers both for every session it holds, which is every live one.
-  // What reaches the server is a session it has no screen of: one from a
-  // previous run, or one asked for by a client that is not behind vornd.
-  registerMethod('terminal:readScrollback', () => ({ data: '' }))
-  registerMethod('terminal:attach', ({ id }) => ({
-    data: '',
-    seq: 0,
-    live: ptyManager.hasLivePty(id)
-  }))
-  registerMethod('terminal:readOutput', ({ id, lines }) => ptyManager.readOutput(id, lines))
   registerMethod('shell:create', (cwd) => {
     const session = ptyManager.createShellPty(cwd)
     announceSession(session)

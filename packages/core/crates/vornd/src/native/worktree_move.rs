@@ -1,4 +1,4 @@
-//! `git:renameWorktreeBranch` and `git:renameWorktree`, answered by vornd
+//! `git:renameWorktreeBranch`, `git:renameWorktree` and `git:checkoutBranch`, answered by vornd
 //! once it holds the session records: the git is `vorn_git::repo`, and the
 //! sessions in the worktree take the new branch, or path and name, in the
 //! copy of the records ([`crate::registry::WorktreeMove`]), which tells the
@@ -11,26 +11,37 @@
 use std::path::Path;
 
 use serde_json::{json, Value};
-use vorn_git::repo::{Git, MovedWorktree};
+use vorn_git::repo::{Done, Git, MovedWorktree};
 
 use super::{absolute_str, Answer, Native};
 use crate::registry::WorktreeMove;
 
 /// Whether `method` is one of the calls this module answers.
 pub fn foresees(method: &str) -> bool {
-    matches!(method, "git:renameWorktreeBranch" | "git:renameWorktree")
+    matches!(
+        method,
+        "git:renameWorktreeBranch" | "git:renameWorktree" | "git:checkoutBranch"
+    )
 }
 
 /// A call as its handler reads it.
 enum Asked<'a> {
     Branch { worktree: &'a str, branch: &'a str },
     Move { worktree: &'a str, name: &'a str },
+    Checkout { worktree: &'a str, branch: &'a str },
 }
 
 impl<'a> Asked<'a> {
     fn read(native: &Native, method: &str, params: &'a Value) -> Option<Self> {
-        let worktree = absolute_str(params.get("worktreePath")?)?;
         let text = |key| params.get(key)?.as_str();
+        if method == "git:checkoutBranch" {
+            let worktree = absolute_str(params.get("cwd")?)?;
+            let branch = text("branch")?;
+            return native
+                .local_path(worktree)
+                .then_some(Asked::Checkout { worktree, branch });
+        }
+        let worktree = absolute_str(params.get("worktreePath")?)?;
         let asked = match method {
             "git:renameWorktreeBranch" => Asked::Branch {
                 worktree,
@@ -100,6 +111,19 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
             });
             (worktree, moved_json(done), moved)
         }
+        Asked::Checkout { worktree, branch } => {
+            let done = native.turns.take(Path::new(worktree), || {
+                git.checkout(Path::new(worktree), branch)
+            });
+            match done {
+                Done::Ok => (
+                    worktree,
+                    json!({ "ok": true }),
+                    Some(WorktreeMove::Branch(branch.to_owned())),
+                ),
+                Done::Failed(error) => (worktree, json!({ "ok": false, "error": error }), None),
+            }
+        }
     };
     if let (Some(moved), Some(registry)) = (moved, native.registry.get()) {
         registry.change(|r| ((), r.move_worktree(worktree, &moved).unwrap_or_default()));
@@ -118,6 +142,8 @@ pub fn foresee(native: &Native, method: &str, params: &Value) -> Option<Answer> 
             json!(git.foresee_branch_rename(Path::new(worktree), branch)?)
         }
         Asked::Move { worktree, name } => moved_json(git.foresee_worktree_move(worktree, name)),
+        // Whether git takes the checkout is git's to say.
+        Asked::Checkout { .. } => return None,
     };
     Some(Answer::Result(answer))
 }
@@ -280,6 +306,27 @@ mod tests {
             call(&native, "git:renameWorktree", &moved),
             Answer::Result(Value::Null)
         );
+    }
+
+    #[test]
+    fn checks_out_a_branch_and_moves_the_sessions_on_it() {
+        let (dir, wt) = repo();
+        sh(&dir.path().join("main"), &["branch", "other"]);
+        let (native, registry) = holding(&wt, true);
+        let checkout = json!({ "cwd": wt, "branch": "other" });
+        assert_eq!(foresee(&native, "git:checkoutBranch", &checkout), None);
+        assert_eq!(
+            call(&native, "git:checkoutBranch", &checkout),
+            Answer::Result(json!({ "ok": true }))
+        );
+        assert_eq!(terminal(&registry).0.as_deref(), Some("other"));
+        let missing = json!({ "cwd": wt, "branch": "no-such-branch" });
+        let Answer::Result(refused) = call(&native, "git:checkoutBranch", &missing) else {
+            panic!("an answer")
+        };
+        assert_eq!(refused["ok"], false);
+        assert!(refused["error"].as_str().is_some_and(|e| !e.is_empty()));
+        assert_eq!(terminal(&registry).0.as_deref(), Some("other"));
     }
 
     #[test]
