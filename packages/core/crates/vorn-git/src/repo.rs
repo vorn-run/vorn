@@ -625,7 +625,7 @@ fn strip_prefix_ascii_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
 }
 
 /// The separator the server joins worktree paths with on this platform.
-const SEP: char = std::path::MAIN_SEPARATOR;
+const SEP: char = Style::HOST.sep();
 
 /// Where a project's worktrees go: `<parent>/.vorn-worktrees/<project>`.
 pub fn worktree_base_dir(project: &str) -> String {
@@ -821,6 +821,10 @@ fn branch_rename_name(raw: &str) -> Option<&str> {
 /// sanitized, runs of `-` collapsed and one stripped from each end, beside
 /// the worktree and keeping its `-<8 hex>` id.
 pub fn worktree_move_target(worktree: &str, new_name: &str) -> Option<MovedWorktree> {
+    move_target(Style::HOST, worktree, new_name)
+}
+
+fn move_target(style: Style, worktree: &str, new_name: &str) -> Option<MovedWorktree> {
     let mut name = String::new();
     for c in sanitize_name(js_trim(new_name)).chars() {
         if !(c == '-' && name.ends_with('-')) {
@@ -832,7 +836,7 @@ pub fn worktree_move_target(worktree: &str, new_name: &str) -> Option<MovedWorkt
     if name.is_empty() {
         return None;
     }
-    let base = node_basename(worktree);
+    let base = style.basename(worktree);
     let at = base.len().checked_sub(9)?;
     if base.as_bytes()[at] != b'-' {
         return None;
@@ -841,8 +845,8 @@ pub fn worktree_move_target(worktree: &str, new_name: &str) -> Option<MovedWorkt
     if !id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
         return None;
     }
-    let path = format!("{}{SEP}{name}-{id}", node_dirname(worktree));
-    (path != worktree).then(|| MovedWorktree {
+    let path = format!("{}{}{name}-{id}", style.dirname(worktree), style.sep());
+    (!style.same_path(&path, worktree)).then(|| MovedWorktree {
         path,
         name: name.to_owned(),
     })
@@ -993,38 +997,81 @@ fn split_diff(raw: &str, counts: &[(String, u64, u64)]) -> Vec<FileDiff> {
 /// Node's `path.basename` for this platform's separators: the last part,
 /// trailing separators ignored.
 pub fn node_basename(p: &str) -> &str {
-    let trimmed = p.trim_end_matches(is_sep);
-    if trimmed.is_empty() {
-        return "";
-    }
-    trimmed.rsplit(is_sep).next().unwrap_or(trimmed)
+    Style::HOST.basename(p)
 }
 
 /// Node's `path.dirname` for this platform's separators.
 pub fn node_dirname(p: &str) -> &str {
-    if p.is_empty() {
-        return ".";
+    Style::HOST.dirname(p)
+}
+
+/// How a platform separates a path's parts: `/` on POSIX, either slash on
+/// Windows. A value rather than `cfg!`, so both are tested on every host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Style {
+    Posix,
+    Windows,
+}
+
+impl Style {
+    const HOST: Style = if cfg!(windows) {
+        Style::Windows
+    } else {
+        Style::Posix
+    };
+
+    /// The separator Node's `path.sep` joins with.
+    const fn sep(self) -> char {
+        match self {
+            Style::Posix => '/',
+            Style::Windows => '\\',
+        }
     }
-    let trimmed = p.trim_end_matches(is_sep);
-    if trimmed.is_empty() {
-        // Only separators: the root.
-        return &p[..1];
+
+    fn is_sep(self, c: char) -> bool {
+        c == '/' || (self == Style::Windows && c == '\\')
     }
-    match trimmed.rfind(is_sep) {
-        None => ".",
-        Some(at) => {
-            let parent = trimmed[..at].trim_end_matches(is_sep);
-            if parent.is_empty() {
-                &p[..1]
-            } else {
-                parent
+
+    fn basename(self, p: &str) -> &str {
+        let trimmed = p.trim_end_matches(|c| self.is_sep(c));
+        if trimmed.is_empty() {
+            return "";
+        }
+        trimmed.rsplit(|c| self.is_sep(c)).next().unwrap_or(trimmed)
+    }
+
+    fn dirname(self, p: &str) -> &str {
+        if p.is_empty() {
+            return ".";
+        }
+        let trimmed = p.trim_end_matches(|c| self.is_sep(c));
+        if trimmed.is_empty() {
+            // Only separators: the root.
+            return &p[..1];
+        }
+        match trimmed.rfind(|c| self.is_sep(c)) {
+            None => ".",
+            Some(at) => {
+                let parent = trimmed[..at].trim_end_matches(|c| self.is_sep(c));
+                if parent.is_empty() {
+                    &p[..1]
+                } else {
+                    parent
+                }
             }
         }
     }
-}
 
-fn is_sep(c: char) -> bool {
-    c == '/' || (cfg!(windows) && c == '\\')
+    /// Whether `a` and `b` spell one path: the same parts from the same
+    /// root, whichever separators join them and however many.
+    fn same_path(self, a: &str, b: &str) -> bool {
+        let rooted = |p: &str| p.starts_with(|c| self.is_sep(c));
+        rooted(a) == rooted(b) && self.parts(a).eq(self.parts(b))
+    }
+
+    fn parts(self, p: &str) -> impl Iterator<Item = &str> {
+        p.split(move |c| self.is_sep(c)).filter(|s| !s.is_empty())
+    }
 }
 
 /// The first eight hex digits of a random UUID, as the server takes them.
@@ -1114,8 +1161,8 @@ mod tests {
 
     #[test]
     fn a_worktree_moves_beside_itself_under_its_new_name_and_id() {
-        let target = |p: &str, n: &str| worktree_move_target(p, n).map(|t| (t.path, t.name));
-        let at = |name: &str| format!("/w{SEP}{name}");
+        let target = |p: &str, n: &str| move_target(Style::Posix, p, n).map(|t| (t.path, t.name));
+        let at = |name: &str| format!("/w/{name}");
         assert_eq!(
             target("/w/old-1a2b3c4d", "--a  b--"),
             Some((at("a-b-1a2b3c4d"), "a-b".into()))
@@ -1130,11 +1177,69 @@ mod tests {
             Some((at("x-1a2b3c4d"), "x".into()))
         );
         assert_eq!(target("/w/old-1a2b3c4d", "old"), None);
+        assert_eq!(target("/w//old-1a2b3c4d/", "old"), None);
         assert_eq!(target("/w/old-1A2B3C4D", "new"), None);
         assert_eq!(target("/w/1a2b3c4d", "new"), None);
         assert_eq!(target("/w/old_1a2b3c4d", "new"), None);
         assert_eq!(target("/w/é1a2b3c4", "new"), None);
         assert_eq!(target("/w/old-1a2b3c4d", "  "), None);
+    }
+
+    #[test]
+    fn a_windows_worktree_moves_beside_itself_whichever_slashes_spell_it() {
+        let target = |p: &str, n: &str| move_target(Style::Windows, p, n).map(|t| t.path);
+        assert_eq!(
+            target(r"C:\w\old-1a2b3c4d", "new").as_deref(),
+            Some(r"C:\w\new-1a2b3c4d")
+        );
+        assert_eq!(
+            target("C:/w/old-1a2b3c4d", "new").as_deref(),
+            Some(r"C:/w\new-1a2b3c4d")
+        );
+        for same in [
+            r"C:\w\old-1a2b3c4d",
+            "C:/w/old-1a2b3c4d",
+            r"C:\w/old-1a2b3c4d\",
+            "/w/old-1a2b3c4d",
+            r"\\host\share\old-1a2b3c4d",
+        ] {
+            assert_eq!(target(same, "old"), None, "{same}");
+        }
+    }
+
+    #[test]
+    fn a_backslash_is_part_of_a_posix_name() {
+        assert_eq!(
+            move_target(Style::Posix, r"/w\old-1a2b3c4d", "new").map(|t| t.path),
+            Some("//new-1a2b3c4d".into())
+        );
+        assert!(!Style::Posix.same_path(r"/w\a", "/w/a"));
+    }
+
+    #[test]
+    fn one_path_is_the_same_whichever_separators_join_it() {
+        let win = |a, b| Style::Windows.same_path(a, b);
+        assert!(win(r"C:\w\a", "C:/w/a"));
+        assert!(win(r"C:\\w\a\", "C:/w//a"));
+        assert!(win(r"\w\a", "/w/a"));
+        assert!(!win(r"\w\a", "w/a"));
+        assert!(!win(r"C:\w\a", r"D:\w\a"));
+        assert!(!win(r"C:\w\a", r"C:\w\a\b"));
+        let posix = |a, b| Style::Posix.same_path(a, b);
+        assert!(posix("/w/a", "/w//a/"));
+        assert!(!posix("/w/a", "w/a"));
+        assert!(!posix("/w/a", "/w/b"));
+    }
+
+    #[test]
+    fn the_host_moves_a_worktree_it_spells_natively() {
+        let wt: PathBuf = [std::path::MAIN_SEPARATOR_STR, "w", "old-1a2b3c4d"]
+            .iter()
+            .collect();
+        let wt = wt.to_str().unwrap();
+        assert_eq!(worktree_move_target(wt, "old"), None);
+        let moved = worktree_move_target(wt, "new").map(|t| PathBuf::from(t.path));
+        assert_eq!(moved, Some(Path::new(wt).with_file_name("new-1a2b3c4d")));
     }
 
     #[test]
@@ -1286,7 +1391,13 @@ mod tests {
     }
 
     #[test]
-    fn paths_split_as_node_splits_them() {
+    fn paths_split_as_node_splits_them_with_each_platforms_separators() {
+        assert_eq!(Style::Windows.basename(r"C:\a\b\"), "b");
+        assert_eq!(Style::Windows.basename("C:/a/b"), "b");
+        assert_eq!(Style::Windows.dirname(r"C:\a/b"), r"C:\a");
+        assert_eq!(Style::Windows.dirname(r"\a"), r"\");
+        assert_eq!(Style::Posix.basename(r"/a/b\c"), r"b\c");
+        assert_eq!(Style::Posix.dirname(r"/a\b"), "/");
         assert_eq!(node_basename("/a/b"), "b");
         assert_eq!(node_basename("/a/b/"), "b");
         assert_eq!(node_dirname("/a/b"), "/a");
