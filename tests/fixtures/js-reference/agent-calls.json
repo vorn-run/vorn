@@ -1,0 +1,940 @@
+{
+  "agent:detectInstalled null #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "claude": true,
+      "copilot": true,
+      "codex": true,
+      "opencode": true,
+      "gemini": true
+    }
+  },
+  "sessions:getRecent null #1": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "sessionId": "p1",
+        "agentType": "copilot",
+        "display": "Copilot work",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787060000,
+        "activityCount": 3,
+        "activityLabel": "turn",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "g1",
+        "agentType": "gemini",
+        "display": "héllo gemini",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787050500,
+        "activityCount": 2,
+        "activityLabel": "prompt",
+        "canResumeExact": false
+      },
+      {
+        "sessionId": "x2",
+        "agentType": "codex",
+        "display": "Plain",
+        "projectPath": "<root>/plain",
+        "timestamp": 1735787049000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c4",
+        "agentType": "claude",
+        "display": "Elsewhere",
+        "projectPath": "<root>/plain",
+        "timestamp": 1735787048000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c1",
+        "agentType": "claude",
+        "display": "Fix the bug",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787047000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c2",
+        "agentType": "claude",
+        "display": "In the worktree",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787046000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "o1",
+        "agentType": "opencode",
+        "display": "OpenCode work",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787044000,
+        "activityCount": 2,
+        "activityLabel": "message",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c3",
+        "agentType": "claude",
+        "display": "Through the link",
+        "projectPath": "<root>/linked/",
+        "timestamp": 1735787000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c5",
+        "agentType": "claude",
+        "display": "Same time as a codex thread",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "x1",
+        "agentType": "codex",
+        "display": "A first message",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      }
+    ]
+  },
+  "sessions:getRecent \"\" #1": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "sessionId": "p1",
+        "agentType": "copilot",
+        "display": "Copilot work",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787060000,
+        "activityCount": 3,
+        "activityLabel": "turn",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "g1",
+        "agentType": "gemini",
+        "display": "héllo gemini",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787050500,
+        "activityCount": 2,
+        "activityLabel": "prompt",
+        "canResumeExact": false
+      },
+      {
+        "sessionId": "x2",
+        "agentType": "codex",
+        "display": "Plain",
+        "projectPath": "<root>/plain",
+        "timestamp": 1735787049000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c4",
+        "agentType": "claude",
+        "display": "Elsewhere",
+        "projectPath": "<root>/plain",
+        "timestamp": 1735787048000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c1",
+        "agentType": "claude",
+        "display": "Fix the bug",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787047000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c2",
+        "agentType": "claude",
+        "display": "In the worktree",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787046000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "o1",
+        "agentType": "opencode",
+        "display": "OpenCode work",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787044000,
+        "activityCount": 2,
+        "activityLabel": "message",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c3",
+        "agentType": "claude",
+        "display": "Through the link",
+        "projectPath": "<root>/linked/",
+        "timestamp": 1735787000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c5",
+        "agentType": "claude",
+        "display": "Same time as a codex thread",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "x1",
+        "agentType": "codex",
+        "display": "A first message",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      }
+    ]
+  },
+  "sessions:getRecent \"<root>/project\" #1": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "sessionId": "p1",
+        "agentType": "copilot",
+        "display": "Copilot work",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787060000,
+        "activityCount": 3,
+        "activityLabel": "turn",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "g1",
+        "agentType": "gemini",
+        "display": "héllo gemini",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787050500,
+        "activityCount": 2,
+        "activityLabel": "prompt",
+        "canResumeExact": false
+      },
+      {
+        "sessionId": "c1",
+        "agentType": "claude",
+        "display": "Fix the bug",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787047000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c2",
+        "agentType": "claude",
+        "display": "In the worktree",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787046000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "o1",
+        "agentType": "opencode",
+        "display": "OpenCode work",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787044000,
+        "activityCount": 2,
+        "activityLabel": "message",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c3",
+        "agentType": "claude",
+        "display": "Through the link",
+        "projectPath": "<root>/linked/",
+        "timestamp": 1735787000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c5",
+        "agentType": "claude",
+        "display": "Same time as a codex thread",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "x1",
+        "agentType": "codex",
+        "display": "A first message",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      }
+    ]
+  },
+  "sessions:getRecent \"<root>/project/\" #1": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "sessionId": "p1",
+        "agentType": "copilot",
+        "display": "Copilot work",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787060000,
+        "activityCount": 3,
+        "activityLabel": "turn",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "g1",
+        "agentType": "gemini",
+        "display": "héllo gemini",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787050500,
+        "activityCount": 2,
+        "activityLabel": "prompt",
+        "canResumeExact": false
+      },
+      {
+        "sessionId": "c1",
+        "agentType": "claude",
+        "display": "Fix the bug",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787047000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c2",
+        "agentType": "claude",
+        "display": "In the worktree",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787046000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "o1",
+        "agentType": "opencode",
+        "display": "OpenCode work",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787044000,
+        "activityCount": 2,
+        "activityLabel": "message",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c3",
+        "agentType": "claude",
+        "display": "Through the link",
+        "projectPath": "<root>/linked/",
+        "timestamp": 1735787000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c5",
+        "agentType": "claude",
+        "display": "Same time as a codex thread",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "x1",
+        "agentType": "codex",
+        "display": "A first message",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      }
+    ]
+  },
+  "sessions:getRecent \"<root>/.vorn-worktrees/project/wt\" #1": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "sessionId": "p1",
+        "agentType": "copilot",
+        "display": "Copilot work",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787060000,
+        "activityCount": 3,
+        "activityLabel": "turn",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "g1",
+        "agentType": "gemini",
+        "display": "héllo gemini",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787050500,
+        "activityCount": 2,
+        "activityLabel": "prompt",
+        "canResumeExact": false
+      },
+      {
+        "sessionId": "c1",
+        "agentType": "claude",
+        "display": "Fix the bug",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787047000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c2",
+        "agentType": "claude",
+        "display": "In the worktree",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787046000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "o1",
+        "agentType": "opencode",
+        "display": "OpenCode work",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787044000,
+        "activityCount": 2,
+        "activityLabel": "message",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c3",
+        "agentType": "claude",
+        "display": "Through the link",
+        "projectPath": "<root>/linked/",
+        "timestamp": 1735787000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c5",
+        "agentType": "claude",
+        "display": "Same time as a codex thread",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "x1",
+        "agentType": "codex",
+        "display": "A first message",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      }
+    ]
+  },
+  "sessions:getRecent \"<root>/linked\" #1": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "sessionId": "p1",
+        "agentType": "copilot",
+        "display": "Copilot work",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787060000,
+        "activityCount": 3,
+        "activityLabel": "turn",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "g1",
+        "agentType": "gemini",
+        "display": "héllo gemini",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787050500,
+        "activityCount": 2,
+        "activityLabel": "prompt",
+        "canResumeExact": false
+      },
+      {
+        "sessionId": "c1",
+        "agentType": "claude",
+        "display": "Fix the bug",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787047000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c2",
+        "agentType": "claude",
+        "display": "In the worktree",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787046000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "o1",
+        "agentType": "opencode",
+        "display": "OpenCode work",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787044000,
+        "activityCount": 2,
+        "activityLabel": "message",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c3",
+        "agentType": "claude",
+        "display": "Through the link",
+        "projectPath": "<root>/linked/",
+        "timestamp": 1735787000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c5",
+        "agentType": "claude",
+        "display": "Same time as a codex thread",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "x1",
+        "agentType": "codex",
+        "display": "A first message",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      }
+    ]
+  },
+  "sessions:getRecent \"<root>/plain\" #1": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "sessionId": "x2",
+        "agentType": "codex",
+        "display": "Plain",
+        "projectPath": "<root>/plain",
+        "timestamp": 1735787049000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c4",
+        "agentType": "claude",
+        "display": "Elsewhere",
+        "projectPath": "<root>/plain",
+        "timestamp": 1735787048000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      }
+    ]
+  },
+  "sessions:getRecent \"<root>/missing\" #1": {
+    "jsonrpc": "2.0",
+    "result": []
+  },
+  "agent:detectInstalled null #2": {
+    "jsonrpc": "2.0",
+    "result": {
+      "claude": true,
+      "copilot": true,
+      "codex": true,
+      "opencode": true,
+      "gemini": true
+    }
+  },
+  "sessions:getRecent \"<root>/project\" #2": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "sessionId": "p1",
+        "agentType": "copilot",
+        "display": "Copilot work",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787060000,
+        "activityCount": 3,
+        "activityLabel": "turn",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "g1",
+        "agentType": "gemini",
+        "display": "héllo gemini",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787050500,
+        "activityCount": 2,
+        "activityLabel": "prompt",
+        "canResumeExact": false
+      },
+      {
+        "sessionId": "c1",
+        "agentType": "claude",
+        "display": "Fix the bug",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787047000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c2",
+        "agentType": "claude",
+        "display": "In the worktree",
+        "projectPath": "<root>/.vorn-worktrees/project/wt",
+        "timestamp": 1735787046000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "o1",
+        "agentType": "opencode",
+        "display": "OpenCode work",
+        "projectPath": "<root>/project",
+        "timestamp": 1735787044000,
+        "activityCount": 2,
+        "activityLabel": "message",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c3",
+        "agentType": "claude",
+        "display": "Through the link",
+        "projectPath": "<root>/linked/",
+        "timestamp": 1735787000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "c5",
+        "agentType": "claude",
+        "display": "Same time as a codex thread",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 1,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      },
+      {
+        "sessionId": "x1",
+        "agentType": "codex",
+        "display": "A first message",
+        "projectPath": "<root>/project",
+        "timestamp": 1735700000000,
+        "activityCount": 2,
+        "activityLabel": "entry",
+        "canResumeExact": true
+      }
+    ]
+  },
+  "agent:listModels {\"agentType\":\"claude\",\"projectPath\":\"<root>/project\"} #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "opus",
+          "label": "Opus",
+          "description": "Most capable"
+        },
+        {
+          "id": "haiku",
+          "label": "Haiku"
+        }
+      ],
+      "status": "ready",
+      "fetchedAt": "<fetched>"
+    }
+  },
+  "agent:listModels {\"agentType\":\"claude\",\"projectPath\":\"<root>/project\"} #2": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "opus",
+          "label": "Opus",
+          "description": "Most capable"
+        },
+        {
+          "id": "haiku",
+          "label": "Haiku"
+        }
+      ],
+      "status": "ready",
+      "fetchedAt": "<fetched>"
+    }
+  },
+  "agent:listModels {\"agentType\":\"codex\",\"projectPath\":\"<root>/project\"} #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "gpt",
+          "label": "GPT"
+        },
+        {
+          "id": "gpt-mini",
+          "label": "gpt-mini"
+        }
+      ],
+      "status": "ready",
+      "fetchedAt": "<fetched>"
+    }
+  },
+  "agent:listModels {\"agentType\":\"codex\",\"projectPath\":\"<root>/project\"} #2": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "gpt",
+          "label": "GPT"
+        },
+        {
+          "id": "gpt-mini",
+          "label": "gpt-mini"
+        }
+      ],
+      "status": "ready",
+      "fetchedAt": "<fetched>"
+    }
+  },
+  "agent:listModels {\"agentType\":\"copilot\",\"projectPath\":\"<root>/project\"} #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "auto",
+          "label": "Auto",
+          "description": "1x usage"
+        }
+      ],
+      "status": "ready",
+      "fetchedAt": "<fetched>"
+    }
+  },
+  "agent:listModels {\"agentType\":\"copilot\",\"projectPath\":\"<root>/project\"} #2": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "auto",
+          "label": "Auto",
+          "description": "1x usage"
+        }
+      ],
+      "status": "ready",
+      "fetchedAt": "<fetched>"
+    }
+  },
+  "agent:listModels {\"agentType\":\"opencode\",\"projectPath\":\"<root>/project\"} #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "anthropic/claude-x",
+          "label": "anthropic/claude-x"
+        },
+        {
+          "id": "openai/gpt-y",
+          "label": "openai/gpt-y"
+        }
+      ],
+      "status": "ready",
+      "fetchedAt": "<fetched>"
+    }
+  },
+  "agent:listModels {\"agentType\":\"opencode\",\"projectPath\":\"<root>/project\"} #2": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "anthropic/claude-x",
+          "label": "anthropic/claude-x"
+        },
+        {
+          "id": "openai/gpt-y",
+          "label": "openai/gpt-y"
+        }
+      ],
+      "status": "ready",
+      "fetchedAt": "<fetched>"
+    }
+  },
+  "agent:listModels {\"agentType\":\"gemini\",\"projectPath\":\"<root>/project\"} #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [],
+      "status": "unavailable",
+      "error": "Model selection is unavailable for this agent."
+    }
+  },
+  "agent:listModels {\"agentType\":\"shell\",\"projectPath\":\"<root>/project\"} #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [],
+      "status": "unavailable",
+      "error": "Model selection is unavailable for this agent."
+    }
+  },
+  "agent:listModels {\"agentType\":\"claude\",\"projectPath\":\"<root>/project\",\"remoteHostId\":\"host-1\"} #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [],
+      "status": "unavailable",
+      "error": "Models on a remote host cannot be listed; use the default or type a model id."
+    }
+  },
+  "agent:listModels {\"agentType\":\"claude\",\"projectPath\":\"{{context.path}}\"} #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [],
+      "status": "unavailable",
+      "error": "Choose a project to list models, or type a model id."
+    }
+  },
+  "agent:listModels {\"agentType\":\"claude\"} #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [],
+      "status": "unavailable",
+      "error": "Choose a project to list models, or type a model id."
+    }
+  },
+  "agent:listModels {\"agentType\":\"claude\",\"projectPath\":\"<root>/project\",\"refresh\":true} #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "opus",
+          "label": "Opus",
+          "description": "Most capable"
+        },
+        {
+          "id": "haiku",
+          "label": "Haiku"
+        }
+      ],
+      "status": "stale",
+      "fetchedAt": "<fetched>",
+      "error": "Agent model discovery failed. Check the CLI installation and sign-in, then refresh."
+    }
+  },
+  "agent:listModels {\"agentType\":\"claude\",\"projectPath\":\"<root>/project\"} #3": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "opus",
+          "label": "Opus",
+          "description": "Most capable"
+        },
+        {
+          "id": "haiku",
+          "label": "Haiku"
+        }
+      ],
+      "status": "ready",
+      "fetchedAt": "<fetched>"
+    }
+  },
+  "agent:listModels {\"agentType\":\"claude\",\"projectPath\":\"<root>/project\",\"refresh\":true} #2": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "opus",
+          "label": "Opus",
+          "description": "Most capable"
+        },
+        {
+          "id": "haiku",
+          "label": "Haiku"
+        }
+      ],
+      "status": "stale",
+      "fetchedAt": "<fetched>",
+      "error": "Agent model discovery failed. Check the CLI installation and sign-in, then refresh."
+    }
+  },
+  "agent:listModels {\"agentType\":\"opencode\",\"projectPath\":\"<root>/plain\"} #1": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [],
+      "status": "unavailable",
+      "error": "Agent model discovery failed. Check the CLI installation and sign-in, then refresh."
+    }
+  },
+  "agent:listModels {\"agentType\":\"claude\",\"projectPath\":\"<root>/project\",\"refresh\":true} #3": {
+    "jsonrpc": "2.0",
+    "result": {
+      "choices": [
+        {
+          "id": "opus",
+          "label": "Opus",
+          "description": "Most capable"
+        },
+        {
+          "id": "haiku",
+          "label": "Haiku"
+        }
+      ],
+      "status": "ready",
+      "fetchedAt": "<fetched>"
+    }
+  }
+}

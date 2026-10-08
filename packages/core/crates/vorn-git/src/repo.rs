@@ -28,11 +28,13 @@ pub const MAX_DIFF_TEXT_BYTES: usize = 500 * 1024;
 const TRUNCATED_DIFF: &str = "\n\n... diff truncated (too large) ...\n";
 
 /// How to run git: the executable and the whole environment it gets, as the
-/// server resolves them.
+/// server resolves them, and the login to run it through for a repository on
+/// a remote host (`gitExec` with `remote`), where paths are POSIX.
 #[derive(Clone, Debug)]
 pub struct Git {
     pub bin: String,
     pub env: Vec<(String, String)>,
+    pub ssh: Option<vorn_remote::Login>,
 }
 
 /// A worktree as `git worktree list` reports it.
@@ -149,6 +151,15 @@ impl Git {
         timeout_ms: u64,
         max_buffer: usize,
     ) -> Result<String, Error> {
+        if let Some(login) = &self.ssh {
+            let words: Vec<String> = args.iter().map(|a| vorn_remote::quote(a)).collect();
+            let command = format!(
+                "cd {} && git {}",
+                vorn_remote::quote(&cwd.to_string_lossy()),
+                words.join(" ")
+            );
+            return self.remote_shell(login, &command, timeout_ms);
+        }
         let req = Request {
             bin: self.bin.clone(),
             args: args.iter().map(|a| (*a).to_owned()).collect(),
@@ -158,6 +169,28 @@ impl Git {
             max_buffer,
         };
         run(&req).map(|reply| js_trim(&reply.stdout).to_owned())
+    }
+
+    /// A shell command on the remote host, trimmed.
+    fn remote_shell(
+        &self,
+        login: &vorn_remote::Login,
+        command: &str,
+        timeout_ms: u64,
+    ) -> Result<String, Error> {
+        login
+            .exec(command, None, Duration::from_millis(timeout_ms))
+            .map(|out| js_trim(&out).to_owned())
+            .map_err(|message| Error::Remote { message })
+    }
+
+    /// How this repository's paths are written: POSIX on a remote host.
+    fn style(&self) -> Style {
+        if self.ssh.is_some() {
+            Style::Posix
+        } else {
+            Style::HOST
+        }
     }
 
     fn exec_default(&self, args: &[&str], cwd: &Path, timeout_ms: u64) -> Result<String, Error> {
@@ -232,6 +265,9 @@ impl Git {
     /// Whether [`Git::rename_branch`] would succeed now, read with gix and
     /// without changing anything. `None` when gix cannot tell as git would.
     pub fn foresee_branch_rename(&self, worktree: &Path, new_branch: &str) -> Option<bool> {
+        if self.ssh.is_some() {
+            return None;
+        }
         let Some(name) = branch_rename_name(new_branch) else {
             return Some(false);
         };
@@ -243,6 +279,19 @@ impl Git {
     /// directory carries no id, the target is the worktree itself or is
     /// taken, or git refuses the move.
     pub fn move_worktree(&self, worktree: &str, new_name: &str) -> Option<MovedWorktree> {
+        if let Some(login) = &self.ssh {
+            let target = move_target(Style::Posix, worktree, new_name)?;
+            let check = format!(
+                "test -d {} && echo EXISTS || echo MISSING",
+                vorn_remote::quote(&target.path)
+            );
+            if self.remote_shell(login, &check, 5000).ok()? == "EXISTS" {
+                return None;
+            }
+            let args = ["worktree", "move", worktree, target.path.as_str()];
+            self.exec_default(&args, Path::new(worktree), 10_000).ok()?;
+            return Some(target);
+        }
         let target = worktree_move_target(worktree, new_name)?;
         if Path::new(&target.path).exists() {
             return None;
@@ -257,6 +306,9 @@ impl Git {
     /// What [`Git::move_worktree`] would answer now, read without moving
     /// anything: git moves a linked worktree, whose `.git` is a file.
     pub fn foresee_worktree_move(&self, worktree: &str, new_name: &str) -> Option<MovedWorktree> {
+        if self.ssh.is_some() {
+            return None;
+        }
         let target = worktree_move_target(worktree, new_name)?;
         let linked = Path::new(worktree).join(".git").is_file();
         (linked && !Path::new(&target.path).exists()).then_some(target)
@@ -293,14 +345,26 @@ impl Git {
             _ => generate_name(),
         };
         let name = sanitize_name(&raw);
-        let base_dir = worktree_base_dir(project);
-        let worktree_dir = format!("{base_dir}{SEP}{name}-{short_id}");
+        let style = self.style();
+        let sep = style.sep();
+        let base_dir = format!(
+            "{}{sep}.vorn-worktrees{sep}{}",
+            style.dirname(project),
+            style.basename(project)
+        );
+        let worktree_dir = format!("{base_dir}{sep}{name}-{short_id}");
         on_path(&worktree_dir);
-        std::fs::create_dir_all(&base_dir).map_err(|error| Error::Fs {
-            syscall: "mkdir",
-            path: base_dir.clone(),
-            error,
-        })?;
+        match &self.ssh {
+            Some(login) => {
+                let mkdir = format!("mkdir -p {}", vorn_remote::quote(&base_dir));
+                self.remote_shell(login, &mkdir, 5000)?;
+            }
+            None => std::fs::create_dir_all(&base_dir).map_err(|error| Error::Fs {
+                syscall: "mkdir",
+                path: base_dir.clone(),
+                error,
+            })?,
+        }
         let project_dir = Path::new(project);
         let locals = self.list_branches(project_dir);
         let local = |b: &str| locals.iter().any(|l| l == b);

@@ -93,6 +93,7 @@ fn git_ignored(dir: &str, env: &Arc<SafeEnv>, cache: &IgnoreCache) -> Option<Arc
     let git = vorn_git::repo::Git {
         bin: env.git_bin(),
         env: env.get(),
+        ssh: None,
     };
     let request = |args: &[&str], cwd: &str, timeout_ms: u64| vorn_git::Request {
         bin: git.bin.clone(),
@@ -199,6 +200,116 @@ pub fn write_content(path: &str, content: &str) -> Value {
             "success": false,
             "error": vorn_git::fs_message("open", path, &error),
         }),
+    }
+}
+
+/// The same calls for a remote host's files, each one ssh command as the
+/// server's `file-utils` runs them there; a failure reads as nothing there.
+pub mod remote {
+    use std::time::Duration;
+
+    use serde_json::{json, Value};
+    use vorn_remote::{quote, Login};
+
+    use super::{locale_compare, FileEntry, ALWAYS_EXCLUDE, BINARY_CHECK};
+
+    const TIMEOUT: Duration = Duration::from_secs(10);
+    const SEP: &str = "__VORN_SEP__";
+
+    /// `ls` of `dir` beside git's ignored paths there.
+    pub fn list_dir(login: &Login, dir: &str) -> Vec<FileEntry> {
+        let q = quote(dir);
+        let cmd = format!(
+            "ls -1aF {q} && echo '{SEP}' && (cd {q} && git ls-files --others --ignored --exclude-standard --directory 2>/dev/null || true)"
+        );
+        let Ok(out) = login.exec(&cmd, None, TIMEOUT) else {
+            return Vec::new();
+        };
+        let (listed, ignored) = out
+            .split_once(&format!("{SEP}\n"))
+            .unwrap_or((out.as_str(), ""));
+        if listed.trim().is_empty() {
+            return Vec::new();
+        }
+        let ignored: Vec<&str> = ignored
+            .trim()
+            .split('\n')
+            .map(|p| p.strip_suffix('/').unwrap_or(p))
+            .filter(|p| !p.is_empty())
+            .collect();
+        let mut entries: Vec<FileEntry> = listed
+            .trim()
+            .split('\n')
+            .filter_map(|line| {
+                let is_directory = line.ends_with('/');
+                let name = line.strip_suffix(['/', '@', '*', '|', '=']).unwrap_or(line);
+                let skip = name.is_empty()
+                    || name == "."
+                    || name == ".."
+                    || ALWAYS_EXCLUDE.contains(&name)
+                    || (name.starts_with('.') && name != ".github")
+                    || ignored.contains(&name);
+                (!skip).then(|| FileEntry {
+                    name: name.to_owned(),
+                    path: format!("{dir}/{name}"),
+                    is_directory,
+                })
+            })
+            .collect();
+        entries.sort_by(|a, b| {
+            b.is_directory
+                .cmp(&a.is_directory)
+                .then_with(|| locale_compare(&a.name, &b.name))
+        });
+        entries
+    }
+
+    /// The first `max_bytes` of a file as text, marked when that many came back.
+    pub fn read_content(login: &Login, path: &str, max_bytes: u64) -> Option<String> {
+        let text = login
+            .exec(
+                &format!("head -c {max_bytes} {}", quote(path)),
+                None,
+                TIMEOUT,
+            )
+            .ok()?;
+        if text.chars().take(BINARY_CHECK).any(|c| c == '\0') {
+            return None;
+        }
+        // `head -c` cuts silently, and a cut file saved back would lose its tail.
+        if text.len() as u64 >= max_bytes {
+            return Some(format!("{text}\n\n--- truncated ---"));
+        }
+        Some(text)
+    }
+
+    /// Writes the file through ssh's stdin, as `cat > file`.
+    pub fn write_content(login: &Login, path: &str, content: &str) -> Value {
+        let cmd = format!("cat > {}", quote(path));
+        match login.exec(&cmd, Some(content.as_bytes()), Duration::from_secs(30)) {
+            Ok(_) => json!({ "success": true }),
+            Err(error) => json!({ "success": false, "error": error }),
+        }
+    }
+
+    /// Size and whole-second modification time, from GNU or BSD `stat`.
+    pub fn stamp(login: &Login, path: &str) -> Option<Value> {
+        let q = quote(path);
+        let script = format!("stat -c '%s %Y' {q} 2>/dev/null || stat -f '%z %m' {q} 2>/dev/null");
+        let out = login.exec(&script, None, TIMEOUT).ok()?;
+        let mut parts = out.split_whitespace();
+        let size: f64 = parts.next()?.parse().ok()?;
+        let seconds: f64 = parts.next()?.parse().ok()?;
+        // Whole numbers as JSON integers, as `Number` prints them.
+        let num = |n: f64| {
+            if n.fract() == 0.0 && n.abs() < 9e15 {
+                json!(n as i64)
+            } else {
+                json!(n)
+            }
+        };
+        (size.is_finite() && seconds.is_finite())
+            .then(|| json!({ "size": num(size), "mtimeMs": num(seconds * 1000.0) }))
     }
 }
 

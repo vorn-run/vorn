@@ -878,10 +878,12 @@ impl Around for Wired {
             Some(native) => Git {
                 bin: native.env.git_bin(),
                 env: native.env.get(),
+                ssh: None,
             },
             None => Git {
                 bin: "git".to_owned(),
                 env: Vec::new(),
+                ssh: None,
             },
         }
     }

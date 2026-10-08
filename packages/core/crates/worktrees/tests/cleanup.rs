@@ -104,6 +104,7 @@ impl Fixture {
             name: "proj".into(),
             path: s(&self.project),
             host_ids: vec!["local".into()],
+            remote: None,
         }]
     }
 }
@@ -112,6 +113,7 @@ fn local_git() -> Git {
     Git {
         bin: "git".into(),
         env: std::env::vars().collect(),
+        ssh: None,
     }
 }
 
@@ -270,11 +272,13 @@ fn a_project_that_is_not_a_repository_says_so() {
             name: "plain".into(),
             path: s(tmp.path()),
             host_ids: vec!["local".into()],
+            remote: None,
         },
         Project {
             name: "again".into(),
             path: s(tmp.path()),
             host_ids: vec!["local".into()],
+            remote: None,
         },
     ];
     let inv = scan(
@@ -324,6 +328,7 @@ fn a_worktree_a_live_session_uses_is_never_removed() {
         artifact_dirs: &dirs,
         projects: &projects,
         guard: &guard,
+        remote_of: &|_| None,
     };
     let refused = format!("{used} has 1 active session — close them first");
 
@@ -384,6 +389,7 @@ fn a_session_that_starts_during_the_removal_stops_it() {
         artifact_dirs: &[],
         projects: &projects,
         guard: &guard,
+        remote_of: &|_| None,
     };
     let item = RemoveItem {
         worktree_path: path.clone(),
@@ -416,6 +422,7 @@ fn uncommitted_work_is_reported_not_removed() {
         artifact_dirs: &[],
         projects: &projects,
         guard: &guard,
+        remote_of: &|_| None,
     };
     let result = remove_worktrees(
         &[RemoveItem {
@@ -454,6 +461,7 @@ fn removing_a_merged_worktree_takes_its_branch_and_reports_the_bytes() {
         artifact_dirs: &dirs,
         projects: &projects,
         guard: &guard,
+        remote_of: &|_| None,
     };
     let item = |path: &str| RemoveItem {
         worktree_path: path.to_owned(),
@@ -514,6 +522,7 @@ fn reclaiming_sweeps_build_output_and_keeps_the_work() {
         artifact_dirs: &dirs,
         projects: &projects,
         guard: &guard,
+        remote_of: &|_| None,
     };
     let clean = fx.wt("gilded-fresco");
     std::fs::remove_dir_all(Path::new(&clean).join("node_modules")).unwrap();
@@ -544,6 +553,7 @@ fn pruning_deletes_only_what_git_has_forgotten() {
         artifact_dirs: &[],
         projects: &projects,
         guard: &guard,
+        remote_of: &|_| None,
     };
     let stray = fx.wt("stray");
     let listed = fx.wt("amber-muse");

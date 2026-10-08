@@ -13,6 +13,10 @@ use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use vorn_remote::quote;
+
+use crate::scan::Remote;
+
 /// How long a measured size is trusted.
 pub const SIZE_TTL: Duration = Duration::from_secs(5 * 60);
 const DU_TIMEOUT: Duration = Duration::from_secs(45);
@@ -51,12 +55,17 @@ impl Sizes {
         artifact_dirs: &[String],
         refresh: bool,
         env: &[(String, String)],
+        remote: Option<&Remote>,
     ) -> Size {
         let kept = self.lock().get(root).copied();
         if let Some(s) = kept.filter(|s| !refresh && s.at.elapsed() < SIZE_TTL) {
             return s.size;
         }
-        match measure_now(root, artifact_dirs, env) {
+        let measured = match remote {
+            Some(r) => measure_remote(root, artifact_dirs, r),
+            None => measure_now(root, artifact_dirs, env),
+        };
+        match measured {
             Some(size) => {
                 self.lock().insert(
                     root.to_owned(),
@@ -84,6 +93,68 @@ impl Sizes {
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Sample>> {
         self.samples.lock().unwrap_or_else(|e| e.into_inner())
     }
+}
+
+/// [`measure_now`] on a remote host, which always has `find` and `du`.
+fn measure_remote(root: &str, artifact_dirs: &[String], remote: &Remote) -> Option<Size> {
+    let artifacts = find_artifact_dirs_remote(root, artifact_dirs, remote);
+    let size_bytes = du_bytes_remote(&[root.to_owned()], remote)?;
+    let artifact_bytes = if artifacts.is_empty() {
+        0
+    } else {
+        du_bytes_remote(&artifacts, remote)?
+    };
+    Some(Size {
+        size_bytes,
+        artifact_bytes: artifact_bytes.min(size_bytes),
+        measured: true,
+    })
+}
+
+/// [`find_artifact_dirs`] on a remote host.
+pub(crate) fn find_artifact_dirs_remote(
+    root: &str,
+    names: &[String],
+    remote: &Remote,
+) -> Vec<String> {
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let tests: Vec<String> = names
+        .iter()
+        .map(|n| format!("-name {}", quote(n)))
+        .collect();
+    let cmd = format!(
+        "find {} -type d \\( {} \\) -prune -print",
+        quote(root),
+        tests.join(" -o ")
+    );
+    remote
+        .shell(&cmd, FIND_TIMEOUT)
+        .map(|out| {
+            out.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// [`du_bytes`] on a remote host.
+pub(crate) fn du_bytes_remote(paths: &[String], remote: &Remote) -> Option<u64> {
+    let mut kb = 0u64;
+    for chunk in paths.chunks(DU_CHUNK) {
+        let words: Vec<String> = chunk.iter().map(|p| quote(p)).collect();
+        let out = remote
+            .shell(&format!("du -sk {}", words.join(" ")), DU_TIMEOUT)
+            .ok()?;
+        kb += out
+            .lines()
+            .filter_map(|l| l.split_whitespace().next()?.parse::<u64>().ok())
+            .sum::<u64>();
+    }
+    Some(kb * 1024)
 }
 
 fn measure_now(root: &str, artifact_dirs: &[String], env: &[(String, String)]) -> Option<Size> {
@@ -295,28 +366,28 @@ mod tests {
         let tmp = tree();
         let root = tmp.path().to_string_lossy().into_owned();
         let sizes = Sizes::default();
-        let first = sizes.measure(&root, &names(), false, &[]);
+        let first = sizes.measure(&root, &names(), false, &[], None);
         assert!(first.measured);
         assert!(first.size_bytes >= 35_000, "{first:?}");
         assert!(first.artifact_bytes >= 25_000 && first.artifact_bytes <= first.size_bytes);
 
         std::fs::write(tmp.path().join("src/big"), vec![b'x'; 200_000]).unwrap();
-        assert_eq!(sizes.measure(&root, &names(), false, &[]), first);
-        let fresh = sizes.measure(&root, &names(), true, &[]);
+        assert_eq!(sizes.measure(&root, &names(), false, &[], None), first);
+        let fresh = sizes.measure(&root, &names(), true, &[], None);
         assert!(fresh.size_bytes > first.size_bytes);
 
         std::fs::remove_file(tmp.path().join("src/big")).unwrap();
         sizes.invalidate(&format!("{root}x"));
-        assert_eq!(sizes.measure(&root, &names(), false, &[]), fresh);
+        assert_eq!(sizes.measure(&root, &names(), false, &[], None), fresh);
         sizes.invalidate(&root);
-        assert!(sizes.measure(&root, &names(), false, &[]).size_bytes < fresh.size_bytes);
+        assert!(sizes.measure(&root, &names(), false, &[], None).size_bytes < fresh.size_bytes);
     }
 
     #[test]
     fn a_tree_that_cannot_be_measured_reads_unmeasured() {
         let sizes = Sizes::default();
         let gone = std::env::temp_dir().join("vorn-worktrees-no-such-dir");
-        let size = sizes.measure(&gone.to_string_lossy(), &names(), false, &[]);
+        let size = sizes.measure(&gone.to_string_lossy(), &names(), false, &[], None);
         // Without `du`, the walk reads a missing tree as empty, as the server's does.
         let walked = Size {
             measured: true,

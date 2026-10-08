@@ -8,9 +8,14 @@ use std::path::Path;
 use serde::Serialize;
 use vorn_git::repo::{Git, WorktreeEntry};
 
-use crate::guard::{assert_inside_worktree, assert_removable_path, canonical};
-use crate::scan::Project;
-use crate::size::{du_bytes, find_artifact_dirs, walk_bytes, Sizes};
+use crate::guard::{
+    assert_inside_remote_worktree, assert_inside_worktree, assert_removable_path,
+    assert_removable_remote_path, canonical, canonical_remote,
+};
+use crate::scan::{git_on, Project, Remote};
+use crate::size::{
+    du_bytes, du_bytes_remote, find_artifact_dirs, find_artifact_dirs_remote, walk_bytes, Sizes,
+};
 
 /// What the host promises around a deletion.
 pub trait Guard {
@@ -72,6 +77,15 @@ pub struct Cleanup<'a> {
     pub artifact_dirs: &'a [String],
     pub projects: &'a [Project],
     pub guard: &'a dyn Guard,
+    /// The remote host any path is on (`resolveRemoteHostByPath`), for an orphan directory.
+    pub remote_of: &'a dyn Fn(&str) -> Option<Remote>,
+}
+
+/// Where an owned worktree is: its project, its path, and the host it is on.
+struct Owner<'a> {
+    project: String,
+    worktree: String,
+    remote: Option<&'a Remote>,
 }
 
 /// A project's worktrees, listed once per action.
@@ -81,22 +95,31 @@ struct Listed(HashMap<String, Vec<WorktreeEntry>>);
 /// The project and worktree git says `target` is, by resolved path, so a
 /// worktree made by hand outside `.vorn-worktrees` counts as much as one vorn
 /// made. Never the project's own checkout.
-fn find_owning_worktree(
+fn find_owning_worktree<'a>(
     target: &str,
-    ctx: &Cleanup<'_>,
+    ctx: &Cleanup<'a>,
     listed: &mut Listed,
-) -> Result<(String, String), String> {
-    let wanted = canonical(target);
+) -> Result<Owner<'a>, String> {
     for project in ctx.projects {
+        let remote = project.remote.as_ref();
+        let canon = |p: &str| match remote {
+            Some(_) => canonical_remote(p),
+            None => canonical(p),
+        };
+        let wanted = canon(target);
         let worktrees = listed
             .0
             .entry(project.path.clone())
-            .or_insert_with(|| ctx.git.list_worktrees(Path::new(&project.path)));
+            .or_insert_with(|| git_on(ctx.git, remote).list_worktrees(Path::new(&project.path)));
         if let Some(wt) = worktrees
             .iter()
-            .find(|wt| !wt.is_main && canonical(&wt.path) == wanted)
+            .find(|wt| !wt.is_main && canon(&wt.path) == wanted)
         {
-            return Ok((project.path.clone(), wt.path.clone()));
+            return Ok(Owner {
+                project: project.path.clone(),
+                worktree: wt.path.clone(),
+                remote,
+            });
         }
     }
     Err("not a worktree of any known project".into())
@@ -112,32 +135,29 @@ pub fn remove_worktrees(items: &[RemoveItem], ctx: &Cleanup<'_>) -> ActionResult
         let path = item.worktree_path.as_str();
         let mut branch = None;
         let done = (|| {
-            let (project, _) = find_owning_worktree(path, ctx, &mut listed)?;
-            let bytes = size_of(path, ctx);
+            let owner = find_owning_worktree(path, ctx, &mut listed)?;
+            let (project, remote) = (owner.project, owner.remote);
+            let git = git_on(ctx.git, remote);
+            let bytes = size_of(path, ctx, remote);
             if item.delete_branch {
-                branch = ctx.git.branch(Path::new(path));
+                branch = git.branch(Path::new(path));
             }
             // Again, after the git above, and once more inside the turn.
             ctx.guard.assert_idle(path)?;
             ctx.guard.turn(Path::new(&project), &mut || {
                 ctx.guard.assert_idle(path)?;
-                if ctx.git.remove_worktree(
-                    Path::new(&project),
-                    path,
-                    item.force,
-                    item.delete_branch,
-                ) {
+                if git.remove_worktree(Path::new(&project), path, item.force, item.delete_branch) {
                     Ok(())
                 } else {
                     Err("git worktree remove failed".into())
                 }
             })?;
             ctx.sizes.invalidate(path);
-            Ok((project, bytes))
+            Ok((project, bytes, git))
         })();
-        let freed = done.map(|(project, bytes)| {
+        let freed = done.map(|(project, bytes, git)| {
             if let Some(b) = branch.take() {
-                if !ctx.git.list_branches(Path::new(&project)).contains(&b) {
+                if !git.list_branches(Path::new(&project)).contains(&b) {
                     result.deleted_branches.push(b);
                 }
             }
@@ -155,12 +175,18 @@ pub fn reclaim_artifacts(paths: &[String], ctx: &Cleanup<'_>) -> ActionResult {
     let mut listed = Listed::default();
     for path in paths {
         let done = (|| {
-            let (_, worktree) = find_owning_worktree(path, ctx, &mut listed)?;
-            let dirs = find_artifact_dirs(path, ctx.artifact_dirs, &ctx.git.env);
+            let owner = find_owning_worktree(path, ctx, &mut listed)?;
+            let (worktree, remote) = (owner.worktree, owner.remote);
+            let dirs = match remote {
+                Some(r) => find_artifact_dirs_remote(path, ctx.artifact_dirs, r),
+                None => find_artifact_dirs(path, ctx.artifact_dirs, &ctx.git.env),
+            };
             if dirs.is_empty() {
                 return Ok(0);
             }
-            let before = if cfg!(unix) {
+            let before = if let Some(r) = remote {
+                du_bytes_remote(&dirs, r).ok_or("could not measure the build output")?
+            } else if cfg!(unix) {
                 du_bytes(&dirs, &ctx.git.env).ok_or("could not measure the build output")?
             } else {
                 dirs.iter()
@@ -171,8 +197,11 @@ pub fn reclaim_artifacts(paths: &[String], ctx: &Cleanup<'_>) -> ActionResult {
             for dir in &dirs {
                 // Each on its own: a symlinked build directory must not lead
                 // out of the worktree.
-                assert_inside_worktree(dir, &worktree)?;
-                remove_dir(dir)?;
+                match remote {
+                    Some(_) => assert_inside_remote_worktree(dir, &worktree)?,
+                    None => assert_inside_worktree(dir, &worktree)?,
+                }
+                remove_dir(dir, remote)?;
             }
             ctx.sizes.invalidate(path);
             Ok(before)
@@ -188,13 +217,21 @@ pub fn prune_orphan_dirs(paths: &[String], ctx: &Cleanup<'_>) -> ActionResult {
     let mut result = ActionResult::default();
     for path in paths {
         let done = (|| {
-            assert_removable_path(path)?;
-            if ctx.git.absolute_git_dir(Path::new(path)).is_some() {
+            let remote = (ctx.remote_of)(path);
+            let remote = remote.as_ref();
+            match remote {
+                Some(_) => assert_removable_remote_path(path)?,
+                None => assert_removable_path(path)?,
+            }
+            if git_on(ctx.git, remote)
+                .absolute_git_dir(Path::new(path))
+                .is_some()
+            {
                 return Err("still registered with git — remove it as a worktree instead".into());
             }
-            let bytes = size_of(path, ctx);
+            let bytes = size_of(path, ctx, remote);
             ctx.guard.assert_idle(path)?;
-            remove_dir(path)?;
+            remove_dir(path, remote)?;
             ctx.sizes.invalidate(path);
             Ok(bytes)
         })();
@@ -203,14 +240,20 @@ pub fn prune_orphan_dirs(paths: &[String], ctx: &Cleanup<'_>) -> ActionResult {
     result
 }
 
-fn size_of(path: &str, ctx: &Cleanup<'_>) -> u64 {
+fn size_of(path: &str, ctx: &Cleanup<'_>, remote: Option<&Remote>) -> u64 {
     ctx.sizes
-        .measure(path, ctx.artifact_dirs, false, &ctx.git.env)
+        .measure(path, ctx.artifact_dirs, false, &ctx.git.env, remote)
         .size_bytes
 }
 
-/// `fs.rmSync(.., {recursive, force})`: gone already is done.
-fn remove_dir(path: &str) -> Result<(), String> {
+/// `fs.rmSync(.., {recursive, force})`: gone already is done; `rm -rf` on a remote host.
+fn remove_dir(path: &str, remote: Option<&Remote>) -> Result<(), String> {
+    if let Some(r) = remote {
+        let cmd = format!("rm -rf {}", vorn_remote::quote(path));
+        return r
+            .shell(&cmd, std::time::Duration::from_secs(60))
+            .map(|_| ());
+    }
     match std::fs::remove_dir_all(path) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
         _ => Ok(()),

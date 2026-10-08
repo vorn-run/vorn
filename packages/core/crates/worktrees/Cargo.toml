@@ -13,6 +13,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 vorn-git = { path = "../vorn-git" }
+vorn-remote = { path = "../remote" }
 
 [dev-dependencies]
 tempfile = "3"

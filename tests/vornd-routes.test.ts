@@ -138,6 +138,8 @@ describe('a call vornd answers, made to the server', () => {
   it('leaves every other call to the server, and fails without vornd', async () => {
     const relay = relayVorndCall({ ask: (async () => null) as never }, 50)
     expect(relay('device:list', undefined)).toBeUndefined()
+    expect(relay('sessions:restored', undefined)).toBeUndefined()
+    await expect(relay('sessions:getRecent', undefined)).rejects.toThrow(/vornd is not running/)
     await expect(relay('task:list', undefined)).rejects.toThrow(/vornd is not running/)
     await expect(relay('config:load', undefined)).rejects.toThrow(/vornd is not running/)
     await expect(relay('artifact:get', { artifactId: 'a' })).rejects.toThrow(/vornd is not running/)

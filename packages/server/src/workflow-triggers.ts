@@ -33,8 +33,19 @@ const VORND_GROUPS = new Set([
   'ssh',
   'script',
   'credential',
-  'permission'
+  'permission',
+  'git',
+  'file',
+  'worktree',
+  'agent',
+  'ide',
+  'token',
+  'pairing',
+  'tailscale'
 ])
+
+/** Calls vornd answers in a group the server still has others of. */
+const VORND_METHODS = new Set(['sessions:getRecent'])
 
 /** How long vornd gets to answer one: publishing may wait on the pane opening. */
 const WORK_CALL_TIMEOUT_MS = 60_000
@@ -55,7 +66,7 @@ export function relayVorndCall(
   waitMs = CHANNEL_WAIT_MS
 ): (method: string, params: unknown) => Promise<unknown> | undefined {
   return (method, params) => {
-    if (!VORND_GROUPS.has(method.split(':')[0])) return undefined
+    if (!VORND_GROUPS.has(method.split(':')[0]) && !VORND_METHODS.has(method)) return undefined
     const deadline = Date.now() + waitMs
     const attempt = async (): Promise<unknown> => {
       for (;;) {

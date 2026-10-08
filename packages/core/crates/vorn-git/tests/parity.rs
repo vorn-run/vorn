@@ -350,6 +350,7 @@ fn checks_out_a_branch_reads_head_and_names_a_worktree_before_making_it() {
     let g = Git {
         bin: "git".into(),
         env: std::env::vars().collect(),
+        ssh: None,
     };
     let head = git(&dir, &["rev-parse", "HEAD"]);
     assert_eq!(g.head(&dir).as_deref(), Some(head.trim()));
@@ -391,6 +392,7 @@ fn renames_a_worktree_branch_and_moves_a_worktree_as_foreseen() {
     let g = Git {
         bin: "git".into(),
         env: std::env::vars().collect(),
+        ssh: None,
     };
     let made = g
         .create_worktree(dir.to_str().unwrap(), "first", Some("tree"))

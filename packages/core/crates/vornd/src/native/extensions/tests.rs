@@ -108,6 +108,7 @@ impl Around for Fake {
         Git {
             bin: "git".into(),
             env: std::env::vars().filter(|(k, _)| k == "PATH").collect(),
+            ssh: None,
         }
     }
 }

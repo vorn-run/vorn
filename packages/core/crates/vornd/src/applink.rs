@@ -83,6 +83,8 @@ pub struct AppLink {
     spawned: Notify,
     /// The work model, which takes the triggers the server delivers.
     work: OnceLock<Arc<crate::native::work::Work>>,
+    /// vornd's own calls, for the server's relays when no work model runs.
+    native: OnceLock<std::sync::Weak<crate::native::Native>>,
 }
 
 impl Default for AppLink {
@@ -100,6 +102,7 @@ impl Default for AppLink {
             spawns: Mutex::new(VecDeque::new()),
             spawned: Notify::new(),
             work: OnceLock::new(),
+            native: OnceLock::new(),
         }
     }
 }
@@ -191,6 +194,14 @@ impl AppLink {
 
     pub fn work(&self) -> Option<&Arc<crate::native::work::Work>> {
         self.work.get()
+    }
+
+    pub fn set_native(&self, native: &Arc<crate::native::Native>) {
+        let _ = self.native.set(Arc::downgrade(native));
+    }
+
+    pub fn native(&self) -> Option<Arc<crate::native::Native>> {
+        self.native.get()?.upgrade()
     }
 
     /// What the server said of its winding down.

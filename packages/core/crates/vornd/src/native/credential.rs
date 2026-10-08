@@ -47,7 +47,7 @@ fn text(params: &Value, key: &str) -> Option<String> {
 /// Answers `method`.
 pub async fn answer(native: &Arc<Native>, method: &str, params: Value) -> Answer {
     if native.database().is_none() {
-        return Answer::Forward;
+        return super::no_database();
     }
     let n = Arc::clone(native);
     let m = method.to_owned();

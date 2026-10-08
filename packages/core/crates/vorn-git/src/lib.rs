@@ -67,6 +67,10 @@ pub enum Error {
         bin: String,
         limit: usize,
     },
+    /// A command on a remote host failed, in the words a failed `execFile` has.
+    Remote {
+        message: String,
+    },
     /// A file system call around git failed, such as making the directory a
     /// worktree goes in.
     Fs {
@@ -80,6 +84,7 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Error::Remote { message } => f.write_str(message),
             Error::Failed { command, stderr } if stderr.is_empty() => {
                 write!(f, "Command failed: {command}")
             }

@@ -1,13 +1,14 @@
 /**
  * vornd's own answers to the `git:`, `file:` and `ide:` calls, against the
- * server's answers to the same calls.
+ * answers the server's TypeScript gave to the same calls, recorded before it
+ * was removed (`fixtures/js-reference/git-calls.json`, rerecorded with
+ * `VORN_RECORD_JS_REFERENCE=1` against a server that still has them).
  *
- * One server is started, and three vornds in front of it: one answering
- * them itself, one with the desktop's launch token as well, and
- * one shadowing the same groups. Every call is made directly to the server
- * and through vornd, and the two frames a client receives must be the same
- * but for the differences `helpers/git-parity` names. A call that changes a
- * repository is made once on each side, on two copies of the same fixture.
+ * One server is started, and two vornds in front of it: one answering the
+ * calls itself, and one with the desktop's launch token as well. The frames a
+ * client receives must equal the recorded ones but for the differences
+ * `helpers/git-parity` names. A call that changes a repository is made on a
+ * copy of the fixture of its own.
  *
  * Runs where vornd has been built (`yarn build:core`, or the binary in
  * `VORN_CONFORMANCE_VORND`).
@@ -20,6 +21,7 @@ import { createInterface } from 'node:readline'
 import Database from 'libsql'
 import WebSocket from 'ws'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { JsReference, posixSeparators } from './helpers/js-reference'
 import {
   answerOf,
   fileMtime,
@@ -293,7 +295,7 @@ let serverPort: number
 let closeServer: () => Promise<void>
 let native: Vornd | undefined
 let desktop: Vornd | undefined
-let shadow: Vornd | undefined
+const reference = new JsReference('git-calls')
 let reads: Fixture
 let mine: Fixture
 let theirs: Fixture
@@ -322,17 +324,12 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
     desktop = await startVornd(serverPort, ['--db', db], {
       VORND_DESKTOP_TOKEN: TEST_CREDENTIAL
     })
-    shadow = await startVornd(serverPort, [
-      '--groups',
-      'git=shadow,file=shadow,ide=shadow',
-      '--db',
-      db
-    ])
   }, 60_000)
 
   afterAll(async () => {
     delete process.env.SECRET_VORN_BOOTSTRAP_TOKEN
-    await Promise.all([stopVornd(native), stopVornd(desktop), stopVornd(shadow)])
+    reference.save()
+    await Promise.all([stopVornd(native), stopVornd(desktop)])
     await closeServer?.()
     for (const dir of [reads?.root, mine?.root, theirs?.root, storeDir]) {
       if (dir) fs.rmSync(dir, { recursive: true, force: true })
@@ -386,16 +383,27 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
     await through.call('config:load')
     try {
       for (const [method, params] of readCalls()) {
-        const want = answerOf(await direct.call(method, params))
-        const got = answerOf(await through.call(method, params))
-        expect(got, `${method} ${JSON.stringify(params)}`).toEqual(want)
+        const read = (a: Answer): Answer => {
+          const rooted = posixSeparators(fixtureRoot(a, reads.root))
+          return method === 'file:stamp' ? fileMtime(rooted) : rooted
+        }
+        const key = `${method} ${JSON.stringify(posixSeparators(fixtureRoot(params ?? null, reads.root)))}`
+        const got = read(answerOf(await through.call(method, params)))
+        // The editors installed are this machine's.
+        if (method === 'ide:detect') {
+          expect(Array.isArray(got.result), `${key}`).toBe(true)
+          continue
+        }
+        const want = await reference.want(key, async () =>
+          read(answerOf(await direct.call(method, params)))
+        )
+        expect(got, `${key}`).toEqual(want)
       }
-      const opened = answerOf(
-        await through.call('ide:open', { ideId: 'no-such-editor', projectPath: reads.repo })
-      )
+      const open = { ideId: 'no-such-editor', projectPath: reads.repo }
+      const opened = answerOf(await through.call('ide:open', open))
       expect(opened).toEqual(
-        answerOf(
-          await direct.call('ide:open', { ideId: 'no-such-editor', projectPath: reads.repo })
+        await reference.want('ide:open no-such-editor', async () =>
+          answerOf(await direct.call('ide:open', open))
         )
       )
       expect(opened).not.toHaveProperty('result')
@@ -428,13 +436,13 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
     await through.client.call('config:load')
 
     /** Makes one call on each side and compares the answers. */
+    let steps = 0
     const step = async (
       method: string,
       params: (s: Side) => unknown,
       extra: (a: Answer) => Answer = (a) => a
     ): Promise<void> => {
-      const answers: Answer[] = []
-      for (const side of [server, through]) {
+      const run = async (side: Side): Promise<Answer> => {
         const p = params(side)
         const answer = answerOf(await side.client.call(method, p))
         if (method === 'git:createWorktree') {
@@ -442,9 +450,11 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
           const made = (answer.result as { worktreePath?: string } | undefined)?.worktreePath
           if (made) side.worktrees.push(made)
         }
-        answers.push(extra(worktreeMadeUp(fixtureRoot(answer, side.f.root), side.made)))
+        return extra(posixSeparators(worktreeMadeUp(fixtureRoot(answer, side.f.root), side.made)))
       }
-      expect(answers[1], `${method} ${JSON.stringify(params(server))}`).toEqual(answers[0])
+      const key = `change ${++steps} ${method}`
+      const want = await reference.want(key, () => run(server))
+      expect(await run(through), `${key}`).toEqual(want)
     }
 
     try {
@@ -521,30 +531,33 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
       server.client.close()
       through.client.close()
     }
-    expect(sh(theirs.repo, 'log', '--format=%s')).toBe(sh(mine.repo, 'log', '--format=%s'))
+    expect(sh(theirs.repo, 'log', '--format=%s')).toBe(
+      await reference.want('change log', async () => sh(mine.repo, 'log', '--format=%s'))
+    )
     expect(sh(path.join(theirs.root, 'origin.git'), 'log', '--format=%s', 'main')).toBe(
-      sh(path.join(mine.root, 'origin.git'), 'log', '--format=%s', 'main')
+      await reference.want('change pushed', async () =>
+        sh(path.join(mine.root, 'origin.git'), 'log', '--format=%s', 'main')
+      )
     )
   })
 
-  it('leaves the calls only the server can answer to the server', async () => {
+  it('answers a remote host it cannot read as this machine, and forwards nothing', async () => {
     const through = await Client.open(native!.port)
     await through.call('config:load')
-    const before = await counts(native!)
-    // A project on a remote host, a file on one, and a call that moves the
-    // server's sessions to another branch while the server holds them.
-    await through.call('git:listBranches', '/srv/remote-project')
-    await through.call('git:diffStat', '/srv/remote-project/sub')
-    await through.call('file:listDir', { dirPath: reads.repo, remoteHostId: 'host-1' })
-    await through.call('git:renameWorktreeBranch', {
+    // A host the store does not have is no host: the server read it as this machine too.
+    const listed = await through.call('file:listDir', {
+      dirPath: reads.repo,
+      remoteHostId: 'host-1'
+    })
+    expect(Array.isArray(listed.result)).toBe(true)
+    const renamed = await through.call('git:renameWorktreeBranch', {
       worktreePath: path.join(reads.root, 'missing'),
       newBranch: 'x'
     })
+    expect(renamed.result).toBe(false)
     through.close()
     const after = await counts(native!)
-    expect((after.git?.forwarded ?? 0) - (before.git?.forwarded ?? 0)).toBe(3)
-    expect(after.git?.native ?? 0).toBe(before.git?.native ?? 0)
-    expect((after.file?.forwarded ?? 0) - (before.file?.forwarded ?? 0)).toBe(1)
+    for (const group of ['git', 'file', 'ide']) expect(after[group]?.forwarded ?? 0).toBe(0)
   })
 
   it('answers only once the server has admitted the socket', async () => {
@@ -574,36 +587,5 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
     const after = await counts(desktop!)
     expect((after.git?.native ?? 0) - (before.git?.native ?? 0)).toBe(1)
     through.close()
-  })
-
-  it('shadows every call that changes nothing and finds no difference', async () => {
-    const direct = await Client.open(serverPort)
-    const through = await Client.open(shadow!.port)
-    await through.call('config:load')
-    try {
-      for (const [method, params] of readCalls()) {
-        const want = answerOf(await direct.call(method, params))
-        const got = answerOf(await through.call(method, params))
-        expect(got, `${method} ${JSON.stringify(params)}`).toEqual(want)
-      }
-    } finally {
-      direct.close()
-      through.close()
-    }
-    // Shadow answers settle after the server's; wait for the counts to stop moving.
-    let groups = await counts(shadow!)
-    for (let tries = 0; tries < 50; tries++) {
-      await new Promise((r) => setTimeout(r, 100))
-      const next = await counts(shadow!)
-      const settled = JSON.stringify(next) === JSON.stringify(groups)
-      groups = next
-      if (settled && tries > 2) break
-    }
-    for (const group of ['git', 'file', 'ide']) {
-      expect(groups[group]?.mode).toBe('shadow')
-      expect(groups[group]?.native ?? 0).toBe(0)
-      expect(groups[group]?.shadowMismatched ?? 0).toBe(0)
-      expect(groups[group]?.shadowMatched ?? 0).toBeGreaterThan(0)
-    }
   })
 })

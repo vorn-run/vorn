@@ -37,6 +37,34 @@ pub(crate) fn canonical(p: &str) -> String {
         .into_owned()
 }
 
+/// [`canonical`] for a remote host's path: only trailing slashes go.
+pub(crate) fn canonical_remote(p: &str) -> String {
+    p.trim_end_matches('/').to_owned()
+}
+
+/// [`assert_removable_path`] for a remote host's POSIX path, taken as written.
+pub fn assert_removable_remote_path(target: &str) -> Result<(), String> {
+    refuse_empty(target)?;
+    let segments: Vec<&str> = target.split('/').filter(|s| !s.is_empty()).collect();
+    check_segments(target, &segments)
+}
+
+/// [`assert_inside_worktree`] for a remote host's POSIX paths.
+pub fn assert_inside_remote_worktree(target: &str, worktree: &str) -> Result<(), String> {
+    refuse_empty(target)?;
+    let root = canonical_remote(worktree);
+    let resolved = canonical_remote(target);
+    let beneath = resolved
+        .strip_prefix(&root)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
+    if !beneath {
+        return Err(format!(
+            "Refusing to delete {target}: outside the worktree at {worktree}"
+        ));
+    }
+    Ok(())
+}
+
 fn refuse_empty(target: &str) -> Result<(), String> {
     if target.trim().is_empty() {
         return Err("Refusing to delete an empty path".into());
@@ -55,6 +83,11 @@ pub fn assert_removable_path(target: &str) -> Result<(), String> {
         .split(MAIN_SEPARATOR)
         .filter(|s| !s.is_empty())
         .collect();
+    check_segments(target, &segments)
+}
+
+/// At least `.vorn-worktrees/<project>/<worktree>`, never the root or a whole project's folder.
+fn check_segments(target: &str, segments: &[&str]) -> Result<(), String> {
     let Some(root) = segments.iter().rposition(|s| *s == WORKTREE_ROOT_SEGMENT) else {
         return Err(format!(
             "Refusing to delete a path outside {WORKTREE_ROOT_SEGMENT}: {target}"

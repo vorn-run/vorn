@@ -19,7 +19,7 @@ use vorn_agents::{detect, Agent, AgentCommand, ProbeContext};
 use vorn_git::repo::Git;
 use vorn_store::AgentSettings;
 
-use super::{env, Answer, Native};
+use super::{bad_params, env, Answer, Native};
 
 /// Answers `method` with `params`.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
@@ -29,6 +29,19 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
         "sessions:getRecent" => recent_sessions(native, params),
         _ => Answer::Forward,
     }
+}
+
+/// The error for settings vornd could not read.
+pub(super) fn no_settings() -> Answer {
+    Answer::Error("vornd could not read the settings".to_owned())
+}
+
+/// The error for a stored agent command of a shape the server's code would not read.
+pub(super) fn unreadable_command(agent: Agent) -> Answer {
+    Answer::Error(format!(
+        "the {} command in the settings cannot be read",
+        agent.id()
+    ))
 }
 
 /// The settings, or why vornd cannot answer without them.
@@ -76,13 +89,13 @@ pub(super) fn command_of(settings: &AgentSettings, agent: Agent) -> Option<Agent
 
 fn detect_installed(native: &Native) -> Answer {
     let Some(settings) = settings(native) else {
-        return Answer::Forward;
+        return no_settings();
     };
     let mut commands = HashMap::with_capacity(Agent::ALL.len());
     for agent in Agent::ALL {
         match command_of(&settings, agent) {
             Some(command) => commands.insert(agent, command),
-            None => return Answer::Forward,
+            None => return unreadable_command(agent),
         };
     }
     let env = native.env.get();
@@ -120,13 +133,13 @@ fn truthy(v: Option<&Value>) -> bool {
 
 fn list_models(native: &Native, params: &Value) -> Answer {
     let Value::Object(request) = params else {
-        return Answer::Forward;
+        return bad_params("agent:listModels");
     };
     let project_path = match request.get("projectPath") {
         Some(Value::String(s)) => s.clone(),
         v if !truthy(v) => String::new(),
         // Not a string: the server's handler throws on it.
-        _ => return Answer::Forward,
+        _ => return bad_params("agent:listModels"),
     };
     let request = ModelRequest {
         agent: request
@@ -146,13 +159,13 @@ fn list_models(native: &Native, params: &Value) -> Answer {
     let (agent, command, env) = match request.agent {
         Some(agent) if askable => {
             if !Path::new(&request.project_path).is_absolute() {
-                return Answer::Forward;
+                return bad_params("agent:listModels");
             }
             let Some(settings) = settings(native) else {
-                return Answer::Forward;
+                return no_settings();
             };
             let Some(command) = command_of(&settings, agent) else {
-                return Answer::Forward;
+                return unreadable_command(agent);
             };
             let data_dir = native.db.get().and_then(|db| db.parent());
             let env = native.env.launch(&settings.env_passthrough, data_dir);
@@ -199,17 +212,20 @@ fn recent_sessions(native: &Native, params: &Value) -> Answer {
         Value::String(s) if !s.is_empty() => Some(s.as_str()),
         v if !truthy(Some(v)) => None,
         // Not a path: the server's handler throws on it.
-        _ => return Answer::Forward,
+        _ => return bad_params("sessions:getRecent"),
     };
     let Some(homes) = Homes::from_env() else {
-        return Answer::Forward;
+        return Answer::Result(Value::Array(Vec::new()));
     };
     let scope = match project {
-        Some(project) if !Path::new(project).is_absolute() => return Answer::Forward,
+        Some(project) if !Path::new(project).is_absolute() => {
+            return bad_params("sessions:getRecent")
+        }
         Some(project) => {
             let git = Git {
                 bin: native.env.git_bin(),
                 env: native.env.get(),
+                ssh: None,
             };
             let worktrees = git.list_worktrees(Path::new(project));
             Some(ProjectScope::new(
@@ -256,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn answers_what_needs_no_settings_and_forwards_the_rest() {
+    fn answers_what_needs_no_settings_and_refuses_the_rest() {
         let native = Native::new();
         // Nothing to ask: answered whatever the database.
         let gemini = native.call(
@@ -273,30 +289,23 @@ mod tests {
                 "agent:listModels",
                 &json!({ "agentType": "claude", "projectPath": "/p" })
             ),
-            Answer::Forward
+            no_settings()
         );
+        let bad = bad_params("agent:listModels");
         assert_eq!(
             native.call(
                 "agent:listModels",
                 &json!({ "agentType": "claude", "projectPath": "rel" })
             ),
-            Answer::Forward
+            bad
         );
-        assert_eq!(
-            native.call("agent:listModels", &json!(null)),
-            Answer::Forward
-        );
+        assert_eq!(native.call("agent:listModels", &json!(null)), bad);
         assert_eq!(
             native.call("agent:detectInstalled", &json!(null)),
-            Answer::Forward
+            no_settings()
         );
-        assert_eq!(
-            native.call("sessions:getRecent", &json!(5)),
-            Answer::Forward
-        );
-        assert_eq!(
-            native.call("sessions:getRecent", &json!("rel")),
-            Answer::Forward
-        );
+        let recent = bad_params("sessions:getRecent");
+        assert_eq!(native.call("sessions:getRecent", &json!(5)), recent);
+        assert_eq!(native.call("sessions:getRecent", &json!("rel")), recent);
     }
 }

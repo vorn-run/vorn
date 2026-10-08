@@ -304,21 +304,16 @@ describe('server integration', () => {
       return { status: res.status, json: await res.json().catch(() => null) }
     }
 
-    /** Ask the server, over an authenticated socket, for a code to show. */
+    // vornd answers `pairing:*` now; these routes are the server's own pairing, started here directly.
     const startPairing = async (): Promise<string> => {
-      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
-      await new Promise<void>((r) => ws.on('open', r))
-      const reply = await sendRpc(ws, 501, 'pairing:start')
-      const { code } = reply.result as { code: string }
-      ws.close()
-      return code
+      const { startPairing: start } = await import('../packages/server/src/pairing')
+      return start().code
     }
 
     const decide = async (method: string, requestId: string): Promise<void> => {
-      const ws = new WebSocket(`ws://127.0.0.1:${serverPort}/ws`, authOptions())
-      await new Promise<void>((r) => ws.on('open', r))
-      await sendRpc(ws, 502, method, { requestId })
-      ws.close()
+      const pairing = await import('../packages/server/src/pairing')
+      if (method === 'pairing:approve') pairing.approveRequest(requestId)
+      else pairing.denyRequest(requestId)
     }
 
     it('refuses a request that is not JSON, so a form post cannot reach it', async () => {
