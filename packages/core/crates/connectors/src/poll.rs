@@ -71,12 +71,16 @@ impl McpPoll {
                         .collect();
                 }
                 Ok(_) => return Err("Invalid pollArgs JSON: pollArgs must be a JSON object".into()),
-                Err(err) => return Err(format!("Invalid pollArgs JSON: {}", json_error(raw, &err))),
+                Err(err) => {
+                    return Err(format!("Invalid pollArgs JSON: {}", json_error(raw, &err)))
+                }
             }
         }
         if let Some(arg) = &self.cursor_arg {
             if UNSAFE_KEYS.contains(&arg.as_str()) {
-                return Err(format!("Cursor argument \"{arg}\" is not a usable argument name"));
+                return Err(format!(
+                    "Cursor argument \"{arg}\" is not a usable argument name"
+                ));
             }
             if let Some(cursor) = cursor {
                 args.insert(arg.clone(), json!(cursor));
@@ -128,7 +132,10 @@ impl McpPoll {
             }));
         }
         let next_cursor = if self.cursor_arg.is_some() {
-            let next = walk(output, Some(self.cursor_path.as_deref().unwrap_or("nextCursor")));
+            let next = walk(
+                output,
+                Some(self.cursor_path.as_deref().unwrap_or("nextCursor")),
+            );
             match next {
                 Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
                 _ => cursor.map(str::to_owned),
@@ -148,7 +155,10 @@ impl McpPoll {
     /// The connection's filters with a seeded starting cursor taken out of
     /// its poll arguments, for a backfill that starts at the beginning.
     pub fn without_seed_cursor(&self, filters: &Map<String, Value>) -> Map<String, Value> {
-        let (Some(arg), Some(raw)) = (&self.cursor_arg, filters.get("pollArgs").and_then(Value::as_str)) else {
+        let (Some(arg), Some(raw)) = (
+            &self.cursor_arg,
+            filters.get("pollArgs").and_then(Value::as_str),
+        ) else {
             return filters.clone();
         };
         if !raw.contains(arg.as_str()) {
@@ -205,7 +215,10 @@ pub fn event_item(event: &Value) -> Item {
     };
     let either = |a: &str, b: &str| data.get(a).filter(|v| !v.is_null()).or_else(|| data.get(b));
     Item {
-        external_id: s(data.get("externalId").filter(|v| !v.is_null()).or_else(|| event.get("id"))),
+        external_id: s(data
+            .get("externalId")
+            .filter(|v| !v.is_null())
+            .or_else(|| event.get("id"))),
         title: s(data.get("title")),
         description: s(either("description", "body")),
         external_url: s(data.get("url")),
@@ -232,7 +245,10 @@ pub fn sdk_page(page: &Map<String, Value>, now: &str) -> Page {
         .collect();
     Page {
         events,
-        next_cursor: page.get("nextCursor").and_then(Value::as_str).map(str::to_owned),
+        next_cursor: page
+            .get("nextCursor")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         has_more: page.get("hasMore") == Some(&Value::Bool(true)),
     }
 }
@@ -265,12 +281,20 @@ pub fn inbox_events(conn: &Value, events: &[Value]) -> Vec<Value> {
         .map(|event| {
             let data = event.get("data").cloned().unwrap_or_else(|| json!({}));
             let external = match data.get("externalId") {
-                None | Some(Value::Null) => event.get("id").map_or_else(|| "undefined".into(), js::to_string),
+                None | Some(Value::Null) => event
+                    .get("id")
+                    .map_or_else(|| "undefined".into(), js::to_string),
                 Some(v) => js::to_string(v),
             };
             let mut item = Map::new();
-            item.insert("connectionId".into(), conn.get("id").cloned().unwrap_or(Value::Null));
-            item.insert("connectorId".into(), conn.get("connectorId").cloned().unwrap_or(Value::Null));
+            item.insert(
+                "connectionId".into(),
+                conn.get("id").cloned().unwrap_or(Value::Null),
+            );
+            item.insert(
+                "connectorId".into(),
+                conn.get("connectorId").cloned().unwrap_or(Value::Null),
+            );
             item.insert("externalId".into(), json!(external));
             if let Some(url) = data.get("url").filter(|u| u.is_string()) {
                 item.insert("externalUrl".into(), url.clone());
@@ -305,16 +329,32 @@ mod tests {
 
     #[test]
     fn reads_arguments_and_refuses_the_prototype() {
-        let cfg = poll(json!({ "pollTool": "list", "pollArgs": "{\"a\":1,\"__proto__\":2}", "cursorArg": "after" }));
-        assert_eq!(Value::Object(cfg.arguments(None).unwrap()), json!({ "a": 1 }));
-        assert_eq!(Value::Object(cfg.arguments(Some("c")).unwrap()), json!({ "a": 1, "after": "c" }));
-        assert!(poll(json!({ "pollArgs": "[1]" })).arguments(None).unwrap_err().contains("must be a JSON object"));
-        assert!(poll(json!({ "cursorArg": "constructor" })).arguments(None).unwrap_err().contains("not a usable argument name"));
+        let cfg = poll(
+            json!({ "pollTool": "list", "pollArgs": "{\"a\":1,\"__proto__\":2}", "cursorArg": "after" }),
+        );
+        assert_eq!(
+            Value::Object(cfg.arguments(None).unwrap()),
+            json!({ "a": 1 })
+        );
+        assert_eq!(
+            Value::Object(cfg.arguments(Some("c")).unwrap()),
+            json!({ "a": 1, "after": "c" })
+        );
+        assert!(poll(json!({ "pollArgs": "[1]" }))
+            .arguments(None)
+            .unwrap_err()
+            .contains("must be a JSON object"));
+        assert!(poll(json!({ "cursorArg": "constructor" }))
+            .arguments(None)
+            .unwrap_err()
+            .contains("not a usable argument name"));
     }
 
     #[test]
     fn filters_by_timestamp_and_keeps_items_at_the_cursor() {
-        let cfg = poll(json!({ "pollTool": "list", "itemsPath": "data.items", "idField": "id", "timestampField": "at", "titleField": "name" }));
+        let cfg = poll(
+            json!({ "pollTool": "list", "itemsPath": "data.items", "idField": "id", "timestampField": "at", "titleField": "name" }),
+        );
         let output = json!({ "data": { "items": [
             { "id": 1, "at": "2030-01-01", "name": "old" },
             { "id": 2, "at": "2030-01-02", "name": "same" },
@@ -327,7 +367,10 @@ mod tests {
         assert_eq!(page.next_cursor.as_deref(), Some("2030-01-03"));
         assert_eq!(page.events[1]["data"]["title"], "new");
         assert_eq!(page.events[1]["data"]["externalId"], "3");
-        assert!(cfg.page(None, &json!({ "data": {} }), "now").unwrap_err().contains("itemsPath \"data.items\""));
+        assert!(cfg
+            .page(None, &json!({ "data": {} }), "now")
+            .unwrap_err()
+            .contains("itemsPath \"data.items\""));
     }
 
     #[test]
@@ -338,7 +381,9 @@ mod tests {
         assert_eq!(page.next_cursor.as_deref(), Some("x"));
         let page = cfg.page(None, &json!({ "nextCursor": "n" }), "now");
         assert!(page.is_err());
-        let page = poll(json!({ "pollTool": "t" })).page(None, &json!([{ "k": 1 }]), "now").unwrap();
+        let page = poll(json!({ "pollTool": "t" }))
+            .page(None, &json!([{ "k": 1 }]), "now")
+            .unwrap();
         assert_eq!(page.events[0]["id"], "{\"k\":1}");
         assert_eq!(page.next_cursor, None);
     }
@@ -361,8 +406,20 @@ mod tests {
         assert_eq!(rows[0]["connectorItem"]["externalId"], "e1");
         assert_eq!(rows[0]["connectorItem"]["externalUrl"], "u");
         let item = sdk_item(&json!({ "externalId": 5, "updatedAt": "t" }), "now");
-        assert_eq!((item.external_id.as_str(), item.updated_at.as_str()), ("5", "t"));
-        let back = event_item(&json!({ "id": "i", "timestamp": "t", "data": { "body": "b", "state": "open" } }));
-        assert_eq!((back.external_id.as_str(), back.description.as_str(), back.status_raw.as_str()), ("i", "b", "open"));
+        assert_eq!(
+            (item.external_id.as_str(), item.updated_at.as_str()),
+            ("5", "t")
+        );
+        let back = event_item(
+            &json!({ "id": "i", "timestamp": "t", "data": { "body": "b", "state": "open" } }),
+        );
+        assert_eq!(
+            (
+                back.external_id.as_str(),
+                back.description.as_str(),
+                back.status_raw.as_str()
+            ),
+            ("i", "b", "open")
+        );
     }
 }

@@ -238,7 +238,6 @@ pub mod fixture {
         .unwrap();
         dir
     }
-
 }
 
 #[cfg(test)]

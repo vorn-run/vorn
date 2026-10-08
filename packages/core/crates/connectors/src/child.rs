@@ -538,7 +538,9 @@ fn call_error(method: &str, error: &Value) -> CallError {
             .and_then(Value::as_str)
             .filter(|k| ERROR_KINDS.contains(k))
             .map(str::to_owned),
-        retryable: data.and_then(|d| d.get("retryable")).and_then(Value::as_bool),
+        retryable: data
+            .and_then(|d| d.get("retryable"))
+            .and_then(Value::as_bool),
         field: data
             .and_then(|d| d.get("field"))
             .and_then(Value::as_str)
@@ -597,7 +599,10 @@ mod tests {
             panic!("an answered error");
         };
         assert_eq!(data.kind.as_deref(), Some("signed-out"));
-        assert_eq!((data.retryable, data.field.as_deref()), (Some(true), Some("f")));
+        assert_eq!(
+            (data.retryable, data.field.as_deref()),
+            (Some(true), Some("f"))
+        );
         let CallError::Answered { data, .. } =
             call_error("m", &json!({ "message": "x", "data": { "kind": "odd" } }))
         else {

@@ -28,7 +28,13 @@ pub struct Profile {
 impl Profile {
     /// From a profile connection's filters and its secret.
     pub fn of(filters: &Map<String, Value>, secret: Option<&str>) -> Profile {
-        let s = |k: &str| filters.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
+        let s = |k: &str| {
+            filters
+                .get(k)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned()
+        };
         Profile {
             base_url: s("baseUrl"),
             auth_header: s("authHeader"),
@@ -41,14 +47,22 @@ impl Profile {
 
 /// Why a profile cannot sign: its secret is stored but cannot be read here.
 pub fn locked_error(filters: &Map<String, Value>, secret_readable: bool) -> Option<String> {
-    let stored = filters.get("secret").and_then(Value::as_str).is_some_and(|s| !s.is_empty());
+    let stored = filters
+        .get("secret")
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.is_empty());
     (stored && !secret_readable).then(|| {
-        "This profile's secret is locked - decryption is unavailable or has not synced yet.".to_owned()
+        "This profile's secret is locked - decryption is unavailable or has not synced yet."
+            .to_owned()
     })
 }
 
 /// Why a connection cannot sign a request: not a profile, or a locked one.
-pub fn profile_error(connector_id: &str, filters: &Map<String, Value>, secret_readable: bool) -> Option<String> {
+pub fn profile_error(
+    connector_id: &str,
+    filters: &Map<String, Value>,
+    secret_readable: bool,
+) -> Option<String> {
     if connector_id != crate::connections::HTTP {
         return Some(format!(
             "Connection belongs to the {connector_id} connector, not an HTTP auth profile"
@@ -72,7 +86,11 @@ pub fn prepare(
 ) -> Result<Request, Value> {
     let method = method.to_uppercase();
     if !METHODS.contains(&method.as_str()) {
-        let shown = if method.is_empty() { "(none)" } else { method.as_str() };
+        let shown = if method.is_empty() {
+            "(none)"
+        } else {
+            method.as_str()
+        };
         return Err(failure(format!("Invalid HTTP method: {shown}")));
     }
     let base = match profile.base_url.as_str() {
@@ -117,7 +135,11 @@ pub fn prepare(
             .filter(|(k, _)| *k != name)
             .map(|(k, v)| (k.into_owned(), v.into_owned()))
             .collect();
-        target.query_pairs_mut().clear().extend_pairs(kept).append_pair(&name, &value);
+        target
+            .query_pairs_mut()
+            .clear()
+            .extend_pairs(kept)
+            .append_pair(&name, &value);
     }
     let mut body = body;
     let auth_body = profile.auth_body.trim();
@@ -130,7 +152,10 @@ pub fn prepare(
         if let (Ok(Value::Object(add)), Ok(Value::Object(mut merged))) = (injected, current) {
             merged.extend(add);
             body = Some(Value::Object(merged).to_string());
-            if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
+            if !headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+            {
                 headers.push(("Content-Type".into(), "application/json".into()));
             }
         }
@@ -181,7 +206,14 @@ pub fn execute(http: &Http, action: &str, profile: &Profile, args: &Map<String, 
             if profile.base_url.is_empty() {
                 return failure("Set a base URL to test this profile");
             }
-            perform(http, profile, "GET", &profile.base_url.clone(), Vec::new(), None)
+            perform(
+                http,
+                profile,
+                "GET",
+                &profile.base_url.clone(),
+                Vec::new(),
+                None,
+            )
         }
         "request" => {
             let url = s("url");
@@ -197,7 +229,9 @@ pub fn execute(http: &Http, action: &str, profile: &Profile, args: &Map<String, 
                         .collect()
                 })
                 .unwrap_or_default();
-            let method = Some(s("method")).filter(|m| !m.is_empty()).unwrap_or_else(|| "GET".into());
+            let method = Some(s("method"))
+                .filter(|m| !m.is_empty())
+                .unwrap_or_else(|| "GET".into());
             let body = Some(s("body")).filter(|b| !b.is_empty());
             perform(http, profile, &method, &url, headers, body)
         }
@@ -221,22 +255,47 @@ mod tests {
 
     #[test]
     fn signs_a_request_to_its_own_origin() {
-        let req = prepare(&profile(), "post", "items?x=1", vec![], Some(r#"{"a":1}"#.into())).unwrap();
+        let req = prepare(
+            &profile(),
+            "post",
+            "items?x=1",
+            vec![],
+            Some(r#"{"a":1}"#.into()),
+        )
+        .unwrap();
         assert_eq!(req.method, "POST");
         assert_eq!(req.url, "https://api.example.com/v1/items?x=1&key=s3cr3t");
-        assert!(req.headers.contains(&("Authorization".into(), "Bearer s3cr3t".into())));
-        assert!(req.headers.contains(&("Content-Type".into(), "application/json".into())));
+        assert!(req
+            .headers
+            .contains(&("Authorization".into(), "Bearer s3cr3t".into())));
+        assert!(req
+            .headers
+            .contains(&("Content-Type".into(), "application/json".into())));
         assert_eq!(req.body.as_deref(), Some(r#"{"a":1,"token":"s3cr3t"}"#));
     }
 
     #[test]
     fn refuses_another_origin_and_odd_methods() {
-        let refused = prepare(&profile(), "GET", "https://evil.example/x", vec![], None).unwrap_err();
+        let refused =
+            prepare(&profile(), "GET", "https://evil.example/x", vec![], None).unwrap_err();
         assert_eq!(refused["error"], "This profile only signs requests to https://api.example.com; refusing https://evil.example");
-        assert_eq!(prepare(&profile(), "TRACE", "/", vec![], None).unwrap_err()["error"], "Invalid HTTP method: TRACE");
-        assert_eq!(prepare(&Profile::default(), "GET", "nope", vec![], None).unwrap_err()["error"], "Invalid URL: nope");
+        assert_eq!(
+            prepare(&profile(), "TRACE", "/", vec![], None).unwrap_err()["error"],
+            "Invalid HTTP method: TRACE"
+        );
+        assert_eq!(
+            prepare(&Profile::default(), "GET", "nope", vec![], None).unwrap_err()["error"],
+            "Invalid URL: nope"
+        );
         // No injection, so any URL may be asked; a GET carries no body.
-        let plain = prepare(&Profile::default(), "GET", "https://x.example/", vec![], Some("b".into())).unwrap();
+        let plain = prepare(
+            &Profile::default(),
+            "GET",
+            "https://x.example/",
+            vec![],
+            Some("b".into()),
+        )
+        .unwrap();
         assert_eq!(plain.body, None);
     }
 
@@ -250,7 +309,13 @@ mod tests {
             profile_error("mcp", stored, true).unwrap(),
             "Connection belongs to the mcp connector, not an HTTP auth profile"
         );
-        assert_eq!(execute(&Http, "test", &Profile::default(), &Map::new())["error"], "Set a base URL to test this profile");
-        assert_eq!(execute(&Http, "nope", &Profile::default(), &Map::new())["error"], "Unknown action: nope");
+        assert_eq!(
+            execute(&Http, "test", &Profile::default(), &Map::new())["error"],
+            "Set a base URL to test this profile"
+        );
+        assert_eq!(
+            execute(&Http, "nope", &Profile::default(), &Map::new())["error"],
+            "Unknown action: nope"
+        );
     }
 }

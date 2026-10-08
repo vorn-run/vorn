@@ -25,8 +25,13 @@ pub trait Runner: Send + Sync {
     /// The executable `name` resolves to, if it is installed.
     fn resolve(&self, name: &str) -> Option<PathBuf>;
     /// Runs it, answering stdout and stderr, or why it failed (first line only).
-    fn run(&self, file: &PathBuf, args: &[String], env: &[(String, String)], timeout: Duration)
-        -> Result<(String, String), String>;
+    fn run(
+        &self,
+        file: &PathBuf,
+        args: &[String],
+        env: &[(String, String)],
+        timeout: Duration,
+    ) -> Result<(String, String), String>;
     /// This machine's value of `name`.
     fn var(&self, name: &str) -> Option<String>;
     /// The environment every child starts from.
@@ -54,7 +59,8 @@ fn borrow_env(auth: Option<&Value>) -> Vec<String> {
 
 fn never_borrowed(name: &str) -> bool {
     let upper = name.to_uppercase();
-    NEVER_BORROWED_KEYS.contains(&upper.as_str()) || NEVER_BORROWED_PREFIXES.iter().any(|p| upper.starts_with(p))
+    NEVER_BORROWED_KEYS.contains(&upper.as_str())
+        || NEVER_BORROWED_PREFIXES.iter().any(|p| upper.starts_with(p))
 }
 
 fn credential_name(name: &str) -> bool {
@@ -86,7 +92,10 @@ pub fn borrowable_names(source: &Source) -> Vec<String> {
         .filter(|n| !is_stripped(n))
         .collect();
     for asked in borrow_env(source.auth.as_ref()) {
-        if !allowed.iter().any(|n| n.to_uppercase() == asked.to_uppercase()) {
+        if !allowed
+            .iter()
+            .any(|n| n.to_uppercase() == asked.to_uppercase())
+        {
             warn!("[auth] refused to borrow {asked}: undeclared, stripped for everyone, or a credential by name");
         }
     }
@@ -145,7 +154,9 @@ fn strip_ansi(text: &str) -> String {
 /// somebody and is not a refusal (`identityFrom`).
 pub fn identity_from(output: &str) -> Option<String> {
     let text = strip_ansi(output);
-    let negation = ["not", "cannot", "can't", "couldn't", "failed", "unable", "denied", "expired", "invalid"];
+    let negation = [
+        "not", "cannot", "can't", "couldn't", "failed", "unable", "denied", "expired", "invalid",
+    ];
     for phrase in ["account", "as"] {
         let lower = text.to_lowercase();
         let mut from = 0;
@@ -153,11 +164,19 @@ pub fn identity_from(output: &str) -> Option<String> {
             let Some(at) = lower[from..].find(phrase).map(|i| i + from) else {
                 break None;
             };
-            let before_ok = at == 0 || !lower[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_');
+            let before_ok = at == 0
+                || !lower[..at]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|c| c.is_alphanumeric() || c == '_');
             let rest = &text[at + phrase.len()..];
             let spaced = rest.chars().next().is_some_and(char::is_whitespace);
             if before_ok && spaced {
-                let word: String = rest.trim_start().chars().take_while(|c| !c.is_whitespace()).collect();
+                let word: String = rest
+                    .trim_start()
+                    .chars()
+                    .take_while(|c| !c.is_whitespace())
+                    .collect();
                 if !word.is_empty() {
                     break Some((at, word));
                 }
@@ -180,7 +199,10 @@ pub fn identity_from(output: &str) -> Option<String> {
 
 /// What to run to sign in: a status command's `login`, else the tool itself.
 pub fn sign_in_command(auth: &Value) -> String {
-    let command = auth.pointer("/probe/command").and_then(Value::as_str).unwrap_or("");
+    let command = auth
+        .pointer("/probe/command")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let args: Vec<&str> = auth
         .pointer("/probe/args")
         .and_then(Value::as_array)
@@ -267,7 +289,11 @@ pub fn probe(source: &Source, runner: &dyn Runner) -> Value {
 /// What a `cli` connector's child starts with: the names it may borrow that
 /// this machine has, and its token fetched fresh (`borrowedSecrets`).
 pub fn borrowed_secrets(source: &Source, runner: &dyn Runner) -> Vec<(String, String)> {
-    let Some(auth) = source.auth.as_ref().filter(|a| a.get("rung").and_then(Value::as_str) == Some("cli")) else {
+    let Some(auth) = source
+        .auth
+        .as_ref()
+        .filter(|a| a.get("rung").and_then(Value::as_str) == Some("cli"))
+    else {
         return Vec::new();
     };
     let names = borrowable_names(source);
@@ -276,7 +302,12 @@ pub fn borrowed_secrets(source: &Source, runner: &dyn Runner) -> Vec<(String, St
     }
     let mut borrowed: Vec<(String, String)> = names
         .iter()
-        .filter_map(|n| runner.var(n).filter(|v| !v.is_empty()).map(|v| (n.clone(), v)))
+        .filter_map(|n| {
+            runner
+                .var(n)
+                .filter(|v| !v.is_empty())
+                .map(|v| (n.clone(), v))
+        })
         .collect();
     let asked = auth
         .pointer("/borrow/tokenEnv")
@@ -329,9 +360,16 @@ mod tests {
 
     impl Runner for Fake {
         fn resolve(&self, name: &str) -> Option<PathBuf> {
-            self.installed.then(|| PathBuf::from(format!("/bin/{name}")))
+            self.installed
+                .then(|| PathBuf::from(format!("/bin/{name}")))
         }
-        fn run(&self, _: &PathBuf, args: &[String], _: &[(String, String)], _: Duration) -> Result<(String, String), String> {
+        fn run(
+            &self,
+            _: &PathBuf,
+            args: &[String],
+            _: &[(String, String)],
+            _: Duration,
+        ) -> Result<(String, String), String> {
             self.ran.lock().unwrap().push(args.to_vec());
             self.answer.clone().unwrap_or(Err("exit 1".into()))
         }
@@ -345,8 +383,10 @@ mod tests {
 
     fn cli() -> Source {
         Source {
-            auth: Some(json!({ "rung": "cli", "probe": { "command": "gh", "args": ["auth", "status"] },
-                               "borrow": { "env": ["GH_HOST", "MY_TOKEN", "GITHUB_TOKEN"], "tokenEnv": "my_token", "tokenArgs": ["auth", "token"] } })),
+            auth: Some(
+                json!({ "rung": "cli", "probe": { "command": "gh", "args": ["auth", "status"] },
+                               "borrow": { "env": ["GH_HOST", "MY_TOKEN", "GITHUB_TOKEN"], "tokenEnv": "my_token", "tokenArgs": ["auth", "token"] } }),
+            ),
             declared: vec!["GH_HOST".into(), "MY_TOKEN".into(), "GITHUB_TOKEN".into()],
             trusted: false,
         }
@@ -354,24 +394,42 @@ mod tests {
 
     #[test]
     fn reads_who_a_tool_says_is_signed_in() {
-        assert_eq!(identity_from("Logged in to github.com account octo (keyring)").as_deref(), Some("octo"));
-        assert_eq!(identity_from("\u{1b}[32m✓\u{1b}[0m Logged in as Octo."), Some("Octo".into()));
+        assert_eq!(
+            identity_from("Logged in to github.com account octo (keyring)").as_deref(),
+            Some("octo")
+        );
+        assert_eq!(
+            identity_from("\u{1b}[32m✓\u{1b}[0m Logged in as Octo."),
+            Some("Octo".into())
+        );
         assert_eq!(identity_from("You are not logged in as anyone"), None);
         assert_eq!(identity_from("{\"token\":\"x\"}"), None);
     }
 
     #[test]
     fn says_how_to_sign_in_and_install() {
-        assert_eq!(sign_in_command(&json!({ "probe": { "command": "gh", "args": ["auth", "status"] } })), "gh auth login");
-        assert_eq!(sign_in_command(&json!({ "probe": { "command": "az" } })), "az");
+        assert_eq!(
+            sign_in_command(&json!({ "probe": { "command": "gh", "args": ["auth", "status"] } })),
+            "gh auth login"
+        );
+        assert_eq!(
+            sign_in_command(&json!({ "probe": { "command": "az" } })),
+            "az"
+        );
         assert!(install_hint("other").contains("`other`"));
     }
 
     #[test]
     fn borrows_only_what_was_declared_and_is_not_a_credential() {
         assert_eq!(borrowable_names(&cli()), ["GH_HOST", "MY_TOKEN"]);
-        let trusted = Source { trusted: true, ..cli() };
-        assert_eq!(borrowable_names(&trusted), ["GH_HOST", "MY_TOKEN", "GITHUB_TOKEN"]);
+        let trusted = Source {
+            trusted: true,
+            ..cli()
+        };
+        assert_eq!(
+            borrowable_names(&trusted),
+            ["GH_HOST", "MY_TOKEN", "GITHUB_TOKEN"]
+        );
     }
 
     #[test]
@@ -381,17 +439,42 @@ mod tests {
         assert_eq!(report["ok"], false);
         assert!(report["installHint"].as_str().is_some());
 
-        let signed_out = Fake { installed: true, ..Fake::default() };
-        assert_eq!(probe(&cli(), &signed_out)["message"], "Sign in by running `gh auth login` in your terminal.");
+        let signed_out = Fake {
+            installed: true,
+            ..Fake::default()
+        };
+        assert_eq!(
+            probe(&cli(), &signed_out)["message"],
+            "Sign in by running `gh auth login` in your terminal."
+        );
 
-        let signed_in = Fake { installed: true, answer: Some(Ok(("tok123\n".into(), "Logged in as octo".into()))), ..Fake::default() };
-        assert_eq!(probe(&cli(), &signed_in), json!({ "ok": true, "identity": "octo" }));
+        let signed_in = Fake {
+            installed: true,
+            answer: Some(Ok(("tok123\n".into(), "Logged in as octo".into()))),
+            ..Fake::default()
+        };
+        assert_eq!(
+            probe(&cli(), &signed_in),
+            json!({ "ok": true, "identity": "octo" })
+        );
         let secrets = borrowed_secrets(&cli(), &signed_in);
-        assert_eq!(secrets, [("GH_HOST".into(), "github.com".into()), ("MY_TOKEN".into(), "tok123".into())]);
-        assert_eq!(signed_in.ran.lock().unwrap().last().unwrap(), &["auth", "token"]);
+        assert_eq!(
+            secrets,
+            [
+                ("GH_HOST".into(), "github.com".into()),
+                ("MY_TOKEN".into(), "tok123".into())
+            ]
+        );
+        assert_eq!(
+            signed_in.ran.lock().unwrap().last().unwrap(),
+            &["auth", "token"]
+        );
 
         assert_eq!(probe(&Source::default(), &missing), json!({ "ok": null }));
-        let none = Source { auth: Some(json!({ "rung": "none" })), ..Source::default() };
+        let none = Source {
+            auth: Some(json!({ "rung": "none" })),
+            ..Source::default()
+        };
         assert_eq!(probe(&none, &missing)["ok"], true);
     }
 }

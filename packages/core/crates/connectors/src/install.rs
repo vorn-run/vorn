@@ -14,9 +14,9 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
+use crate::fetch::Fetch;
 use crate::manifest::{self, Kind, Manifest};
 use crate::pack::{is_safe_id, InstalledPack, PackStore, ENTRY_FILE};
-use crate::fetch::Fetch;
 use crate::sdk::outdated_message;
 
 /// Largest archive Vorn will install, matched by the SDK's own pack gate.
@@ -46,7 +46,10 @@ const RESERVED_IDS: [&str; 3] = ["mcp", "http", "sdk"];
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     File(PathBuf),
-    Url { url: String, sha256: Option<String> },
+    Url {
+        url: String,
+        sha256: Option<String>,
+    },
     /// Verified by an inspection, held under this token.
     Staged(String),
 }
@@ -58,7 +61,12 @@ impl Source {
         let Some(source) = raw.as_object() else {
             return Err("That is not a pack to install".into());
         };
-        let text = |k: &str| source.get(k).and_then(Value::as_str).filter(|s| !s.is_empty());
+        let text = |k: &str| {
+            source
+                .get(k)
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+        };
         match source.get("kind").and_then(Value::as_str) {
             Some("file") => text("path")
                 .map(|p| Source::File(PathBuf::from(p)))
@@ -106,7 +114,11 @@ fn usable_url(url: &str) -> Result<(), String> {
         .split(':')
         .next()
         .unwrap_or("");
-    if host.is_empty() || !scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c)) {
+    if host.is_empty()
+        || !scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+    {
         return Err(refused());
     }
     match scheme.to_ascii_lowercase().as_str() {
@@ -118,7 +130,6 @@ fn usable_url(url: &str) -> Result<(), String> {
 
 /// How an install is going, for the clients watching it.
 pub type Progress<'a> = &'a (dyn Fn(Value) + Send + Sync);
-
 
 struct Staged {
     staging: PathBuf,
@@ -276,7 +287,10 @@ impl Installer {
         match result {
             Ok(pack) => json!({ "ok": true, "pack": pack }),
             Err(error) => {
-                warn!("[packs] install from {} refused: {error}", source.describe());
+                warn!(
+                    "[packs] install from {} refused: {error}",
+                    source.describe()
+                );
                 report(json!({ "phase": "failed", "error": error }));
                 json!({ "ok": false, "error": error })
             }
@@ -309,7 +323,10 @@ impl Installer {
             None => None,
         };
         write_current(&dir, &manifest.version, previous.as_deref())?;
-        prune(&dir, &[Some(manifest.version.as_str()), previous.as_deref()]);
+        prune(
+            &dir,
+            &[Some(manifest.version.as_str()), previous.as_deref()],
+        );
         Ok(())
     }
 
@@ -478,16 +495,17 @@ fn read_source(
         }
         Source::Url { url, sha256 } => {
             let last = std::cell::Cell::new(-1i64);
-            let bytes = download.get(url, DOWNLOAD_TIMEOUT, MAX_PACK_BYTES, &|received, total| {
-                if total == 0 {
-                    return;
-                }
-                let percent = ((received as f64 / total as f64) * 100.0).round() as i64;
-                if percent != last.get() {
-                    last.set(percent);
-                    report(json!({ "phase": "downloading", "percent": percent }));
-                }
-            })?;
+            let bytes =
+                download.get(url, DOWNLOAD_TIMEOUT, MAX_PACK_BYTES, &|received, total| {
+                    if total == 0 {
+                        return;
+                    }
+                    let percent = ((received as f64 / total as f64) * 100.0).round() as i64;
+                    if percent != last.get() {
+                        last.set(percent);
+                        report(json!({ "phase": "downloading", "percent": percent }));
+                    }
+                })?;
             if let Some(expected) = sha256 {
                 let digest = data_encoding::HEXLOWER.encode(&Sha256::digest(&bytes));
                 if digest != expected.to_lowercase() {
@@ -554,7 +572,9 @@ pub fn is_safe_entry(path: &str, file_or_dir: bool) -> bool {
 fn unpack(archive: &[u8], dir: &Path) -> Result<(), String> {
     let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(archive));
     let mut total = 0u64;
-    let entries = tar.entries().map_err(|e| format!("The pack is not a readable archive: {e}"))?;
+    let entries = tar
+        .entries()
+        .map_err(|e| format!("The pack is not a readable archive: {e}"))?;
     for entry in entries {
         let mut entry = entry.map_err(|e| format!("The pack is not a readable archive: {e}"))?;
         let kind = entry.header().entry_type();
@@ -688,7 +708,11 @@ pub fn verify_dir(dir: &Path) -> Result<Manifest, String> {
         else {
             continue;
         };
-        let non_empty = |k: &str| pkg.get(k).and_then(Value::as_object).is_some_and(|m| !m.is_empty());
+        let non_empty = |k: &str| {
+            pkg.get(k)
+                .and_then(Value::as_object)
+                .is_some_and(|m| !m.is_empty())
+        };
         if non_empty("dependencies") {
             return Err(format!("{file} declares dependencies; a pack must carry everything it needs so it can launch with no registry"));
         }
@@ -732,7 +756,13 @@ mod tests {
 
     struct NoNetwork;
     impl Fetch for NoNetwork {
-        fn get(&self, _: &str, _: Duration, _: u64, _: &dyn Fn(u64, u64)) -> Result<Vec<u8>, String> {
+        fn get(
+            &self,
+            _: &str,
+            _: Duration,
+            _: u64,
+            _: &dyn Fn(u64, u64),
+        ) -> Result<Vec<u8>, String> {
             Err("offline".into())
         }
     }
@@ -740,7 +770,13 @@ mod tests {
     /// Bytes served from memory, as a download would serve them.
     struct Served(Vec<u8>);
     impl Fetch for Served {
-        fn get(&self, _: &str, _: Duration, _: u64, progress: &dyn Fn(u64, u64)) -> Result<Vec<u8>, String> {
+        fn get(
+            &self,
+            _: &str,
+            _: Duration,
+            _: u64,
+            progress: &dyn Fn(u64, u64),
+        ) -> Result<Vec<u8>, String> {
             let total = self.0.len() as u64;
             progress(total / 2, total);
             progress(total, total);
@@ -797,7 +833,12 @@ mod tests {
         let token = preview["preview"]["token"].as_str().unwrap().to_owned();
 
         let heard = Mutex::new(Vec::new());
-        let progress = |v: Value| heard.lock().unwrap().push(v["phase"].as_str().unwrap().to_owned());
+        let progress = |v: Value| {
+            heard
+                .lock()
+                .unwrap()
+                .push(v["phase"].as_str().unwrap().to_owned())
+        };
         let installed = installer.install(&Source::Staged(token.clone()), &NoNetwork, &progress);
         assert_eq!(installed["ok"], true, "{installed}");
         assert_eq!(installed["pack"]["version"], "1.0.0");
@@ -809,7 +850,10 @@ mod tests {
         let second = pack_file(dir.path(), "2.0.0");
         let bytes = fs::read(&second).unwrap();
         let sha = data_encoding::HEXLOWER.encode(&Sha256::digest(&bytes));
-        let url = Source::Url { url: "https://example.com/t.tgz".into(), sha256: Some(sha) };
+        let url = Source::Url {
+            url: "https://example.com/t.tgz".into(),
+            sha256: Some(sha),
+        };
         let updated = installer.install(&url, &Served(bytes.clone()), &|_| {});
         assert_eq!(updated["pack"]["version"], "2.0.0", "{updated}");
         assert_eq!(updated["pack"]["previousVersion"], "1.0.0");
@@ -818,13 +862,22 @@ mod tests {
         assert_eq!(back["pack"]["version"], "1.0.0", "{back}");
         assert_eq!(back["pack"]["previousVersion"], "2.0.0");
 
-        let wrong = Source::Url { url: "https://example.com/t.tgz".into(), sha256: Some("00".into()) };
+        let wrong = Source::Url {
+            url: "https://example.com/t.tgz".into(),
+            sha256: Some("00".into()),
+        };
         let refused = installer.install(&wrong, &Served(bytes), &|_| {});
         assert!(refused["error"].as_str().unwrap().contains("checksum"));
 
         assert_eq!(installer.remove("tickets"), json!({ "ok": true }));
-        assert_eq!(installer.remove("tickets")["error"], "tickets is not installed");
-        assert_eq!(installer.rollback("tickets")["error"], "There is no earlier version to roll back to");
+        assert_eq!(
+            installer.remove("tickets")["error"],
+            "tickets is not installed"
+        );
+        assert_eq!(
+            installer.rollback("tickets")["error"],
+            "There is no earlier version to roll back to"
+        );
     }
 
     #[test]
@@ -876,19 +929,34 @@ mod tests {
 
     #[test]
     fn reads_sources_as_the_server_did() {
-        assert_eq!(Source::parse(&json!(null)).unwrap_err(), "That is not a pack to install");
-        assert_eq!(Source::parse(&json!({ "kind": "file", "path": "" })).unwrap_err(), "That file path is empty");
-        assert_eq!(Source::parse(&json!({ "kind": "staged" })).unwrap_err(), "That pack has expired");
         assert_eq!(
-            Source::parse(&json!({ "kind": "url", "url": "http://example.com/a.tgz" })).unwrap_err(),
+            Source::parse(&json!(null)).unwrap_err(),
+            "That is not a pack to install"
+        );
+        assert_eq!(
+            Source::parse(&json!({ "kind": "file", "path": "" })).unwrap_err(),
+            "That file path is empty"
+        );
+        assert_eq!(
+            Source::parse(&json!({ "kind": "staged" })).unwrap_err(),
+            "That pack has expired"
+        );
+        assert_eq!(
+            Source::parse(&json!({ "kind": "url", "url": "http://example.com/a.tgz" }))
+                .unwrap_err(),
             "A pack is fetched over https, or from this machine"
         );
         assert_eq!(
             Source::parse(&json!({ "kind": "url", "url": "nope" })).unwrap_err(),
             "That is not a URL a pack can be fetched from"
         );
-        assert!(Source::parse(&json!({ "kind": "url", "url": "http://127.0.0.1:9/a.tgz" })).is_ok());
-        assert!(Source::parse(&json!({ "kind": "url", "url": "https://h/a.tgz", "sha256": "ab" })).is_ok());
+        assert!(
+            Source::parse(&json!({ "kind": "url", "url": "http://127.0.0.1:9/a.tgz" })).is_ok()
+        );
+        assert!(
+            Source::parse(&json!({ "kind": "url", "url": "https://h/a.tgz", "sha256": "ab" }))
+                .is_ok()
+        );
     }
 
     #[test]

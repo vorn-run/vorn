@@ -103,8 +103,14 @@ pub fn is_implicit(conn: &Value) -> bool {
 /// The filters that tie a connection to a pack (`sdkConnectionFilters`).
 pub fn sdk_connection_filters(pack: &Value, trigger: Option<&str>) -> Map<String, Value> {
     let mut out = Map::new();
-    out.insert(filter::CONNECTOR_ID.into(), pack.get("id").cloned().unwrap_or(Value::Null));
-    out.insert(filter::VERSION.into(), pack.get("version").cloned().unwrap_or(Value::Null));
+    out.insert(
+        filter::CONNECTOR_ID.into(),
+        pack.get("id").cloned().unwrap_or(Value::Null),
+    );
+    out.insert(
+        filter::VERSION.into(),
+        pack.get("version").cloned().unwrap_or(Value::Null),
+    );
     if let Some(icon) = pack.get("icon").filter(|i| crate::js::truthy(i)) {
         out.insert(filter::ICON.into(), json!(icon.to_string()));
     }
@@ -130,7 +136,10 @@ pub fn cron_every_minutes(minutes: f64) -> String {
         return "* * * * *".to_owned();
     }
     if minutes < 60.0 {
-        return format!("*/{} * * * *", crate::js::to_string(&crate::js::json_number(minutes)));
+        return format!(
+            "*/{} * * * *",
+            crate::js::to_string(&crate::js::json_number(minutes))
+        );
     }
     let hours = (minutes / 60.0 + 0.5).floor();
     if hours <= 1.0 {
@@ -209,7 +218,13 @@ pub fn create(store: &mut Store, new: NewConnection<'_>) -> vorn_store::Result<V
     let p = new.params;
     let mut conn = Map::new();
     conn.insert("id".into(), json!(new.id));
-    for key in ["connectorId", "name", "filters", "syncIntervalMinutes", "statusMapping"] {
+    for key in [
+        "connectorId",
+        "name",
+        "filters",
+        "syncIntervalMinutes",
+        "statusMapping",
+    ] {
         conn.insert(key.into(), p.get(key).cloned().unwrap_or(Value::Null));
     }
     if let Some(project) = p.get("executionProject").filter(|v| crate::js::truthy(v)) {
@@ -227,7 +242,10 @@ pub fn create(store: &mut Store, new: NewConnection<'_>) -> vorn_store::Result<V
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        if let (Some(seed), true) = (p.get("seedWorkflow").filter(|s| s.is_object()), connector == SDK) {
+        if let (Some(seed), true) = (
+            p.get("seedWorkflow").filter(|s| s.is_object()),
+            connector == SDK,
+        ) {
             events.push(json!({
                 "name": seed.get("name"),
                 "event": POLL_EVENT,
@@ -262,7 +280,11 @@ pub fn delete(store: &mut Store, id: &str) -> vorn_store::Result<()> {
     let prefix = seeded_workflow_prefix(id);
     let workflows = store.call("dbListWorkflows", json!([]))?;
     for wf in workflows.as_array().into_iter().flatten() {
-        if let Some(wf_id) = wf.get("id").and_then(Value::as_str).filter(|i| i.starts_with(&prefix)) {
+        if let Some(wf_id) = wf
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|i| i.starts_with(&prefix))
+        {
             store.call("dbDeleteWorkflow", json!([wf_id]))?;
         }
     }
@@ -300,7 +322,13 @@ pub fn upsert_item(
         "sourceExternalUrl": item.external_url,
         "sourceExternalId": item.external_id,
     });
-    let keys = json!(["title", "description", "updatedAt", "sourceExternalUrl", "sourceExternalId"]);
+    let keys = json!([
+        "title",
+        "description",
+        "updatedAt",
+        "sourceExternalUrl",
+        "sourceExternalId"
+    ]);
     let existing = store.call(
         "dbGetTaskSourceLinkByExternalId",
         json!([conn_id, item.external_id]),
@@ -368,7 +396,12 @@ pub fn upsert_item(
 
 /// Updates a connection's row; a key named in `cleared` and absent from
 /// `updates` is cleared, as `undefined` clears it.
-pub fn update(store: &mut Store, id: &str, updates: Map<String, Value>, cleared: &[&str]) -> vorn_store::Result<()> {
+pub fn update(
+    store: &mut Store,
+    id: &str,
+    updates: Map<String, Value>,
+    cleared: &[&str],
+) -> vorn_store::Result<()> {
     let mut keys: Vec<String> = updates.keys().cloned().collect();
     keys.extend(cleared.iter().map(|k| (*k).to_owned()));
     store.call("dbUpdateSourceConnection", json!([id, updates, keys]))?;
@@ -405,7 +438,9 @@ fn env_name_for(key: &str) -> String {
     let mut out = String::with_capacity(key.len() + 4);
     let mut prev: Option<char> = None;
     for c in key.chars() {
-        if c.is_ascii_uppercase() && prev.is_some_and(|p| p.is_ascii_lowercase() || p.is_ascii_digit()) {
+        if c.is_ascii_uppercase()
+            && prev.is_some_and(|p| p.is_ascii_lowercase() || p.is_ascii_digit())
+        {
             out.push('_');
         }
         out.push(c);
@@ -417,8 +452,14 @@ fn env_name_for(key: &str) -> String {
 /// An action as the step editor draws it (`sdkActionDef`).
 pub fn sdk_action_def(action: &Value) -> Value {
     let mut out = Map::new();
-    out.insert("type".into(), action.get("type").cloned().unwrap_or(Value::Null));
-    out.insert("label".into(), action.get("label").cloned().unwrap_or(Value::Null));
+    out.insert(
+        "type".into(),
+        action.get("type").cloned().unwrap_or(Value::Null),
+    );
+    out.insert(
+        "label".into(),
+        action.get("label").cloned().unwrap_or(Value::Null),
+    );
     if let Some(d) = action.get("description").filter(|d| crate::js::truthy(d)) {
         out.insert("description".into(), d.clone());
     }
@@ -430,7 +471,12 @@ pub fn sdk_action_def(action: &Value) -> Value {
         .map(action_input_field)
         .collect();
     out.insert("configFields".into(), Value::Array(fields));
-    let outputs: Vec<&Value> = action.get("outputs").and_then(Value::as_array).into_iter().flatten().collect();
+    let outputs: Vec<&Value> = action
+        .get("outputs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .collect();
     if !outputs.is_empty() {
         let properties: Map<String, Value> = outputs
             .iter()
@@ -445,7 +491,10 @@ pub fn sdk_action_def(action: &Value) -> Value {
                 (text(o, "key").to_owned(), Value::Object(p))
             })
             .collect();
-        out.insert("outputSchema".into(), json!({ "type": "object", "properties": properties }));
+        out.insert(
+            "outputSchema".into(),
+            json!({ "type": "object", "properties": properties }),
+        );
     }
     Value::Object(out)
 }
@@ -453,14 +502,26 @@ pub fn sdk_action_def(action: &Value) -> Value {
 /// An action argument as a step form draws it (`actionInputField`).
 fn action_input_field(input: &Value) -> Value {
     let mut out = Map::new();
-    out.insert("key".into(), input.get("key").cloned().unwrap_or(Value::Null));
-    out.insert("label".into(), input.get("label").cloned().unwrap_or(Value::Null));
-    out.insert("required".into(), input.get("required").cloned().unwrap_or(json!(false)));
+    out.insert(
+        "key".into(),
+        input.get("key").cloned().unwrap_or(Value::Null),
+    );
+    out.insert(
+        "label".into(),
+        input.get("label").cloned().unwrap_or(Value::Null),
+    );
+    out.insert(
+        "required".into(),
+        input.get("required").cloned().unwrap_or(json!(false)),
+    );
     out.insert("supportsTemplates".into(), json!(true));
     if let Some(d) = input.get("description").filter(|d| crate::js::truthy(d)) {
         out.insert("description".into(), d.clone());
     }
-    let options = input.get("options").and_then(Value::as_array).filter(|o| !o.is_empty());
+    let options = input
+        .get("options")
+        .and_then(Value::as_array)
+        .filter(|o| !o.is_empty());
     let kind = text(input, "type");
     if let (true, Some(options)) = (kind == "select", options) {
         out.insert("type".into(), json!("select"));
@@ -482,9 +543,27 @@ fn action_input_field(input: &Value) -> Value {
 
 /// Published key prefixes: naming one says which service a value belongs to.
 const VENDOR_MARKERS: [&str; 21] = [
-    "sk_live_", "sk_test_", "pk_live_", "pk_test_", "rk_live_", "whsec_", "github_pat_", "ghp_",
-    "gho_", "ghs_", "ghu_", "glpat-", "xoxb-", "xoxp-", "xoxa-", "xapp-", "shpat_", "npm_",
-    "dop_v1_", "AKIA", "ASIA",
+    "sk_live_",
+    "sk_test_",
+    "pk_live_",
+    "pk_test_",
+    "rk_live_",
+    "whsec_",
+    "github_pat_",
+    "ghp_",
+    "gho_",
+    "ghs_",
+    "ghu_",
+    "glpat-",
+    "xoxb-",
+    "xoxp-",
+    "xoxa-",
+    "xapp-",
+    "shpat_",
+    "npm_",
+    "dop_v1_",
+    "AKIA",
+    "ASIA",
 ];
 
 /// A known marker plus the last four characters (`maskSecret`).
@@ -495,21 +574,30 @@ pub fn mask_secret(value: &str) -> String {
     if crate::js::len16(value) < 12 {
         return "••••".to_owned();
     }
-    let marker = VENDOR_MARKERS.iter().find(|m| value.starts_with(*m)).copied().unwrap_or("");
+    let marker = VENDOR_MARKERS
+        .iter()
+        .find(|m| value.starts_with(*m))
+        .copied()
+        .unwrap_or("");
     format!("{marker}••••{}", crate::js::tail16(value, 4))
 }
 
 /// A name a shell accepts that cannot reach the prototype (`isEnvName`).
 pub fn is_env_name(name: &str) -> bool {
     let mut chars = name.chars();
-    chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
         && !matches!(name, "__proto__" | "constructor" | "prototype")
 }
 
 /// The variable names a `secretEnv` blob carries (`envNamesOf`).
 pub fn env_names_of(blob: Option<&str>) -> Vec<String> {
-    match blob.filter(|b| !b.is_empty()).and_then(|b| serde_json::from_str::<Value>(b).ok()) {
+    match blob
+        .filter(|b| !b.is_empty())
+        .and_then(|b| serde_json::from_str::<Value>(b).ok())
+    {
         Some(Value::Object(map)) => map.keys().filter(|k| is_env_name(k)).cloned().collect(),
         _ => Vec::new(),
     }
@@ -518,7 +606,9 @@ pub fn env_names_of(blob: Option<&str>) -> Vec<String> {
 /// The field naming the connection a step runs against (`boundConnectionKey`).
 fn bound_key(node: &Value, config: &Map<String, Value>) -> Option<&'static str> {
     match node.get("type").and_then(Value::as_str) {
-        Some("trigger") if config.get("triggerType").and_then(Value::as_str) == Some("connectorPoll") => {
+        Some("trigger")
+            if config.get("triggerType").and_then(Value::as_str) == Some("connectorPoll") =>
+        {
             Some("connectionId")
         }
         Some("callConnectorAction") => Some("connectionId"),
@@ -532,9 +622,20 @@ fn bound_key(node: &Value, config: &Map<String, Value>) -> Option<&'static str> 
 pub fn usage_counts(workflows: &[Value]) -> HashMap<String, u64> {
     let mut counts = HashMap::new();
     for wf in workflows {
-        for node in wf.get("nodes").and_then(Value::as_array).into_iter().flatten() {
-            let config = node.get("config").and_then(Value::as_object).cloned().unwrap_or_default();
-            let Some(key) = bound_key(node, &config) else { continue };
+        for node in wf
+            .get("nodes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let config = node
+                .get("config")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let Some(key) = bound_key(node, &config) else {
+                continue;
+            };
             let id = match config.get(key) {
                 None | Some(Value::Null) => String::new(),
                 Some(v) => crate::js::to_string(v),
@@ -567,7 +668,10 @@ pub fn list_keys(
             .filter_map(|field| {
                 let key = field.get("key").and_then(Value::as_str)?;
                 let label = field.get("label").cloned().unwrap_or(Value::Null);
-                stored.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())?;
+                stored
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())?;
                 let value = readable.get(key);
                 Some(if key == SECRET_ENV {
                     json!({ "key": key, "label": label, "readable": value.is_some(),
@@ -601,9 +705,18 @@ mod tests {
     fn names_a_script_step_s_secrets() {
         let fields = vec![
             ("apiKey".to_owned(), "k".to_owned()),
-            ("secretEnv".to_owned(), r#"{"A":"1","B":2,"__proto__":"x"}"#.to_owned()),
+            (
+                "secretEnv".to_owned(),
+                r#"{"A":"1","B":2,"__proto__":"x"}"#.to_owned(),
+            ),
         ];
-        assert_eq!(script_env(&fields), [("API_KEY".to_owned(), "k".to_owned()), ("A".to_owned(), "1".to_owned())]);
+        assert_eq!(
+            script_env(&fields),
+            [
+                ("API_KEY".to_owned(), "k".to_owned()),
+                ("A".to_owned(), "1".to_owned())
+            ]
+        );
         assert_eq!(env_name_for("token2Value"), "TOKEN2_VALUE");
     }
 
@@ -617,7 +730,10 @@ mod tests {
 
     #[test]
     fn reads_env_names_and_refuses_the_prototype() {
-        assert_eq!(env_names_of(Some(r#"{"A":"1","__proto__":"x","1B":"y","_c":"z"}"#)), ["A", "_c"]);
+        assert_eq!(
+            env_names_of(Some(r#"{"A":"1","__proto__":"x","1B":"y","_c":"z"}"#)),
+            ["A", "_c"]
+        );
         assert!(env_names_of(Some("[1]")).is_empty());
         assert!(env_names_of(None).is_empty());
     }
@@ -627,7 +743,11 @@ mod tests {
         let conn = json!({ "id": "c1", "connectorId": "sdk" });
         let manifest = json!({ "statusMapping": [{ "upstream": "Open", "suggestedLocal": "in_progress" }],
                                "triggers": [{ "type": "mcpPoll", "label": "Poll" }] });
-        let wf = seeded_workflow(&conn, &manifest, &json!({ "name": "Tickets", "event": "mcpPoll", "defaultCronFromMinutes": 120 }));
+        let wf = seeded_workflow(
+            &conn,
+            &manifest,
+            &json!({ "name": "Tickets", "event": "mcpPoll", "defaultCronFromMinutes": 120 }),
+        );
         assert_eq!(wf["id"], "connector:c1:mcpPoll");
         assert_eq!(wf["nodes"][0]["config"]["cron"], "0 */2 * * *");
         assert_eq!(wf["nodes"][0]["label"], "Poll Poll");
@@ -661,14 +781,18 @@ mod tests {
             json!({ "id": "n", "name": "None", "connectorId": "http", "filters": {} }),
         ];
         let secrets = |id: &str| -> Option<HashMap<String, String>> {
-            (id == "a").then(|| HashMap::from([("secretEnv".to_owned(), r#"{"TOKEN":"x"}"#.to_owned())]))
+            (id == "a")
+                .then(|| HashMap::from([("secretEnv".to_owned(), r#"{"TOKEN":"x"}"#.to_owned())]))
         };
         let keys = list_keys(&conns, password_fields, &[], secrets);
         assert_eq!(keys.len(), 2);
         assert_eq!(keys[0]["name"], "alpha");
         assert_eq!(keys[0]["connectorId"], "ado");
         assert_eq!(keys[0]["fields"][0]["envNames"], json!(["TOKEN"]));
-        assert_eq!(keys[1]["fields"][0], json!({ "key": "secret", "label": "Secret", "readable": false, "hint": "" }));
+        assert_eq!(
+            keys[1]["fields"][0],
+            json!({ "key": "secret", "label": "Secret", "readable": false, "hint": "" })
+        );
     }
 
     #[test]
@@ -678,7 +802,10 @@ mod tests {
         assert_eq!(connector_id_of(&conn), " ado ");
         assert_eq!(sdk_trigger_of(&conn), "items");
         assert!(is_implicit(&conn));
-        let filters = sdk_connection_filters(&json!({ "id": "x", "version": "1", "icon": { "paths": [] } }), Some("t"));
+        let filters = sdk_connection_filters(
+            &json!({ "id": "x", "version": "1", "icon": { "paths": [] } }),
+            Some("t"),
+        );
         assert_eq!(filters[filter::ICON], json!(r#"{"paths":[]}"#));
         assert_eq!(filters[filter::TRIGGER], "t");
         assert_eq!(password_fields("mcp").len(), 1);

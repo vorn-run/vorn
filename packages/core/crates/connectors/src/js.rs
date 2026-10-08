@@ -192,7 +192,9 @@ pub fn truthy(value: &Value) -> bool {
 
 /// `a.localeCompare(b)` for the names Vorn sorts: without case first, then as written.
 pub fn locale_compare(a: &str, b: &str) -> std::cmp::Ordering {
-    a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b))
+    a.to_lowercase()
+        .cmp(&b.to_lowercase())
+        .then_with(|| a.cmp(b))
 }
 
 /// JavaScript's `a < b` on strings: by UTF-16 code unit.

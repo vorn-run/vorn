@@ -185,7 +185,10 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
 /// The effect of a call vornd answers, or `None` for one it does not. The
 /// work model's calls are all answered here, never compared.
 pub fn effect(method: &str) -> Option<Effect> {
-    if work::METHODS.contains(&method) || extensions::METHODS.contains(&method) {
+    if work::METHODS.contains(&method)
+        || extensions::METHODS.contains(&method)
+        || connectors::METHODS.contains(&method)
+    {
         return Some(Effect::Change);
     }
     METHODS.iter().find(|(m, _)| *m == method).map(|(_, e)| *e)
@@ -922,7 +925,6 @@ struct Planned {
     shells: usize,
 }
 
-
 impl Conn {
     /// `desktop` connections are admitted from the start: vornd checked
     /// their credential itself.
@@ -1501,5 +1503,4 @@ mod tests {
         }
         assert_eq!(most.load(Ordering::SeqCst), 1);
     }
-
 }

@@ -35,7 +35,9 @@ fn fixture(mode: &str) -> Option<SdkLaunch> {
 
 #[tokio::test]
 async fn greets_a_child_and_asks_it_everything() {
-    let Some(launch) = fixture("normal") else { return };
+    let Some(launch) = fixture("normal") else {
+        return;
+    };
     let client = sdk::open(&launch, "Fixture", "1.0", Timeouts::default())
         .await
         .unwrap();
@@ -49,7 +51,10 @@ async fn greets_a_child_and_asks_it_everything() {
     assert_eq!(page["items"][0]["cursor"], "c1");
     let mut args = Map::new();
     args.insert("title".into(), json!("T"));
-    let echo = client.action("create", &args, Some("call-1")).await.unwrap();
+    let echo = client
+        .action("create", &args, Some("call-1"))
+        .await
+        .unwrap();
     assert_eq!(echo["echo"]["title"], "T");
     assert_eq!(echo["sessionCall"], "call-1");
     args.insert("fail".into(), json!(true));
@@ -59,26 +64,56 @@ async fn greets_a_child_and_asks_it_everything() {
     assert_eq!(failed.data.field.as_deref(), Some("title"));
     // The fixture's manifest declares nothing, which an install refuses.
     let refused = client.manifest().await.unwrap_err();
-    assert!(refused.message.contains("reports no triggers and no actions"));
+    assert!(refused
+        .message
+        .contains("reports no triggers and no actions"));
     let malformed = client.poll("malformed", None, None).await.unwrap_err();
-    assert_eq!(malformed.message, "Fixture answered trigger/poll without a page of items");
+    assert_eq!(
+        malformed.message,
+        "Fixture answered trigger/poll without a page of items"
+    );
     client.close().await;
     assert!(client.exited());
 }
 
 #[tokio::test]
 async fn tells_an_old_or_newer_child_from_a_broken_one() {
-    let Some(launch) = fixture("mcp-only") else { return };
-    let err = sdk::open(&launch, "Old", "1.0", Timeouts::default()).await.unwrap_err();
+    let Some(launch) = fixture("mcp-only") else {
+        return;
+    };
+    let err = sdk::open(&launch, "Old", "1.0", Timeouts::default())
+        .await
+        .unwrap_err();
     assert!(matches!(err, OpenError::Outdated(_)), "{err}");
 
-    let Some(launch) = fixture("hello-unsupported") else { return };
-    let err = sdk::open(&launch, "New", "1.0", Timeouts::default()).await.unwrap_err();
-    assert_eq!(err, OpenError::Unsupported("New speaks a newer connector protocol, which needs a newer Vorn".into()));
+    let Some(launch) = fixture("hello-unsupported") else {
+        return;
+    };
+    let err = sdk::open(&launch, "New", "1.0", Timeouts::default())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err,
+        OpenError::Unsupported(
+            "New speaks a newer connector protocol, which needs a newer Vorn".into()
+        )
+    );
 
-    let Some(launch) = fixture("crash-on-start") else { return };
-    let err = sdk::open(&launch, "Crash", "1.0", Timeouts::default()).await.unwrap_err();
-    let OpenError::Failed(message) = err else { panic!("a failed start") };
-    assert!(message.starts_with("Crash did not answer vorn/hello: Crash exited (code 3)"), "{message}");
-    assert!(message.contains("Error: the fixture could not start"), "{message}");
+    let Some(launch) = fixture("crash-on-start") else {
+        return;
+    };
+    let err = sdk::open(&launch, "Crash", "1.0", Timeouts::default())
+        .await
+        .unwrap_err();
+    let OpenError::Failed(message) = err else {
+        panic!("a failed start")
+    };
+    assert!(
+        message.starts_with("Crash did not answer vorn/hello: Crash exited (code 3)"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Error: the fixture could not start"),
+        "{message}"
+    );
 }

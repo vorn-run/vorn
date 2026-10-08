@@ -17,7 +17,9 @@ fn recorded() -> Map<String, Value> {
 
 fn each(name: &str, check: impl Fn(&Value, &Value)) {
     let cases = recorded();
-    let list = cases[name].as_array().unwrap_or_else(|| panic!("no cases for {name}"));
+    let list = cases[name]
+        .as_array()
+        .unwrap_or_else(|| panic!("no cases for {name}"));
     assert!(!list.is_empty());
     for case in list {
         check(&case["input"], &case["output"]);
@@ -34,7 +36,11 @@ fn reads_catalog_documents_as_the_server_did() {
         assert_eq!(&Value::Array(catalog::parse_templates(doc)), want, "{doc}");
     });
     each("parseMcpServers", |doc, want| {
-        assert_eq!(&Value::Array(catalog::parse_mcp_servers(doc)), want, "{doc}");
+        assert_eq!(
+            &Value::Array(catalog::parse_mcp_servers(doc)),
+            want,
+            "{doc}"
+        );
     });
 }
 
@@ -62,7 +68,9 @@ fn describes_keys_as_the_server_did() {
             ]
         };
         let secrets = |id: &str| -> Option<HashMap<String, String>> {
-            input["secrets"].get(id).and_then(|s| serde_json::from_value(s.clone()).ok())
+            input["secrets"]
+                .get(id)
+                .and_then(|s| serde_json::from_value(s.clone()).ok())
         };
         let got = conns::list_keys(connections, auth_of, workflows, secrets);
         assert_eq!(&Value::Array(got), want, "{input}");
@@ -91,7 +99,11 @@ fn reads_sign_ins_as_the_server_did() {
 #[test]
 fn seeds_workflows_and_draws_actions_as_the_server_did() {
     each("cronEveryMinutes", |m, want| {
-        assert_eq!(json!(conns::cron_every_minutes(m.as_f64().unwrap())), *want, "{m}");
+        assert_eq!(
+            json!(conns::cron_every_minutes(m.as_f64().unwrap())),
+            *want,
+            "{m}"
+        );
     });
     each("seededWorkflow", |input, want| {
         let got = conns::seeded_workflow(&input["conn"], &input["manifest"], &input["event"]);
@@ -141,8 +153,11 @@ fn signs_requests_as_the_server_did() {
                 let sent = &want["sent"];
                 assert_eq!(json!(request.url), sent["url"], "{input}");
                 assert_eq!(json!(request.method), sent["method"], "{input}");
-                let headers: Map<String, Value> =
-                    request.headers.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
+                let headers: Map<String, Value> = request
+                    .headers
+                    .iter()
+                    .map(|(k, v)| (k.clone(), json!(v)))
+                    .collect();
                 assert_eq!(Value::Object(headers), sent["headers"], "{input}");
                 assert_eq!(json!(request.body), sent["body"], "{input}");
             }

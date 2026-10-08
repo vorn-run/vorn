@@ -232,8 +232,12 @@ impl Daemon {
             addr.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
         }
         let bridge = Arc::new(crate::bridge::AppBridge(Arc::clone(link)));
-        let connectors =
-            crate::native::connectors::Connectors::new(native, &dir, format!("http://{addr}"), bridge);
+        let connectors = crate::native::connectors::Connectors::new(
+            native,
+            &dir,
+            format!("http://{addr}"),
+            bridge,
+        );
         native.set_connectors(Arc::clone(&connectors));
         tokio::spawn(async move { connectors.reconcile().await });
     }
@@ -495,7 +499,9 @@ async fn handle(
 /// The connection a browser connector's child calls its window for:
 /// `POST /connections/<id>/browser/fetch`.
 fn window_route(method: &Method, path: &str) -> Option<String> {
-    let rest = path.strip_prefix("/connections/")?.strip_suffix("/browser/fetch")?;
+    let rest = path
+        .strip_prefix("/connections/")?
+        .strip_suffix("/browser/fetch")?;
     (*method == Method::POST && !rest.is_empty() && !rest.contains('/')).then(|| rest.to_owned())
 }
 
@@ -508,7 +514,8 @@ async fn window_fetch(
 ) -> Response<Body> {
     let reply = |status: u16, body: serde_json::Value| {
         let mut res = Response::new(full(body.to_string()));
-        *res.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        *res.status_mut() =
+            StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         res.headers_mut().insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/json; charset=utf-8"),

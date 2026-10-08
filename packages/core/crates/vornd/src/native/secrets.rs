@@ -1,16 +1,9 @@
-//! Connector credentials vornd holds, and the vault that keeps them.
+//! Connection secrets, kept in the vault ([`vorn_vault`]).
 //!
-//! The desktop decrypts a connection's secrets and pushes the plaintext to
-//! the server (`credentials:setDecrypted`, `credentials:clearDecrypted`) on
-//! every start and every configuration change. Those pushes reach the server
-//! through vornd, which keeps the same plaintext ([`Secrets::observe`]) and
-//! files it in the vault ([`vorn_vault`]), where it outlives a vornd restart
-//! the desktop would not push again for.
-//!
-//! One item per connection, holding its fields as JSON. With
+//! One item per connection, holding its secret fields as JSON. With
 //! `VORND_KEYCHAIN=0` the OS keychain is not used and items go to the
 //! vault's private file; until vornd knows its data directory there is no
-//! vault, and a call whose secrets vornd does not know goes to the server.
+//! vault, and nothing is kept between runs.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -27,11 +20,11 @@ pub type Fields = BTreeMap<String, Secret>;
 /// What vornd knows of one connection's secrets.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Known {
-    /// The fields the desktop decrypted.
+    /// Its secret fields.
     Fields(Fields),
-    /// The desktop said there are none it can decrypt.
+    /// It has none.
     None,
-    /// Nothing was pushed since vornd started, and the vault has no item.
+    /// Nothing was set since vornd started, and the vault has no item.
     Unknown,
 }
 
@@ -91,28 +84,7 @@ impl Secrets {
         let _ = self.keychain.set(keychain);
     }
 
-    /// Reads a client's call to the server that changes what the server
-    /// holds: the desktop's pushes. Returns whether it was one.
-    pub fn observe(&self, method: &str, params: &Value) -> bool {
-        let id = params.get("connectionId").and_then(Value::as_str);
-        match (method, id) {
-            ("credentials:setDecrypted", Some(id)) => match params.get("fields") {
-                Some(Value::Object(fields)) => {
-                    self.set(id, fields_of(fields));
-                    true
-                }
-                _ => false,
-            },
-            ("credentials:clearDecrypted", Some(id)) => {
-                self.clear(id);
-                true
-            }
-            _ => false,
-        }
-    }
-
-    /// `fields` are the connection's secrets now, as `setDecryptedCreds`
-    /// replaces them.
+    /// `fields` are the connection's secrets now.
     pub fn set(&self, id: &str, fields: Fields) {
         if self.remember(id, Known::Fields(fields.clone())) {
             self.write(Job::Set(id.to_owned(), fields));
@@ -129,7 +101,7 @@ impl Secrets {
         self.set(id, fields);
     }
 
-    /// The connection has no secrets the desktop can decrypt.
+    /// The connection has no secrets.
     pub fn clear(&self, id: &str) {
         if self.remember(id, Known::None) {
             self.write(Job::Delete(id.to_owned()));
@@ -263,26 +235,22 @@ mod tests {
     }
 
     #[test]
-    fn keeps_what_the_desktop_pushes_and_files_it_in_the_vault() {
+    fn files_what_it_is_given_in_the_vault() {
         let memory = Arc::new(Memory::default());
         let secrets = Secrets::with_keychain(Some(memory.clone()));
         assert_eq!(secrets.lookup("c1"), Known::Unknown);
-        let push = json!({ "connectionId": "c1", "fields": { "secretEnv": "{\"K\":\"v\"}" } });
-        assert!(secrets.observe("credentials:setDecrypted", &push));
-        // The same push again, as every configuration change brings, writes nothing.
-        secrets.observe("credentials:setDecrypted", &push);
+        let given = fields(json!({ "secretEnv": "{\"K\":\"v\"}" }));
+        secrets.set("c1", given.clone());
+        // The same fields again write nothing.
+        secrets.set("c1", given.clone());
         settled(&memory, 1);
-        let expected = Known::Fields(fields(json!({ "secretEnv": "{\"K\":\"v\"}" })));
-        assert_eq!(secrets.lookup("c1"), expected);
+        assert_eq!(secrets.lookup("c1"), Known::Fields(given.clone()));
 
         // A vornd started later reads them back from the vault.
         let later = Secrets::with_keychain(Some(memory.clone()));
-        assert_eq!(later.lookup("c1"), expected);
+        assert_eq!(later.lookup("c1"), Known::Fields(given));
 
-        assert!(secrets.observe(
-            "credentials:clearDecrypted",
-            &json!({ "connectionId": "c1" })
-        ));
+        secrets.clear("c1");
         assert_eq!(secrets.lookup("c1"), Known::None);
         settled(&memory, 2);
         assert_eq!(memory.get(Kind::Connection, "c1").unwrap(), None);
@@ -301,16 +269,6 @@ mod tests {
             ))
         );
         secrets.forget("c1");
-        assert_eq!(secrets.lookup("c1"), Known::Unknown);
-    }
-
-    #[test]
-    fn ignores_what_is_not_a_push() {
-        let secrets = Secrets::default();
-        assert!(!secrets.observe("credentials:setDecrypted", &json!({ "connectionId": "c1" })));
-        assert!(!secrets.observe("credentials:setDecrypted", &json!(null)));
-        assert!(!secrets.observe("credentials:clearDecrypted", &json!({ "connectionId": 3 })));
-        assert!(!secrets.observe("connection:list", &json!({ "connectionId": "c1" })));
         assert_eq!(secrets.lookup("c1"), Known::Unknown);
     }
 
@@ -369,8 +327,7 @@ mod tests {
         tracing::subscriber::with_default(subscriber, || {
             let memory = Arc::new(Memory::default());
             let secrets = Secrets::with_keychain(Some(memory.clone()));
-            let push = json!({ "connectionId": "c1", "fields": { "token": "hunter2-secret" } });
-            secrets.observe("credentials:setDecrypted", &push);
+            secrets.set("c1", fields(json!({ "token": "hunter2-secret" })));
             settled(&memory, 1);
             // A write the keychain refuses, and an item that is not what vornd wrote.
             let locked = Arc::new(Memory::default());

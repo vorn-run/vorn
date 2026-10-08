@@ -194,7 +194,10 @@ pub async fn open(
         Some(p) if p.fract() == 0.0 && p >= 0.0 && SUPPORTED_PROTOCOLS.contains(&(p as u64)) => {}
         Some(p) => {
             child.close().await;
-            return Err(needs_newer_vorn(key, (p.fract() == 0.0).then_some(p as u64)));
+            return Err(needs_newer_vorn(
+                key,
+                (p.fract() == 0.0).then_some(p as u64),
+            ));
         }
         None => {
             child.close().await;
@@ -292,7 +295,10 @@ impl SdkClient {
             )
             .await?;
         let mut out = Map::new();
-        out.insert("ok".into(), result.get("ok").cloned().unwrap_or(Value::Null));
+        out.insert(
+            "ok".into(),
+            result.get("ok").cloned().unwrap_or(Value::Null),
+        );
         if let Some(message) = result.get("message").and_then(Value::as_str) {
             if !message.is_empty() {
                 out.insert("message".into(), json!(message));
@@ -539,8 +545,19 @@ mod tests {
 
     #[tokio::test]
     async fn a_missing_command_is_a_failed_probe() {
-        let probed = probe("  ", &[], vec![], std::env::temp_dir(), "1", Timeouts::default()).await;
-        assert_eq!(probed, json!({ "ok": false, "error": "A command is required" }));
+        let probed = probe(
+            "  ",
+            &[],
+            vec![],
+            std::env::temp_dir(),
+            "1",
+            Timeouts::default(),
+        )
+        .await;
+        assert_eq!(
+            probed,
+            json!({ "ok": false, "error": "A command is required" })
+        );
         let probed = probe(
             "vorn-no-such-program",
             &["-y".into(), "pkg".into()],

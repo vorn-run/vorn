@@ -188,10 +188,7 @@ fn summary(entry: &Map<String, Value>) -> Map<String, Value> {
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     out.insert("type".into(), json!(kind));
-    out.insert(
-        "label".into(),
-        json!(text(entry, "label").unwrap_or(&kind)),
-    );
+    out.insert("label".into(), json!(text(entry, "label").unwrap_or(&kind)));
     if let Some(d) = text(entry, "description") {
         out.insert("description".into(), json!(d));
     }
@@ -233,7 +230,10 @@ fn action_inputs(raw: Option<&Value>) -> Value {
                 let mut out = Map::new();
                 out.insert("key".into(), json!(key));
                 out.insert("label".into(), json!(text(input, "label").unwrap_or(key)));
-                out.insert("type".into(), json!(text(input, "type").unwrap_or("string")));
+                out.insert(
+                    "type".into(),
+                    json!(text(input, "type").unwrap_or("string")),
+                );
                 out.insert(
                     "required".into(),
                     json!(input.get("required") == Some(&Value::Bool(true))),
@@ -296,7 +296,11 @@ fn normalize_template(raw: &Value) -> Option<Value> {
     let mut portable = portable.clone();
     if let Some(requires) = portable.get("requires") {
         let kept = match requires {
-            Value::Array(items) => items.iter().filter(|r| usable_requirement(r)).cloned().collect(),
+            Value::Array(items) => items
+                .iter()
+                .filter(|r| usable_requirement(r))
+                .cloned()
+                .collect(),
             _ => Vec::new(),
         };
         portable.insert("requires".into(), Value::Array(kept));
@@ -350,7 +354,10 @@ pub fn parse_mcp_servers(document: &Value) -> Vec<Value> {
 /// Where a catalog entry is launched from: a checkout's build when
 /// `VORN_CONNECTORS_ROOT` names one, else `npx -y <package>`.
 pub fn launch_spec(entry: &Value, repo_root: Option<&Path>) -> Value {
-    let package = entry.get("packageName").and_then(Value::as_str).unwrap_or("");
+    let package = entry
+        .get("packageName")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     match local_launch_spec(&local_package_dir(package), repo_root) {
         Some((command, args)) => json!({ "command": command, "args": args }),
         None => json!({ "command": "npx", "args": ["-y", package] }),
@@ -358,15 +365,21 @@ pub fn launch_spec(entry: &Value, repo_root: Option<&Path>) -> Value {
 }
 
 /// A checkout's build of the connector in `dir_name`, when there is one.
-pub fn local_launch_spec(dir_name: &str, repo_root: Option<&Path>) -> Option<(String, Vec<String>)> {
+pub fn local_launch_spec(
+    dir_name: &str,
+    repo_root: Option<&Path>,
+) -> Option<(String, Vec<String>)> {
     let local = repo_root?
         .join("packages")
         .join(dir_name)
         .join("dist")
         .join("index.js");
-    local
-        .exists()
-        .then(|| ("node".to_owned(), vec![local.to_string_lossy().into_owned()]))
+    local.exists().then(|| {
+        (
+            "node".to_owned(),
+            vec![local.to_string_lossy().into_owned()],
+        )
+    })
 }
 
 /// `@vornrun/connector-kusto` lives in `packages/kusto`.
@@ -396,7 +409,9 @@ pub struct Catalog {
 
 impl std::fmt::Debug for Catalog {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Catalog").field("cache", &self.cache).finish_non_exhaustive()
+        f.debug_struct("Catalog")
+            .field("cache", &self.cache)
+            .finish_non_exhaustive()
     }
 }
 
@@ -475,7 +490,8 @@ impl Catalog {
         } else {
             held.templates.clone()
         };
-        let mut out = json!({ "items": items, "templates": templates, "mcpServers": held.mcp_servers });
+        let mut out =
+            json!({ "items": items, "templates": templates, "mcpServers": held.mcp_servers });
         if let Some(at) = held.fetched_at {
             out["fetchedAt"] = json!(at);
         }
@@ -485,7 +501,8 @@ impl Catalog {
     /// Fetches the published catalog and adopts it if it parses: whether it
     /// was fetched, and whether what is held changed. Blocks; never fails.
     pub fn refresh(&self, fetch: &dyn Fetch, now: u64) -> (bool, bool) {
-        let Ok(bytes) = fetch.get(CATALOG_URL, FETCH_TIMEOUT, MAX_DOCUMENT_BYTES, &|_, _| {}) else {
+        let Ok(bytes) = fetch.get(CATALOG_URL, FETCH_TIMEOUT, MAX_DOCUMENT_BYTES, &|_, _| {})
+        else {
             return (false, false);
         };
         let Ok(document) = serde_json::from_slice::<Value>(&bytes) else {
@@ -532,7 +549,13 @@ mod tests {
 
     struct Serving(Option<Value>);
     impl Fetch for Serving {
-        fn get(&self, _: &str, _: Duration, _: u64, _: &dyn Fn(u64, u64)) -> Result<Vec<u8>, String> {
+        fn get(
+            &self,
+            _: &str,
+            _: Duration,
+            _: u64,
+            _: &dyn Fn(u64, u64),
+        ) -> Result<Vec<u8>, String> {
             self.0
                 .as_ref()
                 .map(|v| v.to_string().into_bytes())
@@ -547,12 +570,18 @@ mod tests {
         let (first, stale) = catalog.snapshot(10);
         assert!(stale);
         assert!(first.get("fetchedAt").is_none());
-        assert_eq!(first["items"][0]["launch"], json!({ "command": "npx", "args": ["-y", "@vornrun/connector-ado"] }));
+        assert_eq!(
+            first["items"][0]["launch"],
+            json!({ "command": "npx", "args": ["-y", "@vornrun/connector-ado"] })
+        );
         assert!(!first["templates"].as_array().unwrap().is_empty());
 
         assert_eq!(catalog.refresh(&Serving(None), 20), (false, false));
         let doc = json!({ "version": 1, "connectors": [{ "id": "x", "name": "X", "packageName": "@v/connector-x" }] });
-        assert_eq!(catalog.refresh(&Serving(Some(doc.clone())), 30), (true, true));
+        assert_eq!(
+            catalog.refresh(&Serving(Some(doc.clone())), 30),
+            (true, true)
+        );
         assert_eq!(catalog.refresh(&Serving(Some(doc)), 40), (true, false));
         let (now, stale) = catalog.snapshot(50);
         assert!(!stale);

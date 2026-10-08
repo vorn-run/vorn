@@ -107,7 +107,9 @@ pub struct Connectors {
 
 impl std::fmt::Debug for Connectors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Connectors").field("origin", &self.origin).finish_non_exhaustive()
+        f.debug_struct("Connectors")
+            .field("origin", &self.origin)
+            .finish_non_exhaustive()
     }
 }
 
@@ -182,7 +184,9 @@ fn plain(fields: &Fields) -> HashMap<String, String> {
 /// Takes the secret fields of `filters` into `secrets`, leaving the marker.
 fn take_secrets(connector: &str, filters: &mut Map<String, Value>, secrets: &mut Fields) {
     for field in conns::password_fields(connector) {
-        let Some(key) = field.get("key").and_then(Value::as_str) else { continue };
+        let Some(key) = field.get("key").and_then(Value::as_str) else {
+            continue;
+        };
         match filters.get(key).and_then(Value::as_str) {
             Some(v) if !v.is_empty() && v != IN_VAULT => {
                 secrets.insert(key.to_owned(), Secret::from(v));
@@ -201,11 +205,21 @@ struct ProcessRunner {
 
 impl Runner for ProcessRunner {
     fn resolve(&self, name: &str) -> Option<PathBuf> {
-        let path = self.env.iter().find(|(k, _)| k.eq_ignore_ascii_case("PATH")).map(|(_, v)| v.as_str())?;
+        let path = self
+            .env
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
+            .map(|(_, v)| v.as_str())?;
         super::env::find_on_path(name, path)
     }
 
-    fn run(&self, file: &PathBuf, args: &[String], env: &[(String, String)], timeout: Duration) -> Result<(String, String), String> {
+    fn run(
+        &self,
+        file: &PathBuf,
+        args: &[String],
+        env: &[(String, String)],
+        timeout: Duration,
+    ) -> Result<(String, String), String> {
         let mut child = std::process::Command::new(file)
             .args(args)
             .env_clear()
@@ -225,7 +239,11 @@ impl Runner for ProcessRunner {
                     return if status.success() {
                         Ok((stdout, stderr))
                     } else {
-                        Err(format!("Command failed: {} {} ({status})", file.display(), args.join(" ")))
+                        Err(format!(
+                            "Command failed: {} {} ({status})",
+                            file.display(),
+                            args.join(" ")
+                        ))
                     };
                 }
                 Ok(None) if started.elapsed() > timeout => {
@@ -239,7 +257,10 @@ impl Runner for ProcessRunner {
     }
 
     fn var(&self, name: &str) -> Option<String> {
-        self.source.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+        self.source
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.clone())
     }
 
     fn safe_env(&self) -> Vec<(String, String)> {
@@ -274,7 +295,9 @@ impl Connectors {
     }
 
     fn native(&self) -> Result<Arc<Native>, String> {
-        self.native.upgrade().ok_or_else(|| "vornd is stopping".to_owned())
+        self.native
+            .upgrade()
+            .ok_or_else(|| "vornd is stopping".to_owned())
     }
 
     /// Runs `f` on the store on a blocking thread.
@@ -293,7 +316,9 @@ impl Connectors {
 
     async fn connection(&self, id: &str) -> Result<Option<Value>, String> {
         let id = id.to_owned();
-        let conn = self.store(move |s| s.call("dbGetSourceConnection", json!([id]))).await?;
+        let conn = self
+            .store(move |s| s.call("dbGetSourceConnection", json!([id])))
+            .await?;
         Ok((!conn.is_null()).then(|| from_store(conn)))
     }
 
@@ -312,7 +337,9 @@ impl Connectors {
     }
 
     fn secret(&self, id: &str, field: &str) -> Option<String> {
-        self.secrets_of(id)?.get(field).map(|s| s.expose().to_owned())
+        self.secrets_of(id)?
+            .get(field)
+            .map(|s| s.expose().to_owned())
     }
 
     /// Answers `method`.
@@ -331,7 +358,9 @@ impl Connectors {
             "connection:listMcpTools" => self.list_mcp_tools(&params).await,
             "connection:listActions" => self.list_actions(&params).await,
             "connection:preflight" => self.preflight(&params).await,
-            "connection:refreshMcpTools" => Ok(Some(self.refresh(params.as_str().unwrap_or("")).await)),
+            "connection:refreshMcpTools" => {
+                Ok(Some(self.refresh(params.as_str().unwrap_or("")).await))
+            }
             "connection:executeAction" => self.execute(&params).await.map(Some),
             "connection:browserAuth" => self.browser_auth(&params).await,
             "connection:signedIn" => self.signed_in(&params).await,
@@ -354,7 +383,11 @@ impl Connectors {
                     .unwrap_or(Value::Null),
             )),
             "connector:poll" => {
-                let id = params.get("workflowId").and_then(Value::as_str).unwrap_or("").to_owned();
+                let id = params
+                    .get("workflowId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
                 Ok(Some(json!({ "pages": self.poll(&id).await })))
             }
             "connector:probeSdk" => Ok(Some(self.probe_sdk(&params).await)),
@@ -362,8 +395,12 @@ impl Connectors {
             "connector:catalogRefresh" => Ok(Some(self.catalog_refresh().await)),
             "connector:inspectPack" => Ok(Some(self.inspect_pack(&params).await)),
             "connector:installPack" => Ok(Some(self.install_pack(&params).await)),
-            "connector:removePack" => Ok(Some(self.remove_pack(params.as_str().unwrap_or("")).await)),
-            "connector:rollbackPack" => Ok(Some(self.rollback_pack(params.as_str().unwrap_or("")).await)),
+            "connector:removePack" => {
+                Ok(Some(self.remove_pack(params.as_str().unwrap_or("")).await))
+            }
+            "connector:rollbackPack" => Ok(Some(
+                self.rollback_pack(params.as_str().unwrap_or("")).await,
+            )),
             "connector:listPacks" => Ok(Some(json!(self.installer.store().list()))),
             "connector:seedWorkflow" => self.seed_workflow(&params).await,
             "connector:status" => Ok(Some(self.status().await)),
@@ -383,7 +420,10 @@ impl Connectors {
     // ---- rows ----
 
     async fn list(&self, params: &Value) -> Result<Option<Value>, String> {
-        let connector = params.get("connectorId").and_then(Value::as_str).map(str::to_owned);
+        let connector = params
+            .get("connectorId")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         let mut list = self
             .store(move |s| s.call("dbListSourceConnections", json!([connector])))
             .await
@@ -395,9 +435,20 @@ impl Connectors {
     }
 
     async fn create(self: &Arc<Self>, params: &Value) -> Result<Option<Value>, String> {
-        let mut params = params.as_object().cloned().ok_or("connection:create needs a connection")?;
-        let connector = params.get("connectorId").and_then(Value::as_str).unwrap_or("").to_owned();
-        let mut filters = params.get("filters").and_then(Value::as_object).cloned().unwrap_or_default();
+        let mut params = params
+            .as_object()
+            .cloned()
+            .ok_or("connection:create needs a connection")?;
+        let connector = params
+            .get("connectorId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let mut filters = params
+            .get("filters")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
         let mut secrets = Fields::new();
         take_secrets(&connector, &mut filters, &mut secrets);
         params.insert("filters".into(), Value::Object(filters));
@@ -408,7 +459,14 @@ impl Connectors {
         let new_id = id.clone();
         let conn = self
             .store(move |s| {
-                conns::create(s, conns::NewConnection { id: new_id, params: &params, now: now_iso() })
+                conns::create(
+                    s,
+                    conns::NewConnection {
+                        id: new_id,
+                        params: &params,
+                        now: now_iso(),
+                    },
+                )
             })
             .await?;
         self.changed();
@@ -423,11 +481,22 @@ impl Connectors {
     }
 
     async fn update(&self, params: &Value) -> Result<Option<Value>, String> {
-        let id = params.get("id").and_then(Value::as_str).ok_or("connection:update needs an id")?.to_owned();
-        let mut updates = params.get("updates").and_then(Value::as_object).cloned().unwrap_or_default();
+        let id = params
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("connection:update needs an id")?
+            .to_owned();
+        let mut updates = params
+            .get("updates")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
         if let Some(Value::Object(mut filters)) = updates.remove("filters") {
             let conn = self.connection(&id).await?;
-            let connector = conn.as_ref().map(|c| text(c, "connectorId").to_owned()).unwrap_or_default();
+            let connector = conn
+                .as_ref()
+                .map(|c| text(c, "connectorId").to_owned())
+                .unwrap_or_default();
             let mut secrets = self.secrets_of(&id).unwrap_or_default();
             let before = secrets.len();
             let had = secrets.clone();
@@ -438,7 +507,8 @@ impl Connectors {
             updates.insert("filters".into(), Value::Object(filters));
         }
         let row = id.clone();
-        self.store(move |s| conns::update(s, &row, updates, &[])).await?;
+        self.store(move |s| conns::update(s, &row, updates, &[]))
+            .await?;
         self.stop_children(&id).await;
         self.changed();
         let conn = self.connection(&id).await?;
@@ -446,10 +516,16 @@ impl Connectors {
     }
 
     async fn delete(&self, params: &Value) -> Result<Option<Value>, String> {
-        let id = params.as_str().ok_or("connection:delete needs an id")?.to_owned();
+        let id = params
+            .as_str()
+            .ok_or("connection:delete needs an id")?
+            .to_owned();
         if let Some(conn) = self.connection(&id).await? {
             if conns::is_implicit(&conn) {
-                return Err(format!("{} came with its connector. Remove the pack instead.", text(&conn, "name")));
+                return Err(format!(
+                    "{} came with its connector. Remove the pack instead.",
+                    text(&conn, "name")
+                ));
             }
         }
         self.remove_connection(&id).await?;
@@ -465,7 +541,9 @@ impl Connectors {
         let bridge = Arc::clone(&self.bridge);
         let forget = id.to_owned();
         tokio::spawn(async move {
-            let _ = bridge.request("session:forget", json!(forget), WINDOW_CALL_TIMEOUT).await;
+            let _ = bridge
+                .request("session:forget", json!(forget), WINDOW_CALL_TIMEOUT)
+                .await;
         });
         self.stop_children(id).await;
         self.changed();
@@ -474,7 +552,10 @@ impl Connectors {
 
     async fn stop_children(&self, id: &str) {
         self.children.stop(id).await;
-        self.grants.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+        self.grants
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
         if let Ok(native) = self.native() {
             native.mcp.stop(id);
         }
@@ -493,10 +574,23 @@ impl Connectors {
             return Ok(Some(json!([])));
         };
         Ok(Some(match text(&conn, "connectorId") {
-            MCP => Value::Array(discovered_tools(&conn).iter().filter_map(mcp::tool_action).collect()),
+            MCP => Value::Array(
+                discovered_tools(&conn)
+                    .iter()
+                    .filter_map(mcp::tool_action)
+                    .collect(),
+            ),
             SDK => {
                 let manifest = self.sdk_manifest(&conn).await?;
-                Value::Array(manifest.get("actions").and_then(Value::as_array).into_iter().flatten().map(conns::sdk_action_def).collect())
+                Value::Array(
+                    manifest
+                        .get("actions")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .map(conns::sdk_action_def)
+                        .collect(),
+                )
             }
             other => conns::builtin(other)
                 .and_then(|c| c.pointer("/manifest/actions").cloned())
@@ -506,12 +600,17 @@ impl Connectors {
 
     async fn preflight(&self, params: &Value) -> Result<Option<Value>, String> {
         let id = params.as_str().unwrap_or("").to_owned();
-        let conn = self.connection(&id).await?.ok_or_else(|| format!("connection {id} not found"))?;
+        let conn = self
+            .connection(&id)
+            .await?
+            .ok_or_else(|| format!("connection {id} not found"))?;
         Ok(Some(match text(&conn, "connectorId") {
             conns::HTTP => {
                 let filters = conns::filters_of(&conn);
                 let secret = self.secret(&id, "secret");
-                if let Some(locked) = vorn_connectors::http::locked_error(&filters, secret.is_some()) {
+                if let Some(locked) =
+                    vorn_connectors::http::locked_error(&filters, secret.is_some())
+                {
                     json!({ "ok": false, "message": locked })
                 } else {
                     let profile = vorn_connectors::http::Profile::of(&filters, secret.as_deref());
@@ -524,7 +623,10 @@ impl Connectors {
                     if result["success"] != true {
                         json!({ "ok": false, "message": result.get("error") })
                     } else {
-                        let status = result.pointer("/output/status").and_then(Value::as_u64).unwrap_or(500);
+                        let status = result
+                            .pointer("/output/status")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(500);
                         json!({ "ok": status < 400, "message": format!("HTTP {status}") })
                     }
                 }
@@ -543,7 +645,10 @@ impl Connectors {
     // ---- MCP ----
 
     /// The MCP child of `conn`, started or reused.
-    async fn mcp_peer(&self, conn: &Value) -> Result<rmcp::service::Peer<rmcp::service::RoleClient>, String> {
+    async fn mcp_peer(
+        &self,
+        conn: &Value,
+    ) -> Result<rmcp::service::Peer<rmcp::service::RoleClient>, String> {
         let native = self.native()?;
         let launch = self.spawn_spec(conn).await?;
         let launch = mcp::Launch {
@@ -551,7 +656,10 @@ impl Connectors {
             args: launch.launch.args.clone(),
             env: launch.own_env,
         };
-        native.mcp.client(text(conn, "id"), &launch, native.child_env()).await
+        native
+            .mcp
+            .client(text(conn, "id"), &launch, native.child_env())
+            .await
     }
 
     async fn invoke_mcp(&self, conn: &Value, tool: &str, args: &Map<String, Value>) -> Value {
@@ -580,7 +688,9 @@ impl Connectors {
                 let mut updates = Map::new();
                 updates.insert("filters".into(), Value::Object(filters));
                 updates.insert("lastSyncAt".into(), json!(now_iso()));
-                let written = self.store(move |s| conns::update(s, &row, updates, &["lastSyncError"])).await;
+                let written = self
+                    .store(move |s| conns::update(s, &row, updates, &["lastSyncError"]))
+                    .await;
                 match written {
                     Ok(()) => json!({ "ok": true, "count": count }),
                     Err(error) => json!({ "ok": false, "error": error }),
@@ -589,7 +699,9 @@ impl Connectors {
             Err(error) => {
                 let mut updates = Map::new();
                 updates.insert("lastSyncError".into(), json!(error));
-                let _ = self.store(move |s| conns::update(s, &row, updates, &[])).await;
+                let _ = self
+                    .store(move |s| conns::update(s, &row, updates, &[]))
+                    .await;
                 json!({ "ok": false, "error": error })
             }
         };
@@ -609,12 +721,20 @@ impl Connectors {
         let Some((command, args)) = local else {
             let pack = self.installer.store().describe(sdk_id)?;
             return Some(auth::Source {
-                auth: pack.auth.as_ref().and_then(|a| serde_json::to_value(a).ok()),
+                auth: pack
+                    .auth
+                    .as_ref()
+                    .and_then(|a| serde_json::to_value(a).ok()),
                 declared: pack.env.iter().map(|e| e.name.clone()).collect(),
                 trusted: false,
             });
         };
-        if let Some(cached) = self.checkout_auth.lock().unwrap_or_else(|e| e.into_inner()).get(sdk_id) {
+        if let Some(cached) = self
+            .checkout_auth
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(sdk_id)
+        {
             return cached.clone();
         }
         let native = self.native().ok()?;
@@ -640,9 +760,15 @@ impl Connectors {
             trusted: false,
         });
         if source.is_none() {
-            warn!("[auth] could not read {sdk_id} from its checkout: {}", probed["error"]);
+            warn!(
+                "[auth] could not read {sdk_id} from its checkout: {}",
+                probed["error"]
+            );
         }
-        self.checkout_auth.lock().unwrap_or_else(|e| e.into_inner()).insert(sdk_id.to_owned(), source.clone());
+        self.checkout_auth
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(sdk_id.to_owned(), source.clone());
         source
     }
 
@@ -664,14 +790,19 @@ impl Connectors {
         let mut name = String::new();
         let mut program_args: Option<(String, Vec<String>)> = None;
         if !sdk_id.is_empty() {
-            if let Some(local) = vorn_connectors::catalog::local_launch_spec(&sdk_id, self.repo_root.as_deref()) {
+            if let Some(local) =
+                vorn_connectors::catalog::local_launch_spec(&sdk_id, self.repo_root.as_deref())
+            {
                 source = LaunchSource::Checkout;
                 program_args = Some(local);
             } else if let Some(pack) = self.installer.store().describe(&sdk_id) {
                 source = LaunchSource::Pack;
                 protocol = pack.protocol;
                 name = pack.name.clone();
-                program_args = Some(("node".into(), vec![pack.entry().to_string_lossy().into_owned()]));
+                program_args = Some((
+                    "node".into(),
+                    vec![pack.entry().to_string_lossy().into_owned()],
+                ));
             }
         }
         let (command, args) = match program_args {
@@ -683,8 +814,14 @@ impl Connectors {
                 if command.is_empty() {
                     return Err("MCP connection is missing a command".into());
                 }
-                let args = match filters.get("args").and_then(Value::as_str).and_then(|a| serde_json::from_str::<Value>(a).ok()) {
-                    Some(Value::Array(items)) => items.iter().map(vorn_connectors::js::to_string).collect(),
+                let args = match filters
+                    .get("args")
+                    .and_then(Value::as_str)
+                    .and_then(|a| serde_json::from_str::<Value>(a).ok())
+                {
+                    Some(Value::Array(items)) => {
+                        items.iter().map(vorn_connectors::js::to_string).collect()
+                    }
                     _ => Vec::new(),
                 };
                 (command, args)
@@ -699,9 +836,10 @@ impl Connectors {
         if let Some(auth) = &auth {
             let runner = self.runner()?;
             let source = auth.clone();
-            let borrowed = tokio::task::spawn_blocking(move || auth::borrowed_secrets(&source, &runner))
-                .await
-                .unwrap_or_default();
+            let borrowed =
+                tokio::task::spawn_blocking(move || auth::borrowed_secrets(&source, &runner))
+                    .await
+                    .unwrap_or_default();
             for (k, v) in borrowed {
                 put(k, v);
             }
@@ -749,15 +887,36 @@ impl Connectors {
                 let mut spawn = self.spawn_spec(&conn).await?;
                 if let Some(browser) = spawn.browser.clone() {
                     let token = random_token(32);
-                    spawn.launch.env.push(("VORN_BROWSER_HOST".into(), format!("{}/connections/{id}/browser", self.origin)));
-                    spawn.launch.env.push(("VORN_BROWSER_TOKEN".into(), token.clone()));
-                    self.grants.lock().unwrap_or_else(|e| e.into_inner()).insert(
-                        id.clone(),
-                        Arc::new(Grant { token, browser, calls: Mutex::default() }),
-                    );
+                    spawn.launch.env.push((
+                        "VORN_BROWSER_HOST".into(),
+                        format!("{}/connections/{id}/browser", self.origin),
+                    ));
+                    spawn
+                        .launch
+                        .env
+                        .push(("VORN_BROWSER_TOKEN".into(), token.clone()));
+                    self.grants
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(
+                            id.clone(),
+                            Arc::new(Grant {
+                                token,
+                                browser,
+                                calls: Mutex::default(),
+                            }),
+                        );
                 }
-                let key = if spawn.name.is_empty() { text(&conn, "name").to_owned() } else { spawn.name.clone() };
-                let launch = SdkLaunch { launch: spawn.launch, source: spawn.source, protocol: spawn.protocol };
+                let key = if spawn.name.is_empty() {
+                    text(&conn, "name").to_owned()
+                } else {
+                    spawn.name.clone()
+                };
+                let launch = SdkLaunch {
+                    launch: spawn.launch,
+                    source: spawn.source,
+                    protocol: spawn.protocol,
+                };
                 sdk::open(&launch, &key, &self.version, sdk::Timeouts::default())
                     .await
                     .map_err(|e| e.to_string())
@@ -775,15 +934,31 @@ impl Connectors {
             }
         }
         let client = self.sdk_client(conn).await?;
-        client.manifest().await.map(|m| json!(m)).map_err(|e| e.message)
+        client
+            .manifest()
+            .await
+            .map(|m| json!(m))
+            .map_err(|e| e.message)
     }
 
     // ---- actions ----
 
     async fn execute(&self, params: &Value) -> Result<Value, String> {
-        let id = params.get("connectionId").and_then(Value::as_str).unwrap_or("").to_owned();
-        let action = params.get("action").and_then(Value::as_str).unwrap_or("").to_owned();
-        let args = params.get("args").and_then(Value::as_object).cloned().unwrap_or_default();
+        let id = params
+            .get("connectionId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let action = params
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let args = params
+            .get("args")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
         let Some(conn) = self.connection(&id).await? else {
             return Ok(failure(format!("Connection {id} not found")));
         };
@@ -800,21 +975,31 @@ impl Connectors {
                 self.through_window(conn, |client, call| {
                     let action = action.to_owned();
                     let params = params.clone();
-                    async move { client.action(&action, &params, call.as_deref()).await.map(Value::Object) }
+                    async move {
+                        client
+                            .action(&action, &params, call.as_deref())
+                            .await
+                            .map(Value::Object)
+                    }
                 })
                 .await
-                .map_or_else(|failed| failed, |(output, calls)| {
-                    let mut result = json!({ "success": true, "output": output });
-                    if !calls.is_empty() {
-                        result["sessionCalls"] = Value::Array(calls);
-                    }
-                    result
-                })
+                .map_or_else(
+                    |failed| failed,
+                    |(output, calls)| {
+                        let mut result = json!({ "success": true, "output": output });
+                        if !calls.is_empty() {
+                            result["sessionCalls"] = Value::Array(calls);
+                        }
+                        result
+                    },
+                )
             }
             conns::HTTP => {
                 let filters = conns::filters_of(conn);
                 let secret = self.secret(id, "secret");
-                if let Some(locked) = vorn_connectors::http::locked_error(&filters, secret.is_some()) {
+                if let Some(locked) =
+                    vorn_connectors::http::locked_error(&filters, secret.is_some())
+                {
                     return failure(locked);
                 }
                 let mut merged = filters.clone();
@@ -824,9 +1009,11 @@ impl Connectors {
                 merged.extend(args.clone());
                 let profile = vorn_connectors::http::Profile::of(&merged, secret.as_deref());
                 let (http, action) = (self.http.clone(), action.to_owned());
-                tokio::task::spawn_blocking(move || vorn_connectors::http::execute(&http, &action, &profile, &merged))
-                    .await
-                    .unwrap_or_else(|e| failure(e.to_string()))
+                tokio::task::spawn_blocking(move || {
+                    vorn_connectors::http::execute(&http, &action, &profile, &merged)
+                })
+                .await
+                .unwrap_or_else(|e| failure(e.to_string()))
             }
             other => failure(format!("Connector {other} does not support actions")),
         }
@@ -834,7 +1021,11 @@ impl Connectors {
 
     /// Runs a call on a package connection's child, through its signed-in
     /// window when it has one; a failure reads the way an action's does.
-    async fn through_window<F, Fut>(&self, conn: &Value, run: F) -> Result<(Value, Vec<Value>), Value>
+    async fn through_window<F, Fut>(
+        &self,
+        conn: &Value,
+        run: F,
+    ) -> Result<(Value, Vec<Value>), Value>
     where
         F: FnOnce(Arc<SdkClient>, Option<String>) -> Fut,
         Fut: std::future::Future<Output = Result<Value, sdk::SdkError>>,
@@ -844,15 +1035,28 @@ impl Connectors {
             Ok(client) => client,
             Err(error) => return Err(failure(error)),
         };
-        let grant = self.grants.lock().unwrap_or_else(|e| e.into_inner()).get(&id).cloned();
+        let grant = self
+            .grants
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .cloned();
         let key = grant.as_ref().map(|g| {
             let key = random_token(12);
-            g.calls.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), Vec::new());
+            g.calls
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(key.clone(), Vec::new());
             key
         });
         let answered = run(client, key.clone()).await;
         let calls = match (&grant, &key) {
-            (Some(g), Some(k)) => g.calls.lock().unwrap_or_else(|e| e.into_inner()).remove(k).unwrap_or_default(),
+            (Some(g), Some(k)) => g
+                .calls
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(k)
+                .unwrap_or_default(),
             _ => Vec::new(),
         };
         match answered {
@@ -876,18 +1080,30 @@ impl Connectors {
     }
 
     /// A failed call through a window, told apart: Vorn closed, or the site signed it out.
-    async fn window_outcome(&self, conn: &Value, grant: &Grant, calls: Vec<Value>, mut result: Value) -> Value {
+    async fn window_outcome(
+        &self,
+        conn: &Value,
+        grant: &Grant,
+        calls: Vec<Value>,
+        mut result: Value,
+    ) -> Value {
         let name = text(conn, "name");
         if calls.iter().any(|c| c["status"] == "app-offline") {
             result["errorKind"] = json!("app-offline");
-            result["error"] = json!(format!("Open Vorn on the desktop {name} signed in on, then run this step again."));
+            result["error"] = json!(format!(
+                "Open Vorn on the desktop {name} signed in on, then run this step again."
+            ));
             return result;
         }
-        let refused = calls.iter().any(|c| c["status"] == 401 || c["status"] == 403);
+        let refused = calls
+            .iter()
+            .any(|c| c["status"] == 401 || c["status"] == 403);
         if refused && self.still_signed_in(text(conn, "id"), &grant.browser).await == Some(false) {
             self.mark_signed_out(text(conn, "id")).await;
             result["errorKind"] = json!("needs-sign-in");
-            result["error"] = json!(format!("{name} was signed out. Sign in again, and this step runs again."));
+            result["error"] = json!(format!(
+                "{name} was signed out. Sign in again, and this step runs again."
+            ));
         }
         result
     }
@@ -898,7 +1114,11 @@ impl Connectors {
         }
         let answer = self
             .bridge
-            .request("session:check", json!({ "connectionId": id, "browser": browser }), WINDOW_CALL_TIMEOUT)
+            .request(
+                "session:check",
+                json!({ "connectionId": id, "browser": browser }),
+                WINDOW_CALL_TIMEOUT,
+            )
             .await
             .ok()?;
         answer.get("signedIn").and_then(Value::as_bool)
@@ -906,9 +1126,20 @@ impl Connectors {
 
     /// `POST /connections/<id>/browser/fetch`: a browser connector's child
     /// calling through its window. The status and body to answer with.
-    pub async fn window_fetch(&self, id: &str, bearer: Option<&str>, call_key: Option<&str>, body: &[u8]) -> (u16, Value) {
+    pub async fn window_fetch(
+        &self,
+        id: &str,
+        bearer: Option<&str>,
+        call_key: Option<&str>,
+        body: &[u8],
+    ) -> (u16, Value) {
         let refuse = |status: u16, message: &str| (status, json!({ "error": message }));
-        let grant = self.grants.lock().unwrap_or_else(|e| e.into_inner()).get(id).cloned();
+        let grant = self
+            .grants
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned();
         let known = grant.as_ref().zip(bearer).is_some_and(|(g, t)| {
             vorn_reach::token::constant_time_eq(t.as_bytes(), g.token.as_bytes())
         });
@@ -922,8 +1153,14 @@ impl Connectors {
             return refuse(400, "Send { url, method, headers?, body? }");
         };
         let method = text(&request, "method").to_owned();
-        if !matches!(method.as_str(), "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE") {
-            return refuse(405, &format!("{method} is not a method a signed-in call may use"));
+        if !matches!(
+            method.as_str(),
+            "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
+        ) {
+            return refuse(
+                405,
+                &format!("{method} is not a method a signed-in call may use"),
+            );
         }
         let url = text(&request, "url").to_owned();
         let origins: Vec<String> = grant
@@ -936,12 +1173,22 @@ impl Connectors {
             .map(str::to_owned)
             .collect();
         if !vorn_connectors::manifest::within_origins(&origins, &url) {
-            return refuse(403, &format!("{url} is not on one of this connection's origins"));
+            return refuse(
+                403,
+                &format!("{url} is not on one of this connection's origins"),
+            );
         }
-        let path = url::Url::parse(&url).map(|u| u.path().to_owned()).unwrap_or_default();
+        let path = url::Url::parse(&url)
+            .map(|u| u.path().to_owned())
+            .unwrap_or_default();
         let record = |status: Value| {
             if let Some(key) = call_key {
-                if let Some(calls) = grant.calls.lock().unwrap_or_else(|e| e.into_inner()).get_mut(key) {
+                if let Some(calls) = grant
+                    .calls
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get_mut(key)
+                {
                     calls.push(json!({ "method": method, "path": path, "status": status }));
                     if calls.len() > KEPT_CALLS {
                         let excess = calls.len() - KEPT_CALLS;
@@ -981,7 +1228,10 @@ impl Connectors {
         let sdk_id = conns::sdk_id_of(&conn);
         let auth = self.connector_auth(&sdk_id).await.and_then(|s| s.auth);
         Ok(Some(match auth {
-            Some(a) if a.get("rung").and_then(Value::as_str) == Some("browser") && a.get("browser").is_some_and(|b| !b.is_null()) => {
+            Some(a)
+                if a.get("rung").and_then(Value::as_str) == Some("browser")
+                    && a.get("browser").is_some_and(|b| !b.is_null()) =>
+            {
                 json!({ "name": conn.get("name"), "browser": a.get("browser") })
             }
             _ => Value::Null,
@@ -989,7 +1239,11 @@ impl Connectors {
     }
 
     async fn signed_in(&self, params: &Value) -> Result<Option<Value>, String> {
-        let id = params.get("connectionId").and_then(Value::as_str).unwrap_or("").to_owned();
+        let id = params
+            .get("connectionId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         let identity = params.get("identity").cloned().unwrap_or(Value::Null);
         let row = id.clone();
         self.store(move |s| s.call("dbSetConnectionSignIn", json!([row, identity, now_iso()])))
@@ -1008,7 +1262,9 @@ impl Connectors {
 
     async fn mark_signed_out(&self, id: &str) {
         let row = id.to_owned();
-        let _ = self.store(move |s| s.call("dbSetConnectionSignIn", json!([row, null, null]))).await;
+        let _ = self
+            .store(move |s| s.call("dbSetConnectionSignIn", json!([row, null, null])))
+            .await;
         self.changed();
     }
 
@@ -1016,7 +1272,12 @@ impl Connectors {
 
     async fn list_keys(&self) -> Result<Option<Value>, String> {
         let (conns_list, workflows) = self
-            .store(|s| Ok((s.call("dbListSourceConnections", json!([null]))?, s.call("dbListWorkflows", json!([]))?)))
+            .store(|s| {
+                Ok((
+                    s.call("dbListSourceConnections", json!([null]))?,
+                    s.call("dbListWorkflows", json!([]))?,
+                ))
+            })
             .await?;
         let rows: Vec<Value> = conns_list
             .as_array()
@@ -1026,32 +1287,53 @@ impl Connectors {
             .cloned()
             .collect();
         let workflows = workflows.as_array().cloned().unwrap_or_default();
-        let keys = conns::list_keys(&rows, conns::auth_fields, &workflows, |id| self.secrets_of(id).map(|f| plain(&f)));
+        let keys = conns::list_keys(&rows, conns::auth_fields, &workflows, |id| {
+            self.secrets_of(id).map(|f| plain(&f))
+        });
         Ok(Some(Value::Array(keys)))
     }
 
     async fn rotate(&self, params: &Value) -> Result<Option<Value>, String> {
-        let id = params.get("connectionId").and_then(Value::as_str).unwrap_or("").to_owned();
-        let field = params.get("field").and_then(Value::as_str).unwrap_or("").to_owned();
-        let plaintext = params.get("plaintext").and_then(Value::as_str).unwrap_or("").to_owned();
+        let id = params
+            .get("connectionId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let field = params
+            .get("field")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let plaintext = params
+            .get("plaintext")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         let Some(conn) = self.connection(&id).await? else {
-            return Ok(Some(json!({ "ok": false, "error": format!("connection {id} not found") })));
+            return Ok(Some(
+                json!({ "ok": false, "error": format!("connection {id} not found") }),
+            ));
         };
         let secret = conns::password_fields(text(&conn, "connectorId"))
             .iter()
             .any(|f| f.get("key").and_then(Value::as_str) == Some(field.as_str()));
         if !secret {
-            return Ok(Some(json!({ "ok": false, "error": format!("{field} is not a secret on this connection") })));
+            return Ok(Some(
+                json!({ "ok": false, "error": format!("{field} is not a secret on this connection") }),
+            ));
         }
         if plaintext.trim().is_empty() {
-            return Ok(Some(json!({ "ok": false, "error": "A replacement value is required" })));
+            return Ok(Some(
+                json!({ "ok": false, "error": "A replacement value is required" }),
+            ));
         }
         let mut filters = conns::filters_of(&conn);
         filters.insert(field.clone(), json!(IN_VAULT));
         let mut updates = Map::new();
         updates.insert("filters".into(), Value::Object(filters));
         let row = id.clone();
-        self.store(move |s| conns::update(s, &row, updates, &[])).await?;
+        self.store(move |s| conns::update(s, &row, updates, &[]))
+            .await?;
         self.native()?.secrets.merge(&id, &field, &plaintext);
         self.stop_children(&id).await;
         self.changed();
@@ -1063,13 +1345,24 @@ impl Connectors {
     async fn import(&self, params: &Value) -> Result<Option<Value>, String> {
         let native = self.native()?;
         let mut imported = 0u64;
-        for (id, fields) in params.get("connections").and_then(Value::as_object).into_iter().flatten() {
-            let Some(fields) = fields.as_object() else { continue };
-            let Some(conn) = self.connection(id).await? else { continue };
+        for (id, fields) in params
+            .get("connections")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
+            let Some(fields) = fields.as_object() else {
+                continue;
+            };
+            let Some(conn) = self.connection(id).await? else {
+                continue;
+            };
             let mut secrets = self.secrets_of(id).unwrap_or_default();
             let mut filters = conns::filters_of(&conn);
             for (key, value) in fields {
-                let Some(value) = value.as_str().filter(|v| !v.is_empty()) else { continue };
+                let Some(value) = value.as_str().filter(|v| !v.is_empty()) else {
+                    continue;
+                };
                 secrets.insert(key.clone(), Secret::from(value));
                 filters.insert(key.clone(), json!(IN_VAULT));
             }
@@ -1077,7 +1370,8 @@ impl Connectors {
             let mut updates = Map::new();
             updates.insert("filters".into(), Value::Object(filters));
             let row = id.clone();
-            self.store(move |s| conns::update(s, &row, updates, &[])).await?;
+            self.store(move |s| conns::update(s, &row, updates, &[]))
+                .await?;
             imported += 1;
         }
         if imported > 0 {
@@ -1090,8 +1384,15 @@ impl Connectors {
     // ---- items ----
 
     async fn upsert_from_item(&self, params: &Value) -> Result<Option<Value>, String> {
-        let id = params.get("connectionId").and_then(Value::as_str).unwrap_or("").to_owned();
-        let conn = self.connection(&id).await?.ok_or_else(|| format!("connection {id} not found"))?;
+        let id = params
+            .get("connectionId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let conn = self
+            .connection(&id)
+            .await?
+            .ok_or_else(|| format!("connection {id} not found"))?;
         let item = params.get("item").cloned().unwrap_or(Value::Null);
         let now = now_iso();
         let s = |v: Option<&Value>| v.and_then(Value::as_str).unwrap_or("").to_owned();
@@ -1102,12 +1403,18 @@ impl Connectors {
             description: s(item.get("body")),
             external_url: s(item.get("externalUrl")),
             status_raw: s(raw.and_then(|r| r.get("status"))),
-            updated_at: raw.and_then(|r| r.get("updatedAt")).and_then(Value::as_str).map_or_else(|| now.clone(), str::to_owned),
+            updated_at: raw
+                .and_then(|r| r.get("updatedAt"))
+                .and_then(Value::as_str)
+                .map_or_else(|| now.clone(), str::to_owned),
         };
         let project = params
             .get("project")
             .filter(|p| vorn_connectors::js::truthy(p))
-            .or_else(|| conn.get("executionProject").filter(|p| vorn_connectors::js::truthy(p)))
+            .or_else(|| {
+                conn.get("executionProject")
+                    .filter(|p| vorn_connectors::js::truthy(p))
+            })
             .or_else(|| conn.get("name"))
             .map(vorn_connectors::js::to_string)
             .unwrap_or_default();
@@ -1127,7 +1434,11 @@ impl Connectors {
 
     /// `connection:backfill`: everything a connection's trigger returns, from the start, on the board.
     async fn backfill(&self, params: &Value) -> Value {
-        let id = params.get("connectionId").and_then(Value::as_str).unwrap_or("").to_owned();
+        let id = params
+            .get("connectionId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         let Ok(Some(conn)) = self.connection(&id).await else {
             return json!({ "imported": 0, "updated": 0, "error": "Connection not found" });
         };
@@ -1170,13 +1481,17 @@ impl Connectors {
             Ok(()) => {
                 let mut updates = Map::new();
                 updates.insert("lastSyncAt".into(), json!(now));
-                let _ = self.store(move |s| conns::update(s, &row, updates, &["lastSyncError"])).await;
+                let _ = self
+                    .store(move |s| conns::update(s, &row, updates, &["lastSyncError"]))
+                    .await;
                 json!({ "imported": imported, "updated": updated })
             }
             Err(error) => {
                 let mut updates = Map::new();
                 updates.insert("lastSyncError".into(), json!(error));
-                let _ = self.store(move |s| conns::update(s, &row, updates, &[])).await;
+                let _ = self
+                    .store(move |s| conns::update(s, &row, updates, &[]))
+                    .await;
                 json!({ "imported": imported, "updated": updated, "error": error })
             }
         };
@@ -1204,33 +1519,53 @@ impl Connectors {
                         return Ok(());
                     }
                     match page.next_cursor {
-                        Some(next) if !page.events.is_empty() && Some(&next) != cursor.as_ref() => cursor = Some(next),
+                        Some(next) if !page.events.is_empty() && Some(&next) != cursor.as_ref() => {
+                            cursor = Some(next)
+                        }
                         _ => return Ok(()),
                     }
                 }
-                Err(format!("Connection \"{name}\" exceeded {} backfill pages", poll::MAX_BACKFILL_PAGES))
+                Err(format!(
+                    "Connection \"{name}\" exceeded {} backfill pages",
+                    poll::MAX_BACKFILL_PAGES
+                ))
             }
             SDK => {
                 let trigger = conns::sdk_trigger_of(conn);
                 if trigger.is_empty() {
-                    return Err(format!("Connection \"{name}\" has no trigger, so there is nothing to import."));
+                    return Err(format!(
+                        "Connection \"{name}\" has no trigger, so there is nothing to import."
+                    ));
                 }
                 let who = format!("Connection \"{name}\"");
                 let mut cursor: Option<String> = None;
                 for _ in 0..poll::MAX_BACKFILL_PAGES {
                     let page = self.sdk_raw_page(conn, &trigger, cursor.as_deref()).await?;
                     let now = now_iso();
-                    items.extend(page.get("items").and_then(Value::as_array).into_iter().flatten().map(|i| poll::sdk_item(i, &now)));
+                    items.extend(
+                        page.get("items")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .map(|i| poll::sdk_item(i, &now)),
+                    );
                     if page.get("hasMore") != Some(&Value::Bool(true)) {
                         return Ok(());
                     }
-                    let next = page.get("nextCursor").and_then(Value::as_str).filter(|n| !n.is_empty()).map(str::to_owned);
+                    let next = page
+                        .get("nextCursor")
+                        .and_then(Value::as_str)
+                        .filter(|n| !n.is_empty())
+                        .map(str::to_owned);
                     if next.is_none() || next == cursor {
                         return Err(format!("{who} did not advance its backfill cursor"));
                     }
                     cursor = next;
                 }
-                Err(format!("{who} exceeded {} backfill pages", poll::MAX_BACKFILL_PAGES))
+                Err(format!(
+                    "{who} exceeded {} backfill pages",
+                    poll::MAX_BACKFILL_PAGES
+                ))
             }
             other => Err(format!("Connector {other} does not support listItems()")),
         }
@@ -1244,26 +1579,44 @@ impl Connectors {
         let args = cfg.arguments(cursor)?;
         let result = self.invoke_mcp(conn, &tool, &args).await;
         if result["success"] != true {
-            let error = result.get("error").and_then(Value::as_str).filter(|e| !e.is_empty()).map(str::to_owned);
+            let error = result
+                .get("error")
+                .and_then(Value::as_str)
+                .filter(|e| !e.is_empty())
+                .map(str::to_owned);
             return Err(error.unwrap_or_else(|| format!("MCP poll tool {tool} failed")));
         }
-        cfg.page(cursor, result.get("output").unwrap_or(&Value::Null), &now_iso())
+        cfg.page(
+            cursor,
+            result.get("output").unwrap_or(&Value::Null),
+            &now_iso(),
+        )
     }
 
-    async fn sdk_raw_page(&self, conn: &Value, trigger: &str, cursor: Option<&str>) -> Result<Map<String, Value>, String> {
+    async fn sdk_raw_page(
+        &self,
+        conn: &Value,
+        trigger: &str,
+        cursor: Option<&str>,
+    ) -> Result<Map<String, Value>, String> {
         let answered = self
             .through_window(conn, |client, call| {
                 let (trigger, cursor) = (trigger.to_owned(), cursor.map(str::to_owned));
-                async move { client.poll(&trigger, cursor.as_deref(), call.as_deref()).await.map(Value::Object) }
+                async move {
+                    client
+                        .poll(&trigger, cursor.as_deref(), call.as_deref())
+                        .await
+                        .map(Value::Object)
+                }
             })
             .await;
         match answered {
             Ok((Value::Object(page), _)) => Ok(page),
             Ok(_) => Err(format!("Polling {} failed", text(conn, "name"))),
-            Err(failed) => Err(failed
-                .get("error")
-                .and_then(Value::as_str)
-                .map_or_else(|| format!("Polling {} failed", text(conn, "name")), str::to_owned)),
+            Err(failed) => Err(failed.get("error").and_then(Value::as_str).map_or_else(
+                || format!("Polling {} failed", text(conn, "name")),
+                str::to_owned,
+            )),
         }
     }
 
@@ -1273,7 +1626,10 @@ impl Connectors {
     /// page by page, each page and its cursor kept together. The pages read.
     pub async fn poll(&self, workflow_id: &str) -> u64 {
         let wf = workflow_id.to_owned();
-        let Ok(workflow) = self.store(move |s| s.call("dbGetWorkflow", json!([wf]))).await else {
+        let Ok(workflow) = self
+            .store(move |s| s.call("dbGetWorkflow", json!([wf])))
+            .await
+        else {
             return 0;
         };
         let trigger = workflow
@@ -1302,7 +1658,11 @@ impl Connectors {
             }
             MCP => None,
             SDK => {
-                let t = if event == conns::POLL_EVENT { conns::sdk_trigger_of(&conn) } else { event.clone() };
+                let t = if event == conns::POLL_EVENT {
+                    conns::sdk_trigger_of(&conn)
+                } else {
+                    event.clone()
+                };
                 if t.is_empty() {
                     warn!("[scheduler] connectorPoll: connection {connection_id} has no trigger to poll — skipping");
                     return 0;
@@ -1325,7 +1685,10 @@ impl Connectors {
         let failed: Option<String> = 'pages: {
             for _ in 0..poll::MAX_PAGES_PER_POLL {
                 let page = match &sdk_trigger {
-                    Some(t) => self.sdk_raw_page(&conn, t, cursor.as_deref()).await.map(|p| poll::sdk_page(&p, &now_iso())),
+                    Some(t) => self
+                        .sdk_raw_page(&conn, t, cursor.as_deref())
+                        .await
+                        .map(|p| poll::sdk_page(&p, &now_iso())),
                     None => self.mcp_page(&conn, cursor.as_deref()).await,
                 };
                 let page = match page {
@@ -1334,7 +1697,9 @@ impl Connectors {
                 };
                 let next = page.next_cursor.clone().or_else(|| cursor.clone());
                 if page.has_more && next == cursor {
-                    break 'pages Some(format!("{connector}.poll({event}) returned hasMore without advancing its cursor"));
+                    break 'pages Some(format!(
+                        "{connector}.poll({event}) returned hasMore without advancing its cursor"
+                    ));
                 }
                 let events = poll::inbox_events(&conn, &page.events);
                 let record = json!({
@@ -1345,7 +1710,10 @@ impl Connectors {
                     "polledAt": now,
                     "events": events,
                 });
-                if let Err(error) = self.store(move |s| s.call("dbRecordConnectorPollPage", json!([record]))).await {
+                if let Err(error) = self
+                    .store(move |s| s.call("dbRecordConnectorPollPage", json!([record])))
+                    .await
+                {
                     break 'pages Some(error);
                 }
                 pages += 1;
@@ -1359,7 +1727,9 @@ impl Connectors {
         if let Some(error) = failed {
             warn!("[scheduler] connectorPoll: {connector}.poll({event}) failed: {error}");
             let record = json!({ "workflowId": workflow_id, "connectionId": connection_id, "error": error, "polledAt": now });
-            let _ = self.store(move |s| s.call("dbRecordConnectorPollError", json!([record]))).await;
+            let _ = self
+                .store(move |s| s.call("dbRecordConnectorPollError", json!([record])))
+                .await;
         }
         pages
     }
@@ -1380,15 +1750,32 @@ impl Connectors {
             .map(str::to_owned)
             .collect();
         let mut env = native.child_env();
-        for (k, v) in params.get("env").and_then(Value::as_object).into_iter().flatten() {
+        for (k, v) in params
+            .get("env")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
             if let Some(v) = v.as_str() {
                 env.retain(|(key, _)| key != k);
                 env.push((k.clone(), v.to_owned()));
             }
         }
         let program = super::mcp::resolve(vorn_connectors::js::trim(command), &env);
-        let shown = if program.as_os_str().is_empty() { command.to_owned() } else { program.to_string_lossy().into_owned() };
-        sdk::probe(&shown, &args, env, std::env::temp_dir(), &self.version, sdk::Timeouts::default()).await
+        let shown = if program.as_os_str().is_empty() {
+            command.to_owned()
+        } else {
+            program.to_string_lossy().into_owned()
+        };
+        sdk::probe(
+            &shown,
+            &args,
+            env,
+            std::env::temp_dir(),
+            &self.version,
+            sdk::Timeouts::default(),
+        )
+        .await
     }
 
     fn catalog_snapshot(self: &Arc<Self>) -> Value {
@@ -1454,7 +1841,12 @@ impl Connectors {
     }
 
     async fn remove_pack(&self, id: &str) -> Value {
-        let connections = self.connections_of(id).await.iter().filter(|c| !conns::is_implicit(c)).count();
+        let connections = self
+            .connections_of(id)
+            .await
+            .iter()
+            .filter(|c| !conns::is_implicit(c))
+            .count();
         let mut result = self.installer.remove(id);
         if result["ok"] == true {
             self.pack_changed(id).await;
@@ -1474,7 +1866,10 @@ impl Connectors {
     }
 
     async fn connections_of(&self, connector_id: &str) -> Vec<Value> {
-        let all = self.store(|s| s.call("dbListSourceConnections", json!([null]))).await.unwrap_or(Value::Null);
+        let all = self
+            .store(|s| s.call("dbListSourceConnections", json!([null])))
+            .await
+            .unwrap_or(Value::Null);
         all.as_array()
             .into_iter()
             .flatten()
@@ -1492,12 +1887,19 @@ impl Connectors {
         }
         let pack = self.installer.store().describe(id);
         let wants_implicit = pack.as_ref().is_some_and(|p| {
-            !p.is_extension() && p.auth.as_ref().and_then(|a| serde_json::to_value(a).ok()).is_some_and(|a| a["rung"] == "none")
+            !p.is_extension()
+                && p.auth
+                    .as_ref()
+                    .and_then(|a| serde_json::to_value(a).ok())
+                    .is_some_and(|a| a["rung"] == "none")
         });
         if !wants_implicit {
             for conn in existing.iter().filter(|c| conns::is_implicit(c)) {
                 if self.remove_connection(text(conn, "id")).await.is_ok() {
-                    info!("[packs] withdrew the implicit connection {}", text(conn, "id"));
+                    info!(
+                        "[packs] withdrew the implicit connection {}",
+                        text(conn, "id")
+                    );
                 }
             }
             return;
@@ -1518,7 +1920,16 @@ impl Connectors {
         });
         let params = params.as_object().cloned().unwrap_or_default();
         let made = self
-            .store(move |s| conns::create(s, conns::NewConnection { id: uuid(), params: &params, now: now_iso() }))
+            .store(move |s| {
+                conns::create(
+                    s,
+                    conns::NewConnection {
+                        id: uuid(),
+                        params: &params,
+                        now: now_iso(),
+                    },
+                )
+            })
             .await;
         if made.is_ok() {
             self.changed();
@@ -1533,9 +1944,20 @@ impl Connectors {
     }
 
     async fn seed_workflow(&self, params: &Value) -> Result<Option<Value>, String> {
-        let id = params.get("connectionId").and_then(Value::as_str).unwrap_or("").to_owned();
-        let event = params.get("event").and_then(Value::as_str).unwrap_or("").to_owned();
-        let conn = self.connection(&id).await?.ok_or_else(|| format!("connection {id} not found"))?;
+        let id = params
+            .get("connectionId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let event = params
+            .get("event")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let conn = self
+            .connection(&id)
+            .await?
+            .ok_or_else(|| format!("connection {id} not found"))?;
         let connector = text(&conn, "connectorId").to_owned();
         let manifest = conns::builtin(&connector)
             .and_then(|c| c.get("manifest").cloned())
@@ -1616,7 +2038,13 @@ impl Connectors {
     }
 
     async fn http_request(&self, params: &Value) -> Value {
-        let s = |k: &str| params.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
+        let s = |k: &str| {
+            params
+                .get(k)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned()
+        };
         let mut profile = vorn_connectors::http::Profile::default();
         let profile_id = s("profileConnectionId");
         if !profile_id.is_empty() {
@@ -1626,7 +2054,11 @@ impl Connectors {
             };
             let filters = conns::filters_of(&conn);
             let secret = self.secret(&profile_id, "secret");
-            if let Some(problem) = vorn_connectors::http::profile_error(text(&conn, "connectorId"), &filters, secret.is_some()) {
+            if let Some(problem) = vorn_connectors::http::profile_error(
+                text(&conn, "connectorId"),
+                &filters,
+                secret.is_some(),
+            ) {
                 return failure(problem);
             }
             profile = vorn_connectors::http::Profile::of(&filters, secret.as_deref());
@@ -1638,11 +2070,16 @@ impl Connectors {
             .flatten()
             .map(|(k, v)| (k.clone(), vorn_connectors::js::to_string(v)))
             .collect();
-        let body = params.get("body").and_then(Value::as_str).map(str::to_owned);
+        let body = params
+            .get("body")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         let (method, url, http) = (s("method"), s("url"), self.http.clone());
-        tokio::task::spawn_blocking(move || vorn_connectors::http::perform(&http, &profile, &method, &url, headers, body))
-            .await
-            .unwrap_or_else(|e| failure(e.to_string()))
+        tokio::task::spawn_blocking(move || {
+            vorn_connectors::http::perform(&http, &profile, &method, &url, headers, body)
+        })
+        .await
+        .unwrap_or_else(|e| failure(e.to_string()))
     }
 
     /// Stops every child, as vornd stops.
@@ -1677,7 +2114,8 @@ fn read_window_request(body: &[u8]) -> Option<Value> {
     out.insert("url".into(), json!(url));
     out.insert("method".into(), json!(method));
     if let Some(headers) = v.get("headers").and_then(Value::as_object) {
-        let kept: BTreeMap<&String, &Value> = headers.iter().filter(|(_, v)| v.is_string()).collect();
+        let kept: BTreeMap<&String, &Value> =
+            headers.iter().filter(|(_, v)| v.is_string()).collect();
         out.insert("headers".into(), json!(kept));
     }
     if let Some(body) = v.get("body") {
@@ -1701,9 +2139,15 @@ mod tests {
         ], "outputs": [{ "key": "id", "type": "string" }] });
         let def = conns::sdk_action_def(&action);
         assert_eq!(def["configFields"][0]["type"], "select");
-        assert_eq!(def["configFields"][0]["options"][0], json!({ "value": "a", "label": "a" }));
+        assert_eq!(
+            def["configFields"][0]["options"][0],
+            json!({ "value": "a", "label": "a" })
+        );
         assert_eq!(def["configFields"][1]["type"], "textarea");
-        assert_eq!(def["outputSchema"]["properties"]["id"], json!({ "type": "string" }));
+        assert_eq!(
+            def["outputSchema"]["properties"]["id"],
+            json!({ "type": "string" })
+        );
     }
 
     #[test]
@@ -1717,7 +2161,10 @@ mod tests {
 
     #[test]
     fn takes_secrets_out_of_a_row() {
-        let mut filters = json!({ "secretEnv": "{\"K\":\"v\"}", "env": "{}" }).as_object().unwrap().clone();
+        let mut filters = json!({ "secretEnv": "{\"K\":\"v\"}", "env": "{}" })
+            .as_object()
+            .unwrap()
+            .clone();
         let mut secrets = Fields::new();
         take_secrets(MCP, &mut filters, &mut secrets);
         assert_eq!(filters["secretEnv"], IN_VAULT);
