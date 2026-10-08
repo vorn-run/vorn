@@ -868,7 +868,13 @@ impl CreateRequest {
             Some(v) => Some(strings(v)?),
         };
         let project_path = text("projectPath")??;
-        if !Path::new(&project_path).is_absolute() {
+        let remote_host_id = text("remoteHostId")?;
+        // A remote project is a path on the ssh host, POSIX whatever this host is.
+        let absolute = match given(remote_host_id.as_deref()) {
+            Some(_) => project_path.starts_with('/'),
+            None => Path::new(&project_path).is_absolute(),
+        };
+        if !absolute {
             return None;
         }
         Some(CreateRequest {
@@ -885,7 +891,7 @@ impl CreateRequest {
             worktree_name: text("worktreeName")?,
             initial_prompt: text("initialPrompt")?,
             args,
-            remote_host_id: text("remoteHostId")?,
+            remote_host_id,
             credentials: Credentials {
                 key_content: text("_decryptedKeyContent")?.map(Secret::new),
                 password: text("_decryptedPassword")?.map(Secret::new),
@@ -2034,6 +2040,19 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn reads_a_remote_project_as_a_posix_path_on_any_host() {
+        let read = |path: &str| {
+            CreateRequest::read(&json!({
+                "agentType": "claude", "projectName": "far", "projectPath": path,
+                "remoteHostId": "h",
+            }))
+        };
+        assert!(read("/srv/far").is_some());
+        assert!(read("srv/far").is_none());
+        assert!(read(r"C:\srv\far").is_none());
+    }
+
+    #[test]
     fn reads_a_local_create_and_leaves_the_rest_to_the_server() {
         let req = CreateRequest::read(&json!({
             "agentType": "claude", "projectName": "p", "projectPath": project(),
@@ -2057,8 +2076,9 @@ pub(super) mod tests {
         }
         // An empty remote host is none, as the handler reads it.
         let read = |host: &str| {
+            let path = if host.is_empty() { project() } else { "/srv/p" };
             CreateRequest::read(&json!({
-                "agentType": "codex", "projectName": "p", "projectPath": project(), "remoteHostId": host,
+                "agentType": "codex", "projectName": "p", "projectPath": path, "remoteHostId": host,
             }))
             .unwrap()
         };
@@ -2673,7 +2693,8 @@ pub(super) mod tests {
         assert_eq!(planned["record"]["agentType"], "claude");
         assert_eq!(planned["record"]["groupId"], "g");
         assert_eq!(planned["record"]["agentSessionId"], true);
-        assert!(planned["argv"].as_array().unwrap().len() >= 2);
+        let shell_args = launch_shell::default_shell_args(Platform::HOST).len();
+        assert!(planned["argv"].as_array().unwrap().len() > shell_args);
         assert_eq!(fed.registry.restored().unwrap().len(), 1);
         assert!(plan(&fed.native, "sessions:resume", &json!({ "id": "nope" }), 0).is_none());
     }
@@ -2777,7 +2798,7 @@ pub(super) mod tests {
         assert_eq!(remote.marker, login::marker(id));
         assert!(
             remote.line.starts_with(
-                "ssh -t -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no -A me@box.example 'echo __VORN_READY_'"
+                "ssh -t -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no -A me@box.example 'echo __VORN_READY_"
             ),
             "{}",
             remote.line

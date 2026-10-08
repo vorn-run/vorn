@@ -501,7 +501,13 @@ mod tests {
         assert!(record.get("displayName").is_none());
         let (spec, input) = fed.host.last_start();
         assert_eq!(input, Input::Prompt(None));
-        assert_eq!(spec.argv.last().map(String::as_str), Some(""));
+        let last = spec.argv.last().map(String::as_str).unwrap_or_default();
+        if cfg!(windows) {
+            // The cmd.exe line, its empty prompt quoted.
+            assert!(last.ends_with(r#" -p """"#), "{last}");
+        } else {
+            assert_eq!(last, "");
+        }
     }
 
     #[test]

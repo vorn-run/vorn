@@ -424,8 +424,8 @@ fn renames_a_worktree_branch_and_moves_a_worktree_as_foreseen() {
     assert_eq!(g.branch(&wt).as_deref(), Some("third"));
 
     let path = made.worktree_path.as_str();
-    let parent = &path[..path.rfind('/').unwrap()];
     let id = &path[path.len() - 8..];
+    let beside = |name: &str| wt.with_file_name(format!("{name}-{id}"));
     let moved = |p: &str, name: &str| {
         let foreseen = g.foresee_worktree_move(p, name);
         let done = g.move_worktree(p, name);
@@ -435,13 +435,13 @@ fn renames_a_worktree_branch_and_moves_a_worktree_as_foreseen() {
     assert_eq!(moved(path, "!!"), None);
     assert_eq!(moved(path, "tree"), None);
     assert_eq!(moved(dir.to_str().unwrap(), "x"), None);
-    std::fs::create_dir(format!("{parent}/blocked-{id}")).unwrap();
+    std::fs::create_dir(beside("blocked")).unwrap();
     assert_eq!(moved(path, "blocked"), None);
     let to = moved(path, " New  Name! ").unwrap();
     assert_eq!(
         to,
         MovedWorktree {
-            path: format!("{parent}/New-Name-{id}"),
+            path: beside("New-Name").to_str().unwrap().to_owned(),
             name: "New-Name".into()
         }
     );

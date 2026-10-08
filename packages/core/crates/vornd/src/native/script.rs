@@ -533,8 +533,13 @@ mod tests {
         });
         scripts.run(&params, then).unwrap();
         let (spec, input) = fed.host.last_start();
-        assert_eq!(input, Input::None);
-        assert_eq!(spec.io, Io::Piped { stdin: Stdin::Null });
+        let (fed_in, stdin) = if cfg!(windows) {
+            (Input::Prompt(Some(b"echo hi".to_vec())), Stdin::Pipe)
+        } else {
+            (Input::None, Stdin::Null)
+        };
+        assert_eq!(input, fed_in);
+        assert_eq!(spec.io, Io::Piped { stdin });
         assert_eq!(spec.cwd, cwd());
         assert!(spec.env.contains(&("API_KEY".into(), "k".into())));
         let file = PathBuf::from(&spec.argv[1]);
@@ -599,9 +604,8 @@ mod tests {
             [Err("no such directory".to_owned())]
         );
         assert!(!scripts.runs("s1"));
-        let left = std::fs::read_dir(data.path().join("scripts"))
-            .unwrap()
-            .count();
+        // Windows feeds bash on stdin and writes no file at all.
+        let left = std::fs::read_dir(data.path().join("scripts")).map_or(0, |d| d.count());
         assert_eq!(left, 0);
     }
 

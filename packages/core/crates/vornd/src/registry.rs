@@ -1489,19 +1489,22 @@ impl Registry {
     /// The sessions still at work in the worktree at `path`, terminals
     /// first: a terminal that is not idle, an agent still running
     /// (`worktree:activeSessions`). The path is compared as given, as the
-    /// server compares it.
+    /// server compares it, except that on Windows `/` and `\` are one
+    /// separator: git lists `C:/a/b` for the worktree vorn made as `C:\a\b`.
     pub fn active_in_worktree(&self, path: &str) -> Vec<&str> {
+        let at = |w: &Option<String>| {
+            w.as_deref()
+                .is_some_and(|w| same_worktree(w, path, cfg!(windows)))
+        };
         let terminals = self
             .terminals
             .records()
-            .filter(|s| s.worktree_path.as_deref() == Some(path) && s.status != AgentStatus::Idle)
+            .filter(|s| at(&s.worktree_path) && s.status != AgentStatus::Idle)
             .map(|s| s.id.as_str());
         let headless = self
             .headless
             .records()
-            .filter(|s| {
-                s.worktree_path.as_deref() == Some(path) && s.status == HeadlessStatus::Running
-            })
+            .filter(|s| at(&s.worktree_path) && s.status == HeadlessStatus::Running)
             .map(|s| s.id.as_str());
         terminals.chain(headless).collect()
     }
@@ -2435,6 +2438,16 @@ impl SessionRegistry {
     }
 }
 
+/// Whether `a` and `b` spell the same worktree path; with `windows`, `/` and
+/// `\` are the same separator.
+fn same_worktree(a: &str, b: &str, windows: bool) -> bool {
+    if !windows {
+        return a == b;
+    }
+    let unify = |c: char| if c == '\\' { '/' } else { c };
+    a.chars().map(unify).eq(b.chars().map(unify))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2643,6 +2656,16 @@ mod tests {
         .unwrap();
         assert_eq!(r.active_in_worktree("/w"), ["t1", "t3", "h1"]);
         assert!(r.active_in_worktree("/w/").is_empty());
+    }
+
+    #[test]
+    fn a_worktree_path_matches_whichever_separator_spells_it_on_windows() {
+        assert!(same_worktree(r"C:\w\a", "C:/w/a", true));
+        assert!(same_worktree("/w/a", "/w/a", true));
+        assert!(!same_worktree(r"C:\w\a", r"C:\w\b", true));
+        assert!(!same_worktree(r"C:\w\a", r"C:\w\a\", true));
+        assert!(same_worktree("/w/a", "/w/a", false));
+        assert!(!same_worktree(r"/w\a", "/w/a", false));
     }
 
     #[test]

@@ -413,6 +413,11 @@ mod tests {
     fn fixture() -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
+        // Git cannot read Windows' `\\?\` form.
+        let root = match root.to_str().and_then(|r| r.strip_prefix(r"\\?\")) {
+            Some(plain) => std::path::PathBuf::from(plain),
+            None => root,
+        };
         let project = root.join("p");
         std::fs::create_dir(&project).unwrap();
         sh(&project, &["init", "-q", "-b", "main"]);
@@ -485,7 +490,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|e| e["path"] == path)
+            .find(|e| e["path"].as_str().map(Path::new) == Some(Path::new(path)))
             .unwrap_or_else(|| panic!("{path} is listed"))
     }
 
