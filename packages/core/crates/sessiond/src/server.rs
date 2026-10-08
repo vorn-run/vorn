@@ -64,8 +64,10 @@ pub struct Sessiond {
     pub stop: Notify,
     /// Set while the sessions are being handed to a newer sessiond: no new
     /// sessions, and none released, until it is done or called off.
+    #[cfg(unix)]
     handing: AtomicBool,
     /// Set once a newer sessiond took the sessions: this one only reaps.
+    #[cfg(unix)]
     handed: AtomicBool,
     /// Sessions handed off whose programs this process still has to reap.
     #[cfg(unix)]
@@ -90,7 +92,9 @@ impl Sessiond {
             draining: AtomicBool::new(false),
             stopping: AtomicBool::new(false),
             stop: Notify::new(),
+            #[cfg(unix)]
             handing: AtomicBool::new(false),
+            #[cfg(unix)]
             handed: AtomicBool::new(false),
             #[cfg(unix)]
             reaping: Mutex::new(Vec::new()),
@@ -108,15 +112,18 @@ impl Sessiond {
     }
 
     /// Whether a newer sessiond took this one's sessions.
+    #[cfg(unix)]
     pub fn handed_off(&self) -> bool {
         self.handed.load(Ordering::SeqCst)
     }
 
     /// Whether this one takes new sessions.
     fn closed_to_new(&self) -> bool {
+        #[cfg(unix)]
+        if self.handing.load(Ordering::SeqCst) || self.handed.load(Ordering::SeqCst) {
+            return true;
+        }
         self.draining.load(Ordering::SeqCst)
-            || self.handing.load(Ordering::SeqCst)
-            || self.handed.load(Ordering::SeqCst)
     }
 
     /// Ends [`serve`], which then removes the endpoint and the announcement:
@@ -319,7 +326,11 @@ impl Conn {
             let ToSessiond::Hello(h) = msg else {
                 return false;
             };
-            if h.proto_min > PROTO || h.proto_max < PROTO || self.d.handed_off() {
+            if h.proto_min > PROTO || h.proto_max < PROTO {
+                return false;
+            }
+            #[cfg(unix)]
+            if self.d.handed_off() {
                 return false;
             }
             let mut g = 0;
@@ -395,6 +406,7 @@ impl Conn {
                 }
             }
             // A session handed over mid-release goes on to be released there.
+            #[cfg(unix)]
             ToSessiond::Release(_) if self.d.handing.load(Ordering::SeqCst) => {}
             ToSessiond::Release(r) => {
                 let mut map = self.d.sessions();
@@ -716,7 +728,11 @@ pub async fn serve(d: Arc<Sessiond>, mut listener: crate::os::Listener) -> std::
                 tokio::spawn(Arc::clone(&d).serve_conn(stream));
             }
             _ = tokio::time::sleep(Duration::from_millis(250)) => {
-                if d.idle_for(idle) || d.stopping.load(Ordering::SeqCst) || d.handed_off() {
+                if d.idle_for(idle) || d.stopping.load(Ordering::SeqCst) {
+                    break;
+                }
+                #[cfg(unix)]
+                if d.handed_off() {
                     break;
                 }
             }

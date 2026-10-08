@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 
 use vorn_term_proto::Entry;
 
+#[cfg(unix)]
 use crate::wire::SpoolState;
 
 const MAGIC: &[u8; 4] = b"VRNS";
@@ -58,6 +59,7 @@ pub struct Spool {
     torn: bool,
     /// Leave the file when dropped: while a handoff stages the session, the
     /// file is the donor's, and once it is done, the adopter's.
+    #[cfg(unix)]
     keep: bool,
 }
 
@@ -76,73 +78,9 @@ impl Spool {
             end: 0,
             marks: Vec::new(),
             torn: false,
+            #[cfg(unix)]
             keep: false,
         }
-    }
-
-    /// Where this spool stands, for the sessiond a session is handed to;
-    /// the file stays where it is.
-    pub fn state(&self) -> SpoolState {
-        SpoolState {
-            bytes: self.bytes,
-            count: self.count as u64,
-            first: self.first,
-            first_offset: self.first_offset,
-            end: self.end,
-            marks: self.marks.clone(),
-            torn: self.torn,
-        }
-    }
-
-    /// The spool another sessiond kept at `path`, standing where `st` says.
-    /// The file must be that long, or longer only past a torn frame, and
-    /// carry `epoch`'s header. It is kept when dropped until [`Spool::keep`]
-    /// says otherwise.
-    pub fn adopt(path: impl Into<PathBuf>, epoch: u32, st: &SpoolState) -> io::Result<Spool> {
-        let path = path.into();
-        let bad = |why: &str| io::Error::new(io::ErrorKind::InvalidData, why.to_owned());
-        let count = usize::try_from(st.count).map_err(|_| bad("spool count"))?;
-        if count == 0 {
-            if st.bytes != 0 || st.first.is_some() {
-                return Err(bad("an empty spool with bytes"));
-            }
-            let mut s = Spool::new(path, epoch);
-            s.keep = true;
-            return Ok(s);
-        }
-        let (Some(first), Some(_)) = (st.first, st.first_offset) else {
-            return Err(bad("a spool with records but no first"));
-        };
-        if first.checked_add(st.count) != Some(st.end)
-            || st.marks.first().map(|m| m.0) != Some(first)
-        {
-            return Err(bad("spool records do not add up"));
-        }
-        open_checked(&path, epoch)?;
-        let mut file = OpenOptions::new().write(true).open(&path)?;
-        let len = file.metadata()?.len();
-        if len < st.bytes || (len > st.bytes && !st.torn) {
-            return Err(bad("the spool file is not as long as said"));
-        }
-        file.seek(SeekFrom::Start(st.bytes))?;
-        Ok(Spool {
-            path,
-            epoch,
-            file: Some(file),
-            bytes: st.bytes,
-            count,
-            first: st.first,
-            first_offset: st.first_offset,
-            end: st.end,
-            marks: st.marks.clone(),
-            torn: st.torn,
-            keep: true,
-        })
-    }
-
-    /// Whether dropping the spool leaves its file.
-    pub fn keep(&mut self, keep: bool) {
-        self.keep = keep;
     }
 
     pub fn path(&self) -> &Path {
@@ -340,11 +278,82 @@ impl Spool {
     }
 }
 
+/// The handoff side of a spool, macOS and Linux only.
+#[cfg(unix)]
+impl Spool {
+    /// Where this spool stands, for the sessiond a session is handed to;
+    /// the file stays where it is.
+    pub fn state(&self) -> SpoolState {
+        SpoolState {
+            bytes: self.bytes,
+            count: self.count as u64,
+            first: self.first,
+            first_offset: self.first_offset,
+            end: self.end,
+            marks: self.marks.clone(),
+            torn: self.torn,
+        }
+    }
+
+    /// The spool another sessiond kept at `path`, standing where `st` says.
+    /// The file must be that long, or longer only past a torn frame, and
+    /// carry `epoch`'s header. It is kept when dropped until [`Spool::keep`]
+    /// says otherwise.
+    pub fn adopt(path: impl Into<PathBuf>, epoch: u32, st: &SpoolState) -> io::Result<Spool> {
+        let path = path.into();
+        let bad = |why: &str| io::Error::new(io::ErrorKind::InvalidData, why.to_owned());
+        let count = usize::try_from(st.count).map_err(|_| bad("spool count"))?;
+        if count == 0 {
+            if st.bytes != 0 || st.first.is_some() {
+                return Err(bad("an empty spool with bytes"));
+            }
+            let mut s = Spool::new(path, epoch);
+            s.keep = true;
+            return Ok(s);
+        }
+        let (Some(first), Some(_)) = (st.first, st.first_offset) else {
+            return Err(bad("a spool with records but no first"));
+        };
+        if first.checked_add(st.count) != Some(st.end)
+            || st.marks.first().map(|m| m.0) != Some(first)
+        {
+            return Err(bad("spool records do not add up"));
+        }
+        open_checked(&path, epoch)?;
+        let mut file = OpenOptions::new().write(true).open(&path)?;
+        let len = file.metadata()?.len();
+        if len < st.bytes || (len > st.bytes && !st.torn) {
+            return Err(bad("the spool file is not as long as said"));
+        }
+        file.seek(SeekFrom::Start(st.bytes))?;
+        Ok(Spool {
+            path,
+            epoch,
+            file: Some(file),
+            bytes: st.bytes,
+            count,
+            first: st.first,
+            first_offset: st.first_offset,
+            end: st.end,
+            marks: st.marks.clone(),
+            torn: st.torn,
+            keep: true,
+        })
+    }
+
+    /// Whether dropping the spool leaves its file.
+    pub fn keep(&mut self, keep: bool) {
+        self.keep = keep;
+    }
+}
+
 impl Drop for Spool {
     fn drop(&mut self) {
-        if !self.keep {
-            let _ = self.clear();
+        #[cfg(unix)]
+        if self.keep {
+            return;
         }
+        let _ = self.clear();
     }
 }
 
@@ -433,6 +442,7 @@ mod tests {
 
     /// A spool handed to another sessiond carries on in the same file, and
     /// only the side that holds the session removes it.
+    #[cfg(unix)]
     #[test]
     fn an_adopted_spool_carries_on_in_the_same_file() {
         let dir = tempfile::tempdir().unwrap();

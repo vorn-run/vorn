@@ -294,6 +294,7 @@ fn an_older_build_without_handoff_is_drained_and_exits() {
     assert_eq!(older[0]["sessions"], 0);
     assert_eq!(older[0]["handedOff"], false);
     assert_ne!(current["instance"], "1d");
+    #[cfg(unix)]
     assert!(!old.handed_off());
 
     let t = Instant::now();

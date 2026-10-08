@@ -25,8 +25,10 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, Wr
 use tracing::{info, warn};
 use vorn_sessiond::launch::{self, Instance};
 use vorn_sessiond::os;
+#[cfg(unix)]
+use vorn_sessiond_wire::Adopt;
 use vorn_sessiond_wire::{
-    Adopt, Drain, FrameReader, Hello, Message, Nonce, ToSessiond, ToVornd, Welcome, PROTO,
+    Drain, FrameReader, Hello, Message, Nonce, ToSessiond, ToVornd, Welcome, PROTO,
 };
 
 /// The sessiond protocols this vornd speaks.
@@ -38,6 +40,7 @@ const PING_EVERY: Duration = Duration::from_secs(15);
 const RESTART_AFTER: Duration = Duration::from_secs(1);
 /// A handoff moves fds and ring copies over a local socket; this is far past
 /// any number of sessions, and only bounds a sessiond that hangs.
+#[cfg(unix)]
 const ADOPT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Where the holder lives and what to run.
@@ -222,7 +225,11 @@ async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<(C
     };
     let mut older = Vec::new();
     for i in others {
+        #[cfg(unix)]
         older.push(retire(&instance, &i).await);
+        // ConPTY handles cannot move between processes: an older one drains.
+        #[cfg(windows)]
+        older.push(drain(&i, HolderInstance::older(&i)).await);
     }
     holder.state().older = older;
     // After the adoptions, so the Welcome lists what was adopted.
@@ -239,19 +246,27 @@ async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<(C
     Ok((conn, welcome))
 }
 
+impl HolderInstance {
+    /// An older sessiond as announced, before it is asked anything.
+    fn older(i: &Instance) -> Self {
+        HolderInstance {
+            pid: i.pid,
+            instance: i.instance,
+            build: i.build.clone(),
+            proto: i.proto,
+            sessions: None,
+            compatible: SESSIOND_PROTOS.contains(&i.proto),
+            handed_off: false,
+        }
+    }
+}
+
 /// Have `current` adopt the sessions of the older sessiond `i`, or, when it
 /// cannot, tell `i` to drain.
+#[cfg(unix)]
 async fn retire(current: &Instance, i: &Instance) -> HolderInstance {
-    let mut seen = HolderInstance {
-        pid: i.pid,
-        instance: i.instance,
-        build: i.build.clone(),
-        proto: i.proto,
-        sessions: None,
-        compatible: SESSIOND_PROTOS.contains(&i.proto),
-        handed_off: false,
-    };
-    if seen.compatible && cfg!(unix) && i.handoff.is_some() {
+    let mut seen = HolderInstance::older(i);
+    if seen.compatible && i.handoff.is_some() {
         match adopt(current, i).await {
             Ok(sessions) => {
                 info!(pid = i.pid, build = %i.build, sessions, "an older session holder handed over its sessions");
@@ -269,6 +284,7 @@ async fn retire(current: &Instance, i: &Instance) -> HolderInstance {
 
 /// Ask `current` to take every session `from` holds. All or nothing: on an
 /// error `from` still holds them all. Answers how many moved.
+#[cfg(unix)]
 async fn adopt(current: &Instance, from: &Instance) -> io::Result<usize> {
     let (mut conn, _) = Conn::open(&current.endpoint).await?;
     conn.send(&ToSessiond::Adopt(Adopt {
