@@ -225,6 +225,8 @@ pub(crate) mod tests {
     /// Writes an installed pack `id` at `version` with `manifest`.
     pub(crate) fn install(root: &Path, id: &str, version: &str, manifest: &Value) -> PathBuf {
         let dir = root.join(id).join(version);
+        // Windows resolves `id/../x` without creating `id`, where current.json goes.
+        fs::create_dir_all(root.join(id)).unwrap();
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(ENTRY_FILE), "process.stdin.resume()\n").unwrap();
         fs::write(dir.join(MANIFEST_FILE), manifest.to_string()).unwrap();
