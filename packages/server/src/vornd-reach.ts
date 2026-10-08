@@ -16,9 +16,11 @@ import { VORN_PEER_HEADER } from './vornd-relay'
  * again the names a browser may load the web client from.
  */
 
-/** The broadcasts vornd may ask for: what pairing, runs, artifacts, extensions and the configuration announce. */
+/** The broadcasts vornd may ask for: what pairing, runs, artifacts, extensions, connectors and the configuration announce. */
 const BROADCASTS: ReadonlySet<string> = new Set([
   IPC.CONFIG_CHANGED,
+  IPC.CONNECTOR_INSTALL_PROGRESS,
+  IPC.CONNECTOR_CATALOG_CHANGED,
   IPC.PAIRING_REQUESTED,
   IPC.PAIRING_COLLECTED,
   IPC.WORKFLOW_RUN_UPDATED,
