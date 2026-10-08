@@ -329,8 +329,13 @@ export component AppWindow inherits Window {
             reject
         }
         input := TextInput {
-            x: -1000px;
-            width: 10px;
+            // Slint drops focus from items outside the window: keep it in,
+            // tiny and transparent.
+            x: 0;
+            y: 0;
+            width: 1px;
+            height: 1px;
+            color: transparent;
             single-line: true;
             edited => {
                 if self.text != "" {

@@ -1,0 +1,8 @@
+# sizes (release, arm64, macOS), bytes
+807984 swift/build/VornSpikeSwift.app/Contents/MacOS/VornSpikeSwift
+7390688 target/release/vorn-spike-gpui
+6392800 target/release/vorn-spike-tauri
+13306384 target/release/vorn-spike-slint
+800 KiB swift/build/VornSpikeSwift.app (bundle)
+164168879 Vorn-0.7.5-arm64-mac.zip (Electron app, GitHub release asset)
+170660518 Vorn-0.7.5-arm64.dmg (Electron app, GitHub release asset)

@@ -29,6 +29,7 @@ struct State {
     typed_at: Option<Instant>,
     hit: bool,
     first: bool,
+    done: bool,
 }
 
 thread_local! {
@@ -242,12 +243,18 @@ fn bench_tick() {
         }
         Step::Enter => press(Key::Return.into()),
         Step::Done => {
-            with(|s| {
+            let first = with(|s| {
+                if std::mem::replace(&mut s.done, true) {
+                    return false;
+                }
                 let errs: Vec<String> = s.grid.errors().iter().map(|e| format!("{e:?}")).collect();
                 s.bench.cfg.shoot();
                 s.bench.write("slint", s.grid.panes(), &[("errors", format!("[{}]", errs.join(",")))]);
+                true
             });
-            let _ = slint::quit_event_loop();
+            if first == Some(true) {
+                let _ = slint::quit_event_loop();
+            }
         }
     }
 }
@@ -403,6 +410,7 @@ fn main() {
             typed_at: None,
             hit: false,
             first: false,
+            done: false,
         })
     });
 

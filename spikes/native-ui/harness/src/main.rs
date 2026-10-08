@@ -98,6 +98,11 @@ fn programs(mode: &str, panes: usize, producer: Option<&str>) -> Vec<Vec<String>
         .collect()
 }
 
+/// Commits left out of the look test's log: their subjects are about
+/// dependencies and tooling rather than the app.
+const LOOK_SKIP: [&str; 7] =
+    ["fb3ec6c9", "3fa1c988", "69acc4ba", "57fa5c96", "f1db8488", "9d5de282", "65c9e3d1"];
+
 /// The look test's terminal: this repository's history as a coloured graph
 /// (after the client has sized the pane), then a shell prompt.
 fn look_program() -> Vec<String> {
@@ -105,9 +110,10 @@ fn look_program() -> Vec<String> {
     let script = format!(
         "sleep 1.5; git --no-pager -C '{}' log --graph --color=always -n 60 \
          --format='%C(yellow)%h%C(reset) %C(blue)%<(13)%cr%C(reset)  %s' \
-         | grep -viE 'node-pty|mcp|conpty|claude|codex|copilot|gemini|opencode|xterm|electron'; \
+         | grep -vE '{}'; \
          PS1='vorn $ ' exec /bin/sh -i",
-        repo.display()
+        repo.display(),
+        LOOK_SKIP.join("|")
     );
     vec!["/bin/sh".into(), "-c".into(), script]
 }

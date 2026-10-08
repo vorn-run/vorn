@@ -89,9 +89,10 @@ mod mac {
             if b.is_null() || !CGRectMakeWithDictionaryRepresentation(b, &mut r) {
                 continue;
             }
-            // Normal windows are layer 0; a floating bench window is 3.
+            // Normal windows are layer 0; a floating bench window is 3, a
+            // pop-up one 101.
             let area = r.w * r.h;
-            if (0..=8).contains(&layer) && best.map_or(true, |(a, _)| area > a) {
+            if (0..1000).contains(&layer) && best.map_or(true, |(a, _)| area > a) {
                 best = Some((area, num(d, kCGWindowNumber).unwrap_or(0) as u32));
             }
         }

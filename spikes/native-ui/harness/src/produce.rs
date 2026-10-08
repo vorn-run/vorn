@@ -6,7 +6,7 @@
 //! - `buildlog`: a scrolling build log at a steady 256 KB/s, a compile line
 //!   per module and a spinner redrawn in place every fifth line.
 //! - `rec:NAME`: a recorded transcript from `crates/recovery` (vim, htop,
-//!   claude) replayed at its recorded pace, looped.
+//!   an agent CLI) replayed at its recorded pace, looped.
 
 use std::io::Write;
 use std::time::{Duration, Instant};
