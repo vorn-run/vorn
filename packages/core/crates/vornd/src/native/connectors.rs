@@ -329,15 +329,22 @@ impl Connectors {
         }
     }
 
-    fn secrets_of(&self, id: &str) -> Option<Fields> {
-        match self.native().ok()?.secrets.lookup(id) {
+    /// A connection's secrets, read off the runtime: the vault may block.
+    async fn secrets_of(&self, id: &str) -> Option<Fields> {
+        let native = self.native().ok()?;
+        let id = id.to_owned();
+        tokio::task::spawn_blocking(move || match native.secrets.lookup(&id) {
             Known::Fields(fields) => Some(fields),
             Known::None | Known::Unknown => None,
-        }
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
-    fn secret(&self, id: &str, field: &str) -> Option<String> {
-        self.secrets_of(id)?
+    async fn secret(&self, id: &str, field: &str) -> Option<String> {
+        self.secrets_of(id)
+            .await?
             .get(field)
             .map(|s| s.expose().to_owned())
     }
@@ -497,7 +504,7 @@ impl Connectors {
                 .as_ref()
                 .map(|c| text(c, "connectorId").to_owned())
                 .unwrap_or_default();
-            let mut secrets = self.secrets_of(&id).unwrap_or_default();
+            let mut secrets = self.secrets_of(&id).await.unwrap_or_default();
             let before = secrets.len();
             let had = secrets.clone();
             take_secrets(&connector, &mut filters, &mut secrets);
@@ -607,7 +614,7 @@ impl Connectors {
         Ok(Some(match text(&conn, "connectorId") {
             conns::HTTP => {
                 let filters = conns::filters_of(&conn);
-                let secret = self.secret(&id, "secret");
+                let secret = self.secret(&id, "secret").await;
                 if let Some(locked) =
                     vorn_connectors::http::locked_error(&filters, secret.is_some())
                 {
@@ -847,7 +854,7 @@ impl Connectors {
         for (k, v) in mcp::parse_json_object(filters.get("env")) {
             put(k, v.as_str().unwrap_or("").to_owned());
         }
-        if let Some(secrets) = self.secrets_of(text(conn, "id")) {
+        if let Some(secrets) = self.secrets_of(text(conn, "id")).await {
             for (k, v) in super::secrets::secret_env(&secrets) {
                 put(k, v.as_str().unwrap_or("").to_owned());
             }
@@ -996,7 +1003,7 @@ impl Connectors {
             }
             conns::HTTP => {
                 let filters = conns::filters_of(conn);
-                let secret = self.secret(id, "secret");
+                let secret = self.secret(id, "secret").await;
                 if let Some(locked) =
                     vorn_connectors::http::locked_error(&filters, secret.is_some())
                 {
@@ -1287,8 +1294,14 @@ impl Connectors {
             .cloned()
             .collect();
         let workflows = workflows.as_array().cloned().unwrap_or_default();
+        let mut held: HashMap<String, HashMap<String, String>> = HashMap::new();
+        for row in &rows {
+            if let Some(fields) = self.secrets_of(text(row, "id")).await {
+                held.insert(text(row, "id").to_owned(), plain(&fields));
+            }
+        }
         let keys = conns::list_keys(&rows, conns::auth_fields, &workflows, |id| {
-            self.secrets_of(id).map(|f| plain(&f))
+            held.get(id).cloned()
         });
         Ok(Some(Value::Array(keys)))
     }
@@ -1334,7 +1347,11 @@ impl Connectors {
         let row = id.clone();
         self.store(move |s| conns::update(s, &row, updates, &[]))
             .await?;
-        self.native()?.secrets.merge(&id, &field, &plaintext);
+        let native = self.native()?;
+        let (row, key) = (id.clone(), field.clone());
+        tokio::task::spawn_blocking(move || native.secrets.merge(&row, &key, &plaintext))
+            .await
+            .map_err(|e| e.to_string())?;
         self.stop_children(&id).await;
         self.changed();
         Ok(Some(json!({ "ok": true })))
@@ -1357,7 +1374,7 @@ impl Connectors {
             let Some(conn) = self.connection(id).await? else {
                 continue;
             };
-            let mut secrets = self.secrets_of(id).unwrap_or_default();
+            let mut secrets = self.secrets_of(id).await.unwrap_or_default();
             let mut filters = conns::filters_of(&conn);
             for (key, value) in fields {
                 let Some(value) = value.as_str().filter(|v| !v.is_empty()) else {
@@ -2053,7 +2070,7 @@ impl Connectors {
                 _ => return failure(format!("Connection {profile_id} not found")),
             };
             let filters = conns::filters_of(&conn);
-            let secret = self.secret(&profile_id, "secret");
+            let secret = self.secret(&profile_id, "secret").await;
             if let Some(problem) = vorn_connectors::http::profile_error(
                 text(&conn, "connectorId"),
                 &filters,

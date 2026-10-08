@@ -82,15 +82,15 @@ describe('making a profile where it was asked for', () => {
     expect(preflightConnection).toHaveBeenCalledWith('conn-9')
   })
 
-  it('never stores a secret as it was typed', async () => {
+  it('hands the secret to vornd, which keeps it in the OS keychain', async () => {
     const { onDone } = form()
     fireEvent.change(screen.getByLabelText('Secret'), { target: { value: 'hunter2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save and test' }))
 
     await waitFor(() => expect(onDone).toHaveBeenCalled())
-    expect(encryptString).toHaveBeenCalledWith('hunter2')
+    expect(encryptString).not.toHaveBeenCalled()
     const filters = createConnection.mock.calls[0][0].filters as Record<string, unknown>
-    expect(filters.secret).toBe('cipher')
+    expect(filters.secret).toBe('hunter2')
   })
 
   // A profile that cannot answer is the one worth correcting, so the form stays.
