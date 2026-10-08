@@ -38,7 +38,7 @@ for tier in "${tiers[@]}"; do
   work="/tmp/vorn-scale-$tier"
   rm -rf "$work"
   # Generous: 10,000 sessions spawn, settle and hand off twice over.
-  limit=$((900 + tier / 4))
+  limit=$((900 + tier * 2 / 5))
   echo "tier $tier (timeout ${limit}s)"
   VORN_BENCH_HOST=1 timeout --kill-after=30 "$limit" "$bin/vorn-scale-bench" run \
     --tier "$tier" \

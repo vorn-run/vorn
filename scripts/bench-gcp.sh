@@ -84,20 +84,30 @@ wait_boot "$boot"
 echo "building and running tiers ${tiers[*]:-100 1000 10000}"
 # The timeout only frees this side should ssh linger after the launch.
 timeout 120 "${gc[@]}" compute ssh "$vm" --zone "$zone" -- "mkdir -p \"\$HOME/results\" && PHASES=$phases setsid nohup bash -c 'bash \"\$HOME/vorn/packages/core/bench/scale/run-tiers.sh\" \"\$HOME/results\" ${tiers[*]:-}; touch \"\$HOME/results/done\"' >\"\$HOME/run.log\" 2>&1 </dev/null &" </dev/null || true
+mkdir -p "$dest"
+# Copies what the tiers wrote so far, so a preempted VM keeps finished tiers.
+fetch() { ssh_vm 'tar -c -C "$HOME/results" --exclude=build.log .' 2>/dev/null | tar -x -C "$dest" 2>/dev/null; }
 misses=0
 while :; do
   sleep 60
   state=$(ssh_vm 'if [ -f "$HOME/results/done" ]; then echo DONE; else echo "running: $(tail -n 1 "$HOME/run.log")"; fi' 2>/dev/null) || state=
-  [ -n "$state" ] && misses=0 || misses=$((misses + 1))
-  # Ten minutes without ssh: the Spot VM was preempted or hit its run limit.
-  [ "$misses" -lt 10 ] || { echo "lost the VM" >&2; exit 1; }
+  if [ -n "$state" ]; then
+    misses=0
+    fetch || true
+  else
+    misses=$((misses + 1))
+    # A preempted Spot VM is deleted at once; a busy one only stops answering.
+    if ! "${gc[@]}" compute instances describe "$vm" --zone "$zone" --format='value(status)' 2>/dev/null | grep -q RUNNING; then
+      echo "the VM is gone (Spot preemption?); partial results in $dest" >&2
+      exit 1
+    fi
+  fi
+  [ "$misses" -lt 10 ] || { echo "lost the VM; partial results in $dest" >&2; exit 1; }
   [ "$state" = DONE ] && break
   [ -n "$state" ] && echo "$state"
 done
 ssh_vm 'cp "$HOME/run.log" "$HOME/results/run.log"; rm -f "$HOME/results/done"'
-
-mkdir -p "$dest"
-ssh_vm 'tar -c -C "$HOME/results" .' | tar -x -C "$dest"
+fetch
 
 if ls "$dest"/tier-*.json >/dev/null 2>&1; then
   {
