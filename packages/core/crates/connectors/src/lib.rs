@@ -6,6 +6,8 @@
 //! manifests and children.
 
 pub mod child;
+pub mod install;
 pub mod js;
 pub mod manifest;
 pub mod pack;
+pub mod sdk;

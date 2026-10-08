@@ -80,11 +80,33 @@ fn signal_name(sig: i32) -> String {
     }
 }
 
+/// What a connector says of an error it answered with (`data` in protocol 1).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ErrorData {
+    /// One of `validation`, `app-offline`, `signed-out`, `upstream`, `internal`.
+    pub kind: Option<String>,
+    pub retryable: Option<bool>,
+    pub field: Option<String>,
+}
+
+/// The error kinds protocol 1 names; any other is dropped.
+pub const ERROR_KINDS: &[&str] = &[
+    "validation",
+    "app-offline",
+    "signed-out",
+    "upstream",
+    "internal",
+];
+
 /// Why a request got no result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallError {
     /// The child answered with an error.
-    Answered { code: i64, message: String },
+    Answered {
+        code: i64,
+        message: String,
+        data: ErrorData,
+    },
     /// The child, or its pipe, failed before it answered.
     Transport(String),
 }
@@ -509,7 +531,24 @@ fn call_error(method: &str, error: &Value) -> CallError {
         Some(m) if !m.is_empty() => m.to_owned(),
         _ => format!("{method} failed"),
     };
-    CallError::Answered { code, message }
+    let data = error.get("data").filter(|d| d.is_object());
+    let data = ErrorData {
+        kind: data
+            .and_then(|d| d.get("kind"))
+            .and_then(Value::as_str)
+            .filter(|k| ERROR_KINDS.contains(k))
+            .map(str::to_owned),
+        retryable: data.and_then(|d| d.get("retryable")).and_then(Value::as_bool),
+        field: data
+            .and_then(|d| d.get("field"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    };
+    CallError::Answered {
+        code,
+        message,
+        data,
+    }
 }
 
 #[cfg(test)]
@@ -539,16 +578,32 @@ mod tests {
             call_error("m", &json!({ "code": -32601, "message": "nope" })),
             CallError::Answered {
                 code: -32601,
-                message: "nope".into()
+                message: "nope".into(),
+                data: ErrorData::default()
             }
         );
         assert_eq!(
             call_error("m", &json!("x")),
             CallError::Answered {
                 code: CONNECTOR_ERROR,
-                message: "m failed".into()
+                message: "m failed".into(),
+                data: ErrorData::default()
             }
         );
+        let CallError::Answered { data, .. } = call_error(
+            "m",
+            &json!({ "message": "x", "data": { "kind": "signed-out", "retryable": true, "field": "f" } }),
+        ) else {
+            panic!("an answered error");
+        };
+        assert_eq!(data.kind.as_deref(), Some("signed-out"));
+        assert_eq!((data.retryable, data.field.as_deref()), (Some(true), Some("f")));
+        let CallError::Answered { data, .. } =
+            call_error("m", &json!({ "message": "x", "data": { "kind": "odd" } }))
+        else {
+            panic!("an answered error");
+        };
+        assert_eq!(data.kind, None);
     }
 
     #[test]
