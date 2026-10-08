@@ -34,6 +34,7 @@
 //! Connections and connectors, their secrets included, are vornd's
 //! ([`connectors`]).
 
+pub mod about;
 pub mod agent;
 pub mod config;
 pub mod connectors;
@@ -198,6 +199,8 @@ pub fn effect(method: &str) -> Option<Effect> {
         || method == IDENTIFY
         || tasks::METHODS.contains(&method)
         || widget::METHODS.contains(&method)
+        || about::METHODS.contains(&method)
+        || method == script::METHOD
     {
         return Some(Effect::Change);
     }
@@ -588,6 +591,12 @@ impl Native {
         }
         if widget::METHODS.contains(&method.as_str()) {
             return widget::answer(self);
+        }
+        if about::METHODS.contains(&method.as_str()) {
+            return about::answer(self, &method, params).await;
+        }
+        if method == script::METHOD {
+            return script::execute(self, params).await;
         }
         if extensions::METHODS.contains(&method.as_str()) {
             let Some(host) = self.extensions.get().cloned() else {

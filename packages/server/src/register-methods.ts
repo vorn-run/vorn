@@ -63,7 +63,6 @@ import {
   dbDeleteSSHKey,
   insertSessionEvent
 } from './database'
-import { executeScript, scriptRunnerEvents } from './script-runner'
 import { getTailscaleStatus, clearBinaryCache } from './tailscale'
 import { reachableUrls } from './reachable-urls'
 import { listTokens, mintOwnerToken, revokeToken } from './token-manager'
@@ -276,8 +275,6 @@ export function registerAllMethods(): void {
     sessionManager.scheduleSave()
     return session
   })
-
-  registerMethod('core:status', () => coreStatus())
 
   // Sessions
   registerMethod('sessions:clear', () => {
@@ -680,9 +677,6 @@ export function registerAllMethods(): void {
   registerMethod('headless:kill', (id) => headlessManager.killHeadless(id))
   registerMethod('headless:list', () => headlessManager.getActiveSessions())
 
-  // Scripts
-  registerMethod('script:execute', (config) => executeScript(config))
-
   // Agent/IDE detection
   registerMethod('agent:detectInstalled', () => detectInstalledAgents())
   registerMethod('agent:listModels', (request) => listAgentModels(request))
@@ -701,15 +695,6 @@ export function registerAllMethods(): void {
       // Not installed or not answering; LAN addresses still stand.
     }
     return reachableUrls(serverPort, tailscaleIps)
-  })
-
-  // Asked for by the main process, which spawns the simulator's companion and
-  // has only the four system directories on its own PATH. Bounded well under
-  // the shell's own timeout: a caller waiting on this is a person waiting on a
-  // device pane, and a provisional answer beats a late one.
-  registerMethod('env:path', async () => {
-    await shellEnvSettled(5_000)
-    return resolvedShellPath()
   })
 
   // Tailscale network access. Informational only now: it supplies an address and
@@ -798,7 +783,6 @@ export function registerAllMethods(): void {
   registerMethod('shell:listInstalled', () => listInstalledShells())
 
   // SSH
-  registerMethod('ssh:testConnection', (host) => testSshConnection(host))
 
   // Fire-and-forget notifications
   registerNotification('terminal:write', ({ id, data }) => ptyManager.writeToPty(id, data))
@@ -849,12 +833,6 @@ export function registerAllMethods(): void {
   })
   headlessManager.on('client-message', (channel: string, payload: unknown) => {
     clientRegistry.broadcast(channel, payload, terminalScope(payload))
-  })
-  scriptRunnerEvents.on(IPC.SCRIPT_DATA, (payload) => {
-    clientRegistry.broadcast(IPC.SCRIPT_DATA, payload)
-  })
-  scriptRunnerEvents.on(IPC.SCRIPT_EXIT, (payload) => {
-    clientRegistry.broadcast(IPC.SCRIPT_EXIT, payload)
   })
 
   // ─── Persistent session auto-save ──────────────────────────────

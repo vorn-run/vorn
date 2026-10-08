@@ -3869,6 +3869,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-remote"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "vorn-screen"
 version = "0.7.5"
 dependencies = [
@@ -4022,6 +4030,7 @@ dependencies = [
  "vorn-protocol",
  "vorn-reach",
  "vorn-recovery",
+ "vorn-remote",
  "vorn-screen",
  "vorn-sessiond",
  "vorn-sessiond-wire",

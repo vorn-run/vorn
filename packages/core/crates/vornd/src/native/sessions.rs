@@ -119,6 +119,13 @@ pub trait Host: Send + Sync + fmt::Debug {
     /// gives it `input` once it is up. Returns at once.
     fn start(&self, spec: SpawnSpec, name: String, input: Input, then: Then);
 
+    /// As [`Host::start`], handing what the program prints and how it ended
+    /// to `watch`. A host that cannot watch drops it, which reads as lost.
+    fn start_watched(&self, spec: SpawnSpec, name: String, input: Input, watch: Watch, then: Then) {
+        drop(watch);
+        self.start(spec, name, input, then);
+    }
+
     /// Sends `sig` to session `id`'s program.
     fn signal(&self, id: &str, sig: Sig);
 
@@ -179,6 +186,13 @@ pub enum Input {
 
 /// What a start's outcome is handed to.
 pub type Then = Box<dyn FnOnce(Result<Started, String>) + Send>;
+
+/// Where a watched program's output and exit code go ([`Host::start_watched`]).
+#[derive(Debug)]
+pub struct Watch {
+    pub output: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    pub ended: tokio::sync::oneshot::Sender<i64>,
+}
 
 /// A session's program, started.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

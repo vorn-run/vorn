@@ -357,9 +357,6 @@ export class VorndSessions extends EventEmitter {
   /** What starts vornd, and says whether it is coming. */
   private launcher: VorndLauncher | null = null
 
-  /** Whether vornd runs the project scripts, or compares what this server runs, as its `vornd:hello` said. */
-  private scriptWork: Hello['scripts'] = null
-
   /** Whether this server is winding down, as vornd needs to know while it creates terminals. */
   private closingSource: (() => Closing) | null = null
   private toldClosing = ''
@@ -390,11 +387,6 @@ export class VorndSessions extends EventEmitter {
     (record, how) => this.emit('mirrored', record, how),
     (note) => this.emit('native', note)
   )
-
-  /** Whether vornd runs the project scripts (`native`) or compares the plans of this server's (`shadow`). */
-  scriptMode(): 'native' | 'shadow' | null {
-    return this.inUse() ? (this.scriptWork ?? null) : null
-  }
 
   /**
    * Claim `transcriptId` for session `sessionId` in vornd. Answers the session
@@ -526,7 +518,6 @@ export class VorndSessions extends EventEmitter {
     }
     const old = this.channel
     this.channel = channel
-    this.scriptWork = hello?.scripts ?? null
     old?.close()
     channel.on('notification', (method: string, params: unknown) =>
       this.notified(channel, method, params)

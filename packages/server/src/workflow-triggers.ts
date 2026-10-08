@@ -26,7 +26,12 @@ const VORND_GROUPS = new Set([
   'config',
   'task',
   'project',
-  'sessionEvent'
+  'sessionEvent',
+  'widget',
+  'core',
+  'env',
+  'ssh',
+  'script'
 ])
 
 /** How long vornd gets to answer one: publishing may wait on the pane opening. */

@@ -33,8 +33,8 @@ use tracing::{info, warn};
 use vorn_sessiond_wire::{Io, Sig, SpawnSpec, Stdin};
 
 use super::headless::FORCE_KILL_DELAY;
-use super::sessions::{set, Input, Started, Then};
-use super::{agent, first_difference, Native};
+use super::sessions::{set, Input, Started, Then, Watch};
+use super::{agent, first_difference, Answer, Native};
 use crate::groups::{Counted, Groups, Mode};
 
 /// What a script's call is counted as, wherever the server was asked.
@@ -234,6 +234,18 @@ impl Scripts {
     /// gave, then hands `then` its start or why it failed. An error is why
     /// nothing was started. Blocks while the environment is read.
     pub fn run(self: &Arc<Self>, params: &Value, then: Then) -> Result<(), String> {
+        self.start(params, None, then)?;
+        // Counted here: the server was asked, and the proxy counted the call as forwarded.
+        self.groups.count(METHOD, Counted::Native);
+        Ok(())
+    }
+
+    fn start(
+        self: &Arc<Self>,
+        params: &Value,
+        watch: Option<Watch>,
+        then: Then,
+    ) -> Result<(), String> {
         if self.mode != Mode::Native {
             return Err("vornd does not run scripts".to_owned());
         }
@@ -305,31 +317,29 @@ impl Scripts {
             ring_bytes: None,
         };
         native.sessions.lock_starting().insert(id.clone(), None);
-        self.groups.count(METHOD, Counted::Native);
         let (sessions, host_after) = (Arc::clone(&native.sessions), Arc::clone(host));
-        let files = Arc::downgrade(self);
-        host.start(
-            spec,
-            id.clone(),
-            input,
-            Box::new(move |outcome: Result<Started, String>| {
-                let pending = sessions.lock_starting().remove(&id).flatten();
-                match &outcome {
-                    Ok(_) => {
-                        if let Some(sig) = pending {
-                            stop(host_after.as_ref(), &id, sig);
-                        }
-                    }
-                    Err(why) => {
-                        warn!(%id, %why, "vornd could not start this script");
-                        if let Some(files) = files.upgrade() {
-                            files.ended(&id);
-                        }
+        let (files, name) = (Arc::downgrade(self), id.clone());
+        let then: Then = Box::new(move |outcome: Result<Started, String>| {
+            let pending = sessions.lock_starting().remove(&id).flatten();
+            match &outcome {
+                Ok(_) => {
+                    if let Some(sig) = pending {
+                        stop(host_after.as_ref(), &id, sig);
                     }
                 }
-                then(outcome);
-            }),
-        );
+                Err(why) => {
+                    warn!(%id, %why, "vornd could not start this script");
+                    if let Some(files) = files.upgrade() {
+                        files.ended(&id);
+                    }
+                }
+            }
+            then(outcome);
+        });
+        match watch {
+            Some(watch) => host.start_watched(spec, name, input, watch, then),
+            None => host.start(spec, name, input, then),
+        }
         Ok(())
     }
 
@@ -403,6 +413,149 @@ fn stop(host: &dyn super::sessions::Host, id: &str, sig: Sig) {
     host.signal(id, sig);
     if sig == Sig::Term {
         host.signal_after(id, Sig::Kill, FORCE_KILL_DELAY);
+    }
+}
+
+/// `script:execute`: runs a script in the session holder, tells its
+/// output and end to every client by its `runId` (`script:data`,
+/// `script:exit`), and answers `{success, output, error?, exitCode}` once
+/// it ended, as the server's `executeScript` does.
+pub async fn execute(native: &Arc<Native>, params: Value) -> Answer {
+    let run = params
+        .get("runId")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let tell = |method: &str, fields: Value| {
+        if let Some(run) = &run {
+            let mut note = json!({ "runId": run });
+            if let (Some(n), Some(f)) = (note.as_object_mut(), fields.as_object()) {
+                n.extend(f.clone());
+            }
+            native.broadcast(method, note);
+        }
+    };
+    let fail = |message: String| {
+        warn!(%message, "a script did not run");
+        tell(
+            "script:data",
+            json!({ "data": format!("Error: {message}\n") }),
+        );
+        tell("script:exit", json!({ "exitCode": 1 }));
+        Answer::Result(json!({ "success": false, "output": "", "error": message }))
+    };
+    let script_type = params
+        .get("scriptType")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if Interpreter::parse(script_type).is_none() {
+        let message = format!("Unsupported script type: {script_type}");
+        return Answer::Result(json!({ "success": false, "output": "", "error": message }));
+    }
+    let Some(scripts) = native.link.get().and_then(|l| l.scripts()).cloned() else {
+        return fail("vornd does not run scripts".to_owned());
+    };
+    let cwd = ["cwd", "projectPath"]
+        .iter()
+        .find_map(|k| {
+            params
+                .get(*k)
+                .and_then(Value::as_str)
+                .filter(|c| !c.is_empty())
+        })
+        .map(str::to_owned)
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|d| d.to_string_lossy().into_owned())
+        })
+        .unwrap_or_default();
+    let id = format!("script-{}", uuid::Uuid::new_v4());
+    let mut asked = json!({
+        "id": id,
+        "scriptType": script_type,
+        "scriptContent": params.get("scriptContent").cloned().unwrap_or(json!("")),
+        "cwd": cwd,
+        "args": params.get("args").filter(|a| !a.is_null()).cloned().unwrap_or(json!([])),
+    });
+    if let Some(from) = params.get("secretsFrom").filter(|f| f.is_string()) {
+        asked["secretsFrom"] = from.clone();
+    }
+    let (output_tx, mut output) = tokio::sync::mpsc::unbounded_channel();
+    let (ended_tx, ended) = tokio::sync::oneshot::channel();
+    let (started_tx, started) = tokio::sync::oneshot::channel();
+    let watch = Watch {
+        output: output_tx,
+        ended: ended_tx,
+    };
+    let then: Then = Box::new(move |outcome| {
+        let _ = started_tx.send(outcome);
+    });
+    let s = Arc::clone(&scripts);
+    let ran = tokio::task::spawn_blocking(move || s.start(&asked, Some(watch), then)).await;
+    match ran {
+        Ok(Ok(())) => {}
+        Ok(Err(why)) => return fail(why),
+        Err(err) => return fail(err.to_string()),
+    }
+    match started.await {
+        Ok(Ok(_)) => {}
+        Ok(Err(why)) => return fail(why),
+        Err(_) => return fail("vornd's session holder went away".to_owned()),
+    }
+    let mut text = Utf8::default();
+    let mut printed = String::new();
+    while let Some(bytes) = output.recv().await {
+        let chunk = text.push(&bytes);
+        if !chunk.is_empty() {
+            tell("script:data", json!({ "data": chunk }));
+            printed.push_str(&chunk);
+        }
+    }
+    let rest = text.finish();
+    if !rest.is_empty() {
+        tell("script:data", json!({ "data": rest }));
+        printed.push_str(&rest);
+    }
+    let code = ended.await.unwrap_or(1);
+    scripts.ended(&id);
+    tell("script:exit", json!({ "exitCode": code }));
+    let mut answer = json!({ "success": code == 0, "output": printed, "exitCode": code });
+    if code != 0 {
+        answer["error"] = json!(if printed.is_empty() {
+            format!("Exited with code {code}")
+        } else {
+            printed
+        });
+    }
+    Answer::Result(answer)
+}
+
+/// Text from bytes that arrive in pieces: a character split between two
+/// pieces is told whole with the second.
+#[derive(Debug, Default)]
+struct Utf8 {
+    pending: Vec<u8>,
+}
+
+impl Utf8 {
+    fn push(&mut self, bytes: &[u8]) -> String {
+        self.pending.extend_from_slice(bytes);
+        let whole = match std::str::from_utf8(&self.pending) {
+            Ok(_) => self.pending.len(),
+            // Only an incomplete character at the end waits; anything else is replaced now.
+            Err(e) if e.error_len().is_none() => e.valid_up_to(),
+            Err(_) => self.pending.len(),
+        };
+        let rest = self.pending.split_off(whole);
+        let text = String::from_utf8_lossy(&self.pending).into_owned();
+        self.pending = rest;
+        text
+    }
+
+    fn finish(&mut self) -> String {
+        let text = String::from_utf8_lossy(&self.pending).into_owned();
+        self.pending.clear();
+        text
     }
 }
 
@@ -507,6 +660,17 @@ async fn clean_up(
 mod tests {
     use super::super::sessions::tests::{fed, Fed};
     use super::*;
+
+    #[test]
+    fn tells_a_character_split_between_pieces_whole() {
+        let mut text = Utf8::default();
+        let e_acute = "é".as_bytes();
+        assert_eq!(text.push(&[b'a', e_acute[0]]), "a");
+        assert_eq!(text.push(&[e_acute[1], b'b']), "éb");
+        assert_eq!(text.push(&[0xff, b'c']), "\u{fffd}c");
+        assert_eq!(text.push(&[e_acute[0]]), "");
+        assert_eq!(text.finish(), "\u{fffd}");
+    }
 
     fn ready(mode: Mode) -> (Fed, Arc<Scripts>, tempfile::TempDir) {
         let fed = fed();
