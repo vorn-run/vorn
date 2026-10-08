@@ -962,6 +962,8 @@ pub const AUTH_GROUP: &str = "auth";
 pub const AUTH_METHOD: &str = "auth:authenticate";
 /// What an Origin check is counted as.
 pub const ORIGIN_METHOD: &str = "auth:origin";
+/// The error code the server answers a call on a socket it has not admitted with.
+const NOT_AUTHENTICATED: i64 = -32001;
 /// The close code the server refuses a credential with.
 pub const CLOSE_CREDENTIAL_REJECTED: u16 = 4002;
 /// The shadow comparison of the credential check, which no request id can
@@ -1063,17 +1065,20 @@ impl Conn {
     /// - **shadow**: vornd's verdict is compared with the server's, which is
     ///   an answer or `auth:ok` (admitted) or a close with
     ///   [`CLOSE_CREDENTIAL_REJECTED`] (refused).
-    pub fn check_credential(self: &Arc<Self>, raw: String) {
+    ///
+    /// The check runs off this task; what it returns ends when it is done,
+    /// which the upgrade's first frame waits for.
+    pub fn check_credential(self: &Arc<Self>, raw: String) -> Option<tokio::task::JoinHandle<()>> {
         let mode = self.groups.mode(AUTH_GROUP);
         if mode == Mode::Forward || self.admitted() {
             self.groups.count(AUTH_METHOD, Counted::Forwarded);
-            return;
+            return None;
         }
         if mode == Mode::Shadow {
             self.shadows.begin(CREDENTIAL.to_owned(), AUTH_METHOD);
         }
         let conn = Arc::clone(self);
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             let native = Arc::clone(&conn.native);
             let checked = tokio::task::spawn_blocking(move || {
                 let verdict = native.verify_credential(&raw);
@@ -1104,7 +1109,7 @@ impl Conn {
                         .settle(CREDENTIAL, Side::Native, json!(admitted), &conn.groups);
                 }
             }
-        });
+        }))
     }
 
     /// The server closed the connection with `code`.
@@ -1127,11 +1132,29 @@ impl Conn {
                 .and_then(|(_, params)| params.get("token")?.as_str().map(str::to_owned))
                 .filter(|t| !t.is_empty())
             {
-                self.check_credential(token);
+                // The server answers `auth:ok`, which admits the connection here too.
+                let _ = self.check_credential(token);
             } else {
                 self.groups.count(method, Counted::Forwarded);
             }
             return Offer::Pass;
+        }
+        // Before a connection is admitted the server refuses it, whatever it asks.
+        if !self.admitted() {
+            self.groups.count(method, Counted::BeforeAuth);
+            return Offer::Pass;
+        }
+        if crate::groups::unknown(method) {
+            if let Some((id, _)) = request_of(text) {
+                let frame = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": { "code": -32601, "message": format!("Method not found: {method}") },
+                });
+                self.reply.send_now(&frame);
+            }
+            self.groups.count(method, Counted::Native);
+            return Offer::Taken;
         }
         let mode = self.groups.route(method);
         if mode == Mode::Forward {
@@ -1249,7 +1272,11 @@ impl Conn {
     }
 
     async fn run(&self, method: String, params: Value) -> Answer {
-        let viewer = self.viewer.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let viewer = self
+            .viewer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         self.native.answer(method, params, &viewer).await
     }
 
@@ -1358,8 +1385,10 @@ impl Conn {
     /// connection, and whether it answers a shadowed call. The frame itself
     /// goes to the client unchanged whatever this finds.
     pub fn on_server_text(self: &Arc<Self>, text: &str) {
-        let admitting =
-            !self.admitted() && (text.contains("\"result\"") || text.contains("\"auth:ok\""));
+        let admitting = !self.admitted()
+            && (text.contains("\"result\"")
+                || text.contains("\"error\"")
+                || text.contains("\"auth:ok\""));
         let shadowed = self.shadows.waiting() && text.contains("\"id\"");
         let pending = self.waiting.load(Ordering::Acquire) > 0 && text.contains("\"id\"");
         if !admitting && !shadowed && !pending {
@@ -1371,9 +1400,17 @@ impl Conn {
         let method = frame.get("method").and_then(Value::as_str);
         let id = frame.get("id").filter(|id| !id.is_null());
         if admitting {
-            // The server sends a result, or `auth:ok`, only to a socket it
-            // has admitted.
-            let answer = method.is_none() && id.is_some() && frame.contains_key("result");
+            // The server answers, or sends `auth:ok`, only to a socket it has
+            // admitted: any other gets its not-authenticated refusal.
+            let refused = frame
+                .get("error")
+                .and_then(|e| e.get("code"))
+                .and_then(Value::as_i64)
+                == Some(NOT_AUTHENTICATED);
+            let answer = method.is_none()
+                && id.is_some()
+                && !refused
+                && (frame.contains_key("result") || frame.contains_key("error"));
             if answer || (method == Some("auth:ok") && id.is_none()) {
                 self.authed.store(true, Ordering::Release);
                 self.shadows

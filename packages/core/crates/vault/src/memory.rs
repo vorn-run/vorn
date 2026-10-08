@@ -27,7 +27,10 @@ impl Memory {
 
     /// The writes made so far, as `set <id>` and `delete <id>`.
     pub fn writes(&self) -> Vec<String> {
-        self.writes.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.writes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Makes every write and delete fail, as a locked keychain does.

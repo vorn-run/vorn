@@ -483,6 +483,14 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
     } finally {
       process.stdout.write = origWrite
     }
+    // vornd answers the configuration from vorn.db; here it lives in the mocked store, so the server answers it for both sides.
+    const { registerMethod } = await import('../packages/server/src/ws-handler')
+    const { configManager } = await import('../packages/server/src/config-manager')
+    registerMethod('config:load', () => configManager.loadConfig())
+    registerMethod('config:save', (config) => {
+      configManager.saveConfig(config as AppConfig)
+      configManager.notifyChanged()
+    })
     const token = { VORND_DESKTOP_TOKEN: TEST_CREDENTIAL }
     native = await startVornd(serverPort, ['--groups', 'mcp=native'], token)
     untold = await startVornd(serverPort, ['--groups', 'mcp=native'])

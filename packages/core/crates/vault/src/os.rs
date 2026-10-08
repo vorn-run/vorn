@@ -29,7 +29,9 @@ pub fn open() -> Result<Arc<dyn Keychain>> {
 
 #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 pub fn open() -> Result<Arc<dyn Keychain>> {
-    Err(Error::Unavailable("this platform has no keychain Vorn uses".into()))
+    Err(Error::Unavailable(
+        "this platform has no keychain Vorn uses".into(),
+    ))
 }
 
 #[cfg(any(target_os = "macos", windows, target_os = "linux"))]

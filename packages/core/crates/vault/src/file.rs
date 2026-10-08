@@ -128,10 +128,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = FileKeychain::new(dir.path().join("vornd").join(FILE_NAME));
         assert_eq!(file.get(Kind::SshKey, "k").unwrap(), None);
-        file.set(Kind::SshKey, "k", &Secret::from("PRIVATE")).unwrap();
-        file.set(Kind::HostPassword, "k", &Secret::from("pw")).unwrap();
-        assert_eq!(file.get(Kind::SshKey, "k").unwrap().unwrap().expose(), "PRIVATE");
-        assert_eq!(file.get(Kind::HostPassword, "k").unwrap().unwrap().expose(), "pw");
+        file.set(Kind::SshKey, "k", &Secret::from("PRIVATE"))
+            .unwrap();
+        file.set(Kind::HostPassword, "k", &Secret::from("pw"))
+            .unwrap();
+        assert_eq!(
+            file.get(Kind::SshKey, "k").unwrap().unwrap().expose(),
+            "PRIVATE"
+        );
+        assert_eq!(
+            file.get(Kind::HostPassword, "k").unwrap().unwrap().expose(),
+            "pw"
+        );
         file.delete(Kind::SshKey, "k").unwrap();
         file.delete(Kind::SshKey, "k").unwrap();
         assert_eq!(file.get(Kind::SshKey, "k").unwrap(), None);

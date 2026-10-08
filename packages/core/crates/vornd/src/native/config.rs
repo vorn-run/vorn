@@ -36,9 +36,7 @@ pub enum Viewer {
 impl Viewer {
     /// Who presents `credential`, once it has been admitted.
     pub fn of_credential(credential: &str, desktop: Option<&[u8]>) -> Viewer {
-        if desktop
-            .is_some_and(|d| vorn_reach::token::constant_time_eq(credential.as_bytes(), d))
-        {
+        if desktop.is_some_and(|d| vorn_reach::token::constant_time_eq(credential.as_bytes(), d)) {
             return Viewer::Desktop;
         }
         match vorn_reach::token::parse(credential) {
@@ -96,6 +94,10 @@ struct Saved {
 
 /// Answers `config:load` or `config:save` for `viewer`.
 pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &Viewer) -> Answer {
+    // A vornd started without the database (a test's) leaves the call to the server.
+    if native.database().is_none() {
+        return Answer::Forward;
+    }
     let (n, key) = (Arc::clone(native), viewer.key());
     match method {
         "config:load" => {

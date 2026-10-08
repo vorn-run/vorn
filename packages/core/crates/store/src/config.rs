@@ -1043,13 +1043,18 @@ mod tests {
             .save_viewer_settings("desktop", desktop["defaults"].as_object().unwrap())
             .unwrap();
 
-        assert_eq!(store.load_config_for("token:phone").unwrap()["defaults"]["theme"], "light");
-        assert_eq!(store.load_config_for("desktop").unwrap()["defaults"]["theme"], "dark");
+        assert_eq!(
+            store.load_config_for("token:phone").unwrap()["defaults"]["theme"],
+            "light"
+        );
+        assert_eq!(
+            store.load_config_for("desktop").unwrap()["defaults"]["theme"],
+            "dark"
+        );
         // A viewer that kept nothing sees the shared values, and no viewer row leaks into a config.
         let fresh = store.load_config_for("token:new").unwrap();
         assert_eq!(fresh["defaults"]["theme"], "dark");
         assert!(fresh["defaults"].get("viewer:desktop").is_none());
         assert_eq!(fresh["defaults"]["shell"], "/bin/bash");
     }
-
 }

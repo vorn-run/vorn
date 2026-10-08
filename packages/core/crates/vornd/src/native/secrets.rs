@@ -184,19 +184,20 @@ impl Secrets {
         let tx = self.writes.get_or_init(|| {
             let (tx, rx) = mpsc::channel::<Job>();
             let keychain = Arc::clone(keychain);
+            let logs = tracing::dispatcher::get_default(Clone::clone);
             std::thread::Builder::new()
                 .name("vornd-keychain".into())
                 .spawn(move || {
+                    let _logs = tracing::dispatcher::set_default(&logs);
                     for job in rx {
                         let (what, done) = match &job {
                             Job::Set(id, fields) => (
                                 "write",
                                 vorn_vault::set_connection_fields(keychain.as_ref(), id, fields),
                             ),
-                            Job::Delete(id) => (
-                                "delete",
-                                keychain.delete(vorn_vault::Kind::Connection, id),
-                            ),
+                            Job::Delete(id) => {
+                                ("delete", keychain.delete(vorn_vault::Kind::Connection, id))
+                            }
                         };
                         match done {
                             Ok(()) => debug!(what, "vault updated"),
@@ -336,14 +337,62 @@ mod tests {
         }
         let later = Secrets::new();
         later.settle_in(dir.path(), false);
-        assert_eq!(later.lookup("c1"), Known::Fields(fields(json!({ "token": "t" }))));
+        assert_eq!(
+            later.lookup("c1"),
+            Known::Fields(fields(json!({ "token": "t" })))
+        );
+    }
+
+    /// Everything logged, into one buffer.
+    #[derive(Clone, Default)]
+    struct Logged(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Logged {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
     fn no_secret_reaches_the_log_or_a_debug_print() {
-        let secrets = Secrets::default();
-        secrets.set("c1", fields(json!({ "token": "hunter2-secret" })));
-        let shown = format!("{:?} {:?}", secrets.lookup("c1"), secrets);
-        assert!(!shown.contains("hunter2-secret"), "{shown}");
+        let logged = Logged::default();
+        let writer = logged.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let memory = Arc::new(Memory::default());
+            let secrets = Secrets::with_keychain(Some(memory.clone()));
+            let push = json!({ "connectionId": "c1", "fields": { "token": "hunter2-secret" } });
+            secrets.observe("credentials:setDecrypted", &push);
+            settled(&memory, 1);
+            // A write the keychain refuses, and an item that is not what vornd wrote.
+            let locked = Arc::new(Memory::default());
+            locked.fail_writes(true);
+            Secrets::with_keychain(Some(locked)).merge("c3", "token", "hunter3-secret");
+            memory
+                .set(Kind::Connection, "c2", &Secret::from("hunter4-secret"))
+                .unwrap();
+            assert_eq!(secrets.lookup("c2"), Known::Unknown);
+            let shown = format!("{:?} {:?}", secrets.lookup("c1"), secrets);
+            assert!(!shown.contains("hunter"), "{shown}");
+        });
+        // The refused write is logged from the vault's thread, after it fails.
+        for _ in 0..200 {
+            if String::from_utf8_lossy(&logged.0.lock().unwrap()).contains("could not update") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let text = String::from_utf8_lossy(&logged.0.lock().unwrap()).into_owned();
+        assert!(text.contains("could not update the vault"), "{text}");
+        assert!(text.contains("could not read a connection"), "{text}");
+        assert!(!text.contains("hunter"), "{text}");
     }
 }

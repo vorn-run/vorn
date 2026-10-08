@@ -142,6 +142,9 @@ impl Reach {
         if desktop.is_some_and(|d| token::constant_time_eq(raw.as_bytes(), d)) {
             return Verdict::Admitted;
         }
+        if local_token(db).is_some_and(|t| token::constant_time_eq(raw.as_bytes(), &t)) {
+            return Verdict::Admitted;
+        }
         let Some(parsed) = token::parse(raw) else {
             return Verdict::Refused;
         };
@@ -160,6 +163,14 @@ impl Reach {
             Err(_) => Verdict::CannotTell,
         }
     }
+}
+
+/// The server's local credential, which it keeps beside the database.
+fn local_token(db: Option<&PathBuf>) -> Option<Vec<u8>> {
+    let file = db?.parent()?.join("local-token");
+    let token = std::fs::read(file).ok()?;
+    let token = token.trim_ascii();
+    (!token.is_empty()).then(|| token.to_vec())
 }
 
 /// Whether `p` is a file this user may run.

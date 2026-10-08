@@ -132,7 +132,11 @@ impl fmt::Display for Error {
         match self {
             Error::Unavailable(why) => write!(f, "no keychain: {why}"),
             Error::Failed { op, kind, reason } => {
-                write!(f, "could not {op} {} in the keychain: {reason}", kind.service())
+                write!(
+                    f,
+                    "could not {op} {} in the keychain: {reason}",
+                    kind.service()
+                )
             }
             Error::Corrupt { kind } => {
                 write!(f, "an item of {} is not what Vorn wrote", kind.service())
@@ -238,11 +242,9 @@ pub fn connection_fields(
     let Some(item) = keychain.get(Kind::Connection, id)? else {
         return Ok(None);
     };
-    parse_fields(item.expose())
-        .map(Some)
-        .ok_or(Error::Corrupt {
-            kind: Kind::Connection,
-        })
+    parse_fields(item.expose()).map(Some).ok_or(Error::Corrupt {
+        kind: Kind::Connection,
+    })
 }
 
 /// Files a connection's secret fields as one item.
@@ -308,8 +310,12 @@ mod tests {
     #[test]
     fn imports_every_kind_and_keeps_fields_already_held() {
         let memory = Memory::default();
-        set_connection_fields(&memory, "c1", &fields(&[("token", "old"), ("extra", "kept")]))
-            .unwrap();
+        set_connection_fields(
+            &memory,
+            "c1",
+            &fields(&[("token", "old"), ("extra", "kept")]),
+        )
+        .unwrap();
         let import = Import {
             connections: [("c1".to_owned(), fields(&[("token", "new")]))].into(),
             ssh_keys: [("k1".to_owned(), Secret::from("PRIVATE"))].into(),
@@ -333,7 +339,11 @@ mod tests {
             "PRIVATE"
         );
         assert_eq!(
-            memory.get(Kind::HostPassword, "h1").unwrap().unwrap().expose(),
+            memory
+                .get(Kind::HostPassword, "h1")
+                .unwrap()
+                .unwrap()
+                .expose(),
             "pw"
         );
         // Run again, as a desktop that did not hear the answer would: the same items.
@@ -384,7 +394,11 @@ mod tests {
             .unwrap();
         let (again, _) = open(false, Some(dir.path()));
         assert_eq!(
-            again.get(Kind::HostPassword, "h").unwrap().unwrap().expose(),
+            again
+                .get(Kind::HostPassword, "h")
+                .unwrap()
+                .unwrap()
+                .expose(),
             "pw"
         );
         let (_, backing) = open(false, None);

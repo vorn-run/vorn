@@ -13,9 +13,7 @@ use crate::js;
 /// The triggers `after` fires over `before`, both whole configurations, in
 /// the order of `after`'s tasks. Each is `{effectId, kind, task, from?, to?}`.
 pub fn for_change(before: &Value, after: &Value) -> Vec<Value> {
-    let previous: HashMap<String, &Value> = tasks(before)
-        .map(|t| (key(t.get("id")), t))
-        .collect();
+    let previous: HashMap<String, &Value> = tasks(before).map(|t| (key(t.get("id")), t)).collect();
     let mut triggers = Vec::new();
     for task in tasks(after) {
         let id = text(task.get("id"));
@@ -93,7 +91,8 @@ mod tests {
 
     #[test]
     fn a_new_task_is_created_and_a_moved_one_changed_status() {
-        let before = json!({ "tasks": [task("a", "todo", "2030-01-01"), task("b", "todo", "2030-01-01")] });
+        let before =
+            json!({ "tasks": [task("a", "todo", "2030-01-01"), task("b", "todo", "2030-01-01")] });
         let after = json!({ "tasks": [
             task("a", "todo", "2030-01-02"),
             task("b", "in_progress", "2030-01-02"),
