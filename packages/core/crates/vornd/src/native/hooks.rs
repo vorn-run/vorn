@@ -102,6 +102,8 @@ pub struct Hooks {
     owner: AtomicBool,
     /// Whether it wrote Copilot's hooks file.
     copilot: AtomicBool,
+    /// Set once vornd stops: a registration that comes free then is not taken.
+    stopped: AtomicBool,
     pending: Mutex<Vec<Pending>>,
     mapper: Mutex<Mapper>,
     last_activity: Mutex<Instant>,
@@ -143,6 +145,7 @@ impl Hooks {
             port: listener.local_addr()?.port(),
             owner: AtomicBool::new(false),
             copilot: AtomicBool::new(false),
+            stopped: AtomicBool::new(false),
             pending: Mutex::default(),
             mapper: Mutex::default(),
             last_activity: Mutex::new(Instant::now()),
@@ -161,6 +164,9 @@ impl Hooks {
                 loop {
                     tokio::time::sleep(OWNER_POLL).await;
                     let Some(hooks) = weak.upgrade() else { return };
+                    if hooks.stopped.load(Ordering::SeqCst) {
+                        return;
+                    }
                     if hooks.try_claim() {
                         info!(
                             port = hooks.port,
@@ -198,6 +204,9 @@ impl Hooks {
         if self.owns_registration() {
             return true;
         }
+        if self.stopped.load(Ordering::SeqCst) {
+            return false;
+        }
         let me = std::process::id();
         if !may_claim(
             Owner::read(&self.owner_file()),
@@ -230,6 +239,7 @@ impl Hooks {
 
     /// Denies what is pending and gives the registration up, when it is still this vornd's.
     pub fn stop(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
         for p in lock(&self.pending).drain(..) {
             let _ = p.reply.send(permission::decision(false, None, None));
         }
@@ -359,11 +369,7 @@ impl Hooks {
             reply: tx,
         });
         hook_status(&native, &resolved.terminal, None, true);
-        let about = terminals
-            .iter()
-            .find(|t| t.id == resolved.terminal)
-            .map(|_| about(&native, &resolved.terminal))
-            .unwrap_or_default();
+        let about = about(&native, &resolved.terminal);
         info!(request = %id, tool = event.tool_name(), terminal = %resolved.terminal, "a permission request");
         native.broadcast(
             "widget:permission-request",
@@ -762,7 +768,15 @@ async fn capture(
     agent: vorn_hooks::capture::Agent,
     id: String,
 ) {
-    let data_home = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from);
+    // Where OpenCode keeps its data: LOCALAPPDATA on Windows, XDG_DATA_HOME elsewhere.
+    let data_home = if cfg!(windows) {
+        Some(
+            std::env::var_os("LOCALAPPDATA")
+                .map_or_else(|| home.join("AppData").join("Local"), PathBuf::from),
+        )
+    } else {
+        std::env::var_os("XDG_DATA_HOME").map(PathBuf::from)
+    };
     let db = agent.database(&home, data_home.as_deref());
     for secs in CAPTURE_LADDER {
         tokio::time::sleep(Duration::from_secs(secs)).await;

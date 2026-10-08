@@ -30,13 +30,7 @@ import {
   releaseSpawningTranscript,
   releaseSpawningTranscriptsFor
 } from './transcript-claims'
-import {
-  IPC,
-  PermissionRequestInfo,
-  SessionEventType,
-  RemoteHost,
-  getProjectRemoteHostId
-} from '@vornrun/shared/types'
+import { IPC, SessionEventType, RemoteHost, getProjectRemoteHostId } from '@vornrun/shared/types'
 import type { ProjectConfig, TerminalSession, WorktreeRetentionConfig } from '@vornrun/shared/types'
 import { DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
 import * as gitUtils from './git-utils'
@@ -65,7 +59,6 @@ import {
 } from './pairing'
 import { disconnectToken } from './ws-handler'
 import { listAgentModels } from './agent-model-catalog'
-import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
 import log from './logger'
 import { vorndSessions } from './vornd-sessions'
 import { wireVorndRestore } from './vornd-restore'
