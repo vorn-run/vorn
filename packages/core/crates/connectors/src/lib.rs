@@ -13,4 +13,5 @@ pub mod install;
 pub mod js;
 pub mod manifest;
 pub mod pack;
+pub mod poll;
 pub mod sdk;

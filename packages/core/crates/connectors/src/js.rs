@@ -194,3 +194,8 @@ pub fn truthy(value: &Value) -> bool {
 pub fn locale_compare(a: &str, b: &str) -> std::cmp::Ordering {
     a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b))
 }
+
+/// JavaScript's `a < b` on strings: by UTF-16 code unit.
+pub fn less(a: &str, b: &str) -> bool {
+    a.encode_utf16().lt(b.encode_utf16())
+}
