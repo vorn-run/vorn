@@ -8,7 +8,7 @@ This spike decides how Vorn's next native client is built. The client talks to v
   - **A, pure Swift:** CoreText runs drawn by a native view.
   - **B, hybrid:** a Rust GPU renderer behind a small C API, attached to the native view.
 
-**Round two recommendation: B (hybrid), provisionally.** It is the same look and the same input and accessibility as A. Typing latency stays flat when neighbouring panes are busy (0.4 ms against 8 ms), and terminal drawing moves off the main thread that the SwiftUI chrome also needs. The renderer is portable Rust, so it is reusable by a later Windows or Linux client. It costs about 4 MB of binary, about 80 MB more memory at 8 panes, and more CPU on full-screen floods. The gated 32-pane stress run decides it, because that is where A's main-thread drawing either holds or doesn't. Details are in [Round two recommendation](#round-two-recommendation).
+**Round two recommendation: A (pure Swift).** At 32 busy panes A holds 120 fps, with typing latency flat at about one frame (8.2 / 8.8 ms p50 / p95). It used 42% CPU and 42 MB of memory, against B's 232% and 211 MB: B's cost grows with every pane, while A's tracks the window's size. B hands frames over sooner (1.1 / 4.4 ms), but it doesn't justify five times the CPU and memory, a C boundary and a second language in an app that is now Apple-only. Looks, IME and VoiceOver are identical. Details are in [16 and 32 panes](#16-and-32-busy-panes-for-a-and-b) and [Round two recommendation](#round-two-recommendation).
 
 ## Contents
 
@@ -19,8 +19,8 @@ This spike decides how Vorn's next native client is built. The client talks to v
   - [The look screen, round one's flaws fixed](#the-look-screen-round-ones-flaws-fixed)
   - [Recordings](#recordings)
   - [VoiceOver and Japanese IME](#voiceover-and-japanese-ime)
+  - [16 and 32 panes](#16-and-32-busy-panes-for-a-and-b)
   - [Round two recommendation](#round-two-recommendation)
-  - [Gated: 16 and 32 panes](#gated-16-and-32-busy-panes-for-a-and-b)
 - Round one (reference): [What was built](#what-was-built) · [Methodology](#methodology) · [Results](#results) · [The look test](#the-look-test) · [Qualitative assessment](#qualitative-assessment) · [Slint license](#slint-license-for-an-mit-open-source-desktop-app) · [Round one recommendation](#recommendation) · [Reproducing](#reproducing)
 
 ## Round two: terminals in the SwiftUI app (A vs B)
@@ -72,7 +72,7 @@ Same machine, harness and runs as round one (M2 Pro, 120 Hz). Round one's `swift
   - With one pane, B hands a frame over 4 ms sooner than A (2.4 against 6.8 ms).
   - With seven neighbours flooding, B gets *faster* (0.4 ms), because the typed pane's render thread wakes on its own delta and presents at once.
   - A waits for the shared main-thread tick that also redraws the seven busy panes (8.0 ms, about one 120 Hz frame).
-  - Both stay within one frame at 8 panes. The question is 32 (gated, below).
+  - Both stay within one frame at 8 panes. At 32 panes A stays at 8.2 / 8.8 ms and B rises to 1.1 / 4.4 ms (see [16 and 32 panes](#16-and-32-busy-panes-for-a-and-b)).
 - **Frame rate:** both hold 120 fps on 8 floods and 8 build logs. B drops 1.3% on `yes` ×8: those are slots where one of the eight independent presenters missed its vsync, not stalls of the whole window.
 - **CPU depends on the load:**
   - **B costs more on full-screen floods** (60.6 against 35.1%): eight threads each build and present a full screen 120 times a second. A `sample` profile shows mostly drawable-pacing waits; nothing cheap was left to remove after sharing the atlas.
@@ -186,42 +186,87 @@ Evidence is in `results/ime/apple-{a,b}-{preedit,commit}.png`.
 
 **The one A/B difference:** B lays the preedit out on the cell grid, two cells per kana. A draws it as one CoreText run at the cursor. Both line up with the committed text in the screenshots.
 
+### 16 and 32 busy panes for A and B
+
+The maintainer approved these stress runs and they ran as planned:
+- **Clients:** `apple-a`, then `apple-b`, one at a time.
+- **Runs per client:**
+  - `load-16-yes`, `load-16-buildlog`, `load-32-yes`, `load-32-buildlog` (10 s each);
+  - `latency-32-yes`: 150 probes into one pane while 31 run `yes`;
+  - `idle-32`.
+- **Pacing:** each run is a foreground `timeout 150` with a 60 s cool-down between runs (`target/stress.sh`, not committed). There were no other busy processes beyond the panes' own producers.
+- **Load gate:** pause if the 5-minute load average went above 60. It peaked at 5.2, so no pause was needed.
+- **One rerun:** A's first run (`load-16-yes`) got no report from the client and no window on screen, likely a slow first launch of the freshly built app. It was rerun once after a cool-down. Every kept run had its window on screen.
+
+Raw JSON is in `results/raw/apple-{a,b}-{load-16-*,load-32-*,latency-32-yes,idle-32}.json`. The table comes from `python3 results/table.py --stress apple-a apple-b`.
+
+| metric | **A: pure Swift** | **B: hybrid** |
+|---|---|---|
+| Latency p50 / p95 / p99, 32 panes, 31 running `yes` (ms) | 8.2 / 8.8 / 11.4 | **1.1 / 4.4 / 5.3** |
+| (same at 8 panes, for comparison) | 8.0 / 8.8 / 11.1 | 0.4 / 0.7 / 0.9 |
+| Probes lost (of 150), 32 panes | 5 | 5 |
+| yes ×16: fps / dropped % / worst interval (ms) | 120.0 / 0.0 / 8.9 | 119.2 / 0.7 / 17.2 |
+| yes ×16: frame work p50 / p95 (ms) | 2.3 / 2.6 | 25.2 / 34.3 (summed over 16 threads) |
+| yes ×16: client CPU % / footprint MB | **33.1 / 32.8** | 119.0 / 149.7 |
+| buildlog ×16: fps / dropped % / worst interval (ms) | 120.0 / 0.2 / 15.8 | 119.7 / 0.4 / 31.5 |
+| buildlog ×16: frame work p50 / p95 (ms) | 3.9 / 4.6 | 4.7 / 11.4 |
+| buildlog ×16: client CPU % / footprint MB | **52.0 / 33.1** | 100.7 / 153.7 |
+| yes ×32: fps / dropped % / worst interval (ms) | 120.0 / 0.0 / 9.2 | 119.9 / 0.3 / 16.6 |
+| yes ×32: frame work p50 / p95 (ms) | 2.9 / 3.2 | 116.4 / 155.6 (summed over 32 threads) |
+| yes ×32: client CPU % / footprint MB | **41.9 / 41.7** | 231.5 / 211.1 |
+| buildlog ×32: fps / dropped % / worst interval (ms) | 119.3 / 0.6 / 62.0 | 119.9 / 0.2 / 22.8 |
+| buildlog ×32: frame work p50 / p95 (ms) | 5.3 / 5.8 | 22.9 / 47.9 |
+| buildlog ×32: client CPU % / footprint MB | **69.9 / 42.7** | 212.8 / 226.5 |
+| vornd CPU %: yes ×16 / buildlog ×16 / yes ×32 / buildlog ×32 | 97 / 38 / 196 / 68 | 109 / 42 / 222 / 83 |
+| Idle 32: client CPU % / footprint MB | 1.3 / **25.7** | 0.5 / 120.8 |
+
+**What the 32-pane runs show.**
+
+- **A holds.** It stays at 120 fps with no drops on 32 floods. Typing latency doesn't move from 8 panes to 32 (p50 8.2, p95 8.8 ms), about one 120 Hz frame.
+- **A's main-thread cost is bounded by the window, not by the pane count.**
+  - Frame work on `yes` went 2.6 → 2.3 → 2.9 ms (8, 16, 32 panes); on build logs, 4.3 → 3.9 → 5.3 ms.
+  - The window has the same number of cells however it is split, and A only lays out dirty rows. The earlier guess here of "roughly 4× at 32" was wrong.
+  - Even on 32 scrolling logs, at least 2.5 ms of each 8.3 ms frame is left for the chrome at p95.
+- **A had one visible hitch:** a single 62 ms frame interval on 32 build logs (7 of 1193 frames dropped). B's worst interval was 23 ms.
+- **B scales with the pane count.** Every pane is a render thread with its own drawables and presents.
+  - At 32 panes, client CPU is 3–5.5× A's (212–232% against 42–70%) and footprint is 5× (211–227 MB against 42 MB).
+  - Idle footprint is 121 MB against 26 MB.
+  - Its latency edge holds but shrinks: p95 grows from 0.7 to 4.4 ms as 32 threads compete for cores.
+- **vornd's CPU is similar for both.** It is a little higher under B, which drains output faster and so returns flow-control credits sooner.
+
 ### Round two recommendation
 
-**B, the hybrid renderer, provisionally: confirm with the 32-pane stress run before committing.**
+**A, pure Swift (CoreText in a native view), now that the 32-pane run is in.** Round two recommended B provisionally and said A was the simpler answer if it held 120 fps at about one frame of latency on 32 panes. It did, so the recommendation is A.
 
 **Deciding reasons.**
-1. **Latency that doesn't degrade with load.** Vorn's normal state is several agents printing at once. In B the pane you type in presents on its own thread the moment its delta lands (0.4 ms p95 0.7 with seven busy neighbours). In A every keystroke waits behind the main-thread redraw of every busy pane (8 ms, and growing with N).
-2. **The main thread stays free for the app.** The SwiftUI chrome, diff review, editor and workflow canvas all live on the main thread. A spends 2.6–4.9 ms of each 8.3 ms frame there on 8 panes, and roughly 4× that at 32. B spends nothing there.
-3. **A portable, reusable renderer.** `term-render` is Rust on wgpu, so the same crate would draw terminals for a later Windows (DirectX) or Linux (Vulkan) client behind the same C API. It is the one part of the stack round one showed is hard to get right per platform.
-4. **No loss on the Apple side.** Looks, IME and VoiceOver are identical because Swift keeps owning them, and the same code ran on iOS unchanged.
+1. **A holds at Vorn's heaviest realistic load.**
+   - It keeps 120 fps with 32 panes flooding, and typing latency stays at about one frame from 8 panes to 32.
+   - Its main-thread drawing cost tracks the window's area, not the number of panes (2.9 ms on 32 floods, 5.8 ms p95 on 32 scrolling logs). That leaves room for the SwiftUI chrome.
+2. **B's cost grows with every pane.**
+   - At 32 panes B takes 3–5.5× A's CPU and 5× its memory, and 4–5× the idle memory.
+   - That costs battery on a laptop and on an iPad, and memory on an iPhone. The fixes (one shared presenter, a 60 Hz cap for unfocused panes, fewer drawables) would rebuild part of what A already does on the main tick.
+3. **B's portability no longer pays for itself.** The decision is one SwiftUI app for Apple platforms, so a renderer reusable by Windows and Linux clients has no consumer now. That was B's third reason.
+4. **Simpler, and nothing lost.**
+   - A is one language, with no unsafe C boundary and no render threads, and no wgpu (−4 MB).
+   - Its painter is about 105 lines against about 1,450 for B.
+   - Looks, IME and VoiceOver are identical, because Swift owns them in both.
 
-**What B costs, and the mitigations.**
+**What A gives up: latency.**
+- With busy neighbours, B hands a frame to the compositor about 7 ms sooner at 8 panes, and about 4 ms sooner at p95 on 32.
+- That is roughly one 120 Hz frame. It is noticeable to the most sensitive typists, and it is the main thing to win back.
+
+**Risks of the A pick, and mitigations.**
 
 | Risk | Mitigation |
 |---|---|
-| **Memory:** +80–100 MB footprint at 8 panes, which matters most on iPhone and iPad. | Fewer drawables, a smaller or evictable atlas, and pausing presenters of hidden panes. A phone shows 1–2 panes (≈ 30 MB). |
-| **CPU on full-screen floods:** 60 against 35% for 8 × `yes`, from 8 render threads presenting at 120 Hz. | Cap busy, unfocused panes at 60 Hz, or move to one presenter thread for all surfaces. |
-| **Complexity:** a Rust GPU renderer, its threads and an unsafe C boundary, about 1,450 extra lines against A's ~105-line `Painter`. | Keep A's `Painter` as the fallback and the test oracle: the A↔B switch already lets one pane flip live and compare. |
-| **Binary:** +4 MB (wgpu and naga). | Acceptable for a desktop app. On iOS consider wgpu's Metal-only features or a direct Metal backend later. |
-| **Atlas overflow** clears the shared atlas, so other panes may show wrong glyphs for one frame. | They redraw on the generation change. An LRU atlas with pages removes it. |
-| **Untested on device.** | Run the same harness on an iPhone and an iPad with Xcode.app. |
+| **About one frame of typing latency under load** (8 ms against 0.4–4 ms for B). | Draw the focused pane as soon as its delta for a typed key arrives, instead of waiting for the next display-link tick. This is the same idea that gives B its edge, applied inside A's painter. |
+| **Main-thread contention** once diff review, the editor and the workflow canvas share the main thread with 5–6 ms of terminal drawing on the worst load. | Measure with the real chrome. If needed, build each pane's layer contents on a background queue (CoreText is thread-safe for drawing into a bitmap context) and only swap contents on main. Or cap busy unfocused panes at 60 Hz. |
+| **One 62 ms hitch** on 32 build logs. | Profile it before building on A. Likely suspects: a burst of scrolled rows laid out in one tick, and CoreText line-cache churn. |
+| **Untested on device** (A-series GPU and CPU, thermals, ProMotion). | Run the same harness on an iPhone and an iPad with Xcode.app. |
 
-**When A is the better pick.** If the stress run shows A holding 120 fps and under one frame of latency at 32 panes, A is the simpler answer: one language, the least memory and CPU on floods, no C boundary. It is fully adequate at ≤ 8 panes today.
+**B stays available.** `apple/term-render` and the app/surface C API remain in the spike as a documented, working alternative. Vorn can come back to it if a non-Apple client returns, or if measured main-thread contention can't be solved inside A. The A↔B per-pane switch makes such a comparison cheap to repeat.
 
-### Gated: 16 and 32 busy panes for A and B
-
-These are stress runs and were not run; they are waiting for the maintainer's go-ahead. The plan:
-
-- **Clients:** `apple-a`, then `apple-b`, one at a time.
-- **Per client, in order:**
-  - `load-16-yes`, `load-16-buildlog`, `load-32-yes`, `load-32-buildlog` (10 s each);
-  - `latency-32-yes`: 150 probes into one pane while 31 run `yes`;
-  - `idle-32` (10 s).
-- **Pacing:** each run is one foreground `timeout 150 ./target/release/spike-harness run --client <c> --mode <m> --panes <N> [--producer yes|buildlog]`, with a 60 s cool-down between runs. That is about 10 min per client, about 20 min in total.
-- **Load:** 32 producers plus vornd at an expected 200–250% CPU, plus the client.
-
-The round-one stress plan below is superseded: the dropped candidates no longer need it.
+The round-one stress plan further down is superseded: the dropped candidates no longer need it.
 
 ## Round one (reference)
 

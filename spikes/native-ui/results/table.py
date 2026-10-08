@@ -26,7 +26,29 @@ rows = [
     ('vornd CPU %: yes x8 / buildlog x8', lambda c: f"{g(c+'-load-8-yes','vornd_cpu_pct')} / {g(c+'-load-8-buildlog','vornd_cpu_pct')}"),
     ('Cold start to first frame, median of 5 (ms)', lambda c: statistics.median([S[f'{c}-start-1-r{i}']['cold_start_ms'] for i in range(1, 6)])),
 ]
+def pair(run, k1, k2):
+    return lambda c: f"{g(c+'-'+run, k1)} / {g(c+'-'+run, k2)}"
+
+# The gated 16/32-pane stress runs: python3 results/table.py --stress apple-a apple-b
+stress_rows = [
+    ('Latency p50 / p95, 32 panes, 31 running yes (ms)', pair('latency-32-yes', 'latency_p50_ms', 'latency_p95_ms')),
+    ('Probes lost (of 150), 32 panes', lambda c: g(c+'-latency-32-yes', 'latency_lost')),
+]
+for n in (16, 32):
+    for p in ('yes', 'buildlog'):
+        r = f'load-{n}-{p}'
+        stress_rows += [
+            (f'Load {p} x{n}: fps / dropped % / interval max (ms)', lambda c, r=r: f"{g(c+'-'+r,'fps')} / {g(c+'-'+r,'dropped_pct')} / {g(c+'-'+r,'frame_interval_max_ms')}"),
+            (f'Load {p} x{n}: frame work p50 / p95 (ms)', pair(r, 'frame_work_p50_ms', 'frame_work_p95_ms')),
+            (f'Load {p} x{n}: client CPU % / footprint MB', pair(r, 'client_cpu_pct', 'client_footprint_max_mb')),
+            (f'Load {p} x{n}: vornd CPU %', lambda c, r=r: g(c+'-'+r, 'vornd_cpu_pct')),
+        ]
+stress_rows.append(('Idle 32: client CPU % / footprint MB', pair('idle-32', 'client_cpu_pct', 'client_footprint_max_mb')))
+
 import sys
+if sys.argv[1:2] == ['--stress']:
+    rows = stress_rows
+    sys.argv.pop(1)
 clients = sys.argv[1:] or ['swift', 'gpui', 'tauri', 'tauri120', 'slint']
 print('| metric | ' + ' | '.join(clients) + ' |')
 print('|---|' + '---|' * len(clients))
