@@ -5657,6 +5657,7 @@ dependencies = [
 name = "spike-core"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "vorn-grid-client",
  "vorn-term-mirror",
  "vorn-term-proto",
@@ -6184,6 +6185,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fed54709c5b3a53d09bb1c113ea4f5ceafd1e772ddcb0030a82e1d56c087b08"
 dependencies = [
  "new_debug_unreachable",
+]
+
+[[package]]
+name = "term-render"
+version = "0.0.0"
+dependencies = [
+ "objc2 0.6.5",
+ "spike-core",
+ "wgpu",
 ]
 
 [[package]]
@@ -6768,6 +6778,7 @@ name = "vorn-spike-ffi"
 version = "0.0.0"
 dependencies = [
  "spike-core",
+ "term-render",
 ]
 
 [[package]]

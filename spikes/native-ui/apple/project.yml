@@ -1,0 +1,62 @@
+# One SwiftUI multiplatform project: the same shared sources (Core, Look) in
+# a macOS app and an iOS/iPadOS app, each linking the Rust static library
+# for its platform. Generate with xcodegen; build.sh does it all.
+name: VornSpikeApple
+options:
+  bundleIdPrefix: run.vorn.spike
+  deploymentTarget:
+    macOS: "14.0"
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_OBJC_BRIDGING_HEADER: App/Shared/Bridging.h
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGNING_REQUIRED: "NO"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+    DEAD_CODE_STRIPPING: "YES"
+    STRIP_INSTALLED_PRODUCT: "YES"
+    GENERATE_INFOPLIST_FILE: "YES"
+    MARKETING_VERSION: "0.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  VornSpikeMac:
+    type: application
+    platform: macOS
+    sources: [App/Shared, App/macOS]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: run.vorn.spike.apple
+        PRODUCT_NAME: VornSpikeApple
+        LIBRARY_SEARCH_PATHS: ["$(PROJECT_DIR)/../target/aarch64-apple-darwin/release"]
+        OTHER_LDFLAGS: ["-lvorn_spike_ffi"]
+        ARCHS: arm64
+        ENABLE_APP_SANDBOX: "NO"
+        ENABLE_HARDENED_RUNTIME: "NO"
+        INFOPLIST_KEY_NSHighResolutionCapable: "YES"
+    dependencies:
+      - sdk: Metal.framework
+      - sdk: QuartzCore.framework
+      - sdk: CoreText.framework
+  VornSpikeIOS:
+    type: application
+    platform: iOS
+    sources: [App/Shared, App/iOS]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: run.vorn.spike.ios
+        PRODUCT_NAME: VornSpikeIOS
+        TARGETED_DEVICE_FAMILY: "1,2"
+        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": ["$(PROJECT_DIR)/../target/aarch64-apple-ios-sim/release"]
+        "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]": ["$(PROJECT_DIR)/../target/aarch64-apple-ios/release"]
+        OTHER_LDFLAGS: ["-lvorn_spike_ffi"]
+        ARCHS: arm64
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleLightContent
+    dependencies:
+      - sdk: Metal.framework
+      - sdk: QuartzCore.framework
+      - sdk: CoreText.framework

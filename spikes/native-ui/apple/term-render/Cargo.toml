@@ -1,0 +1,11 @@
+[package]
+name = "term-render"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Option B: draws one pane of the shared grid client with wgpu (Metal) on its own thread into a layer it attaches to a host view"
+
+[dependencies]
+spike-core = { workspace = true }
+wgpu = { version = "30", default-features = false, features = ["metal", "wgsl"] }
+objc2 = "0.6"

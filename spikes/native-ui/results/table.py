@@ -26,7 +26,8 @@ rows = [
     ('vornd CPU %: yes x8 / buildlog x8', lambda c: f"{g(c+'-load-8-yes','vornd_cpu_pct')} / {g(c+'-load-8-buildlog','vornd_cpu_pct')}"),
     ('Cold start to first frame, median of 5 (ms)', lambda c: statistics.median([S[f'{c}-start-1-r{i}']['cold_start_ms'] for i in range(1, 6)])),
 ]
-clients = ['swift', 'gpui', 'tauri', 'tauri120', 'slint']
+import sys
+clients = sys.argv[1:] or ['swift', 'gpui', 'tauri', 'tauri120', 'slint']
 print('| metric | ' + ' | '.join(clients) + ' |')
 print('|---|' + '---|' * len(clients))
 for label, f in rows:

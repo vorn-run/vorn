@@ -9,3 +9,4 @@ description = "The grid client every native UI prototype links: vornd's socket, 
 vorn-term-proto = { workspace = true }
 vorn-term-mirror = { workspace = true }
 vorn-grid-client = { workspace = true }
+libc = "0.2"

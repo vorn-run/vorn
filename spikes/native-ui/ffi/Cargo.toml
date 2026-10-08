@@ -3,11 +3,16 @@ name = "vorn-spike-ffi"
 version = "0.0.0"
 edition = "2021"
 publish = false
-description = "C ABI over spike-core (term-mirror + term-proto) for the SwiftUI prototype"
+description = "C ABI over spike-core (term-mirror + term-proto) for the Swift apps, plus the GPU pane renderer's surface API"
 
 [lib]
 crate-type = ["staticlib"]
 path = "src/lib.rs"
 
+[features]
+default = ["render"]
+render = ["dep:term-render"]
+
 [dependencies]
 spike-core = { workspace = true }
+term-render = { workspace = true, optional = true }

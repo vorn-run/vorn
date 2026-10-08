@@ -127,6 +127,19 @@ pub struct Bench {
     pub frame_work_ms: Vec<f64>,
     pub period_ms: f64,
     pub first_frame_ns: Option<u128>,
+    /// This process's CPU seconds when the measured window opened: the
+    /// client's own CPU%, which works where the harness cannot sample the
+    /// process (the iOS simulator).
+    cpu_at_window: Option<f64>,
+}
+
+/// User plus system CPU seconds of this process, and its peak RSS in bytes.
+pub fn self_usage() -> (f64, u64) {
+    // SAFETY: getrusage writes the struct it is given.
+    let mut r: libc::rusage = unsafe { std::mem::zeroed() };
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut r) };
+    let s = |t: libc::timeval| t.tv_sec as f64 + t.tv_usec as f64 / 1e6;
+    (s(r.ru_utime) + s(r.ru_stime), r.ru_maxrss as u64)
 }
 
 impl Bench {
@@ -147,6 +160,7 @@ impl Bench {
             frame_work_ms: Vec::new(),
             period_ms: 1000.0 / 60.0,
             first_frame_ns: None,
+            cpu_at_window: None,
         }
     }
 
@@ -174,6 +188,7 @@ impl Bench {
             }
             self.window = Some(now);
             self.next = now;
+            self.cpu_at_window = Some(self_usage().0);
         }
         let window = self.window.unwrap_or(now);
         match self.cfg.mode {
@@ -276,6 +291,16 @@ impl Bench {
             list(&self.frame_work_ms),
             crate::shot::on_screen(),
         );
+        if let (Some(w), Some(c0)) = (self.window, self.cpu_at_window) {
+            let (c1, rss) = self_usage();
+            let secs = w.elapsed().as_secs_f64().max(1e-3);
+            let _ = write!(
+                s,
+                ",\"self_cpu_pct\":{:.1},\"self_maxrss_mb\":{:.1}",
+                100.0 * (c1 - c0) / secs,
+                rss as f64 / 1048576.0
+            );
+        }
         for (k, v) in extra {
             let _ = write!(s, ",\"{k}\":{v}");
         }

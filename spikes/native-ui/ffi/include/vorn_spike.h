@@ -37,6 +37,13 @@ void vs_view_free(VsView *v);
 void vs_key(const VsHandle *h, uint32_t pane, const char *code, uint16_t mods, const char *text);
 void vs_text(const VsHandle *h, uint32_t pane, const char *utf8);
 void vs_resize(const VsHandle *h, uint32_t pane, uint16_t cols, uint16_t rows);
+/* 0: the host draws the pane (option A), 1: the GPU renderer (option B).
+   VORN_SPIKE_RENDERER sets it at open: "swift", "gpu" or per pane "abab". */
+uint32_t vs_pane_renderer(const VsHandle *h, uint32_t pane);
+void vs_set_pane_renderer(const VsHandle *h, uint32_t pane, uint32_t r);
+/* The pane's screen text for accessibility; free with vs_free_text. */
+char *vs_read_text(const VsHandle *h, uint32_t pane);
+void vs_free_text(char *t);
 
 uint32_t vs_bench_mode(const VsHandle *h);
 uint32_t vs_bench_tick(const VsHandle *h, uint32_t *ch);
@@ -47,3 +54,10 @@ void vs_bench_set_period(const VsHandle *h, double ms);
 /* Takes the look test's screenshot of this process's window, if asked for. */
 void vs_bench_shoot(const VsHandle *h);
 void vs_bench_write(const VsHandle *h);
+void vs_bench_write_as(const VsHandle *h, const char *client);
+/* The probe key was typed now / a probe-hit view is now on screen. */
+void vs_bench_typed(const VsHandle *h);
+void vs_bench_hit(const VsHandle *h);
+/* The host drew `pane` with a screen in it (first-frame bookkeeping). */
+void vs_pane_shown(const VsHandle *h, uint32_t pane);
+double vs_now_ms(const VsHandle *h);

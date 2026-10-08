@@ -108,8 +108,9 @@ const LOOK_SKIP: [&str; 7] =
 fn look_program() -> Vec<String> {
     let repo = spike_root().join("../..");
     let script = format!(
-        "sleep 1.5; git --no-pager -C '{}' log --graph --color=always -n 60 \
-         --format='%C(yellow)%h%C(reset) %C(blue)%<(13)%cr%C(reset)  %s' \
+        "sleep 4; w=$(( $(stty size | cut -d' ' -f2) - 28 )); \
+         git --no-pager -C '{}' log --graph --color=always -n 60 \
+         --format=\"%C(yellow)%h%C(reset) %C(blue)%<(13)%cr%C(reset)  %<($w,trunc)%s\" \
          | grep -vE '{}'; \
          PS1='vorn $ ' exec /bin/sh -i",
         repo.display(),
@@ -125,12 +126,25 @@ fn client_command(client: &str) -> Result<PathBuf, String> {
         "gpui" => root.join("target/release/vorn-spike-gpui"),
         "tauri" => root.join("target/release/vorn-spike-tauri"),
         "slint" => root.join("target/release/vorn-spike-slint"),
+        "apple-a" | "apple-b" => root.join("apple/build/VornSpikeApple.app/Contents/MacOS/VornSpikeApple"),
+        "ios-a" | "ios-b" => root.join("apple/ios-client.sh"),
         other => PathBuf::from(other),
     };
     if p.exists() {
         Ok(p)
     } else {
         Err(format!("no client at {}", p.display()))
+    }
+}
+
+/// The Apple app's renderer and result name: option A (CoreText) or B (GPU).
+fn apple_env(client: &str) -> Vec<(&'static str, String)> {
+    match client.rsplit_once('-') {
+        Some(("apple" | "ios", r @ ("a" | "b"))) => vec![
+            ("VORN_SPIKE_RENDERER", if r == "a" { "swift" } else { "gpu" }.into()),
+            ("VORN_SPIKE_CLIENT", client.into()),
+        ],
+        _ => vec![],
     }
 }
 
@@ -216,6 +230,7 @@ fn run(args: &Args) -> Result<(), String> {
         .env("VORN_SPIKE_POLISH", if polish { "1" } else { "0" })
         .env("VORN_SPIKE_FONT_SIZE", if look { "13" } else { "12" })
         .envs(look.then(|| ("VORN_SPIKE_SHOT", shot.clone())))
+        .envs(apple_env(&client))
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()

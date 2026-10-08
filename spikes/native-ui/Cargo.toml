@@ -4,13 +4,14 @@
 # dependencies never touch this lockfile.
 [workspace]
 resolver = "2"
-members = ["core", "ffi", "harness", "tauri", "slint"]
+members = ["core", "ffi", "harness", "tauri", "slint", "apple/term-render"]
 
 [workspace.dependencies]
 vorn-term-proto = { path = "../../packages/core/crates/term-proto" }
 vorn-term-mirror = { path = "../../packages/core/crates/term-mirror" }
 vorn-grid-client = { path = "../../packages/core/crates/grid-client" }
 spike-core = { path = "core" }
+term-render = { path = "apple/term-render" }
 
 [profile.release]
 opt-level = 3
