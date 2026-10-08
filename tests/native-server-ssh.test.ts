@@ -147,7 +147,9 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
           user: 'me',
           port: 2222,
           authMethod: 'password',
-          sshOptions: '-o StrictHostKeyChecking=no'
+          sshOptions: '-o StrictHostKeyChecking=no',
+          // Kept in vornd's vault with the save, and read from it for the login.
+          password: PASSWORD
         },
         {
           id: 'key',
@@ -166,8 +168,7 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
       projectName: 'far',
       projectPath: project,
       remoteHostId: 'pw',
-      initialPrompt: 'fix the remote build',
-      _decryptedPassword: PASSWORD
+      initialPrompt: 'fix the remote build'
     })
     const byKey = await created('create on a key host', {
       agentType: 'codex',

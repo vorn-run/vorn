@@ -40,6 +40,9 @@ use crate::groups::{Counted, Groups, Mode};
 /// What a script's call is counted as, wherever the server was asked.
 pub const METHOD: &str = "script:execute";
 
+/// How long a script waits for the session holder to connect before it fails.
+const HOLDER_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// What stands for the script's file in a compared plan: each side writes
 /// its own.
 const FILE: &str = "<script>";
@@ -490,6 +493,11 @@ pub async fn execute(native: &Arc<Native>, params: Value) -> Answer {
     let then: Then = Box::new(move |outcome| {
         let _ = started_tx.send(outcome);
     });
+    // A run that resumes as vornd starts waits for the session holder, as the server's did.
+    let deadline = tokio::time::Instant::now() + HOLDER_WAIT;
+    while !native.host.get().is_some_and(|h| h.ready()) && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
     let s = Arc::clone(&scripts);
     let ran = tokio::task::spawn_blocking(move || s.start(&asked, Some(watch), then)).await;
     match ran {
