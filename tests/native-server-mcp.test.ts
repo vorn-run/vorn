@@ -491,6 +491,12 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
       configManager.saveConfig(config as AppConfig)
       configManager.notifyChanged()
     })
+    // Connectors are vornd's too, which has no vorn.db here: a fixed empty set answers both sides alike.
+    registerMethod('connector:list', () => [])
+    registerMethod('connector:catalog', () => ({ items: [], templates: [], mcpServers: [] }))
+    registerMethod('connector:status', () => [])
+    registerMethod('connector:listPacks', () => [])
+    registerMethod('connection:list', () => [])
     const token = { VORND_DESKTOP_TOKEN: TEST_CREDENTIAL }
     native = await startVornd(serverPort, ['--groups', 'mcp=native'], token)
     untold = await startVornd(serverPort, ['--groups', 'mcp=native'])
