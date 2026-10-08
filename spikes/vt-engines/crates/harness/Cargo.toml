@@ -1,0 +1,17 @@
+[package]
+name = "vt-harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Throughput, memory, correctness and feature probes over every engine"
+
+[dependencies]
+vorn-recovery = { path = "../../../../packages/core/crates/recovery" }
+vorn-term-proto = { path = "../../../../packages/core/crates/term-proto" }
+vt-api = { path = "../api" }
+vt-alacritty = { path = "../alacritty" }
+vt-ghostty = { path = "../ghostty" }
+vt-vt100 = { path = "../vt100" }
+vt-wezterm = { path = "../wezterm" }

@@ -1,0 +1,14 @@
+[package]
+name = "vt-wezterm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "wezterm-term and termwiz from wezterm's upstream at a pinned commit"
+
+[dependencies]
+# Not on crates.io; scripts/fetch-wezterm.sh checks it out.
+wezterm-term = { path = "../../../.vt-vendor/wezterm/term" }
+termwiz = { path = "../../../.vt-vendor/wezterm/termwiz" }
+vt-api = { path = "../api" }

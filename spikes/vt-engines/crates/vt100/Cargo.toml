@@ -1,0 +1,12 @@
+[package]
+name = "vt-vt100"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The vt100 crate"
+
+[dependencies]
+vt100 = "=0.16.2"
+vt-api = { path = "../api" }

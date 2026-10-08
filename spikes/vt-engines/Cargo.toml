@@ -1,0 +1,24 @@
+# A spike outside packages/core's workspace, with its own Cargo.lock, so
+# nothing here changes the product's dependency graph.
+[workspace]
+resolver = "2"
+members = [
+  "crates/api",
+  "crates/ghostty",
+  "crates/alacritty",
+  "crates/wezterm",
+  "crates/vt100",
+  "crates/harness",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+
+# The product's shipped profile, so throughput is what vornd would see.
+[profile.release]
+lto = true
+codegen-units = 1

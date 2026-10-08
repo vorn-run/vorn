@@ -1,0 +1,13 @@
+[package]
+name = "vt-ghostty"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "libghostty-vt through vorn-screen, the baseline"
+
+[dependencies]
+libghostty-vt = { version = "=0.2.2", default-features = false }
+vorn-screen = { path = "../../../../packages/core/crates/screen" }
+vt-api = { path = "../api" }

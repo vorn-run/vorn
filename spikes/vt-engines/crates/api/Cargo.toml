@@ -1,0 +1,8 @@
+[package]
+name = "vt-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The engine trait and cell model the spike drives every engine through"
