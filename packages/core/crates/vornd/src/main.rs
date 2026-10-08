@@ -509,7 +509,7 @@ mod tests {
         let plain = parse(&["--upstream", "127.0.0.1:1"]).unwrap();
         assert_eq!(plain.groups.mode("git"), Mode::Native);
         assert_eq!(plain.groups.mode("workflow"), Mode::Native);
-        assert_eq!(plain.groups.mode("task"), Mode::Forward);
+        assert_eq!(plain.groups.mode("permission"), Mode::Forward);
         let shadowed = parse(&[
             "--upstream",
             "127.0.0.1:1",
@@ -526,7 +526,8 @@ mod tests {
 
     #[test]
     fn passes_group_errors_on() {
-        let err = parse(&["--upstream", "127.0.0.1:1", "--groups", "task=native"]).unwrap_err();
+        let err =
+            parse(&["--upstream", "127.0.0.1:1", "--groups", "permission=native"]).unwrap_err();
         assert!(err.starts_with("--groups"), "{err}");
     }
 }

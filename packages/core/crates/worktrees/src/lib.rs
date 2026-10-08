@@ -14,6 +14,7 @@
 //! their projects stay the server's.
 
 mod guard;
+pub mod mobile;
 mod remove;
 mod scan;
 mod size;

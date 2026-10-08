@@ -23,7 +23,10 @@ const VORND_GROUPS = new Set([
   'scheduler',
   'webhook',
   'artifact',
-  'config'
+  'config',
+  'task',
+  'project',
+  'sessionEvent'
 ])
 
 /** How long vornd gets to answer one: publishing may wait on the pane opening. */

@@ -65,7 +65,7 @@ pub fn list(store: &mut Store, params: &Value) -> Result<Value> {
     let tasks = store.call("dbListTasks", json!([get("projectName"), get("status")]))?;
     if params
         .get("includeDescription")
-        .is_some_and(|v| crate::js::truthy(v))
+        .is_some_and(crate::js::truthy)
     {
         return Ok(tasks);
     }
@@ -265,7 +265,7 @@ pub fn archive(store: &mut Store, params: &Value, now: &str) -> Result<(Value, b
     let Some(task) = task(store, &id)? else {
         return Ok((ok(false), false));
     };
-    let archived = params.get("archived").is_some_and(|v| crate::js::truthy(v));
+    let archived = params.get("archived").is_some_and(crate::js::truthy);
     if archived && !is_terminal(task.get("status").and_then(Value::as_str)) {
         return Ok((ok(false), false));
     }

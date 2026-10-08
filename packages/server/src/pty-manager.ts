@@ -296,7 +296,7 @@ class PtyManager extends EventEmitter {
       projectName: session.projectName,
       projectPath: session.projectPath
     } as CreateTerminalPayload
-    this.emit('session-created', session, payload)
+    this.emit('session-created', session, payload, true)
   }
 
   /**

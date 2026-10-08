@@ -1544,6 +1544,14 @@ fn register(
         set(&mut env, "TERM", PTY_TERM.to_owned());
     }
     let answer = record_json(&record);
+    let mut created = json!({
+        "agentType": record.agent_type,
+        "projectName": record.project_name,
+        "projectPath": record.project_path,
+    });
+    if let Some(branch) = record.branch.as_ref().filter(|b| !b.is_empty()) {
+        created["branch"] = json!(branch);
+    }
     let made = registry.change(|r| {
         let put = match made {
             Made::Created => r.create(record),
@@ -1555,7 +1563,7 @@ fn register(
         }
     });
     match made {
-        Some(Ok(())) => {}
+        Some(Ok(())) => super::tasks::log_event(native, &id, "created", Some(created)),
         Some(Err(e)) => return Answer::Error(e.to_string()),
         // The server went while the session was prepared.
         None => return Answer::Error("The Vorn server is not connected to vornd".to_owned()),
@@ -1683,12 +1691,23 @@ fn set_fields(native: &Native, id: &str, fields: Map<String, Value>) -> Answer {
     let Some(registry) = native.registry.get() else {
         return Answer::Forward;
     };
+    let renamed = fields.get("displayName").cloned();
     let done = registry.change(|r| match r.set_fields(id, fields) {
         Ok(note) => (true, note.into_iter().collect()),
         Err(_) => (false, Vec::new()),
     });
     match done {
-        Some(true) => Answer::Void,
+        Some(true) => {
+            if let Some(name) = renamed {
+                super::tasks::log_event(
+                    native,
+                    id,
+                    "renamed",
+                    Some(json!({ "displayName": name })),
+                );
+            }
+            Answer::Void
+        }
         // No such terminal here: the server says what it makes of it.
         _ => Answer::Forward,
     }

@@ -51,6 +51,7 @@ pub mod secrets;
 pub mod sessions;
 pub mod shell;
 pub mod ssh;
+pub mod tasks;
 pub mod work;
 pub mod worktree;
 pub mod worktree_move;
@@ -194,6 +195,7 @@ pub fn effect(method: &str) -> Option<Effect> {
         || connectors::METHODS.contains(&method)
         || desktop::answers(method)
         || method == IDENTIFY
+        || tasks::METHODS.contains(&method)
     {
         return Some(Effect::Change);
     }
@@ -568,6 +570,9 @@ impl Native {
         }
         if config::METHODS.contains(&method.as_str()) {
             return config::answer(self, &method, params, viewer).await;
+        }
+        if tasks::METHODS.contains(&method.as_str()) {
+            return tasks::answer(self, &method, params).await;
         }
         if extensions::METHODS.contains(&method.as_str()) {
             let Some(host) = self.extensions.get().cloned() else {

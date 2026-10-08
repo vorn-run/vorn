@@ -131,8 +131,22 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
     }
 }
 
+/// Tells every client the configuration changed after a write elsewhere
+/// in vornd (a task, a project), as the server's `notifyChanged` did.
+pub(crate) async fn announce(native: &Arc<Native>) {
+    let n = Arc::clone(native);
+    let loaded = blocking("config:changed", move || {
+        with_store(&n, |s| s.load_config())
+    })
+    .await;
+    match loaded {
+        Ok(config) => native.broadcast("config:changed", config),
+        Err(err) => warn!(%err, "could not read the configuration to announce it"),
+    }
+}
+
 /// Runs `f` on a blocking thread; a panic is the call's error.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     method: &str,
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -142,7 +156,7 @@ async fn blocking<T: Send + 'static>(
     })
 }
 
-fn with_store<T>(
+pub(crate) fn with_store<T>(
     native: &Native,
     f: impl FnOnce(&mut Store) -> vorn_store::Result<T>,
 ) -> Result<T, String> {

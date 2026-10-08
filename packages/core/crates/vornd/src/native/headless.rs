@@ -31,7 +31,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tracing::{info, warn};
 use vorn_agents::launch::shell as launch_shell;
 use vorn_agents::launch::{
@@ -292,12 +292,18 @@ fn register(native: &Native, launch: Launch) -> Answer {
     } = launch;
     let id = record.id.clone();
     let answer = serde_json::to_value(&record).unwrap_or(Value::Null);
+    let created = json!({
+        "agentType": record.agent_type,
+        "projectName": record.project_name,
+        "projectPath": record.project_path,
+        "headless": true,
+    });
     let made = registry.change(|r| match r.create_headless(record) {
         Ok(notes) => (Ok(()), notes),
         Err(e) => (Err(e), Vec::new()),
     });
     match made {
-        Some(Ok(())) => {}
+        Some(Ok(())) => super::tasks::log_event(native, &id, "created", Some(created)),
         Some(Err(e)) => return Answer::Error(e.to_string()),
         None => return Answer::Error("The Vorn server is not connected to vornd".to_owned()),
     }
