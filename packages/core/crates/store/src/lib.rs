@@ -15,7 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use serde_json::{Map, Value};
 use vorn_protocol::WorkspaceConfig;
 
@@ -240,6 +240,11 @@ impl Store {
         &mut self.conn
     }
 
+    /// A transaction for a write; see [`write_transaction`].
+    pub(crate) fn write_transaction(&mut self) -> Result<Transaction<'_>> {
+        write_transaction(&mut self.conn)
+    }
+
     /// The app's defaults; refused on a store opened beside the server.
     pub(crate) fn options(&self) -> Result<&StoreOptions> {
         self.options.as_ref().ok_or_else(|| {
@@ -270,6 +275,18 @@ fn is_corrupt(err: &Error) -> bool {
         ),
         _ => false,
     }
+}
+
+/// Begins a transaction that takes the write lock up front (`BEGIN IMMEDIATE`).
+///
+/// The server and vornd both write the file. A deferred transaction that
+/// reads and then writes holds a snapshot, and once the other process
+/// commits, SQLite refuses to upgrade that snapshot to a write
+/// (`SQLITE_BUSY_SNAPSHOT`) without calling the busy handler, so
+/// `busy_timeout` cannot help and the call fails with "database is locked".
+/// Taking the lock first makes it wait its turn within the timeout instead.
+pub(crate) fn write_transaction(conn: &mut Connection) -> Result<Transaction<'_>> {
+    Ok(conn.transaction_with_behavior(TransactionBehavior::Immediate)?)
 }
 
 #[cfg(test)]

@@ -209,7 +209,7 @@ impl Store {
         author: &str,
         answers_batch_id: Option<&str>,
     ) -> Result<ArtifactVersion> {
-        let tx = self.conn_mut().transaction()?;
+        let tx = self.write_transaction()?;
         let latest: Option<f64> = tx
             .query_row(
                 "SELECT latest_version FROM artifacts WHERE id = ?",
@@ -347,7 +347,7 @@ impl Store {
     /// Seals every draft on the artifact into one batch, returning
     /// `{ batchId, comments }`, or `None` when there were no drafts.
     pub fn send_artifact_drafts(&mut self, artifact_id: &str) -> Result<Option<Value>> {
-        let tx = self.conn_mut().transaction()?;
+        let tx = self.write_transaction()?;
         let batch_id = random_uuid();
         let changes = tx.execute(
             "UPDATE artifact_comments SET state = 'sent', batch_id = ?, sent_at = ?

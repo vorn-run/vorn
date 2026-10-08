@@ -304,8 +304,9 @@ async fn the_report_says_how_and_not_what() {
 
 /// A session started again under its name as soon as its exit is told, as
 /// the app resumes a shell that ended, is started rather than refused while
-/// the ended one is still leaving the engine; a tap taken for it, as a
-/// remote login takes one, reads the new run.
+/// the ended one is still leaving the engine; a tap given with it, as a
+/// remote login gives one, reads the new run whether the ended one leaves
+/// before or after the start is asked for.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_name_is_free_again_once_its_exit_is_told() {
     let rig = Rig::start().await;
@@ -331,8 +332,18 @@ async fn a_name_is_free_again_once_its_exit_is_told() {
                 Err(_) => panic!("run {run} never exited"),
             }
         }
-        let mut tap = v.engine.tap("again");
-        let s = v.engine.spawn_as(spec(), Some("again".into())).await;
+        if run % 2 == 1 {
+            loop {
+                match tokio::time::timeout(PATIENCE, v.events.recv()).await {
+                    Ok(Ok(Event::Closed(c))) if c.brief.session == "again" => break,
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => panic!("events: {e}"),
+                    Err(_) => panic!("run {run} never left the engine"),
+                }
+            }
+        }
+        let (tx, mut tap) = tokio::sync::mpsc::unbounded_channel();
+        let s = v.engine.spawn_tapped(spec(), "again".into(), tx).await;
         assert_eq!(s.map(|s| s.id), Ok("again".to_owned()), "run {run}");
         let read = tokio::time::timeout(PATIENCE, tap.recv()).await;
         assert!(matches!(read, Ok(Some(_))), "run {run}'s tap: {read:?}");

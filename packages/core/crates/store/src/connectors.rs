@@ -281,7 +281,7 @@ impl Store {
     /// crash never leaves a cursor past events that were only in memory.
     /// Answers how many events were new.
     pub fn db_record_connector_poll_page(&mut self, args: &ConnectorPollPage) -> Result<i64> {
-        let tx = self.conn_mut().transaction()?;
+        let tx = self.write_transaction()?;
         let mut inserted = 0_i64;
         {
             let mut insert = tx.prepare(
@@ -337,7 +337,7 @@ impl Store {
     /// Records a failed poll. The cursor is kept only when the workflow still
     /// polls the same connection.
     pub fn db_record_connector_poll_error(&mut self, args: &ConnectorPollError) -> Result<()> {
-        let tx = self.conn_mut().transaction()?;
+        let tx = self.write_transaction()?;
         tx.execute(
             "INSERT INTO connector_poll_state (
          workflow_id, connection_id, cursor, last_polled_at, last_error
@@ -372,7 +372,7 @@ impl Store {
         &mut self,
         args: &ConnectorInboxClaim,
     ) -> Result<Vec<ConnectorInboxItem>> {
-        let tx = self.conn_mut().transaction()?;
+        let tx = self.write_transaction()?;
         let mut claimed = Vec::new();
         {
             let mut select = tx.prepare(

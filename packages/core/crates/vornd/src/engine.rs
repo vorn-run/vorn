@@ -96,10 +96,12 @@ const CLOSED_KEPT: usize = 64;
 const EVENTS: usize = 1024;
 
 enum Command {
-    /// Start a session, under a name when one is given.
+    /// Start a session, under a name when one is given, and tap it when a
+    /// tap is given.
     Spawn(
         SpawnSpec,
         Option<String>,
+        Option<Tap>,
         oneshot::Sender<Result<Spawned, String>>,
     ),
     /// A signal for a session's program.
@@ -113,6 +115,9 @@ enum Command {
     /// Records from this cursor again, for a client continuing from it.
     Fetch(String, Cursor),
 }
+
+/// Where a tapped session's output goes.
+pub type Tap = mpsc::UnboundedSender<Vec<u8>>;
 
 /// What happened to a session, for whoever listens.
 #[derive(Debug, Clone)]
@@ -181,7 +186,7 @@ pub struct Engine {
     /// The copy of the app's session records, which the app's channel feeds.
     registry: Arc<SessionRegistry>,
     /// Sessions whose output is read as it comes, by name: a remote login's.
-    taps: Mutex<HashMap<String, mpsc::UnboundedSender<Vec<u8>>>>,
+    taps: Mutex<HashMap<String, Tap>>,
 }
 
 impl std::fmt::Debug for Engine {
@@ -236,19 +241,8 @@ impl Engine {
         })
     }
 
-    fn taps(&self) -> std::sync::MutexGuard<'_, HashMap<String, mpsc::UnboundedSender<Vec<u8>>>> {
+    fn taps(&self) -> std::sync::MutexGuard<'_, HashMap<String, Tap>> {
         self.taps.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// What session `id` prints from now on, until [`Engine::untap`] or its end.
-    pub fn tap(&self, id: &str) -> mpsc::UnboundedReceiver<Vec<u8>> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        self.taps().insert(id.to_owned(), tx);
-        rx
-    }
-
-    pub fn untap(&self, id: &str) {
-        self.taps().remove(id);
     }
 
     /// Hands what session `id` printed to its tap, if it has one.
@@ -451,8 +445,32 @@ impl Engine {
     /// Refused when another session goes by the name, unless that session's
     /// program has ended: then started once it leaves the engine.
     pub async fn spawn_as(&self, spec: SpawnSpec, name: Option<String>) -> Result<Spawned, String> {
+        self.spawn_with(spec, name, None).await
+    }
+
+    /// As [`Engine::spawn_as`] under `name`, and hands everything the session
+    /// prints to `tap` until it ends or the receiver is dropped.
+    ///
+    /// The tap goes in with the spawn and is set where sessiond's answer is
+    /// taken, so it holds this run's output only: a tap set before the spawn
+    /// could be taken down by the end of an earlier run under the name.
+    pub async fn spawn_tapped(
+        &self,
+        spec: SpawnSpec,
+        name: String,
+        tap: Tap,
+    ) -> Result<Spawned, String> {
+        self.spawn_with(spec, Some(name), Some(tap)).await
+    }
+
+    async fn spawn_with(
+        &self,
+        spec: SpawnSpec,
+        name: Option<String>,
+        tap: Option<Tap>,
+    ) -> Result<Spawned, String> {
         let (tx, rx) = oneshot::channel();
-        self.command(Command::Spawn(spec, name, tx))?;
+        self.command(Command::Spawn(spec, name, tap, tx))?;
         rx.await
             .map_err(|_| "the session holder connection closed".to_owned())?
     }
@@ -672,7 +690,7 @@ impl Engine {
         for (_, p) in d.spawns.drain() {
             let _ = p.reply.send(Err(why.clone()));
         }
-        for (_, (_, reply)) in d.parked.drain() {
+        for (_, Parked { reply, .. }) in d.parked.drain() {
             let _ = reply.send(Err(why.clone()));
         }
         self.streams.suspended();
@@ -805,6 +823,15 @@ struct Pending {
     size: Option<(u16, u16)>,
     /// The name the session is to go by.
     name: Option<String>,
+    /// Where its output goes, set with its name.
+    tap: Option<Tap>,
+}
+
+/// A spawn waiting for an ended session under its name to leave the engine.
+struct Parked {
+    spec: SpawnSpec,
+    tap: Option<Tap>,
+    reply: oneshot::Sender<Result<Spawned, String>>,
 }
 
 /// The session a message to sessiond names.
@@ -875,7 +902,7 @@ struct Driver<'a> {
     /// Spawns under the name of an [`Driver::exited`] session, started once
     /// it leaves. Whoever was told of the exit may start the session again
     /// at once, as a resume does, before the engine has closed the old one.
-    parked: HashMap<String, (SpawnSpec, oneshot::Sender<Result<Spawned, String>>)>,
+    parked: HashMap<String, Parked>,
 }
 
 impl Driver<'_> {
@@ -938,6 +965,10 @@ impl Driver<'_> {
                         }
                         None => s.session,
                     };
+                    // Before the pool opens it, so the tap sees its first byte.
+                    if let Some(tap) = p.tap {
+                        self.engine.taps().insert(id.clone(), tap);
+                    }
                     self.engine.streams.opened(&id, s.start.epoch);
                     if let Some(size) = p.size {
                         self.engine.sizes.opened(&id, size_of(size));
@@ -1152,18 +1183,15 @@ impl Driver<'_> {
             }
             closed.push_back(b.clone());
         }
-        // A tap taken for a spawn parked under the name is the next run's.
-        if !self.parked.contains_key(&b.session) {
-            self.engine.untap(&b.session);
-        }
+        self.engine.taps().remove(&b.session);
         self.engine
             .streams
             .closed(&b.session, b.exited, &summary.screen);
         let id = summary.brief.session.clone();
         let _ = self.engine.events.send(Event::Closed(Arc::from(summary)));
         self.exited.remove(&id);
-        if let Some((spec, reply)) = self.parked.remove(&id) {
-            self.spawn(spec, Some(id), reply);
+        if let Some(Parked { spec, tap, reply }) = self.parked.remove(&id) {
+            self.spawn(spec, Some(id), tap, reply);
         }
     }
 
@@ -1209,12 +1237,14 @@ impl Driver<'_> {
         &mut self,
         spec: SpawnSpec,
         name: Option<String>,
+        tap: Option<Tap>,
         reply: oneshot::Sender<Result<Spawned, String>>,
     ) {
         if let Some(name) = &name {
             if let Err(e) = self.name_free(name) {
                 if self.exited.contains(name) && !self.parked.contains_key(name) {
-                    self.parked.insert(name.clone(), (spec, reply));
+                    self.parked
+                        .insert(name.clone(), Parked { spec, tap, reply });
                 } else {
                     let _ = reply.send(Err(e));
                 }
@@ -1226,8 +1256,15 @@ impl Driver<'_> {
             Io::Pty { cols, rows } => Some((cols, rows)),
             Io::Piped { .. } => None,
         };
-        self.spawns
-            .insert(self.next_req, Pending { reply, size, name });
+        self.spawns.insert(
+            self.next_req,
+            Pending {
+                reply,
+                size,
+                name,
+                tap,
+            },
+        );
         self.send(ToSessiond::Spawn(Spawn {
             req: self.next_req,
             spec,
@@ -1245,7 +1282,7 @@ impl Driver<'_> {
 
     async fn command(&mut self, c: Command, outs: &mut mpsc::UnboundedReceiver<(String, Out)>) {
         match c {
-            Command::Spawn(spec, name, reply) => self.spawn(spec, name, reply),
+            Command::Spawn(spec, name, tap, reply) => self.spawn(spec, name, tap, reply),
             Command::Write(session, bytes) => self.write(session, bytes),
             Command::Signal(session, signal) => {
                 self.send(ToSessiond::Signal(Signal { session, signal }));
@@ -1323,10 +1360,10 @@ impl crate::native::sessions::Host for EngineHost {
         let asked = tokio::time::Instant::now();
         // Taken before the spawn, so the shell's first output is not missed.
         let mut events = engine.subscribe();
-        let tap = matches!(input, Input::Remote(_)).then(|| engine.tap(&name));
         self.runtime.spawn(async move {
-            let named = name.clone();
-            match engine.spawn_as(spec, Some(name)).await {
+            let (tap, output) = mpsc::unbounded_channel();
+            let tap = matches!(input, Input::Remote(_)).then_some(tap);
+            match engine.spawn_with(spec, Some(name), tap).await {
                 Ok(s) => {
                     then(Ok(crate::native::sessions::Started {
                         pid: s.pid,
@@ -1356,17 +1393,11 @@ impl crate::native::sessions::Host for EngineHost {
                             let printed =
                                 first_output(&mut events, &s.id, asked + TYPE_AT_MOST).await;
                             tokio::time::sleep_until(type_at(asked, printed)).await;
-                            if let Some(tap) = tap {
-                                log_in(&engine, &s.id, asked, *remote, tap).await;
-                            }
-                            engine.untap(&s.id);
+                            log_in(&engine, &s.id, asked, *remote, output).await;
                         }
                     }
                 }
-                Err(why) => {
-                    engine.untap(&named);
-                    then(Err(why));
-                }
+                Err(why) => then(Err(why)),
             }
         });
     }

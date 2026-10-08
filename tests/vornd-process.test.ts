@@ -455,6 +455,27 @@ describe('keeping vornd running', () => {
     expect(start).toHaveBeenCalledTimes(1)
   })
 
+  it('resolves a stop only once a vornd that finishes starting after it has exited', async () => {
+    let finish: (v: Vornd) => void = () => {}
+    let exited: () => void = () => {}
+    const late = fakeVornd(47001)
+    late.stop = () => new Promise<void>((resolve) => (exited = resolve))
+    const keeper = new VorndKeeper({
+      find: () => binaries,
+      start: (() => new Promise<Vornd>((resolve) => (finish = resolve))) as never,
+      connect: async () => true
+    })
+    void keeper.launch(50091, '/h')
+    let stopped = false
+    const stopping = keeper.stop().then(() => void (stopped = true))
+    finish(late)
+    await new Promise((r) => setImmediate(r))
+    expect(stopped).toBe(false)
+    exited()
+    await stopping
+    expect(stopped).toBe(true)
+  })
+
   it('ignores an exit from a vornd it already stopped', async () => {
     vi.useFakeTimers()
     const running = fakeVornd(47001)
