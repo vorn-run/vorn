@@ -24,19 +24,13 @@ import { browserBridge } from './browser-bridge'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
 import {
-  extensionRenamedSession,
   reconcileImplicitConnections,
   registerAllMethods,
   setServerPort,
   sessionsToPersist
 } from './register-methods'
-import { registerExtensionBridge, type ExtensionRouteDeps } from './extensions/bridge'
 import { registerSessionBridge, setSessionBridgeOrigin } from './connectors/session-bridge'
 import { sessionGrantFor } from './connectors/mcp-clients'
-import { setExtensionBridgeOrigin, stopAllHosts } from './extensions/hosts'
-import { startExtensionPageServer, stopExtensionPageServer } from './extensions/page-server'
-import { stopAllFooters } from './extensions/footers'
-import { abandonSelections } from './extensions/selection'
 import { configManager } from './config-manager'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
 import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
@@ -85,7 +79,6 @@ import {
 } from './process-utils'
 import log from './logger'
 import { activeCore, coreStatus } from './native-core'
-import { appFrameAncestors } from './extensions/frame-ancestors'
 
 /**
  * Names, beyond IP literals and `localhost`, that the web client may legitimately
@@ -142,19 +135,6 @@ function resolveBuildChannel(): 'dev' | 'packaged' {
   return process.argv[1]?.endsWith('.ts') ? 'dev' : 'packaged'
 }
 
-/**
- * Origins that may frame a pane's page, filled in once this server has a port.
- *
- * The pages are on their own origin, so the app's is not implied; naming it here
- * is what lets a window frame one at all.
- */
-let extensionFrameAncestors: string[] = []
-
-const extensionRouteDeps: ExtensionRouteDeps = {
-  frameAncestors: () => extensionFrameAncestors,
-  sessionRenamed: extensionRenamedSession
-}
-
 /** The vornd in front of this server, kept running for as long as it runs. */
 const vorndKeeper = new VorndKeeper({
   connect: (endpoint) => vorndSessions.connect(endpoint),
@@ -167,7 +147,7 @@ onDraining(() => vorndSessions.tellClosing())
 onHandover(() => vorndSessions.tellClosing())
 const vorndReach = linkReach({
   channel: vorndSessions,
-  broadcast: (method, params) => clientRegistry.broadcast(method, params),
+  broadcast: (method, params, scope) => clientRegistry.broadcast(method, params, scope),
   disconnectToken,
   host: getCurrentHost
 })
@@ -179,8 +159,6 @@ export async function startServer(
     port?: number
     dataDir?: string
     idleShutdown?: boolean
-    /** Origins beyond this server's own that may frame a pane, such as the desktop's. */
-    extensionFrameAncestors?: string[]
   } = {}
 ) {
   // First, so the shell answers while the database opens and the modules load.
@@ -329,10 +307,6 @@ export async function startServer(
 
   registerWorkRoutes(app, () => vorndKeeper.port)
 
-  // An extension's own bridge, which its child process reaches with the token it
-  // was started with. The pages its panes are drawn from are served on their own
-  // origin instead, so a page shares neither storage nor a socket with the app.
-  registerExtensionBridge(app, extensionRouteDeps)
   registerSessionBridge(app, sessionGrantFor)
 
   /**
@@ -560,24 +534,7 @@ export async function startServer(
 
   // Store port for RPC methods (e.g. tailscale:status needs it)
   setServerPort(actualPort)
-  // The address the extension children are given, known only once a port is won.
-  setExtensionBridgeOrigin(`http://127.0.0.1:${actualPort}`)
   setSessionBridgeOrigin(`http://127.0.0.1:${actualPort}`)
-
-  // Pane pages, on a port of their own. The app frames them, so the app's origins
-  // are the only ones allowed to; a page that fails to start costs its panes, not
-  // the server.
-  const appOrigins = [`http://127.0.0.1:${actualPort}`, `http://localhost:${actualPort}`]
-  extensionFrameAncestors = [
-    ...appOrigins,
-    ...appFrameAncestors(process.env.VORN_APP_ORIGINS),
-    ...(options.extensionFrameAncestors ?? [])
-  ]
-  try {
-    await startExtensionPageServer(extensionRouteDeps)
-  } catch (err) {
-    log.warn({ err }, '[extensions] pane pages have no origin; panes will not open')
-  }
 
   // Enable hot-rebind when network access / Tailscale state changes
   initRebind(app.server, host, actualPort)
@@ -759,10 +716,6 @@ export async function startServer(
     vorndSessions.close()
     // Its sessions carry on in the session holder, for the next server.
     const vorndStopped = vorndKeeper.stop()
-    stopAllFooters()
-    abandonSelections()
-    await stopExtensionPageServer()
-    await stopAllHosts()
     const { stopAllMcpClients } = await import('./connectors')
     await stopAllMcpClients()
     configManager.close()

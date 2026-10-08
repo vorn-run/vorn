@@ -45,12 +45,14 @@ describe('extension RPC wiring', () => {
     expect(client).toContain(`'${pushes.EXTENSION_SELECTION_RESULT}': {`)
   })
 
-  it('registers a server method for each request', () => {
-    const methods = read('packages/server/src/register-methods.ts')
+  it('answers each request in vornd', () => {
+    const host = read('packages/core/crates/vornd/src/native/extensions/mod.rs')
+    const methods = host.slice(host.indexOf('pub const METHODS'), host.indexOf('];'))
     for (const channel of Object.values(requests)) {
-      expect(methods).toContain(`registerMethod('${channel}'`)
+      expect(methods).toContain(`"${channel}"`)
+      expect(host).toContain(`"${channel}" =>`)
     }
-    expect(methods).toContain(`registerNotification('${pushes.EXTENSION_SELECTION_RESULT}'`)
+    expect(host).toContain(`SELECTION_RESULT: &str = "${pushes.EXTENSION_SELECTION_RESULT}"`)
   })
 
   it('forwards each request from the main process', () => {

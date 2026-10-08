@@ -16,14 +16,17 @@ import { VORN_PEER_HEADER } from './vornd-relay'
  * again the names a browser may load the web client from.
  */
 
-/** The broadcasts vornd may ask for: what pairing, runs and artifacts announce. */
+/** The broadcasts vornd may ask for: what pairing, runs, artifacts and extensions announce. */
 const BROADCASTS: ReadonlySet<string> = new Set([
   IPC.PAIRING_REQUESTED,
   IPC.PAIRING_COLLECTED,
   IPC.WORKFLOW_RUN_UPDATED,
   IPC.WORKFLOW_GATE_RESOLVED,
   IPC.ARTIFACT_PUBLISHED,
-  IPC.ARTIFACT_COMMENTS_CHANGED
+  IPC.ARTIFACT_COMMENTS_CHANGED,
+  IPC.EXTENSION_ACTIVATION,
+  IPC.EXTENSION_FOOTER_ITEMS,
+  IPC.EXTENSION_SELECTION_REQUEST
 ])
 
 export interface ReachDeps {
@@ -33,7 +36,8 @@ export interface ReachDeps {
     on(event: 'subscribed', listener: () => void): unknown
     tell(method: string, params: unknown): Promise<boolean>
   }
-  broadcast: (method: string, params: unknown) => void
+  /** `scope` is the session a push is about, for the clients subscribed to one. */
+  broadcast: (method: string, params: unknown, scope?: string) => void
   disconnectToken: (tokenId: string) => number
   /** The address this server is bound to now. */
   host: () => string
@@ -50,7 +54,7 @@ export function linkReach(deps: ReachDeps): { hostChanged(): void } {
     switch (method) {
       case 'vornd:broadcast':
         if (typeof p.method === 'string' && BROADCASTS.has(p.method)) {
-          deps.broadcast(p.method, p.params)
+          deps.broadcast(p.method, p.params, typeof p.scope === 'string' ? p.scope : undefined)
         } else {
           log.warn({ method: p.method }, '[vornd] refused to broadcast for vornd')
         }

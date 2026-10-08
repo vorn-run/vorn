@@ -57,7 +57,7 @@ fn not_found() -> Response<Body> {
     refuse(404, "Not found")
 }
 
-fn header<'a>(headers: &'a HeaderMap, name: HeaderName) -> Option<&'a str> {
+fn header(headers: &HeaderMap, name: HeaderName) -> Option<&str> {
     headers.get(name).and_then(|v| v.to_str().ok())
 }
 
