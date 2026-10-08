@@ -263,7 +263,14 @@ async fn live_sessions_move_to_the_newer_sessiond_and_carry_on_byte_exact() {
     let mut want = vec![pty.clone(), piped.clone(), done.clone()];
     want.sort();
     assert_eq!(took, want);
-    assert!(a.handed_off());
+    // The donor marks itself handed off just after the adopter's Took reaches it.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !a.handed_off() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("handed off");
     assert!(!a.holds(&pty) && b.holds(&pty));
 
     // The older sessiond closed its vornd connection and its endpoint.
