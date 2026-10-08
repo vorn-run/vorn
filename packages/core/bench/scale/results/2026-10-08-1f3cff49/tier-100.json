@@ -1,0 +1,156 @@
+{
+  "tier": 100,
+  "host": {
+    "cpus": 16,
+    "mem_total": 67416608768,
+    "kernel": "7.0.0-1011-gcp",
+    "limits": {
+      "pty_max": 65536,
+      "pid_max": 4194304,
+      "threads_max": 4194304,
+      "max_map_count": 1048576,
+      "nofile": 1048576,
+      "nproc": null
+    }
+  },
+  "workload": {
+    "busy_rate": 16384,
+    "probes": 200,
+    "flood_sessions": 16,
+    "flood_bytes": 16777216
+  },
+  "holder": {
+    "idle": 89,
+    "busy": 10,
+    "spawn": {
+      "count": 89,
+      "secs": 0.28895507,
+      "per_sec": 308.00636237322294,
+      "each": {
+        "n": 89,
+        "p50_ms": 228.40998100000002,
+        "p99_ms": 288.874711,
+        "max_ms": 288.874711
+      }
+    },
+    "holder": {
+      "base": {
+        "rss": 3510272,
+        "threads": 1,
+        "fds": 11
+      },
+      "idle": {
+        "rss": 13332480,
+        "threads": 271,
+        "fds": 461
+      },
+      "busy": {
+        "rss": 15773696,
+        "threads": 301,
+        "fds": 511
+      }
+    },
+    "probe_idle": {
+      "n": 200,
+      "p50_ms": 0.32902400000000004,
+      "p99_ms": 0.429029,
+      "max_ms": 0.447564
+    },
+    "probe_busy": {
+      "n": 200,
+      "p50_ms": 0.24540700000000001,
+      "p99_ms": 0.371709,
+      "max_ms": 0.450462
+    },
+    "streamed_bytes": 710638,
+    "handoff": {
+      "sessions": 100,
+      "ms": 48.042724,
+      "adopter": {
+        "rss": 14901248,
+        "threads": 302,
+        "fds": 511
+      }
+    }
+  },
+  "stack": {
+    "idle": 89,
+    "busy": 10,
+    "spawn": {
+      "count": 89,
+      "secs": 0.298544225,
+      "per_sec": 298.1132862308759,
+      "each": {
+        "n": 89,
+        "p50_ms": 114.004334,
+        "p99_ms": 120.810173,
+        "max_ms": 120.810173
+      }
+    },
+    "vornd": {
+      "base": {
+        "rss": 14659584,
+        "threads": 28,
+        "fds": 16
+      },
+      "idle": {
+        "rss": 26148864,
+        "threads": 28,
+        "fds": 106
+      },
+      "busy": {
+        "rss": 31096832,
+        "threads": 26,
+        "fds": 116
+      }
+    },
+    "holder": {
+      "base": {
+        "rss": 3928064,
+        "threads": 4,
+        "fds": 16
+      },
+      "idle": {
+        "rss": 13451264,
+        "threads": 271,
+        "fds": 461
+      },
+      "busy": {
+        "rss": 15929344,
+        "threads": 301,
+        "fds": 511
+      }
+    },
+    "mem_available": {
+      "base": 66025971712,
+      "idle": 65914114048,
+      "busy": 65955921920
+    },
+    "attach": {
+      "n": 20,
+      "p50_ms": 0.435178,
+      "p99_ms": 0.811936,
+      "max_ms": 0.811936
+    },
+    "probe_idle": {
+      "n": 200,
+      "p50_ms": 0.7283879999999999,
+      "p99_ms": 0.874911,
+      "max_ms": 0.922308
+    },
+    "probe_busy": {
+      "n": 200,
+      "p50_ms": 0.572236,
+      "p99_ms": 0.747905,
+      "max_ms": 0.8279850000000001
+    },
+    "throughput": {
+      "sessions": 16,
+      "bytes": 268435456,
+      "secs": 8.579728515,
+      "frames": 761,
+      "frame_bytes": 1021539
+    }
+  },
+  "limits": []
+}

@@ -1,0 +1,143 @@
+{
+  "tier": 10000,
+  "host": {
+    "cpus": 16,
+    "mem_total": 67416608768,
+    "kernel": "7.0.0-1011-gcp",
+    "limits": {
+      "pty_max": 65536,
+      "pid_max": 4194304,
+      "threads_max": 4194304,
+      "max_map_count": 1048576,
+      "nofile": 1048576,
+      "nproc": null
+    }
+  },
+  "workload": {
+    "busy_rate": 16384,
+    "probes": 200,
+    "flood_sessions": 16,
+    "flood_bytes": 16777216
+  },
+  "holder": {
+    "idle": 8999,
+    "busy": 1000,
+    "spawn": {
+      "count": 8999,
+      "secs": 1611.410159561,
+      "per_sec": 5.584549623574185,
+      "each": {
+        "n": 8999,
+        "p50_ms": 11089.826275,
+        "p99_ms": 26360.764718,
+        "max_ms": 35670.268086000004
+      }
+    },
+    "holder": {
+      "base": {
+        "rss": 3452928,
+        "threads": 1,
+        "fds": 11
+      },
+      "idle": {
+        "rss": 379813888,
+        "threads": 27001,
+        "fds": 45011
+      },
+      "busy": {
+        "rss": 4344221696,
+        "threads": 30001,
+        "fds": 50411
+      }
+    },
+    "probe_idle": {
+      "n": 200,
+      "p50_ms": 0.379691,
+      "p99_ms": 0.5175540000000001,
+      "max_ms": 0.6117549999999999
+    },
+    "probe_busy": {
+      "n": 200,
+      "p50_ms": 0.172588,
+      "p99_ms": 0.25842699999999996,
+      "max_ms": 0.295081
+    },
+    "streamed_bytes": 26914238,
+    "handoff": {
+      "sessions": 10000,
+      "ms": 14617.922639999999,
+      "adopter": {
+        "rss": 4185186304,
+        "threads": 30002,
+        "fds": 50412
+      }
+    }
+  },
+  "stack": {
+    "idle": 8999,
+    "busy": 1000,
+    "spawn": {
+      "count": 8999,
+      "secs": 1634.632674868,
+      "per_sec": 5.505212356486565,
+      "each": {
+        "n": 8999,
+        "p50_ms": 5815.6757020000005,
+        "p99_ms": 11357.070335999999,
+        "max_ms": 11551.709367000001
+      }
+    },
+    "vornd": {
+      "base": {
+        "rss": 14258176,
+        "threads": 28,
+        "fds": 16
+      },
+      "idle": {
+        "rss": 717508608,
+        "threads": 26,
+        "fds": 9016
+      },
+      "busy": null
+    },
+    "holder": {
+      "base": {
+        "rss": 3928064,
+        "threads": 4,
+        "fds": 16
+      },
+      "idle": {
+        "rss": 397049856,
+        "threads": 27001,
+        "fds": 45011
+      },
+      "busy": null
+    },
+    "mem_available": {
+      "base": 66023424000,
+      "idle": 53731741696,
+      "busy": null
+    },
+    "attach": {
+      "n": 20,
+      "p50_ms": 5.903913,
+      "p99_ms": 7.910135,
+      "max_ms": 7.910135
+    },
+    "probe_idle": {
+      "n": 200,
+      "p50_ms": 1.656724,
+      "p99_ms": 3.1956710000000004,
+      "max_ms": 3.622245
+    },
+    "probe_busy": null,
+    "throughput": null
+  },
+  "limits": [
+    {
+      "phase": "stack",
+      "sessions": 10000,
+      "what": "timed out waiting for the echo"
+    }
+  ]
+}

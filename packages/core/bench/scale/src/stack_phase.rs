@@ -218,10 +218,11 @@ async fn measure(
         return Err(Error::Failed(format!("spawning busy sessions: {why}")));
     }
     settle(plan.tier).await;
-    out.probe_busy = Some(probe_latency(&mut grid, sid, plan.probes).await?);
+    // Read before the probe, which is what gives out first under load.
     out.vornd.busy = procfs::usage(vornd.pid).ok();
     out.holder.busy = procfs::usage(holder).ok();
     out.mem_available.busy = procfs::mem_available().ok();
+    out.probe_busy = Some(probe_latency(&mut grid, sid, plan.probes).await?);
     grid.detach(sid);
 
     out.throughput = Some(flood(plan, &mut app, &mut grid, &cwd).await?);
