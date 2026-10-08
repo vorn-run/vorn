@@ -150,9 +150,9 @@ async fn an_agents_browser_call_reaches_main_and_comes_back() {
         json!({ "jsonrpc": "2.0", "id": 6, "error": { "code": -32000, "message": "no such device" } })
     );
 
-    // The server hears main's claim, as a notification, and nothing else.
+    // The server hears none of it.
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(methods(&seen), [(None, "bridge:identify".to_owned())]);
+    assert!(methods(&seen).is_empty(), "{:?}", methods(&seen));
 }
 
 #[tokio::test]

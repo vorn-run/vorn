@@ -468,6 +468,8 @@ impl Native {
     /// The environment vornd's children start from.
     pub(crate) fn child_env(&self) -> env::Env {
         self.env.get()
+    }
+
     /// The desktop's main process, as vornd reaches it.
     pub fn main_process(&self) -> &Arc<desktop::Desktop> {
         &self.main
@@ -1088,6 +1090,7 @@ impl Conn {
                 self.groups.count(method, Counted::Native);
                 return Offer::Taken;
             }
+        }
         if method == IDENTIFY && mode == Mode::Native && self.admitted() {
             self.identify(text);
             return Offer::Taken;

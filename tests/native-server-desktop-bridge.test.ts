@@ -128,8 +128,11 @@ describe.skipIf(!runnable)('the desktop bridge through vornd', () => {
       await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
     ).json()) as { groups: Record<string, { native?: number; forwarded?: number }> }
     for (const group of ['bridge', 'browser', 'device']) {
-      expect(health.groups[group]?.forwarded ?? 0, group).toBe(0)
-      expect(health.groups[group]?.native, group).toBeGreaterThan(0)
+      expect({ group, forwarded: health.groups[group]?.forwarded ?? 0 }).toEqual({
+        group,
+        forwarded: 0
+      })
+      expect(health.groups[group]?.native).toBeGreaterThan(0)
     }
   })
 
@@ -137,9 +140,13 @@ describe.skipIf(!runnable)('the desktop bridge through vornd', () => {
     const closed = new Promise((resolve) => main.ws.once('close', resolve))
     main.ws.close()
     await closed
+    const notRunning = 'Vorn app is not running (no main process connected)'
+    let message: string | undefined
     await until('main to be let go', async () => {
       const frame = await agent.call('browser:tabs', { sessionId: 's' })
-      return frame.error?.message === 'Vorn app is not running (no main process connected)'
+      message = (frame.error as { message?: string } | undefined)?.message
+      return message === notRunning
     })
+    expect(message).toBe(notRunning)
   })
 })

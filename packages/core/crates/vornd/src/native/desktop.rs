@@ -299,6 +299,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn serves_the_connectors_as_their_bridge() {
+        use crate::bridge::Bridge;
+        let streams = Streams::new();
+        let mut main = streams.connect();
+        let desktop = std::sync::Arc::new(Desktop::default());
+        let bridge: std::sync::Arc<dyn Bridge> = desktop.clone();
+        assert!(!bridge.connected());
+        assert_eq!(
+            bridge.request("session:check", Value::Null, TIMEOUT).await,
+            Err(NOT_RUNNING.to_owned())
+        );
+
+        desktop.claim(main.id(), &main.forwarder());
+        assert!(bridge.connected());
+        for (reply, expected) in [
+            (json!({ "result": { "ok": true } }), json!({ "ok": true })),
+            (json!({}), Value::Null),
+        ] {
+            let asking = {
+                let bridge = std::sync::Arc::clone(&bridge);
+                tokio::spawn(async move {
+                    bridge
+                        .request("session:fetch", json!({ "url": "u" }), TIMEOUT)
+                        .await
+                })
+            };
+            let frame = sent(&mut main).await;
+            assert_eq!(frame["method"], "session:fetch");
+            let mut answer = reply;
+            answer["id"] = frame["id"].clone();
+            assert!(desktop.settle(main.id(), &answer.to_string()));
+            assert_eq!(asking.await.unwrap(), Ok(expected));
+        }
+    }
+
+    #[tokio::test]
     async fn refuses_without_main_and_after_its_deadline() {
         let desktop = Desktop::default();
         assert_eq!(

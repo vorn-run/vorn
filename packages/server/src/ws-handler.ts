@@ -1,9 +1,5 @@
 import type { WebSocket } from 'ws'
-import type {
-  RpcRequest,
-  RequestMethod,
-  RequestMethods
-} from '@vornrun/shared/protocol'
+import type { RpcRequest, RequestMethod, RequestMethods } from '@vornrun/shared/protocol'
 import {
   createResponse,
   createErrorResponse,
