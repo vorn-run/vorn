@@ -16,7 +16,10 @@ core="$(cd "$(dirname "$0")/../.." && pwd)"
 mkdir -p "$out"
 
 cd "$core"
-cargo build --release --locked -p vornd -p vorn-sessiond -p vorn-scale-bench 2>&1 | tail -3
+if ! cargo build --release --locked -p vornd -p vorn-sessiond -p vorn-scale-bench >"$out/build.log" 2>&1; then
+  grep -A 20 '^error' "$out/build.log" | head -n 60
+  exit 1
+fi
 bin="$core/target/release"
 
 ulimit -n 1048576

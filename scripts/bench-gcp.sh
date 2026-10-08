@@ -105,4 +105,5 @@ if ls "$dest"/tier-*.json >/dev/null 2>&1; then
   echo "appended to packages/core/bench/scale/RESULTS.md; raw results in $dest"
 else
   echo "no tier wrote results; see $dest" >&2
+  exit 1
 fi
