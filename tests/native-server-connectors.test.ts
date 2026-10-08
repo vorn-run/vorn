@@ -374,7 +374,7 @@ describe.skipIf(!vornd)('the native server answers connection calls as the serve
     )
   })
 
-  it('runs with the secrets the desktop pushes, and leaves unknown ones to the server', async () => {
+  it('runs with the secrets the desktop pushes, and finds them again in the vault', async () => {
     // What the desktop would decrypt is pushed in plain text; the row holds
     // only the stored form.
     const stored = { secretEnv: 'stored-ciphertext' }
@@ -397,14 +397,14 @@ describe.skipIf(!vornd)('the native server answers connection calls as the serve
     })
     expect(answerOf(await run(through, mine))).toEqual(want)
 
-    // This vornd never saw the push: the server, which did, answers.
+    // This vornd never saw the push, but reads it from the vault the first one filed it in.
     const desk = await Client.open(desktop!.port)
     try {
       const before = (await counts(desktop!)).connection ?? {}
       expect(answerOf(await run(desk, mine))).toEqual(want)
       const after = (await counts(desktop!)).connection ?? {}
-      expect(after.native ?? 0).toBe(before.native ?? 0)
-      expect(after.forwarded ?? 0).toBe((before.forwarded ?? 0) + 1)
+      expect(after.native ?? 0).toBe((before.native ?? 0) + 1)
+      expect(after.forwarded ?? 0).toBe(before.forwarded ?? 0)
     } finally {
       desk.close()
     }

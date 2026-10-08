@@ -41,6 +41,7 @@ vorn-agents = { path = "../agents" }
 vorn-git = { path = "../vorn-git" }
 vorn-extensions = { path = "../extensions" }
 vorn-store = { path = "../store" }
+vorn-vault = { path = "../vault" }
 vorn-mcp = { path = "../mcp" }
 vorn-protocol = { path = "../protocol" }
 vorn-reach = { path = "../reach" }
@@ -53,16 +54,6 @@ jiff = "0.2"
 vorn-worktrees = { path = "../worktrees" }
 uuid = { version = "1", features = ["v4"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
-
-# Connector credentials are kept in the OS keychain where there is one vornd
-# can reach without a desktop session bus: Keychain and Credential Manager.
-[target.'cfg(target_os = "macos")'.dependencies]
-apple-native-keyring-store = { version = "1", features = ["keychain"] }
-keyring-core = "1"
-
-[target.'cfg(windows)'.dependencies]
-windows-native-keyring-store = { version = "1", default-features = false }
-keyring-core = "1"
 
 [dev-dependencies]
 libghostty-vt = { version = "0.2.2", default-features = false }

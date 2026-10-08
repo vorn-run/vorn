@@ -788,11 +788,8 @@ impl Around for Wired {
     }
 
     fn broadcast(&self, method: &str, params: Value, scope: &str) {
-        if let Some(link) = self.native.upgrade().and_then(|n| n.app_link().cloned()) {
-            link.tell(
-                "vornd:broadcast",
-                json!({ "method": method, "params": params, "scope": scope }),
-            );
+        if let Some(native) = self.native.upgrade() {
+            native.broadcast_to(method, params, Some(scope));
         }
     }
 

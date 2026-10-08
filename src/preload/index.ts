@@ -6,7 +6,11 @@ import {
   STOP_SESSIONS_AND_SERVER_CHANNEL,
   type LocalServerNotice
 } from '../shared/adoption-channels'
-import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
+import {
+  captureViewerSettings,
+  loadedWithViewerSettings,
+  withViewerSettings
+} from '@vornrun/shared/viewer-settings-store'
 import type {
   RequestMethods,
   ServerNotifications,
@@ -232,7 +236,7 @@ const api = {
   // keys those are and why. Done here rather than in the renderer so both
   // transports behave identically and no call site has to know.
   loadConfig: async (): Promise<AppConfig> =>
-    withViewerSettings(await ipcRenderer.invoke(IPC.CONFIG_LOAD)),
+    loadedWithViewerSettings(await ipcRenderer.invoke(IPC.CONFIG_LOAD)),
 
   saveConfig: (config: AppConfig) => {
     captureViewerSettings(config)

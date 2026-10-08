@@ -5,7 +5,11 @@ import {
   type TerminalData
 } from '@vornrun/shared/protocol'
 import { decodeTerminalFrame, terminalFrameVersion } from '@vornrun/shared/terminal-frame'
-import { captureViewerSettings, withViewerSettings } from '@vornrun/shared/viewer-settings-store'
+import {
+  captureViewerSettings,
+  loadedWithViewerSettings,
+  withViewerSettings
+} from '@vornrun/shared/viewer-settings-store'
 import type { GitDiffRange, AppConfig, RecordCursor } from '@vornrun/shared/types'
 /**
  * WebSocket RPC shim that implements the same surface as the Electron preload `window.api`.
@@ -523,7 +527,8 @@ export function createApiShim(wsUrl: string) {
     // ── Configuration ──
     // See the note in src/preload/index.ts — the same two hooks, so a browser and a
     // desktop pointed at one server each keep their own view.
-    loadConfig: async () => withViewerSettings((await rpc.invoke('config:load')) as AppConfig),
+    loadConfig: async () =>
+      loadedWithViewerSettings((await rpc.invoke('config:load')) as AppConfig),
     saveConfig: (config: unknown) => {
       captureViewerSettings(config as AppConfig)
       return rpc.invoke('config:save', config)

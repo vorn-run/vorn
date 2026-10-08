@@ -1,0 +1,28 @@
+[package]
+name = "vorn-vault"
+version.workspace = true
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Where Vorn keeps secrets: the OS keychain (Keychain, Credential Manager, Secret Service), a private file where there is none, and the one-time import of what the desktop sealed"
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+tracing = "0.1"
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+keyring-core = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-native-keyring-store = { version = "1", default-features = false }
+
+# Secret Service over a pure-Rust D-Bus, so no system library is needed to build.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus-secret-service-keyring-store = { version = "1", default-features = false, features = ["rt-async-io-crypto-rust"] }
+
+[dev-dependencies]
+tempfile = "3"

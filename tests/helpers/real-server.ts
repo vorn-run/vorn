@@ -54,9 +54,9 @@ export class Watcher {
     })
   }
 
-  static open(port: number): Promise<Watcher> {
+  static open(port: number, credential = TEST_CREDENTIAL): Promise<Watcher> {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
-      headers: { authorization: `Bearer ${TEST_CREDENTIAL}` }
+      headers: { authorization: `Bearer ${credential}` }
     })
     return new Promise((resolve, reject) => {
       ws.once('open', () => resolve(new Watcher(ws)))
@@ -249,8 +249,26 @@ export async function stopHolder(pid: number | undefined): Promise<void> {
 }
 
 /** @param keepHolder Leaves the session holder and its sessions running, for a server to start again on. */
-export function stopRealServer(server: RealServer, keepHolder = false): Promise<void> {
-  return stopServerChild(server.child, server.vornd, server.dirs.data, keepHolder)
+/** Stops it, and fails if its vornd handed the server a call it should have answered. */
+export async function stopRealServer(server: RealServer, keepHolder = false): Promise<void> {
+  const unexpected = await unexpectedForwards(server.vornd)
+  await stopServerChild(server.child, server.vornd, server.dirs.data, keepHolder)
+  if (Object.keys(unexpected).length > 0) {
+    throw new Error(`vornd handed the server calls it should answer: ${JSON.stringify(unexpected)}`)
+  }
+}
+
+/** The calls vornd forwarded that its list of still-forwarded calls does not allow. */
+export async function unexpectedForwards(port: number): Promise<Record<string, number>> {
+  if (!port) return {}
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/vornd/health`)
+    const health = (await res.json()) as { unexpectedForwards?: Record<string, number> }
+    return health.unexpectedForwards ?? {}
+  } catch {
+    // A vornd the test already stopped has nothing left to report.
+    return {}
+  }
 }
 
 /**

@@ -25,6 +25,7 @@ members = [
   "crates/work",
   "crates/workflow",
   "crates/worktrees",
+  "crates/vault",
 ]
 
 # The app's version (scripts/sync-versions.sh); every binary that reports a version inherits it.

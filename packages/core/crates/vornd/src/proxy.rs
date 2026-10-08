@@ -507,8 +507,14 @@ async fn health(daemon: &Daemon) -> Response<Body> {
     if let (Some(mcp), Some(entry)) = (daemon.mcp.get(), groups.get_mut(crate::mcp::GROUP)) {
         entry["sessions"] = json!(mcp.sessions());
     }
+    let still: serde_json::Map<String, serde_json::Value> = crate::groups::STILL_FORWARDED
+        .iter()
+        .map(|(entry, why)| ((*entry).to_owned(), json!(why.name())))
+        .collect();
     let body = json!({
         "ok": reachable,
+        "stillForwarded": still,
+        "unexpectedForwards": daemon.groups.unexpected_forwards(),
         "protocol": VORND_PROTOCOL,
         "serverProtocols": [SERVER_PROTOCOLS.start(), SERVER_PROTOCOLS.end()],
         "upstream": {
@@ -806,14 +812,19 @@ async fn pump<C, S>(
             desktop,
         )
     });
-    if let (Some(native), Some(credential)) = (&native, credential) {
-        native.check_credential(credential);
-    }
+    let checking = match (&native, credential) {
+        (Some(native), Some(credential)) => native.check_credential(credential),
+        _ => None,
+    };
 
     let groups_daemon = daemon.clone();
     let reply = forward.clone();
     let offered = native.clone();
     let upward = tokio::spawn(async move {
+        // The upgrade's credential decides who answers the first call.
+        if let Some(checking) = checking {
+            let _ = checking.await;
+        }
         while let Some(Ok(msg)) = from_client.next().await {
             match &msg {
                 Message::Text(text) => {

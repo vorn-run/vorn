@@ -37,6 +37,7 @@
 //! deleted connection once the server's answer says it was done.
 
 pub mod agent;
+pub mod config;
 pub mod connection;
 pub mod env;
 pub mod extensions;
@@ -166,6 +167,8 @@ pub const METHODS: &[(&str, Effect)] = &[
     // The connector inbox's leases are the work model's ([`work`]).
     ("connector:inboxComplete", Effect::Change),
     ("connector:inboxRenew", Effect::Change),
+    ("config:load", Effect::Read),
+    ("config:save", Effect::Change),
 ];
 
 /// Calls in a native group that the server keeps answering, and why.
@@ -558,6 +561,9 @@ impl Native {
 
     /// Where the server's database is. Only the first one given is kept.
     pub fn set_database(&self, db: PathBuf) {
+        if let Some(dir) = db.parent() {
+            self.secrets.settle(dir);
+        }
         let _ = self.db.set(db);
     }
 
@@ -613,7 +619,15 @@ impl Native {
     /// free, or on the runtime for a call that waits on an MCP child. A
     /// panic is the server's call to answer, not a crash, unless the call
     /// may already have changed something.
-    pub async fn answer(self: &Arc<Self>, method: String, params: Value) -> Answer {
+    pub async fn answer(
+        self: &Arc<Self>,
+        method: String,
+        params: Value,
+        viewer: &config::Viewer,
+    ) -> Answer {
+        if config::METHODS.contains(&method.as_str()) {
+            return config::answer(self, &method, params, viewer).await;
+        }
         if extensions::METHODS.contains(&method.as_str()) {
             let Some(host) = self.extensions.get().cloned() else {
                 return Answer::Error("vornd is not hosting extensions".to_owned());
@@ -792,9 +806,21 @@ impl Native {
         self.reach.server_port()
     }
 
-    /// The app's channel, once given.
-    pub(crate) fn app_link(&self) -> Option<&Arc<AppLink>> {
-        self.link.get()
+    /// Tells every client `method`. Every broadcast vornd makes goes
+    /// through here; for now the server, which holds the clients, sends it.
+    pub(crate) fn broadcast(&self, method: &str, params: Value) {
+        self.broadcast_to(method, params, None);
+    }
+
+    /// [`Native::broadcast`] to the clients of one session only, when `scope` names it.
+    pub(crate) fn broadcast_to(&self, method: &str, params: Value, scope: Option<&str>) {
+        if let Some(link) = self.link.get() {
+            let mut note = json!({ "method": method, "params": params });
+            if let Some(scope) = scope {
+                note["scope"] = json!(scope);
+            }
+            link.tell("vornd:broadcast", note);
+        }
     }
 
     /// The database, once given.
@@ -971,6 +997,8 @@ pub const AUTH_GROUP: &str = "auth";
 pub const AUTH_METHOD: &str = "auth:authenticate";
 /// What an Origin check is counted as.
 pub const ORIGIN_METHOD: &str = "auth:origin";
+/// The error code the server answers a call on a socket it has not admitted with.
+const NOT_AUTHENTICATED: i64 = -32001;
 /// The close code the server refuses a credential with.
 pub const CLOSE_CREDENTIAL_REJECTED: u16 = 4002;
 /// The shadow comparison of the credential check, which no request id can
@@ -995,6 +1023,8 @@ pub struct Conn {
     /// never keeps the server's side of a closed connection open.
     upstream: mpsc::WeakSender<Message>,
     authed: AtomicBool,
+    /// Who this connection is, as its credential says.
+    viewer: Mutex<config::Viewer>,
     shadows: Arc<Shadows>,
     /// Calls on their way to the server that change a connection's secrets
     /// there, by request id: applied here once the server answers them.
@@ -1044,6 +1074,11 @@ impl Conn {
             reply,
             upstream: upstream.downgrade(),
             authed: AtomicBool::new(desktop),
+            viewer: Mutex::new(if desktop {
+                config::Viewer::Desktop
+            } else {
+                config::Viewer::Local
+            }),
             shadows: Arc::default(),
             pending: Mutex::default(),
             waiting: AtomicUsize::new(0),
@@ -1065,17 +1100,22 @@ impl Conn {
     /// - **shadow**: vornd's verdict is compared with the server's, which is
     ///   an answer or `auth:ok` (admitted) or a close with
     ///   [`CLOSE_CREDENTIAL_REJECTED`] (refused).
-    pub fn check_credential(self: &Arc<Self>, raw: String) {
+    ///
+    /// The check runs off this task; what it returns ends when it is done,
+    /// which the upgrade's first frame waits for.
+    pub fn check_credential(self: &Arc<Self>, raw: String) -> Option<tokio::task::JoinHandle<()>> {
         let mode = self.groups.mode(AUTH_GROUP);
         if mode == Mode::Forward || self.admitted() {
             self.groups.count(AUTH_METHOD, Counted::Forwarded);
-            return;
+            return None;
         }
         if mode == Mode::Shadow {
             self.shadows.begin(CREDENTIAL.to_owned(), AUTH_METHOD);
         }
+        // Who it is counts only once admitted, by vornd or by the server, which may answer first.
+        *self.viewer.lock().unwrap_or_else(|e| e.into_inner()) = self.native.viewer_of(&raw);
         let conn = Arc::clone(self);
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             let native = Arc::clone(&conn.native);
             let verdict = tokio::task::spawn_blocking(move || native.verify_credential(&raw))
                 .await
@@ -1099,7 +1139,7 @@ impl Conn {
                         .settle(CREDENTIAL, Side::Native, json!(admitted), &conn.groups);
                 }
             }
-        });
+        }))
     }
 
     /// The server closed the connection with `code`.
@@ -1122,11 +1162,29 @@ impl Conn {
                 .and_then(|(_, params)| params.get("token")?.as_str().map(str::to_owned))
                 .filter(|t| !t.is_empty())
             {
-                self.check_credential(token);
+                // The server answers `auth:ok`, which admits the connection here too.
+                let _ = self.check_credential(token);
             } else {
                 self.groups.count(method, Counted::Forwarded);
             }
             return Offer::Pass;
+        }
+        // Before a connection is admitted the server refuses it, whatever it asks.
+        if !self.admitted() {
+            self.groups.count(method, Counted::BeforeAuth);
+            return Offer::Pass;
+        }
+        if crate::groups::unknown(method) {
+            if let Some((id, _)) = request_of(text) {
+                let frame = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": { "code": -32601, "message": format!("Method not found: {method}") },
+                });
+                self.reply.send_now(&frame);
+            }
+            self.groups.count(method, Counted::Native);
+            return Offer::Taken;
         }
         let mode = self.groups.route(method);
         if mode == Mode::Forward {
@@ -1255,7 +1313,12 @@ impl Conn {
     }
 
     async fn run(&self, method: String, params: Value) -> Answer {
-        self.native.answer(method, params).await
+        let viewer = self
+            .viewer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        self.native.answer(method, params, &viewer).await
     }
 
     /// Keeps a create the server answers, to work out what vornd would have
@@ -1363,8 +1426,10 @@ impl Conn {
     /// connection, and whether it answers a shadowed call. The frame itself
     /// goes to the client unchanged whatever this finds.
     pub fn on_server_text(self: &Arc<Self>, text: &str) {
-        let admitting =
-            !self.admitted() && (text.contains("\"result\"") || text.contains("\"auth:ok\""));
+        let admitting = !self.admitted()
+            && (text.contains("\"result\"")
+                || text.contains("\"error\"")
+                || text.contains("\"auth:ok\""));
         let shadowed = self.shadows.waiting() && text.contains("\"id\"");
         let pending = self.waiting.load(Ordering::Acquire) > 0 && text.contains("\"id\"");
         if !admitting && !shadowed && !pending {
@@ -1376,9 +1441,17 @@ impl Conn {
         let method = frame.get("method").and_then(Value::as_str);
         let id = frame.get("id").filter(|id| !id.is_null());
         if admitting {
-            // The server sends a result, or `auth:ok`, only to a socket it
-            // has admitted.
-            let answer = method.is_none() && id.is_some() && frame.contains_key("result");
+            // The server answers, or sends `auth:ok`, only to a socket it has
+            // admitted: any other gets its not-authenticated refusal.
+            let refused = frame
+                .get("error")
+                .and_then(|e| e.get("code"))
+                .and_then(Value::as_i64)
+                == Some(NOT_AUTHENTICATED);
+            let answer = method.is_none()
+                && id.is_some()
+                && !refused
+                && (frame.contains_key("result") || frame.contains_key("error"));
             if answer || (method == Some("auth:ok") && id.is_none()) {
                 self.authed.store(true, Ordering::Release);
                 self.shadows
@@ -1638,14 +1711,14 @@ mod tests {
         let after = native.observe("connection:rotateSecret", &rotate).unwrap();
         // Nothing changes until the server says it did.
         assert!(
-            matches!(native.secrets.lookup("c"), secrets::Known::Fields(f) if f["token"] == "t")
+            matches!(native.secrets.lookup("c"), secrets::Known::Fields(f) if f["token"].expose() == "t")
         );
         native.done(after);
         let secrets::Known::Fields(fields) = native.secrets.lookup("c") else {
             panic!("the secrets are known");
         };
-        assert_eq!(fields["token"], "u");
-        assert_eq!(fields["secretEnv"], "{}");
+        assert_eq!(fields["token"].expose(), "u");
+        assert_eq!(fields["secretEnv"].expose(), "{}");
 
         let after = native.observe("connection:delete", &json!("c")).unwrap();
         native.done(after);
