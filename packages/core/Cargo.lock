@@ -3869,6 +3869,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-scale-bench"
+version = "0.8.0-beta.5"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "vorn-grid-client",
+ "vorn-sessiond-wire",
+ "vorn-term-proto",
+]
+
+[[package]]
 name = "vorn-screen"
 version = "0.7.5"
 dependencies = [
