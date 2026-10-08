@@ -18,12 +18,7 @@
   "git:listBranches \"<root>/repo\"": {
     "jsonrpc": "2.0",
     "result": {
-      "local": [
-        "feature/a",
-        "main",
-        "merged",
-        "wt-branch"
-      ],
+      "local": ["feature/a", "main", "merged", "wt-branch"],
       "current": "main",
       "isGitRepo": true
     }
@@ -38,12 +33,7 @@
   },
   "git:listRemoteBranches \"<root>/repo\"": {
     "jsonrpc": "2.0",
-    "result": [
-      "origin",
-      "feature/a",
-      "main",
-      "merged"
-    ]
+    "result": ["origin", "feature/a", "main", "merged"]
   },
   "git:listWorktrees \"<root>/repo\"": {
     "jsonrpc": "2.0",
@@ -403,14 +393,7 @@
   "change 11 git:listBranches": {
     "jsonrpc": "2.0",
     "result": {
-      "local": [
-        "feature/a",
-        "made",
-        "main",
-        "merged",
-        "merged-<made up 4>",
-        "wt-branch"
-      ],
+      "local": ["feature/a", "made", "main", "merged", "merged-<made up 4>", "wt-branch"],
       "current": "main",
       "isGitRepo": true
     }
@@ -440,9 +423,7 @@
   "change 17 git:deleteBranches": {
     "jsonrpc": "2.0",
     "result": {
-      "deleted": [
-        "made"
-      ],
+      "deleted": ["made"],
       "failed": [
         {
           "branch": "feature/a",
@@ -493,11 +474,7 @@
   "change 20 git:listBranches": {
     "jsonrpc": "2.0",
     "result": {
-      "local": [
-        "feature/a",
-        "main",
-        "merged-<made up 4>"
-      ],
+      "local": ["feature/a", "main", "merged-<made up 4>"],
       "current": "main",
       "isGitRepo": true
     }

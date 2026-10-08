@@ -305,6 +305,8 @@ describe('server integration', () => {
     }
 
     // vornd answers `pairing:*` now; these routes are the server's own pairing, started here directly.
+    // Through vornd the routes are vornd's, whose pairing its own tests cover.
+    const throughVorndRun = !!process.env.VORN_CONFORMANCE_VORND
     const startPairing = async (): Promise<string> => {
       const { startPairing: start } = await import('../packages/server/src/pairing')
       return start().code
@@ -335,16 +337,19 @@ describe('server integration', () => {
       expect(status).toBe(400)
     })
 
-    it('hands over no token while the request is still waiting', async () => {
-      const code = await startPairing()
-      const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
+    it.skipIf(throughVorndRun)(
+      'hands over no token while the request is still waiting',
+      async () => {
+        const code = await startPairing()
+        const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
 
-      const polled = await post('/api/pair/poll', { requestId: String(json.requestId) })
+        const polled = await post('/api/pair/poll', { requestId: String(json.requestId) })
 
-      expect(polled.json).toEqual({ status: 'pending' })
-    })
+        expect(polled.json).toEqual({ status: 'pending' })
+      }
+    )
 
-    it('hands over a token once a person approved it', async () => {
+    it.skipIf(throughVorndRun)('hands over a token once a person approved it', async () => {
       const code = await startPairing()
       const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
       await decide('pairing:approve', String(json.requestId))
@@ -356,7 +361,7 @@ describe('server integration', () => {
       expect(typeof polled.json.name).toBe('string')
     })
 
-    it('hands over nothing once a person denied it', async () => {
+    it.skipIf(throughVorndRun)('hands over nothing once a person denied it', async () => {
       const code = await startPairing()
       const { json } = await post('/api/pair/redeem', { code, deviceName: 'iPhone' })
       await decide('pairing:deny', String(json.requestId))

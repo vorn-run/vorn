@@ -77,6 +77,10 @@ describe.runIf(runnable)('a project on a remote host, from vornd', () => {
     repo = path.join(dirs.work, 'far')
     fs.mkdirSync(repo)
     git(repo, 'init', '-q', '-b', 'main')
+    // The commit made over ssh runs where no identity may be set, as on CI.
+    git(repo, 'config', 'user.name', 't')
+    git(repo, 'config', 'user.email', 't@t')
+    git(repo, 'config', 'commit.gpgsign', 'false')
     fs.writeFileSync(path.join(repo, 'README.md'), '# far\n')
     git(repo, 'add', '.')
     git(repo, 'commit', '-q', '-m', 'one')
