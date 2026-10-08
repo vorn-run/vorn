@@ -3721,6 +3721,7 @@ dependencies = [
  "tracing",
  "ureq",
  "url",
+ "vorn-agents",
  "vorn-store",
 ]
 
