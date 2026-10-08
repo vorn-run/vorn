@@ -274,10 +274,11 @@ mod tests {
     #[test]
     fn answers_what_needs_no_settings_and_refuses_the_rest() {
         let native = Native::new();
+        let root = if cfg!(windows) { "C:\\p" } else { "/p" };
         // Nothing to ask: answered whatever the database.
         let gemini = native.call(
             "agent:listModels",
-            &json!({ "agentType": "gemini", "projectPath": "/p" }),
+            &json!({ "agentType": "gemini", "projectPath": root }),
         );
         assert!(
             matches!(gemini, Answer::Result(ref v) if v["status"] == "unavailable"),
@@ -287,7 +288,7 @@ mod tests {
         assert_eq!(
             native.call(
                 "agent:listModels",
-                &json!({ "agentType": "claude", "projectPath": "/p" })
+                &json!({ "agentType": "claude", "projectPath": root })
             ),
             no_settings()
         );
