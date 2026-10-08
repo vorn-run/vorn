@@ -530,8 +530,6 @@ fn collect<T>(conn: &Connection, sql: &str, map: impl Fn(&Row<'_>) -> Result<T>)
     Ok(out)
 }
 
-/// `readConfigRevision`: `Number(value)`, and 0 when that is not finite
-/// (no row, or text that is not a number).
 /// The settings that belong to whoever is looking (`VIEWER_SETTING_KEYS`):
 /// each viewer keeps its own, over the shared `defaults`.
 pub const VIEWER_SETTING_KEYS: &[&str] = &[
@@ -620,6 +618,8 @@ fn pick_viewer_settings(source: &Map<String, Value>) -> Map<String, Value> {
         .collect()
 }
 
+/// `readConfigRevision`: `Number(value)`, and 0 when that is not finite
+/// (no row, or text that is not a number).
 fn read_config_revision(conn: &Connection) -> Result<f64> {
     let mut stmt = conn.prepare("SELECT value FROM schema_meta WHERE key = ?")?;
     let mut rows = stmt.query([CONFIG_REVISION_KEY])?;

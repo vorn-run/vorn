@@ -1077,19 +1077,14 @@ impl Conn {
         if mode == Mode::Shadow {
             self.shadows.begin(CREDENTIAL.to_owned(), AUTH_METHOD);
         }
+        // Who it is counts only once admitted, by vornd or by the server, which may answer first.
+        *self.viewer.lock().unwrap_or_else(|e| e.into_inner()) = self.native.viewer_of(&raw);
         let conn = Arc::clone(self);
         Some(tokio::spawn(async move {
             let native = Arc::clone(&conn.native);
-            let checked = tokio::task::spawn_blocking(move || {
-                let verdict = native.verify_credential(&raw);
-                (verdict, native.viewer_of(&raw))
-            })
-            .await;
-            let (verdict, viewer) =
-                checked.unwrap_or((reach::Verdict::CannotTell, config::Viewer::Local));
-            if verdict == reach::Verdict::Admitted {
-                *conn.viewer.lock().unwrap_or_else(|e| e.into_inner()) = viewer;
-            }
+            let verdict = tokio::task::spawn_blocking(move || native.verify_credential(&raw))
+                .await
+                .unwrap_or(reach::Verdict::CannotTell);
             match (mode, verdict) {
                 (Mode::Native, reach::Verdict::Admitted) => {
                     conn.authed.store(true, Ordering::Release);

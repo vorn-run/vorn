@@ -45,11 +45,12 @@ impl Viewer {
         }
     }
 
-    fn key(&self) -> String {
+    /// The key its own settings are kept under; the CLI and agents' tools keep none.
+    fn key(&self) -> Option<String> {
         match self {
-            Viewer::Desktop => "desktop".to_owned(),
-            Viewer::Device(id) => format!("token:{id}"),
-            Viewer::Local => "local".to_owned(),
+            Viewer::Desktop => Some("desktop".to_owned()),
+            Viewer::Device(id) => Some(format!("token:{id}")),
+            Viewer::Local => None,
         }
     }
 }
@@ -102,7 +103,10 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
     match method {
         "config:load" => {
             let loaded = blocking(method, move || {
-                with_store(&n, |store| store.load_config_for(&key))
+                with_store(&n, |store| match &key {
+                    Some(key) => store.load_config_for(key),
+                    None => store.load_config(),
+                })
             });
             match loaded.await {
                 Ok(config) => Answer::Result(config),
@@ -112,7 +116,7 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
         "config:save" => {
             let sent = params.clone();
             let saved = blocking(method, move || {
-                with_store(&n, |store| save(store, &sent, &key))
+                with_store(&n, |store| save(store, &sent, key.as_deref()))
             });
             match saved.await {
                 Ok(Saved { before, after }) => {
@@ -150,10 +154,11 @@ fn with_store<T>(
     f(&mut store).map_err(|e| e.to_string())
 }
 
-fn save(store: &mut Store, config: &Value, viewer: &str) -> vorn_store::Result<Saved> {
+fn save(store: &mut Store, config: &Value, viewer: Option<&str>) -> vorn_store::Result<Saved> {
     let before = store.load_config()?;
     store.save_config(config, &[])?;
-    if let Some(defaults) = config.get("defaults").and_then(Value::as_object) {
+    let defaults = config.get("defaults").and_then(Value::as_object);
+    if let (Some(viewer), Some(defaults)) = (viewer, defaults) {
         store.save_viewer_settings(viewer, defaults)?;
     }
     let after = store.load_config()?;
@@ -190,7 +195,11 @@ mod tests {
             Viewer::Device("abc".into())
         );
         assert_eq!(Viewer::of_credential("local-token", None), Viewer::Local);
-        assert_eq!(Viewer::Device("abc".into()).key(), "token:abc");
+        assert_eq!(
+            Viewer::Device("abc".into()).key().as_deref(),
+            Some("token:abc")
+        );
+        assert_eq!(Viewer::Local.key(), None);
     }
 
     #[test]
