@@ -375,7 +375,7 @@ mod tests {
     #[test]
     fn reports_a_forward_the_list_does_not_allow() {
         let groups = Groups::new(None).unwrap();
-        groups.count("task:list", Counted::Forwarded);
+        groups.count("agent:detect", Counted::Forwarded);
         groups.count("config:save", Counted::Forwarded);
         groups.count("config:save", Counted::Forwarded);
         groups.count("config:load", Counted::Native);
@@ -384,7 +384,7 @@ mod tests {
             BTreeMap::from([("config:save".to_owned(), 2)])
         );
         assert_eq!(
-            still_forwarded("task:list"),
+            still_forwarded("agent:detect"),
             Some(StillForwarded::NotYetNative)
         );
         assert_eq!(still_forwarded("config:load"), None);
@@ -393,7 +393,7 @@ mod tests {
         assert_eq!(groups.unexpected_forwards().len(), 1);
         assert!(unknown("nonexistent:method"));
         assert!(!unknown("config:save"));
-        assert!(!unknown("task:list"));
+        assert!(!unknown("agent:detect"));
     }
 
     /// Every call a client can make, from the protocol's request map, is
