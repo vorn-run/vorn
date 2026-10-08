@@ -65,9 +65,30 @@ const BASE16: [u32; 16] = [
     0xf14c4c, 0x23d18b, 0xf5f543, 0x3b8eea, 0xd670d6, 0x29b8db, 0xffffff,
 ];
 
+/// The desktop app's terminal theme (its renderer's terminal options), used
+/// by the look test so every prototype shows the same colours as the app.
+const APP16: [u32; 16] = [
+    0x27272a, 0xef4444, 0x22c55e, 0xeab308, 0x3b82f6, 0xa855f7, 0x06b6d4, 0xd4d4d8, 0x52525b,
+    0xf87171, 0x4ade80, 0xfacc15, 0x60a5fa, 0xc084fc, 0x22d3ee, 0xfafafa,
+];
+const APP_FG: u32 = 0xd4d4d8;
+const APP_BG: u32 = 0x141416;
+
+static APP_THEME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Switches every view to the app's terminal theme.
+pub fn use_app_theme() {
+    APP_THEME.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn app_theme() -> bool {
+    APP_THEME.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The xterm 256-color palette.
 pub fn xterm(i: u8) -> u32 {
     match i {
+        0..=15 if app_theme() => APP16[i as usize],
         0..=15 => BASE16[i as usize],
         16..=231 => {
             let i = i - 16;
@@ -95,8 +116,8 @@ impl Palette {
     fn of(m: &Mirror) -> Palette {
         let c = &m.term().colors;
         Palette {
-            fg: c.fg.map_or(DEFAULT_FG, rgb),
-            bg: c.bg.map_or(DEFAULT_BG, rgb),
+            fg: c.fg.map_or(if app_theme() { APP_FG } else { DEFAULT_FG }, rgb),
+            bg: c.bg.map_or(if app_theme() { APP_BG } else { DEFAULT_BG }, rgb),
             over: c.palette.iter().map(|(i, v)| (*i, rgb(*v))).collect(),
         }
     }
@@ -171,7 +192,7 @@ pub fn build(m: &Mirror, rev: u64) -> PaneView {
         },
         fg: pal.fg,
         bg: pal.bg,
-        cursor_color: t.colors.cursor.map_or(DEFAULT_CURSOR, rgb),
+        cursor_color: t.colors.cursor.map_or(if app_theme() { APP_FG } else { DEFAULT_CURSOR }, rgb),
         runs: Vec::with_capacity(t.rows as usize * 2),
         text: Vec::with_capacity(t.rows as usize * t.cols as usize),
         probe_hit: false,

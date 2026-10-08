@@ -30,6 +30,17 @@ struct App {
 struct Hello {
     panes: usize,
     bench: bool,
+    look: bool,
+    polish: bool,
+    font_size: f32,
+    icons: Vec<(&'static str, &'static str)>,
+}
+
+/// The shared stroke icons, for the look test's page.
+macro_rules! icons {
+    ($($name:literal),*) => {
+        vec![$(($name, include_str!(concat!("../../look/icons/", $name, ".svg")))),*]
+    };
 }
 
 #[tauri::command]
@@ -70,10 +81,18 @@ fn attach(state: tauri::State<'_, Arc<App>>, channel: Channel<InvokeResponseBody
             }
         }
     });
-    let bench = app.bench.lock().unwrap().cfg.mode != Mode::Interactive;
+    let b = app.bench.lock().unwrap();
     Hello {
         panes: app.grid.panes(),
-        bench,
+        bench: b.cfg.mode != Mode::Interactive,
+        look: b.cfg.look,
+        polish: b.cfg.polish,
+        font_size: b.cfg.font_size,
+        icons: if b.cfg.look {
+            icons!("terminal", "folder", "folder-open", "square-terminal", "globe", "git-branch", "panel-left", "file-diff")
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -125,6 +144,7 @@ fn samples(app: tauri::AppHandle, state: tauri::State<'_, Arc<App>>, s: Samples)
     }
     if s.done {
         let errs: Vec<String> = state.grid.errors().iter().map(|e| format!("{e:?}")).collect();
+        b.cfg.shoot();
         let name = if std::env::var_os("VORN_SPIKE_WEBVIEW_120").is_some() { "tauri-120" } else { "tauri" };
         b.write(name, state.grid.panes(), &[("errors", format!("[{}]", errs.join(",")))]);
         app.exit(0);
@@ -187,6 +207,60 @@ fn unlock_120(webview: *mut std::ffi::c_void) {
 #[cfg(not(target_os = "macos"))]
 fn unlock_120(_: *mut std::ffi::c_void) {}
 
+/// AppKit fits a titled window into the screen's visible frame (above the
+/// dock); the look test wants the whole 1440x900, so the window keeps the
+/// size asked for, as the SwiftUI prototype's window does.
+#[cfg(target_os = "macos")]
+fn full_size(ns_window: *mut std::ffi::c_void, w: f64, h: f64) {
+    use objc2::encode::{Encode, Encoding, RefEncode};
+    use objc2::runtime::{AnyClass, AnyObject, Sel};
+    use objc2::{msg_send, sel};
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Rect(f64, f64, f64, f64);
+    unsafe impl Encode for Rect {
+        const ENCODING: Encoding = Encoding::Struct(
+            "CGRect",
+            &[
+                Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]),
+                Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]),
+            ],
+        );
+    }
+    unsafe impl RefEncode for Rect {
+        const ENCODING_REF: Encoding = Encoding::Pointer(&<Self as Encode>::ENCODING);
+    }
+    extern "C" fn keep(_: *mut AnyObject, _: Sel, r: Rect, _: *mut AnyObject) -> Rect {
+        r
+    }
+    extern "C" {
+        fn object_getClass(o: *mut AnyObject) -> *const AnyClass;
+        fn class_replaceMethod(
+            c: *const AnyClass,
+            s: Sel,
+            imp: *const std::ffi::c_void,
+            types: *const std::ffi::c_char,
+        ) -> *const std::ffi::c_void;
+    }
+    // SAFETY: `ns_window` is the live NSWindow, on the main thread.
+    unsafe {
+        let win = ns_window.cast::<AnyObject>();
+        class_replaceMethod(
+            object_getClass(win),
+            sel!(constrainFrameRect:toScreen:),
+            keep as *const std::ffi::c_void,
+            c"{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}@".as_ptr(),
+        );
+        let screen: *mut AnyObject = msg_send![win, screen];
+        if screen.is_null() {
+            return;
+        }
+        let sf: Rect = msg_send![screen, frame];
+        let frame = Rect(40.0, sf.3 - 40.0 - h, w, h);
+        let _: () = msg_send![win, setFrame: frame, display: true];
+    }
+}
+
 fn main() {
     let Some(socket) = spike_core::env::grid() else {
         eprintln!("no grid endpoint (VORN_SPIKE_GRID/VORN_SPIKE_SESSIONS)");
@@ -195,9 +269,20 @@ fn main() {
     let sessions = spike_core::env::sessions();
     let cfg = Config::from_env();
     let interactive = cfg.mode == Mode::Interactive;
+    let (look, polish) = (cfg.look, cfg.polish);
     let mut bench = Bench::new(cfg);
     bench.period_ms = 1000.0 / 120.0;
-    let grid = match Grid::connect(&socket, sessions, 80, 24) {
+    // The look test's pane is known up front (Menlo's advance is 0.602 em,
+    // its line 1.164 em); start there so the program's output is not
+    // reflowed when the page sizes it.
+    let (cols, rows) = if look {
+        let fs = bench.cfg.font_size;
+        let ch = (fs * 0.928).ceil() + (fs * 0.236).ceil();
+        ((742.0 / (fs * 0.6021)) as u16, (856.0 / ch) as u16)
+    } else {
+        (80, 24)
+    };
+    let grid = match Grid::connect(&socket, sessions, cols, rows) {
         Ok(g) => g,
         Err(e) => {
             eprintln!("grid: {e}");
@@ -213,14 +298,30 @@ fn main() {
         .manage(Arc::clone(&state))
         .invoke_handler(tauri::generate_handler![attach, ack, key, text, resize, first_frame, samples])
         .setup(move |app| {
-            let w = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Vorn spike: Tauri")
                 .inner_size(1440.0, 900.0)
                 .position(40.0, 40.0)
                 .focused(interactive)
                 .always_on_top(!interactive)
-                .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
-                .build()?;
+                .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
+            if look {
+                b = b
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    .theme(Some(tauri::Theme::Dark));
+            }
+            if polish {
+                use tauri::window::{Effect, EffectState, EffectsBuilder};
+                b = b.transparent(true).effects(
+                    EffectsBuilder::new().effect(Effect::Sidebar).state(EffectState::Active).build(),
+                );
+            }
+            let w = b.build()?;
+            #[cfg(target_os = "macos")]
+            if let Ok(ns) = w.ns_window() {
+                full_size(ns, 1440.0, 900.0);
+            }
             if std::env::var_os("VORN_SPIKE_WEBVIEW_120").is_some() {
                 let _ = w.with_webview(|wv| unlock_120(wv.inner()));
             }

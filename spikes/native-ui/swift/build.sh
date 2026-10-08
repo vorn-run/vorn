@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds swift/build/VornSpikeSwift.app: the Rust grid client as a static
-# library, this file compiled with swiftc, a hand-made bundle.
+# library, the Swift sources compiled with swiftc, a hand-made bundle.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(dirname "$here")
@@ -10,7 +10,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 swiftc -O -module-name VornSpikeSwift \
   -import-objc-header "$root/ffi/include/vorn_spike.h" \
-  "$here/main.swift" \
+  "$here/main.swift" "$here/look.swift" \
   "$root/target/release/libvorn_spike_ffi.a" \
   -framework AppKit -framework SwiftUI -framework CoreText -framework QuartzCore \
   -o "$app/Contents/MacOS/VornSpikeSwift"

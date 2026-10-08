@@ -44,4 +44,6 @@ void vs_bench_frame(const VsHandle *h, double at_ms, double work_ms);
 void vs_bench_first_frame(const VsHandle *h);
 void vs_bench_latency(const VsHandle *h, double ms);
 void vs_bench_set_period(const VsHandle *h, double ms);
+/* Takes the look test's screenshot of this process's window, if asked for. */
+void vs_bench_shoot(const VsHandle *h);
 void vs_bench_write(const VsHandle *h);

@@ -1,0 +1,419 @@
+// The Slint prototype's UI: panes drawn from runs of styled text the Rust
+// side derives from the shared grid client's views, and the look test's
+// screen (the app's sidebar, a session card, a diff card).
+
+export struct Run {
+    x: length,
+    y: length,
+    w: length,
+    text: string,
+    fg: color,
+    bg: color,
+    has-bg: bool,
+    bold: bool,
+    italic: bool,
+    under: bool,
+}
+
+export struct PaneData {
+    bg: color,
+    runs: [Run],
+    cursor-x: length,
+    cursor-y: length,
+    cursor-w: length,
+    cursor-h: length,
+    cursor-color: color,
+    cursor-visible: bool,
+    cursor-hollow: bool,
+}
+
+component Pane inherits Rectangle {
+    in property <int> index;
+    in property <PaneData> data;
+    in property <length> cell-h;
+    in property <length> font-size;
+    in property <string> marked;
+    callback resized(int, length, length);
+    callback clicked(int);
+    clip: true;
+    background: data.bg;
+    changed width => { root.resized(index, self.width, self.height); }
+    changed height => { root.resized(index, self.width, self.height); }
+    init => { root.resized(index, self.width, self.height); }
+    for r in data.runs: Rectangle {
+        x: r.x;
+        y: r.y;
+        width: r.w;
+        height: root.cell-h;
+        background: r.has-bg ? r.bg : transparent;
+        Text {
+            x: 0;
+            y: 0;
+            height: root.cell-h;
+            vertical-alignment: center;
+            text: r.text;
+            color: r.fg;
+            font-family: "Menlo";
+            font-size: root.font-size;
+            font-weight: r.bold ? 700 : 400;
+            font-italic: r.italic;
+        }
+        if r.under: Rectangle {
+            y: root.cell-h - 1px;
+            height: 1px;
+            background: r.fg;
+        }
+    }
+    if data.cursor-visible && marked == "": Rectangle {
+        x: data.cursor-x;
+        y: data.cursor-y;
+        width: data.cursor-w;
+        height: data.cursor-h;
+        background: data.cursor-hollow ? transparent : data.cursor-color.with-alpha(0.75);
+        border-width: data.cursor-hollow ? 1px : 0;
+        border-color: data.cursor-color.with-alpha(0.75);
+    }
+    if marked != "": Text {
+        x: data.cursor-x;
+        y: data.cursor-y;
+        text: marked;
+        color: #ffffff;
+        font-family: "Menlo";
+        font-size: root.font-size;
+    }
+    TouchArea {
+        clicked => { root.clicked(index); }
+    }
+}
+
+// The app's tokens (src/renderer).
+global Tok {
+    out property <color> base: #0d0d0f;
+    out property <color> panel: #101012;
+    out property <color> sunken: #141416;
+    out property <color> overlay: #1c1c20;
+    out property <color> ink: #faf9f7;
+    out property <color> gray300: #d1d5db;
+    out property <color> gray400: #9ca3af;
+    out property <color> gray500: #6b7280;
+    out property <color> gray600: #4b5563;
+    out property <color> line: #ffffff0f;
+    out property <color> hairline: #ffffff0a;
+}
+
+component Icon inherits Image {
+    in property <length> size: 14px;
+    width: size;
+    height: size;
+    image-fit: contain;
+}
+
+component SessionRow inherits Rectangle {
+    in property <string> name;
+    in property <string> branch;
+    in property <color> status;
+    in property <bool> selected;
+    in property <bool> polish;
+    height: 36px;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Icon { source: @image-url("../../look/icons/terminal.svg"); colorize: Tok.gray400; }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            Text { text: name; font-size: 12px; color: selected ? #ffffff : Tok.gray400; }
+            Text { text: branch; font-size: 10px; color: polish ? #ffffff59 : Tok.gray600; }
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle { width: 6px; height: 6px; border-radius: 3px; background: status; }
+        }
+    }
+    if selected: Rectangle { x: 0; y: 4px; width: 1px; height: parent.height - 8px; background: #ffffff; }
+}
+
+component Sidebar inherits Rectangle {
+    in property <bool> polish;
+    width: 256px;
+    background: polish ? #101012c7 : Tok.panel;
+    Rectangle { x: parent.width - 1px; width: 1px; background: Tok.line; }
+    VerticalLayout {
+        alignment: start;
+        Rectangle {
+            height: 40px;
+            Rectangle { y: parent.height - 1px; height: 1px; background: Tok.line; }
+            Icon {
+                x: parent.width - 1px - 12px - 4px - 14px;
+                source: @image-url("../../look/icons/panel-left.svg");
+                colorize: Tok.gray500;
+            }
+        }
+        VerticalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            spacing: 2px;
+            VerticalLayout {
+                padding-top: 12px;
+                padding-bottom: 6px;
+                Text { text: "SESSIONS"; font-size: 11px; font-weight: 500; letter-spacing: 0.55px; color: Tok.gray500; }
+            }
+            Rectangle {
+                border-radius: 4px;
+                background: #ffffff14;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        Icon { source: @image-url("../../look/icons/folder.svg"); colorize: Tok.gray500; }
+                    }
+                    Text { text: "vorn"; font-size: 13px; color: #ffffff; horizontal-stretch: 1; }
+                    Text { text: "3"; font-size: 12px; color: polish ? #ffffff59 : Tok.gray600; vertical-alignment: center; }
+                }
+            }
+            VerticalLayout {
+                padding-left: 16px;
+                spacing: 2px;
+                SessionRow { name: "fix flaky resume test"; branch: "fix/resume-flake"; status: Tok.ink; selected: true; polish: root.polish; }
+                SessionRow { name: "grid protocol docs"; branch: "docs/grid-mode"; status: #c9972a; polish: root.polish; }
+                SessionRow { name: "native ui spike"; branch: "native-ui-spike"; status: #ffffff2e; polish: root.polish; }
+            }
+        }
+    }
+}
+
+component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> tip;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    background: touch.has-hover ? #ffffff1a : transparent;
+    Icon { source: icon; colorize: Tok.ink; }
+    touch := TouchArea {}
+    // Slint has no tooltip; a small popup on hover stands in.
+    if touch.has-hover: Rectangle {
+        x: parent.width - self.width;
+        y: parent.height + 6px;
+        width: tip-text.preferred-width + 16px;
+        height: 24px;
+        border-radius: 4px;
+        background: Tok.overlay;
+        border-width: 1px;
+        border-color: Tok.line;
+        tip-text := Text { text: tip; font-size: 12px; color: Tok.ink; }
+    }
+}
+
+component CardHeader inherits Rectangle {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> branch;
+    in property <string> trailing;
+    in property <bool> buttons;
+    height: 41px;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Tok.hairline; }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Icon { source: icon; size: 18px; colorize: Tok.gray400; }
+        }
+        Text { text: title; font-size: 13px; font-weight: 500; color: Tok.gray300; vertical-alignment: center; }
+        if branch != "": HorizontalLayout {
+            spacing: 4px;
+            VerticalLayout {
+                alignment: center;
+                Icon { source: @image-url("../../look/icons/git-branch.svg"); size: 11px; colorize: Tok.gray500; }
+            }
+            Text { text: branch; font-family: "Menlo"; font-size: 11px; color: Tok.gray400; vertical-alignment: center; }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        if trailing != "": Text { text: trailing; font-size: 11px; color: Tok.gray500; vertical-alignment: center; }
+        if buttons: HorizontalLayout {
+            spacing: 2px;
+            VerticalLayout { alignment: center; IconButton { icon: @image-url("../../look/icons/folder-open.svg"); tip: "Browse files"; } }
+            VerticalLayout { alignment: center; IconButton { icon: @image-url("../../look/icons/square-terminal.svg"); tip: "Add a terminal"; } }
+            VerticalLayout { alignment: center; IconButton { icon: @image-url("../../look/icons/globe.svg"); tip: "Open browser"; } }
+        }
+    }
+}
+
+struct DiffLine { old: string, new: string, kind: int, text: string }
+
+component DiffView inherits VerticalLayout {
+    property <[DiffLine]> lines: [
+        { old: "14", new: "14", kind: 0, text: "  broken: 'bg-danger'," },
+        { old: "15", new: "15", kind: 0, text: "  blocked: 'bg-bronzo'," },
+        { old: "16", new: "", kind: -1, text: "  settled: 'bg-ink-faint'," },
+        { old: "", new: "16", kind: 1, text: "  settled: 'bg-ink-faint/80'," },
+        { old: "", new: "17", kind: 1, text: "  parked: 'bg-ink-ghost'," },
+        { old: "17", new: "18", kind: 0, text: "  live: 'bg-ink'," },
+        { old: "18", new: "19", kind: 0, text: "  idle: 'bg-ink-ghost'" },
+        { old: "19", new: "20", kind: 0, text: "}" },
+    ];
+    alignment: start;
+    Rectangle {
+        background: Tok.overlay;
+        height: 27px;
+        Rectangle { y: parent.height - 1px; height: 1px; background: Tok.line; }
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            spacing: 8px;
+            Text { text: "src/renderer/lib/status-tone.ts"; font-family: "Menlo"; font-size: 12px; color: Tok.gray300; vertical-alignment: center; horizontal-stretch: 1; }
+            Text { text: "+2"; font-family: "Menlo"; font-size: 11px; color: #7ea96a; vertical-alignment: center; }
+            Text { text: "-1"; font-family: "Menlo"; font-size: 11px; color: #c96f62; vertical-alignment: center; }
+        }
+    }
+    Rectangle {
+        background: #ffffff0d;
+        height: 19px;
+        Text { x: 12px; text: "@@ -14,7 +14,8 @@ export const TONE_DOT = {"; font-family: "Menlo"; font-size: 12px; color: #ffffff8c; }
+    }
+    for l in lines: Rectangle {
+        height: 19.2px;
+        background: l.kind == 1 ? #22c55e1a : l.kind == -1 ? #ef44441a : transparent;
+        HorizontalLayout {
+            Text { width: 27px; text: l.old; font-family: "Menlo"; font-size: 11px; horizontal-alignment: right; vertical-alignment: center; color: l.kind == -1 ? #dc2626 : Tok.gray600; }
+            Rectangle { width: 8px; }
+            Text { width: 27px; text: l.new; font-family: "Menlo"; font-size: 11px; horizontal-alignment: right; vertical-alignment: center; color: l.kind == 1 ? #16a34a : Tok.gray600; }
+            Rectangle { width: 8px; }
+            Text { text: l.text; font-family: "Menlo"; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1;
+                   color: l.kind == 1 ? #86efac : l.kind == -1 ? #fca5a5 : Tok.gray400; }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    in property <[PaneData]> panes;
+    in property <bool> look;
+    in property <bool> polish;
+    in property <length> font-size: 12px;
+    in property <string> marked;
+    in property <int> cols: 1;
+    in property <int> rows: 1;
+    in-out property <int> focused;
+    // Cell metrics, measured from the font.
+    out property <length> cell-w: probe.preferred-width / 10;
+    out property <length> cell-h: probe.preferred-height;
+    callback resized(int, length, length);
+    callback key(string, bool, bool, bool, bool) -> bool;
+    callback text(string);
+
+    title: "Vorn spike: Slint";
+    preferred-width: 1440px;
+    preferred-height: 900px;
+    background: polish ? transparent : look ? Tok.base : #404040;
+
+    probe := Text { visible: false; text: "MMMMMMMMMM"; font-family: "Menlo"; font-size: root.font-size; }
+
+    // Keys: text reaches the hidden input (so IME composition works), the
+    // rest is taken here first.
+    FocusScope {
+        capture-key-pressed(e) => {
+            if root.key(e.text, e.modifiers.shift, e.modifiers.alt, e.modifiers.control, e.modifiers.meta) {
+                return accept;
+            }
+            reject
+        }
+        input := TextInput {
+            x: -1000px;
+            width: 10px;
+            single-line: true;
+            edited => {
+                if self.text != "" {
+                    root.text(self.text);
+                    self.text = "";
+                }
+            }
+        }
+    }
+
+    if !look: Rectangle {
+        property <length> gap: 2px;
+        property <length> pw: (root.width - gap * (root.cols - 1)) / root.cols;
+        property <length> ph: (root.height - gap * (root.rows - 1)) / root.rows;
+        for p[i] in panes: Pane {
+            index: i;
+            data: p;
+            x: mod(i, root.cols) * (pw + gap);
+            y: floor(i / root.cols) * (ph + gap);
+            width: pw;
+            height: ph;
+            cell-h: root.cell-h;
+            font-size: root.font-size;
+            marked: i == root.focused ? root.marked : "";
+            resized(i, w, h) => { root.resized(i, w, h); }
+            clicked(i) => { root.focused = i; input.focus(); }
+        }
+    }
+
+    if look: HorizontalLayout {
+        Sidebar { polish: root.polish; }
+        Rectangle {
+            background: Tok.base;
+            HorizontalLayout {
+                alignment: start;
+                Rectangle {
+                    width: 744px;
+                    background: Tok.sunken;
+                    border-width: 1px;
+                    border-color: Tok.line;
+                    VerticalLayout {
+                        padding: 1px;
+                        CardHeader {
+                            icon: @image-url("../../look/icons/terminal.svg");
+                            title: "fix flaky resume test";
+                            branch: "fix/resume-flake";
+                            buttons: true;
+                        }
+                        Rectangle { height: 2px; }
+                        Pane {
+                            index: 0;
+                            data: root.panes[0];
+                            cell-h: root.cell-h;
+                            font-size: root.font-size;
+                            marked: root.marked;
+                            vertical-stretch: 1;
+                            resized(i, w, h) => { root.resized(i, w, h); }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: start;
+                    Rectangle {
+                        width: 440px;
+                        height: 450px;
+                        background: Tok.sunken;
+                        border-width: 1px;
+                        border-color: Tok.line;
+                        VerticalLayout {
+                            padding: 1px;
+                            alignment: start;
+                            CardHeader {
+                                icon: @image-url("../../look/icons/file-diff.svg");
+                                title: "Changes";
+                                trailing: "1 file";
+                            }
+                            DiffView {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    init => { input.focus(); }
+}

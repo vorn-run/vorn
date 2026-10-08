@@ -75,7 +75,10 @@ struct Fonts {
     }
 }
 
-var fonts = Fonts(size: 12)
+let env = ProcessInfo.processInfo.environment
+let look = env["VORN_SPIKE_LOOK"] == "1"
+let polish = env["VORN_SPIKE_POLISH"] == "1"
+var fonts = Fonts(size: CGFloat(Double(env["VORN_SPIKE_FONT_SIZE"] ?? "") ?? 12))
 var colorCache: [UInt32: CGColor] = [:]
 
 func color(_ rgb: UInt32, alpha: CGFloat = 1) -> CGColor {
@@ -468,6 +471,7 @@ final class Driver: NSObject {
         case 2: inject("\r", keyCode: 36)
         case 3:
             timer?.invalidate()
+            vs_bench_shoot(model.h)
             vs_bench_write(model.h)
             NSApp.terminate(nil)
         default: break
@@ -489,6 +493,12 @@ final class Driver: NSObject {
 
 // MARK: - The app
 
+/// Keeps the size asked for: AppKit would shrink a 900-point window that
+/// reaches the dock on a smaller display.
+final class BenchWindow: NSWindow {
+    override func constrainFrameRect(_ r: NSRect, to screen: NSScreen?) -> NSRect { r }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var driver: Driver?
@@ -501,19 +511,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let sessions = (ProcessInfo.processInfo.environment["VORN_SPIKE_SESSIONS"] ?? "")
             .split(separator: ",").count
         let (cols, rows) = layout(max(1, sessions))
-        let paneW = (size.width - CGFloat(cols - 1) * 2) / CGFloat(cols)
-        let paneH = (size.height - CGFloat(rows - 1) * 2) / CGFloat(rows)
+        let paneW = look ? 742 : (size.width - CGFloat(cols - 1) * 2) / CGFloat(cols)
+        let paneH = look ? 900 - 41 - 3 : (size.height - CGFloat(rows - 1) * 2) / CGFloat(rows)
         guard let h = vs_open(UInt16(paneW / fonts.cell.width), UInt16(paneH / fonts.cell.height)) else {
             FileHandle.standardError.write("no grid endpoint (VORN_SPIKE_GRID/VORN_SPIKE_SESSIONS)\n".data(using: .utf8)!)
             exit(1)
         }
         let model = Model(h: h, cell: fonts.cell)
-        window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
-                          styleMask: [.titled, .closable, .resizable, .miniaturizable],
-                          backing: .buffered, defer: false)
+        var style: NSWindow.StyleMask = [.titled, .closable, .resizable, .miniaturizable]
+        if look { style.insert(.fullSizeContentView) }
+        window = BenchWindow(contentRect: NSRect(origin: .zero, size: size),
+                          styleMask: style, backing: .buffered, defer: false)
         window.title = "Vorn spike: SwiftUI/AppKit"
-        window.contentView = NSHostingView(rootView: ContentView(model: model, columns: cols))
-        window.setFrameTopLeftPoint(NSPoint(x: 40, y: (NSScreen.main?.visibleFrame.maxY ?? 900) - 20))
+        if look {
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.appearance = NSAppearance(named: .darkAqua)
+            if polish {
+                window.isOpaque = false
+                window.backgroundColor = .clear
+            }
+            window.contentView = NSHostingView(rootView: LookView(term: model.panes[0], polish: polish))
+            // The content fills the frame: the whole window is 1440x900.
+            window.setFrame(NSRect(origin: .zero, size: size), display: false)
+        } else {
+            window.contentView = NSHostingView(rootView: ContentView(model: model, columns: cols))
+        }
+        window.setFrameTopLeftPoint(NSPoint(x: 40, y: (NSScreen.main?.frame.maxY ?? 940) - 40))
         if model.mode != 0 { window.level = .floating }
         window.orderFrontRegardless()
         window.makeFirstResponder(model.panes.first)

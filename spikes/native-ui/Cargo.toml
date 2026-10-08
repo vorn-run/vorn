@@ -4,7 +4,7 @@
 # dependencies never touch this lockfile.
 [workspace]
 resolver = "2"
-members = ["core", "ffi", "harness", "tauri"]
+members = ["core", "ffi", "harness", "tauri", "slint"]
 
 [workspace.dependencies]
 vorn-term-proto = { path = "../../packages/core/crates/term-proto" }

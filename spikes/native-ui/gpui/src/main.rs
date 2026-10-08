@@ -20,13 +20,15 @@ use spike_core::bench::{Bench, Config, Mode, Step};
 use spike_core::view::flags;
 use spike_core::{Grid, PaneView};
 
-const FONT_SIZE: f32 = 12.0;
+mod look;
+
 const GAP: f32 = 2.0;
 
 struct Metrics {
     cell: gpui::Size<Pixels>,
     ascent: Pixels,
     font: Font,
+    size: Pixels,
 }
 
 struct Root {
@@ -160,6 +162,7 @@ impl Root {
             Step::Done => {
                 let errs: Vec<String> =
                     self.grid.errors().iter().map(|e| format!("{e:?}")).collect();
+                self.bench.borrow().cfg.shoot();
                 self.bench.borrow().write(
                     "gpui",
                     self.grid.panes(),
@@ -294,7 +297,7 @@ fn paint_pane(
         };
         // Plain runs keep the grid's advance; clusters are drawn alone.
         let force = (r.flags & flags::CLUSTER == 0).then_some(cw);
-        let line = ts.shape_line(SharedString::from(text.to_owned()), px(FONT_SIZE), &[run], force);
+        let line = ts.shape_line(SharedString::from(text.to_owned()), m.size, &[run], force);
         let _ = line.paint(at(r.col, r.row), ch, TextAlign::Left, None, window, cx);
     }
     let c = at(v.cursor_x, v.cursor_y);
@@ -307,7 +310,7 @@ fn paint_pane(
             underline: Some(UnderlineStyle { thickness: px(1.0), color: Some(color(v.fg)), wavy: false }),
             strikethrough: None,
         };
-        let line = ts.shape_line(SharedString::from(marked.to_owned()), px(FONT_SIZE), &[run], None);
+        let line = ts.shape_line(SharedString::from(marked.to_owned()), m.size, &[run], None);
         let _ = line.paint(c, ch, TextAlign::Left, None, window, cx);
     } else if v.cursor_visible {
         let mut cc = color(v.cursor_color);
@@ -334,20 +337,29 @@ impl Render for Root {
             }
         }
         let n = self.views.len();
-        let (cols, rows) = spike_core::layout(n);
-        let mut column = div().size_full().flex().flex_col().gap(px(GAP)).bg(rgb(0x404040));
-        for r in 0..rows {
-            let mut row = div().flex_1().w_full().flex().flex_row().gap(px(GAP));
-            for c in 0..cols {
-                let i = r * cols + c;
-                row = if i < n {
-                    row.child(self.pane(i, cx))
-                } else {
-                    row.child(div().flex_1())
-                };
+        let (look, polish) = {
+            let b = self.bench.borrow();
+            (b.cfg.look, b.cfg.polish)
+        };
+        let column = if look {
+            look::screen(self, polish, cx)
+        } else {
+            let (cols, rows) = spike_core::layout(n);
+            let mut column = div().size_full().flex().flex_col().gap(px(GAP)).bg(rgb(0x404040));
+            for r in 0..rows {
+                let mut row = div().flex_1().w_full().flex().flex_row().gap(px(GAP));
+                for c in 0..cols {
+                    let i = r * cols + c;
+                    row = if i < n {
+                        row.child(self.pane(i, cx))
+                    } else {
+                        row.child(div().flex_1())
+                    };
+                }
+                column = column.child(row);
             }
-            column = column.child(row);
-        }
+            column
+        };
         // Painted last: the frame's work is done here.
         let bench = self.bench.clone();
         let (started, frame_start) = (self.started, self.frame_start);
@@ -415,27 +427,70 @@ impl EntityInputHandler for Root {
     }
 }
 
+/// AppKit fits a titled window into the screen's visible frame (above the
+/// dock); the look test wants the whole 1440x900, so GPUI's window class
+/// keeps the size asked for, as the SwiftUI prototype's window does.
+fn keep_frame_size() {
+    use cocoa::base::id;
+    use cocoa::foundation::NSRect;
+    use objc::runtime::{Class, Object, Sel};
+    use objc::{sel, sel_impl};
+    extern "C" fn keep(_: &Object, _: Sel, r: NSRect, _: id) -> NSRect {
+        r
+    }
+    extern "C" {
+        fn class_replaceMethod(
+            c: *const Class,
+            s: Sel,
+            imp: *const std::ffi::c_void,
+            types: *const std::ffi::c_char,
+        ) -> *const std::ffi::c_void;
+    }
+    // GPUI registers its window class with the first window; until then
+    // its superclass takes the override.
+    let Some(class) = Class::get("GPUIWindow").or_else(|| Class::get("NSWindow")) else { return };
+    unsafe {
+        class_replaceMethod(
+            class,
+            sel!(constrainFrameRect:toScreen:),
+            keep as *const std::ffi::c_void,
+            c"{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}@".as_ptr(),
+        );
+    }
+}
+
 fn main() {
     let Some(socket) = spike_core::env::grid() else {
         eprintln!("no grid endpoint (VORN_SPIKE_GRID/VORN_SPIKE_SESSIONS)");
         std::process::exit(1);
     };
     let sessions = spike_core::env::sessions();
-    let interactive = Config::from_env().mode == Mode::Interactive;
-    gpui_platform::application().run(move |cx: &mut App| {
+    let cfg = Config::from_env();
+    let interactive = cfg.mode == Mode::Interactive;
+    let (look, polish) = (cfg.look, cfg.polish);
+    let fs = px(cfg.font_size);
+    gpui_platform::application().with_assets(look::Icons).run(move |cx: &mut App| {
         let f = font("Menlo");
         let ts = cx.text_system().clone();
         let id = ts.resolve_font(&f);
-        let cw = ts.advance(id, px(FONT_SIZE), 'M').map(|a| a.width).unwrap_or(px(7.2));
-        let ascent = ts.ascent(id, px(FONT_SIZE));
-        let descent = ts.descent(id, px(FONT_SIZE));
-        let ch = (ascent.ceil() + descent.abs().ceil()).max(px(FONT_SIZE));
-        let metrics = Metrics { cell: size(cw, ch), ascent, font: f };
+        let cw = ts.advance(id, fs, 'M').map(|a| a.width).unwrap_or(fs * 0.6);
+        let ascent = ts.ascent(id, fs);
+        let descent = ts.descent(id, fs);
+        let ch = (ascent.ceil() + descent.abs().ceil()).max(fs);
+        let metrics = Metrics { cell: size(cw, ch), ascent, font: f, size: fs };
 
         let win = size(px(1440.0), px(900.0));
         let (cols, rows) = spike_core::layout(sessions.len());
-        let pw = (win.width - px(GAP) * (cols as f32 - 1.0)) / cols as f32;
-        let ph = (win.height - px(GAP) * (rows as f32 - 1.0)) / rows as f32;
+        let (pw, ph) = if look {
+            // The session card's body: 744 wide less its borders, the
+            // window less the card header.
+            (px(742.0), px(900.0 - 41.0 - 3.0))
+        } else {
+            (
+                (win.width - px(GAP) * (cols as f32 - 1.0)) / cols as f32,
+                (win.height - px(GAP) * (rows as f32 - 1.0)) / rows as f32,
+            )
+        };
         let grid = match Grid::connect(
             &socket,
             sessions.clone(),
@@ -448,18 +503,25 @@ fn main() {
                 std::process::exit(1);
             }
         };
+        keep_frame_size();
         let bounds = Bounds::new(point(px(40.0), px(40.0)), win);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 focus: interactive,
-                kind: if interactive { WindowKind::Normal } else { WindowKind::PopUp },
+                kind: if interactive || look { WindowKind::Normal } else { WindowKind::PopUp },
                 // The bench window is not key; it must not be throttled.
                 inactive_frame_interval: None,
                 titlebar: Some(gpui::TitlebarOptions {
                     title: Some("Vorn spike: GPUI".into()),
-                    ..Default::default()
+                    appears_transparent: look,
+                    traffic_light_position: look.then(|| point(px(14.0), px(14.0))),
                 }),
+                window_background: if polish {
+                    gpui::WindowBackgroundAppearance::Blurred
+                } else {
+                    gpui::WindowBackgroundAppearance::Opaque
+                },
                 ..Default::default()
             },
             |window, cx| cx.new(|cx| Root::new(grid, metrics, window, cx)),

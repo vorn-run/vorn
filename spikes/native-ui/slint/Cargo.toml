@@ -1,0 +1,20 @@
+[package]
+name = "vorn-spike-slint"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Slint prototype: the shared grid client in Rust, the panes drawn from .slint markup"
+
+[[bin]]
+name = "vorn-spike-slint"
+path = "src/main.rs"
+
+[build-dependencies]
+slint-build = "1.18"
+
+[dependencies]
+spike-core = { workspace = true }
+slint = { version = "1.18", features = ["unstable-winit-030"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"

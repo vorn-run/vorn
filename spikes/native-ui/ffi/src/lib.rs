@@ -208,6 +208,12 @@ pub unsafe extern "C" fn vs_bench_set_period(h: *const VsHandle, ms: f64) {
     (*h).bench.lock().unwrap().period_ms = ms;
 }
 
+/// Takes the look test's screenshot of this process's window, if asked for.
+#[no_mangle]
+pub unsafe extern "C" fn vs_bench_shoot(h: *const VsHandle) {
+    (*h).bench.lock().unwrap().cfg.shoot();
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn vs_bench_write(h: *const VsHandle) {
     let n = (*h).grid.panes();

@@ -27,6 +27,14 @@ pub struct Config {
     pub duration: Duration,
     pub probes: usize,
     pub out: Option<String>,
+    /// The look test: draw the app screen mock instead of the pane grid,
+    /// screenshot it to `shot` once settled (a `start`-mode run), then quit.
+    pub look: bool,
+    /// The look test's variant with each framework's platform polish.
+    pub polish: bool,
+    pub shot: Option<String>,
+    /// Terminal font size in points.
+    pub font_size: f32,
 }
 
 impl Config {
@@ -48,6 +56,30 @@ impl Config {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(150),
             out: var("VORN_SPIKE_OUT"),
+            look: var("VORN_SPIKE_LOOK").is_some_and(|v| v == "1"),
+            polish: var("VORN_SPIKE_POLISH").is_some_and(|v| v == "1"),
+            shot: var("VORN_SPIKE_SHOT"),
+            font_size: var("VORN_SPIKE_FONT_SIZE")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(12.0),
+        }
+        .themed()
+    }
+
+    fn themed(self) -> Config {
+        if self.look {
+            crate::view::use_app_theme();
+        }
+        self
+    }
+
+    /// Takes the look test's screenshot, if this run wants one.
+    pub fn shoot(&self) {
+        if let Some(path) = &self.shot {
+            match crate::shot::capture(path) {
+                Ok(()) => eprintln!("shot: {path}"),
+                Err(e) => eprintln!("shot failed: {e}"),
+            }
         }
     }
 }
@@ -234,7 +266,7 @@ impl Bench {
             s,
             "\"client\":\"{client}\",\"mode\":\"{:?}\",\"panes\":{panes},\"period_ms\":{:.3},\
              \"first_frame_epoch_ns\":{},\"lost\":{},\"latency_ms\":{},\"frame_at_ms\":{},\
-             \"frame_work_ms\":{}",
+             \"frame_work_ms\":{},\"on_screen\":{}",
             self.cfg.mode,
             self.period_ms,
             self.first_frame_ns.unwrap_or(0),
@@ -242,6 +274,7 @@ impl Bench {
             list(&self.latency_ms),
             list(&self.frame_at_ms),
             list(&self.frame_work_ms),
+            crate::shot::on_screen(),
         );
         for (k, v) in extra {
             let _ = write!(s, ",\"{k}\":{v}");

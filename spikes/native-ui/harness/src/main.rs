@@ -91,10 +91,25 @@ fn programs(mode: &str, panes: usize, producer: Option<&str>) -> Vec<Vec<String>
     (0..panes)
         .map(|i| match (mode, producer) {
             ("latency", _) if i == 0 => vec!["/bin/cat".to_string()],
+            ("look", _) => look_program(),
             ("load", Some(p)) | ("latency", Some(p)) => busy(p),
             _ => shell(),
         })
         .collect()
+}
+
+/// The look test's terminal: this repository's history as a coloured graph
+/// (after the client has sized the pane), then a shell prompt.
+fn look_program() -> Vec<String> {
+    let repo = spike_root().join("../..");
+    let script = format!(
+        "sleep 1.5; git --no-pager -C '{}' log --graph --color=always -n 60 \
+         --format='%C(yellow)%h%C(reset) %C(blue)%<(13)%cr%C(reset)  %s' \
+         | grep -viE 'node-pty|mcp|conpty|claude|codex|copilot|gemini|opencode|xterm|electron'; \
+         PS1='vorn $ ' exec /bin/sh -i",
+        repo.display()
+    );
+    vec!["/bin/sh".into(), "-c".into(), script]
 }
 
 fn client_command(client: &str) -> Result<PathBuf, String> {
@@ -103,6 +118,7 @@ fn client_command(client: &str) -> Result<PathBuf, String> {
         "swift" => root.join("swift/build/VornSpikeSwift.app/Contents/MacOS/VornSpikeSwift"),
         "gpui" => root.join("target/release/vorn-spike-gpui"),
         "tauri" => root.join("target/release/vorn-spike-tauri"),
+        "slint" => root.join("target/release/vorn-spike-slint"),
         other => PathBuf::from(other),
     };
     if p.exists() {
@@ -134,7 +150,7 @@ fn run(args: &Args) -> Result<(), String> {
     let mode = args.get("--mode").unwrap_or_else(|| "idle".into());
     let producer = args.get("--producer");
     let duration = args.num("--duration", 10);
-    let settle_ms = args.num("--settle-ms", 2000);
+    let settle_ms = args.num("--settle-ms", if args.get("--mode").as_deref() == Some("look") { 4000 } else { 2000 });
     let probes = args.num("--probes", 150);
     let hz = args.num("--hz", 120) as f64;
     let cmd = client_command(&client)?;
@@ -165,9 +181,19 @@ fn run(args: &Args) -> Result<(), String> {
     // Let the shells print their prompts and the producers get going.
     std::thread::sleep(Duration::from_millis(500));
 
+    let look = mode == "look";
+    let polish = args.0.iter().any(|a| a == "--polish");
+    let shot = spike_root().join("results/look").join(format!(
+        "{}{}.png",
+        client.rsplit('/').next().unwrap_or(&client),
+        if polish { "-polish" } else { "" }
+    ));
+    if look {
+        std::fs::create_dir_all(shot.parent().unwrap()).map_err(|e| e.to_string())?;
+    }
     let client_mode = match mode.as_str() {
         "latency" => "latency",
-        "start" => "start",
+        "start" | "look" => "start",
         _ => "frames",
     };
     let launched_ns = epoch_ns();
@@ -180,6 +206,10 @@ fn run(args: &Args) -> Result<(), String> {
         .env("VORN_SPIKE_SETTLE_MS", settle_ms.to_string())
         .env("VORN_SPIKE_PROBES", probes.to_string())
         .env("VORN_SPIKE_OUT", &client_out)
+        .env("VORN_SPIKE_LOOK", if look { "1" } else { "0" })
+        .env("VORN_SPIKE_POLISH", if polish { "1" } else { "0" })
+        .env("VORN_SPIKE_FONT_SIZE", if look { "13" } else { "12" })
+        .envs(look.then(|| ("VORN_SPIKE_SHOT", shot.clone())))
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()

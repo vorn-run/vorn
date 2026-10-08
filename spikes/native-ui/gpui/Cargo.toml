@@ -22,6 +22,8 @@ gpui = { path = "../.deps/zed/crates/gpui", default-features = false, features =
 gpui_platform = { path = "../.deps/zed/crates/gpui_platform", default-features = false, features = ["font-kit", "runtime_shaders"] }
 spike-core = { path = "../core" }
 futures = "0.3.34"
+cocoa = "0.26"
+objc = "0.2"
 
 [patch.crates-io]
 async-task = { git = "https://github.com/smol-rs/async-task.git", rev = "b4486cd71e4e94fbda54ce6302444de14f4d190e" }

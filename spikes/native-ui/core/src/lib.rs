@@ -7,6 +7,7 @@
 //! all three prototypes.
 
 pub mod bench;
+pub mod shot;
 pub mod view;
 
 use std::io::{Read, Write};

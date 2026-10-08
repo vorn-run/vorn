@@ -4717,9 +4717,11 @@ dependencies = [
 name = "vorn-spike-gpui"
 version = "0.0.0"
 dependencies = [
+ "cocoa",
  "futures",
  "gpui",
  "gpui_platform",
+ "objc",
  "spike-core",
 ]
 

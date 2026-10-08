@@ -1,0 +1,338 @@
+<!doctype html>
+<!-- The Tauri prototype's page: draws the views the Rust grid client sends
+     (header, runs, text; see spike-core view.rs) on one canvas per pane. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; background: #404040; overflow: hidden; }
+  #grid { display: grid; gap: 2px; width: 100vw; height: 100vh; }
+  .pane { position: relative; overflow: hidden; background: #1e1e1e; }
+  .pane canvas { position: absolute; left: 0; top: 0; }
+  #ime { position: absolute; opacity: 0; width: 1px; height: 1em; border: 0; padding: 0;
+         resize: none; outline: none; font: 12px Menlo; }
+
+  /* The look test: the app's tokens (src/renderer). */
+  body.look { background: #0d0d0f; font-family: -apple-system, system-ui, sans-serif;
+              -webkit-font-smoothing: antialiased; color: #faf9f7; cursor: default; user-select: none; }
+  body.look.polish { background: transparent; }
+  .look #grid { display: none; }
+  #app { display: none; width: 100vw; height: 100vh; }
+  .look #app { display: flex; }
+  .ico { display: inline-flex; flex: none; }
+  .ico svg { width: 100%; height: 100%; }
+  .side { width: 255px; border-right: 1px solid rgba(255,255,255,.06); background: #101012;
+          display: flex; flex-direction: column; flex: none; }
+  .polish .side { background: rgba(16,16,18,.55); }
+  .titlebar { height: 40px; box-sizing: border-box; display: flex; align-items: center; justify-content: flex-end;
+              padding: 0 12px 0 80px; border-bottom: 1px solid rgba(255,255,255,.06); color: #6b7280; }
+  .titlebar .ico { padding: 4px; }
+  .side-body { padding: 0 12px; display: flex; flex-direction: column; gap: 2px; }
+  .section { font-size: 11px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; color: #6b7280;
+             padding: 12px 0 6px; }
+  .project { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px;
+             background: rgba(255,255,255,.08); font-size: 13px; color: #fff; }
+  .project .ico { color: #6b7280; }
+  .project .count { margin-left: auto; font-size: 12px; color: #4b5563; }
+  .sessions { padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
+  .row { position: relative; display: flex; align-items: center; gap: 8px; padding: 4px 8px; }
+  .row .ico { color: #9ca3af; }
+  .row .name { font-size: 12px; line-height: 16px; color: #9ca3af; }
+  .row.sel .name { color: #fff; }
+  .row.sel::before { content: ''; position: absolute; left: 0; top: 4px; bottom: 4px; width: 1px; background: #fff; }
+  .row .branch { font-size: 10px; line-height: 14px; color: #4b5563; }
+  .polish .row .branch, .polish .project .count { color: rgba(255,255,255,.35); }
+  .row .dot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .main { flex: 1; display: flex; background: #0d0d0f; }
+  .card { background: #141416; border: 1px solid rgba(255,255,255,.06); display: flex; flex-direction: column;
+          box-sizing: border-box; }
+  .card-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+               border-bottom: 1px solid rgba(255,255,255,.04); flex: none; }
+  .card-head > .ico { color: #9ca3af; }
+  .card-head .title { font-size: 13px; font-weight: 500; color: #d1d5db; }
+  .chip { display: flex; align-items: center; gap: 4px; color: #6b7280; }
+  .chip span { font: 11px Menlo, monospace; color: #9ca3af; }
+  .btns { margin-left: auto; display: flex; gap: 2px; }
+  .btn { padding: 4px; border-radius: 4px; color: #faf9f7; display: flex; }
+  .btn:hover { background: rgba(255,255,255,.10); }
+  .trail { margin-left: auto; font-size: 11px; color: #6b7280; }
+  #term { flex: 1; position: relative; margin-top: 2px; }
+  #term .pane { position: absolute; inset: 0; background: #141416; }
+  .diff { font: 12px Menlo, monospace; }
+  .fhead { display: flex; gap: 8px; padding: 6px 12px; background: #1c1c20; border-bottom: 1px solid rgba(255,255,255,.06);
+           color: #d1d5db; }
+  .fhead .add { margin-left: auto; color: #7ea96a; font-size: 11px; }
+  .fhead .del { color: #c96f62; font-size: 11px; }
+  .hunk { padding: 2px 12px; background: rgba(255,255,255,.05); color: rgba(255,255,255,.55); }
+  .ln { display: flex; height: 19.2px; align-items: center; color: #9ca3af; white-space: pre; }
+  .ln .g { width: 35px; box-sizing: border-box; padding-right: 8px; text-align: right; font-size: 11px; color: #4b5563; flex: none; }
+  .ln.add { background: rgba(34,197,94,.10); color: #86efac; }
+  .ln.add .g.n { color: #16a34a; }
+  .ln.del { background: rgba(239,68,68,.10); color: #fca5a5; }
+  .ln.del .g.o { color: #dc2626; }
+</style>
+</head>
+<body>
+<div id="grid"></div>
+<div id="app"></div>
+<textarea id="ime" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+<script>
+const { invoke, Channel } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+const FONT = 'Menlo';
+let SIZE = 12;
+const dpr = window.devicePixelRatio || 1;
+const dec = new TextDecoder();
+const ime = document.getElementById('ime');
+const hex = new Map();
+const css = (c) => { let s = hex.get(c); if (!s) { s = '#' + c.toString(16).padStart(6, '0'); hex.set(c, s); } return s; };
+
+// Cell metrics from the font (set once the size is known).
+let CW, ASC, CH;
+function metrics() {
+  const probe = document.createElement('canvas').getContext('2d');
+  probe.font = `${SIZE}px ${FONT}`;
+  const tm = probe.measureText('M');
+  CW = tm.width;
+  ASC = Math.ceil(tm.fontBoundingBoxAscent);
+  // WebKit's font box is the typographic one; the other prototypes use
+  // Menlo's line metrics (ascent .928 em, descent .236 em), so match them.
+  ASC = Math.max(ASC, Math.ceil(SIZE * 0.928));
+  CH = Math.max(SIZE, ASC + Math.max(Math.ceil(tm.fontBoundingBoxDescent), Math.ceil(SIZE * 0.236)));
+}
+
+// The look test's screen: the app's sidebar, a session card around pane 0
+// and a small diff card.
+function buildLook(icons, polish) {
+  const ico = (name, size) => `<span class="ico" style="width:${size}px;height:${size}px">${icons[name]}</span>`;
+  const row = (name, branch, dot, sel) => `
+    <div class="row${sel ? ' sel' : ''}">${ico('terminal', 14)}
+      <div><div class="name">${name}</div><div class="branch">${branch}</div></div>
+      <span class="dot" style="background:${dot}"></span></div>`;
+  const diff = [
+    [14, 14, '', "  broken: 'bg-danger',"], [15, 15, '', "  blocked: 'bg-bronzo',"],
+    [16, '', 'del', "  settled: 'bg-ink-faint',"], ['', 16, 'add', "  settled: 'bg-ink-faint/80',"],
+    ['', 17, 'add', "  parked: 'bg-ink-ghost',"], [17, 18, '', "  live: 'bg-ink',"],
+    [18, 19, '', "  idle: 'bg-ink-ghost'"], [19, 20, '', '}'],
+  ].map(([o, n, k, t]) => `<div class="ln ${k}"><span class="g o">${o}</span><span class="g n">${n}</span>${t}</div>`).join('');
+  document.body.classList.add('look');
+  if (polish) document.body.classList.add('polish');
+  document.getElementById('app').innerHTML = `
+    <aside class="side">
+      <div class="titlebar"><span title="Hide sidebar">${ico('panel-left', 14)}</span></div>
+      <div class="side-body">
+        <div class="section">Sessions</div>
+        <div class="project">${ico('folder', 14)}<span>vorn</span><span class="count">3</span></div>
+        <div class="sessions">
+          ${row('fix flaky resume test', 'fix/resume-flake', '#faf9f7', true)}
+          ${row('grid protocol docs', 'docs/grid-mode', '#c9972a', false)}
+          ${row('native ui spike', 'native-ui-spike', 'rgba(255,255,255,.18)', false)}
+        </div>
+      </div>
+    </aside>
+    <main class="main">
+      <section class="card" style="width:744px;height:100%">
+        <div class="card-head">${ico('terminal', 18)}<span class="title">fix flaky resume test</span>
+          <span class="chip">${ico('git-branch', 11)}<span>fix/resume-flake</span></span>
+          <div class="btns">
+            <span class="btn" title="Browse files">${ico('folder-open', 14)}</span>
+            <span class="btn" title="Add a terminal">${ico('square-terminal', 14)}</span>
+            <span class="btn" title="Open browser">${ico('globe', 14)}</span>
+          </div></div>
+        <div id="term"></div>
+      </section>
+      <section class="card" style="width:440px;height:450px">
+        <div class="card-head">${ico('file-diff', 18)}<span class="title">Changes</span><span class="trail">1 file</span></div>
+        <div class="diff">
+          <div class="fhead"><span>src/renderer/lib/status-tone.ts</span><span class="add">+2</span><span class="del">-1</span></div>
+          <div class="hunk">@@ -14,7 +14,8 @@ export const TONE_DOT = {</div>${diff}
+        </div>
+      </section>
+    </main>`;
+}
+
+const panes = [];     // {el, canvas, ctx, size: [cols, rows], view, drawn}
+let focused = 0, marked = '';
+let pending = new Map();   // pane -> latest view bytes not drawn yet
+let rafQueued = false, ackOwed = false, firstSent = false;
+let typedAt = null;
+const S = { at: [], work: [], latency: [] };
+
+function layout(n) {
+  n = Math.max(1, n);
+  const cols = Math.min(n, Math.ceil(Math.sqrt(n * 2)));
+  return [cols, Math.ceil(n / cols)];
+}
+
+function parse(buf, off) {
+  const d = new DataView(buf, off);
+  const nruns = d.getUint32(32, true), tlen = d.getUint32(36, true);
+  const v = {
+    pane: d.getUint32(0, true), cols: d.getUint16(8, true), rows: d.getUint16(10, true),
+    cx: d.getUint16(12, true), cy: d.getUint16(14, true), cvis: d.getUint8(16),
+    cstyle: d.getUint8(17), hit: d.getUint8(18), fg: d.getUint32(20, true),
+    bg: d.getUint32(24, true), cc: d.getUint32(28, true), runs: [], text: null,
+  };
+  const textAt = off + 48 + nruns * 24;
+  v.text = new Uint8Array(buf, textAt, tlen);
+  for (let i = 0; i < nruns; i++) {
+    const o = 48 + i * 24;
+    v.runs.push({
+      row: d.getUint16(o, true), col: d.getUint16(o + 2, true), n: d.getUint16(o + 4, true),
+      flags: d.getUint16(o + 6, true), fg: d.getUint32(o + 8, true), bg: d.getUint32(o + 12, true),
+      to: d.getUint32(o + 16, true), tl: d.getUint32(o + 20, true),
+    });
+  }
+  return [v, textAt + tlen];
+}
+
+const BOLD = 1, ITALIC = 2, UNDER = 4, STRIKE = 8, WIDE = 16, FAINT = 32, CLUSTER = 64;
+
+function draw(p, v, isFocused) {
+  const c = p.ctx;
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.fillStyle = css(v.bg);
+  c.fillRect(0, 0, p.canvas.width / dpr, p.canvas.height / dpr);
+  for (const r of v.runs) {
+    if (r.bg !== v.bg) { c.fillStyle = css(r.bg); c.fillRect(r.col * CW, r.row * CH, r.n * CW, CH); }
+  }
+  c.textBaseline = 'alphabetic';
+  let font = '';
+  for (const r of v.runs) {
+    const t = dec.decode(v.text.subarray(r.to, r.to + r.tl));
+    if (!(r.flags & (UNDER | STRIKE)) && t.trim() === '') continue;
+    const f = `${r.flags & ITALIC ? 'italic ' : ''}${r.flags & BOLD ? 'bold ' : ''}${SIZE}px ${FONT}`;
+    if (f !== font) { c.font = f; font = f; }
+    c.fillStyle = css(r.fg);
+    c.globalAlpha = r.flags & FAINT ? 0.6 : 1;
+    const x = r.col * CW, y = r.row * CH + ASC;
+    if (r.flags & WIDE) {
+      let k = 0;
+      for (const ch of t) { c.fillText(ch, x + k * 2 * CW, y); k++; }
+    } else if (r.flags & CLUSTER) {
+      c.fillText(t, x, y);
+    } else {
+      c.fillText(t, x, y, r.n * CW + 0.5);
+    }
+    if (r.flags & UNDER) c.fillRect(x, r.row * CH + CH - 1, r.n * CW, 1);
+    if (r.flags & STRIKE) c.fillRect(x, r.row * CH + CH / 2, r.n * CW, 1);
+  }
+  c.globalAlpha = 1;
+  const x = v.cx * CW, y = v.cy * CH;
+  if (isFocused && marked) {
+    c.font = `${SIZE}px ${FONT}`;
+    const w = c.measureText(marked).width;
+    c.fillStyle = css(v.bg); c.fillRect(x, y, w, CH);
+    c.fillStyle = css(v.fg); c.fillText(marked, x, y + ASC); c.fillRect(x, y + CH - 1, w, 1);
+  } else if (v.cvis) {
+    c.globalAlpha = 0.75;
+    c.fillStyle = c.strokeStyle = css(v.cc);
+    if (v.cstyle === 2) c.fillRect(x, y, 2, CH);
+    else if (v.cstyle === 3) c.fillRect(x, y + CH - 2, CW, 2);
+    else if (isFocused) c.fillRect(x, y, CW, CH);
+    else c.strokeRect(x + 0.5, y + 0.5, CW - 1, CH - 1);
+    c.globalAlpha = 1;
+  }
+  if (isFocused) { ime.style.left = (p.el.offsetLeft + x) + 'px'; ime.style.top = (p.el.offsetTop + y) + 'px'; }
+}
+
+function frame() {
+  rafQueued = false;
+  const t0 = performance.now();
+  let hit = false;
+  for (const [i, v] of pending) {
+    const p = panes[i];
+    if (!p) continue;
+    p.view = v;
+    draw(p, v, i === focused);
+    if (v.hit) hit = true;
+  }
+  pending.clear();
+  if (ackOwed) { ackOwed = false; invoke('ack'); }
+  const t1 = performance.now();
+  S.at.push(t1); S.work.push(t1 - t0);
+  if (hit && typedAt !== null) { S.latency.push(t1 - typedAt); typedAt = null; }
+  if (!firstSent && panes.every((p) => p.view)) { firstSent = true; invoke('first_frame'); }
+}
+
+function schedule() { if (!rafQueued) { rafQueued = true; requestAnimationFrame(frame); } }
+
+function redraw(i) { const p = panes[i]; if (p && p.view && !pending.has(i)) { pending.set(i, p.view); schedule(); } }
+
+function fit(i) {
+  const p = panes[i];
+  const w = p.el.clientWidth, h = p.el.clientHeight;
+  p.canvas.width = Math.round(w * dpr); p.canvas.height = Math.round(h * dpr);
+  p.canvas.style.width = w + 'px'; p.canvas.style.height = h + 'px';
+  const cols = Math.max(2, Math.floor(w / CW)), rows = Math.max(1, Math.floor(h / CH));
+  if (p.size[0] !== cols || p.size[1] !== rows) { p.size = [cols, rows]; invoke('resize', { pane: i, cols, rows }); }
+  redraw(i);
+}
+
+function onMessage(msg) {
+  const buf = msg instanceof ArrayBuffer ? msg : new Uint8Array(msg).buffer;
+  let off = 0;
+  while (off < buf.byteLength) { const [v, next] = parse(buf, off); pending.set(v.pane, v); off = next; }
+  ackOwed = true;
+  schedule();
+}
+
+// Keys: text through the hidden textarea (so IME composition works), the
+// rest straight to the pane.
+ime.addEventListener('keydown', (e) => {
+  if (e.isComposing || e.keyCode === 229) return;
+  const mods = (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+  if (e.metaKey) return;
+  const text = [...e.key].length === 1 ? e.key : null;
+  invoke('key', { pane: focused, code: e.code || (e.key.length === 1 ? 'Key' + e.key.toUpperCase() : e.key), mods, text });
+  e.preventDefault();
+});
+ime.addEventListener('compositionupdate', (e) => { marked = e.data || ''; redraw(focused); });
+ime.addEventListener('compositionend', (e) => {
+  marked = ''; ime.value = '';
+  if (e.data) invoke('text', { pane: focused, text: e.data });
+  redraw(focused);
+});
+
+async function main() {
+  const ch = new Channel();
+  ch.onmessage = onMessage;
+  const hello = await invoke('attach', { channel: ch });
+  SIZE = hello.font_size; metrics();
+  ime.style.font = `${SIZE}px ${FONT}`;
+  if (hello.look) buildLook(Object.fromEntries(hello.icons), hello.polish);
+  const [cols, rows] = layout(hello.panes);
+  const grid = hello.look ? document.getElementById('term') : document.getElementById('grid');
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+  for (let i = 0; i < hello.panes; i++) {
+    const el = document.createElement('div'); el.className = 'pane';
+    const canvas = document.createElement('canvas'); el.appendChild(canvas);
+    grid.appendChild(el);
+    const p = { el, canvas, ctx: canvas.getContext('2d', { alpha: false }), size: [0, 0], view: null };
+    panes.push(p);
+    el.addEventListener('mousedown', (e) => { const old = focused; focused = i; redraw(old); redraw(i); ime.focus(); e.preventDefault(); });
+  }
+  const ro = new ResizeObserver(() => panes.forEach((_, i) => fit(i)));
+  ro.observe(hello.look ? document.getElementById('term') : grid);
+  ime.focus();
+  if (!hello.bench) return;
+  // The bench: Rust's driver says what to type; the clock runs here, from
+  // just before the synthetic key to the end of the frame that drew it.
+  await listen('inject', (e) => {
+    const key = e.payload;
+    const code = key === 'Enter' ? 'Enter' : 'Key' + key.toUpperCase();
+    if (key !== 'Enter') typedAt = performance.now();
+    ime.dispatchEvent(new KeyboardEvent('keydown', { key, code, bubbles: true, cancelable: true }));
+  });
+  const flush = (done) => {
+    invoke('samples', { s: { at: S.at, work: S.work, latency: S.latency, done } });
+    S.at = []; S.work = []; S.latency = [];
+  };
+  setInterval(() => flush(false), 100);
+  await listen('done', () => flush(true));
+}
+main();
+</script>
+</body>
+</html>
