@@ -35,6 +35,7 @@ mod tokens;
 mod worktrees;
 
 pub use agents::AgentSettings;
+pub use config::VIEWER_SETTING_KEYS;
 pub use connectors::MAX_INBOX_ATTEMPTS;
 pub use hosts::{remote_host, Placement, ProjectHost, ProjectHosts};
 pub use sql::now_iso;
@@ -216,6 +217,13 @@ impl Store {
             options: None,
             path: Some(path.to_owned()),
         }))
+    }
+
+    /// Gives a store opened beside the server the app's defaults, so the
+    /// calls that fall back on them (`loadConfig`, `saveConfig`) can be made.
+    pub fn with_defaults(mut self, options: StoreOptions) -> Store {
+        self.options = Some(options);
+        self
     }
 
     fn prepare_connection(&mut self) -> Result<()> {

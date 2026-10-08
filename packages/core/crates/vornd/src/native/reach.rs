@@ -402,11 +402,8 @@ impl Native {
         match pairing.redeem(&code, &name, address, now) {
             Err(refused) => (400, json!({ "error": refused.name() })),
             Ok(id) => {
-                if let (Some(request), Some(link)) = (pairing.pending_one(&id, now), self.link()) {
-                    link.tell(
-                        "vornd:broadcast",
-                        json!({ "method": PAIRING_REQUESTED, "params": request }),
-                    );
+                if let Some(request) = pairing.pending_one(&id, now) {
+                    self.broadcast(PAIRING_REQUESTED, request);
                 }
                 (200, json!({ "requestId": id }))
             }
@@ -438,12 +435,7 @@ impl Native {
                 let id = id.as_str().unwrap_or_default().to_owned();
                 pairing.collected(&id);
                 drop(pairing);
-                if let Some(link) = self.link() {
-                    link.tell(
-                        "vornd:broadcast",
-                        json!({ "method": PAIRING_COLLECTED, "params": { "requestId": id } }),
-                    );
-                }
+                self.broadcast(PAIRING_COLLECTED, json!({ "requestId": id }));
                 let host = sys::hostname();
                 let name = host.strip_suffix(".local").unwrap_or(&host);
                 (
@@ -469,6 +461,11 @@ impl Native {
     pub fn verify_credential(&self, raw: &str) -> Verdict {
         let desktop = self.desktop.get().map(Vec::as_slice);
         self.reach.verify(raw, desktop, self.db.get())
+    }
+
+    /// Who presents `raw`, for the settings kept per viewer.
+    pub fn viewer_of(&self, raw: &str) -> super::config::Viewer {
+        super::config::Viewer::of_credential(raw, self.desktop.get().map(Vec::as_slice))
     }
 }
 

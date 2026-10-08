@@ -37,6 +37,7 @@
 //! deleted connection once the server's answer says it was done.
 
 pub mod agent;
+pub mod config;
 pub mod connection;
 pub mod env;
 pub mod file;
@@ -165,6 +166,8 @@ pub const METHODS: &[(&str, Effect)] = &[
     // The connector inbox's leases are the work model's ([`work`]).
     ("connector:inboxComplete", Effect::Change),
     ("connector:inboxRenew", Effect::Change),
+    ("config:load", Effect::Read),
+    ("config:save", Effect::Change),
 ];
 
 /// Calls in a native group that the server keeps answering, and why.
@@ -540,6 +543,9 @@ impl Native {
 
     /// Where the server's database is. Only the first one given is kept.
     pub fn set_database(&self, db: PathBuf) {
+        if let Some(dir) = db.parent() {
+            self.secrets.settle(dir);
+        }
         let _ = self.db.set(db);
     }
 
@@ -595,7 +601,15 @@ impl Native {
     /// free, or on the runtime for a call that waits on an MCP child. A
     /// panic is the server's call to answer, not a crash, unless the call
     /// may already have changed something.
-    pub async fn answer(self: &Arc<Self>, method: String, params: Value) -> Answer {
+    pub async fn answer(
+        self: &Arc<Self>,
+        method: String,
+        params: Value,
+        viewer: &config::Viewer,
+    ) -> Answer {
+        if config::METHODS.contains(&method.as_str()) {
+            return config::answer(self, &method, params, viewer).await;
+        }
         if work::is_work(&method)
             || matches!(
                 method.as_str(),
@@ -763,9 +777,15 @@ impl Native {
         self.reach.server_port()
     }
 
-    /// The app's channel, once given.
-    pub(crate) fn app_link(&self) -> Option<&Arc<AppLink>> {
-        self.link.get()
+    /// Tells every client `method`. Every broadcast vornd makes goes
+    /// through here; for now the server, which holds the clients, sends it.
+    pub(crate) fn broadcast(&self, method: &str, params: Value) {
+        if let Some(link) = self.link.get() {
+            link.tell(
+                "vornd:broadcast",
+                json!({ "method": method, "params": params }),
+            );
+        }
     }
 
     /// The database, once given.
@@ -966,6 +986,8 @@ pub struct Conn {
     /// never keeps the server's side of a closed connection open.
     upstream: mpsc::WeakSender<Message>,
     authed: AtomicBool,
+    /// Who this connection is, as its credential says.
+    viewer: Mutex<config::Viewer>,
     shadows: Arc<Shadows>,
     /// Calls on their way to the server that change a connection's secrets
     /// there, by request id: applied here once the server answers them.
@@ -1015,6 +1037,11 @@ impl Conn {
             reply,
             upstream: upstream.downgrade(),
             authed: AtomicBool::new(desktop),
+            viewer: Mutex::new(if desktop {
+                config::Viewer::Desktop
+            } else {
+                config::Viewer::Local
+            }),
             shadows: Arc::default(),
             pending: Mutex::default(),
             waiting: AtomicUsize::new(0),
@@ -1048,9 +1075,16 @@ impl Conn {
         let conn = Arc::clone(self);
         tokio::spawn(async move {
             let native = Arc::clone(&conn.native);
-            let verdict = tokio::task::spawn_blocking(move || native.verify_credential(&raw))
-                .await
-                .unwrap_or(reach::Verdict::CannotTell);
+            let checked = tokio::task::spawn_blocking(move || {
+                let verdict = native.verify_credential(&raw);
+                (verdict, native.viewer_of(&raw))
+            })
+            .await;
+            let (verdict, viewer) =
+                checked.unwrap_or((reach::Verdict::CannotTell, config::Viewer::Local));
+            if verdict == reach::Verdict::Admitted {
+                *conn.viewer.lock().unwrap_or_else(|e| e.into_inner()) = viewer;
+            }
             match (mode, verdict) {
                 (Mode::Native, reach::Verdict::Admitted) => {
                     conn.authed.store(true, Ordering::Release);
@@ -1215,7 +1249,8 @@ impl Conn {
     }
 
     async fn run(&self, method: String, params: Value) -> Answer {
-        self.native.answer(method, params).await
+        let viewer = self.viewer.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        self.native.answer(method, params, &viewer).await
     }
 
     /// Keeps a create the server answers, to work out what vornd would have
@@ -1598,14 +1633,14 @@ mod tests {
         let after = native.observe("connection:rotateSecret", &rotate).unwrap();
         // Nothing changes until the server says it did.
         assert!(
-            matches!(native.secrets.lookup("c"), secrets::Known::Fields(f) if f["token"] == "t")
+            matches!(native.secrets.lookup("c"), secrets::Known::Fields(f) if f["token"].expose() == "t")
         );
         native.done(after);
         let secrets::Known::Fields(fields) = native.secrets.lookup("c") else {
             panic!("the secrets are known");
         };
-        assert_eq!(fields["token"], "u");
-        assert_eq!(fields["secretEnv"], "{}");
+        assert_eq!(fields["token"].expose(), "u");
+        assert_eq!(fields["secretEnv"].expose(), "{}");
 
         let after = native.observe("connection:delete", &json!("c")).unwrap();
         native.done(after);

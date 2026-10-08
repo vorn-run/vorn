@@ -8,7 +8,7 @@ vi.mock('../packages/server/src/logger', () => ({
 }))
 
 import { registerWorkRoutes } from '../packages/server/src/vornd-routes'
-import { relayWorkCall } from '../packages/server/src/workflow-triggers'
+import { relayVorndCall } from '../packages/server/src/workflow-triggers'
 
 /**
  * The work model's pages on the server's port, relayed to vornd, which
@@ -115,10 +115,10 @@ describe('the work pages on the server', () => {
   })
 })
 
-describe('a work call made to the server', () => {
+describe('a call vornd answers, made to the server', () => {
   it('is vornd’s answer to it', async () => {
     const ask = vi.fn(async () => ({ result: [{ id: 'wf' }] }))
-    const relay = relayWorkCall({ ask: ask as never })
+    const relay = relayVorndCall({ ask: ask as never })
     await expect(relay('workflow:list', undefined)).resolves.toEqual([{ id: 'wf' }])
     expect(ask).toHaveBeenCalledWith(
       'vornd:work',
@@ -130,14 +130,15 @@ describe('a work call made to the server', () => {
   it('waits for vornd while it starts', async () => {
     let calls = 0
     const ask = async (): Promise<unknown> => (++calls < 3 ? null : { result: 'late' })
-    const relay = relayWorkCall({ ask: ask as never }, 5_000)
+    const relay = relayVorndCall({ ask: ask as never }, 5_000)
     await expect(relay('scheduler:getLog', 'w')).resolves.toBe('late')
     expect(calls).toBe(3)
   })
 
   it('leaves every other call to the server, and fails without vornd', async () => {
-    const relay = relayWorkCall({ ask: (async () => null) as never }, 50)
+    const relay = relayVorndCall({ ask: (async () => null) as never }, 50)
     expect(relay('task:list', undefined)).toBeUndefined()
+    await expect(relay('config:load', undefined)).rejects.toThrow(/vornd is not running/)
     await expect(relay('artifact:get', { artifactId: 'a' })).rejects.toThrow(/vornd is not running/)
   })
 })

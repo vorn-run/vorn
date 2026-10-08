@@ -60,3 +60,14 @@ export function captureViewerSettings(config: AppConfig): void {
 export function withViewerSettings(config: AppConfig): AppConfig {
   return applyViewerSettings(config, readViewerSettings())
 }
+
+/**
+ * A config as loaded: vornd lays this viewer's kept settings over the shared
+ * ones, this device's cache goes on top, and the result is cached again, so a
+ * cleared cache refills from vornd.
+ */
+export function loadedWithViewerSettings(config: AppConfig): AppConfig {
+  const merged = withViewerSettings(config)
+  captureViewerSettings(merged)
+  return merged
+}

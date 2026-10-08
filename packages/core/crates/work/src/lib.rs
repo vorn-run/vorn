@@ -23,6 +23,7 @@ pub mod receipts;
 pub mod schedule;
 pub mod structured;
 pub mod template;
+pub mod task_triggers;
 pub mod trigger;
 
 use serde_json::Value;

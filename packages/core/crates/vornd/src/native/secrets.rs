@@ -1,60 +1,50 @@
-//! Connector credentials vornd holds, and the keychain that keeps them.
+//! Connector credentials vornd holds, and the vault that keeps them.
 //!
-//! The server stores a connection's secrets encrypted with the desktop's
-//! safeStorage, and the desktop decrypts them and pushes the plaintext to the
-//! server (`credentials:setDecrypted`, `credentials:clearDecrypted`) on every
-//! start and every configuration change. Those pushes reach the server through
-//! vornd, which keeps the same plaintext ([`Secrets::observe`]) and writes it
-//! to the OS keychain, where it outlives a vornd restart that the desktop
-//! would not push again for. The first push after an update moves every
-//! connection's secrets into the keychain, with nobody signing in again.
+//! The desktop decrypts a connection's secrets and pushes the plaintext to
+//! the server (`credentials:setDecrypted`, `credentials:clearDecrypted`) on
+//! every start and every configuration change. Those pushes reach the server
+//! through vornd, which keeps the same plaintext ([`Secrets::observe`]) and
+//! files it in the vault ([`vorn_vault`]), where it outlives a vornd restart
+//! the desktop would not push again for.
 //!
-//! The keychain is Keychain on macOS and Credential Manager on Windows, one
-//! item per connection (service [`SERVICE`], account the connection id)
-//! holding its fields as JSON. Elsewhere, or with `VORND_KEYCHAIN=0`, the
-//! secrets live in memory only, and a call whose secrets vornd does not know
-//! goes to the server, which does.
+//! One item per connection, holding its fields as JSON. With
+//! `VORND_KEYCHAIN=0` the OS keychain is not used and items go to the
+//! vault's private file; until vornd knows its data directory there is no
+//! vault, and a call whose secrets vornd does not know goes to the server.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{Map, Value};
 use tracing::{debug, warn};
+use vorn_vault::{Keychain, Secret};
 
-/// The keychain service connection items are filed under.
-pub const SERVICE: &str = "Vorn connection credentials";
+/// A connection's secret fields, by field key.
+pub type Fields = BTreeMap<String, Secret>;
 
 /// What vornd knows of one connection's secrets.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Known {
-    /// The fields the desktop decrypted, by field key.
-    Fields(Map<String, Value>),
+    /// The fields the desktop decrypted.
+    Fields(Fields),
     /// The desktop said there are none it can decrypt.
     None,
-    /// Nothing was pushed since vornd started, and the keychain has no item.
+    /// Nothing was pushed since vornd started, and the vault has no item.
     Unknown,
 }
 
-/// Where secrets are kept between runs.
-pub trait Keychain: Send + Sync {
-    /// The item for `id`; `Ok(None)` when there is none.
-    fn get(&self, id: &str) -> Result<Option<String>, String>;
-    fn set(&self, id: &str, value: &str) -> Result<(), String>;
-    /// Removes the item for `id`; no item is not an error.
-    fn delete(&self, id: &str) -> Result<(), String>;
-}
-
 enum Job {
-    Set(String, String),
+    Set(String, Fields),
     Delete(String),
 }
 
 /// The secrets of every connection vornd has heard of.
 pub struct Secrets {
     known: Mutex<HashMap<String, Known>>,
-    keychain: Option<Arc<dyn Keychain>>,
-    /// Keychain writes, one at a time in the order they were made, off the
+    keychain: OnceLock<Arc<dyn Keychain>>,
+    /// Vault writes, one at a time in the order they were made, off the
     /// thread that heard them.
     writes: OnceLock<Mutex<mpsc::Sender<Job>>>,
 }
@@ -62,25 +52,43 @@ pub struct Secrets {
 impl std::fmt::Debug for Secrets {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Secrets")
-            .field("keychain", &self.keychain.is_some())
+            .field("vault", &self.keychain.get().is_some())
             .finish_non_exhaustive()
     }
 }
 
 impl Secrets {
-    /// With this platform's keychain, unless `VORND_KEYCHAIN=0` or there is
-    /// none.
+    /// No vault until [`Secrets::settle`] names the data directory.
     pub fn new() -> Secrets {
-        let off = std::env::var("VORND_KEYCHAIN").is_ok_and(|v| v == "0");
-        Secrets::with_keychain(if off { None } else { os_keychain() })
+        Secrets {
+            known: Mutex::default(),
+            keychain: OnceLock::new(),
+            writes: OnceLock::new(),
+        }
     }
 
     pub fn with_keychain(keychain: Option<Arc<dyn Keychain>>) -> Secrets {
-        Secrets {
-            known: Mutex::default(),
-            keychain,
-            writes: OnceLock::new(),
+        let secrets = Secrets::new();
+        if let Some(keychain) = keychain {
+            let _ = secrets.keychain.set(keychain);
         }
+        secrets
+    }
+
+    /// Opens the vault: the OS keychain unless `VORND_KEYCHAIN=0` or there
+    /// is none, else a private file in `dir`. Only the first call counts.
+    pub fn settle(&self, dir: &Path) {
+        let use_os = !std::env::var("VORND_KEYCHAIN").is_ok_and(|v| v == "0");
+        self.settle_in(dir, use_os);
+    }
+
+    fn settle_in(&self, dir: &Path, use_os: bool) {
+        if self.keychain.get().is_some() {
+            return;
+        }
+        let (keychain, backing) = vorn_vault::open(use_os, Some(&dir.join("vornd")));
+        debug!(?backing, "connection secrets are kept");
+        let _ = self.keychain.set(keychain);
     }
 
     /// Reads a client's call to the server that changes what the server
@@ -90,7 +98,7 @@ impl Secrets {
         match (method, id) {
             ("credentials:setDecrypted", Some(id)) => match params.get("fields") {
                 Some(Value::Object(fields)) => {
-                    self.set(id, fields.clone());
+                    self.set(id, fields_of(fields));
                     true
                 }
                 _ => false,
@@ -105,12 +113,9 @@ impl Secrets {
 
     /// `fields` are the connection's secrets now, as `setDecryptedCreds`
     /// replaces them.
-    pub fn set(&self, id: &str, fields: Map<String, Value>) {
-        let known = Known::Fields(fields);
-        if self.remember(id, known.clone()) {
-            if let Known::Fields(fields) = known {
-                self.write(Job::Set(id.to_owned(), Value::Object(fields).to_string()));
-            }
+    pub fn set(&self, id: &str, fields: Fields) {
+        if self.remember(id, Known::Fields(fields.clone())) {
+            self.write(Job::Set(id.to_owned(), fields));
         }
     }
 
@@ -118,9 +123,9 @@ impl Secrets {
     pub fn merge(&self, id: &str, field: &str, value: &str) {
         let mut fields = match self.lookup(id) {
             Known::Fields(fields) => fields,
-            Known::None | Known::Unknown => Map::new(),
+            Known::None | Known::Unknown => Fields::new(),
         };
-        fields.insert(field.to_owned(), Value::String(value.to_owned()));
+        fields.insert(field.to_owned(), Secret::from(value));
         self.set(id, fields);
     }
 
@@ -137,26 +142,20 @@ impl Secrets {
         self.write(Job::Delete(id.to_owned()));
     }
 
-    /// What vornd knows of `id`'s secrets, asking the keychain once when
+    /// What vornd knows of `id`'s secrets, asking the vault once when
     /// nothing was pushed since it started. Blocks while it asks.
     pub fn lookup(&self, id: &str) -> Known {
         if let Some(known) = self.lock().get(id) {
             return known.clone();
         }
-        let Some(keychain) = &self.keychain else {
+        let Some(keychain) = self.keychain.get() else {
             return Known::Unknown;
         };
-        let found = match keychain.get(id) {
-            Ok(Some(text)) => match serde_json::from_str::<Value>(&text) {
-                Ok(Value::Object(fields)) => Known::Fields(fields),
-                _ => {
-                    warn!("a keychain item for a connection is not what vornd wrote; ignoring it");
-                    return Known::Unknown;
-                }
-            },
+        let found = match vorn_vault::connection_fields(keychain.as_ref(), id) {
+            Ok(Some(fields)) => Known::Fields(fields),
             Ok(None) => return Known::Unknown,
             Err(err) => {
-                warn!(%err, "could not read a connection's secrets from the keychain");
+                warn!(%err, "could not read a connection's secrets");
                 return Known::Unknown;
             }
         };
@@ -179,7 +178,7 @@ impl Secrets {
     }
 
     fn write(&self, job: Job) {
-        let Some(keychain) = &self.keychain else {
+        let Some(keychain) = self.keychain.get() else {
             return;
         };
         let tx = self.writes.get_or_init(|| {
@@ -190,16 +189,22 @@ impl Secrets {
                 .spawn(move || {
                     for job in rx {
                         let (what, done) = match &job {
-                            Job::Set(id, value) => ("write", keychain.set(id, value)),
-                            Job::Delete(id) => ("delete", keychain.delete(id)),
+                            Job::Set(id, fields) => (
+                                "write",
+                                vorn_vault::set_connection_fields(keychain.as_ref(), id, fields),
+                            ),
+                            Job::Delete(id) => (
+                                "delete",
+                                keychain.delete(vorn_vault::Kind::Connection, id),
+                            ),
                         };
                         match done {
-                            Ok(()) => debug!(what, "keychain updated"),
-                            Err(err) => warn!(%err, what, "could not update the keychain"),
+                            Ok(()) => debug!(what, "vault updated"),
+                            Err(err) => warn!(%err, what, "could not update the vault"),
                         }
                     }
                 })
-                .expect("a thread for keychain writes");
+                .expect("a thread for vault writes");
             Mutex::new(tx)
         });
         let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).send(job);
@@ -208,152 +213,70 @@ impl Secrets {
 
 impl Default for Secrets {
     fn default() -> Self {
-        Secrets::with_keychain(None)
+        Secrets::new()
     }
+}
+
+/// Pushed fields as the server keeps them: a string as it is, anything
+/// else as its JSON text.
+fn fields_of(map: &Map<String, Value>) -> Fields {
+    map.iter()
+        .map(|(k, v)| {
+            let text = match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            (k.clone(), Secret::new(text))
+        })
+        .collect()
 }
 
 /// The values of a connection's `secretEnv` field: its plaintext, a JSON
 /// object, as `parseJsonObject` reads it.
-pub fn secret_env(fields: &Map<String, Value>) -> Map<String, Value> {
-    super::mcp::parse_json_object(fields.get("secretEnv"))
-}
-
-#[cfg(any(target_os = "macos", windows))]
-fn os_keychain() -> Option<Arc<dyn Keychain>> {
-    match OsKeychain::open() {
-        Ok(keychain) => Some(Arc::new(keychain)),
-        Err(err) => {
-            warn!(%err, "no keychain; connection secrets stay in memory");
-            None
-        }
-    }
-}
-
-#[cfg(not(any(target_os = "macos", windows)))]
-fn os_keychain() -> Option<Arc<dyn Keychain>> {
-    None
-}
-
-/// Keychain on macOS, Credential Manager on Windows.
-#[cfg(any(target_os = "macos", windows))]
-pub struct OsKeychain {
-    store: Arc<keyring_core::CredentialStore>,
-}
-
-#[cfg(any(target_os = "macos", windows))]
-impl OsKeychain {
-    pub fn open() -> Result<OsKeychain, String> {
-        #[cfg(target_os = "macos")]
-        let store = apple_native_keyring_store::keychain::Store::new();
-        #[cfg(windows)]
-        let store = windows_native_keyring_store::Store::new();
-        let store: Arc<keyring_core::CredentialStore> = store.map_err(|e| e.to_string())?;
-        Ok(OsKeychain { store })
-    }
-
-    fn entry(&self, id: &str) -> Result<keyring_core::Entry, String> {
-        self.store
-            .build(SERVICE, id, None)
-            .map_err(|e| e.to_string())
-    }
-}
-
-#[cfg(any(target_os = "macos", windows))]
-impl Keychain for OsKeychain {
-    fn get(&self, id: &str) -> Result<Option<String>, String> {
-        match self.entry(id)?.get_password() {
-            Ok(text) => Ok(Some(text)),
-            Err(keyring_core::Error::NoEntry) => Ok(None),
-            Err(err) => Err(err.to_string()),
-        }
-    }
-
-    fn set(&self, id: &str, value: &str) -> Result<(), String> {
-        self.entry(id)?
-            .set_password(value)
-            .map_err(|e| e.to_string())
-    }
-
-    fn delete(&self, id: &str) -> Result<(), String> {
-        match self.entry(id)?.delete_credential() {
-            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
-            Err(err) => Err(err.to_string()),
-        }
-    }
+pub fn secret_env(fields: &Fields) -> Map<String, Value> {
+    let raw = fields
+        .get("secretEnv")
+        .map(|s| Value::String(s.expose().to_owned()));
+    super::mcp::parse_json_object(raw.as_ref())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use vorn_vault::{Kind, Memory};
 
-    /// A keychain in memory that counts its writes.
-    #[derive(Default)]
-    struct Memory {
-        items: Mutex<HashMap<String, String>>,
-        writes: Mutex<Vec<String>>,
+    fn fields(v: Value) -> Fields {
+        fields_of(v.as_object().unwrap())
     }
 
-    impl Keychain for Memory {
-        fn get(&self, id: &str) -> Result<Option<String>, String> {
-            Ok(self.items.lock().unwrap().get(id).cloned())
-        }
-        fn set(&self, id: &str, value: &str) -> Result<(), String> {
-            self.writes.lock().unwrap().push(format!("set {id}"));
-            self.items
-                .lock()
-                .unwrap()
-                .insert(id.to_owned(), value.to_owned());
-            Ok(())
-        }
-        fn delete(&self, id: &str) -> Result<(), String> {
-            self.writes.lock().unwrap().push(format!("delete {id}"));
-            self.items.lock().unwrap().remove(id);
-            Ok(())
-        }
-    }
-
-    fn fields(v: Value) -> Map<String, Value> {
-        v.as_object().unwrap().clone()
-    }
-
-    /// Waits for the keychain thread to catch up.
+    /// Waits for the vault thread to catch up.
     fn settled(memory: &Memory, writes: usize) {
         for _ in 0..200 {
-            if memory.writes.lock().unwrap().len() >= writes {
+            if memory.writes().len() >= writes {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        panic!("the keychain saw {:?}", memory.writes.lock().unwrap());
+        panic!("the vault saw {:?}", memory.writes());
     }
 
     #[test]
-    fn keeps_what_the_desktop_pushes_and_files_it_in_the_keychain() {
+    fn keeps_what_the_desktop_pushes_and_files_it_in_the_vault() {
         let memory = Arc::new(Memory::default());
         let secrets = Secrets::with_keychain(Some(memory.clone()));
         assert_eq!(secrets.lookup("c1"), Known::Unknown);
-        assert!(secrets.observe(
-            "credentials:setDecrypted",
-            &json!({ "connectionId": "c1", "fields": { "secretEnv": "{\"K\":\"v\"}" } })
-        ));
+        let push = json!({ "connectionId": "c1", "fields": { "secretEnv": "{\"K\":\"v\"}" } });
+        assert!(secrets.observe("credentials:setDecrypted", &push));
         // The same push again, as every configuration change brings, writes nothing.
-        secrets.observe(
-            "credentials:setDecrypted",
-            &json!({ "connectionId": "c1", "fields": { "secretEnv": "{\"K\":\"v\"}" } }),
-        );
+        secrets.observe("credentials:setDecrypted", &push);
         settled(&memory, 1);
-        assert_eq!(
-            secrets.lookup("c1"),
-            Known::Fields(fields(json!({ "secretEnv": "{\"K\":\"v\"}" })))
-        );
+        let expected = Known::Fields(fields(json!({ "secretEnv": "{\"K\":\"v\"}" })));
+        assert_eq!(secrets.lookup("c1"), expected);
 
-        // A vornd started later reads them back from the keychain.
+        // A vornd started later reads them back from the vault.
         let later = Secrets::with_keychain(Some(memory.clone()));
-        assert_eq!(
-            later.lookup("c1"),
-            Known::Fields(fields(json!({ "secretEnv": "{\"K\":\"v\"}" })))
-        );
+        assert_eq!(later.lookup("c1"), expected);
 
         assert!(secrets.observe(
             "credentials:clearDecrypted",
@@ -361,8 +284,8 @@ mod tests {
         ));
         assert_eq!(secrets.lookup("c1"), Known::None);
         settled(&memory, 2);
-        assert_eq!(memory.items.lock().unwrap().get("c1"), None);
-        assert_eq!(*memory.writes.lock().unwrap(), ["set c1", "delete c1"]);
+        assert_eq!(memory.get(Kind::Connection, "c1").unwrap(), None);
+        assert_eq!(memory.writes(), ["set c1", "delete c1"]);
     }
 
     #[test]
@@ -398,20 +321,29 @@ mod tests {
         assert!(secret_env(&fields(json!({}))).is_empty());
     }
 
-    /// The real keychain, on the platforms that have one vornd uses. Writes
-    /// and removes one item of its own.
-    #[cfg(any(target_os = "macos", windows))]
     #[test]
-    fn round_trips_an_item_through_the_os_keychain() {
-        let keychain = OsKeychain::open().expect("a keychain");
-        let id = format!("vornd-test-{}", std::process::id());
-        keychain.set(&id, "{\"secretEnv\":\"{}\"}").unwrap();
-        assert_eq!(
-            keychain.get(&id).unwrap().as_deref(),
-            Some("{\"secretEnv\":\"{}\"}")
-        );
-        keychain.delete(&id).unwrap();
-        assert_eq!(keychain.get(&id).unwrap(), None);
-        keychain.delete(&id).unwrap();
+    fn settles_on_a_private_file_when_told_not_to_use_the_os_keychain() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = Secrets::new();
+        secrets.settle_in(dir.path(), false);
+        secrets.set("c1", fields(json!({ "token": "t" })));
+        let file = dir.path().join("vornd").join(vorn_vault::file::FILE_NAME);
+        for _ in 0..200 {
+            if file.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let later = Secrets::new();
+        later.settle_in(dir.path(), false);
+        assert_eq!(later.lookup("c1"), Known::Fields(fields(json!({ "token": "t" }))));
+    }
+
+    #[test]
+    fn no_secret_reaches_the_log_or_a_debug_print() {
+        let secrets = Secrets::default();
+        secrets.set("c1", fields(json!({ "token": "hunter2-secret" })));
+        let shown = format!("{:?} {:?}", secrets.lookup("c1"), secrets);
+        assert!(!shown.contains("hunter2-secret"), "{shown}");
     }
 }
