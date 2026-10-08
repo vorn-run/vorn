@@ -2076,8 +2076,9 @@ pub(super) mod tests {
         }
         // An empty remote host is none, as the handler reads it.
         let read = |host: &str| {
+            let path = if host.is_empty() { project() } else { "/srv/p" };
             CreateRequest::read(&json!({
-                "agentType": "codex", "projectName": "p", "projectPath": "/p", "remoteHostId": host,
+                "agentType": "codex", "projectName": "p", "projectPath": path, "remoteHostId": host,
             }))
             .unwrap()
         };
