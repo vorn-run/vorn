@@ -389,8 +389,7 @@ pub async fn probe(
     }
     let key = args
         .iter()
-        .filter(|a| !a.starts_with('-'))
-        .next_back()
+        .rfind(|a| !a.starts_with('-'))
         .map_or(command, String::as_str)
         .to_owned();
     let launch = SdkLaunch {
@@ -415,14 +414,17 @@ pub async fn probe(
     }
 }
 
+/// One key's child, once started.
+type Slot = Arc<Mutex<Option<Arc<SdkClient>>>>;
+
 /// Children kept one per key (a connection), started on first use.
 #[derive(Debug, Default)]
 pub struct Children {
-    live: std::sync::Mutex<std::collections::HashMap<String, Arc<Mutex<Option<Arc<SdkClient>>>>>>,
+    live: std::sync::Mutex<std::collections::HashMap<String, Slot>>,
 }
 
 impl Children {
-    fn slot(&self, key: &str) -> Arc<Mutex<Option<Arc<SdkClient>>>> {
+    fn slot(&self, key: &str) -> Slot {
         Arc::clone(
             self.live
                 .lock()

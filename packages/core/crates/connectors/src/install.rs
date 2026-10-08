@@ -885,7 +885,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let installer = Installer::new(PackStore::new(dir.path().join("c")));
         let manifest = connector("1.0.0").to_string();
-        let cases: Vec<(Vec<(&str, &[u8])>, &str)> = vec![
+        type Case<'a> = (Vec<(&'a str, &'a [u8])>, &'a str);
+        let cases: Vec<Case> = vec![
             (vec![("index.js", b"x")], "The pack has no manifest.json"),
             (vec![("manifest.json", manifest.as_bytes())], "The pack has no entry to run"),
             (

@@ -114,48 +114,6 @@ pub fn test(re: &regress::Regex, text: &str) -> bool {
     re.find(text).is_some()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn slices_count_utf16_units() {
-        assert_eq!(slice16("héllo", 2), "hé");
-        assert_eq!(slice16("a😀b", 2), "a");
-        assert_eq!(slice16("a😀b", 3), "a😀");
-        assert_eq!(slice16("abc", 10), "abc");
-        assert_eq!(tail16("a😀b", 2), "b");
-        assert_eq!(tail16("a😀b", 3), "😀b");
-        assert_eq!(len16("a😀"), 3);
-    }
-
-    #[test]
-    fn trims_the_bom_too() {
-        assert_eq!(trim("\u{feff} x \n"), "x");
-    }
-
-    #[test]
-    fn reads_numbers_as_number_does() {
-        assert_eq!(number(Some(&json!(7))), Some(7.0));
-        assert_eq!(number(Some(&json!(" 10 "))), Some(10.0));
-        assert_eq!(number(Some(&json!(""))), Some(0.0));
-        assert_eq!(number(Some(&json!("1e1"))), Some(10.0));
-        assert_eq!(number(Some(&json!("inf"))), None);
-        assert_eq!(number(Some(&json!("Infinity"))), Some(f64::INFINITY));
-        assert_eq!(number(Some(&json!(true))), Some(1.0));
-        assert_eq!(number(Some(&json!(null))), Some(0.0));
-        assert_eq!(number(Some(&json!([]))), None);
-        assert_eq!(number(None), None);
-    }
-
-    #[test]
-    fn writes_whole_numbers_without_a_fraction() {
-        assert_eq!(json_number(10.0).to_string(), "10");
-        assert_eq!(json_number(7.5).to_string(), "7.5");
-    }
-}
-
 /// `String(value)`.
 pub fn to_string(value: &Value) -> String {
     match value {
@@ -200,4 +158,46 @@ pub fn locale_compare(a: &str, b: &str) -> std::cmp::Ordering {
 /// JavaScript's `a < b` on strings: by UTF-16 code unit.
 pub fn less(a: &str, b: &str) -> bool {
     a.encode_utf16().lt(b.encode_utf16())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn slices_count_utf16_units() {
+        assert_eq!(slice16("héllo", 2), "hé");
+        assert_eq!(slice16("a😀b", 2), "a");
+        assert_eq!(slice16("a😀b", 3), "a😀");
+        assert_eq!(slice16("abc", 10), "abc");
+        assert_eq!(tail16("a😀b", 2), "b");
+        assert_eq!(tail16("a😀b", 3), "😀b");
+        assert_eq!(len16("a😀"), 3);
+    }
+
+    #[test]
+    fn trims_the_bom_too() {
+        assert_eq!(trim("\u{feff} x \n"), "x");
+    }
+
+    #[test]
+    fn reads_numbers_as_number_does() {
+        assert_eq!(number(Some(&json!(7))), Some(7.0));
+        assert_eq!(number(Some(&json!(" 10 "))), Some(10.0));
+        assert_eq!(number(Some(&json!(""))), Some(0.0));
+        assert_eq!(number(Some(&json!("1e1"))), Some(10.0));
+        assert_eq!(number(Some(&json!("inf"))), None);
+        assert_eq!(number(Some(&json!("Infinity"))), Some(f64::INFINITY));
+        assert_eq!(number(Some(&json!(true))), Some(1.0));
+        assert_eq!(number(Some(&json!(null))), Some(0.0));
+        assert_eq!(number(Some(&json!([]))), None);
+        assert_eq!(number(None), None);
+    }
+
+    #[test]
+    fn writes_whole_numbers_without_a_fraction() {
+        assert_eq!(json_number(10.0).to_string(), "10");
+        assert_eq!(json_number(7.5).to_string(), "7.5");
+    }
 }

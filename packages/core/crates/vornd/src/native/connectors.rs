@@ -215,7 +215,7 @@ impl Runner for ProcessRunner {
 
     fn run(
         &self,
-        file: &PathBuf,
+        file: &Path,
         args: &[String],
         env: &[(String, String)],
         timeout: Duration,

@@ -190,8 +190,8 @@ impl Default for Secrets {
     }
 }
 
-/// Pushed fields as the server keeps them: a string as it is, anything
-/// else as its JSON text.
+/// Fields from JSON: a string as it is, anything else as its JSON text.
+#[cfg(test)]
 fn fields_of(map: &Map<String, Value>) -> Fields {
     map.iter()
         .map(|(k, v)| {

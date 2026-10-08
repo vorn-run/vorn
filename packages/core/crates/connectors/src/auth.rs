@@ -6,7 +6,7 @@
 //! child, and it is not a credential by name. Streams a tool prints can hold
 //! a token, so only what went wrong is ever logged, never what was printed.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -27,7 +27,7 @@ pub trait Runner: Send + Sync {
     /// Runs it, answering stdout and stderr, or why it failed (first line only).
     fn run(
         &self,
-        file: &PathBuf,
+        file: &Path,
         args: &[String],
         env: &[(String, String)],
         timeout: Duration,
@@ -365,7 +365,7 @@ mod tests {
         }
         fn run(
             &self,
-            _: &PathBuf,
+            _: &Path,
             args: &[String],
             _: &[(String, String)],
             _: Duration,
