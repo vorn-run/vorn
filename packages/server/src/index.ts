@@ -673,7 +673,7 @@ export async function startServer(
       watchEndpoint(() => true)
       // The replacement starts a vornd of its own, which takes the session
       // holder over; two at once would both answer for it.
-      vorndKeeper.stop()
+      await vorndKeeper.stop()
       endpoint?.relinquish()
       removePortFile(dataDir, ownsPublished)
       await releaseListener()
@@ -758,7 +758,7 @@ export async function startServer(
     cancelScripts()
     vorndSessions.close()
     // Its sessions carry on in the session holder, for the next server.
-    vorndKeeper.stop()
+    const vorndStopped = vorndKeeper.stop()
     stopAllFooters()
     abandonSelections()
     await stopExtensionPageServer()
@@ -772,6 +772,8 @@ export async function startServer(
     // socket file left behind is the next publisher's to replace in one rename.
     await endpoint?.close()
     await app.close()
+    // Exited only after vornd, so nothing writes to the data directory once this process is gone.
+    await vorndStopped
     process.exit(0)
   }
 

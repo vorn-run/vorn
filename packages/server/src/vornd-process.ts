@@ -354,7 +354,7 @@ export class VorndKeeper {
       return
     }
     if (this.stopped) {
-      void started.stop()
+      await started.stop()
       return
     }
     this.running = started
@@ -391,14 +391,17 @@ export class VorndKeeper {
     this.restartTimer.unref?.()
   }
 
-  /** Stop vornd, for good: the holder and its sessions carry on. Resolves once it has exited. */
-  stop(): Promise<void> {
+  /**
+   * Stop vornd, for good: the holder and its sessions carry on. Resolves once
+   * it has exited, and so has one still starting, which is stopped as it comes up.
+   */
+  async stop(): Promise<void> {
     this.stopped = true
     clearTimeout(this.restartTimer)
     this.restartTimer = undefined
     const running = this.running
     this.running = null
     this.status = { state: 'off' }
-    return running?.stop() ?? Promise.resolve()
+    await Promise.all([running?.stop(), this.inFlight])
   }
 }
