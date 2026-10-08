@@ -1,0 +1,4 @@
+[build]
+# One target directory for both workspaces (this one and gpui/).
+target-dir = "target"
+jobs = 3

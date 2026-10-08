@@ -1,0 +1,13 @@
+[package]
+name = "spike-harness"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Starts an isolated vornd, sessions and producers, launches one prototype, samples it and writes the numbers"
+
+[[bin]]
+name = "spike-harness"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"

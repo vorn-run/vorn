@@ -1,0 +1,11 @@
+[package]
+name = "spike-core"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "The grid client every native UI prototype links: vornd's socket, the mirrors, resolved color runs, input, resize and the bench bookkeeping"
+
+[dependencies]
+vorn-term-proto = { workspace = true }
+vorn-term-mirror = { workspace = true }
+vorn-grid-client = { workspace = true }

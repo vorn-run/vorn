@@ -1,0 +1,19 @@
+# The spike's shared Rust: the grid client every prototype links, the C ABI
+# the SwiftUI/AppKit prototype links, the Tauri prototype and the harness.
+# The GPUI prototype is its own workspace (gpui/), so its pinned git
+# dependencies never touch this lockfile.
+[workspace]
+resolver = "2"
+members = ["core", "ffi", "harness", "tauri"]
+
+[workspace.dependencies]
+vorn-term-proto = { path = "../../packages/core/crates/term-proto" }
+vorn-term-mirror = { path = "../../packages/core/crates/term-mirror" }
+vorn-grid-client = { path = "../../packages/core/crates/grid-client" }
+spike-core = { path = "core" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = "symbols"

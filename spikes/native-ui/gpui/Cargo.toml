@@ -1,0 +1,33 @@
+# The GPUI prototype is its own workspace so the pinned framework's
+# dependency tree (and its toolchain, rust-toolchain.toml) stays here.
+#
+# GPUI is pinned to Zed's repository at commit
+# cb73ee1d45db3babb14f21efe83f229fcb334d99, checked out (shallow, sparse)
+# into ../.deps/zed by build.sh; Cargo.lock started as that commit's.
+[workspace]
+resolver = "2"
+
+[package]
+name = "vorn-spike-gpui"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "vorn-spike-gpui"
+path = "src/main.rs"
+
+[dependencies]
+gpui = { path = "../.deps/zed/crates/gpui", default-features = false, features = ["font-kit"] }
+gpui_platform = { path = "../.deps/zed/crates/gpui_platform", default-features = false, features = ["font-kit", "runtime_shaders"] }
+spike-core = { path = "../core" }
+futures = "0.3.34"
+
+[patch.crates-io]
+async-task = { git = "https://github.com/smol-rs/async-task.git", rev = "b4486cd71e4e94fbda54ce6302444de14f4d190e" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = "symbols"

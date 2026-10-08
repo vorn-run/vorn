@@ -1,0 +1,13 @@
+[package]
+name = "vorn-spike-ffi"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "C ABI over spike-core (term-mirror + term-proto) for the SwiftUI prototype"
+
+[lib]
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
+spike-core = { workspace = true }
