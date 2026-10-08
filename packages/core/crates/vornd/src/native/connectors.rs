@@ -1395,7 +1395,21 @@ impl Connectors {
             info!(imported, "secrets the desktop sealed are in the vault");
             self.changed();
         }
-        Ok(Some(json!({ "connections": imported })))
+        let (n, p) = (Arc::clone(&native), params.clone());
+        let ssh = tokio::task::spawn_blocking(move || {
+            super::config::with_store(&n, |s| Ok(super::credential::import(&n, s, &p)))?
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        let (ssh_keys, host_passwords) = ssh?;
+        if host_passwords > 0 {
+            super::config::announce(&native).await;
+        }
+        Ok(Some(json!({
+            "connections": imported,
+            "sshKeys": ssh_keys,
+            "hostPasswords": host_passwords,
+        })))
     }
 
     // ---- items ----

@@ -143,6 +143,10 @@ jobs:
       - name: Install dependencies
         run: yarn install
 
+      # Fetched once here, so parallel test workers never race to download it.
+      - name: Electron binary
+        run: node node_modules/electron/install.js
+
       - name: Rust format
         if: runner.os == 'Linux'
         working-directory: packages/core

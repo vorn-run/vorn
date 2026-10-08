@@ -7,7 +7,6 @@ import { configManager } from './config-manager'
 import { sessionManager } from './session-persistence'
 import { getRecentSessions } from './agent-history'
 import { detectIDEs, openInIDE } from './ide-detector'
-import { detectMobileProject } from './mobile-detector'
 import { detectInstalledAgents } from './agent-detector'
 import { clientRegistry } from './broadcast'
 import {
@@ -31,28 +30,8 @@ import {
   releaseSpawningTranscript,
   releaseSpawningTranscriptsFor
 } from './transcript-claims'
-import { browserBridge } from './browser-bridge'
-import { hookServer } from './hook-server'
-import { hookStatusMapper } from './hook-status-mapper'
-import { installHooks } from './hook-installer'
-import { installCopilotHooks } from './copilot-hook-installer'
-import {
-  IPC,
-  WidgetAgentInfo,
-  PermissionRequestInfo,
-  SessionEventType,
-  RemoteHost,
-  getProjectRemoteHostId,
-  isTerminalTaskStatus
-} from '@vornrun/shared/types'
-import type {
-  TaskConfig,
-  TaskStatus,
-  HeadlessSession,
-  ProjectConfig,
-  TerminalSession,
-  WorktreeRetentionConfig
-} from '@vornrun/shared/types'
+import { IPC, SessionEventType, RemoteHost, getProjectRemoteHostId } from '@vornrun/shared/types'
+import type { ProjectConfig, TerminalSession, WorktreeRetentionConfig } from '@vornrun/shared/types'
 import { DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
 import * as gitUtils from './git-utils'
 import {
@@ -67,30 +46,7 @@ import {
 import { fileStamp, listDir, readFileContent, writeFileContent } from './file-utils'
 import { listShellExecutables } from './shell-integration'
 import { listInstalledShells } from './shell-integration/installed'
-import {
-  saveTaskImage,
-  saveTaskImageFromBase64,
-  deleteTaskImage,
-  getTaskImagePath,
-  cleanupTaskImages
-} from './task-images'
-import {
-  dbSaveSSHKey,
-  dbListSSHKeys,
-  dbGetSSHKey,
-  dbDeleteSSHKey,
-  insertSessionEvent,
-  listSessionEvents,
-  listSessionEventsBySession,
-  dbInsertTask,
-  dbUpdateTask,
-  dbDeleteTask,
-  dbGetMaxTaskOrder,
-  dbGetProject,
-  dbListTasks,
-  dbGetTask
-} from './database'
-import { executeScript, scriptRunnerEvents } from './script-runner'
+import { insertSessionEvent } from './database'
 import { getTailscaleStatus, clearBinaryCache } from './tailscale'
 import { reachableUrls } from './reachable-urls'
 import { listTokens, mintOwnerToken, revokeToken } from './token-manager'
@@ -102,37 +58,12 @@ import {
   startPairing
 } from './pairing'
 import { disconnectToken } from './ws-handler'
-import { resolvedShellPath, shellEnvSettled, testSshConnection } from './process-utils'
-import { captureAgentSessionId } from './agent-session-capture'
 import { listAgentModels } from './agent-model-catalog'
-import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
 import log from './logger'
 import { vorndSessions } from './vornd-sessions'
 import { wireVorndRestore } from './vornd-restore'
 import { onePerKey } from './one-per-key'
 import { isWorkspaceHeld } from './workspace-holds'
-import { coreStatus } from './native-core'
-
-/**
- * What a status change does to the two dates that hang off it.
- *
- * Finishing a task stamps `completedAt`; reopening one clears it, and clears
- * `archivedAt` with it — a task that is live again cannot still be filed away.
- *
- * Both keys are returned rather than omitted, because `dbUpdateTask` decides
- * what to write with `'completedAt' in updates`: an absent key leaves the
- * column alone, and only an explicit `undefined` clears it.
- */
-function terminalStamps(
-  from: TaskStatus,
-  to: TaskStatus
-): { completedAt?: string; archivedAt?: string } {
-  const was = isTerminalTaskStatus(from)
-  const is = isTerminalTaskStatus(to)
-  if (is && !was) return { completedAt: new Date().toISOString() }
-  if (!is && was) return { completedAt: undefined, archivedAt: undefined }
-  return {}
-}
 
 function logSessionEvent(
   sessionId: string,
@@ -294,219 +225,15 @@ export function registerAllMethods(): void {
     ptyManager.renameSession(id, displayName, true)
     logSessionEvent(id, 'renamed', { displayName })
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
   registerMethod('terminal:setGroup', ({ id, groupId }) => {
     ptyManager.setSessionGroup(id, groupId)
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
   registerMethod('terminal:reorder', (ids) => {
     ptyManager.reorderSessions(ids)
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
-  /**
-   * The board without the rest of the configuration around it.
-   *
-   * `config:load` carries every task inline, so a client that wants the board
-   * pulls roughly a hundred kilobytes and a client that moves one card sends all
-   * of it back. The database already stores tasks individually; only the wire
-   * treated them as one object.
-   */
-  registerMethod('task:list', (params) => {
-    const filter = (params ?? {}) as {
-      projectName?: string
-      status?: TaskStatus
-      includeDescription?: boolean
-    }
-    const tasks = dbListTasks(filter.projectName, filter.status)
-    if (filter.includeDescription) return tasks
-    // A board renders titles. Descriptions are most of the bytes and none of
-    // what is drawn, so they are left out until something asks for one task.
-    return tasks.map((task) => ({ ...task, description: '' }))
-  })
-
-  registerMethod('project:list', () => configManager.loadConfig().projects ?? [])
-
-  registerMethod('task:get', ({ id }) => dbGetTask(id))
-
-  registerMethod('task:setStatus', ({ id, status }) => {
-    const task = dbGetTask(id)
-    if (!task) return { ok: false }
-    // `dbUpdateTask` writes `updated_at` only when it is handed one, so moving a
-    // card between columns used to leave the row claiming it had not been
-    // touched since whenever it was last edited.
-    dbUpdateTask(id, {
-      status,
-      updatedAt: new Date().toISOString(),
-      ...terminalStamps(task.status, status)
-    })
-    // Everything else reads the board through the cached config, so a direct
-    // row write has to invalidate it. This also broadcasts `config:changed`,
-    // which is how other clients learn the card moved.
-    configManager.notifyChanged()
-    return { ok: true }
-  })
-
-  /**
-   * Writing a task, not only reading and moving one.
-   *
-   * Until these existed the only way to write a task over this socket was
-   * `config:save` carrying the whole configuration — which is what the MCP
-   * tools still do, and what `task:list` was added to stop the board doing.
-   * Every one of them ends in `notifyChanged`, because a row written without
-   * it is a row no other client hears about.
-   */
-  registerMethod(
-    'task:create',
-    ({ projectName, title, description, status, branch, useWorktree, assignedAgent }) => {
-      // A task in a project that does not exist is a task nothing can ever run.
-      if (!dbGetProject(projectName)) return { ok: false }
-
-      const now = new Date().toISOString()
-      const settled = status ?? 'todo'
-      const task: TaskConfig = {
-        id: crypto.randomUUID(),
-        projectName,
-        title,
-        description: description ?? '',
-        status: settled,
-        order: dbGetMaxTaskOrder(projectName) + 1,
-        createdAt: now,
-        updatedAt: now,
-        ...(branch && { branch }),
-        ...(useWorktree && { useWorktree }),
-        ...(assignedAgent && { assignedAgent }),
-        ...(isTerminalTaskStatus(settled) && { completedAt: now })
-      }
-      dbInsertTask(task)
-      configManager.notifyChanged()
-      // Returned whole: the caller does not have to guess the id it was given
-      // or the order it landed at.
-      return { ok: true, task }
-    }
-  )
-
-  /**
-   * Named one by one, never spread.
-   *
-   * The params type is erased at run time — `registerMethod` hands the handler
-   * whatever JSON arrived — so a rest spread would put every key a client cared
-   * to send into `dbUpdateTask`, whose column whitelist is wider than what this
-   * method advertises. That is not a style point: `archivedAt` is one of the two
-   * columns `dbUpdateTask` writes on mere presence, so `{ id, archivedAt }`
-   * would file away a task that is still open, walking past the terminal-status
-   * rule `task:archive` enforces a few lines below. Naming the six fields is
-   * what makes that unreachable.
-   *
-   * `dbUpdateTask` already skips any of these that is `undefined`, so an unsent
-   * field needs no guard here. The dates are not a caller's to set: they come
-   * from `terminalStamps` or not at all.
-   *
-   * `projectName` carries two rules of its own, both borrowed from `task:create`.
-   * A project that does not exist is refused, because a task in one is a task
-   * nothing can run. And `order` is recomputed, because it is per-project: a
-   * task carried across keeps a place that means nothing where it lands, and
-   * from order 0 in one board into a board that already has an order 0 it lands
-   * on top of something. Nothing in the schema forbids that duplicate and
-   * `task:reorder` preserves it faithfully, since it permutes the orders already
-   * present rather than renumbering them. A moved task goes to the end, exactly
-   * as a new one does.
-   */
-  registerMethod(
-    'task:update',
-    ({ id, projectName, title, description, status, branch, useWorktree, assignedAgent }) => {
-      const task = dbGetTask(id)
-      if (!task) return { ok: false }
-
-      const moving = projectName !== undefined && projectName !== task.projectName
-      if (moving && !dbGetProject(projectName)) return { ok: false }
-
-      dbUpdateTask(id, {
-        projectName,
-        ...(moving && { order: dbGetMaxTaskOrder(projectName) + 1 }),
-        title,
-        description,
-        status,
-        branch,
-        useWorktree,
-        assignedAgent,
-        updatedAt: new Date().toISOString(),
-        ...(status ? terminalStamps(task.status, status) : {})
-      })
-      configManager.notifyChanged()
-      return { ok: true, task: dbGetTask(id) ?? undefined }
-    }
-  )
-
-  registerMethod('task:delete', ({ id }) => {
-    if (!dbGetTask(id)) return { ok: false }
-    dbDeleteTask(id)
-    configManager.notifyChanged()
-    return { ok: true }
-  })
-
-  /**
-   * The ids in the order they should now sit. Anything absent keeps its place.
-   *
-   * The places these tasks already occupy are collected and handed back out in
-   * the order asked for, rather than numbering the list 0..n. Numbering would
-   * make that last sentence false twice over: half a board sent for reordering
-   * would be given orders that collide with the half that was not mentioned,
-   * and an id naming nothing would still eat a place, pushing everything after
-   * it down by one. A permutation cannot do either — the set of orders comes
-   * out the same as it went in.
-   */
-  registerMethod('task:reorder', ({ ids }) => {
-    // Deduplicated first, keeping the place each id was first named. An id sent
-    // twice would otherwise put its task in the list twice and its order into
-    // the slots twice, and the second copy is a place no task can take up: the
-    // extra slot pushes a later task onto an order another one already holds.
-    const named = [...new Set(ids)]
-      .map((id) => dbGetTask(id))
-      .filter((task): task is TaskConfig => !!task)
-    if (named.length === 0) return { ok: false }
-
-    const slots = named.map((task) => task.order).sort((a, b) => a - b)
-    const now = new Date().toISOString()
-    let moved = 0
-    named.forEach((task, index) => {
-      const slot = slots[index] ?? task.order
-      if (slot === task.order) return
-      dbUpdateTask(task.id, { order: slot, updatedAt: now })
-      moved += 1
-    })
-    // A list already in the order it asks for is a request that succeeded and
-    // wrote nothing. Broadcasting there would make every client rebuild a board
-    // that did not move.
-    if (moved > 0) configManager.notifyChanged()
-    return { ok: true }
-  })
-
-  registerMethod('task:archive', ({ id, archived }) => {
-    const task = dbGetTask(id)
-    if (!task) return { ok: false }
-    // The same rule `archive_task` enforces on the MCP side. Archiving is for
-    // work that is over; a todo hidden from the board is a todo that is lost.
-    if (archived && !isTerminalTaskStatus(task.status)) return { ok: false }
-
-    const now = new Date().toISOString()
-    dbUpdateTask(id, { archivedAt: archived ? now : undefined, updatedAt: now })
-    configManager.notifyChanged()
-    return { ok: true }
-  })
-
-  // vornd answers both for every session it holds, which is every live one.
-  // What reaches the server is a session it has no screen of: one from a
-  // previous run, or one asked for by a client that is not behind vornd.
-  registerMethod('terminal:readScrollback', () => ({ data: '' }))
-  registerMethod('terminal:attach', ({ id }) => ({
-    data: '',
-    seq: 0,
-    live: ptyManager.hasLivePty(id)
-  }))
-  registerMethod('terminal:readOutput', ({ id, lines }) => ptyManager.readOutput(id, lines))
   registerMethod('shell:create', (cwd) => {
     const session = ptyManager.createShellPty(cwd)
     announceSession(session)
@@ -516,11 +243,8 @@ export function registerAllMethods(): void {
       projectPath: session.projectPath
     })
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
     return session
   })
-
-  registerMethod('core:status', () => coreStatus())
 
   // Sessions
   registerMethod('sessions:clear', () => {
@@ -909,15 +633,6 @@ export function registerAllMethods(): void {
     return gitUtils.gitPush(cwd, remote)
   })
 
-  // Task images
-  registerMethod('task:imageSave', ({ taskId, sourcePath }) => saveTaskImage(taskId, sourcePath))
-  registerMethod('task:imageDelete', ({ taskId, filename }) => deleteTaskImage(taskId, filename))
-  registerMethod('task:imageGetPath', ({ taskId, filename }) => getTaskImagePath(taskId, filename))
-  registerMethod('task:imageCleanup', (taskId) => cleanupTaskImages(taskId))
-  registerMethod('task:imageUpload', ({ taskId, base64, filename }) =>
-    saveTaskImageFromBase64(taskId, base64, filename)
-  )
-
   // Headless
   registerMethod('headless:create', async (payload) => {
     const session = await headlessManager.createHeadless(payload)
@@ -932,20 +647,10 @@ export function registerAllMethods(): void {
   registerMethod('headless:kill', (id) => headlessManager.killHeadless(id))
   registerMethod('headless:list', () => headlessManager.getActiveSessions())
 
-  // Scripts
-  registerMethod('script:execute', (config) => executeScript(config))
-
-  // Session events
-  registerMethod('sessionEvent:list', ({ eventType, limit }) => listSessionEvents(eventType, limit))
-  registerMethod('sessionEvent:listBySession', ({ sessionId, limit }) =>
-    listSessionEventsBySession(sessionId, limit)
-  )
-
   // Agent/IDE detection
   registerMethod('agent:detectInstalled', () => detectInstalledAgents())
   registerMethod('agent:listModels', (request) => listAgentModels(request))
   registerMethod('ide:detect', () => detectIDEs())
-  registerMethod('project:detectMobile', ({ projectPath }) => detectMobileProject(projectPath))
   registerMethod('ide:open', ({ ideId, projectPath }) => openInIDE(ideId, projectPath))
 
   // Where a browser can reach this server. Asked separately from Tailscale status
@@ -962,15 +667,6 @@ export function registerAllMethods(): void {
     return reachableUrls(serverPort, tailscaleIps)
   })
 
-  // Asked for by the main process, which spawns the simulator's companion and
-  // has only the four system directories on its own PATH. Bounded well under
-  // the shell's own timeout: a caller waiting on this is a person waiting on a
-  // device pane, and a provisional answer beats a late one.
-  registerMethod('env:path', async () => {
-    await shellEnvSettled(5_000)
-    return resolvedShellPath()
-  })
-
   // Tailscale network access. Informational only now: it supplies an address and
   // a QR code, and no longer decides whether the server binds wide.
   registerMethod('tailscale:status', async () => {
@@ -981,24 +677,6 @@ export function registerAllMethods(): void {
     // so it happens when the setting changes, and at no other time.
     return getTailscaleStatus(serverPort)
   })
-
-  // Credential vault (storage — encryption handled by main process)
-  registerMethod('credential:storeKey', (params) => {
-    const id = crypto.randomUUID()
-    dbSaveSSHKey({
-      id,
-      label: params.label,
-      encryptedPrivateKey: params.encryptedPrivateKey,
-      publicKey: params.publicKey,
-      certificate: params.certificate,
-      keyType: params.keyType,
-      createdAt: new Date().toISOString()
-    })
-    return { id }
-  })
-  registerMethod('credential:listKeys', () => dbListSSHKeys())
-  registerMethod('credential:deleteKey', (id) => dbDeleteSSHKey(id))
-  registerMethod('credential:getEncryptedKey', (id) => dbGetSSHKey(id))
 
   // Device tokens. Until now these existed only behind `vorn-server token`, so
   // pairing a phone meant finding a terminal on the machine running the server.
@@ -1057,7 +735,6 @@ export function registerAllMethods(): void {
   registerMethod('shell:listInstalled', () => listInstalledShells())
 
   // SSH
-  registerMethod('ssh:testConnection', (host) => testSshConnection(host))
 
   // Fire-and-forget notifications
   registerNotification('terminal:write', ({ id, data }) => ptyManager.writeToPty(id, data))
@@ -1065,64 +742,7 @@ export function registerAllMethods(): void {
     ptyManager.resizePty(id, cols, rows)
   )
 
-  // Permission resolution
-  registerMethod('permission:resolve', ({ requestId, allow, updatedPermissions, updatedInput }) => {
-    hookServer.resolvePermission(requestId, allow, { updatedPermissions, updatedInput })
-  })
-
-  // Resolve top pending permission (for global shortcuts)
-  registerMethod('permission:resolve-top', ({ allow }) => {
-    const pending = hookServer.getPendingPermissions()
-    if (pending.length > 0) {
-      hookServer.resolvePermission(pending[0].requestId, allow)
-    }
-  })
-
   // Widget status update request
-  registerMethod('widget:requestUpdate', () => {
-    broadcastWidgetUpdate()
-  })
-
-  // ─── Browser pane (relayed to Electron main) ──────────────────
-  //
-  // The guest `<webview>` and its CDP debugger only exist in main, so these
-  // are the one method family this process does not answer itself. Each is a
-  // straight relay over the reverse bridge; the session scoping that makes
-  // them safe happens in the MCP layer, which resolves the caller from
-  // VORN_SESSION_ID and never accepts a session as an argument.
-  registerMethod('browser:readPage', (p) => browserBridge.request('browser:readPage', p))
-  registerMethod('browser:getText', (p) => browserBridge.request('browser:getText', p))
-  registerMethod('browser:consoleMessages', (p) =>
-    browserBridge.request('browser:consoleMessages', p)
-  )
-  registerMethod('browser:networkRequests', (p) =>
-    browserBridge.request('browser:networkRequests', p)
-  )
-  registerMethod('browser:screenshot', (p) => browserBridge.request('browser:screenshot', p))
-  registerMethod('browser:interact', (p) => browserBridge.request('browser:interact', p))
-  registerMethod('browser:tabs', (p) => browserBridge.request('browser:tabs', p))
-  registerMethod('browser:openPane', (p) => browserBridge.request('browser:openPane', p))
-  registerMethod('browser:navigate', (p) => browserBridge.request('browser:navigate', p))
-  registerMethod('browser:history', (p) => browserBridge.request('browser:history', p))
-  registerMethod('browser:listTabs', (p) => browserBridge.request('browser:listTabs', p))
-  registerMethod('browser:find', (p) => browserBridge.request('browser:find', p))
-
-  // Device pane (relayed to Electron main, same bridge, same reasoning: the
-  // idb_companion child process and its unix socket live only in main).
-  registerMethod('device:list', (p) => browserBridge.request('device:list', p))
-  registerMethod('device:claim', (p) => browserBridge.request('device:claim', p))
-  registerMethod('device:release', (p) => browserBridge.request('device:release', p))
-  registerMethod('device:readScreen', (p) => browserBridge.request('device:readScreen', p))
-  registerMethod('device:find', (p) => browserBridge.request('device:find', p))
-  registerMethod('device:interact', (p) => browserBridge.request('device:interact', p))
-  registerMethod('device:chrome', (p) => browserBridge.request('device:chrome', p))
-  registerMethod('device:screenshot', (p) => browserBridge.request('device:screenshot', p))
-  registerMethod('device:launch', (p) => browserBridge.request('device:launch', p))
-  registerMethod('device:terminate', (p) => browserBridge.request('device:terminate', p))
-  registerMethod('device:install', (p) => browserBridge.request('device:install', p))
-  registerMethod('device:openUrl', (p) => browserBridge.request('device:openUrl', p))
-  registerMethod('device:logs', (p) => browserBridge.request('device:logs', p))
-  registerMethod('device:openPane', (p) => browserBridge.request('device:openPane', p))
 
   /**
    * Which instance a manager notification is about, or nothing.
@@ -1149,33 +769,9 @@ export function registerAllMethods(): void {
     // generically rather than per channel: every id-bearing payload here means
     // the same thing by it.
     clientRegistry.broadcast(channel, payload, terminalScope(payload))
-    if (channel === IPC.TERMINAL_EXIT) {
-      const p = payload as { id: string; exitCode: number }
-      logSessionEvent(p.id, 'exited', { exitCode: p.exitCode })
-    }
   })
   headlessManager.on('client-message', (channel: string, payload: unknown) => {
     clientRegistry.broadcast(channel, payload, terminalScope(payload))
-    if (channel === IPC.HEADLESS_EXIT) {
-      const p = payload as { id: string; exitCode: number }
-      logSessionEvent(p.id, 'exited', { exitCode: p.exitCode })
-    }
-  })
-  // An agent vornd started for a client: logged as `headless:create` logs one.
-  headlessManager.on('session-created', (session: HeadlessSession) => {
-    logSessionEvent(session.id, 'created', {
-      agentType: session.agentType,
-      projectName: session.projectName,
-      projectPath: session.projectPath,
-      headless: true
-    })
-  })
-
-  scriptRunnerEvents.on(IPC.SCRIPT_DATA, (payload) => {
-    clientRegistry.broadcast(IPC.SCRIPT_DATA, payload)
-  })
-  scriptRunnerEvents.on(IPC.SCRIPT_EXIT, (payload) => {
-    clientRegistry.broadcast(IPC.SCRIPT_EXIT, payload)
   })
 
   // ─── Persistent session auto-save ──────────────────────────────
@@ -1195,73 +791,23 @@ export function registerAllMethods(): void {
   // ─── Hook server integration ──────────────────────────────────
 
   // Handle new terminal sessions: broadcast to UI + Copilot hook setup
-  ptyManager.on('session-created', (session, payload) => {
+  ptyManager.on('session-created', (session, payload, madeByVornd?: boolean) => {
     announceSession(session)
-    logSessionEvent(session.id, 'created', {
-      agentType: session.agentType,
-      projectName: session.projectName,
-      projectPath: session.projectPath,
-      ...(session.branch && { branch: session.branch })
-    })
-
-    if (payload.agentType === 'copilot' && hookServer.getPort() > 0) {
-      const installation = installCopilotHooks(session.id)
-      hookStatusMapper.forceLink(installation.sessionId, session.id)
-      ptyManager.linkHookSession(session.id, installation.sessionId)
-      // Don't set statusSource = 'hooks' eagerly — it disables the pattern-based
-      // fallback. If hooks actually fire, the session is promoted on the
-      // first event. This fixes status stuck on 'waiting' when hooks don't work
-      // (e.g. the agent CLI doesn't support hooks.json).
-    }
-
-    // A local lookup for agents that cannot pin an id; a known id or a remote session is never replaced.
-    if (
-      supportsExactSessionResume(payload.agentType) &&
-      !supportsSessionIdPinning(payload.agentType) &&
-      !session.agentSessionId &&
-      !session.remoteHostId
-    ) {
-      const captureSessionId = session.id
-      // Asked more than once: an agent slow to write its own history used to be
-      // read at five seconds, come up empty, and never be asked again -- leaving
-      // the session holding a conversation it could not name, which a later
-      // resume was then free to take.
-      const attempt = (remaining: number[]): void => {
-        const [delay, ...rest] = remaining
-        if (delay === undefined) return
-        setTimeout(() => {
-          const s = ptyManager.getActiveSessions().find((t) => t.id === captureSessionId)
-          if (!s) {
-            releaseClaimsFor(captureSessionId)
-            return
-          }
-          if (s.agentSessionId) return
-          const cwd = s.worktreePath || s.projectPath
-          const capturedId = captureAgentSessionId(s.agentType, cwd)
-          if (!capturedId) return attempt(rest)
-          ptyManager.setRecordFields(s.id, { agentSessionId: capturedId })
-          // Its own record names the conversation now, so the spawn claim is spent.
-          releaseClaimsFor(captureSessionId)
-          sessionManager.scheduleSave()
-          clientRegistry.broadcast(IPC.SESSION_UPDATED, s)
-          broadcastWidgetUpdate()
-          log.info(`[session] captured ${s.agentType} session ID: ${capturedId}`)
-        }, delay)
-      }
-      attempt([5000, 5000, 10_000, 20_000])
-    }
+    // vornd logs the sessions it makes itself.
+    if (!madeByVornd)
+      logSessionEvent(session.id, 'created', {
+        agentType: session.agentType,
+        projectName: session.projectName,
+        projectPath: session.projectPath,
+        ...(session.branch && { branch: session.branch })
+      })
 
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
 
   // What vornd changed for a client, told and saved as the methods here that make the same changes.
-  ptyManager.on('session-renamed', (id: string, displayName: string) => {
-    logSessionEvent(id, 'renamed', { displayName })
-  })
   ptyManager.on('records-changed', () => {
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
 
   // A shell moved. Saved on a debounce, so a script running `cd` in a loop costs
@@ -1277,137 +823,5 @@ export function registerAllMethods(): void {
     releaseClaimsFor(session.id)
 
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
-
-  // Start hook server
-  hookServer
-    .start()
-    .then((port) => {
-      try {
-        // Only the instance that claimed the shared hook files writes the
-        // settings entry that points at them. A dev server beside the packaged
-        // app used to redirect its hooks here and, killed before it could tidy
-        // up, leave them pointing at a port with no server behind it.
-        if (hookServer.ownsRegistration()) {
-          installHooks(port, hookServer.getAuthToken())
-        } else {
-          log.info('[hooks] another Vorn owns the registration; leaving it alone')
-          hookServer.once('claimed', () => installHooks(port, hookServer.getAuthToken()))
-        }
-      } catch (err) {
-        log.error({ err }, '[hooks] failed to install hooks:')
-      }
-
-      hookServer.on('permission-cancelled', (requestId: string) => {
-        clientRegistry.broadcast(IPC.WIDGET_PERMISSION_CANCELLED, requestId)
-      })
-
-      hookServer.on('hook-event', (event) => {
-        log.info(
-          `[hooks] ${event.hook_event_name}: session=${event.session_id} cwd=${event.cwd}` +
-            (event.vorn_terminal_id ? ` terminal=${event.vorn_terminal_id}` : '')
-        )
-        const result = hookStatusMapper.mapEventToStatus(event)
-        if (result) {
-          ptyManager.hookStatus(result.terminalId, result.status, true)
-          broadcastWidgetUpdate()
-
-          // Persist after hookSessionId is set (SessionStart links the session)
-          if (event.hook_event_name === 'SessionStart') {
-            sessionManager.scheduleSave()
-            try {
-              const config = configManager.loadConfig()
-              const task = config.tasks?.find(
-                (t) =>
-                  t.assignedSessionId === result.terminalId &&
-                  t.status === 'in_progress' &&
-                  !t.agentSessionId
-              )
-              if (task) {
-                task.agentSessionId = event.session_id
-                task.updatedAt = new Date().toISOString()
-                configManager.saveConfig(config)
-                configManager.notifyChanged()
-                log.info(
-                  `[hooks] stored agentSessionId ${event.session_id} on task "${task.title}"`
-                )
-              }
-            } catch (err) {
-              log.error({ err }, '[hooks] failed to persist agentSessionId:')
-            }
-          }
-        }
-
-        const dismissEvents = ['PostToolUse', 'PostToolUseFailure', 'Stop', 'UserPromptSubmit']
-        if (dismissEvents.includes(event.hook_event_name)) {
-          hookServer.cancelSessionPermissions(event.session_id)
-        }
-      })
-
-      hookServer.on('permission-request', ({ requestId, event }) => {
-        const terminalId = hookStatusMapper.resolveTerminal(event)
-
-        log.info(
-          `[hooks] permission-request: session=${event.session_id} tool=${event.tool_name} → terminal=${terminalId ?? 'none (passthrough)'}`
-        )
-
-        if (!terminalId) {
-          hookServer.passthroughPermission(requestId)
-          return
-        }
-
-        ptyManager.hookStatus(terminalId, null, true)
-
-        const session = ptyManager.getActiveSessions().find((s) => s.id === terminalId)
-
-        const permReq: PermissionRequestInfo = {
-          requestId,
-          sessionId: event.session_id,
-          terminalId,
-          toolName: event.tool_name || 'unknown',
-          toolInput: event.tool_input || {},
-          description:
-            typeof event.tool_input?.file_path === 'string'
-              ? (event.tool_input.file_path as string)
-              : typeof event.tool_input?.command === 'string'
-                ? (event.tool_input.command as string)
-                : typeof event.tool_input?.description === 'string'
-                  ? (event.tool_input.description as string)
-                  : undefined,
-          agentType: session?.agentType,
-          projectName: session?.projectName,
-          permissionSuggestions: event.permission_suggestions,
-          questions:
-            event.tool_name === 'AskUserQuestion'
-              ? (event.tool_input?.questions as PermissionRequestInfo['questions'] | undefined)
-              : undefined
-        }
-
-        clientRegistry.broadcast(IPC.WIDGET_PERMISSION_REQUEST, permReq)
-        ptyManager.hookStatus(terminalId, 'waiting', false)
-        broadcastWidgetUpdate()
-      })
-    })
-    .catch((err) => {
-      log.error('Failed to start hook server:', err)
-    })
-}
-
-let widgetUpdateTimer: ReturnType<typeof setTimeout> | null = null
-
-function broadcastWidgetUpdate(): void {
-  if (widgetUpdateTimer) return
-  widgetUpdateTimer = setTimeout(() => {
-    widgetUpdateTimer = null
-    const sessions = ptyManager.getActiveSessions()
-    const agents: WidgetAgentInfo[] = sessions.map((s) => ({
-      id: s.id,
-      agentType: s.agentType,
-      displayName: s.displayName,
-      projectName: s.projectName,
-      status: s.status
-    }))
-    clientRegistry.broadcast(IPC.WIDGET_STATUS_UPDATE, agents)
-  }, 500)
 }

@@ -27,6 +27,8 @@ members = [
   "crates/worktrees",
   "crates/vault",
   "crates/connectors",
+  "crates/remote",
+  "crates/hooks",
   "bench/scale",
 ]
 

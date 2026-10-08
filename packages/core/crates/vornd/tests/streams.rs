@@ -1149,8 +1149,14 @@ async fn write_resize_and_reads_are_answered_by_vornd() {
     let rpc = c.call("terminal:readScrollback", json!({ "id": SESSION }));
     let sb = c.answer(rpc).await;
     assert!(sb["data"].as_str().unwrap().contains("hello world"), "{sb}");
-    // A session vornd does not hold is the server's.
-    let text = json!({ "jsonrpc": "2.0", "id": 99, "method": "terminal:attach", "params": { "id": "nodes" } })
+    // A session nothing holds has no screen and is not live.
+    let rpc = c.call("terminal:attach", json!({ "id": "nodes" }));
+    assert_eq!(
+        c.answer(rpc).await,
+        json!({ "data": "", "seq": 0, "live": false })
+    );
+    // Writing to it is still the server's.
+    let text = json!({ "jsonrpc": "2.0", "id": 99, "method": "terminal:write", "params": { "id": "nodes", "data": "x" } })
         .to_string();
     assert!(!vornd::terminal::handle(
         &v.engine,

@@ -3807,6 +3807,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-hooks"
+version = "0.0.0"
+dependencies = [
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "vorn-mcp"
 version = "0.0.0"
 dependencies = [
@@ -3866,6 +3876,14 @@ dependencies = [
  "vorn-sessiond-wire",
  "vorn-term-proto",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "vorn-remote"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4030,11 +4048,13 @@ dependencies = [
  "vorn-extensions",
  "vorn-git",
  "vorn-grid-client",
+ "vorn-hooks",
  "vorn-mcp",
  "vorn-pipeline",
  "vorn-protocol",
  "vorn-reach",
  "vorn-recovery",
+ "vorn-remote",
  "vorn-screen",
  "vorn-sessiond",
  "vorn-sessiond-wire",

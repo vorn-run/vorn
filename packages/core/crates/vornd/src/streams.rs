@@ -227,6 +227,11 @@ impl Forwarder {
     pub fn send_now(&self, v: &Value) {
         self.outbox.text(v);
     }
+
+    /// Whether the connection's writer has gone, so nothing queued arrives.
+    pub fn is_closed(&self) -> bool {
+        self.outbox.tx.is_closed()
+    }
 }
 
 /// What the hub needs done by whoever drives the session engine.

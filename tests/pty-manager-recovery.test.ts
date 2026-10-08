@@ -530,21 +530,6 @@ describe('SSH connection failures', () => {
     ...overrides
   })
 
-  async function createRemoteWithStoredKey(): Promise<{
-    session: TerminalSession
-    fake: FakeVorndPty
-    keyPath: string
-  }> {
-    const before = new Set(tempKeyFiles())
-    ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'key-stored' }])
-    const session = await ptyManager.createPty(
-      remotePayload({ _decryptedKeyContent: 'PRIVATE KEY MATERIAL' })
-    )
-    const added = tempKeyFiles().filter((f) => !before.has(f))
-    expect(added).toHaveLength(1)
-    return { session, fake: fakeVornd.last(), keyPath: path.join(os.tmpdir(), added[0]) }
-  }
-
   it('reads the output of a remote session, from the home directory', async () => {
     const session = await ptyManager.createPty(remotePayload())
     const fake = fakeVornd.last()
@@ -559,14 +544,13 @@ describe('SSH connection failures', () => {
     ])
   })
 
-  it('stops the remote command and deletes the temp key on an SSH error', async () => {
-    const { fake, keyPath } = await createRemoteWithStoredKey()
+  it('stops the remote command on an SSH error', async () => {
+    await ptyManager.createPty(remotePayload())
+    const fake = fakeVornd.last()
     vi.advanceTimersByTime(300)
-    expect(fake.written.join(' ')).toContain(`-i ${keyPath}`)
 
     fake.print('ssh: connect to host build.example.com port 22: Connection refused\r\n')
 
-    expect(fs.existsSync(keyPath)).toBe(false)
     // The fallback must be cancelled — a refused connection has no shell to run in.
     vi.advanceTimersByTime(30_000)
     expect(fake.written.some((w) => w.includes('cd /srv/proj'))).toBe(false)
@@ -588,8 +572,9 @@ describe('SSH connection failures', () => {
     expect(fake.written.some((w) => w.includes('cd /srv/proj'))).toBe(false)
   })
 
-  it('runs the remote command and deletes the temp key once the marker arrives', async () => {
-    const { session, fake, keyPath } = await createRemoteWithStoredKey()
+  it('runs the remote command once the marker arrives', async () => {
+    const session = await ptyManager.createPty(remotePayload())
+    const fake = fakeVornd.last()
     vi.advanceTimersByTime(300)
 
     fake.print(`__VORN_READY_${session.id.slice(0, 8)}__\r\n`)
@@ -597,7 +582,6 @@ describe('SSH connection failures', () => {
 
     vi.advanceTimersByTime(200)
     expect(fake.written).toContain('cd /srv/proj && claude-launch\r')
-    expect(fs.existsSync(keyPath)).toBe(false)
   })
 
   it('falls back to sending the remote command when the marker never arrives', async () => {
@@ -622,7 +606,7 @@ describe('SSH connection failures', () => {
     expect(fake.written).toEqual([])
   })
 
-  it('falls back to agent auth when stored-key auth has no decrypted key', async () => {
+  it('leaves a stored key to vornd and logs in with the agent', async () => {
     const before = new Set(tempKeyFiles())
     ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'key-stored' }])
     await ptyManager.createPty(remotePayload())
@@ -631,62 +615,6 @@ describe('SSH connection failures', () => {
     vi.advanceTimersByTime(300)
     expect(fake.written[0]).not.toContain('-i ')
     expect(tempKeyFiles().filter((f) => !before.has(f))).toEqual([])
-  })
-
-  it('deletes the temp key when the SSH session drops before connecting', async () => {
-    const { session, fake, keyPath } = await createRemoteWithStoredKey()
-    vi.advanceTimersByTime(300)
-
-    fake.exit(255)
-
-    expect(fs.existsSync(keyPath)).toBe(false)
-    expect(messagesOn(IPC.TERMINAL_EXIT)).toEqual([{ id: session.id, exitCode: 255 }])
-  })
-
-  it('deletes the temp key when every session is let go', async () => {
-    const { keyPath } = await createRemoteWithStoredKey()
-
-    ptyManager.killAll()
-
-    expect(fs.existsSync(keyPath)).toBe(false)
-  })
-
-  it('answers a password prompt once, with the real password', async () => {
-    ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'password' }])
-    await ptyManager.createPty(remotePayload({ _decryptedPassword: 'hunter2' }))
-    const fake = fakeVornd.last()
-    vi.advanceTimersByTime(300)
-    expect(fake.written[0]).toContain('-o PreferredAuthentications=password')
-
-    fake.print("dev@build.example.com's password: ")
-    vi.advanceTimersByTime(50)
-    expect(fake.written).toContain('hunter2\r')
-
-    // A second prompt (wrong password re-ask) must not be auto-answered again.
-    fake.print("dev@build.example.com's password: ")
-    vi.advanceTimersByTime(50)
-    expect(fake.written.filter((w) => w === 'hunter2\r')).toHaveLength(1)
-  })
-
-  it('stops answering password prompts after the listener window closes', async () => {
-    ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'password' }])
-    await ptyManager.createPty(remotePayload({ _decryptedPassword: 'hunter2' }))
-    const fake = fakeVornd.last()
-
-    vi.advanceTimersByTime(15_000)
-    fake.print("dev@build.example.com's password: ")
-    vi.advanceTimersByTime(100)
-
-    expect(fake.written).not.toContain('hunter2\r')
-  })
-
-  it('keeps the decrypted credentials off the payload', async () => {
-    ptyManager.setRemoteHosts([{ ...REMOTE_HOST, authMethod: 'password' }])
-    const payload = remotePayload({ _decryptedPassword: 'hunter2' })
-    await ptyManager.createPty(payload)
-
-    expect(payload._decryptedPassword).toBeUndefined()
-    expect(payload._decryptedKeyContent).toBeUndefined()
   })
 })
 

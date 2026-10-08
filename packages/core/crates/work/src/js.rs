@@ -143,6 +143,17 @@ pub fn number_value(n: f64) -> Value {
     serde_json::Number::from_f64(n).map_or(Value::Null, |n| js_numbers(Value::Number(n)))
 }
 
+/// JavaScript truthiness.
+pub fn truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0 && !f.is_nan()),
+        Value::String(s) => !s.is_empty(),
+        Value::Array(_) | Value::Object(_) => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

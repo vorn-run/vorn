@@ -107,6 +107,11 @@ impl SafeEnv {
         cfg!(windows) || matches!(*self.shell(), Shell::Answered(_))
     }
 
+    /// Whether the login shell is being asked now.
+    pub fn asking(&self) -> bool {
+        matches!(*self.shell(), Shell::Asking)
+    }
+
     /// Starts asking the login shell, once.
     pub fn prime(self: &Arc<Self>) {
         let mut shell = self.shell();

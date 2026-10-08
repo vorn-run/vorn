@@ -1402,6 +1402,55 @@ impl crate::native::sessions::Host for EngineHost {
         });
     }
 
+    fn start_watched(
+        &self,
+        spec: SpawnSpec,
+        name: String,
+        input: crate::native::sessions::Input,
+        watch: crate::native::sessions::Watch,
+        then: crate::native::sessions::Then,
+    ) {
+        use crate::native::sessions::Input;
+        let engine = Arc::clone(&self.engine);
+        // Taken before the spawn, so the exit is not missed.
+        let mut events = engine.subscribe();
+        let crate::native::sessions::Watch { output, ended } = watch;
+        self.runtime.spawn(async move {
+            let s = match engine.spawn_with(spec, Some(name), Some(output)).await {
+                Ok(s) => s,
+                Err(why) => return then(Err(why)),
+            };
+            then(Ok(crate::native::sessions::Started {
+                pid: s.pid,
+                epoch: s.epoch,
+            }));
+            if let Input::Prompt(prompt) = input {
+                let written = match prompt {
+                    Some(bytes) => engine.write(&s.id, bytes),
+                    None => Ok(()),
+                };
+                if let Err(err) = written.and_then(|()| engine.close_stdin(&s.id)) {
+                    warn!(id = %s.id, %err, "could not give the program its input");
+                }
+            }
+            let code = loop {
+                match events.recv().await {
+                    Ok(Event::Effect(fx, Effect::Exit { code, signal })) if fx.session == s.id => {
+                        break crate::streams::exit_code(code, signal);
+                    }
+                    Ok(Event::Closed(c)) if c.brief.session == s.id => break 1,
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break 1,
+                }
+            };
+            let _ = ended.send(code);
+        });
+    }
+
+    fn head_stamp(&self, id: &str) -> Option<Stamp> {
+        self.engine.head_stamp(id)
+    }
+
     fn signal(&self, id: &str, sig: Sig) {
         if let Err(err) = self.engine.signal(id, sig) {
             debug!(%id, %err, "could not signal a session vornd closed");

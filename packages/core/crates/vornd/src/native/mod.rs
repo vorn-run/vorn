@@ -34,14 +34,18 @@
 //! Connections and connectors, their secrets included, are vornd's
 //! ([`connectors`]).
 
+pub mod about;
 pub mod agent;
 pub mod config;
 pub mod connectors;
+pub mod credential;
+pub mod desktop;
 pub mod env;
 pub mod extensions;
 pub mod file;
 pub mod git;
 pub mod headless;
+pub mod hooks;
 pub mod ide;
 pub mod mcp;
 pub mod reach;
@@ -50,6 +54,8 @@ pub mod secrets;
 pub mod sessions;
 pub mod shell;
 pub mod ssh;
+pub mod tasks;
+pub mod widget;
 pub mod work;
 pub mod worktree;
 pub mod worktree_move;
@@ -62,7 +68,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, Semaphore};
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use vorn_store::{Placement, ProjectHosts, Store};
 
 use crate::applink::AppLink;
@@ -108,6 +114,7 @@ pub const METHODS: &[(&str, Effect)] = &[
     // Answered once vornd holds the session records ([`worktree_move`]).
     ("git:renameWorktreeBranch", Effect::Change),
     ("git:renameWorktree", Effect::Change),
+    ("git:checkoutBranch", Effect::Change),
     ("file:listDir", Effect::Read),
     ("file:readContent", Effect::Read),
     ("file:stamp", Effect::Read),
@@ -163,10 +170,6 @@ pub const METHODS: &[(&str, Effect)] = &[
 
 /// Calls in a native group that the server keeps answering, and why.
 pub const SERVER_ONLY: &[(&str, &str)] = &[
-    (
-        "git:checkoutBranch",
-        "moves the server's sessions on that worktree to the new branch and tells clients",
-    ),
     ("server:shutdown", "stops the server itself"),
     (
         "server:handoff",
@@ -182,12 +185,23 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
     ),
 ];
 
+/// The desktop's main process claiming its connection ([`desktop`]).
+pub const IDENTIFY: &str = "bridge:identify";
+
 /// The effect of a call vornd answers, or `None` for one it does not. The
 /// work model's calls are all answered here, never compared.
 pub fn effect(method: &str) -> Option<Effect> {
     if work::METHODS.contains(&method)
         || extensions::METHODS.contains(&method)
         || connectors::METHODS.contains(&method)
+        || desktop::answers(method)
+        || method == IDENTIFY
+        || tasks::METHODS.contains(&method)
+        || widget::METHODS.contains(&method)
+        || about::METHODS.contains(&method)
+        || method == script::METHOD
+        || credential::METHODS.contains(&method)
+        || hooks::METHODS.contains(&method)
     {
         return Some(Effect::Change);
     }
@@ -339,6 +353,10 @@ pub struct Native {
     shells: shell::Shells,
     /// The copy of the server's session records, when vornd holds sessions.
     registry: OnceLock<Arc<SessionRegistry>>,
+    /// The endpoint agents' hooks post to, once it listens ([`hooks`]).
+    hooks: OnceLock<Arc<hooks::Hooks>>,
+    /// Woken when a client asks for the widget's list ([`widget`]).
+    widget: tokio::sync::Notify,
     /// What starts the sessions vornd creates: the engine, when it runs one.
     host: OnceLock<Arc<dyn sessions::Host>>,
     sessions: Arc<sessions::Sessions>,
@@ -351,6 +369,8 @@ pub struct Native {
     connectors: OnceLock<Arc<connectors::Connectors>>,
     /// The extension host, once vornd has a database and its own address.
     extensions: OnceLock<Arc<extensions::Extensions>>,
+    /// The desktop's main process, which answers the browser and device calls.
+    main: Arc<desktop::Desktop>,
 }
 
 /// How long a call about what runs waits for the copy to settle as vornd
@@ -388,12 +408,15 @@ impl Native {
             catalog: vorn_agents::models::Catalog::default(),
             shells: shell::Shells::default(),
             registry: OnceLock::new(),
+            widget: tokio::sync::Notify::new(),
+            hooks: OnceLock::new(),
             host: OnceLock::new(),
             sessions: Arc::default(),
             sizes: vorn_worktrees::Sizes::default(),
             work: OnceLock::new(),
             connectors: OnceLock::new(),
             extensions: OnceLock::new(),
+            main: Arc::default(),
         })
     }
 
@@ -408,6 +431,44 @@ impl Native {
     pub fn set_registry(&self, registry: Arc<SessionRegistry>) {
         registry.want();
         let _ = self.registry.set(registry);
+    }
+
+    /// Starts the endpoint agents' hooks post to, once.
+    pub async fn start_hooks(self: &Arc<Self>) {
+        let Some(homes) = hooks::Homes::from_env() else {
+            warn!("no home directory; agents' hooks are not received");
+            return;
+        };
+        match hooks::Hooks::start(self, homes).await {
+            Ok(h) => {
+                info!(
+                    port = h.port(),
+                    owner = h.owns_registration(),
+                    "the hook endpoint listens"
+                );
+                let _ = self.hooks.set(h);
+            }
+            Err(err) => warn!(%err, "the hook endpoint could not listen"),
+        }
+    }
+
+    /// Denies open permission requests and gives the hook registration up.
+    pub fn stop_hooks(&self) {
+        if let Some(h) = self.hooks.get() {
+            h.stop();
+        }
+    }
+
+    /// How the hook endpoint is doing, for the health report.
+    pub fn hooks_activity(&self) -> Option<Value> {
+        self.hooks.get().map(|h| h.activity())
+    }
+
+    /// Tells the status widget's list as the registry changes, once there is one.
+    pub fn start_widget(self: &Arc<Self>) {
+        if let Some(registry) = self.registry.get() {
+            tokio::spawn(widget::follow(Arc::clone(self), Arc::clone(registry)));
+        }
     }
 
     /// The server's port, which the addresses a browser uses name.
@@ -459,6 +520,11 @@ impl Native {
     /// The environment vornd's children start from.
     pub(crate) fn child_env(&self) -> env::Env {
         self.env.get()
+    }
+
+    /// The desktop's main process, as vornd reaches it.
+    pub fn main_process(&self) -> &Arc<desktop::Desktop> {
+        &self.main
     }
 
     /// The app's channel. Only the first one given is kept.
@@ -545,8 +611,33 @@ impl Native {
         params: Value,
         viewer: &config::Viewer,
     ) -> Answer {
+        if desktop::answers(&method) {
+            return match self.main.request(&method, params, desktop::TIMEOUT).await {
+                Ok(Some(result)) => Answer::Result(result),
+                Ok(None) => Answer::Void,
+                Err(message) => Answer::Error(message),
+            };
+        }
         if config::METHODS.contains(&method.as_str()) {
             return config::answer(self, &method, params, viewer).await;
+        }
+        if tasks::METHODS.contains(&method.as_str()) {
+            return tasks::answer(self, &method, params).await;
+        }
+        if widget::METHODS.contains(&method.as_str()) {
+            return widget::answer(self);
+        }
+        if about::METHODS.contains(&method.as_str()) {
+            return about::answer(self, &method, params).await;
+        }
+        if method == script::METHOD {
+            return script::execute(self, params).await;
+        }
+        if credential::METHODS.contains(&method.as_str()) {
+            return credential::answer(self, &method, params).await;
+        }
+        if hooks::METHODS.contains(&method.as_str()) {
+            return hooks::answer(self, &method, &params);
         }
         if extensions::METHODS.contains(&method.as_str()) {
             let Some(host) = self.extensions.get().cloned() else {
@@ -900,6 +991,8 @@ pub enum Offer {
 
 /// One client connection's view of the native calls.
 pub struct Conn {
+    /// The connection's id in [`crate::streams`].
+    id: u64,
     native: Arc<Native>,
     groups: Arc<Groups>,
     reply: Forwarder,
@@ -929,6 +1022,7 @@ impl Conn {
     /// `desktop` connections are admitted from the start: vornd checked
     /// their credential itself.
     pub fn new(
+        id: u64,
         native: Arc<Native>,
         groups: Arc<Groups>,
         reply: Forwarder,
@@ -936,6 +1030,7 @@ impl Conn {
         desktop: bool,
     ) -> Arc<Conn> {
         Arc::new(Conn {
+            id,
             native,
             groups,
             reply,
@@ -1066,6 +1161,10 @@ impl Conn {
                 return Offer::Taken;
             }
         }
+        if method == IDENTIFY && mode == Mode::Native && self.admitted() {
+            self.identify(text);
+            return Offer::Taken;
+        }
         let call = effect(method)
             .filter(|_| self.admitted())
             .and_then(|e| request_of(text).map(|(id, params)| (e, id, params)));
@@ -1105,6 +1204,27 @@ impl Conn {
                 Offer::Pass
             }
         }
+    }
+
+    /// Main claims this connection as its own and hears whether it holds it.
+    fn identify(&self, text: &str) {
+        let claimed = self.native.main.claim(self.id, &self.reply);
+        self.groups.count(IDENTIFY, Counted::Native);
+        if let Some((id, _)) = request_of(text) {
+            self.reply
+                .send_now(&json!({ "jsonrpc": "2.0", "id": id, "result": { "ok": claimed } }));
+        }
+    }
+
+    /// Whether `text`, a frame without a method, answers a call vornd made
+    /// of main; if so it is settled here and never reaches the server.
+    pub fn settle_desktop(&self, text: &str) -> bool {
+        self.native.main.settle(self.id, text)
+    }
+
+    /// The client's side closed: main's calls fail now if this was main.
+    pub fn closed(&self) {
+        self.native.main.release(self.id);
     }
 
     /// Runs the call off this task and answers it, or sends it on to the

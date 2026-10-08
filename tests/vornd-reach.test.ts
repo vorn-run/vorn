@@ -12,7 +12,7 @@ vi.mock('../packages/server/src/logger', () => ({
 import { FakeVornd } from './helpers/fake-vornd'
 import { until } from './helpers/vornd-sessions'
 import { VorndSessions } from '../packages/server/src/vornd-sessions'
-import { linkReach, relayPairing } from '../packages/server/src/vornd-reach'
+import { hookActivity, linkReach, relayPairing } from '../packages/server/src/vornd-reach'
 
 /**
  * What vornd asks of the server once it holds pairing and writes tokens, and
@@ -85,32 +85,15 @@ describe('vornd asking the server', () => {
     ])
   })
 
-  it('asks the desktop for vornd and hands back its answer or its failure', async () => {
-    const bridge = {
-      request: vi.fn(async (method: string) => {
-        if (method === 'session:check') return { signedIn: true }
-        if (method === 'session:forget') throw 'gone'
-        throw new Error('no desktop')
-      })
-    }
-    linkReach({ channel: sessions, broadcast, disconnectToken, host: () => host, bridge })
+  it('keeps what vornd says of agents’ hooks, for the idle clock', async () => {
+    linkReach({ channel: sessions, broadcast, disconnectToken, host: () => host })
     await sessions.connect(fake.endpoint)
-    fake.send('vornd:ask', {
-      id: 1,
-      method: 'session:check',
-      params: { connectionId: 'c' },
-      timeoutMs: 5
-    })
-    fake.send('vornd:ask', { id: 2, method: 'session:fetch', params: {} })
-    fake.send('vornd:ask', { id: 'x', method: 'session:fetch' })
-    fake.send('vornd:ask', { id: 3, method: 'session:forget', params: 'c' })
-    await until('the answers', () => fake.made('vornd:answer').length === 3)
-    expect(bridge.request).toHaveBeenCalledWith('session:check', { connectionId: 'c' }, 5)
-    expect(fake.made('vornd:answer')).toEqual([
-      { id: 1, result: { signedIn: true } },
-      { id: 2, error: 'no desktop' },
-      { id: 3, error: 'gone' }
-    ])
+    fake.send('vornd:hooks', { pending: 2 })
+    await until('the hooks told', () => hookActivity().pendingPermissions === 2)
+    expect(hookActivity().msSinceHookActivity).toBeLessThan(5_000)
+    fake.send('vornd:hooks', {})
+    fake.send('vornd:hooks', { pending: 0 })
+    await until('the request answered', () => hookActivity().pendingPermissions === 0)
   })
 
   it('closes the sockets of a token vornd revoked', async () => {

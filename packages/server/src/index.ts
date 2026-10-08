@@ -20,7 +20,6 @@ import {
   setMethodFallback
 } from './ws-handler'
 import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
-import { browserBridge } from './browser-bridge'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
 import { registerAllMethods, setServerPort, sessionsToPersist } from './register-methods'
@@ -50,10 +49,9 @@ import {
 } from '@vornrun/shared/protocol'
 import { ptyManager } from './pty-manager'
 import { vorndSessions } from './vornd-sessions'
-import { cancelScripts } from './vornd-scripts'
 import { VorndKeeper } from './vornd-process'
 import { peerAddress, relayThroughVornd, relaysThroughVornd } from './vornd-relay'
-import { linkReach, relayPairing, VORND_FORWARDED_HEADER } from './vornd-reach'
+import { hookActivity, linkReach, relayPairing, VORND_FORWARDED_HEADER } from './vornd-reach'
 import { linkWorktrees } from './vornd-worktrees'
 import { invalidateSizeCache } from './worktree-inventory'
 import { seedRestored, verifyRestored } from './restored-sessions'
@@ -147,11 +145,7 @@ const vorndReach = linkReach({
       ? configManager.notifyChanged()
       : clientRegistry.broadcast(method, params, scope),
   disconnectToken,
-  host: getCurrentHost,
-  bridge: {
-    request: (method, params, timeoutMs) =>
-      browserBridge.request(method as never, params as never, timeoutMs)
-  }
+  host: getCurrentHost
 })
 linkWorktrees({ channel: vorndSessions, forgetSize: invalidateSizeCache })
 
@@ -640,11 +634,7 @@ export async function startServer(
     },
     // Not `shutdown()`: that kills every PTY, which is the one thing a handoff must not do.
     exit: () => {
-      // Release the hook registration so the replacement can claim it at once.
-      void import('./hook-server').then(({ hookServer }) => {
-        hookServer.stop()
-        process.exit(0)
-      })
+      process.exit(0)
     }
   }
 
@@ -665,10 +655,6 @@ export async function startServer(
   log.info(`[server] listening on ${host}:${actualPort} (ready in ${Date.now() - bootStarted}ms)`)
 
   // Graceful shutdown
-  const { hookServer } = await import('./hook-server')
-  const { uninstallHooks } = await import('./hook-installer')
-  const { uninstallAllCopilotHooks } = await import('./copilot-hook-installer')
-  const { hookStatusMapper } = await import('./hook-status-mapper')
 
   // Two failures, and neither is retried -- by the time either is visible this
   // has already cleared the credential and removed the port file, so a second
@@ -692,14 +678,9 @@ export async function startServer(
     // other order made this write nothing on every shutdown.
     sessionManager.persistNow()
     sessionManager.stopAutoSave()
-    hookServer.stop()
     clearLocalCredential()
-    uninstallHooks()
-    uninstallAllCopilotHooks()
-    hookStatusMapper.clear()
     headlessManager.killAll()
     ptyManager.killAll()
-    cancelScripts()
     vorndSessions.close()
     // Its sessions carry on in the session holder, for the next server.
     const vorndStopped = vorndKeeper.stop()
@@ -768,9 +749,10 @@ export async function startServer(
       // seconds, and a finished agent is not a reason to stay up.
       headless: headlessManager.getActiveSessions().filter((h) => h.status === 'running').length,
       msSinceClientActivity: clientRegistry.msSinceActivity(),
-      msSinceHookActivity: hookServer.msSinceHookActivity(),
-      bridgeAttached: browserBridge.isConnected,
-      pendingPermissions: hookServer.getPendingPermissions().length,
+      msSinceHookActivity: hookActivity().msSinceHookActivity,
+      // vornd holds the desktop's bridge now.
+      bridgeAttached: false,
+      pendingPermissions: hookActivity().pendingPermissions,
       pendingPairings: pendingRequests().length,
       connectorLeases: dbCountActiveConnectorInboxLeases(new Date().toISOString()),
       enabledSchedules: armedScheduleCount(configManager.loadConfig().workflows ?? []),

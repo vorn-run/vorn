@@ -9,7 +9,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import type { ScriptExecutionResult } from '../packages/server/src/script-runner'
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import {
   Watcher,
@@ -20,7 +19,11 @@ import {
   until,
   type RealServer
 } from './helpers/real-server'
-import { normalizeScriptRun, type ScriptRun } from './helpers/scripts-parity'
+import {
+  normalizeScriptRun,
+  type ScriptExecutionResult,
+  type ScriptRun
+} from './helpers/scripts-parity'
 import { normalizeRun } from './helpers/sessions-parity'
 
 // Booting a server probes Tailscale with a real process; nothing here needs it.
@@ -36,6 +39,8 @@ const SCRIPTS = {
   fails: 'echo out; echo err >&2; exit 3',
   args: 'printf "%s|" "$@"; echo'
 } as const
+
+let unsupported: unknown
 
 async function scenario(server: RealServer): Promise<Record<string, ScriptRun>> {
   const project = path.join(server.dirs.work, 'proj')
@@ -68,6 +73,11 @@ async function scenario(server: RealServer): Promise<Record<string, ScriptRun>> 
           .map((p) => (p as { exitCode: number }).exitCode)
       }
     }
+    unsupported = await through.result('script:execute', {
+      scriptType: 'ruby',
+      scriptContent: 'puts 1',
+      cwd: project
+    })
     return runs
   } finally {
     through.close()
@@ -133,8 +143,16 @@ describe.skipIf(!runnable)('project scripts through vornd', () => {
     })
   })
 
+  it('says which type it does not run', () => {
+    expect(unsupported).toEqual({
+      success: false,
+      output: '',
+      error: 'Unsupported script type: ruby'
+    })
+  })
+
   it('has vornd run them', () => {
-    // The server stays the entry point and asks vornd to run each one.
-    expect(answered).toMatchObject({ native: 3, forwarded: 3 })
+    expect(answered).toMatchObject({ native: 4 })
+    expect((answered as { forwarded?: number }).forwarded ?? 0).toBe(0)
   })
 })

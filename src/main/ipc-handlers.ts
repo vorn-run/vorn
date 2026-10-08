@@ -19,7 +19,7 @@ import { watchArtifact, stopWatching } from './artifact-watcher'
 import * as deviceRegistry from './device-registry'
 import * as deviceChrome from './device-chrome'
 import * as deviceVideo from './device-video'
-import { registerCredentialHandlers, enrichPayloadWithCredentials } from './credential-handlers'
+import { registerCredentialHandlers } from './credential-handlers'
 import log from './logger'
 
 let bridge: ServerBridge | null = null
@@ -135,11 +135,10 @@ function guardFileRequests(sessionId: string): void {
 export function registerIpcHandlers(): void {
   // ─── Delegated to server via bridge ────────────────────────────
 
-  // Terminal (enriched with decrypted credentials when needed)
-  safeHandle(IPC.TERMINAL_CREATE, async (_, payload) => {
-    const enriched = await enrichPayloadWithCredentials(payload, requireBridge())
-    return requireBridge().request(IPC.TERMINAL_CREATE, enriched)
-  })
+  // A remote host's key or password is vornd's to read from its vault.
+  safeHandle(IPC.TERMINAL_CREATE, (_, payload) =>
+    requireBridge().request(IPC.TERMINAL_CREATE, payload)
+  )
   safeHandle(IPC.TERMINAL_KILL, (_, id) => {
     // Killing the session hands its device back. Nothing else does: closing the
     // pane releases, but a session killed with the pane already shut — or never
@@ -255,11 +254,9 @@ export function registerIpcHandlers(): void {
     requireBridge().request(IPC.TASK_IMAGE_CLEANUP, taskId)
   )
 
-  // Headless sessions (enriched with decrypted credentials when needed)
-  safeHandle(IPC.HEADLESS_CREATE, async (_, payload) => {
-    const enriched = await enrichPayloadWithCredentials(payload, requireBridge())
-    return requireBridge().request(IPC.HEADLESS_CREATE, enriched)
-  })
+  safeHandle(IPC.HEADLESS_CREATE, (_, payload) =>
+    requireBridge().request(IPC.HEADLESS_CREATE, payload)
+  )
   safeHandle(IPC.HEADLESS_KILL, (_, id) => requireBridge().request(IPC.HEADLESS_KILL, id))
   safeHandle(IPC.HEADLESS_LIST, () => requireBridge().request(IPC.HEADLESS_LIST))
 

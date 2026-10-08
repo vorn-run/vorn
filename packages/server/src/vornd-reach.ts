@@ -29,8 +29,21 @@ const BROADCASTS: ReadonlySet<string> = new Set([
   IPC.ARTIFACT_COMMENTS_CHANGED,
   IPC.EXTENSION_ACTIVATION,
   IPC.EXTENSION_FOOTER_ITEMS,
-  IPC.EXTENSION_SELECTION_REQUEST
+  IPC.EXTENSION_SELECTION_REQUEST,
+  IPC.WIDGET_STATUS_UPDATE,
+  IPC.SCRIPT_DATA,
+  IPC.SCRIPT_EXIT,
+  IPC.WIDGET_PERMISSION_REQUEST,
+  IPC.WIDGET_PERMISSION_CANCELLED
 ])
+
+/** What vornd last said of agents' hooks (`vornd:hooks`), which keeps this server from stopping as idle. */
+const hooks = { lastAt: Date.now(), pending: 0 }
+
+/** How long since a hook posted to vornd, and how many permission requests it holds open. */
+export function hookActivity(): { msSinceHookActivity: number; pendingPermissions: number } {
+  return { msSinceHookActivity: Date.now() - hooks.lastAt, pendingPermissions: hooks.pending }
+}
 
 export interface ReachDeps {
   /** vornd's channel: what it asks, when it is (re)subscribed, and telling it. */
@@ -41,8 +54,6 @@ export interface ReachDeps {
   }
   /** `scope` is the session a push is about, for the clients subscribed to one. */
   broadcast: (method: string, params: unknown, scope?: string) => void
-  /** The desktop's bridge, which vornd asks through this server until it holds the desktop itself. */
-  bridge?: { request(method: string, params: unknown, timeoutMs?: number): Promise<unknown> }
   disconnectToken: (tokenId: string) => number
   /** The address this server is bound to now. */
   host: () => string
@@ -64,20 +75,10 @@ export function linkReach(deps: ReachDeps): { hostChanged(): void } {
           log.warn({ method: p.method }, '[vornd] refused to broadcast for vornd')
         }
         return
-      case 'vornd:ask': {
-        const id = p.id
-        if (typeof id !== 'number' || typeof p.method !== 'string' || !deps.bridge) return
-        const timeoutMs = typeof p.timeoutMs === 'number' ? p.timeoutMs : undefined
-        void deps.bridge.request(p.method, p.params, timeoutMs).then(
-          (result) => deps.channel.tell('vornd:answer', { id, result }),
-          (err: unknown) =>
-            deps.channel.tell('vornd:answer', {
-              id,
-              error: err instanceof Error ? err.message : String(err)
-            })
-        )
+      case 'vornd:hooks':
+        hooks.lastAt = Date.now()
+        if (typeof p.pending === 'number') hooks.pending = p.pending
         return
-      }
       case 'vornd:tokenRevoked':
         if (typeof p.tokenId === 'string') deps.disconnectToken(p.tokenId)
         return

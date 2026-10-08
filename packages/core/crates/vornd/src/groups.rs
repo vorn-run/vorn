@@ -81,13 +81,23 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "config",
     "credentials",
     "http",
+    "browser",
+    "device",
+    "bridge",
+    "task",
+    "project",
+    "sessionEvent",
+    "widget",
+    "core",
+    "env",
+    "ssh",
+    "credential",
+    "permission",
 ];
 
 /// Why vornd may still hand a call to the server.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StillForwarded {
-    /// Extension hosting and the desktop bridge, which move separately.
-    ExtensionHost,
     /// Not native yet.
     NotYetNative,
 }
@@ -95,7 +105,6 @@ pub enum StillForwarded {
 impl StillForwarded {
     pub fn name(self) -> &'static str {
         match self {
-            StillForwarded::ExtensionHost => "extension host",
             StillForwarded::NotYetNative => "not yet native",
         }
     }
@@ -106,22 +115,9 @@ impl StillForwarded {
 /// endpoint reports (`unexpectedForwards`) and the tests fail on. It shrinks
 /// to nothing.
 pub const STILL_FORWARDED: &[(&str, StillForwarded)] = &[
-    ("bridge", StillForwarded::ExtensionHost),
-    ("browser", StillForwarded::ExtensionHost),
-    ("device", StillForwarded::ExtensionHost),
     ("auth:authenticate", StillForwarded::NotYetNative),
     ("subscribe", StillForwarded::NotYetNative),
-    ("credential", StillForwarded::NotYetNative),
-    ("task", StillForwarded::NotYetNative),
-    ("project", StillForwarded::NotYetNative),
-    ("sessionEvent", StillForwarded::NotYetNative),
     ("session", StillForwarded::NotYetNative),
-    ("env", StillForwarded::NotYetNative),
-    ("core", StillForwarded::NotYetNative),
-    ("ssh", StillForwarded::NotYetNative),
-    ("permission", StillForwarded::NotYetNative),
-    ("widget", StillForwarded::NotYetNative),
-    ("script", StillForwarded::NotYetNative),
     ("server", StillForwarded::NotYetNative),
     ("terminal", StillForwarded::NotYetNative),
     ("git", StillForwarded::NotYetNative),
@@ -327,7 +323,7 @@ mod tests {
             assert_eq!(groups.mode(group), Mode::Native, "{group}");
         }
         assert_eq!(groups.mode("workflow"), Mode::Native);
-        assert_eq!(groups.mode("task"), Mode::Forward);
+        assert_eq!(groups.mode("subscribe"), Mode::Forward);
         let shadowed = Groups::new(Some("git=shadow,file=forward")).unwrap();
         assert_eq!(shadowed.mode("git"), Mode::Shadow);
         assert_eq!(shadowed.mode("file"), Mode::Forward);
@@ -336,7 +332,7 @@ mod tests {
 
     #[test]
     fn refuses_native_for_a_group_nothing_implements() {
-        let err = Groups::parse("task=native").unwrap_err();
+        let err = Groups::parse("subscribe=native").unwrap_err();
         assert!(err.contains("no native implementation"), "{err}");
         assert_eq!(
             Groups::parse("git=native").unwrap().mode("git"),
@@ -379,7 +375,7 @@ mod tests {
     #[test]
     fn reports_a_forward_the_list_does_not_allow() {
         let groups = Groups::new(None).unwrap();
-        groups.count("browser:navigate", Counted::Forwarded);
+        groups.count("agent:detect", Counted::Forwarded);
         groups.count("config:save", Counted::Forwarded);
         groups.count("config:save", Counted::Forwarded);
         groups.count("config:load", Counted::Native);
@@ -388,15 +384,16 @@ mod tests {
             BTreeMap::from([("config:save".to_owned(), 2)])
         );
         assert_eq!(
-            still_forwarded("browser:navigate"),
-            Some(StillForwarded::ExtensionHost)
+            still_forwarded("agent:detect"),
+            Some(StillForwarded::NotYetNative)
         );
         assert_eq!(still_forwarded("config:load"), None);
+        assert_eq!(still_forwarded("browser:navigate"), None);
         groups.count("config:load", Counted::BeforeAuth);
         assert_eq!(groups.unexpected_forwards().len(), 1);
         assert!(unknown("nonexistent:method"));
         assert!(!unknown("config:save"));
-        assert!(!unknown("task:list"));
+        assert!(!unknown("agent:detect"));
     }
 
     /// Every call a client can make, from the protocol's request map, is

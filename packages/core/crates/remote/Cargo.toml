@@ -1,0 +1,13 @@
+[package]
+name = "vorn-remote"
+# Never published and never versioned on its own; vorn-core carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Commands run on a remote host over ssh, with the options and multiplexing the app uses"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }

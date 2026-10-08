@@ -1,9 +1,9 @@
 //! What a terminal on a remote host is given once its local shell is up:
-//! the ssh line, the password and stored key the desktop decrypted for this
+//! the ssh line, the password and stored key read from the vault for this
 //! one login, and the command to run there ([`Remote`]). The engine types
 //! them as [`vorn_agents::launch::ssh::Login`] reads the output.
 //!
-//! The credentials reach vornd in the create's params and leave it only
+//! The credentials leave vornd only
 //! over the session holder's local socket, as keystrokes, and as a key file
 //! only its owner can read, removed once the login is over. Neither is ever
 //! in an argv, an environment, a record, a plan, an answer or a log line:
@@ -31,13 +31,6 @@ impl fmt::Debug for Secret {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Secret(<redacted>)")
     }
-}
-
-/// The credentials a create carries for one login (`_decryptedKeyContent`, `_decryptedPassword`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Credentials {
-    pub key_content: Option<Secret>,
-    pub password: Option<Secret>,
 }
 
 /// A stored key, written for the login to a file of its own and removed after it.
@@ -97,7 +90,7 @@ mod tests {
             password: Some(Secret::new("hunter2".into())),
             key: Some(KeyFile::new(Secret::new("-----BEGIN KEY-----".into()))),
         };
-        let shown = format!("{remote:?} {:?}", Credentials::default());
+        let shown = format!("{remote:?}");
         assert!(
             !shown.contains("hunter2") && !shown.contains("BEGIN KEY"),
             "{shown}"
