@@ -25,7 +25,7 @@ limits sit beside this file under `results/<date>-<commit>/`.
   all attached to one grid client, timed until the client's screens show
   every log's last line.
 
-Run it with `scripts/bench-gcp.sh [TIER...]`. Tiers above 100 refuse to run
+Run it with `PROJECT=<gcp-project> scripts/bench-gcp.sh [TIER...]`. Tiers above 100 refuse to run
 unless `VORN_BENCH_HOST=1` is set, which only the VM's runner does.
 
 ### 100 sessions · 2026-10-08 · `1f3cff49` · n2-standard-16 (16 vCPU, 62.8 GiB, Linux 7.0.0-1011-gcp)
