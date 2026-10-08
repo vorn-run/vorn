@@ -77,6 +77,7 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "scheduler",
     "webhook",
     "artifact",
+    "extension",
 ];
 
 /// The group a method belongs to: everything before the first colon.

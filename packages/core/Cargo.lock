@@ -3068,6 +3068,7 @@ dependencies = [
  "uuid",
  "vorn-agents",
  "vorn-engine",
+ "vorn-extensions",
  "vorn-git",
  "vorn-grid-client",
  "vorn-mcp",

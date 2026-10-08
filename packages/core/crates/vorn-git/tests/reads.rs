@@ -44,7 +44,15 @@ fn reads_the_diff_status_and_origin_of_a_worktree() {
     assert!(diff.ends_with("+b"), "trimmed as gitExec trims: {diff:?}");
     assert_eq!(g.status_porcelain(dir).unwrap(), "M a.txt\n?? new.txt");
 
-    git(dir, &["remote", "add", "origin", "git@github.com:vorn-run/vorn.git"]);
+    git(
+        dir,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:vorn-run/vorn.git",
+        ],
+    );
     assert_eq!(
         g.origin_url(dir).as_deref(),
         Some("git@github.com:vorn-run/vorn.git")

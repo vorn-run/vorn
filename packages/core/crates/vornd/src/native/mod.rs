@@ -39,6 +39,7 @@
 pub mod agent;
 pub mod connection;
 pub mod env;
+pub mod extensions;
 pub mod file;
 pub mod git;
 pub mod headless;
@@ -287,7 +288,7 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
 /// The effect of a call vornd answers, or `None` for one it does not. The
 /// work model's calls are all answered here, never compared.
 pub fn effect(method: &str) -> Option<Effect> {
-    if work::METHODS.contains(&method) {
+    if work::METHODS.contains(&method) || extensions::METHODS.contains(&method) {
         return Some(Effect::Change);
     }
     METHODS.iter().find(|(m, _)| *m == method).map(|(_, e)| *e)
@@ -446,6 +447,8 @@ pub struct Native {
     sizes: vorn_worktrees::Sizes,
     /// The work model, once vornd has a database and its own address.
     work: OnceLock<Arc<work::Work>>,
+    /// The extension host, once vornd has a database and its own address.
+    extensions: OnceLock<Arc<extensions::Extensions>>,
 }
 
 /// How long a call about what runs waits for the copy to settle as vornd
@@ -487,6 +490,7 @@ impl Native {
             sessions: Arc::default(),
             sizes: vorn_worktrees::Sizes::default(),
             work: OnceLock::new(),
+            extensions: OnceLock::new(),
         })
     }
 
@@ -515,6 +519,20 @@ impl Native {
 
     pub fn work(&self) -> Option<&Arc<work::Work>> {
         self.work.get()
+    }
+
+    /// The extension host. Only the first one given is kept.
+    pub fn set_extensions(&self, extensions: Arc<extensions::Extensions>) {
+        let _ = self.extensions.set(extensions);
+    }
+
+    pub fn extensions(&self) -> Option<&Arc<extensions::Extensions>> {
+        self.extensions.get()
+    }
+
+    /// The environment vornd's children start from.
+    pub(crate) fn child_env(&self) -> env::Env {
+        self.env.get()
     }
 
     /// The app's channel. Only the first one given is kept.
@@ -596,6 +614,17 @@ impl Native {
     /// panic is the server's call to answer, not a crash, unless the call
     /// may already have changed something.
     pub async fn answer(self: &Arc<Self>, method: String, params: Value) -> Answer {
+        if extensions::METHODS.contains(&method.as_str()) {
+            let Some(host) = self.extensions.get().cloned() else {
+                return Answer::Error("vornd is not hosting extensions".to_owned());
+            };
+            let m = method.clone();
+            let running = tokio::spawn(async move { host.answer(&m, &params).await });
+            return running.await.unwrap_or_else(|err| {
+                warn!(%method, %err, "an extension call failed");
+                Answer::Error(format!("{method} failed in vornd"))
+            });
+        }
         if work::is_work(&method)
             || matches!(
                 method.as_str(),
@@ -1103,6 +1132,17 @@ impl Conn {
         if mode == Mode::Forward {
             self.groups.count(method, Counted::Forwarded);
             return Offer::Pass;
+        }
+        if method == extensions::SELECTION_RESULT && mode == Mode::Native && self.admitted() {
+            if let Some(host) = self.native.extensions.get() {
+                let params = serde_json::from_str::<Value>(text)
+                    .ok()
+                    .and_then(|mut frame| frame.get_mut("params").map(Value::take))
+                    .unwrap_or_default();
+                host.resolve_selection(&params);
+                self.groups.count(method, Counted::Native);
+                return Offer::Taken;
+            }
         }
         let call = effect(method)
             .filter(|_| self.admitted())

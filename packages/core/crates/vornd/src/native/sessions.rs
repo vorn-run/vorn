@@ -73,7 +73,7 @@ pub const INITIAL_COLS: u16 = 80;
 pub const INITIAL_ROWS: u16 = 24;
 
 /// The terminal type programs are told they run in, off Windows.
-const PTY_TERM: &str = "xterm-256color";
+pub(super) const PTY_TERM: &str = "xterm-256color";
 
 /// How long a create naming a conversation that a start of the server's
 /// holds waits for it before it says the conversation is busy, and how
