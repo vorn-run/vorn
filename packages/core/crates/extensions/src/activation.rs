@@ -156,7 +156,7 @@ fn url_host(url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pack::{tests::install, PackStore};
+    use crate::pack::{fixture::install, PackStore};
     use serde_json::json;
 
     fn rule(v: serde_json::Value) -> Activation {

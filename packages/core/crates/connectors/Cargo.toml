@@ -1,18 +1,18 @@
 [package]
-name = "vorn-extensions"
+name = "vorn-connectors"
 # Never published and never versioned on its own; vorn-core carries the app version.
 version = "0.0.0"
 edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 publish = false
-description = "Extensions for Vorn: installed packs, where their contributions show, the child each runs as per project, and the channel it talks back on"
+description = "Connectors for Vorn: the packs on disk and their manifests, the child each runs in the connector protocol, the catalog, and the built-in HTTP and MCP connectors"
+
+[features]
+# The pack fixture, for the tests of crates built on this one.
+test-support = []
 
 [dependencies]
-vorn-connectors = { path = "../connectors" }
-data-encoding = "2"
-getrandom = "0.4"
-# Link handler patterns are JavaScript regular expressions, matched as a browser would.
 regress = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -24,6 +24,5 @@ tracing = "0.1"
 libc = "0.2"
 
 [dev-dependencies]
-vorn-connectors = { path = "../connectors", features = ["test-support"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros"] }

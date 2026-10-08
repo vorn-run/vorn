@@ -59,7 +59,7 @@ pub fn match_links(packs: &[InstalledPack], subject: &Subject<'_>, text: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pack::{tests::install, PackStore};
+    use crate::pack::{fixture::install, PackStore};
     use serde_json::json;
     use std::path::Path;
 

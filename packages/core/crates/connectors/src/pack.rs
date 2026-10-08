@@ -217,13 +217,14 @@ fn directory_bytes(dir: &Path) -> std::io::Result<u64> {
     Ok(total)
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
+/// Packs written straight to disk, for tests here and in the crates built on this one.
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixture {
     use super::*;
     use serde_json::json;
 
     /// Writes an installed pack `id` at `version` with `manifest`.
-    pub(crate) fn install(root: &Path, id: &str, version: &str, manifest: &Value) -> PathBuf {
+    pub fn install(root: &Path, id: &str, version: &str, manifest: &Value) -> PathBuf {
         let dir = root.join(id).join(version);
         // Windows resolves `id/../x` without creating `id`, where current.json goes.
         fs::create_dir_all(root.join(id)).unwrap();
@@ -237,6 +238,14 @@ pub(crate) mod tests {
         .unwrap();
         dir
     }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fixture::install;
+    use super::*;
+    use serde_json::json;
 
     fn extension(name: &str) -> Value {
         json!({ "id": name, "name": name, "kind": "extension", "protocol": 1,

@@ -7,12 +7,12 @@
 use serde_json::Value;
 
 /// `value` when it is a string, else `fallback`: the SDK's `str`.
-pub(crate) fn str_or<'a>(value: Option<&'a Value>, fallback: &'a str) -> &'a str {
+pub fn str_or<'a>(value: Option<&'a Value>, fallback: &'a str) -> &'a str {
     value.and_then(Value::as_str).unwrap_or(fallback)
 }
 
 /// The string at `value`, or `""`.
-pub(crate) fn str_of(value: Option<&Value>) -> &str {
+pub fn str_of(value: Option<&Value>) -> &str {
     str_or(value, "")
 }
 
@@ -57,7 +57,7 @@ pub fn trim(s: &str) -> &str {
 }
 
 /// `Number(value)` for what a manifest holds; `None` stands for `NaN`.
-pub(crate) fn number(value: Option<&Value>) -> Option<f64> {
+pub fn number(value: Option<&Value>) -> Option<f64> {
     match value? {
         Value::Number(n) => n.as_f64(),
         Value::Bool(b) => Some(f64::from(u8::from(*b))),
@@ -84,7 +84,7 @@ pub(crate) fn number(value: Option<&Value>) -> Option<f64> {
 }
 
 /// A number as `JSON.stringify` writes it: whole numbers without a fraction.
-pub(crate) fn json_number(n: f64) -> Value {
+pub fn json_number(n: f64) -> Value {
     // Exact for every integer an f64 holds below 2^53, which is all a manifest names.
     #[allow(clippy::cast_possible_truncation)]
     let whole = n as i64;
@@ -96,7 +96,7 @@ pub(crate) fn json_number(n: f64) -> Value {
 }
 
 /// Serializes a present number as [`json_number`] writes it.
-pub(crate) fn serialize_some_number<S: serde::Serializer>(
+pub fn serialize_some_number<S: serde::Serializer>(
     n: &Option<f64>,
     s: S,
 ) -> Result<S::Ok, S::Error> {
@@ -105,12 +105,12 @@ pub(crate) fn serialize_some_number<S: serde::Serializer>(
 }
 
 /// A JavaScript regular expression without flags, compiled once.
-pub(crate) fn regex(pattern: &str) -> regress::Regex {
+pub fn regex(pattern: &str) -> regress::Regex {
     regress::Regex::new(pattern).expect("a pattern written in this crate compiles")
 }
 
 /// Whether `re` matches somewhere in `text`, as `RegExp.prototype.test`.
-pub(crate) fn test(re: &regress::Regex, text: &str) -> bool {
+pub fn test(re: &regress::Regex, text: &str) -> bool {
     re.find(text).is_some()
 }
 
