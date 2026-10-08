@@ -12,6 +12,7 @@ members = [
   "crates/sessiond-wire",
   "crates/recovery",
   "crates/engine",
+  "crates/extensions",
   "crates/grid",
   "crates/grid-client",
   "crates/size",
