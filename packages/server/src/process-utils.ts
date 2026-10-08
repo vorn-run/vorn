@@ -70,11 +70,6 @@ export function primeShellEnv(): Promise<void> {
 
 /** True once the login shell has answered; on Windows there is nothing to wait for. */
 /** The PATH a process without one should use, and whether the shell has spoken for it. */
-export function resolvedShellPath(): { path: string | null; resolved: boolean } {
-  const env = getSafeEnv()
-  return { path: env.PATH || env.Path || null, resolved: shellEnvResolved() }
-}
-
 export function shellEnvResolved(): boolean {
   return process.platform === 'win32' || resolvedEnvCache !== undefined
 }
@@ -369,55 +364,6 @@ export function normalizePath(p: string): string {
     result = result.toLowerCase()
   }
   return result
-}
-
-export interface SshTestResult {
-  success: boolean
-  message: string
-  durationMs: number
-}
-
-export function testSshConnection(host: RemoteHost): Promise<SshTestResult> {
-  return new Promise((resolve) => {
-    const start = Date.now()
-    const args = buildSshArgs(host, { connectTimeout: 5 })
-    args.push('echo', '__VORN_OK__')
-
-    const safetyTimer = setTimeout(() => {
-      try {
-        child.kill()
-      } catch {
-        /* already dead */
-      }
-    }, 12000)
-
-    const child = execFile(
-      'ssh',
-      args,
-      { timeout: 10000, env: getSafeEnv() },
-      (err, stdout, stderr) => {
-        clearTimeout(safetyTimer)
-        const durationMs = Date.now() - start
-        if (!err && stdout.includes('__VORN_OK__')) {
-          resolve({ success: true, message: `Connected in ${durationMs}ms`, durationMs })
-        } else {
-          // Strip SSH warnings (e.g. "Warning: Permanently added ... to known hosts")
-          const stderrClean = (stderr || '')
-            .split('\n')
-            .filter((line) => !line.startsWith('Warning:'))
-            .join('\n')
-            .trim()
-          let msg = stderrClean || err?.message || 'Connection failed'
-          if (msg.includes('Host key verification failed')) {
-            msg = 'Host key changed — remove old entry from known_hosts or verify the server'
-          } else if (msg.includes('Permission denied')) {
-            msg = 'Permission denied — check username and authentication method'
-          }
-          resolve({ success: false, message: msg, durationMs })
-        }
-      }
-    )
-  })
 }
 
 /**

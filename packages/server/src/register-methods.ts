@@ -74,7 +74,6 @@ import {
   startPairing
 } from './pairing'
 import { disconnectToken } from './ws-handler'
-import { resolvedShellPath, shellEnvSettled, testSshConnection } from './process-utils'
 import { captureAgentSessionId } from './agent-session-capture'
 import { listAgentModels } from './agent-model-catalog'
 import { supportsExactSessionResume, supportsSessionIdPinning } from '@vornrun/shared/types'
@@ -83,7 +82,6 @@ import { vorndSessions } from './vornd-sessions'
 import { wireVorndRestore } from './vornd-restore'
 import { onePerKey } from './one-per-key'
 import { isWorkspaceHeld } from './workspace-holds'
-import { coreStatus } from './native-core'
 
 function logSessionEvent(
   sessionId: string,

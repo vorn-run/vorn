@@ -108,106 +108,6 @@ describe('process-utils (server package)', () => {
       expect(getShellArgs()).toEqual(['-l'])
     }
   })
-
-  describe('testSshConnection', () => {
-    beforeEach(() => {
-      mockExecFile.mockReset()
-    })
-
-    const host = {
-      id: 'test-id',
-      label: 'Test Host',
-      hostname: 'example.com',
-      user: 'ubuntu',
-      port: 22
-    }
-
-    it('returns success when SSH echoes the marker', async () => {
-      mockExecFile.mockImplementation(
-        (
-          _cmd: string,
-          _args: string[],
-          _opts: unknown,
-          cb: (err: Error | null, stdout: string, stderr: string) => void
-        ) => {
-          cb(null, '__VORN_OK__\n', '')
-          return { kill: vi.fn() }
-        }
-      )
-
-      const { testSshConnection } = await import('../packages/server/src/process-utils')
-      const result = await testSshConnection(host)
-      expect(result.success).toBe(true)
-      expect(result.message).toMatch(/Connected in \d+ms/)
-
-      // Verify SSH args include BatchMode and StrictHostKeyChecking
-      const args = mockExecFile.mock.calls[0][1] as string[]
-      expect(args).toContain('BatchMode=yes')
-      expect(args).toContain('StrictHostKeyChecking=accept-new')
-      expect(args).toContain('ubuntu@example.com')
-    })
-
-    it('returns failure with stderr message on error', async () => {
-      mockExecFile.mockImplementation(
-        (
-          _cmd: string,
-          _args: string[],
-          _opts: unknown,
-          cb: (err: Error | null, stdout: string, stderr: string) => void
-        ) => {
-          cb(new Error('exit code 255'), '', 'Permission denied (publickey)')
-          return { kill: vi.fn() }
-        }
-      )
-
-      const { testSshConnection } = await import('../packages/server/src/process-utils')
-      const result = await testSshConnection(host)
-      expect(result.success).toBe(false)
-      expect(result.message).toBe('Permission denied — check username and authentication method')
-    })
-
-    it('returns helpful message for host key verification failure', async () => {
-      mockExecFile.mockImplementation(
-        (
-          _cmd: string,
-          _args: string[],
-          _opts: unknown,
-          cb: (err: Error | null, stdout: string, stderr: string) => void
-        ) => {
-          cb(new Error('exit code 255'), '', 'Host key verification failed.')
-          return { kill: vi.fn() }
-        }
-      )
-
-      const { testSshConnection } = await import('../packages/server/src/process-utils')
-      const result = await testSshConnection(host)
-      expect(result.success).toBe(false)
-      expect(result.message).toContain('known_hosts')
-    })
-
-    it('includes custom port and key path in args', async () => {
-      mockExecFile.mockImplementation(
-        (
-          _cmd: string,
-          _args: string[],
-          _opts: unknown,
-          cb: (err: Error | null, stdout: string, stderr: string) => void
-        ) => {
-          cb(null, '__VORN_OK__\n', '')
-          return { kill: vi.fn() }
-        }
-      )
-
-      const { testSshConnection } = await import('../packages/server/src/process-utils')
-      await testSshConnection({ ...host, port: 2222, sshKeyPath: '/home/.ssh/id_ed25519' })
-
-      const args = mockExecFile.mock.calls[0][1] as string[]
-      expect(args).toContain('-p')
-      expect(args).toContain('2222')
-      expect(args).toContain('-i')
-      expect(args).toContain('/home/.ssh/id_ed25519')
-    })
-  })
 })
 
 describe('normalizePath', () => {
@@ -310,23 +210,6 @@ describe('the login-shell environment', () => {
     await mod.primeShellEnv()
     expect(mod.getSafeEnv().PATH).toBe('/opt/homebrew/bin:/usr/bin')
     expect(mockExecFile).toHaveBeenCalledTimes(1)
-  })
-
-  it('offers its PATH to the main process, saying whether the shell has spoken', async () => {
-    // The main process has no login shell of its own, so it asks for this one.
-    let finish: (() => void) | undefined
-    mockExecFile.mockImplementation((_bin, _args, _opts, cb) => {
-      finish = () => cb(null, 'PATH=/opt/homebrew/bin:/usr/bin\n')
-    })
-    const mod = await import('../packages/server/src/process-utils')
-    const priming = mod.primeShellEnv()
-    expect(mod.resolvedShellPath()).toEqual({ path: '/usr/bin', resolved: false })
-    finish?.()
-    await priming
-    expect(mod.resolvedShellPath()).toEqual({
-      path: '/opt/homebrew/bin:/usr/bin',
-      resolved: true
-    })
   })
 
   it('does not hand the desktop credential to the login shell', async () => {
