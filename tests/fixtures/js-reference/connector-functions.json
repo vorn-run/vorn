@@ -15,18 +15,12 @@
               "contributes": {
                 "a": 1
               },
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": {
                 "a": 1
               },
               "packUrl": "https://p",
-              "actions": [
-                1,
-                "a"
-              ]
+              "actions": [1, "a"]
             }
           ],
           "templates": [
@@ -35,9 +29,7 @@
               "description": "d",
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -46,9 +38,7 @@
             {
               "id": "m",
               "name": "M",
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -63,10 +53,7 @@
               "name": "A",
               "packageName": "@v/b",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "authRung": "weird",
               "verified": {
@@ -89,28 +76,18 @@
             {
               "id": "b",
               "name": "B",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": true,
               "sha256": "",
               "authRung": "weird",
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "name": "A",
               "description": 4,
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "authRung": "weird",
               "env": 3,
@@ -156,41 +133,27 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": "x",
               "env": 3,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
               "id": "a",
               "packageName": "",
               "description": 4,
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": true,
               "env": "x"
@@ -213,14 +176,9 @@
               "id": "m",
               "name": "M",
               "command": "",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": "x",
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -237,10 +195,7 @@
               "description": "d",
               "kind": "connector",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -259,9 +214,7 @@
                 },
                 null
               ],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -269,10 +222,7 @@
               "name": "A",
               "packageName": "@v/connector-a",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "authRung": "cli",
@@ -300,9 +250,7 @@
                 }
               ],
               "env": true,
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "id": 3,
@@ -311,10 +259,7 @@
                 "a": 1
               },
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -378,16 +323,11 @@
               "name": "B",
               "packageName": "",
               "description": "d",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
               "permissions": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "authRung": "weird",
@@ -401,10 +341,7 @@
                 {
                   "type": ""
                 },
-                [
-                  1,
-                  "a"
-                ]
+                [1, "a"]
               ],
               "actions": [
                 {
@@ -429,9 +366,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             }
           ]
@@ -446,9 +381,7 @@
               "id": "b",
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "packUrl": "https://p",
               "actions": [
                 {
@@ -482,9 +415,7 @@
               "description": 5,
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -530,10 +461,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": [
                 {
@@ -558,12 +486,8 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "id": "b",
@@ -573,17 +497,11 @@
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "sha256": "ab",
-              "env": [
-                1,
-                "a"
-              ]
+              "env": [1, "a"]
             }
           ],
           "mcpServers": [
@@ -618,10 +536,7 @@
             "name": "A",
             "packageName": "@v/connector-a",
             "description": "",
-            "env": [
-              1,
-              "a"
-            ],
+            "env": [1, "a"],
             "capabilities": [],
             "sha256": "ab"
           }
@@ -635,9 +550,7 @@
               "id": "a",
               "name": "A",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "permissions": 3,
               "packUrl": "https://p",
@@ -645,12 +558,8 @@
               "triggers": {
                 "a": 1
               },
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "name": "A",
@@ -666,22 +575,12 @@
                   }
                 ]
               },
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
-              "activates": [
-                1,
-                "a"
-              ],
+              "permissions": ["git.read", "nope"],
+              "activates": [1, "a"],
               "sha256": "ab",
               "authRung": "weird",
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "id": 3,
@@ -694,10 +593,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": [
                 {
@@ -800,10 +696,7 @@
             {
               "id": "m",
               "name": "M",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": "x"
             }
           ]
@@ -825,20 +718,13 @@
               "name": "B",
               "packageName": "",
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "sha256": "",
               "triggers": 3,
               "actions": [],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "packageName": "@v/connector-a",
@@ -859,10 +745,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": [
                 {
@@ -887,26 +770,17 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "id": "b",
               "packageName": "@v/connector-a",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "authRung": "weird",
               "actions": [
                 {
@@ -931,9 +805,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -948,18 +820,13 @@
               "name": "B",
               "packageName": "@v/connector-a",
               "description": 4,
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "authRung": "weird",
               "verified": {
                 "schema": 2
               },
               "env": true,
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "packageName": "",
@@ -975,10 +842,7 @@
               "contributes": {},
               "permissions": 3,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "",
               "triggers": [
@@ -1018,9 +882,7 @@
                   ]
                 }
               ],
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             }
           ],
           "templates": [
@@ -1028,15 +890,10 @@
               "id": "t",
               "name": "T",
               "description": "d",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -1046,13 +903,8 @@
               "id": "m",
               "name": "M",
               "command": "",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -1067,21 +919,12 @@
               "packageName": "@v/connector-a",
               "capabilities": "x",
               "kind": "extension",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
-              "verified": [
-                1,
-                "a"
-              ],
+              "verified": [1, "a"],
               "triggers": [
                 {
                   "type": "t",
@@ -1096,9 +939,7 @@
               ],
               "actions": "x",
               "env": true,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -1111,9 +952,7 @@
               "authRung": "cli",
               "triggers": true,
               "actions": 3,
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "id": "a",
@@ -1125,10 +964,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": null
             }
@@ -1147,15 +983,9 @@
               "description": 4,
               "capabilities": {},
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
@@ -1174,21 +1004,14 @@
                 3
               ],
               "actions": [],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
               "id": "b",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "contributes": "x",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "authRung": "cli",
               "triggers": [
@@ -1201,10 +1024,7 @@
                 {
                   "type": ""
                 },
-                [
-                  1,
-                  "a"
-                ]
+                [1, "a"]
               ],
               "actions": [
                 {
@@ -1229,21 +1049,14 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
               "packageName": "",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": 3,
               "sha256": "ab",
               "triggers": [
@@ -1259,10 +1072,7 @@
                 {}
               ],
               "actions": [],
-              "keywords": [
-                1,
-                "a"
-              ],
+              "keywords": [1, "a"],
               "extra": "kept"
             }
           ],
@@ -1290,9 +1100,7 @@
               }
             ],
             "actions": [],
-            "env": [
-              "A"
-            ],
+            "env": ["A"],
             "extra": "kept",
             "packUrl": "https://p",
             "sha256": "ab"
@@ -1306,14 +1114,9 @@
             {
               "id": "b",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "authRung": "cli",
@@ -1346,20 +1149,12 @@
               "id": 3,
               "packageName": "@v/connector-a",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "capabilities": ["triggers"],
+              "permissions": ["git.read", "nope"],
               "authRung": "cli",
               "triggers": 3,
               "actions": true,
-              "env": [
-                1,
-                "a"
-              ],
+              "env": [1, "a"],
               "keywords": [],
               "extra": "kept"
             }
@@ -1370,19 +1165,13 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": {}
             }
           ]
@@ -1396,14 +1185,9 @@
             {
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "triggers": [
                 {
@@ -1463,10 +1247,7 @@
                 ]
               },
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
@@ -1483,13 +1264,8 @@
                 "x"
               ],
               "actions": true,
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                1,
-                "a"
-              ]
+              "env": ["A"],
+              "keywords": [1, "a"]
             }
           ],
           "mcpServers": [
@@ -1520,9 +1296,7 @@
               "description": 5,
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -1548,19 +1322,14 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
               "name": "M",
               "command": "npx",
               "keywords": [],
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -1574,10 +1343,7 @@
               "id": "b",
               "name": "A",
               "packageName": "",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "sha256": "",
               "authRung": "weird",
@@ -1593,9 +1359,7 @@
                 },
                 3
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             }
           ],
@@ -1604,10 +1368,7 @@
               "id": "t",
               "name": "T",
               "description": "d",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [
@@ -1637,9 +1398,7 @@
               "sha256": "ab",
               "authRung": "weird",
               "verified": true,
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": {},
               "extra": "kept"
             }
@@ -1650,9 +1409,7 @@
               "description": "d",
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -1670,12 +1427,8 @@
               "packUrl": "https://p",
               "sha256": "ab",
               "triggers": "x",
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ],
+              "env": ["A"],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ]
@@ -1722,10 +1475,7 @@
               "packageName": "@v/b",
               "kind": "extension",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "sha256": "ab",
@@ -1734,14 +1484,9 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -1749,21 +1494,13 @@
               "packageName": "@v/b",
               "description": 4,
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {},
               "sha256": "ab",
               "authRung": "weird",
-              "triggers": [
-                1,
-                "a"
-              ],
+              "triggers": [1, "a"],
               "actions": 3,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ],
@@ -1771,15 +1508,10 @@
             {
               "id": "t",
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -1794,10 +1526,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [
@@ -1835,10 +1564,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -1866,10 +1592,7 @@
               "description": 4,
               "capabilities": "triggers",
               "kind": "extension",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": "x",
               "packUrl": "https://p",
               "authRung": "weird",
@@ -1888,23 +1611,15 @@
                 },
                 "x"
               ],
-              "actions": [
-                1,
-                "a"
-              ]
+              "actions": [1, "a"]
             },
             {
               "id": "b",
               "name": "A",
               "packageName": "@v/connector-a",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
-              "permissions": [
-                1,
-                "a"
-              ],
+              "capabilities": ["triggers"],
+              "permissions": [1, "a"],
               "activates": "x",
               "packUrl": "https://p",
               "verified": {
@@ -1976,23 +1691,15 @@
               "id": "b",
               "description": 4,
               "capabilities": "triggers",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "sha256": "ab",
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
@@ -2001,9 +1708,7 @@
               "capabilities": 3,
               "kind": "connector",
               "permissions": {},
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": true,
               "extra": "kept"
             }
@@ -2024,9 +1729,7 @@
               "name": "M",
               "command": "",
               "keywords": true,
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -2059,10 +1762,7 @@
               "capabilities": "x",
               "permissions": "x",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -2091,9 +1791,7 @@
                   ]
                 }
               ],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ]
@@ -2103,10 +1801,7 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
@@ -2115,9 +1810,7 @@
               "keywords": {
                 "a": 1
               },
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -2144,19 +1837,13 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ]
+              "args": ["-y", 2]
             }
           ]
         },
@@ -2227,23 +1914,15 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "templates": [
             {
               "id": "t",
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -2265,14 +1944,8 @@
             {
               "name": "B",
               "packageName": "@v/b",
-              "capabilities": [
-                1,
-                "a"
-              ],
-              "contributes": [
-                1,
-                "a"
-              ],
+              "capabilities": [1, "a"],
+              "contributes": [1, "a"],
               "permissions": true,
               "sha256": "",
               "actions": [
@@ -2304,10 +1977,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [
@@ -2323,14 +1993,9 @@
             {
               "id": "m",
               "name": "M",
-              "args": [
-                1,
-                "a"
-              ],
+              "args": [1, "a"],
               "keywords": {},
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -2345,32 +2010,21 @@
               "packageName": "",
               "capabilities": "triggers",
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "authRung": "weird",
               "verified": "x",
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "id": "b",
               "name": "A",
               "packageName": "",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "authRung": "cli",
               "env": true
@@ -2381,25 +2035,16 @@
               "description": "d",
               "permissions": true,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "authRung": "cli",
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "triggers": [
-                1,
-                "a"
-              ],
+              "triggers": [1, "a"],
               "actions": true,
               "extra": "kept"
             }
@@ -2409,10 +2054,7 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": "x"
             }
           ]
@@ -2426,26 +2068,13 @@
             {
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "capabilities": ["triggers"],
+              "permissions": ["git.read", "nope"],
               "packUrl": "",
-              "verified": [
-                1,
-                "a"
-              ],
+              "verified": [1, "a"],
               "actions": null,
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                1,
-                "a"
-              ],
+              "env": ["A"],
+              "keywords": [1, "a"],
               "extra": "kept"
             }
           ],
@@ -2465,17 +2094,9 @@
               "id": "m",
               "name": "M",
               "command": "",
-              "args": [
-                "-y",
-                2
-              ],
-              "keywords": [
-                1,
-                "a"
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "keywords": [1, "a"],
+              "env": ["A"]
             }
           ]
         },
@@ -2489,14 +2110,9 @@
               "id": 3,
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "triggers": true,
               "actions": [],
               "env": [],
@@ -2506,15 +2122,9 @@
               "id": "a",
               "name": "A",
               "packageName": "",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "authRung": "weird",
@@ -2537,10 +2147,7 @@
             {
               "id": "b",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "verified": {
                 "schema": 2
@@ -2559,10 +2166,7 @@
             {
               "name": "T",
               "description": 5,
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -2575,13 +2179,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -2602,10 +2201,7 @@
               "id": "b",
               "name": "A",
               "kind": "extension",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "authRung": "weird",
               "actions": [
@@ -2636,14 +2232,9 @@
             {
               "name": "A",
               "description": "d",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "contributes": {},
-              "activates": [
-                1,
-                "a"
-              ],
+              "activates": [1, "a"],
               "sha256": "ab",
               "authRung": "cli",
               "verified": {
@@ -2668,15 +2259,10 @@
             {
               "id": "b",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "contributes": true,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "verified": 3,
@@ -2692,10 +2278,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -2715,10 +2298,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -2746,39 +2326,27 @@
               "name": "B",
               "packageName": "",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
               "contributes": null,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "authRung": "cli",
               "verified": {
                 "a": 1
               },
-              "actions": [
-                1,
-                "a"
-              ],
+              "actions": [1, "a"],
               "env": {},
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
               "id": "b",
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "activates": null,
               "packUrl": "",
               "sha256": "",
@@ -2792,10 +2360,7 @@
                 {
                   "type": ""
                 },
-                [
-                  1,
-                  "a"
-                ]
+                [1, "a"]
               ],
               "keywords": true,
               "extra": "kept"
@@ -2805,14 +2370,9 @@
               "name": "B",
               "packageName": "",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "verified": true,
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             }
           ],
@@ -2821,14 +2381,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                1,
-                "a"
-              ],
-              "keywords": [
-                1,
-                "a"
-              ]
+              "args": [1, "a"],
+              "keywords": [1, "a"]
             }
           ]
         },
@@ -2837,9 +2391,7 @@
             "id": "b",
             "name": "B",
             "packageName": "@v/connector-a",
-            "capabilities": [
-              "triggers"
-            ],
+            "capabilities": ["triggers"],
             "triggers": [
               {
                 "type": "t",
@@ -2882,10 +2434,7 @@
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -2912,10 +2461,7 @@
               "id": 3,
               "name": "B",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "authRung": "cli",
               "verified": {
                 "schema": 2
@@ -2954,10 +2500,7 @@
               "capabilities": "triggers",
               "kind": "extension",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": 3,
               "sha256": "ab",
               "authRung": "weird",
@@ -2965,15 +2508,9 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "triggers": [
-                1,
-                "a"
-              ]
+              "triggers": [1, "a"]
             },
             {
               "id": "a",
@@ -2982,16 +2519,11 @@
               "kind": "connector",
               "contributes": {},
               "authRung": "cli",
-              "verified": [
-                1,
-                "a"
-              ],
+              "verified": [1, "a"],
               "triggers": {
                 "a": 1
               },
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": null
             }
           ]
@@ -3026,10 +2558,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -3043,9 +2572,7 @@
                 },
                 []
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
@@ -3065,25 +2592,18 @@
                 },
                 3
               ],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
               "id": 3,
               "packageName": "@v/b",
               "description": "d",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "",
               "authRung": "weird",
@@ -3119,9 +2639,7 @@
               "steps": {},
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -3131,13 +2649,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -3170,10 +2683,7 @@
               "capabilities": "triggers",
               "activates": [],
               "authRung": "weird",
-              "actions": [
-                1,
-                "a"
-              ],
+              "actions": [1, "a"],
               "extra": "kept"
             },
             {
@@ -3188,10 +2698,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -3218,24 +2725,16 @@
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "env": "x",
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             }
           ]
         },
@@ -3250,10 +2749,7 @@
               "packageName": "",
               "description": 4,
               "capabilities": "x",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
                 "a": 1
               },
@@ -3281,9 +2777,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
@@ -3291,16 +2785,10 @@
               "name": "A",
               "capabilities": [],
               "contributes": {},
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "packUrl": "https://p",
               "sha256": "ab",
-              "triggers": [
-                1,
-                "a"
-              ],
+              "triggers": [1, "a"],
               "actions": [
                 {
                   "type": "a",
@@ -3324,9 +2812,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": true,
               "extra": "kept"
             },
@@ -3349,22 +2835,15 @@
                 },
                 3
               ],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ],
+              "env": ["A"],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ],
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -3377,13 +2856,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -3403,9 +2877,7 @@
               "sha256": "",
               "authRung": "weird",
               "actions": [],
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             }
           ],
           "templates": [
@@ -3415,9 +2887,7 @@
               "description": "d",
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -3426,13 +2896,8 @@
             {
               "id": "m",
               "name": "M",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -3442,9 +2907,7 @@
             "name": "B",
             "packageName": "@v/b",
             "actions": [],
-            "keywords": [
-              "k"
-            ],
+            "keywords": ["k"],
             "description": "",
             "capabilities": [],
             "packUrl": "https://p"
@@ -3467,15 +2930,9 @@
               "name": "B",
               "packageName": "@v/b",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
@@ -3510,10 +2967,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": null,
               "keywords": {
@@ -3533,10 +2987,7 @@
               "packageName": "@v/b",
               "description": 4,
               "permissions": "x",
-              "activates": [
-                1,
-                "a"
-              ],
+              "activates": [1, "a"],
               "packUrl": "https://p",
               "sha256": "",
               "triggers": [],
@@ -3573,9 +3024,7 @@
               "authRung": "cli",
               "triggers": 3,
               "actions": [],
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             },
             {
               "id": "a",
@@ -3592,22 +3041,14 @@
                   }
                 ]
               },
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "",
               "authRung": "weird",
               "actions": 3,
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": []
             }
           ],
@@ -3615,10 +3056,7 @@
             {
               "id": "t",
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -3634,9 +3072,7 @@
             "packageName": "@v/connector-a",
             "description": "",
             "actions": [],
-            "env": [
-              "A"
-            ],
+            "env": ["A"],
             "keywords": [],
             "capabilities": [],
             "kind": "extension",
@@ -3649,13 +3085,9 @@
                 }
               ]
             },
-            "permissions": [
-              "git.read"
-            ],
+            "permissions": ["git.read"],
             "activates": {
-              "agent": [
-                "claude"
-              ]
+              "agent": ["claude"]
             }
           }
         ]
@@ -3674,10 +3106,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -3699,16 +3128,11 @@
               "name": "A",
               "packageName": "",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "sha256": "",
@@ -3748,10 +3172,7 @@
               "description": 4,
               "kind": "connector",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "verified": [],
@@ -3779,15 +3200,10 @@
             {
               "name": "T",
               "description": "d",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -3803,10 +3219,7 @@
               "id": "b",
               "capabilities": "triggers",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "triggers": [
                 {
@@ -3827,26 +3240,16 @@
               "id": 3,
               "name": "A",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
-              "contributes": [
-                1,
-                "a"
-              ],
+              "contributes": [1, "a"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
               "actions": [],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -3862,16 +3265,11 @@
                 ]
               },
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "triggers": true,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ],
@@ -3880,15 +3278,10 @@
               "id": "t",
               "name": "T",
               "description": 5,
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -3919,18 +3312,12 @@
               "contributes": {
                 "a": 1
               },
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": {
                 "a": 1
               },
               "packUrl": "https://p",
-              "actions": [
-                1,
-                "a"
-              ]
+              "actions": [1, "a"]
             }
           ],
           "templates": [
@@ -3939,9 +3326,7 @@
               "description": "d",
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -3950,9 +3335,7 @@
             {
               "id": "m",
               "name": "M",
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -3967,10 +3350,7 @@
               "name": "A",
               "packageName": "@v/b",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "authRung": "weird",
               "verified": {
@@ -3993,28 +3373,18 @@
             {
               "id": "b",
               "name": "B",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": true,
               "sha256": "",
               "authRung": "weird",
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "name": "A",
               "description": 4,
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "authRung": "weird",
               "env": 3,
@@ -4060,41 +3430,27 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": "x",
               "env": 3,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
               "id": "a",
               "packageName": "",
               "description": 4,
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": true,
               "env": "x"
@@ -4117,14 +3473,9 @@
               "id": "m",
               "name": "M",
               "command": "",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": "x",
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -4141,10 +3492,7 @@
               "description": "d",
               "kind": "connector",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -4163,9 +3511,7 @@
                 },
                 null
               ],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -4173,10 +3519,7 @@
               "name": "A",
               "packageName": "@v/connector-a",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "authRung": "cli",
@@ -4204,9 +3547,7 @@
                 }
               ],
               "env": true,
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "id": 3,
@@ -4215,10 +3556,7 @@
                 "a": 1
               },
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -4282,16 +3620,11 @@
               "name": "B",
               "packageName": "",
               "description": "d",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
               "permissions": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "authRung": "weird",
@@ -4305,10 +3638,7 @@
                 {
                   "type": ""
                 },
-                [
-                  1,
-                  "a"
-                ]
+                [1, "a"]
               ],
               "actions": [
                 {
@@ -4333,9 +3663,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             }
           ]
@@ -4350,9 +3678,7 @@
               "id": "b",
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "packUrl": "https://p",
               "actions": [
                 {
@@ -4386,9 +3712,7 @@
               "description": 5,
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -4434,10 +3758,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": [
                 {
@@ -4462,12 +3783,8 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "id": "b",
@@ -4477,17 +3794,11 @@
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "sha256": "ab",
-              "env": [
-                1,
-                "a"
-              ]
+              "env": [1, "a"]
             }
           ],
           "mcpServers": [
@@ -4508,9 +3819,7 @@
               "id": "a",
               "name": "A",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "permissions": 3,
               "packUrl": "https://p",
@@ -4518,12 +3827,8 @@
               "triggers": {
                 "a": 1
               },
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "name": "A",
@@ -4539,22 +3844,12 @@
                   }
                 ]
               },
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
-              "activates": [
-                1,
-                "a"
-              ],
+              "permissions": ["git.read", "nope"],
+              "activates": [1, "a"],
               "sha256": "ab",
               "authRung": "weird",
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "id": 3,
@@ -4567,10 +3862,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": [
                 {
@@ -4696,10 +3988,7 @@
             {
               "id": "m",
               "name": "M",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": "x"
             }
           ]
@@ -4744,20 +4033,13 @@
               "name": "B",
               "packageName": "",
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "sha256": "",
               "triggers": 3,
               "actions": [],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "packageName": "@v/connector-a",
@@ -4778,10 +4060,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": [
                 {
@@ -4806,26 +4085,17 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "id": "b",
               "packageName": "@v/connector-a",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "authRung": "weird",
               "actions": [
                 {
@@ -4850,9 +4120,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -4867,18 +4135,13 @@
               "name": "B",
               "packageName": "@v/connector-a",
               "description": 4,
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "authRung": "weird",
               "verified": {
                 "schema": 2
               },
               "env": true,
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "packageName": "",
@@ -4894,10 +4157,7 @@
               "contributes": {},
               "permissions": 3,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "",
               "triggers": [
@@ -4937,9 +4197,7 @@
                   ]
                 }
               ],
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             }
           ],
           "templates": [
@@ -4947,15 +4205,10 @@
               "id": "t",
               "name": "T",
               "description": "d",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -4965,13 +4218,8 @@
               "id": "m",
               "name": "M",
               "command": "",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -4986,21 +4234,12 @@
               "packageName": "@v/connector-a",
               "capabilities": "x",
               "kind": "extension",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
-              "verified": [
-                1,
-                "a"
-              ],
+              "verified": [1, "a"],
               "triggers": [
                 {
                   "type": "t",
@@ -5015,9 +4254,7 @@
               ],
               "actions": "x",
               "env": true,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -5030,9 +4267,7 @@
               "authRung": "cli",
               "triggers": true,
               "actions": 3,
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "id": "a",
@@ -5044,10 +4279,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": null
             }
@@ -5066,15 +4298,9 @@
               "description": 4,
               "capabilities": {},
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
@@ -5093,21 +4319,14 @@
                 3
               ],
               "actions": [],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
               "id": "b",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "contributes": "x",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "authRung": "cli",
               "triggers": [
@@ -5120,10 +4339,7 @@
                 {
                   "type": ""
                 },
-                [
-                  1,
-                  "a"
-                ]
+                [1, "a"]
               ],
               "actions": [
                 {
@@ -5148,21 +4364,14 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
               "packageName": "",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": 3,
               "sha256": "ab",
               "triggers": [
@@ -5178,10 +4387,7 @@
                 {}
               ],
               "actions": [],
-              "keywords": [
-                1,
-                "a"
-              ],
+              "keywords": [1, "a"],
               "extra": "kept"
             }
           ],
@@ -5202,14 +4408,9 @@
             {
               "id": "b",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "authRung": "cli",
@@ -5242,20 +4443,12 @@
               "id": 3,
               "packageName": "@v/connector-a",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "capabilities": ["triggers"],
+              "permissions": ["git.read", "nope"],
               "authRung": "cli",
               "triggers": 3,
               "actions": true,
-              "env": [
-                1,
-                "a"
-              ],
+              "env": [1, "a"],
               "keywords": [],
               "extra": "kept"
             }
@@ -5266,19 +4459,13 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": {}
             }
           ]
@@ -5292,14 +4479,9 @@
             {
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "triggers": [
                 {
@@ -5359,10 +4541,7 @@
                 ]
               },
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
@@ -5379,13 +4558,8 @@
                 "x"
               ],
               "actions": true,
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                1,
-                "a"
-              ]
+              "env": ["A"],
+              "keywords": [1, "a"]
             }
           ],
           "mcpServers": [
@@ -5416,9 +4590,7 @@
               "description": 5,
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -5444,19 +4616,14 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
               "name": "M",
               "command": "npx",
               "keywords": [],
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -5470,10 +4637,7 @@
               "id": "b",
               "name": "A",
               "packageName": "",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "sha256": "",
               "authRung": "weird",
@@ -5489,9 +4653,7 @@
                 },
                 3
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             }
           ],
@@ -5500,10 +4662,7 @@
               "id": "t",
               "name": "T",
               "description": "d",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [
@@ -5521,9 +4680,7 @@
             "id": "t",
             "name": "T",
             "description": "d",
-            "steps": [
-              "s"
-            ],
+            "steps": ["s"],
             "portable": {
               "version": 1,
               "nodes": [
@@ -5551,9 +4708,7 @@
               "sha256": "ab",
               "authRung": "weird",
               "verified": true,
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": {},
               "extra": "kept"
             }
@@ -5564,9 +4719,7 @@
               "description": "d",
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -5584,12 +4737,8 @@
               "packUrl": "https://p",
               "sha256": "ab",
               "triggers": "x",
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ],
+              "env": ["A"],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ]
@@ -5636,10 +4785,7 @@
               "packageName": "@v/b",
               "kind": "extension",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "sha256": "ab",
@@ -5648,14 +4794,9 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -5663,21 +4804,13 @@
               "packageName": "@v/b",
               "description": 4,
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {},
               "sha256": "ab",
               "authRung": "weird",
-              "triggers": [
-                1,
-                "a"
-              ],
+              "triggers": [1, "a"],
               "actions": 3,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ],
@@ -5685,15 +4818,10 @@
             {
               "id": "t",
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -5708,10 +4836,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [
@@ -5749,10 +4874,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -5780,10 +4902,7 @@
               "description": 4,
               "capabilities": "triggers",
               "kind": "extension",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": "x",
               "packUrl": "https://p",
               "authRung": "weird",
@@ -5802,23 +4921,15 @@
                 },
                 "x"
               ],
-              "actions": [
-                1,
-                "a"
-              ]
+              "actions": [1, "a"]
             },
             {
               "id": "b",
               "name": "A",
               "packageName": "@v/connector-a",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
-              "permissions": [
-                1,
-                "a"
-              ],
+              "capabilities": ["triggers"],
+              "permissions": [1, "a"],
               "activates": "x",
               "packUrl": "https://p",
               "verified": {
@@ -5890,23 +5001,15 @@
               "id": "b",
               "description": 4,
               "capabilities": "triggers",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "sha256": "ab",
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
@@ -5915,9 +5018,7 @@
               "capabilities": 3,
               "kind": "connector",
               "permissions": {},
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": true,
               "extra": "kept"
             }
@@ -5938,9 +5039,7 @@
               "name": "M",
               "command": "",
               "keywords": true,
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -5955,10 +5054,7 @@
               "capabilities": "x",
               "permissions": "x",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -5987,9 +5083,7 @@
                   ]
                 }
               ],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ]
@@ -5999,10 +5093,7 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
@@ -6011,9 +5102,7 @@
               "keywords": {
                 "a": 1
               },
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -6040,19 +5129,13 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ]
+              "args": ["-y", 2]
             }
           ]
         },
@@ -6163,23 +5246,15 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "templates": [
             {
               "id": "t",
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -6201,14 +5276,8 @@
             {
               "name": "B",
               "packageName": "@v/b",
-              "capabilities": [
-                1,
-                "a"
-              ],
-              "contributes": [
-                1,
-                "a"
-              ],
+              "capabilities": [1, "a"],
+              "contributes": [1, "a"],
               "permissions": true,
               "sha256": "",
               "actions": [
@@ -6240,10 +5309,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [
@@ -6259,14 +5325,9 @@
             {
               "id": "m",
               "name": "M",
-              "args": [
-                1,
-                "a"
-              ],
+              "args": [1, "a"],
               "keywords": {},
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -6281,32 +5342,21 @@
               "packageName": "",
               "capabilities": "triggers",
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "authRung": "weird",
               "verified": "x",
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "id": "b",
               "name": "A",
               "packageName": "",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "authRung": "cli",
               "env": true
@@ -6317,25 +5367,16 @@
               "description": "d",
               "permissions": true,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "authRung": "cli",
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "triggers": [
-                1,
-                "a"
-              ],
+              "triggers": [1, "a"],
               "actions": true,
               "extra": "kept"
             }
@@ -6345,10 +5386,7 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": "x"
             }
           ]
@@ -6362,26 +5400,13 @@
             {
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "capabilities": ["triggers"],
+              "permissions": ["git.read", "nope"],
               "packUrl": "",
-              "verified": [
-                1,
-                "a"
-              ],
+              "verified": [1, "a"],
               "actions": null,
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                1,
-                "a"
-              ],
+              "env": ["A"],
+              "keywords": [1, "a"],
               "extra": "kept"
             }
           ],
@@ -6401,17 +5426,9 @@
               "id": "m",
               "name": "M",
               "command": "",
-              "args": [
-                "-y",
-                2
-              ],
-              "keywords": [
-                1,
-                "a"
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "keywords": [1, "a"],
+              "env": ["A"]
             }
           ]
         },
@@ -6425,14 +5442,9 @@
               "id": 3,
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "triggers": true,
               "actions": [],
               "env": [],
@@ -6442,15 +5454,9 @@
               "id": "a",
               "name": "A",
               "packageName": "",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "authRung": "weird",
@@ -6473,10 +5479,7 @@
             {
               "id": "b",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "verified": {
                 "schema": 2
@@ -6495,10 +5498,7 @@
             {
               "name": "T",
               "description": 5,
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -6511,13 +5511,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -6538,10 +5533,7 @@
               "id": "b",
               "name": "A",
               "kind": "extension",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "authRung": "weird",
               "actions": [
@@ -6572,14 +5564,9 @@
             {
               "name": "A",
               "description": "d",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "contributes": {},
-              "activates": [
-                1,
-                "a"
-              ],
+              "activates": [1, "a"],
               "sha256": "ab",
               "authRung": "cli",
               "verified": {
@@ -6604,15 +5591,10 @@
             {
               "id": "b",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "contributes": true,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "verified": 3,
@@ -6628,10 +5610,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -6651,10 +5630,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -6682,39 +5658,27 @@
               "name": "B",
               "packageName": "",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
               "contributes": null,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "authRung": "cli",
               "verified": {
                 "a": 1
               },
-              "actions": [
-                1,
-                "a"
-              ],
+              "actions": [1, "a"],
               "env": {},
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
               "id": "b",
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "activates": null,
               "packUrl": "",
               "sha256": "",
@@ -6728,10 +5692,7 @@
                 {
                   "type": ""
                 },
-                [
-                  1,
-                  "a"
-                ]
+                [1, "a"]
               ],
               "keywords": true,
               "extra": "kept"
@@ -6741,14 +5702,9 @@
               "name": "B",
               "packageName": "",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "verified": true,
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             }
           ],
@@ -6757,14 +5713,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                1,
-                "a"
-              ],
-              "keywords": [
-                1,
-                "a"
-              ]
+              "args": [1, "a"],
+              "keywords": [1, "a"]
             }
           ]
         },
@@ -6798,10 +5748,7 @@
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -6828,10 +5775,7 @@
               "id": 3,
               "name": "B",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "authRung": "cli",
               "verified": {
                 "schema": 2
@@ -6870,10 +5814,7 @@
               "capabilities": "triggers",
               "kind": "extension",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": 3,
               "sha256": "ab",
               "authRung": "weird",
@@ -6881,15 +5822,9 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "triggers": [
-                1,
-                "a"
-              ]
+              "triggers": [1, "a"]
             },
             {
               "id": "a",
@@ -6898,16 +5833,11 @@
               "kind": "connector",
               "contributes": {},
               "authRung": "cli",
-              "verified": [
-                1,
-                "a"
-              ],
+              "verified": [1, "a"],
               "triggers": {
                 "a": 1
               },
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": null
             }
           ]
@@ -6942,10 +5872,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -6959,9 +5886,7 @@
                 },
                 []
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
@@ -6981,25 +5906,18 @@
                 },
                 3
               ],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
               "id": 3,
               "packageName": "@v/b",
               "description": "d",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "",
               "authRung": "weird",
@@ -7035,9 +5953,7 @@
               "steps": {},
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -7047,13 +5963,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -7086,10 +5997,7 @@
               "capabilities": "triggers",
               "activates": [],
               "authRung": "weird",
-              "actions": [
-                1,
-                "a"
-              ],
+              "actions": [1, "a"],
               "extra": "kept"
             },
             {
@@ -7104,10 +6012,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -7134,24 +6039,16 @@
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "env": "x",
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             }
           ]
         },
@@ -7166,10 +6063,7 @@
               "packageName": "",
               "description": 4,
               "capabilities": "x",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
                 "a": 1
               },
@@ -7197,9 +6091,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
@@ -7207,16 +6099,10 @@
               "name": "A",
               "capabilities": [],
               "contributes": {},
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "packUrl": "https://p",
               "sha256": "ab",
-              "triggers": [
-                1,
-                "a"
-              ],
+              "triggers": [1, "a"],
               "actions": [
                 {
                   "type": "a",
@@ -7240,9 +6126,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": true,
               "extra": "kept"
             },
@@ -7265,22 +6149,15 @@
                 },
                 3
               ],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ],
+              "env": ["A"],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ],
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -7293,13 +6170,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -7319,9 +6191,7 @@
               "sha256": "",
               "authRung": "weird",
               "actions": [],
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             }
           ],
           "templates": [
@@ -7331,9 +6201,7 @@
               "description": "d",
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -7342,13 +6210,8 @@
             {
               "id": "m",
               "name": "M",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -7370,15 +6233,9 @@
               "name": "B",
               "packageName": "@v/b",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
@@ -7413,10 +6270,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": null,
               "keywords": {
@@ -7436,10 +6290,7 @@
               "packageName": "@v/b",
               "description": 4,
               "permissions": "x",
-              "activates": [
-                1,
-                "a"
-              ],
+              "activates": [1, "a"],
               "packUrl": "https://p",
               "sha256": "",
               "triggers": [],
@@ -7476,9 +6327,7 @@
               "authRung": "cli",
               "triggers": 3,
               "actions": [],
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             },
             {
               "id": "a",
@@ -7495,22 +6344,14 @@
                   }
                 ]
               },
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "",
               "authRung": "weird",
               "actions": 3,
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": []
             }
           ],
@@ -7518,10 +6359,7 @@
             {
               "id": "t",
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -7546,10 +6384,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -7571,16 +6406,11 @@
               "name": "A",
               "packageName": "",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "sha256": "",
@@ -7620,10 +6450,7 @@
               "description": 4,
               "kind": "connector",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "verified": [],
@@ -7641,15 +6468,10 @@
             {
               "name": "T",
               "description": "d",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -7665,10 +6487,7 @@
               "id": "b",
               "capabilities": "triggers",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "triggers": [
                 {
@@ -7689,26 +6508,16 @@
               "id": 3,
               "name": "A",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
-              "contributes": [
-                1,
-                "a"
-              ],
+              "contributes": [1, "a"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
               "actions": [],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -7724,16 +6533,11 @@
                 ]
               },
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "triggers": true,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ],
@@ -7742,15 +6546,10 @@
               "id": "t",
               "name": "T",
               "description": 5,
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -7781,18 +6580,12 @@
               "contributes": {
                 "a": 1
               },
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": {
                 "a": 1
               },
               "packUrl": "https://p",
-              "actions": [
-                1,
-                "a"
-              ]
+              "actions": [1, "a"]
             }
           ],
           "templates": [
@@ -7801,9 +6594,7 @@
               "description": "d",
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -7812,9 +6603,7 @@
             {
               "id": "m",
               "name": "M",
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -7829,10 +6618,7 @@
               "name": "A",
               "packageName": "@v/b",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "authRung": "weird",
               "verified": {
@@ -7855,28 +6641,18 @@
             {
               "id": "b",
               "name": "B",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": true,
               "sha256": "",
               "authRung": "weird",
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "name": "A",
               "description": 4,
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "authRung": "weird",
               "env": 3,
@@ -7922,41 +6698,27 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": "x",
               "env": 3,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
               "id": "a",
               "packageName": "",
               "description": 4,
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": true,
               "env": "x"
@@ -7979,14 +6741,9 @@
               "id": "m",
               "name": "M",
               "command": "",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": "x",
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -8003,10 +6760,7 @@
               "description": "d",
               "kind": "connector",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -8025,9 +6779,7 @@
                 },
                 null
               ],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -8035,10 +6787,7 @@
               "name": "A",
               "packageName": "@v/connector-a",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "authRung": "cli",
@@ -8066,9 +6815,7 @@
                 }
               ],
               "env": true,
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "id": 3,
@@ -8077,10 +6824,7 @@
                 "a": 1
               },
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -8144,16 +6888,11 @@
               "name": "B",
               "packageName": "",
               "description": "d",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
               "permissions": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "authRung": "weird",
@@ -8167,10 +6906,7 @@
                 {
                   "type": ""
                 },
-                [
-                  1,
-                  "a"
-                ]
+                [1, "a"]
               ],
               "actions": [
                 {
@@ -8195,9 +6931,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             }
           ]
@@ -8212,9 +6946,7 @@
               "id": "b",
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "packUrl": "https://p",
               "actions": [
                 {
@@ -8248,9 +6980,7 @@
               "description": 5,
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -8296,10 +7026,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": [
                 {
@@ -8324,12 +7051,8 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "id": "b",
@@ -8339,17 +7062,11 @@
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "sha256": "ab",
-              "env": [
-                1,
-                "a"
-              ]
+              "env": [1, "a"]
             }
           ],
           "mcpServers": [
@@ -8370,9 +7087,7 @@
               "id": "a",
               "name": "A",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "permissions": 3,
               "packUrl": "https://p",
@@ -8380,12 +7095,8 @@
               "triggers": {
                 "a": 1
               },
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "name": "A",
@@ -8401,22 +7112,12 @@
                   }
                 ]
               },
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
-              "activates": [
-                1,
-                "a"
-              ],
+              "permissions": ["git.read", "nope"],
+              "activates": [1, "a"],
               "sha256": "ab",
               "authRung": "weird",
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "id": 3,
@@ -8429,10 +7130,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": [
                 {
@@ -8535,10 +7233,7 @@
             {
               "id": "m",
               "name": "M",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": "x"
             }
           ]
@@ -8560,20 +7255,13 @@
               "name": "B",
               "packageName": "",
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "sha256": "",
               "triggers": 3,
               "actions": [],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "packageName": "@v/connector-a",
@@ -8594,10 +7282,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": [
                 {
@@ -8622,26 +7307,17 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ]
+              "env": ["A"],
+              "keywords": ["k"]
             },
             {
               "id": "b",
               "packageName": "@v/connector-a",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "authRung": "weird",
               "actions": [
                 {
@@ -8666,9 +7342,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -8683,18 +7357,13 @@
               "name": "B",
               "packageName": "@v/connector-a",
               "description": 4,
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "authRung": "weird",
               "verified": {
                 "schema": 2
               },
               "env": true,
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "packageName": "",
@@ -8710,10 +7379,7 @@
               "contributes": {},
               "permissions": 3,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "",
               "triggers": [
@@ -8753,9 +7419,7 @@
                   ]
                 }
               ],
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             }
           ],
           "templates": [
@@ -8763,15 +7427,10 @@
               "id": "t",
               "name": "T",
               "description": "d",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -8781,13 +7440,8 @@
               "id": "m",
               "name": "M",
               "command": "",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -8802,21 +7456,12 @@
               "packageName": "@v/connector-a",
               "capabilities": "x",
               "kind": "extension",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
-              "verified": [
-                1,
-                "a"
-              ],
+              "verified": [1, "a"],
               "triggers": [
                 {
                   "type": "t",
@@ -8831,9 +7476,7 @@
               ],
               "actions": "x",
               "env": true,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -8846,9 +7489,7 @@
               "authRung": "cli",
               "triggers": true,
               "actions": 3,
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "id": "a",
@@ -8860,10 +7501,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "actions": null
             }
@@ -8882,15 +7520,9 @@
               "description": 4,
               "capabilities": {},
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
@@ -8909,21 +7541,14 @@
                 3
               ],
               "actions": [],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
               "id": "b",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "contributes": "x",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "authRung": "cli",
               "triggers": [
@@ -8936,10 +7561,7 @@
                 {
                   "type": ""
                 },
-                [
-                  1,
-                  "a"
-                ]
+                [1, "a"]
               ],
               "actions": [
                 {
@@ -8964,21 +7586,14 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
               "packageName": "",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": 3,
               "sha256": "ab",
               "triggers": [
@@ -8994,10 +7609,7 @@
                 {}
               ],
               "actions": [],
-              "keywords": [
-                1,
-                "a"
-              ],
+              "keywords": [1, "a"],
               "extra": "kept"
             }
           ],
@@ -9018,14 +7630,9 @@
             {
               "id": "b",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "authRung": "cli",
@@ -9058,20 +7665,12 @@
               "id": 3,
               "packageName": "@v/connector-a",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "capabilities": ["triggers"],
+              "permissions": ["git.read", "nope"],
               "authRung": "cli",
               "triggers": 3,
               "actions": true,
-              "env": [
-                1,
-                "a"
-              ],
+              "env": [1, "a"],
               "keywords": [],
               "extra": "kept"
             }
@@ -9082,19 +7681,13 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": {}
             }
           ]
@@ -9104,9 +7697,7 @@
             "id": "m",
             "name": "M",
             "command": "npx",
-            "args": [
-              "-y"
-            ],
+            "args": ["-y"],
             "keywords": []
           }
         ]
@@ -9118,14 +7709,9 @@
             {
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "triggers": [
                 {
@@ -9185,10 +7771,7 @@
                 ]
               },
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
@@ -9205,13 +7788,8 @@
                 "x"
               ],
               "actions": true,
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                1,
-                "a"
-              ]
+              "env": ["A"],
+              "keywords": [1, "a"]
             }
           ],
           "mcpServers": [
@@ -9242,9 +7820,7 @@
               "description": 5,
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -9270,19 +7846,14 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
               "name": "M",
               "command": "npx",
               "keywords": [],
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -9292,9 +7863,7 @@
             "name": "M",
             "command": "npx",
             "keywords": [],
-            "env": [
-              "A"
-            ],
+            "env": ["A"],
             "args": []
           }
         ]
@@ -9307,10 +7876,7 @@
               "id": "b",
               "name": "A",
               "packageName": "",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "packUrl": "https://p",
               "sha256": "",
               "authRung": "weird",
@@ -9326,9 +7892,7 @@
                 },
                 3
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             }
           ],
@@ -9337,10 +7901,7 @@
               "id": "t",
               "name": "T",
               "description": "d",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [
@@ -9370,9 +7931,7 @@
               "sha256": "ab",
               "authRung": "weird",
               "verified": true,
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": {},
               "extra": "kept"
             }
@@ -9383,9 +7942,7 @@
               "description": "d",
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -9403,12 +7960,8 @@
               "packUrl": "https://p",
               "sha256": "ab",
               "triggers": "x",
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ],
+              "env": ["A"],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ]
@@ -9455,10 +8008,7 @@
               "packageName": "@v/b",
               "kind": "extension",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "sha256": "ab",
@@ -9467,14 +8017,9 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -9482,21 +8027,13 @@
               "packageName": "@v/b",
               "description": 4,
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {},
               "sha256": "ab",
               "authRung": "weird",
-              "triggers": [
-                1,
-                "a"
-              ],
+              "triggers": [1, "a"],
               "actions": 3,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ],
@@ -9504,15 +8041,10 @@
             {
               "id": "t",
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -9527,10 +8059,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [
@@ -9568,10 +8097,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -9599,10 +8125,7 @@
               "description": 4,
               "capabilities": "triggers",
               "kind": "extension",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": "x",
               "packUrl": "https://p",
               "authRung": "weird",
@@ -9621,23 +8144,15 @@
                 },
                 "x"
               ],
-              "actions": [
-                1,
-                "a"
-              ]
+              "actions": [1, "a"]
             },
             {
               "id": "b",
               "name": "A",
               "packageName": "@v/connector-a",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
-              "permissions": [
-                1,
-                "a"
-              ],
+              "capabilities": ["triggers"],
+              "permissions": [1, "a"],
               "activates": "x",
               "packUrl": "https://p",
               "verified": {
@@ -9709,23 +8224,15 @@
               "id": "b",
               "description": 4,
               "capabilities": "triggers",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "sha256": "ab",
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
@@ -9734,9 +8241,7 @@
               "capabilities": 3,
               "kind": "connector",
               "permissions": {},
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": true,
               "extra": "kept"
             }
@@ -9757,9 +8262,7 @@
               "name": "M",
               "command": "",
               "keywords": true,
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -9774,10 +8277,7 @@
               "capabilities": "x",
               "permissions": "x",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -9806,9 +8306,7 @@
                   ]
                 }
               ],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ]
@@ -9818,10 +8316,7 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
@@ -9830,9 +8325,7 @@
               "keywords": {
                 "a": 1
               },
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -9859,19 +8352,13 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "mcpServers": [
             {
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ]
+              "args": ["-y", 2]
             }
           ]
         },
@@ -9880,9 +8367,7 @@
             "id": "m",
             "name": "M",
             "command": "npx",
-            "args": [
-              "-y"
-            ]
+            "args": ["-y"]
           }
         ]
       },
@@ -9951,23 +8436,15 @@
       {
         "input": {
           "version": 1,
-          "connectors": [
-            1,
-            "a"
-          ],
+          "connectors": [1, "a"],
           "templates": [
             {
               "id": "t",
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -9989,14 +8466,8 @@
             {
               "name": "B",
               "packageName": "@v/b",
-              "capabilities": [
-                1,
-                "a"
-              ],
-              "contributes": [
-                1,
-                "a"
-              ],
+              "capabilities": [1, "a"],
+              "contributes": [1, "a"],
               "permissions": true,
               "sha256": "",
               "actions": [
@@ -10028,10 +8499,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [
@@ -10047,14 +8515,9 @@
             {
               "id": "m",
               "name": "M",
-              "args": [
-                1,
-                "a"
-              ],
+              "args": [1, "a"],
               "keywords": {},
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             }
           ]
         },
@@ -10069,32 +8532,21 @@
               "packageName": "",
               "capabilities": "triggers",
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "authRung": "weird",
               "verified": "x",
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             },
             {
               "id": "b",
               "name": "A",
               "packageName": "",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "authRung": "cli",
               "env": true
@@ -10105,25 +8557,16 @@
               "description": "d",
               "permissions": true,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "authRung": "cli",
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "triggers": [
-                1,
-                "a"
-              ],
+              "triggers": [1, "a"],
               "actions": true,
               "extra": "kept"
             }
@@ -10133,10 +8576,7 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
+              "args": ["-y", 2],
               "keywords": "x"
             }
           ]
@@ -10146,9 +8586,7 @@
             "id": "m",
             "name": "M",
             "command": "npx",
-            "args": [
-              "-y"
-            ],
+            "args": ["-y"],
             "keywords": []
           }
         ]
@@ -10160,26 +8598,13 @@
             {
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "capabilities": ["triggers"],
+              "permissions": ["git.read", "nope"],
               "packUrl": "",
-              "verified": [
-                1,
-                "a"
-              ],
+              "verified": [1, "a"],
               "actions": null,
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                1,
-                "a"
-              ],
+              "env": ["A"],
+              "keywords": [1, "a"],
               "extra": "kept"
             }
           ],
@@ -10199,17 +8624,9 @@
               "id": "m",
               "name": "M",
               "command": "",
-              "args": [
-                "-y",
-                2
-              ],
-              "keywords": [
-                1,
-                "a"
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "keywords": [1, "a"],
+              "env": ["A"]
             }
           ]
         },
@@ -10223,14 +8640,9 @@
               "id": 3,
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "triggers": true,
               "actions": [],
               "env": [],
@@ -10240,15 +8652,9 @@
               "id": "a",
               "name": "A",
               "packageName": "",
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "authRung": "weird",
@@ -10271,10 +8677,7 @@
             {
               "id": "b",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "verified": {
                 "schema": 2
@@ -10293,10 +8696,7 @@
             {
               "name": "T",
               "description": 5,
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -10309,13 +8709,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -10324,12 +8719,8 @@
             "id": "m",
             "name": "M",
             "command": "npx",
-            "args": [
-              "-y"
-            ],
-            "env": [
-              "A"
-            ]
+            "args": ["-y"],
+            "env": ["A"]
           }
         ]
       },
@@ -10348,10 +8739,7 @@
               "id": "b",
               "name": "A",
               "kind": "extension",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "sha256": "ab",
               "authRung": "weird",
               "actions": [
@@ -10382,14 +8770,9 @@
             {
               "name": "A",
               "description": "d",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "contributes": {},
-              "activates": [
-                1,
-                "a"
-              ],
+              "activates": [1, "a"],
               "sha256": "ab",
               "authRung": "cli",
               "verified": {
@@ -10414,15 +8797,10 @@
             {
               "id": "b",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "contributes": true,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "verified": 3,
@@ -10438,10 +8816,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -10461,10 +8836,7 @@
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -10492,39 +8864,27 @@
               "name": "B",
               "packageName": "",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "extension",
               "contributes": null,
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "authRung": "cli",
               "verified": {
                 "a": 1
               },
-              "actions": [
-                1,
-                "a"
-              ],
+              "actions": [1, "a"],
               "env": {},
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
               "id": "b",
               "name": "B",
               "packageName": "@v/connector-a",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "activates": null,
               "packUrl": "",
               "sha256": "",
@@ -10538,10 +8898,7 @@
                 {
                   "type": ""
                 },
-                [
-                  1,
-                  "a"
-                ]
+                [1, "a"]
               ],
               "keywords": true,
               "extra": "kept"
@@ -10551,14 +8908,9 @@
               "name": "B",
               "packageName": "",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "verified": true,
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             }
           ],
@@ -10567,14 +8919,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                1,
-                "a"
-              ],
-              "keywords": [
-                1,
-                "a"
-              ]
+              "args": [1, "a"],
+              "keywords": [1, "a"]
             }
           ]
         },
@@ -10583,12 +8929,8 @@
             "id": "m",
             "name": "M",
             "command": "npx",
-            "args": [
-              "a"
-            ],
-            "keywords": [
-              "a"
-            ]
+            "args": ["a"],
+            "keywords": ["a"]
           }
         ]
       },
@@ -10628,10 +8970,7 @@
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "",
@@ -10658,10 +8997,7 @@
               "id": 3,
               "name": "B",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "authRung": "cli",
               "verified": {
                 "schema": 2
@@ -10700,10 +9036,7 @@
               "capabilities": "triggers",
               "kind": "extension",
               "contributes": {},
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": 3,
               "sha256": "ab",
               "authRung": "weird",
@@ -10711,15 +9044,9 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
-              "triggers": [
-                1,
-                "a"
-              ]
+              "triggers": [1, "a"]
             },
             {
               "id": "a",
@@ -10728,16 +9055,11 @@
               "kind": "connector",
               "contributes": {},
               "authRung": "cli",
-              "verified": [
-                1,
-                "a"
-              ],
+              "verified": [1, "a"],
               "triggers": {
                 "a": 1
               },
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": null
             }
           ]
@@ -10772,10 +9094,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -10789,9 +9108,7 @@
                 },
                 []
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
@@ -10811,25 +9128,18 @@
                 },
                 3
               ],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
               "id": 3,
               "packageName": "@v/b",
               "description": "d",
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "",
               "authRung": "weird",
@@ -10865,9 +9175,7 @@
               "steps": {},
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -10877,13 +9185,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -10892,12 +9195,8 @@
             "id": "m",
             "name": "M",
             "command": "npx",
-            "args": [
-              "-y"
-            ],
-            "env": [
-              "A"
-            ]
+            "args": ["-y"],
+            "env": ["A"]
           }
         ]
       },
@@ -10928,10 +9227,7 @@
               "capabilities": "triggers",
               "activates": [],
               "authRung": "weird",
-              "actions": [
-                1,
-                "a"
-              ],
+              "actions": [1, "a"],
               "extra": "kept"
             },
             {
@@ -10946,10 +9242,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -10976,24 +9269,16 @@
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "verified": {
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "env": "x",
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             }
           ]
         },
@@ -11008,10 +9293,7 @@
               "packageName": "",
               "description": 4,
               "capabilities": "x",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
                 "a": 1
               },
@@ -11039,9 +9321,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "extra": "kept"
             },
             {
@@ -11049,16 +9329,10 @@
               "name": "A",
               "capabilities": [],
               "contributes": {},
-              "permissions": [
-                1,
-                "a"
-              ],
+              "permissions": [1, "a"],
               "packUrl": "https://p",
               "sha256": "ab",
-              "triggers": [
-                1,
-                "a"
-              ],
+              "triggers": [1, "a"],
               "actions": [
                 {
                   "type": "a",
@@ -11082,9 +9356,7 @@
                   ]
                 }
               ],
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": true,
               "extra": "kept"
             },
@@ -11107,22 +9379,15 @@
                 },
                 3
               ],
-              "env": [
-                "A"
-              ],
-              "keywords": [
-                "k"
-              ],
+              "env": ["A"],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ],
           "templates": [
             {
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -11135,13 +9400,8 @@
               "id": "m",
               "name": "M",
               "command": "npx",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -11150,12 +9410,8 @@
             "id": "m",
             "name": "M",
             "command": "npx",
-            "args": [
-              "-y"
-            ],
-            "env": [
-              "A"
-            ]
+            "args": ["-y"],
+            "env": ["A"]
           }
         ]
       },
@@ -11173,9 +9429,7 @@
               "sha256": "",
               "authRung": "weird",
               "actions": [],
-              "keywords": [
-                "k"
-              ]
+              "keywords": ["k"]
             }
           ],
           "templates": [
@@ -11185,9 +9439,7 @@
               "description": "d",
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -11196,13 +9448,8 @@
             {
               "id": "m",
               "name": "M",
-              "args": [
-                "-y",
-                2
-              ],
-              "env": [
-                "A"
-              ]
+              "args": ["-y", 2],
+              "env": ["A"]
             }
           ]
         },
@@ -11224,15 +9471,9 @@
               "name": "B",
               "packageName": "@v/b",
               "capabilities": "triggers",
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
@@ -11267,10 +9508,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": null,
               "keywords": {
@@ -11290,10 +9528,7 @@
               "packageName": "@v/b",
               "description": 4,
               "permissions": "x",
-              "activates": [
-                1,
-                "a"
-              ],
+              "activates": [1, "a"],
               "packUrl": "https://p",
               "sha256": "",
               "triggers": [],
@@ -11330,9 +9565,7 @@
               "authRung": "cli",
               "triggers": 3,
               "actions": [],
-              "env": [
-                "A"
-              ]
+              "env": ["A"]
             },
             {
               "id": "a",
@@ -11349,22 +9582,14 @@
                   }
                 ]
               },
-              "permissions": [
-                "git.read",
-                "nope"
-              ],
+              "permissions": ["git.read", "nope"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "",
               "authRung": "weird",
               "actions": 3,
-              "env": [
-                "A"
-              ],
+              "env": ["A"],
               "keywords": []
             }
           ],
@@ -11372,10 +9597,7 @@
             {
               "id": "t",
               "name": "T",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 1,
                 "nodes": [],
@@ -11400,10 +9622,7 @@
                 "schema": 1,
                 "version": "1",
                 "checkedAt": "t",
-                "checks": [
-                  "a",
-                  2
-                ]
+                "checks": ["a", 2]
               },
               "triggers": [
                 {
@@ -11425,16 +9644,11 @@
               "name": "A",
               "packageName": "",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
               "contributes": {},
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "",
               "sha256": "",
@@ -11474,10 +9688,7 @@
               "description": 4,
               "kind": "connector",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "verified": [],
@@ -11495,15 +9706,10 @@
             {
               "name": "T",
               "description": "d",
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -11519,10 +9725,7 @@
               "id": "b",
               "capabilities": "triggers",
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "triggers": [
                 {
@@ -11543,26 +9746,16 @@
               "id": 3,
               "name": "A",
               "description": 4,
-              "capabilities": [
-                "triggers"
-              ],
+              "capabilities": ["triggers"],
               "kind": "connector",
-              "contributes": [
-                1,
-                "a"
-              ],
+              "contributes": [1, "a"],
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "packUrl": "https://p",
               "sha256": "ab",
               "actions": [],
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             },
             {
@@ -11578,16 +9771,11 @@
                 ]
               },
               "activates": {
-                "agent": [
-                  "claude",
-                  "x"
-                ]
+                "agent": ["claude", "x"]
               },
               "sha256": "ab",
               "triggers": true,
-              "keywords": [
-                "k"
-              ],
+              "keywords": ["k"],
               "extra": "kept"
             }
           ],
@@ -11596,15 +9784,10 @@
               "id": "t",
               "name": "T",
               "description": 5,
-              "steps": [
-                "s",
-                3
-              ],
+              "steps": ["s", 3],
               "portable": {
                 "version": 2,
-                "nodes": [
-                  {}
-                ],
+                "nodes": [{}],
                 "edges": []
               }
             }
@@ -11793,10 +9976,7 @@
     "envNamesOf": [
       {
         "input": "{\"A\":\"1\",\"b-c\":\"2\",\"_x\":\"3\",\"__proto__\":\"4\"}",
-        "output": [
-          "A",
-          "_x"
-        ]
+        "output": ["A", "_x"]
       },
       {
         "input": "[1]",
@@ -11816,9 +9996,7 @@
       },
       {
         "input": "{\"9A\":\"x\",\"Z\":1}",
-        "output": [
-          "Z"
-        ]
+        "output": ["Z"]
       }
     ],
     "usageCounts": [
@@ -12666,9 +10844,7 @@
                 "key": "secretEnv",
                 "label": "L",
                 "readable": true,
-                "envNames": [
-                  "TOKEN"
-                ]
+                "envNames": ["TOKEN"]
               }
             ],
             "usageCount": 0
@@ -12762,9 +10938,7 @@
                 "key": "secretEnv",
                 "label": "L",
                 "readable": true,
-                "envNames": [
-                  "TOKEN"
-                ]
+                "envNames": ["TOKEN"]
               }
             ],
             "usageCount": 1
@@ -13136,9 +11310,7 @@
                 "key": "secretEnv",
                 "label": "L",
                 "readable": true,
-                "envNames": [
-                  "TOKEN"
-                ]
+                "envNames": ["TOKEN"]
               }
             ],
             "usageCount": 1
@@ -13862,9 +12034,7 @@
                 "key": "secretEnv",
                 "label": "L",
                 "readable": true,
-                "envNames": [
-                  "TOKEN"
-                ]
+                "envNames": ["TOKEN"]
               }
             ],
             "usageCount": 0
@@ -14216,9 +12386,7 @@
                 "key": "secretEnv",
                 "label": "L",
                 "readable": true,
-                "envNames": [
-                  "TOKEN"
-                ]
+                "envNames": ["TOKEN"]
               }
             ],
             "usageCount": 0
@@ -14459,10 +12627,7 @@
           "rung": "cli",
           "probe": {
             "command": "gh",
-            "args": [
-              "auth",
-              "status"
-            ]
+            "args": ["auth", "status"]
           }
         },
         "output": "gh auth login"
@@ -14481,9 +12646,7 @@
           "rung": "cli",
           "probe": {
             "command": "glab",
-            "args": [
-              "status"
-            ]
+            "args": ["status"]
           }
         },
         "output": "glab login"
@@ -14495,52 +12658,26 @@
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "gh_host",
-                "CLAUDE_CODE_X",
-                "SECRET_VORN_BOOTSTRAP_TOKEN",
-                "UNDECLARED"
-              ]
+              "env": ["gh_host", "CLAUDE_CODE_X", "SECRET_VORN_BOOTSTRAP_TOKEN", "UNDECLARED"]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "GITHUB_TOKEN",
-            "CLAUDE_CODE_X",
-            "Secret_Thing"
-          ],
+          "declared": ["GH_HOST", "GITHUB_TOKEN", "CLAUDE_CODE_X", "Secret_Thing"],
           "trusted": true
         },
-        "output": [
-          "GH_HOST"
-        ]
+        "output": ["GH_HOST"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "gh_host",
-                "MY_TOKEN",
-                "CLAUDE_CODE_X",
-                "UNDECLARED"
-              ]
+              "env": ["gh_host", "MY_TOKEN", "CLAUDE_CODE_X", "UNDECLARED"]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "MY_TOKEN",
-            "GITHUB_TOKEN",
-            "CLAUDE_CODE_X",
-            "Secret_Thing"
-          ],
+          "declared": ["GH_HOST", "MY_TOKEN", "GITHUB_TOKEN", "CLAUDE_CODE_X", "Secret_Thing"],
           "trusted": false
         },
-        "output": [
-          "GH_HOST",
-          "MY_TOKEN"
-        ]
+        "output": ["GH_HOST", "MY_TOKEN"]
       },
       {
         "input": {
@@ -14557,18 +12694,10 @@
               ]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "MY_TOKEN",
-            "GITHUB_TOKEN",
-            "CLAUDE_CODE_X"
-          ],
+          "declared": ["GH_HOST", "MY_TOKEN", "GITHUB_TOKEN", "CLAUDE_CODE_X"],
           "trusted": false
         },
-        "output": [
-          "GH_HOST",
-          "MY_TOKEN"
-        ]
+        "output": ["GH_HOST", "MY_TOKEN"]
       },
       {
         "input": {
@@ -14584,90 +12713,49 @@
               ]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "MY_TOKEN",
-            "CLAUDE_CODE_X"
-          ],
+          "declared": ["GH_HOST", "MY_TOKEN", "CLAUDE_CODE_X"],
           "trusted": false
         },
-        "output": [
-          "MY_TOKEN"
-        ]
+        "output": ["MY_TOKEN"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "MY_TOKEN",
-                "GITHUB_TOKEN",
-                "CLAUDE_CODE_X"
-              ]
+              "env": ["MY_TOKEN", "GITHUB_TOKEN", "CLAUDE_CODE_X"]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "MY_TOKEN",
-            "GITHUB_TOKEN",
-            "CLAUDE_CODE_X",
-            "Secret_Thing"
-          ],
+          "declared": ["GH_HOST", "MY_TOKEN", "GITHUB_TOKEN", "CLAUDE_CODE_X", "Secret_Thing"],
           "trusted": false
         },
-        "output": [
-          "MY_TOKEN"
-        ]
+        "output": ["MY_TOKEN"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "gh_host",
-                "GITHUB_TOKEN",
-                "CLAUDE_CODE_X",
-                "SECRET_VORN_BOOTSTRAP_TOKEN"
-              ]
+              "env": ["gh_host", "GITHUB_TOKEN", "CLAUDE_CODE_X", "SECRET_VORN_BOOTSTRAP_TOKEN"]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "MY_TOKEN",
-            "GITHUB_TOKEN",
-            "CLAUDE_CODE_X"
-          ],
+          "declared": ["GH_HOST", "MY_TOKEN", "GITHUB_TOKEN", "CLAUDE_CODE_X"],
           "trusted": false
         },
-        "output": [
-          "GH_HOST"
-        ]
+        "output": ["GH_HOST"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "gh_host",
-                "GITHUB_TOKEN",
-                "CLAUDE_CODE_X",
-                "UNDECLARED"
-              ]
+              "env": ["gh_host", "GITHUB_TOKEN", "CLAUDE_CODE_X", "UNDECLARED"]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "GITHUB_TOKEN",
-            "Secret_Thing"
-          ],
+          "declared": ["GH_HOST", "GITHUB_TOKEN", "Secret_Thing"],
           "trusted": false
         },
-        "output": [
-          "GH_HOST"
-        ]
+        "output": ["GH_HOST"]
       },
       {
         "input": {
@@ -14683,58 +12771,33 @@
               ]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "GITHUB_TOKEN"
-          ],
+          "declared": ["GH_HOST", "GITHUB_TOKEN"],
           "trusted": true
         },
-        "output": [
-          "GH_HOST",
-          "GITHUB_TOKEN"
-        ]
+        "output": ["GH_HOST", "GITHUB_TOKEN"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "gh_host",
-                "GITHUB_TOKEN",
-                "CLAUDE_CODE_X",
-                "SECRET_VORN_BOOTSTRAP_TOKEN"
-              ]
+              "env": ["gh_host", "GITHUB_TOKEN", "CLAUDE_CODE_X", "SECRET_VORN_BOOTSTRAP_TOKEN"]
             }
           },
-          "declared": [
-            "GITHUB_TOKEN",
-            "CLAUDE_CODE_X",
-            "Secret_Thing"
-          ],
+          "declared": ["GITHUB_TOKEN", "CLAUDE_CODE_X", "Secret_Thing"],
           "trusted": true
         },
-        "output": [
-          "GITHUB_TOKEN"
-        ]
+        "output": ["GITHUB_TOKEN"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "GITHUB_TOKEN",
-                "SECRET_VORN_BOOTSTRAP_TOKEN",
-                "UNDECLARED"
-              ]
+              "env": ["GITHUB_TOKEN", "SECRET_VORN_BOOTSTRAP_TOKEN", "UNDECLARED"]
             }
           },
-          "declared": [
-            "MY_TOKEN",
-            "CLAUDE_CODE_X",
-            "Secret_Thing"
-          ],
+          "declared": ["MY_TOKEN", "CLAUDE_CODE_X", "Secret_Thing"],
           "trusted": false
         },
         "output": []
@@ -14753,18 +12816,10 @@
               ]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "MY_TOKEN",
-            "CLAUDE_CODE_X",
-            "Secret_Thing"
-          ],
+          "declared": ["GH_HOST", "MY_TOKEN", "CLAUDE_CODE_X", "Secret_Thing"],
           "trusted": true
         },
-        "output": [
-          "GH_HOST",
-          "MY_TOKEN"
-        ]
+        "output": ["GH_HOST", "MY_TOKEN"]
       },
       {
         "input": {
@@ -14780,88 +12835,49 @@
               ]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "Secret_Thing"
-          ],
+          "declared": ["GH_HOST", "Secret_Thing"],
           "trusted": false
         },
-        "output": [
-          "GH_HOST"
-        ]
+        "output": ["GH_HOST"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "gh_host",
-                "MY_TOKEN",
-                "CLAUDE_CODE_X"
-              ]
+              "env": ["gh_host", "MY_TOKEN", "CLAUDE_CODE_X"]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "MY_TOKEN",
-            "CLAUDE_CODE_X",
-            "Secret_Thing"
-          ],
+          "declared": ["GH_HOST", "MY_TOKEN", "CLAUDE_CODE_X", "Secret_Thing"],
           "trusted": true
         },
-        "output": [
-          "GH_HOST",
-          "MY_TOKEN"
-        ]
+        "output": ["GH_HOST", "MY_TOKEN"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "MY_TOKEN",
-                "GITHUB_TOKEN"
-              ]
+              "env": ["MY_TOKEN", "GITHUB_TOKEN"]
             }
           },
-          "declared": [
-            "MY_TOKEN",
-            "GITHUB_TOKEN",
-            "CLAUDE_CODE_X",
-            "Secret_Thing"
-          ],
+          "declared": ["MY_TOKEN", "GITHUB_TOKEN", "CLAUDE_CODE_X", "Secret_Thing"],
           "trusted": false
         },
-        "output": [
-          "MY_TOKEN"
-        ]
+        "output": ["MY_TOKEN"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "gh_host",
-                "MY_TOKEN",
-                "GITHUB_TOKEN",
-                "CLAUDE_CODE_X",
-                "UNDECLARED"
-              ]
+              "env": ["gh_host", "MY_TOKEN", "GITHUB_TOKEN", "CLAUDE_CODE_X", "UNDECLARED"]
             }
           },
-          "declared": [
-            "MY_TOKEN",
-            "CLAUDE_CODE_X",
-            "Secret_Thing"
-          ],
+          "declared": ["MY_TOKEN", "CLAUDE_CODE_X", "Secret_Thing"],
           "trusted": false
         },
-        "output": [
-          "MY_TOKEN"
-        ]
+        "output": ["MY_TOKEN"]
       },
       {
         "input": {
@@ -14878,40 +12894,23 @@
               ]
             }
           },
-          "declared": [
-            "GITHUB_TOKEN"
-          ],
+          "declared": ["GITHUB_TOKEN"],
           "trusted": true
         },
-        "output": [
-          "GITHUB_TOKEN"
-        ]
+        "output": ["GITHUB_TOKEN"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "gh_host",
-                "MY_TOKEN",
-                "CLAUDE_CODE_X",
-                "UNDECLARED"
-              ]
+              "env": ["gh_host", "MY_TOKEN", "CLAUDE_CODE_X", "UNDECLARED"]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "MY_TOKEN",
-            "GITHUB_TOKEN",
-            "CLAUDE_CODE_X"
-          ],
+          "declared": ["GH_HOST", "MY_TOKEN", "GITHUB_TOKEN", "CLAUDE_CODE_X"],
           "trusted": false
         },
-        "output": [
-          "GH_HOST",
-          "MY_TOKEN"
-        ]
+        "output": ["GH_HOST", "MY_TOKEN"]
       },
       {
         "input": {
@@ -14927,66 +12926,36 @@
               ]
             }
           },
-          "declared": [
-            "MY_TOKEN",
-            "GITHUB_TOKEN",
-            "CLAUDE_CODE_X"
-          ],
+          "declared": ["MY_TOKEN", "GITHUB_TOKEN", "CLAUDE_CODE_X"],
           "trusted": false
         },
-        "output": [
-          "MY_TOKEN"
-        ]
+        "output": ["MY_TOKEN"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "MY_TOKEN",
-                "CLAUDE_CODE_X",
-                "SECRET_VORN_BOOTSTRAP_TOKEN",
-                "UNDECLARED"
-              ]
+              "env": ["MY_TOKEN", "CLAUDE_CODE_X", "SECRET_VORN_BOOTSTRAP_TOKEN", "UNDECLARED"]
             }
           },
-          "declared": [
-            "GH_HOST",
-            "MY_TOKEN",
-            "GITHUB_TOKEN",
-            "CLAUDE_CODE_X",
-            "Secret_Thing"
-          ],
+          "declared": ["GH_HOST", "MY_TOKEN", "GITHUB_TOKEN", "CLAUDE_CODE_X", "Secret_Thing"],
           "trusted": false
         },
-        "output": [
-          "MY_TOKEN"
-        ]
+        "output": ["MY_TOKEN"]
       },
       {
         "input": {
           "auth": {
             "rung": "cli",
             "borrow": {
-              "env": [
-                "MY_TOKEN",
-                "CLAUDE_CODE_X",
-                "SECRET_VORN_BOOTSTRAP_TOKEN",
-                "UNDECLARED"
-              ]
+              "env": ["MY_TOKEN", "CLAUDE_CODE_X", "SECRET_VORN_BOOTSTRAP_TOKEN", "UNDECLARED"]
             }
           },
-          "declared": [
-            "MY_TOKEN",
-            "CLAUDE_CODE_X",
-            "Secret_Thing"
-          ],
+          "declared": ["MY_TOKEN", "CLAUDE_CODE_X", "Secret_Thing"],
           "trusted": true
         },
-        "output": [
-          "MY_TOKEN"
-        ]
+        "output": ["MY_TOKEN"]
       }
     ],
     "cronEveryMinutes": [

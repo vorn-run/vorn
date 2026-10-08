@@ -3,9 +3,7 @@
     "id": "http",
     "name": "HTTP",
     "icon": "http",
-    "capabilities": [
-      "actions"
-    ],
+    "capabilities": ["actions"],
     "manifest": {
       "auth": [
         {
@@ -104,14 +102,7 @@
                 "type": "object"
               },
               "body": {
-                "type": [
-                  "object",
-                  "array",
-                  "string",
-                  "number",
-                  "boolean",
-                  "null"
-                ]
+                "type": ["object", "array", "string", "number", "boolean", "null"]
               }
             }
           }
@@ -123,11 +114,7 @@
     "id": "mcp",
     "name": "MCP",
     "icon": "mcp",
-    "capabilities": [
-      "actions",
-      "triggers",
-      "tasks"
-    ],
+    "capabilities": ["actions", "triggers", "tasks"],
     "manifest": {
       "auth": [
         {
@@ -240,11 +227,7 @@
     "id": "sdk",
     "name": "Connector package",
     "icon": "mcp",
-    "capabilities": [
-      "actions",
-      "triggers",
-      "tasks"
-    ],
+    "capabilities": ["actions", "triggers", "tasks"],
     "addable": false,
     "manifest": {
       "auth": [

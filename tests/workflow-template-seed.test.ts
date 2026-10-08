@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import { TEMPLATE_SEED } from './helpers/template-seed'
-import { PORTABLE_FORMAT_VERSION } from '../packages/shared/src/workflow-portability'
 
 describe('the bundled seed', () => {
   it('offers somewhere to start before anything is fetched', () => {

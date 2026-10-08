@@ -191,16 +191,14 @@ describe.runIf(runnable)('connections and connectors in vornd', () => {
     })
     // A row from before the vault: the secret is sealed text only the desktop can read.
     queryDb(db(), (d) =>
-      d
-        .prepare('UPDATE source_connections SET filters = ? WHERE id = ?')
-        .run(
-          JSON.stringify({
-            baseUrl: `http://127.0.0.1:${profilePort}`,
-            authHeader: 'Authorization: Bearer {{secret}}',
-            secret: 'sealed-by-the-desktop'
-          }),
-          conn.id
-        )
+      d.prepare('UPDATE source_connections SET filters = ? WHERE id = ?').run(
+        JSON.stringify({
+          baseUrl: `http://127.0.0.1:${profilePort}`,
+          authHeader: 'Authorization: Bearer {{secret}}',
+          secret: 'sealed-by-the-desktop'
+        }),
+        conn.id
+      )
     )
     const locked = await client.result('http:request', {
       profileConnectionId: conn.id,

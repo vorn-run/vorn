@@ -68,17 +68,14 @@ export function linkReach(deps: ReachDeps): { hostChanged(): void } {
         const id = p.id
         if (typeof id !== 'number' || typeof p.method !== 'string' || !deps.bridge) return
         const timeoutMs = typeof p.timeoutMs === 'number' ? p.timeoutMs : undefined
-        deps.bridge
-          .request(p.method, p.params, timeoutMs)
-          .then(
-            (result) => deps.channel.tell('vornd:answer', { id, result }),
-            (err: unknown) =>
-              deps.channel.tell('vornd:answer', {
-                id,
-                error: err instanceof Error ? err.message : String(err)
-              })
-          )
-          .catch(() => {})
+        void deps.bridge.request(p.method, p.params, timeoutMs).then(
+          (result) => deps.channel.tell('vornd:answer', { id, result }),
+          (err: unknown) =>
+            deps.channel.tell('vornd:answer', {
+              id,
+              error: err instanceof Error ? err.message : String(err)
+            })
+        )
         return
       }
       case 'vornd:tokenRevoked':

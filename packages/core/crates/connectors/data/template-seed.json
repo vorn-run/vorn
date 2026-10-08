@@ -3,11 +3,7 @@
     "id": "webhook-to-report",
     "name": "Webhook to report",
     "description": "Take a request from another system, look at what it says, and post the ones that matter on somewhere else.",
-    "steps": [
-      "Webhook",
-      "Condition",
-      "HTTP request"
-    ],
+    "steps": ["Webhook", "Condition", "HTTP request"],
     "category": "Integrations",
     "portable": {
       "version": 1,
@@ -91,11 +87,7 @@
     "id": "morning-digest",
     "name": "Morning digest",
     "description": "Every weekday morning, gather what changed overnight and have an agent write it up.",
-    "steps": [
-      "Schedule",
-      "Script",
-      "Agent"
-    ],
+    "steps": ["Schedule", "Script", "Agent"],
     "category": "Reporting",
     "portable": {
       "version": 1,
@@ -169,10 +161,7 @@
     "id": "triage-new-tasks",
     "name": "Triage new tasks",
     "description": "When a task is created, have an agent read it and say what it will take.",
-    "steps": [
-      "Task created",
-      "Agent"
-    ],
+    "steps": ["Task created", "Agent"],
     "category": "Tasks",
     "portable": {
       "version": 1,

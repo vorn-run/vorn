@@ -89,6 +89,7 @@ describe('vornd asking the server', () => {
     const bridge = {
       request: vi.fn(async (method: string) => {
         if (method === 'session:check') return { signedIn: true }
+        if (method === 'session:forget') throw 'gone'
         throw new Error('no desktop')
       })
     }
@@ -102,11 +103,13 @@ describe('vornd asking the server', () => {
     })
     fake.send('vornd:ask', { id: 2, method: 'session:fetch', params: {} })
     fake.send('vornd:ask', { id: 'x', method: 'session:fetch' })
-    await until('both answers', () => fake.made('vornd:answer').length === 2)
+    fake.send('vornd:ask', { id: 3, method: 'session:forget', params: 'c' })
+    await until('the answers', () => fake.made('vornd:answer').length === 3)
     expect(bridge.request).toHaveBeenCalledWith('session:check', { connectionId: 'c' }, 5)
     expect(fake.made('vornd:answer')).toEqual([
       { id: 1, result: { signedIn: true } },
-      { id: 2, error: 'no desktop' }
+      { id: 2, error: 'no desktop' },
+      { id: 3, error: 'gone' }
     ])
   })
 
