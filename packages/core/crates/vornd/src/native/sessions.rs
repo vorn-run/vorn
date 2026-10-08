@@ -2077,7 +2077,7 @@ pub(super) mod tests {
         // An empty remote host is none, as the handler reads it.
         let read = |host: &str| {
             CreateRequest::read(&json!({
-                "agentType": "codex", "projectName": "p", "projectPath": project(), "remoteHostId": host,
+                "agentType": "codex", "projectName": "p", "projectPath": "/p", "remoteHostId": host,
             }))
             .unwrap()
         };
@@ -2797,7 +2797,7 @@ pub(super) mod tests {
         assert_eq!(remote.marker, login::marker(id));
         assert!(
             remote.line.starts_with(
-                "ssh -t -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no -A me@box.example 'echo __VORN_READY_'"
+                "ssh -t -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no -A me@box.example 'echo __VORN_READY_"
             ),
             "{}",
             remote.line
