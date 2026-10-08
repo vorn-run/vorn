@@ -142,6 +142,10 @@ jobs:
       - name: Install dependencies
         run: yarn install
 
+      # Fetched once here, so parallel test workers never race to download it.
+      - name: Electron binary
+        run: node node_modules/electron/install.js
+
       # The server runs its terminals on the Rust core, so the tests need
       # vorn_core.node. libghostty-vt-sys builds Ghostty's VT library with Zig,
       # and the Ghostty commit it pins refuses any Zig but 0.15.2.
