@@ -40,6 +40,7 @@ const FILES = [
   'tests/native-server-workflows.test.ts',
   'tests/native-server-config.test.ts',
   'tests/native-server-extensions.test.ts',
+  'tests/native-server-desktop-bridge.test.ts',
   'tests/native-cli.test.ts'
 ]
 

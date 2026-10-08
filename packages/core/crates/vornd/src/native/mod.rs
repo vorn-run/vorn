@@ -37,6 +37,7 @@
 pub mod agent;
 pub mod config;
 pub mod connectors;
+pub mod desktop;
 pub mod env;
 pub mod extensions;
 pub mod file;
@@ -182,12 +183,17 @@ pub const SERVER_ONLY: &[(&str, &str)] = &[
     ),
 ];
 
+/// The desktop's main process claiming its connection ([`desktop`]).
+pub const IDENTIFY: &str = "bridge:identify";
+
 /// The effect of a call vornd answers, or `None` for one it does not. The
 /// work model's calls are all answered here, never compared.
 pub fn effect(method: &str) -> Option<Effect> {
     if work::METHODS.contains(&method)
         || extensions::METHODS.contains(&method)
         || connectors::METHODS.contains(&method)
+        || desktop::answers(method)
+        || method == IDENTIFY
     {
         return Some(Effect::Change);
     }
@@ -351,6 +357,8 @@ pub struct Native {
     connectors: OnceLock<Arc<connectors::Connectors>>,
     /// The extension host, once vornd has a database and its own address.
     extensions: OnceLock<Arc<extensions::Extensions>>,
+    /// The desktop's main process, which answers the browser and device calls.
+    main: Arc<desktop::Desktop>,
 }
 
 /// How long a call about what runs waits for the copy to settle as vornd
@@ -394,6 +402,7 @@ impl Native {
             work: OnceLock::new(),
             connectors: OnceLock::new(),
             extensions: OnceLock::new(),
+            main: Arc::default(),
         })
     }
 
@@ -459,6 +468,11 @@ impl Native {
     /// The environment vornd's children start from.
     pub(crate) fn child_env(&self) -> env::Env {
         self.env.get()
+    }
+
+    /// The desktop's main process, as vornd reaches it.
+    pub fn main_process(&self) -> &Arc<desktop::Desktop> {
+        &self.main
     }
 
     /// The app's channel. Only the first one given is kept.
@@ -545,6 +559,13 @@ impl Native {
         params: Value,
         viewer: &config::Viewer,
     ) -> Answer {
+        if desktop::answers(&method) {
+            return match self.main.request(&method, params, desktop::TIMEOUT).await {
+                Ok(Some(result)) => Answer::Result(result),
+                Ok(None) => Answer::Void,
+                Err(message) => Answer::Error(message),
+            };
+        }
         if config::METHODS.contains(&method.as_str()) {
             return config::answer(self, &method, params, viewer).await;
         }
@@ -900,6 +921,8 @@ pub enum Offer {
 
 /// One client connection's view of the native calls.
 pub struct Conn {
+    /// The connection's id in [`crate::streams`].
+    id: u64,
     native: Arc<Native>,
     groups: Arc<Groups>,
     reply: Forwarder,
@@ -929,6 +952,7 @@ impl Conn {
     /// `desktop` connections are admitted from the start: vornd checked
     /// their credential itself.
     pub fn new(
+        id: u64,
         native: Arc<Native>,
         groups: Arc<Groups>,
         reply: Forwarder,
@@ -936,6 +960,7 @@ impl Conn {
         desktop: bool,
     ) -> Arc<Conn> {
         Arc::new(Conn {
+            id,
             native,
             groups,
             reply,
@@ -1066,6 +1091,10 @@ impl Conn {
                 return Offer::Taken;
             }
         }
+        if method == IDENTIFY && mode == Mode::Native && self.admitted() {
+            self.identify(text);
+            return Offer::Taken;
+        }
         let call = effect(method)
             .filter(|_| self.admitted())
             .and_then(|e| request_of(text).map(|(id, params)| (e, id, params)));
@@ -1105,6 +1134,27 @@ impl Conn {
                 Offer::Pass
             }
         }
+    }
+
+    /// Main claims this connection as its own and hears whether it holds it.
+    fn identify(&self, text: &str) {
+        let claimed = self.native.main.claim(self.id, &self.reply);
+        self.groups.count(IDENTIFY, Counted::Native);
+        if let Some((id, _)) = request_of(text) {
+            self.reply
+                .send_now(&json!({ "jsonrpc": "2.0", "id": id, "result": { "ok": claimed } }));
+        }
+    }
+
+    /// Whether `text`, a frame without a method, answers a call vornd made
+    /// of main; if so it is settled here and never reaches the server.
+    pub fn settle_desktop(&self, text: &str) -> bool {
+        self.native.main.settle(self.id, text)
+    }
+
+    /// The client's side closed: main's calls fail now if this was main.
+    pub fn closed(&self) {
+        self.native.main.release(self.id);
     }
 
     /// Runs the call off this task and answers it, or sends it on to the

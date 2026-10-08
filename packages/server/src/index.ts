@@ -20,7 +20,6 @@ import {
   setMethodFallback
 } from './ws-handler'
 import { IdleWatch, DEFAULT_IDLE_WINDOW_MS } from './idle'
-import { browserBridge } from './browser-bridge'
 import { parseTopics, clientRegistry } from './broadcast'
 import { IPC } from '@vornrun/shared/types'
 import { registerAllMethods, setServerPort, sessionsToPersist } from './register-methods'
@@ -147,11 +146,7 @@ const vorndReach = linkReach({
       ? configManager.notifyChanged()
       : clientRegistry.broadcast(method, params, scope),
   disconnectToken,
-  host: getCurrentHost,
-  bridge: {
-    request: (method, params, timeoutMs) =>
-      browserBridge.request(method as never, params as never, timeoutMs)
-  }
+  host: getCurrentHost
 })
 linkWorktrees({ channel: vorndSessions, forgetSize: invalidateSizeCache })
 
@@ -769,7 +764,8 @@ export async function startServer(
       headless: headlessManager.getActiveSessions().filter((h) => h.status === 'running').length,
       msSinceClientActivity: clientRegistry.msSinceActivity(),
       msSinceHookActivity: hookServer.msSinceHookActivity(),
-      bridgeAttached: browserBridge.isConnected,
+      // vornd holds the desktop's bridge now.
+      bridgeAttached: false,
       pendingPermissions: hookServer.getPendingPermissions().length,
       pendingPairings: pendingRequests().length,
       connectorLeases: dbCountActiveConnectorInboxLeases(new Date().toISOString()),

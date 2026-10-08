@@ -81,13 +81,14 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "config",
     "credentials",
     "http",
+    "browser",
+    "device",
+    "bridge",
 ];
 
 /// Why vornd may still hand a call to the server.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StillForwarded {
-    /// Extension hosting and the desktop bridge, which move separately.
-    ExtensionHost,
     /// Not native yet.
     NotYetNative,
 }
@@ -95,7 +96,6 @@ pub enum StillForwarded {
 impl StillForwarded {
     pub fn name(self) -> &'static str {
         match self {
-            StillForwarded::ExtensionHost => "extension host",
             StillForwarded::NotYetNative => "not yet native",
         }
     }
@@ -106,9 +106,6 @@ impl StillForwarded {
 /// endpoint reports (`unexpectedForwards`) and the tests fail on. It shrinks
 /// to nothing.
 pub const STILL_FORWARDED: &[(&str, StillForwarded)] = &[
-    ("bridge", StillForwarded::ExtensionHost),
-    ("browser", StillForwarded::ExtensionHost),
-    ("device", StillForwarded::ExtensionHost),
     ("auth:authenticate", StillForwarded::NotYetNative),
     ("subscribe", StillForwarded::NotYetNative),
     ("credential", StillForwarded::NotYetNative),
@@ -379,7 +376,7 @@ mod tests {
     #[test]
     fn reports_a_forward_the_list_does_not_allow() {
         let groups = Groups::new(None).unwrap();
-        groups.count("browser:navigate", Counted::Forwarded);
+        groups.count("task:list", Counted::Forwarded);
         groups.count("config:save", Counted::Forwarded);
         groups.count("config:save", Counted::Forwarded);
         groups.count("config:load", Counted::Native);
@@ -388,10 +385,11 @@ mod tests {
             BTreeMap::from([("config:save".to_owned(), 2)])
         );
         assert_eq!(
-            still_forwarded("browser:navigate"),
-            Some(StillForwarded::ExtensionHost)
+            still_forwarded("task:list"),
+            Some(StillForwarded::NotYetNative)
         );
         assert_eq!(still_forwarded("config:load"), None);
+        assert_eq!(still_forwarded("browser:navigate"), None);
         groups.count("config:load", Counted::BeforeAuth);
         assert_eq!(groups.unexpected_forwards().len(), 1);
         assert!(unknown("nonexistent:method"));
