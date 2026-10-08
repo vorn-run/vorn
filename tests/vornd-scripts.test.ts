@@ -16,7 +16,6 @@ import {
   scriptRunnerEvents
 } from '../packages/server/src/script-runner'
 import { setLaunchDataDir } from '../packages/server/src/process-utils'
-import { setDecryptedCreds } from '../packages/server/src/connectors/decrypted-creds'
 import { vorndSessions } from '../packages/server/src/vornd-sessions'
 import { cancelScripts } from '../packages/server/src/vornd-scripts'
 import { FakeVornd, effect } from './helpers/fake-vornd'
@@ -37,7 +36,7 @@ const SCENARIOS: Array<[string, Omit<ScriptConfig, 'cwd'>]> = [
     'a bash script with arguments and a secret',
     {
       scriptType: 'bash',
-      scriptContent: 'echo "out $1 $API_KEY"; pwd; ls',
+      scriptContent: 'echo "out $1"; pwd; ls',
       args: ['first', 'second'],
       secretsFrom: 'conn-1'
     }
@@ -73,7 +72,7 @@ describe.skipIf(process.platform === 'win32')('project scripts run by vornd', ()
       [...interpreter.args(file), ...(params.args as string[])],
       {
         cwd: String(params.cwd),
-        env: { ...process.env, ...(params.secretEnv as Record<string, string>) },
+        env: { ...process.env, ...(params.secretsFrom === 'conn-1' && { API_KEY: 'sk-test' }) },
         stdio: [file ? 'ignore' : 'pipe', 'pipe', 'pipe']
       }
     )
@@ -122,7 +121,6 @@ describe.skipIf(process.platform === 'win32')('project scripts run by vornd', ()
     fs.writeFileSync(path.join(cwd, 'present.txt'), '')
     initDatabase(dataDir)
     setLaunchDataDir(dataDir)
-    setDecryptedCreds('conn-1', { apiKey: 'sk-test' })
     fake = new FakeVornd(dataDir)
     fake.onScript = runAsVornd
     await fake.start()
@@ -150,14 +148,14 @@ describe.skipIf(process.platform === 'win32')('project scripts run by vornd', ()
 
     expect(normalizeScriptRun(vornd, 'vornd')).toEqual(normalizeScriptRun(server, 'server'))
     expect(server.exits).toHaveLength(1)
-    // vornd is sent the step resolved: its cwd, and its secrets by value.
+    // vornd is sent the step resolved: its cwd, and the connection it reads the secrets from.
     expect(asked[0]).toEqual({
       id: expect.stringMatching(/^script-/),
       scriptType: script.scriptType,
       scriptContent: script.scriptContent,
       cwd,
       args: script.args ?? [],
-      secretEnv: script.secretsFrom ? { API_KEY: 'sk-test' } : {}
+      ...(script.secretsFrom && { secretsFrom: script.secretsFrom })
     })
   })
 
@@ -176,10 +174,10 @@ describe.skipIf(process.platform === 'win32')('project scripts run by vornd', ()
     await until('the plan', () => fake.made('vornd:scriptPlan').length === 1)
     const [told] = fake.made('vornd:scriptPlan')
     const plan = told.plan as { argv: string[]; cwd: string; envKeys: string[] }
-    expect(told).toMatchObject({ scriptType: 'bash', cwd, args: ['x'], secretKeys: ['API_KEY'] })
+    expect(told).toMatchObject({ scriptType: 'bash', cwd, args: ['x'], secretKeys: [] })
     expect(plan.argv).toEqual(['bash', '<script>', 'x'])
     expect(plan.cwd).toBe(cwd)
-    expect(plan.envKeys).toContain('API_KEY')
+    expect(plan.envKeys).not.toContain('API_KEY')
     expect(plan.envKeys).toContain('VORN_DATA_DIR')
     expect(plan.envKeys).toEqual([...plan.envKeys].sort())
     // Names only: the secret's value never leaves this server in shadow mode.

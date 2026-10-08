@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { StartFromPanel } from '../src/renderer/components/workflow-editor/panels/StartFromPanel'
-import { TEMPLATE_SEED } from '../packages/server/src/connectors/template-seed'
+import { TEMPLATE_SEED } from './helpers/template-seed'
 import type { SourceConnection } from '../packages/shared/src/types'
 
 function connection(overrides: Partial<SourceConnection> = {}): SourceConnection {
