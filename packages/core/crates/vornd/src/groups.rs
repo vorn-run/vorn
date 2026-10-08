@@ -87,6 +87,7 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "task",
     "project",
     "sessionEvent",
+    "widget",
 ];
 
 /// Why vornd may still hand a call to the server.
@@ -117,7 +118,6 @@ pub const STILL_FORWARDED: &[(&str, StillForwarded)] = &[
     ("core", StillForwarded::NotYetNative),
     ("ssh", StillForwarded::NotYetNative),
     ("permission", StillForwarded::NotYetNative),
-    ("widget", StillForwarded::NotYetNative),
     ("script", StillForwarded::NotYetNative),
     ("server", StillForwarded::NotYetNative),
     ("terminal", StillForwarded::NotYetNative),

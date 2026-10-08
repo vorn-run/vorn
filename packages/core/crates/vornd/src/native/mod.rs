@@ -52,6 +52,7 @@ pub mod sessions;
 pub mod shell;
 pub mod ssh;
 pub mod tasks;
+pub mod widget;
 pub mod work;
 pub mod worktree;
 pub mod worktree_move;
@@ -196,6 +197,7 @@ pub fn effect(method: &str) -> Option<Effect> {
         || desktop::answers(method)
         || method == IDENTIFY
         || tasks::METHODS.contains(&method)
+        || widget::METHODS.contains(&method)
     {
         return Some(Effect::Change);
     }
@@ -347,6 +349,8 @@ pub struct Native {
     shells: shell::Shells,
     /// The copy of the server's session records, when vornd holds sessions.
     registry: OnceLock<Arc<SessionRegistry>>,
+    /// Woken when a client asks for the widget's list ([`widget`]).
+    widget: tokio::sync::Notify,
     /// What starts the sessions vornd creates: the engine, when it runs one.
     host: OnceLock<Arc<dyn sessions::Host>>,
     sessions: Arc<sessions::Sessions>,
@@ -398,6 +402,7 @@ impl Native {
             catalog: vorn_agents::models::Catalog::default(),
             shells: shell::Shells::default(),
             registry: OnceLock::new(),
+            widget: tokio::sync::Notify::new(),
             host: OnceLock::new(),
             sessions: Arc::default(),
             sizes: vorn_worktrees::Sizes::default(),
@@ -419,6 +424,13 @@ impl Native {
     pub fn set_registry(&self, registry: Arc<SessionRegistry>) {
         registry.want();
         let _ = self.registry.set(registry);
+    }
+
+    /// Tells the status widget's list as the registry changes, once there is one.
+    pub fn start_widget(self: &Arc<Self>) {
+        if let Some(registry) = self.registry.get() {
+            tokio::spawn(widget::follow(Arc::clone(self), Arc::clone(registry)));
+        }
     }
 
     /// The server's port, which the addresses a browser uses name.
@@ -573,6 +585,9 @@ impl Native {
         }
         if tasks::METHODS.contains(&method.as_str()) {
             return tasks::answer(self, &method, params).await;
+        }
+        if widget::METHODS.contains(&method.as_str()) {
+            return widget::answer(self);
         }
         if extensions::METHODS.contains(&method.as_str()) {
             let Some(host) = self.extensions.get().cloned() else {

@@ -36,7 +36,6 @@ import { installHooks } from './hook-installer'
 import { installCopilotHooks } from './copilot-hook-installer'
 import {
   IPC,
-  WidgetAgentInfo,
   PermissionRequestInfo,
   SessionEventType,
   RemoteHost,
@@ -247,17 +246,14 @@ export function registerAllMethods(): void {
     ptyManager.renameSession(id, displayName, true)
     logSessionEvent(id, 'renamed', { displayName })
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
   registerMethod('terminal:setGroup', ({ id, groupId }) => {
     ptyManager.setSessionGroup(id, groupId)
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
   registerMethod('terminal:reorder', (ids) => {
     ptyManager.reorderSessions(ids)
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
   // vornd answers both for every session it holds, which is every live one.
   // What reaches the server is a session it has no screen of: one from a
@@ -278,7 +274,6 @@ export function registerAllMethods(): void {
       projectPath: session.projectPath
     })
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
     return session
   })
 
@@ -825,9 +820,6 @@ export function registerAllMethods(): void {
   })
 
   // Widget status update request
-  registerMethod('widget:requestUpdate', () => {
-    broadcastWidgetUpdate()
-  })
 
   /**
    * Which instance a manager notification is about, or nothing.
@@ -933,7 +925,6 @@ export function registerAllMethods(): void {
           releaseClaimsFor(captureSessionId)
           sessionManager.scheduleSave()
           clientRegistry.broadcast(IPC.SESSION_UPDATED, s)
-          broadcastWidgetUpdate()
           log.info(`[session] captured ${s.agentType} session ID: ${capturedId}`)
         }, delay)
       }
@@ -941,13 +932,11 @@ export function registerAllMethods(): void {
     }
 
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
 
   // What vornd changed for a client, told and saved as the methods here that make the same changes.
   ptyManager.on('records-changed', () => {
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
 
   // A shell moved. Saved on a debounce, so a script running `cd` in a loop costs
@@ -963,7 +952,6 @@ export function registerAllMethods(): void {
     releaseClaimsFor(session.id)
 
     sessionManager.scheduleSave()
-    broadcastWidgetUpdate()
   })
 
   // Start hook server
@@ -997,7 +985,6 @@ export function registerAllMethods(): void {
         const result = hookStatusMapper.mapEventToStatus(event)
         if (result) {
           ptyManager.hookStatus(result.terminalId, result.status, true)
-          broadcastWidgetUpdate()
 
           // Persist after hookSessionId is set (SessionStart links the session)
           if (event.hook_event_name === 'SessionStart') {
@@ -1072,28 +1059,9 @@ export function registerAllMethods(): void {
 
         clientRegistry.broadcast(IPC.WIDGET_PERMISSION_REQUEST, permReq)
         ptyManager.hookStatus(terminalId, 'waiting', false)
-        broadcastWidgetUpdate()
       })
     })
     .catch((err) => {
       log.error('Failed to start hook server:', err)
     })
-}
-
-let widgetUpdateTimer: ReturnType<typeof setTimeout> | null = null
-
-function broadcastWidgetUpdate(): void {
-  if (widgetUpdateTimer) return
-  widgetUpdateTimer = setTimeout(() => {
-    widgetUpdateTimer = null
-    const sessions = ptyManager.getActiveSessions()
-    const agents: WidgetAgentInfo[] = sessions.map((s) => ({
-      id: s.id,
-      agentType: s.agentType,
-      displayName: s.displayName,
-      projectName: s.projectName,
-      status: s.status
-    }))
-    clientRegistry.broadcast(IPC.WIDGET_STATUS_UPDATE, agents)
-  }, 500)
 }
