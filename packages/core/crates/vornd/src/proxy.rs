@@ -215,7 +215,7 @@ impl Daemon {
     /// Starts connections and connectors ([`crate::native::connectors`]) once
     /// vornd has a database and its own address, which a browser connector's
     /// child reaches its window through.
-    pub async fn start_connectors(&self, link: &Arc<AppLink>) {
+    pub async fn start_connectors(&self) {
         let Some(native) = self.native.as_ref() else {
             return;
         };
@@ -231,7 +231,7 @@ impl Daemon {
         if addr.ip().is_unspecified() {
             addr.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
         }
-        let bridge = Arc::new(crate::bridge::AppBridge(Arc::clone(link)));
+        let bridge: Arc<dyn crate::bridge::Bridge> = Arc::clone(native.main_process()) as _;
         let connectors = crate::native::connectors::Connectors::new(
             native,
             &dir,
@@ -890,6 +890,7 @@ async fn pump<C, S>(
     });
     let native = daemon.native.as_ref().map(|n| {
         Conn::new(
+            conn_id,
             Arc::clone(n),
             Arc::clone(&daemon.groups),
             forward.clone(),
@@ -905,6 +906,7 @@ async fn pump<C, S>(
     let groups_daemon = daemon.clone();
     let reply = forward.clone();
     let offered = native.clone();
+    let closing = native.clone();
     let upward = tokio::spawn(async move {
         // The upgrade's credential decides who answers the first call.
         if let Some(checking) = checking {
@@ -916,7 +918,15 @@ async fn pump<C, S>(
                     if answered_here(&groups_daemon, conn_id, &reply, text.as_str()) {
                         continue;
                     }
-                    if let Some(method) = method_of(text.as_str()) {
+                    let method = method_of(text.as_str());
+                    if method.is_none()
+                        && offered
+                            .as_ref()
+                            .is_some_and(|n| n.settle_desktop(text.as_str()))
+                    {
+                        continue;
+                    }
+                    if let Some(method) = method {
                         match &offered {
                             Some(native) => {
                                 if native.offer(&method, text.as_str()) == Offer::Taken {
@@ -989,6 +999,9 @@ async fn pump<C, S>(
     tokio::pin!(upward, downward, writer);
     tokio::select! {
         _ = &mut upward => {
+            if let Some(native) = &closing {
+                native.closed();
+            }
             if tokio::time::timeout(CLOSE_GRACE, &mut downward).await.is_err() {
                 downward.abort();
             }
@@ -998,6 +1011,9 @@ async fn pump<C, S>(
                 upward.abort();
             }
         }
+    }
+    if let Some(native) = &closing {
+        native.closed();
     }
     if tokio::time::timeout(CLOSE_GRACE, &mut writer)
         .await

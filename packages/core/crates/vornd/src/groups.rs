@@ -81,6 +81,9 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "config",
     "credentials",
     "http",
+    "browser",
+    "device",
+    "bridge",
 ];
 
 /// Why vornd may still hand a call to the server.
