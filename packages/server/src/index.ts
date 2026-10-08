@@ -38,6 +38,7 @@ import { startExtensionPageServer, stopExtensionPageServer } from './extensions/
 import { stopAllFooters } from './extensions/footers'
 import { abandonSelections } from './extensions/selection'
 import { configManager } from './config-manager'
+import { clearAgentDetectionCache } from './agent-detector'
 import { claimPublishedFiles, writePortFile, removePortFile } from './published-files'
 import { openLocalEndpoint, type LocalEndpoint } from './local-endpoint'
 import { handOver, isHandingOver, onHandover, type HandoffHost } from './handoff/donor'
@@ -53,7 +54,7 @@ import {
 } from './ws-auth'
 import { getDataDir, dbCountActiveConnectorInboxLeases } from './database'
 import { registerWorkRoutes } from './vornd-routes'
-import { armedScheduleCount, relayWorkCall } from './workflow-triggers'
+import { armedScheduleCount, relayVorndCall } from './workflow-triggers'
 import { parseServerArgs, resolveServerPort, shouldRememberPort } from './server-args'
 import {
   DEFAULT_SERVER_PORT,
@@ -167,7 +168,11 @@ onDraining(() => vorndSessions.tellClosing())
 onHandover(() => vorndSessions.tellClosing())
 const vorndReach = linkReach({
   channel: vorndSessions,
-  broadcast: (method, params) => clientRegistry.broadcast(method, params),
+  // A configuration vornd saved is read again here, which tells every client.
+  broadcast: (method, params) =>
+    method === IPC.CONFIG_CHANGED
+      ? configManager.notifyChanged()
+      : clientRegistry.broadcast(method, params),
   disconnectToken,
   host: getCurrentHost
 })
@@ -244,6 +249,7 @@ export async function startServer(
 
   // Re-sync managers and broadcast to clients when config changes
   configManager.onConfigChanged((cfg) => {
+    clearAgentDetectionCache()
     setEnvPassthrough(cfg.defaults.envPassthrough)
     ptyManager.setAgentCommands(cfg.agentCommands)
     ptyManager.setRemoteHosts(cfg.remoteHosts ?? [])
@@ -478,7 +484,7 @@ export async function startServer(
   // Register all RPC methods
   registerAllMethods()
   // The work model's calls are vornd's; a client connected here reaches it through vornd.
-  setMethodFallback(relayWorkCall(vorndSessions))
+  setMethodFallback(relayVorndCall(vorndSessions))
 
   // Connects the rung-none packs installed before installing meant connecting.
   reconcileImplicitConnections()

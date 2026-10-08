@@ -38,6 +38,7 @@ const FILES = [
   'tests/native-server-status.test.ts',
   'tests/native-server-mcp.test.ts',
   'tests/native-server-workflows.test.ts',
+  'tests/native-server-config.test.ts',
   'tests/native-cli.test.ts'
 ]
 

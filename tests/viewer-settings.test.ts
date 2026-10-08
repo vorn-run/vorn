@@ -124,6 +124,19 @@ describe('the device store', () => {
     expect(withViewerSettings(fromServer).defaults.fontSize).toBe(18)
   })
 
+  it('refills a cleared cache from what vornd keeps for this viewer', async () => {
+    const { loadedWithViewerSettings, withViewerSettings } =
+      await import('../packages/shared/src/viewer-settings-store')
+
+    // vornd answers a load with this viewer's own settings already laid over the shared ones.
+    const loaded = loadedWithViewerSettings(config({ mainViewMode: 'tasks', fontSize: 18 }))
+    expect(loaded.defaults.fontSize).toBe(18)
+    // A broadcast carries the shared values; the cache keeps this viewer's.
+    const broadcast = withViewerSettings(config({ mainViewMode: 'sessions', fontSize: 13 }))
+    expect(broadcast.defaults.mainViewMode).toBe('tasks')
+    expect(broadcast.defaults.fontSize).toBe(18)
+  })
+
   it('keeps earlier keys when a later save carries fewer', async () => {
     const { captureViewerSettings, withViewerSettings } =
       await import('../packages/shared/src/viewer-settings-store')

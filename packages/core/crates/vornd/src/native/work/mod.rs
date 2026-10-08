@@ -1153,7 +1153,23 @@ impl Work {
         received
     }
 
-    /// A workflow trigger the server delivers: a task created or moved. It
+    /// A call a client connected to the server made, which the server
+    /// hands here: the work model's, or any other vornd answers.
+    pub async fn relayed(self: &Arc<Self>, method: String, params: Value) -> Answer {
+        if is_work(&method) {
+            return self.answer(&method, &params).await;
+        }
+        match self.native.upgrade() {
+            Some(native) => {
+                native
+                    .answer(method, params, &super::config::Viewer::Local)
+                    .await
+            }
+            None => Answer::Forward,
+        }
+    }
+
+    /// A workflow trigger a configuration save fires: a task created or moved. It
     /// is received once by its `effectId`, however often it is delivered.
     pub async fn trigger(&self, params: &Value) -> Result<bool, String> {
         let effect = text(params, "effectId").ok_or("a trigger needs an effectId")?;

@@ -1,0 +1,4232 @@
+{
+  "seed": 1592594996,
+  "cases": [
+    {
+      "before": {
+        "tasks": []
+      },
+      "after": {
+        "tasks": []
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/a/cancelled/todo/2026-09-09T10:05:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          "from": "cancelled",
+          "to": "todo"
+        },
+        {
+          "effectId": "task-status/e/in_progress/in_review/2026-09-09T10:00:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          "from": "in_progress",
+          "to": "in_review"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "n2",
+            "title": "T n2",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/c/in_review/done/2026-09-09T10:00:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          "from": "in_review",
+          "to": "done"
+        },
+        {
+          "effectId": "task-created/n2",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n2",
+            "title": "T n2",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/d/in_review/cancelled/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "in_review",
+          "to": "cancelled"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "n4",
+            "title": "T n4",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n4",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n4",
+            "title": "T n4",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "n6",
+            "title": "T n6",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n6",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n6",
+            "title": "T n6",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "n7",
+            "title": "T n7",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/e/done/todo/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "done",
+          "to": "todo"
+        },
+        {
+          "effectId": "task-created/n7",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n7",
+            "title": "T n7",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/b/in_review/cancelled/2026-09-09T10:05:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          "from": "in_review",
+          "to": "cancelled"
+        },
+        {
+          "effectId": "task-status/d/todo/in_progress/2026-09-09T10:00:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          "from": "todo",
+          "to": "in_progress"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/d/todo/in_review/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "todo",
+          "to": "in_review"
+        },
+        {
+          "effectId": "task-status/e/cancelled/done/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "cancelled",
+          "to": "done"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "n10",
+            "title": "T n10",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n10",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n10",
+            "title": "T n10",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/d/in_progress/done/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "in_progress",
+          "to": "done"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "n13",
+            "title": "T n13",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n13",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n13",
+            "title": "T n13",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/a/done/cancelled/2026-09-09T09:59:59.999Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          "from": "done",
+          "to": "cancelled"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "n17",
+            "title": "T n17",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n17",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n17",
+            "title": "T n17",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "n18",
+            "title": "T n18",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n18",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n18",
+            "title": "T n18",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/e/in_progress/done/2026-09-09T10:05:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          "from": "in_progress",
+          "to": "done"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "n21",
+            "title": "T n21",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n21",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n21",
+            "title": "T n21",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "n22",
+            "title": "T n22",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n22",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n22",
+            "title": "T n22",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/e/todo/in_review/2026-09-09T10:00:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          "from": "todo",
+          "to": "in_review"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/e/in_progress/done/2026-09-09T10:05:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          "from": "in_progress",
+          "to": "done"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "n25",
+            "title": "T n25",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n25",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n25",
+            "title": "T n25",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "n27",
+            "title": "T n27",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n27",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n27",
+            "title": "T n27",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "n29",
+            "title": "T n29",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n29",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n29",
+            "title": "T n29",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "n30",
+            "title": "T n30",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n30",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n30",
+            "title": "T n30",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/b/todo/done/2026-09-09T09:59:59.999Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          "from": "todo",
+          "to": "done"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/d/done/todo/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "done",
+          "to": "todo"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/b/in_review/cancelled/2026-09-09T10:05:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          "from": "in_review",
+          "to": "cancelled"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/a/done/todo/2026-09-09T10:05:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          "from": "done",
+          "to": "todo"
+        },
+        {
+          "effectId": "task-status/e/done/cancelled/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "done",
+          "to": "cancelled"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/e/todo/done/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "todo",
+          "to": "done"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/c/in_review/in_progress/2026-09-09T09:59:59.999Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          "from": "in_review",
+          "to": "in_progress"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "n40",
+            "title": "T n40",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n40",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n40",
+            "title": "T n40",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/a/cancelled/in_review/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "cancelled",
+          "to": "in_review"
+        },
+        {
+          "effectId": "task-status/b/cancelled/in_progress/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "cancelled",
+          "to": "in_progress"
+        },
+        {
+          "effectId": "task-status/d/cancelled/done/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "cancelled",
+          "to": "done"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "n43",
+            "title": "T n43",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/c/cancelled/todo/2026-09-09T09:59:59.999Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          "from": "cancelled",
+          "to": "todo"
+        },
+        {
+          "effectId": "task-created/n43",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n43",
+            "title": "T n43",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "n44",
+            "title": "T n44",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n44",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n44",
+            "title": "T n44",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "n45",
+            "title": "T n45",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n45",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n45",
+            "title": "T n45",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "n46",
+            "title": "T n46",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n46",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n46",
+            "title": "T n46",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "n47",
+            "title": "T n47",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n47",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n47",
+            "title": "T n47",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "n48",
+            "title": "T n48",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n48",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n48",
+            "title": "T n48",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "n49",
+            "title": "T n49",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n49",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n49",
+            "title": "T n49",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/d/in_progress/in_review/2026-09-09T09:59:59.999Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          "from": "in_progress",
+          "to": "in_review"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/b/in_review/todo/2026-09-09T10:00:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          "from": "in_review",
+          "to": "todo"
+        },
+        {
+          "effectId": "task-status/c/cancelled/in_progress/2026-09-09T10:05:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          "from": "cancelled",
+          "to": "in_progress"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "n54",
+            "title": "T n54",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n54",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n54",
+            "title": "T n54",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/b/cancelled/done/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "cancelled",
+          "to": "done"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/b/in_progress/in_review/2026-09-09T10:00:00Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "in_review",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          "from": "in_progress",
+          "to": "in_review"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-09T09:59:59.999Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "n57",
+            "title": "T n57",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/n57",
+          "kind": "taskCreated",
+          "task": {
+            "id": "n57",
+            "title": "T n57",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "c",
+            "title": "T c",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "in_progress",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-status/e/in_progress/done/2026-09-10T00:00:00.000Z",
+          "kind": "taskStatusChanged",
+          "task": {
+            "id": "e",
+            "title": "T e",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          "from": "in_progress",
+          "to": "done"
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {
+        "tasks": [
+          {
+            "id": "a",
+            "title": "T a",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          },
+          {
+            "id": "b",
+            "title": "T b",
+            "projectName": "vorn",
+            "status": "todo",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:00:00Z"
+          },
+          {
+            "id": "d",
+            "title": "T d",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "triggers": []
+    },
+    {
+      "before": {},
+      "after": {},
+      "triggers": []
+    },
+    {
+      "before": {},
+      "after": {
+        "tasks": [
+          {
+            "id": "x",
+            "title": "T x",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        ]
+      },
+      "triggers": [
+        {
+          "effectId": "task-created/x",
+          "kind": "taskCreated",
+          "task": {
+            "id": "x",
+            "title": "T x",
+            "projectName": "vorn",
+            "status": "cancelled",
+            "order": 0,
+            "updatedAt": "2026-09-09T10:05:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "before": {
+        "tasks": [
+          {
+            "id": "x",
+            "title": "T x",
+            "projectName": "vorn",
+            "status": "done",
+            "order": 0,
+            "updatedAt": "2026-09-10T00:00:00.000Z"
+          }
+        ]
+      },
+      "after": {},
+      "triggers": []
+    }
+  ]
+}

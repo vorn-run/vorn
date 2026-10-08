@@ -101,13 +101,10 @@ impl VorndHost {
         let _ = self.notes.send(note);
     }
 
-    /// Tells every client `method`, through the server, which holds them.
+    /// Tells every client `method`.
     pub fn broadcast(&self, method: &str, params: Value) {
-        if let Some(link) = self.native.upgrade().and_then(|n| n.app_link().cloned()) {
-            link.tell(
-                "vornd:broadcast",
-                json!({ "method": method, "params": params }),
-            );
+        if let Some(native) = self.native.upgrade() {
+            native.broadcast(method, params);
         }
     }
 

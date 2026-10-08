@@ -6,11 +6,10 @@ import { headlessManager } from './headless-manager'
 import { configManager } from './config-manager'
 import { sessionManager } from './session-persistence'
 import { getRecentSessions } from './agent-history'
-import { createTriggerOutbox, taskTriggersForChange } from './workflow-triggers'
 import { pollConnector } from './connector-poll'
 import { detectIDEs, openInIDE } from './ide-detector'
 import { detectMobileProject } from './mobile-detector'
-import { detectInstalledAgents, clearAgentDetectionCache } from './agent-detector'
+import { detectInstalledAgents } from './agent-detector'
 import { clientRegistry } from './broadcast'
 import {
   restoredRecords,
@@ -625,9 +624,6 @@ export function sessionsToPersist(): TerminalSession[] {
   return [...active, ...restoredRecords()]
 }
 
-/** Task triggers, delivered to vornd until it takes each. */
-const workflowTriggers = createTriggerOutbox(vorndSessions)
-
 /** Creates that name a conversation, by its id, while they prepare. */
 const createNamed = onePerKey<TerminalSession>()
 
@@ -971,17 +967,7 @@ export function registerAllMethods(): void {
     return session
   })
 
-  // Config
-  registerMethod('config:load', () => configManager.loadConfig())
   registerMethod('core:status', () => coreStatus())
-  registerMethod('config:save', (config) => {
-    clearAgentDetectionCache()
-    // Read before the write, so a task that changed status can be seen to have.
-    const before = configManager.loadConfig()
-    configManager.saveConfig(config)
-    configManager.notifyChanged()
-    void workflowTriggers.deliver(taskTriggersForChange(before, config))
-  })
 
   // Sessions
   registerMethod('sessions:clear', () => {

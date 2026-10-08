@@ -530,6 +530,94 @@ fn collect<T>(conn: &Connection, sql: &str, map: impl Fn(&Row<'_>) -> Result<T>)
     Ok(out)
 }
 
+/// The settings that belong to whoever is looking (`VIEWER_SETTING_KEYS`):
+/// each viewer keeps its own, over the shared `defaults`.
+pub const VIEWER_SETTING_KEYS: &[&str] = &[
+    "mainViewMode",
+    "layoutMode",
+    "taskViewMode",
+    "minimizedPlacement",
+    "activeWorkspace",
+    "fontSize",
+    "rowHeight",
+    "theme",
+    "notifications",
+    "domBlockRendering",
+    "enableHoverPreview",
+    "showHeadlessAgents",
+    "reopenSessions",
+    "hasSeenOnboarding",
+];
+
+/// The `defaults` row a viewer's own settings are kept in. `loadDefaults`
+/// reads only the keys it lists, so these rows never reach a config.
+fn viewer_row(viewer: &str) -> String {
+    format!("viewer:{viewer}")
+}
+
+impl Store {
+    /// The settings `viewer` saved as its own; empty when it has none.
+    pub fn viewer_settings(&self, viewer: &str) -> Result<Map<String, Value>> {
+        let row: Option<String> = self
+            .conn()
+            .query_row(
+                "SELECT value FROM defaults WHERE key = ?",
+                [viewer_row(viewer)],
+                |r| r.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                e => Err(e),
+            })?;
+        Ok(match row.map(|text| parse_json(&text)).transpose()? {
+            Some(Value::Object(map)) => pick_viewer_settings(&map),
+            _ => Map::new(),
+        })
+    }
+
+    /// Keeps the viewer settings in `defaults` as `viewer`'s own, over what
+    /// it kept before. Nothing is written when `defaults` has none.
+    pub fn save_viewer_settings(&self, viewer: &str, defaults: &Map<String, Value>) -> Result<()> {
+        let picked = pick_viewer_settings(defaults);
+        if picked.is_empty() {
+            return Ok(());
+        }
+        let mut kept = self.viewer_settings(viewer)?;
+        kept.extend(picked);
+        self.conn().execute(
+            "INSERT INTO defaults (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![viewer_row(viewer), json_text(&Value::Object(kept))?],
+        )?;
+        Ok(())
+    }
+
+    /// `loadConfig`, with `viewer`'s own settings laid over the shared ones.
+    pub fn load_config_for(&self, viewer: &str) -> Result<Value> {
+        let mut config = self.load_config()?;
+        let own = self.viewer_settings(viewer)?;
+        if let Some(Value::Object(defaults)) = config.get_mut("defaults") {
+            defaults.extend(own);
+        }
+        Ok(config)
+    }
+}
+
+/// The viewer settings in `source`, `null` and `undefined` left out as
+/// `pickViewerSettings` leaves them.
+fn pick_viewer_settings(source: &Map<String, Value>) -> Map<String, Value> {
+    VIEWER_SETTING_KEYS
+        .iter()
+        .filter_map(|k| {
+            source
+                .get(*k)
+                .filter(|v| !v.is_null())
+                .map(|v| ((*k).to_owned(), v.clone()))
+        })
+        .collect()
+}
+
 /// `readConfigRevision`: `Number(value)`, and 0 when that is not finite
 /// (no row, or text that is not a number).
 fn read_config_revision(conn: &Connection) -> Result<f64> {
@@ -930,5 +1018,43 @@ mod tests {
 
         saved.unwrap();
         assert_eq!(store.load_config().unwrap()["revision"], json!(1));
+    }
+    #[test]
+    fn each_viewer_keeps_its_own_settings_over_the_shared_ones() {
+        let mut store = test_support::store();
+        let mut config = store.load_config().unwrap();
+        config["defaults"]["theme"] = json!("light");
+        config["defaults"]["fontSize"] = json!(16);
+        config["defaults"]["shell"] = json!("/bin/bash");
+        store.save_config(&config, &[]).unwrap();
+        store
+            .save_viewer_settings("token:phone", config["defaults"].as_object().unwrap())
+            .unwrap();
+        // Something that is not a viewer setting is never kept per viewer.
+        let kept = store.viewer_settings("token:phone").unwrap();
+        assert_eq!(kept["theme"], "light");
+        assert_eq!(kept["fontSize"], 16);
+        assert!(kept.get("shell").is_none());
+
+        let mut desktop = store.load_config().unwrap();
+        desktop["defaults"]["theme"] = json!("dark");
+        store.save_config(&desktop, &[]).unwrap();
+        store
+            .save_viewer_settings("desktop", desktop["defaults"].as_object().unwrap())
+            .unwrap();
+
+        assert_eq!(
+            store.load_config_for("token:phone").unwrap()["defaults"]["theme"],
+            "light"
+        );
+        assert_eq!(
+            store.load_config_for("desktop").unwrap()["defaults"]["theme"],
+            "dark"
+        );
+        // A viewer that kept nothing sees the shared values, and no viewer row leaks into a config.
+        let fresh = store.load_config_for("token:new").unwrap();
+        assert_eq!(fresh["defaults"]["theme"], "dark");
+        assert!(fresh["defaults"].get("viewer:desktop").is_none());
+        assert_eq!(fresh["defaults"]["shell"], "/bin/bash");
     }
 }

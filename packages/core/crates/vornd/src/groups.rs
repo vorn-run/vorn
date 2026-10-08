@@ -77,7 +77,77 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "scheduler",
     "webhook",
     "artifact",
+    "config",
 ];
+
+/// Why vornd may still hand a call to the server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StillForwarded {
+    /// Extension hosting and the desktop bridge, which move separately.
+    ExtensionHost,
+    /// Not native yet.
+    NotYetNative,
+}
+
+impl StillForwarded {
+    pub fn name(self) -> &'static str {
+        match self {
+            StillForwarded::ExtensionHost => "extension host",
+            StillForwarded::NotYetNative => "not yet native",
+        }
+    }
+}
+
+/// The calls vornd may still forward to the server, as a whole group or one
+/// method. Any other call that reaches the server is a fault the health
+/// endpoint reports (`unexpectedForwards`) and the tests fail on. It shrinks
+/// to nothing.
+pub const STILL_FORWARDED: &[(&str, StillForwarded)] = &[
+    ("extension", StillForwarded::ExtensionHost),
+    ("bridge", StillForwarded::ExtensionHost),
+    ("browser", StillForwarded::ExtensionHost),
+    ("device", StillForwarded::ExtensionHost),
+    ("auth:authenticate", StillForwarded::NotYetNative),
+    ("subscribe", StillForwarded::NotYetNative),
+    ("credentials", StillForwarded::NotYetNative),
+    ("credential", StillForwarded::NotYetNative),
+    ("connection", StillForwarded::NotYetNative),
+    ("connector", StillForwarded::NotYetNative),
+    ("task", StillForwarded::NotYetNative),
+    ("project", StillForwarded::NotYetNative),
+    ("sessionEvent", StillForwarded::NotYetNative),
+    ("session", StillForwarded::NotYetNative),
+    ("env", StillForwarded::NotYetNative),
+    ("http", StillForwarded::NotYetNative),
+    ("core", StillForwarded::NotYetNative),
+    ("ssh", StillForwarded::NotYetNative),
+    ("permission", StillForwarded::NotYetNative),
+    ("widget", StillForwarded::NotYetNative),
+    ("script", StillForwarded::NotYetNative),
+    ("server", StillForwarded::NotYetNative),
+    ("terminal", StillForwarded::NotYetNative),
+    ("git", StillForwarded::NotYetNative),
+    ("file", StillForwarded::NotYetNative),
+    ("worktree", StillForwarded::NotYetNative),
+    ("headless", StillForwarded::NotYetNative),
+    ("sessions", StillForwarded::NotYetNative),
+    ("shell", StillForwarded::NotYetNative),
+    ("agent", StillForwarded::NotYetNative),
+];
+
+/// Whether neither vornd nor the server has `method`: no native group, and
+/// not one the server still answers.
+pub fn unknown(method: &str) -> bool {
+    !NATIVE_GROUPS.contains(&group_of(method)) && still_forwarded(method).is_none()
+}
+
+/// Whether `method` may still go to the server, and why.
+pub fn still_forwarded(method: &str) -> Option<StillForwarded> {
+    STILL_FORWARDED
+        .iter()
+        .find(|(entry, _)| *entry == method || *entry == group_of(method))
+        .map(|(_, why)| *why)
+}
 
 /// The group a method belongs to: everything before the first colon.
 pub fn group_of(method: &str) -> &str {
@@ -98,6 +168,8 @@ pub enum Counted {
     /// In shadow mode, but nothing native ran: no implementation, a call
     /// that changes something, or one only the server can answer.
     ShadowUnported,
+    /// Sent before the connection was admitted, which the server refuses.
+    BeforeAuth,
 }
 
 /// The switches, and how many calls each group has seen.
@@ -105,6 +177,8 @@ pub enum Counted {
 pub struct Groups {
     modes: BTreeMap<String, Mode>,
     seen: Mutex<BTreeMap<String, GroupCounts>>,
+    /// Forwarded calls [`STILL_FORWARDED`] does not allow, by method.
+    unexpected: Mutex<BTreeMap<String, u64>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -166,6 +240,7 @@ impl Groups {
         Ok(Groups {
             modes,
             seen: Mutex::default(),
+            unexpected: Mutex::default(),
         })
     }
 
@@ -184,7 +259,18 @@ impl Groups {
         let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
         let counts = seen.entry(group_of(method).to_string()).or_default();
         match what {
-            Counted::Forwarded => counts.forwarded += 1,
+            Counted::Forwarded => {
+                counts.forwarded += 1;
+                if still_forwarded(method).is_none() {
+                    *self
+                        .unexpected
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .entry(method.to_owned())
+                        .or_default() += 1;
+                }
+            }
+            Counted::BeforeAuth => counts.forwarded += 1,
             Counted::Native => counts.native += 1,
             Counted::ShadowMatched => counts.shadow_matched += 1,
             Counted::ShadowMismatched => counts.shadow_mismatched += 1,
@@ -205,6 +291,14 @@ impl Groups {
 
     pub fn counts(&self) -> BTreeMap<String, GroupCounts> {
         self.seen.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The calls forwarded that [`STILL_FORWARDED`] does not allow, by method.
+    pub fn unexpected_forwards(&self) -> BTreeMap<String, u64> {
+        self.unexpected
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 
@@ -282,5 +376,56 @@ mod tests {
         );
         assert_eq!(counts["file"].native, 1);
         assert_eq!(counts["task"].forwarded, 1);
+    }
+
+    #[test]
+    fn reports_a_forward_the_list_does_not_allow() {
+        let groups = Groups::new(None).unwrap();
+        groups.count("browser:navigate", Counted::Forwarded);
+        groups.count("config:save", Counted::Forwarded);
+        groups.count("config:save", Counted::Forwarded);
+        groups.count("config:load", Counted::Native);
+        assert_eq!(
+            groups.unexpected_forwards(),
+            BTreeMap::from([("config:save".to_owned(), 2)])
+        );
+        assert_eq!(
+            still_forwarded("extension:list"),
+            Some(StillForwarded::ExtensionHost)
+        );
+        assert_eq!(still_forwarded("config:load"), None);
+        groups.count("config:load", Counted::BeforeAuth);
+        assert_eq!(groups.unexpected_forwards().len(), 1);
+        assert!(unknown("nonexistent:method"));
+        assert!(!unknown("config:save"));
+        assert!(!unknown("task:list"));
+    }
+
+    /// Every call a client can make, from the protocol's request map, is
+    /// answered by vornd unless [`STILL_FORWARDED`] names it.
+    #[test]
+    fn every_protocol_call_is_native_or_listed() {
+        let protocol = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../shared/src/protocol.ts");
+        let text = std::fs::read_to_string(protocol)
+            .expect("the protocol")
+            .replace("\r\n", "\n");
+        let start = text
+            .find("export interface RequestMethods")
+            .expect("the request map");
+        let body = &text[start..];
+        let body = &body[..body.find("\n}\n").expect("its end")];
+        let methods: Vec<&str> = body
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix('\''))
+            .filter_map(|l| l.split_once('\'').map(|(m, _)| m))
+            .filter(|m| m.contains(':'))
+            .collect();
+        assert!(methods.len() > 150, "read {} methods", methods.len());
+        let missing: Vec<&str> = methods
+            .into_iter()
+            .filter(|m| crate::native::effect(m).is_none() && still_forwarded(m).is_none())
+            .collect();
+        assert!(missing.is_empty(), "forwarded and not listed: {missing:?}");
     }
 }

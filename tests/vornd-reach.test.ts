@@ -56,16 +56,18 @@ describe('vornd asking the server', () => {
     expect(fake.made('vornd:reach')[1]).toEqual({ host: '0.0.0.0' })
   })
 
-  it('broadcasts what pairing announces, and nothing else', async () => {
+  it('broadcasts what pairing and the configuration announce, and nothing else', async () => {
     linkReach({ channel: sessions, broadcast, disconnectToken, host: () => host })
     await sessions.connect(fake.endpoint)
     const request = { requestId: 'r1', deviceName: 'Pixel' }
     fake.send('vornd:broadcast', { method: 'pairing:requested', params: request })
+    fake.send('vornd:broadcast', { method: 'terminal:data', params: {} })
     fake.send('vornd:broadcast', { method: 'config:changed', params: {} })
     fake.send('vornd:broadcast', { method: 'pairing:collected', params: { requestId: 'r1' } })
-    await until('the broadcasts', () => broadcast.mock.calls.length === 2)
+    await until('the broadcasts', () => broadcast.mock.calls.length === 3)
     expect(broadcast.mock.calls).toEqual([
       ['pairing:requested', request],
+      ['config:changed', {}],
       ['pairing:collected', { requestId: 'r1' }]
     ])
   })
