@@ -1042,26 +1042,15 @@ export interface RequestMethods {
     params: void
     result: ConnectorKey[]
   }
-  /** Replace one stored secret. `value` is the ciphertext to persist, sealed
-   *  by the desktop process because only it holds the keychain. `plaintext` is
-   *  the same secret in the clear, handed over so the running server can serve
-   *  it immediately rather than leaving a window in which the key is stored
-   *  but unusable — the same trust boundary `credentials:setDecrypted` uses. */
+  /** Replace one stored secret, which vornd keeps in the OS keychain. */
   'connection:rotateSecret': {
-    params: { connectionId: string; field: string; value: string; plaintext: string }
+    params: { connectionId: string; field: string; plaintext: string }
     result: { ok: boolean; error?: string }
   }
-  /** Main→server push of decrypted credential fields. Called after main
-   *  decrypts values (via Electron safeStorage) on boot and on config
-   *  changes. Plaintext lives in server memory only — never persisted. */
-  'credentials:setDecrypted': {
-    params: { connectionId: string; fields: Record<string, string> }
-    result: void
-  }
-  /** Clear the in-memory plaintext for a connection (on delete / sign-out). */
-  'credentials:clearDecrypted': {
-    params: { connectionId: string }
-    result: void
+  /** Secrets this app sealed before vornd kept them, decrypted once, by connection then field. */
+  'credentials:import': {
+    params: { connections: Record<string, Record<string, string>> }
+    result: { connections: number }
   }
   /** Invoke a connector's action (createIssue, commentOnIssue, ...) via the
    *  connection's auth. Used by callConnectorAction workflow nodes. */

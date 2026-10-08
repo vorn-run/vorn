@@ -98,29 +98,15 @@ export function AddConnectionForm({
     setError(null)
     setSaving(true)
     try {
-      // Encrypt any password-typed auth fields via Electron's safeStorage
-      // BEFORE they touch the DB. Plaintext never leaves this call.
-      const encryptedAuth: Record<string, string> = {}
+      // Secrets go to vornd as typed; it keeps them in the OS keychain, never in the database.
+      const authFields: Record<string, string> = {}
       for (const field of manifest.auth ?? []) {
         const v = auth[field.key]
-        if (!v) continue
-        if (field.type === 'password') {
-          try {
-            encryptedAuth[field.key] = await window.api.encryptString(v)
-          } catch (err) {
-            throw new Error(
-              `Could not encrypt ${field.label}: ${err instanceof Error ? err.message : String(err)}. ` +
-                `OS keychain access may be unavailable.`,
-              { cause: err }
-            )
-          }
-        } else {
-          encryptedAuth[field.key] = v
-        }
+        if (v) authFields[field.key] = v
       }
 
       const connectionFilters: Record<string, unknown> = {
-        ...encryptedAuth,
+        ...authFields,
         ...filters,
         ...extraFilters
       }

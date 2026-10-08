@@ -73,23 +73,6 @@ describe('the keys this machine holds', () => {
     expect(await screen.findByText(/Locked — this machine cannot read it/)).toBeInTheDocument()
   })
 
-  it('warns when the keychain cannot seal a replacement', async () => {
-    api.isSafeStorageAvailable.mockResolvedValue(false)
-    render(<KeysSettings />)
-
-    expect(await screen.findByText(/Keychain encryption is not available/)).toBeInTheDocument()
-  })
-
-  it('offers no rotation it could not carry out, rather than failing at Save', async () => {
-    api.isSafeStorageAvailable.mockResolvedValue(false)
-    render(<KeysSettings />)
-
-    await screen.findByText(/Keychain encryption is not available/)
-    for (const button of screen.getAllByRole('button', { name: /Rotate/ })) {
-      expect(button).toBeDisabled()
-    }
-  })
-
   it('draws a packaged connector with the mark it ships', async () => {
     api.listConnections.mockResolvedValue([
       {
@@ -149,7 +132,7 @@ describe('testing a key', () => {
 })
 
 describe('rotating a key', () => {
-  it('seals the new value before it leaves, and reloads what is held', async () => {
+  it('sends the new value to vornd, and reloads what is held', async () => {
     render(<KeysSettings />)
     fireEvent.click((await screen.findAllByRole('button', { name: /Rotate/ }))[0])
     fireEvent.change(screen.getByPlaceholderText('The replacement value'), {
@@ -158,12 +141,10 @@ describe('rotating a key', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(api.rotateConnectionSecret).toHaveBeenCalled())
-    expect(api.encryptString).toHaveBeenCalledWith('sk_live_new')
-    // Ciphertext to store, and the value itself so the key works at once.
+    expect(api.encryptString).not.toHaveBeenCalled()
     expect(api.rotateConnectionSecret).toHaveBeenCalledWith({
       connectionId: 'conn-1',
       field: 'secret',
-      value: 'sealed',
       plaintext: 'sk_live_new'
     })
     // Once on mount, once after the rotation; the shared connections cache may read the list too.
