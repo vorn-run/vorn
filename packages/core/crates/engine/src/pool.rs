@@ -14,7 +14,8 @@
 //! Each worker keeps a [`Brief`] of its sessions in a map the pool shares,
 //! so the debug report reads it without waiting behind a worker's queue.
 
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
@@ -73,8 +74,7 @@ enum Job {
 /// What the pool and its workers share.
 #[derive(Default)]
 struct Shared {
-    /// Which worker each session is on.
-    placed: Mutex<HashMap<String, usize>>,
+    placed: Mutex<Placed>,
     briefs: Mutex<HashMap<String, Brief>>,
     /// Set when the pool is dropped: workers stop before their next job
     /// rather than working through their queues.
@@ -82,7 +82,7 @@ struct Shared {
 }
 
 impl Shared {
-    fn placed(&self) -> MutexGuard<'_, HashMap<String, usize>> {
+    fn placed(&self) -> MutexGuard<'_, Placed> {
         self.placed.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -93,6 +93,39 @@ impl Shared {
     fn forget(&self, id: &str) {
         self.placed().remove(id);
         self.briefs().remove(id);
+    }
+}
+
+/// Which worker each session is on, and how many each has, so placing one
+/// does not count them all.
+#[derive(Default)]
+struct Placed {
+    at: HashMap<String, usize>,
+    load: Vec<usize>,
+}
+
+impl Placed {
+    fn get(&self, id: &str) -> Option<&usize> {
+        self.at.get(id)
+    }
+
+    fn len(&self) -> usize {
+        self.at.len()
+    }
+
+    /// Places `id` on the least loaded of `workers`.
+    fn place(&mut self, id: &str, workers: usize) -> usize {
+        self.load.resize(workers.max(self.load.len()), 0);
+        let w = (0..workers).min_by_key(|&w| self.load[w]).unwrap_or(0);
+        self.load[w] += 1;
+        self.at.insert(id.to_owned(), w);
+        w
+    }
+
+    fn remove(&mut self, id: &str) {
+        if let Some(w) = self.at.remove(id) {
+            self.load[w] -= 1;
+        }
     }
 }
 
@@ -129,6 +162,7 @@ impl Pool {
                         sink,
                         shared,
                         sessions: HashMap::new(),
+                        due: Due::default(),
                         out: Vec::new(),
                     };
                     w.run(rx)
@@ -151,16 +185,9 @@ impl Pool {
     pub fn open(&self, id: &str, open: Open) {
         let w = {
             let mut placed = self.shared.placed();
-            if let Some(&w) = placed.get(id) {
-                w
-            } else {
-                let mut load = vec![0usize; self.workers.len()];
-                for &w in placed.values() {
-                    load[w] += 1;
-                }
-                let w = (0..load.len()).min_by_key(|&w| load[w]).unwrap_or(0);
-                placed.insert(id.to_owned(), w);
-                w
+            match placed.get(id) {
+                Some(&w) => w,
+                None => placed.place(id, self.workers.len()),
             }
         };
         let _ = self.workers[w].0.send(Job::Open {
@@ -250,6 +277,13 @@ impl Pool {
         all
     }
 
+    /// Whether session `id` is open, from the moment [`Pool::open`] returns
+    /// rather than once its worker has got to it; without copying every
+    /// brief, as a lookup per spawn or attach must not.
+    pub fn has(&self, id: &str) -> bool {
+        self.shared.placed().get(id).is_some()
+    }
+
     /// Every session as its worker last left it, without waiting for any.
     pub fn briefs(&self) -> Vec<Brief> {
         let mut all: Vec<Brief> = self.shared.briefs().values().cloned().collect();
@@ -309,8 +343,56 @@ struct Worker {
     sink: Sink,
     shared: Arc<Shared>,
     sessions: HashMap<String, Session>,
+    /// When each session's next grid frame is due, so a job costs the
+    /// sessions it touches, not every session on the worker.
+    due: Due,
     /// Reused for every call's outputs.
     out: Vec<Out>,
+}
+
+/// Grid frames due, earliest first. An entry is current while it matches
+/// `at`; one that a later schedule replaced is skipped when it comes up.
+#[derive(Default)]
+struct Due {
+    heap: BinaryHeap<Reverse<(Instant, String)>>,
+    at: HashMap<String, Instant>,
+}
+
+impl Due {
+    /// Session `id` next wants a frame at `when`. An earlier entry already
+    /// queued covers it: popping that one looks again.
+    fn schedule(&mut self, id: &str, when: Option<Instant>) {
+        let Some(when) = when else {
+            return;
+        };
+        if self.at.get(id).is_some_and(|&t| t <= when) {
+            return;
+        }
+        self.at.insert(id.to_owned(), when);
+        self.heap.push(Reverse((when, id.to_owned())));
+    }
+
+    fn next(&self) -> Option<Instant> {
+        self.heap.peek().map(|Reverse((t, _))| *t)
+    }
+
+    /// The sessions whose entry came due by `now`, each once.
+    fn take(&mut self, now: Instant) -> Vec<String> {
+        let mut ids = Vec::new();
+        while let Some(Reverse((t, _))) = self.heap.peek() {
+            if *t > now {
+                break;
+            }
+            let Some(Reverse((t, id))) = self.heap.pop() else {
+                break;
+            };
+            if self.at.get(&id) == Some(&t) {
+                self.at.remove(&id);
+                ids.push(id);
+            }
+        }
+        ids
+    }
 }
 
 impl Worker {
@@ -389,6 +471,7 @@ impl Worker {
                             .guarded(&id, |out| s.output(token, lines, out))
                             .is_some()
                         {
+                            self.due.schedule(&id, s.due());
                             self.sessions.insert(id.clone(), s);
                         } else {
                             self.lost(&id);
@@ -431,24 +514,25 @@ impl Worker {
 
     /// When the earliest grid frame on this worker is due.
     fn next_frame(&self) -> Option<Instant> {
-        self.sessions.values().filter_map(Session::due).min()
+        self.due.next()
     }
 
     /// Cuts the grid frames due by `now`.
     fn frames(&mut self, now: Instant) {
-        let due: Vec<String> = self
-            .sessions
-            .iter()
-            .filter(|(_, s)| s.due().is_some_and(|d| d <= now))
-            .map(|(id, _)| id.clone())
-            .collect();
-        for id in due {
-            if let Some(mut s) = self.sessions.remove(&id) {
-                if self.guarded(&id, |out| s.frame(now, out)).is_some() {
-                    self.sessions.insert(id.clone(), s);
-                } else {
-                    self.lost(&id);
-                }
+        for id in self.due.take(now) {
+            let Some(mut s) = self.sessions.remove(&id) else {
+                continue;
+            };
+            if s.due().is_some_and(|d| d > now) {
+                self.due.schedule(&id, s.due());
+                self.sessions.insert(id, s);
+                continue;
+            }
+            if self.guarded(&id, |out| s.frame(now, out)).is_some() {
+                self.due.schedule(&id, s.due());
+                self.sessions.insert(id, s);
+            } else {
+                self.lost(&id);
             }
         }
     }
@@ -494,6 +578,7 @@ impl Worker {
             return;
         };
         if !s.closed() {
+            self.due.schedule(id, s.due());
             let brief = s.brief();
             self.shared.briefs().insert(id.to_owned(), brief);
             return;
@@ -567,5 +652,30 @@ impl Worker {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Due;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn due_frames_come_up_once_in_time_order() {
+        let t = Instant::now();
+        let ms = |n| t + Duration::from_millis(n);
+        let mut due = Due::default();
+        due.schedule("a", Some(ms(30)));
+        due.schedule("b", Some(ms(10)));
+        due.schedule("c", None);
+        // Earlier replaces later; later than queued keeps the earlier.
+        due.schedule("a", Some(ms(5)));
+        due.schedule("b", Some(ms(20)));
+        assert_eq!(due.next(), Some(ms(5)));
+        assert_eq!(due.take(ms(10)), ["a", "b"]);
+        // a's stale 30 ms entry is skipped, not handed out again.
+        assert!(due.take(ms(40)).is_empty());
+        due.schedule("a", Some(ms(50)));
+        assert_eq!(due.take(ms(50)), ["a"]);
     }
 }

@@ -417,9 +417,7 @@ impl Engine {
 
     /// Whether the engine runs session `id` now.
     pub fn has_session(&self, id: &str) -> bool {
-        self.current()
-            .as_ref()
-            .is_some_and(|c| c.pool.briefs().iter().any(|b| b.session == id))
+        self.current().as_ref().is_some_and(|c| c.pool.has(id))
     }
 
     /// A grid client's request for session `id`, for its actor.
@@ -1249,7 +1247,7 @@ impl Driver<'_> {
     /// Whether a session may be started under `name`: no session the
     /// engine runs, nor one waiting to be started, goes by it already.
     fn name_free(&self, name: &str) -> Result<(), String> {
-        let running = |id: &str| self.pool.briefs().iter().any(|b| b.session == id);
+        let running = |id: &str| self.pool.has(id);
         if running(name)
             || self.parked.contains_key(name)
             || self

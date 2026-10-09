@@ -7,7 +7,8 @@
 #   scripts/bench-gcp.sh [TIER...]          (default: 100 1000 10000)
 #
 # Env: PROJECT (required, the GCP project to bill), ZONE (us-central1-c),
-#      MACHINE (n2-standard-16), MAX_RUN (3h), PHASES (holder,stack).
+#      MACHINE (n2-standard-16), MAX_RUN (3h), PHASES (holder,stack),
+#      TESTS (set to run the Rust tests on the VM before the tiers).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -17,6 +18,7 @@ zone=${ZONE:-us-central1-c}
 machine=${MACHINE:-n2-standard-16}
 max_run=${MAX_RUN:-3h}
 phases=${PHASES:-holder,stack}
+tests=${TESTS:-}
 tiers=("$@")
 vm="vorn-scale-bench-$(date +%Y%m%d-%H%M%S)"
 commit=$(git rev-parse --short HEAD)
@@ -29,19 +31,38 @@ if ! git diff --quiet HEAD -- packages/core; then
   exit 1
 fi
 
+# Deletes the VM and its disks however the run ends: also on a hangup (the
+# terminal that started it closed) or a broken pipe (the tee it ran into died),
+# and retried until neither is listed, since a lost or preempted VM may still
+# be stopping when the driver gives up on it.
 cleanup() {
   local code=$?
-  trap - EXIT INT TERM
-  echo "deleting $vm"
-  "${gc[@]}" compute instances delete "$vm" --zone "$zone" --delete-disks=all >/dev/null 2>&1 || true
-  # A disk left behind by a failed create or a detach.
-  for d in $("${gc[@]}" compute disks list --filter="name~^$vm" --format='value(name)' 2>/dev/null); do
-    "${gc[@]}" compute disks delete "$d" --zone "$zone" >/dev/null 2>&1 || true
+  trap - EXIT INT TERM HUP
+  trap '' PIPE
+  set +e
+  echo "deleting $vm" >&2
+  local left=
+  for _ in 1 2 3 4 5 6; do
+    if [ -n "$("${gc[@]}" compute instances list --filter="name=$vm" --format='value(name)' 2>/dev/null)" ]; then
+      "${gc[@]}" compute instances delete "$vm" --zone "$zone" --delete-disks=all >/dev/null 2>&1
+    fi
+    # A disk left behind by a failed create, a detach or a preemption.
+    for d in $("${gc[@]}" compute disks list --filter="name~^$vm" --format='value(name)' 2>/dev/null); do
+      "${gc[@]}" compute disks delete "$d" --zone "$zone" >/dev/null 2>&1
+    done
+    # A listing that fails counts as something left.
+    left=$("${gc[@]}" compute instances list --filter="name=$vm" --format='value(name)' 2>/dev/null) || left="$vm?"
+    left+=$("${gc[@]}" compute disks list --filter="name~^$vm" --format='value(name)' 2>/dev/null) || left+=" disks?"
+    [ -z "$left" ] && break
+    sleep 20
   done
-  "${gc[@]}" compute instances list --filter="name=$vm" --format='value(name)'
+  if [ -n "$left" ]; then
+    echo "could not delete $vm or its disks; delete them by hand: $left" >&2
+    [ "$code" -ne 0 ] || code=1
+  fi
   exit "$code"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT INT TERM HUP PIPE
 
 ssh_vm() { "${gc[@]}" compute ssh "$vm" --zone "$zone" -- "$@"; }
 
@@ -83,7 +104,7 @@ wait_boot "$boot"
 # Detached on the VM, so a dropped ssh connection does not end the run.
 echo "building and running tiers ${tiers[*]:-100 1000 10000}"
 # The timeout only frees this side should ssh linger after the launch.
-timeout 120 "${gc[@]}" compute ssh "$vm" --zone "$zone" -- "mkdir -p \"\$HOME/results\" && PHASES=$phases setsid nohup bash -c 'bash \"\$HOME/vorn/packages/core/bench/scale/run-tiers.sh\" \"\$HOME/results\" ${tiers[*]:-}; touch \"\$HOME/results/done\"' >\"\$HOME/run.log\" 2>&1 </dev/null &" </dev/null || true
+timeout 120 "${gc[@]}" compute ssh "$vm" --zone "$zone" -- "mkdir -p \"\$HOME/results\" && PHASES=$phases TESTS=$tests setsid nohup bash -c 'bash \"\$HOME/vorn/packages/core/bench/scale/run-tiers.sh\" \"\$HOME/results\" ${tiers[*]:-}; touch \"\$HOME/results/done\"' >\"\$HOME/run.log\" 2>&1 </dev/null &" </dev/null || true
 mkdir -p "$dest"
 # Copies what the tiers wrote so far, so a preempted VM keeps finished tiers.
 fetch() { ssh_vm 'tar -c -C "$HOME/results" --exclude=build.log .' 2>/dev/null | tar -x -C "$dest" 2>/dev/null; }

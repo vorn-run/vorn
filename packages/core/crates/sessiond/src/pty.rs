@@ -1,32 +1,16 @@
 //! Terminals on macOS and Linux: the PTY pair is opened here and the program
-//! started with a plain `Command`, so nothing runs in the child between fork
-//! and exec but a few async-signal-safe calls.
+//! started on it with [`crate::spawn`], which never forks.
 //!
-//! sessiond is multithreaded, and a forked child of a multithreaded process
-//! may only make async-signal-safe calls until it execs: another thread may
-//! have held the allocator's lock at the fork. So no descriptor is closed by
-//! listing them in the child. Every descriptor sessiond opens is close-on-exec
-//! from the moment it exists, and the ones it inherited are made so once at
-//! startup ([`cloexec_inherited`]).
+//! Every descriptor sessiond opens is close-on-exec from the moment it
+//! exists, and the ones it inherited are made so once at startup
+//! ([`cloexec_inherited`]), so no program inherits another's terminal.
 
 use std::ffi::{CStr, CString};
-use std::fs::File;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::process::CommandExt;
-use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
-/// Signals whose disposition the child gets back at its default: one sessiond
-/// ignores would otherwise stay ignored across exec.
-const DEFAULT_SIGNALS: [libc::c_int; 6] = [
-    libc::SIGCHLD,
-    libc::SIGHUP,
-    libc::SIGINT,
-    libc::SIGQUIT,
-    libc::SIGTERM,
-    libc::SIGALRM,
-];
+use crate::spawn::{Program, Stdio};
 
 /// `ptsname` answers in a buffer shared by the whole process.
 static PTSNAME: Mutex<()> = Mutex::new(());
@@ -42,14 +26,10 @@ impl Master {
         set_size(&self.fd, cols, rows, px_w, px_h)
     }
 
-    /// A second handle on the master for reading, close-on-exec like the first.
-    pub fn reader(&self) -> io::Result<File> {
-        Ok(File::from(self.fd.try_clone()?))
-    }
-
-    /// A second handle on the master for writing.
-    pub fn writer(&self) -> io::Result<File> {
-        Ok(File::from(self.fd.try_clone()?))
+    /// A second handle on the master, close-on-exec like the first: input
+    /// is written through it, so it is polled for room apart from output.
+    pub fn dup(&self) -> io::Result<OwnedFd> {
+        self.fd.try_clone()
     }
 }
 
@@ -66,43 +46,41 @@ impl AsRawFd for Master {
     }
 }
 
-/// Start `cmd` on a new terminal of `cols` x `rows`, as the leader of its own
-/// session with the terminal as its controlling one. Its stdio is replaced.
-pub fn spawn(mut cmd: Command, cols: u16, rows: u16) -> io::Result<(Master, Child)> {
-    let (master, slave) = open()?;
+/// Start `program` on a new terminal of `cols` x `rows`, as the leader of
+/// its own session with the terminal as its controlling one. Its pid.
+pub fn spawn(program: &Program, cols: u16, rows: u16) -> io::Result<(Master, libc::pid_t)> {
+    let (master, slave, name) = open()?;
     set_size(&master, cols, rows, 0, 0)?;
-    cmd.stdin(Stdio::from(slave.try_clone()?))
-        .stdout(Stdio::from(slave.try_clone()?))
-        .stderr(Stdio::from(slave));
-    // SAFETY: the closure runs in the child between fork and exec, and makes
-    // only async-signal-safe calls: signal, setsid and ioctl. It allocates
-    // nothing and takes no lock.
-    unsafe {
-        cmd.pre_exec(|| {
-            for sig in DEFAULT_SIGNALS {
-                libc::signal(sig, libc::SIG_DFL);
-            }
-            if libc::setsid() == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            // `as _`: the request's type differs between platforms.
-            #[allow(clippy::cast_lossless)]
-            if libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
+    let pid = program.spawn(Stdio::Terminal(&name))?;
+    // Held until the program has the terminal open, so the master never
+    // reads the end of a terminal nobody opened yet. Now only the program
+    // and what it starts hold it, and the master reads EOF once they all
+    // closed it.
+    drop(slave);
+    #[cfg(target_os = "macos")]
+    claimed(&master, pid);
+    Ok((Master { fd: master }, pid))
+}
+
+/// Wait, briefly, until `pid` holds the terminal as its controlling one.
+/// macOS returns from posix_spawn before the new session claims it (a few
+/// ms later); a sessiond that died in between would leave the program
+/// without the hangup that ends it.
+#[cfg(target_os = "macos")]
+fn claimed(master: &OwnedFd, pid: libc::pid_t) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    // SAFETY: tcgetpgrp on a master this module owns.
+    while unsafe { libc::tcgetpgrp(master.as_raw_fd()) } != pid {
+        if std::time::Instant::now() >= deadline {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_micros(250));
     }
-    // The child's copies of the slave are dropped with `cmd`, so only the
-    // child holds it open and the master reads EOF once it and everything it
-    // started have closed it.
-    let child = cmd.spawn()?;
-    Ok((Master { fd: master }, child))
 }
 
 /// Open a PTY pair, both ends close-on-exec from the start, so a program
 /// another thread starts meanwhile inherits neither.
-fn open() -> io::Result<(OwnedFd, OwnedFd)> {
+fn open() -> io::Result<(OwnedFd, OwnedFd, CString)> {
     let flags = libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC;
     // SAFETY: a NUL-terminated path; the result is checked before use.
     let fd = unsafe { libc::open(c"/dev/ptmx".as_ptr(), flags) };
@@ -125,7 +103,7 @@ fn open() -> io::Result<(OwnedFd, OwnedFd)> {
     }
     // SAFETY: as above.
     let slave = unsafe { OwnedFd::from_raw_fd(fd) };
-    Ok((master, slave))
+    Ok((master, slave, name))
 }
 
 fn slave_name(master: &OwnedFd) -> io::Result<CString> {
@@ -153,6 +131,21 @@ fn set_size(fd: &OwnedFd, cols: u16, rows: u16, px_w: u16, px_h: u16) -> io::Res
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Open `/dev/null` on whichever of stdin, stdout and stderr sessiond was
+/// started without, so no descriptor it makes later lands on one of them and
+/// is mistaken for a program's stdio ([`crate::spawn`]).
+pub fn stdio_open() {
+    for fd in 0..3 {
+        // SAFETY: fcntl on a descriptor number, and open of a fixed path,
+        // which takes the lowest free number: the one found missing.
+        unsafe {
+            if libc::fcntl(fd, libc::F_GETFD) == -1 {
+                libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
+            }
+        }
+    }
 }
 
 /// Make every descriptor above stderr that sessiond inherited close-on-exec,
@@ -184,16 +177,40 @@ mod tests {
     use super::*;
     use std::io::Read;
 
-    fn sh(script: &str) -> Command {
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(script);
-        cmd
+    fn sh(script: &str) -> Program {
+        Program::new(&["sh".into(), "-c".into(), script.into()], &[], None).unwrap()
+    }
+
+    fn spawn(p: Program, cols: u16, rows: u16) -> io::Result<(Master, Child)> {
+        super::spawn(&p, cols, rows).map(|(m, pid)| (m, Child(pid)))
+    }
+
+    struct Child(libc::pid_t);
+
+    impl Child {
+        fn id(&self) -> u32 {
+            self.0 as u32
+        }
+
+        fn wait(&mut self) -> io::Result<std::process::ExitStatus> {
+            use std::os::unix::process::ExitStatusExt;
+            let mut status = 0;
+            // SAFETY: reaping the child this test started.
+            if unsafe { libc::waitpid(self.0, &mut status, 0) } == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(std::process::ExitStatus::from_raw(status))
+        }
+    }
+
+    fn writer(m: &Master) -> std::fs::File {
+        std::fs::File::from(m.dup().unwrap())
     }
 
     /// Everything the terminal prints until the program and all it started
     /// have closed it.
     fn read_all(master: &Master) -> String {
-        let mut r = master.reader().unwrap();
+        let mut r = writer(master);
         let mut out = Vec::new();
         let mut buf = [0u8; 4096];
         loop {
@@ -215,7 +232,7 @@ mod tests {
         assert_eq!(sid, pid, "its own session");
         assert_eq!(fg, pid, "the terminal is its controlling one");
         use std::io::Write;
-        master.writer().unwrap().write_all(b"\n").unwrap();
+        writer(&master).write_all(b"\n").unwrap();
         // macOS holds the program's exit until the terminal's echo of that
         // line is read.
         read_all(&master);
@@ -241,7 +258,7 @@ mod tests {
         let (master, mut child) = spawn(sh("read _; stty size"), 80, 24).unwrap();
         master.resize(132, 50, 0, 0).unwrap();
         use std::io::Write;
-        master.writer().unwrap().write_all(b"\n").unwrap();
+        writer(&master).write_all(b"\n").unwrap();
         let out = read_all(&master);
         child.wait().unwrap();
         assert!(out.contains("50 132"), "{out:?}");

@@ -18,7 +18,10 @@ use vorn_sessiond::server::{self, Config, Sessiond};
 fn main() {
     // Before any thread starts: nothing sessiond was handed reaches a terminal.
     #[cfg(unix)]
-    vorn_sessiond::pty::cloexec_inherited();
+    {
+        vorn_sessiond::pty::stdio_open();
+        vorn_sessiond::pty::cloexec_inherited();
+    }
     let mut home = std::env::var_os("VORN_HOME").map(PathBuf::from);
     let mut idle = std::env::var("VORN_SESSIOND_IDLE_EXIT")
         .ok()

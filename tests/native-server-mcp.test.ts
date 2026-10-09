@@ -374,6 +374,9 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
     start = fixture(process.cwd())
     fixtureIds = uuidsIn(start)
     await reset()
+    // Settle the connector catalog first, so a background fetch cannot land between two sides.
+    const { rpcCall } = await import('../packages/mcp/src/rpc-client')
+    await rpcCall('connector:catalogRefresh')
 
     version = (
       JSON.parse(

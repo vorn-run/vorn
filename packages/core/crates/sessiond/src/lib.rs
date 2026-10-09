@@ -10,6 +10,8 @@
 
 #[cfg(unix)]
 mod fdpass;
+#[cfg(unix)]
+mod hub;
 pub mod launch;
 pub mod log;
 pub mod os;
@@ -18,6 +20,8 @@ pub mod pty;
 pub mod rundir;
 pub mod server;
 pub mod session;
+#[cfg(unix)]
+pub mod spawn;
 pub mod spool;
 /// The socket protocol, from the crate vornd shares.
 pub use vorn_sessiond_wire as wire;
