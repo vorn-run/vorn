@@ -132,7 +132,7 @@ jobs:
       # Its own key, so this build-only cache never takes the Core workflow's
       # slot. target/ holds the Ghostty checkout and Zig's caches as well as
       # cargo's. v2: built without LTO, so nothing from the v1 cache applies.
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
