@@ -162,6 +162,21 @@ jobs:
             core-v2-${{ runner.os }}-
             core-${{ runner.os }}-
 
+      # Files unchanged since the cached target's commit get an old mtime, so cargo rebuilds only the crates that changed.
+      - name: Keep unchanged crates built
+        shell: bash
+        run: |
+          stamp=packages/core/target/.built-from
+          if [ -f "$stamp" ] && built=$(cat "$stamp") && git fetch --quiet --depth=1 origin "$built"; then
+            git ls-files -z | xargs -0 touch -t 200001010000
+            git diff --name-only --diff-filter=d "$built" HEAD | while IFS= read -r f; do touch "$f"; done
+            echo "cached target built from $built; $(git diff --name-only "$built" HEAD | wc -l) files changed since"
+          else
+            echo "no usable record of what the cached target was built from; building everything"
+          fi
+          mkdir -p packages/core/target
+          git rev-parse HEAD > "$stamp"
+
       - name: Install dependencies
         run: yarn install
 
@@ -177,6 +192,11 @@ jobs:
       - name: Clippy
         working-directory: packages/core
         run: cargo clippy --release --locked --workspace --all-targets -- -D warnings
+
+      # nextest runs the test binaries side by side instead of one after another; doc tests run separately.
+      - uses: taiki-e/install-action@7623a79cdfecb99d681017af368ca353d9f49bb5 # v2.87.19
+        with:
+          tool: cargo-nextest@0.9.145
 
       # Every crate but the napi adapter, whose test binary would not link on
       # every platform and which holds no tests of its own. One run, so each
@@ -196,10 +216,12 @@ jobs:
             export VORN_CONPTY_DIR="$(cygpath -w "$PWD")"
           fi
           if [ -n "$CRATES" ]; then
-            cargo test --profile ci --locked --no-fail-fast $(printf -- '-p %s ' $CRATES)
+            packages=$(printf -- '-p %s ' $CRATES)
           else
-            cargo test --profile ci --locked --no-fail-fast --workspace --exclude vorn-core
+            packages='--workspace --exclude vorn-core'
           fi
+          cargo nextest run --cargo-profile ci --locked --no-fail-fast --no-tests=warn $packages
+          cargo test --doc --profile ci --locked --no-fail-fast $packages
         env:
           CRATES: ${{ inputs.crates }}
 
@@ -215,9 +237,13 @@ jobs:
         if: ${{ !inputs.quick && (runner.os == 'Linux') }}
         run: node scripts/gen-mcp-tools.mjs --check
 
+      # Pull requests reuse the ci profile the tests compiled; main and the nightly run build the shipping release.
       - name: Build vorn_core.node
         if: ${{ !inputs.quick }}
-        run: yarn build:core
+        shell: bash
+        env:
+          PROFILE: ${{ github.event_name == 'pull_request' && '--profile=ci' || '' }}
+        run: yarn build:core $PROFILE
 
       # The RPC test files again, with every client going through vornd, which
       # answers every group it implements: the vornd and sessiond the build
