@@ -3683,7 +3683,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-cli"
-version = "0.8.0-beta.5"
+version = "0.8.0-beta.6"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -3727,7 +3727,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-core"
-version = "0.8.0-beta.5"
+version = "0.8.0-beta.6"
 dependencies = [
  "napi",
  "napi-build",
@@ -3919,7 +3919,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-sessiond"
-version = "0.8.0-beta.5"
+version = "0.8.0-beta.6"
 dependencies = [
  "crc32fast",
  "libc",
@@ -4032,7 +4032,7 @@ dependencies = [
 
 [[package]]
 name = "vornd"
-version = "0.8.0-beta.5"
+version = "0.8.0-beta.6"
 dependencies = [
  "bytes",
  "chrono",
