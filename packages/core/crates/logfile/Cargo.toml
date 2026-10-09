@@ -1,0 +1,13 @@
+[package]
+name = "vorn-logfile"
+version.workspace = true
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Size-capped log files for vornd and vorn-sessiond: rotate at a limit and keep a fixed number of files"
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"

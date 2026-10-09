@@ -11,7 +11,6 @@
 //! and the app's, `"app":"<socket or pipe>"`. `"native"` lists the groups
 //! vornd answers itself.
 
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -21,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+use vorn_logfile::{LogFile, Rotation};
 use vornd::applink::AppLink;
 use vornd::holder::{self, Holder, HolderConfig};
 use vornd::protocol::VORND_PROTOCOL;
@@ -36,7 +36,8 @@ const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT]
   --db         the server's vorn.db, read to tell a local project from a remote
                one and to see how the agents are configured; without it those
                calls go to the server
-  --log-file   append the log here instead of stderr; VORND_LOG sets the level
+  --log-file   append the log here instead of stderr, rotated at 20 MiB and
+               keeping 5 files; VORND_LOG sets the level
   --exit-with-stdin
                stop when stdin closes, so vornd ends with whoever started it,
                even if that process is killed
@@ -145,10 +146,7 @@ fn init_logging(log_file: Option<&str>) -> Result<(), String> {
         .log_internal_errors(false);
     match log_file {
         Some(path) => {
-            let file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
+            let file = LogFile::open(path, Rotation::DEFAULT)
                 .map_err(|e| format!("--log-file {path}: {e}"))?;
             builder
                 .with_ansi(false)

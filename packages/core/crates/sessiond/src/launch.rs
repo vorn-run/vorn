@@ -335,8 +335,27 @@ fn unique() -> String {
 /// itself. Readiness is the announcement, not its stdout: a scope wrapper may
 /// not hand the pipe through.
 pub fn start(binary: &Path, home: &Path, timeout: Duration) -> io::Result<Instance> {
+    spawn(binary, home)?.wait(timeout)
+}
+
+/// A sessiond started by this process that may not have announced itself yet.
+/// Dropping it leaves the process running.
+#[derive(Debug)]
+pub struct Starting {
+    /// The scope wrapper and setsid both exec in place, so this is sessiond's.
+    pid: u32,
+    /// Taken only by `drop`, which hands it to a thread that reaps it.
+    child: Option<std::process::Child>,
+    home: PathBuf,
+    log_path: PathBuf,
+}
+
+/// Start `binary` detached from the caller, without waiting for it.
+pub fn spawn(binary: &Path, home: &Path) -> io::Result<Starting> {
     fs::create_dir_all(home.join("log"))?;
     let log_path = home.join("log").join("sessiond.log");
+    // Its stderr is a plain file it keeps open, so the log is rotated here, at each start.
+    let _ = vorn_logfile::rotate_if_full(&log_path, vorn_logfile::Rotation::DEFAULT);
     let log = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -345,7 +364,7 @@ pub fn start(binary: &Path, home: &Path, timeout: Duration) -> io::Result<Instan
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::from(log));
-    let mut child = match cmd.spawn() {
+    let child = match cmd.spawn() {
         Ok(c) => c,
         // A job that forbids breakaway refuses the spawn; start inside it.
         #[cfg(windows)]
@@ -358,34 +377,58 @@ pub fn start(binary: &Path, home: &Path, timeout: Duration) -> io::Result<Instan
         }
         Err(e) => return Err(e),
     };
-    // The scope wrapper and setsid both exec in place, so the child's pid is
-    // sessiond's.
-    let pid = child.id();
-    let t = Instant::now();
-    let found = loop {
-        if let Some(i) = running(home).into_iter().find(|i| i.pid == pid) {
-            break Ok(i);
+    Ok(Starting {
+        pid: child.id(),
+        child: Some(child),
+        home: home.to_owned(),
+        log_path,
+    })
+}
+
+impl Starting {
+    /// Its process id.
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    /// Wait up to `timeout` for it to announce itself. A `TimedOut` error
+    /// leaves it running, to be waited on again; any other means it is gone.
+    pub fn wait(&mut self, timeout: Duration) -> io::Result<Instance> {
+        let pid = self.pid;
+        let Some(child) = self.child.as_mut() else {
+            return Err(io::Error::other("sessiond is no longer this launcher's"));
+        };
+        let t = Instant::now();
+        loop {
+            if let Some(i) = running(&self.home).into_iter().find(|i| i.pid == pid) {
+                return Ok(i);
+            }
+            if let Some(status) = child.try_wait()? {
+                return Err(io::Error::other(format!(
+                    "sessiond exited ({status}) before it started: {}",
+                    log_tail(&self.log_path)
+                )));
+            }
+            if t.elapsed() >= timeout {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("sessiond did not start: {}", log_tail(&self.log_path)),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(20));
         }
-        if let Some(status) = child.try_wait()? {
-            break Err(io::Error::other(format!(
-                "sessiond exited ({status}) before it started: {}",
-                log_tail(&log_path)
-            )));
+    }
+}
+
+impl Drop for Starting {
+    fn drop(&mut self) {
+        // It lives on its own; a thread reaps it if it exits while the launcher runs.
+        if let Some(mut child) = self.child.take() {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
         }
-        if t.elapsed() >= timeout {
-            break Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                format!("sessiond did not start: {}", log_tail(&log_path)),
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    // It lives on its own; a thread only reaps it if it exits while the
-    // launcher still runs, so it never lingers as a zombie.
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
-    found
+    }
 }
 
 fn log_tail(path: &Path) -> String {

@@ -29,6 +29,7 @@ members = [
   "crates/connectors",
   "crates/remote",
   "crates/hooks",
+  "crates/logfile",
   "bench/scale",
 ]
 
