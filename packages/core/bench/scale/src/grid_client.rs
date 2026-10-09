@@ -149,6 +149,31 @@ impl GridClient {
         }
     }
 
+    /// Sends `command` as typed and waits until the screen shows `answer`:
+    /// a shell command timed until its output is in.
+    pub async fn command(
+        &mut self,
+        sid: u32,
+        command: &[u8],
+        answer: &str,
+        within: Duration,
+    ) -> Result<Duration, Error> {
+        let input_seq = self.client.input_seq();
+        self.client.send(&ClientMsg::Input {
+            sid,
+            input_seq,
+            event: InputEvent::Raw {
+                bytes: command.to_vec(),
+            },
+        });
+        let t = Instant::now();
+        let deadline = t + within;
+        while !self.text(sid).contains(answer) {
+            self.pump(deadline, "a command's output").await?;
+        }
+        Ok(t.elapsed())
+    }
+
     /// Reads and applies whatever arrives for `quiet`, so later waits see
     /// only what they caused.
     pub async fn drain(&mut self, quiet: Duration) -> Result<(), Error> {

@@ -47,6 +47,53 @@ fn field(text: &str, key: &str) -> Option<u64> {
         .and_then(|n| n.parse().ok())
 }
 
+/// `RssAnon` in bytes: the private memory a process dirtied, without the
+/// file pages (the binary, shared libraries) every copy of it shares.
+#[cfg(unix)]
+pub fn rss_anon(pid: u32) -> io::Result<u64> {
+    let status = std::fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("status"))?;
+    field(&status, "RssAnon:")
+        .map(|kb| kb * 1024)
+        .ok_or_else(|| io::Error::other(format!("no RssAnon for pid {pid}")))
+}
+
+/// CPU time a process has used, user and system, in clock ticks.
+#[cfg(unix)]
+pub fn cpu_ticks(pid: u32) -> io::Result<u64> {
+    let stat = std::fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("stat"))?;
+    parse_cpu_ticks(&stat).ok_or_else(|| io::Error::other(format!("no CPU times for pid {pid}")))
+}
+
+/// utime + stime, the 14th and 15th fields of `/proc/<pid>/stat`.
+#[cfg(unix)]
+pub fn parse_cpu_ticks(stat: &str) -> Option<u64> {
+    let mut after = stat[stat.rfind(')')? + 1..].split_whitespace().skip(11);
+    Some(after.next()?.parse::<u64>().ok()? + after.next()?.parse::<u64>().ok()?)
+}
+
+/// The machine's CPU time so far, busy and in all, in clock ticks, from
+/// the first line of `/proc/stat`.
+#[cfg(unix)]
+pub fn machine_ticks() -> io::Result<(u64, u64)> {
+    let text = std::fs::read_to_string("/proc/stat")?;
+    parse_machine_ticks(&text).ok_or_else(|| io::Error::other("no cpu line in /proc/stat"))
+}
+
+/// Busy is everything but idle and iowait.
+#[cfg(unix)]
+pub fn parse_machine_ticks(text: &str) -> Option<(u64, u64)> {
+    let line = text.lines().find(|l| l.starts_with("cpu "))?;
+    let v: Vec<u64> = line
+        .split_whitespace()
+        .skip(1)
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    let total: u64 = v.iter().sum();
+    let idle = v.get(3)? + v.get(4).copied().unwrap_or(0);
+    Some((total - idle, total))
+}
+
 /// `MemAvailable`, in bytes.
 #[cfg(unix)]
 pub fn mem_available() -> io::Result<u64> {
@@ -187,6 +234,16 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn cpu_times_come_after_the_name() {
+        let stat = "42 (a b) c) S 7 42 42 0 -1 4194560 100 0 0 0 250 50 0 0 20 0 1 0";
+        assert_eq!(parse_cpu_ticks(stat), Some(300));
+        assert_eq!(parse_cpu_ticks("42 (x) S 7"), None);
+        let text = "cpu  100 5 50 800 20 0 25 0 0 0\ncpu0 1 2 3 4\n";
+        assert_eq!(parse_machine_ticks(text), Some((180, 1000)));
+        assert_eq!(parse_machine_ticks("intr 1\n"), None);
+    }
+
     #[test]
     fn the_parent_follows_the_last_parenthesis() {
         assert_eq!(parse_ppid("42 (bash) S 7 42 42 0"), Some(7));

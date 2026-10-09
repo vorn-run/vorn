@@ -61,6 +61,10 @@ vorn-hooks = { path = "../hooks" }
 uuid = { version = "1", features = ["v4"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std", "ansi"] }
 
+# malloc_trim, to give back what sleeping terminals free.
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+libc = "0.2"
+
 # The machine's boot time, read once as vornd starts.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }

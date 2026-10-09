@@ -6,6 +6,9 @@
 //! vornd for `SECS` (default 60, or `VORN_SESSIOND_IDLE_EXIT`), or until
 //! SIGTERM or Ctrl-C. Either way it takes its endpoint and announcement back.
 //!
+//! On Linux it starts its programs through a copy of itself run as
+//! `vorn-sessiond --spawn-helper` ([`vorn_sessiond::spawn::helper`]).
+//!
 //! `VORN_SESSIOND_HANDOFF_FAULT=<step>:<fail|stall>` (Unix) makes a handoff
 //! fail or hang at that step, for tests that check nothing is lost when it does.
 
@@ -21,6 +24,14 @@ fn main() {
     {
         vorn_sessiond::pty::stdio_open();
         vorn_sessiond::pty::cloexec_inherited();
+    }
+    #[cfg(target_os = "linux")]
+    if std::env::args_os().nth(1).as_deref() == Some(vorn_sessiond::spawn::helper::ARG.as_ref()) {
+        if let Err(e) = vorn_sessiond::spawn::helper::serve() {
+            eprintln!("vorn-sessiond: spawn helper: {e}");
+            std::process::exit(1);
+        }
+        return;
     }
     let mut home = std::env::var_os("VORN_HOME").map(PathBuf::from);
     let mut idle = std::env::var("VORN_SESSIOND_IDLE_EXIT")
@@ -41,6 +52,11 @@ fn main() {
                 std::process::exit(2);
             }
         }
+    }
+    // The running binary even after an upgrade replaced the file.
+    #[cfg(target_os = "linux")]
+    if let Err(e) = vorn_sessiond::spawn::helper::install(std::path::Path::new("/proc/self/exe")) {
+        eprintln!("vorn-sessiond: no spawn helper, so programs start from here: {e}");
     }
     let home = home
         .or_else(|| home_dir().map(|h| h.join(".vorn")))

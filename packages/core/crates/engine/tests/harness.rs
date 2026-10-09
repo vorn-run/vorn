@@ -5,13 +5,14 @@
 mod common;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use common::{config, Harnessed};
 use vorn_engine::Config;
 use vorn_recovery::gen::{Generator, Profile};
 use vorn_recovery::{
-    differential, run, transcript, Error, InProcess, KillPlan, Log, LogBuilder, Report, Restore,
-    Size,
+    compare, differential, run, transcript, Error, InProcess, KillPlan, Log, LogBuilder, Report,
+    Restore, Size,
 };
 use vorn_term_proto::Record;
 
@@ -45,6 +46,41 @@ fn differential_state() {
         let log = Generator::log(seed, Profile::mixed().bytes(128 << 10));
         differential(&log, &KillPlan::random(seed, 6), engine(config(8 << 10)))
             .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+    }
+}
+
+/// Put to sleep after every record and woken by the next, killed and
+/// recovered at random records too, a session ends with the terminal of
+/// one that never slept: waking restores it exactly.
+#[test]
+fn asleep_between_records() {
+    let sleepy = Arc::new(Config {
+        idle: Some(Duration::ZERO),
+        ..(*config(8 << 10)).clone()
+    });
+    for (seed, profile) in [
+        (1, Profile::round_trip()),
+        (2, Profile::round_trip()),
+        (3, Profile::mixed()),
+        (4, Profile::mixed()),
+    ] {
+        let log = Generator::log(seed, profile.bytes(64 << 10));
+        let calm = run(
+            &log,
+            InProcess::<Harnessed>::new(config(8 << 10), Restore::Checkpoint),
+            &KillPlan::Never,
+        )
+        .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        for plan in [KillPlan::Never, KillPlan::random(seed, 4)] {
+            let slept = run(
+                &log,
+                InProcess::<Harnessed>::new(Arc::clone(&sleepy), Restore::Checkpoint),
+                &plan,
+            )
+            .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+            compare(&calm.state, &slept.state).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+            assert_eq!(slept.digest, log.digest(), "seed {seed}");
+        }
     }
 }
 

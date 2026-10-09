@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use vorn_engine::{Cadence, Config, Input, Open, Out, Session};
 use vorn_recovery::{Checkpoint as HarnessCheckpoint, Error, Size, TermState};
@@ -190,7 +190,13 @@ pub fn writes_in_replay(outs: &[Out]) -> usize {
 
 /// The session engine under the recovery harness: one session, its
 /// checkpoints handed to the harness's store as sessiond would keep them.
-pub struct Harnessed(Session);
+/// With [`Config::idle`] at zero it is put to sleep after every record, so
+/// every record after the first wakes it.
+pub struct Harnessed(Session, bool);
+
+fn harnessed(cfg: &Config, s: Session) -> Harnessed {
+    Harnessed(s, cfg.idle == Some(Duration::ZERO))
+}
 
 /// The harness's blob is the whole checkpoint as sessiond stores it,
 /// format and CRC included, so a recovery checks them as vornd does.
@@ -212,21 +218,24 @@ impl vorn_recovery::Engine for Harnessed {
             (size.cols, size.rows),
             Cursor::start(0),
         )
-        .map(Harnessed)
+        .map(|s| harnessed(cfg, s))
         .map_err(Error::Screen)
     }
 
     fn restore(cfg: &Arc<Config>, cp: &HarnessCheckpoint) -> Result<Self, Error> {
         let stored: Checkpoint = postcard::from_bytes(&cp.blob)?;
         Session::restored("s", Arc::clone(cfg), &stored)
-            .map(Harnessed)
+            .map(|s| harnessed(cfg, s))
             .map_err(|why| Error::Engine(why.as_str().into()))
     }
 
     fn apply(&mut self, entry: &Entry) -> Result<Option<HarnessCheckpoint>, Error> {
         let mut out = Vec::new();
-        self.0
-            .apply_all(std::slice::from_ref(entry), Instant::now(), &mut out);
+        let now = Instant::now();
+        self.0.apply_all(std::slice::from_ref(entry), now, &mut out);
+        if self.1 {
+            self.0.sleep(now, &mut out);
+        }
         let mut cut = None;
         for o in out {
             match o {

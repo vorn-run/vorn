@@ -32,6 +32,11 @@ use crate::term::Fidelity;
 /// How often a worker looks for sessions gone quiet.
 const TICK: Duration = Duration::from_millis(500);
 
+/// The most sessions a worker puts to sleep per tick. Each costs a checked
+/// cut, and sessions started together go idle together: spread out, their
+/// workers stay free for the sessions in use.
+const SLEEPS_PER_TICK: usize = 32;
+
 /// Where sessions' outputs go: the session's id and what it wants.
 pub type Sink = Arc<dyn Fn(&str, Out) + Send + Sync>;
 
@@ -468,7 +473,7 @@ impl Worker {
                 Some(Job::Output { id, token, lines }) => match self.sessions.remove(&id) {
                     Some(mut s) => {
                         if self
-                            .guarded(&id, |out| s.output(token, lines, out))
+                            .guarded(&id, |out| s.output(token, lines, now, out))
                             .is_some()
                         {
                             self.due.schedule(&id, s.due());
@@ -498,9 +503,16 @@ impl Worker {
             if now.duration_since(last_tick) >= TICK {
                 last_tick = now;
                 let ids: Vec<String> = self.sessions.keys().cloned().collect();
+                let mut sleeps = SLEEPS_PER_TICK;
                 for id in ids {
                     if let Some(mut s) = self.sessions.remove(&id) {
-                        if self.guarded(&id, |out| s.tick(now, out)).is_some() {
+                        let ticked = self.guarded(&id, |out| {
+                            s.tick(now, out);
+                            if sleeps > 0 && s.sleep(now, out) {
+                                sleeps -= 1;
+                            }
+                        });
+                        if ticked.is_some() {
                             self.sessions.insert(id.clone(), s);
                             self.settle(&id);
                         } else {
@@ -619,6 +631,7 @@ impl Worker {
                 checkpoints: 0,
                 uncut: None,
                 exited: None,
+                asleep: false,
             },
             title: String::new(),
             cwd: String::new(),

@@ -24,6 +24,16 @@ limits sit beside this file under `results/<date>-<commit>/`.
 - **throughput** is 16 sessions each printing 16 MiB as fast as they can,
   all attached to one grid client, timed until the client's screens show
   every log's last line.
+- **comparison method** (`vorn-scale-bench compare`), run on the build
+  under test ("after") and on the merge base with `origin/main` ("before"),
+  each with a fresh vornd per terminal count. Every terminal runs `dash`
+  (one count also `bash`) and first prints 1,000 numbered lines. Memory is
+  `RssAnon` summed over vornd, the holder and every process they started,
+  once the terminals are quiet ("live") and again after they sat 60 s
+  untouched and the sum stopped moving ("idle"). Response time is from
+  typing `echo` into one of the terminals until its output is on that
+  terminal's grid screen, beside 0, 10 and 100 terminals running `date` in
+  a 0.1 s sleep loop, with the whole machine's CPU use over the same span.
 
 Run it with `PROJECT=<gcp-project> scripts/bench-gcp.sh [TIER...]`. Tiers above 100 refuse to run
 unless `VORN_BENCH_HOST=1` is set, which only the VM's runner does.

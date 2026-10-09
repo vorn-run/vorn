@@ -1,6 +1,7 @@
 //! One session's terminal and what reads the output beside it: the
 //! emulator, the output analyzer and the state that ties them to a point in
-//! the stream. A checkpoint blob is all of it, as bytes.
+//! the stream. A checkpoint blob is all of it, as bytes, and a terminal left
+//! idle is kept as nothing more ([`Packed`]).
 //!
 //! Blob layout, format [`FORMAT`]: the fidelity byte, the last agent status
 //! (u32), the UTF-8 bytes a record split for the analyzer (a length byte and
@@ -8,7 +9,7 @@
 //! each as a u32 length and its bytes. All integers little-endian.
 
 use vorn_analysis::Analyzer;
-use vorn_screen::{Checkpoint, Effect, Emulator, Uncut};
+use vorn_screen::{Checkpoint, Counters, Effect, Emulator, Uncut};
 
 /// The checkpoint format this engine writes and the only one it reads. A
 /// checkpoint in any other format is not a restore base.
@@ -186,10 +187,20 @@ impl Term {
     /// as `Err((RestoreCheck, Some(term)))`, the best a session without a
     /// valid base has.
     pub(crate) fn load(blob: &[u8]) -> Result<Term, (Rejected, Option<Box<Term>>)> {
-        let parts = split(blob).ok_or((Rejected::Decode, None))?;
-        let cp = Checkpoint::decode(parts.screen).ok_or((Rejected::Decode, None))?;
-        let analyzer = Analyzer::restore(parts.analysis).ok_or((Rejected::Decode, None))?;
-        let em = Emulator::restore(&cp).map_err(|_| (Rejected::Rebuild, None))?;
+        let (term, cp) = Term::unpack(blob).map_err(|why| (why, None))?;
+        if cp.matches(&term.em) {
+            Ok(term)
+        } else {
+            Err((Rejected::RestoreCheck, Some(Box::new(term))))
+        }
+    }
+
+    /// The terminal a blob holds, with its screen checkpoint, unchecked.
+    fn unpack(blob: &[u8]) -> Result<(Term, Checkpoint), Rejected> {
+        let parts = split(blob).ok_or(Rejected::Decode)?;
+        let cp = Checkpoint::decode(parts.screen).ok_or(Rejected::Decode)?;
+        let analyzer = Analyzer::restore(parts.analysis).ok_or(Rejected::Decode)?;
+        let em = Emulator::restore(&cp).map_err(|_| Rejected::Rebuild)?;
         let term = Term {
             em,
             analyzer,
@@ -198,16 +209,52 @@ impl Term {
             fidelity: parts.fidelity,
             colors: None,
         };
-        if cp.matches(&term.em) {
-            Ok(term)
-        } else {
-            Err((Rejected::RestoreCheck, Some(Box::new(term))))
-        }
+        Ok((term, cp))
+    }
+
+    /// Cuts a checkpoint as [`Term::save`] does and keeps only that: the
+    /// terminal, its page memory and the analyzer go when this is dropped.
+    pub(crate) fn pack(&mut self) -> Result<Packed, Uncut> {
+        let mut blob = self.save()?;
+        blob.shrink_to_fit();
+        Ok(Packed {
+            blob,
+            cols: self.em.cols(),
+            rows: self.em.rows(),
+            fidelity: self.fidelity,
+            counters: self.em.counters(),
+            colors: self.colors,
+        })
     }
 
     /// The analyzer's completed lines, for the debug report.
     pub(crate) fn lines(&self, n: u32) -> Vec<String> {
         self.analyzer.output(Some(n))
+    }
+}
+
+/// A [`Term`] put away as the checkpoint blob it saved, a fraction of its
+/// live size, with what the blob does not carry.
+pub(crate) struct Packed {
+    /// Format [`FORMAT`], cut and checked by [`Term::save`].
+    pub(crate) blob: Vec<u8>,
+    pub(crate) cols: u16,
+    pub(crate) rows: u16,
+    pub(crate) fidelity: Fidelity,
+    counters: Counters,
+    colors: Option<([u8; 3], [u8; 3])>,
+}
+
+impl Packed {
+    /// The terminal back. No restore check: the blob passed one when it
+    /// was saved, and the terminal being put away was swapped for its
+    /// decode then, so decoding it again rebuilds that same terminal. The
+    /// check walks every cell, which a wake on attach cannot afford.
+    pub(crate) fn wake(&self) -> Result<Term, Rejected> {
+        let (mut term, _) = Term::unpack(&self.blob)?;
+        term.em.set_counters(self.counters);
+        term.set_colors(self.colors);
+        Ok(term)
     }
 }
 
@@ -309,6 +356,27 @@ mod tests {
         fx.clear();
         t.feed(b"\x1b]10;?\x1b\\", true, &mut fx);
         assert_eq!(fx.len(), 1, "still answered after the cut: {fx:?}");
+    }
+
+    #[test]
+    fn a_packed_term_wakes_as_the_one_put_away_and_carries_on_alike() {
+        let mut a = fed(&[b"\x1b[31mone\r\ntwo\x1b[3J \xe2\x82", b"\xac\r\n$ \x1b]0;t"]);
+        a.set_colors(Some(([1, 2, 3], [4, 5, 6])));
+        let packed = a.pack().unwrap();
+        let mut b = packed.wake().unwrap();
+        assert_eq!(a.em.fingerprint(), b.em.fingerprint());
+        assert_eq!(a.em.counters(), b.em.counters());
+        assert_eq!(b.em.history_clears(), 1);
+        let mut fx = Vec::new();
+        for t in [&mut a, &mut b] {
+            t.feed(b"itle\x07three\r\n(y/n) \x1b]11;?\x1b\\", true, &mut fx);
+        }
+        assert_eq!(a.em.fingerprint(), b.em.fingerprint());
+        assert_eq!(a.em.counters(), b.em.counters());
+        assert_eq!(a.lines(0), b.lines(0));
+        assert_eq!(a.status, b.status);
+        let replies = fx.iter().filter(|f| matches!(f, Effect::Reply(_))).count();
+        assert_eq!(replies, 2, "both answer colour queries: {fx:?}");
     }
 
     #[test]

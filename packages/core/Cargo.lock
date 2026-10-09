@@ -3939,6 +3939,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "jiff",
+ "libc",
  "libghostty-vt",
  "rmcp",
  "serde",

@@ -46,7 +46,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vorn_engine::{
     Brief, Config, Effect, EffectId, Fidelity, GridIn, HubOut, Input, Open, Out, Peer, Pool,
-    Summary,
+    Summary, Viewed,
 };
 use vorn_sessiond_wire::{
     Ack, Attach, AttachFrom, Io, Nonce, Resize, SessionRef, Sig, Signal, Spawn, SpawnSpec,
@@ -82,6 +82,10 @@ pub const WRITE_QUEUE_CAP: usize = 64 << 20;
 /// colour queries (OSC 10, 11) with: the app's terminal theme, which is what
 /// xterm.js answered with before vornd answered every query.
 pub const DEFAULT_COLORS: ([u8; 3], [u8; 3]) = ([0xd4, 0xd4, 0xd8], [0x14, 0x14, 0x16]);
+
+/// How long a session goes with no output and no viewer before its terminal
+/// is kept only as a checkpoint, unless the config says otherwise.
+pub const IDLE: Duration = Duration::from_secs(60);
 
 /// How often attaches waiting on a snapshot or a fetch are checked.
 const EXPIRE_EVERY: Duration = Duration::from_secs(1);
@@ -220,6 +224,9 @@ impl Engine {
             .as_ref()
             .and_then(|h| h.parent())
             .map(|d| d.join("names.json"));
+        // Bytes clients hold a session awake as grid clients do.
+        let watching = Arc::clone(&streams);
+        let viewed = Viewed(Arc::new(move |id: &str| watching.viewed(id)));
         Arc::new(Engine {
             names: Mutex::new(Names::load(names_file)),
             journal: Mutex::new(Journal::default()),
@@ -228,6 +235,8 @@ impl Engine {
             cfg: Config {
                 stream: true,
                 colors: cfg.colors.or(Some(DEFAULT_COLORS)),
+                idle: cfg.idle.or(Some(IDLE)),
+                viewed: Some(viewed),
                 ..cfg
             },
             write_timeout,
@@ -689,6 +698,7 @@ impl Engine {
             repumping: std::collections::HashSet::new(),
             exited: std::collections::HashSet::new(),
             parked: HashMap::new(),
+            slept: false,
         };
         let mut ping = tokio::time::interval(PING_EVERY);
         ping.tick().await;
@@ -706,7 +716,12 @@ impl Engine {
                     nonce += 1;
                     d.send(ToSessiond::Ping(Nonce { nonce }));
                 }
-                _ = expire.tick() => self.streams.expire(std::time::Instant::now()),
+                _ = expire.tick() => {
+                    self.streams.expire(std::time::Instant::now());
+                    if std::mem::take(&mut d.slept) {
+                        tokio::task::spawn_blocking(give_back);
+                    }
+                }
                 () = until(self.sizes.due()) => d.resize_due(),
                 () = self.sizes.woken() => d.resize_due(),
                 r = &mut writing => break r.unwrap_or_else(|e| e.to_string()),
@@ -729,6 +744,19 @@ impl Engine {
         why
     }
 }
+
+/// Hands the heap pages sleeping terminals freed back to the system,
+/// which glibc otherwise keeps in its arenas for the next allocation.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn give_back() {
+    // SAFETY: malloc_trim takes no pointers; it only walks glibc's own arenas.
+    unsafe {
+        libc::malloc_trim(0);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn give_back() {}
 
 /// Resolves at `at`, or never.
 async fn until(at: Option<std::time::Instant>) {
@@ -843,6 +871,7 @@ fn brief(s: &Brief) -> Value {
         "checkpoints": s.checkpoints,
         "uncut": s.uncut,
         "exited": s.exited.map(|(code, signal)| json!({ "code": code, "signal": signal })),
+        "asleep": s.asleep,
     })
 }
 
@@ -933,6 +962,8 @@ struct Driver<'a> {
     /// it leaves. Whoever was told of the exit may start the session again
     /// at once, as a resume does, before the engine has closed the old one.
     parked: HashMap<String, Parked>,
+    /// A session went to sleep since the heap was last trimmed.
+    slept: bool,
 }
 
 impl Driver<'_> {
@@ -1140,6 +1171,10 @@ impl Driver<'_> {
                 self.engine.streams.snapshot_ready(token, snap);
             }
             Out::Output(token, lines) => self.engine.streams.output_ready(token, lines.as_deref()),
+            Out::Asleep => {
+                self.engine.streams.asleep(id);
+                self.slept = true;
+            }
         }
     }
 

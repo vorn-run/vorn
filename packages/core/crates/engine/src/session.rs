@@ -23,6 +23,13 @@
 //! terminal: the session's [`Hub`] cuts their frames after each batch of
 //! records and on the render clock ([`Session::due`], [`Session::frame`]),
 //! and answers their requests ([`Input::Grid`]) with [`Out::Grid`].
+//!
+//! A live session left idle, with no output, request or viewer for
+//! [`Config::idle`], puts its terminal away ([`Session::sleep`]): it keeps
+//! the checkpoint blob of a checked cut and drops the terminal, the analyzer
+//! and the grid. The next record, attach, snapshot or read decodes the blob
+//! first, which rebuilds the terminal the cut swapped in, so nothing a
+//! client or a recovery sees tells the two apart.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -36,7 +43,7 @@ use vorn_term_proto::msg::{self, EventId as WireEventId, EventKind};
 use vorn_term_proto::{Cursor, Entry, Record, RecordHeader};
 
 use crate::snapshot::VtSnapshot;
-use crate::term::{Fidelity, Rejected, Term, FORMAT};
+use crate::term::{Fidelity, Packed, Rejected, Term, FORMAT};
 
 /// The size a piped agent's output is parsed at. It has no terminal, so
 /// nothing ever resizes it.
@@ -89,6 +96,23 @@ pub struct Config {
     /// queries are answered with. None leaves them unset, and those queries
     /// unanswered.
     pub colors: Option<([u8; 3], [u8; 3])>,
+    /// How long a live session goes with no output, request or viewer
+    /// before its terminal is put away as a checkpoint ([`Session::sleep`]).
+    /// None keeps every terminal live.
+    pub idle: Option<Duration>,
+    /// Whether a session has viewers the engine does not see itself (a
+    /// host's bytes clients); one with any is never put away.
+    pub viewed: Option<Viewed>,
+}
+
+/// Asked of a session by id: see [`Config::viewed`].
+#[derive(Clone)]
+pub struct Viewed(pub Arc<dyn Fn(&str) -> bool + Send + Sync>);
+
+impl std::fmt::Debug for Viewed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Viewed")
+    }
 }
 
 impl Default for Config {
@@ -103,6 +127,8 @@ impl Default for Config {
             grid: HubConfig::default(),
             stream: false,
             colors: None,
+            idle: None,
+            viewed: None,
         }
     }
 }
@@ -288,6 +314,9 @@ pub enum Out {
     /// terminal stands then, which a host that streams records cannot learn
     /// otherwise when nothing came after the base.
     Live(Cursor),
+    /// The session's terminal was put away ([`Session::sleep`]): a host may
+    /// drop what it keeps beside it for viewers, who wake it by asking.
+    Asleep,
 }
 
 /// Where a session is, for the debug report.
@@ -332,6 +361,8 @@ pub struct Brief {
     /// Why the last checkpoint due was not cut.
     pub uncut: Option<&'static str>,
     pub exited: Option<(Option<i32>, Option<i32>)>,
+    /// Live with its terminal put away until something asks for it.
+    pub asleep: bool,
 }
 
 /// A session with its contents, for tests and in-process callers.
@@ -362,12 +393,15 @@ enum Phase {
     /// Waiting for sessiond's answer to an attach at this step.
     Attaching(Step),
     Running(Box<Run>),
+    /// Live and idle, with the terminal put away until something asks.
+    Asleep(Box<Run<Packed>>),
     Lost,
 }
 
-/// A session with a terminal, applying records.
-struct Run {
-    term: Term,
+/// A session with a terminal, applying records. Asleep, `term` is the
+/// terminal packed; everything else stays as it was.
+struct Run<T = Term> {
+    term: T,
     base: Base,
     /// After the last record applied.
     cursor: Cursor,
@@ -382,6 +416,11 @@ struct Run {
     floor: Option<Cursor>,
     since_cut: u64,
     last_output: Instant,
+    /// The last output or request, or when the last viewer went: the idle
+    /// clock.
+    last_active: Instant,
+    /// Seen with a viewer at the last idle check.
+    watched: bool,
     history: Option<History>,
     /// A redraw nudge owed to the program once the session is live.
     nudge: bool,
@@ -389,6 +428,55 @@ struct Run {
     hub: Hub,
     /// Whether [`Out::Live`] was sent for going live.
     live_reported: bool,
+}
+
+impl<T> Run<T> {
+    /// The same run with `term` in place of its terminal, and the old one.
+    fn with_term<U>(self, term: U) -> (T, Run<U>) {
+        let Run {
+            term: old,
+            base,
+            cursor,
+            started,
+            live,
+            size_known,
+            floor,
+            since_cut,
+            last_output,
+            last_active,
+            watched,
+            history,
+            nudge,
+            hub,
+            live_reported,
+        } = self;
+        let run = Run {
+            term,
+            base,
+            cursor,
+            started,
+            live,
+            size_known,
+            floor,
+            since_cut,
+            last_output,
+            last_active,
+            watched,
+            history,
+            nudge,
+            hub,
+            live_reported,
+        };
+        (old, run)
+    }
+
+    /// Whether the cursor is past the newest checkpoint sessiond holds, so
+    /// one cut here would not replace a newer one.
+    fn past_floor(&self) -> bool {
+        !self
+            .floor
+            .is_some_and(|f| f.epoch == self.cursor.epoch && self.cursor.next_rseq <= f.next_rseq)
+    }
 }
 
 pub struct Session {
@@ -494,7 +582,7 @@ impl Session {
         &self.id
     }
 
-    /// The terminal, once there is one.
+    /// The terminal, once there is one and while it is not put away.
     pub fn emulator(&self) -> Option<&Emulator> {
         match &self.phase {
             Phase::Running(r) => Some(&r.term.em),
@@ -506,6 +594,7 @@ impl Session {
     pub fn into_emulator(self) -> Option<Emulator> {
         match self.phase {
             Phase::Running(r) => Some(r.term.em),
+            Phase::Asleep(r) => r.term.wake().ok().map(|t| t.em),
             _ => None,
         }
     }
@@ -513,7 +602,101 @@ impl Session {
     pub fn fidelity(&self) -> Fidelity {
         match &self.phase {
             Phase::Running(r) => r.term.fidelity,
+            Phase::Asleep(r) => r.term.fidelity,
             _ => Fidelity::Approximate,
+        }
+    }
+
+    /// Whether the session's terminal is put away ([`Session::sleep`]).
+    pub fn asleep(&self) -> bool {
+        matches!(self.phase, Phase::Asleep(_))
+    }
+
+    /// Puts the terminal away when the session has been idle for
+    /// [`Config::idle`]: live, with no output, request or viewer in that
+    /// time and nothing waiting on it. What is kept is a checkpoint; one
+    /// past sessiond's newest goes to it too ([`Out::Checkpoint`]). Answers
+    /// whether it did. Anything that needs the terminal wakes it first.
+    pub fn sleep(&mut self, now: Instant, out: &mut Vec<Out>) -> bool {
+        let Some(idle) = self.cfg.idle else {
+            return false;
+        };
+        let Phase::Running(run) = &mut self.phase else {
+            return false;
+        };
+        if !run.live || self.exited.is_some() || !self.snapshots.is_empty() {
+            return false;
+        }
+        if !run.watched && now.duration_since(run.last_active) < idle {
+            return false;
+        }
+        // Only a session idle that long is asked about, then at every tick
+        // while it has viewers: the idle clock starts again when they go.
+        let viewed =
+            run.hub.attached() || self.cfg.viewed.as_ref().is_some_and(|v| (v.0)(&self.id));
+        if viewed {
+            run.watched = true;
+            return false;
+        }
+        if std::mem::take(&mut run.watched) {
+            run.last_active = now;
+            return false;
+        }
+        run.hub.before_swap(&run.term.em);
+        let packed = run.term.pack();
+        run.hub.after_swap(&run.term.em);
+        let packed = match packed {
+            Ok(p) => p,
+            Err(why) => {
+                // Tried again after another idle spell, not at every tick.
+                self.uncut = Some(why);
+                run.last_active = now;
+                return false;
+            }
+        };
+        if run.past_floor() {
+            out.push(Out::Checkpoint(Checkpoint {
+                session: self.id.clone(),
+                resume: run.cursor,
+                cols: packed.cols,
+                rows: packed.rows,
+                format: FORMAT,
+                vornd_build: self.cfg.build.clone(),
+                blob_crc32: crc32fast::hash(&packed.blob),
+                blob: packed.blob.clone(),
+            }));
+            run.floor = Some(run.cursor);
+            run.since_cut = 0;
+            self.checkpoints += 1;
+            self.uncut = None;
+        }
+        let Phase::Running(run) = std::mem::replace(&mut self.phase, Phase::Lost) else {
+            return false;
+        };
+        let (_, mut run) = run.with_term(packed);
+        // The grid is rebuilt from the terminal on the next attach.
+        run.hub.rebuilt();
+        self.phase = Phase::Asleep(Box::new(run));
+        out.push(Out::Asleep);
+        true
+    }
+
+    /// Brings a terminal put away back, as it was. A blob that will not
+    /// decode, which only running out of memory explains, loses the session.
+    fn wake(&mut self, now: Instant, out: &mut Vec<Out>) {
+        if !self.asleep() {
+            return;
+        }
+        let Phase::Asleep(run) = std::mem::replace(&mut self.phase, Phase::Lost) else {
+            return;
+        };
+        match run.term.wake() {
+            Ok(term) => {
+                let (_, mut run) = run.with_term(term);
+                run.last_active = now;
+                self.phase = Phase::Running(Box::new(run));
+            }
+            Err(_) => self.lose("terminal would not wake", out),
         }
     }
 
@@ -522,19 +705,25 @@ impl Session {
     /// where one can be cut, otherwise at the next record boundary that is,
     /// or once it has waited [`crate::snapshot::HOLD`].
     pub fn snapshot(&mut self, token: u64, now: Instant, out: &mut Vec<Out>) {
+        self.wake(now, out);
         let Phase::Running(run) = &mut self.phase else {
             out.push(Out::Snapshot(token, None));
             return;
         };
+        run.last_active = now;
         self.snapshots.push((token, now));
         answer_snapshots(run, &mut self.snapshots, None, out);
     }
 
     /// The analyzer's last `lines` completed lines, answered with
     /// [`Out::Output`] under `token`.
-    pub fn output(&mut self, token: u64, lines: u32, out: &mut Vec<Out>) {
-        let lines = match &self.phase {
-            Phase::Running(r) => Some(r.term.lines(lines)),
+    pub fn output(&mut self, token: u64, lines: u32, now: Instant, out: &mut Vec<Out>) {
+        self.wake(now, out);
+        let lines = match &mut self.phase {
+            Phase::Running(r) => {
+                r.last_active = now;
+                Some(r.term.lines(lines))
+            }
             _ => None,
         };
         out.push(Out::Output(token, lines));
@@ -542,6 +731,12 @@ impl Session {
 
     /// Takes one message from sessiond.
     pub fn input(&mut self, input: Input, now: Instant, out: &mut Vec<Out>) {
+        match &input {
+            // An asleep session has no attachment for these to end.
+            Input::Grid(GridIn::Detach { .. } | GridIn::Gone { .. }) if self.asleep() => return,
+            Input::Grid(_) => self.wake(now, out),
+            _ => {}
+        }
         match input {
             Input::Checkpoint(cp) => {
                 if let Phase::Attaching(step) = self.phase {
@@ -600,6 +795,7 @@ impl Session {
         let Phase::Running(run) = &mut self.phase else {
             return;
         };
+        run.last_active = now;
         let mut hub_out = Vec::new();
         let ctx = grid_ctx(&run.term, run.cursor, run.live, &self.id);
         for m in self.waiting.drain(..) {
@@ -630,6 +826,9 @@ impl Session {
 
     /// Applies records in order: what [`Input::Entries`] does.
     pub fn apply_all(&mut self, entries: &[Entry], now: Instant, out: &mut Vec<Out>) {
+        if !entries.is_empty() {
+            self.wake(now, out);
+        }
         let Phase::Running(run) = &mut self.phase else {
             // An answer to an attach that was turned down.
             return;
@@ -673,6 +872,7 @@ impl Session {
             }
         }
         if applied {
+            run.last_active = now;
             out.push(Out::Ack(run.cursor));
             run.grid_records(&self.id, now, first, out);
         }
@@ -685,14 +885,17 @@ impl Session {
         match &self.phase {
             Phase::Lost => true,
             Phase::Running(r) => r.live && self.exited.is_some(),
-            Phase::Attaching(_) => false,
+            // Its exit would have woken it.
+            Phase::Attaching(_) | Phase::Asleep(_) => false,
         }
     }
 
     /// Deletes the session's disk history, as when it is released.
     pub fn remove_history(&mut self) -> std::io::Result<()> {
-        if let Phase::Running(r) = &mut self.phase {
-            r.history = None;
+        match &mut self.phase {
+            Phase::Running(r) => r.history = None,
+            Phase::Asleep(r) => r.history = None,
+            _ => {}
         }
         match &self.cfg.history {
             Some(dir) => History::remove(&history_path(dir, &self.id)),
@@ -745,13 +948,24 @@ impl Session {
             lines: Vec::new(),
             digest: None,
         };
-        if let Phase::Running(r) = &self.phase {
-            s.title = r.term.em.title().to_owned();
-            s.cwd = r.term.em.cwd().to_owned();
-            s.screen = plain(&r.term.em);
-            s.lines = r.term.lines(20);
-            s.digest = Some(r.term.em.state_digest());
-        }
+        // An asleep terminal is read from a copy woken for it.
+        let woken;
+        let term = match &self.phase {
+            Phase::Running(r) => &r.term,
+            Phase::Asleep(r) => match r.term.wake() {
+                Ok(t) => {
+                    woken = t;
+                    &woken
+                }
+                Err(_) => return s,
+            },
+            _ => return s,
+        };
+        s.title = term.em.title().to_owned();
+        s.cwd = term.em.cwd().to_owned();
+        s.screen = plain(&term.em);
+        s.lines = term.lines(20);
+        s.digest = Some(term.em.state_digest());
         s
     }
 
@@ -770,6 +984,7 @@ impl Session {
             checkpoints: self.checkpoints,
             uncut: self.uncut,
             exited: self.exited,
+            asleep: self.asleep(),
         };
         match &self.phase {
             Phase::Attaching(_) => s.state = State::Attaching,
@@ -784,6 +999,13 @@ impl Session {
                 s.cursor = Some(r.cursor);
                 s.cols = r.term.em.cols();
                 s.rows = r.term.em.rows();
+            }
+            Phase::Asleep(r) => {
+                s.state = State::Live;
+                s.base = Some(r.base);
+                s.cursor = Some(r.cursor);
+                s.cols = r.term.cols;
+                s.rows = r.term.rows;
             }
         }
         s
@@ -904,6 +1126,7 @@ impl Session {
         // new build for them.
         let mut hub = match std::mem::replace(&mut self.phase, Phase::Lost) {
             Phase::Running(old) => old.hub,
+            Phase::Asleep(old) => old.hub,
             _ => Hub::new(self.cfg.grid),
         };
         hub.rebuilt();
@@ -918,6 +1141,8 @@ impl Session {
             floor: self.open.newest_cp,
             since_cut: 0,
             last_output: now,
+            last_active: now,
+            watched: false,
             history,
             nudge: false,
             hub,
@@ -1112,10 +1337,7 @@ impl Run {
         if !now && self.since_cut < ctx.cfg.cadence.bytes {
             return;
         }
-        if self
-            .floor
-            .is_some_and(|f| f.epoch == self.cursor.epoch && self.cursor.next_rseq <= f.next_rseq)
-        {
+        if !self.past_floor() {
             return;
         }
         // Only a sequence too long to carry declines; it is retried at the next record.
