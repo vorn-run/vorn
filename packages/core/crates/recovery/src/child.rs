@@ -27,7 +27,7 @@
 use std::borrow::Cow;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread::{self, JoinHandle};
 
@@ -208,7 +208,7 @@ impl ChildProcess {
     /// could not restore `from`.
     fn spawn(&mut self, from: Option<&Checkpoint>) -> Result<Option<Running>, Error> {
         let size = self.size.ok_or(Error::Dead)?;
-        let mut child = Command::new(&self.program)
+        let mut child = vorn_spawn::command(&self.program)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

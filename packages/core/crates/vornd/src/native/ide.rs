@@ -173,11 +173,11 @@ impl Ides {
                 .chain(std::iter::once(project))
                 .collect::<Vec<_>>()
                 .join(" ");
-            let mut cmd = Command::new("cmd.exe");
+            let mut cmd = vorn_spawn::command("cmd.exe");
             cmd.args(["/d", "/s", "/c", &line]);
             cmd
         } else {
-            let mut cmd = Command::new(program);
+            let mut cmd = vorn_spawn::command(program);
             cmd.args(parts).arg(project);
             cmd
         };
@@ -205,16 +205,14 @@ fn detach(cmd: &mut Command) {
 
 #[cfg(windows)]
 fn detach(cmd: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    cmd.creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW);
+    use vorn_spawn::Hidden;
+    cmd.hidden_with(vorn_spawn::DETACHED_PROCESS);
 }
 
 /// Whether `which` (`where` on Windows) finds `cmd` within three seconds.
 fn command_exists(cmd: &str, env: &Arc<SafeEnv>) -> bool {
     let finder = if cfg!(windows) { "where" } else { "which" };
-    let Ok(mut child) = Command::new(finder)
+    let Ok(mut child) = vorn_spawn::command(finder)
         .arg(cmd)
         .env_clear()
         .envs(env.get())

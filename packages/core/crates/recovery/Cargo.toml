@@ -8,6 +8,7 @@ publish = false
 description = "Session recovery test harness: seeded VT, recorded transcripts, a kill driver and the terminal state comparator"
 
 [dependencies]
+vorn-spawn = { path = "../spawn" }
 libghostty-vt.workspace = true
 postcard = { version = "1", default-features = false, features = ["use-std"] }
 serde = { version = "1", features = ["derive"] }

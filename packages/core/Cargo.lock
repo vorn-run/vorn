@@ -3564,6 +3564,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "vorn-spawn",
 ]
 
 [[package]]
@@ -3595,6 +3596,7 @@ dependencies = [
  "tokio-tungstenite",
  "uuid",
  "vorn-protocol",
+ "vorn-spawn",
  "vorn-store",
 ]
 
@@ -3617,6 +3619,7 @@ dependencies = [
  "ureq",
  "url",
  "vorn-agents",
+ "vorn-spawn",
  "vorn-store",
 ]
 
@@ -3664,6 +3667,7 @@ dependencies = [
  "tempfile",
  "uuid",
  "vorn-remote",
+ "vorn-spawn",
 ]
 
 [[package]]
@@ -3761,6 +3765,7 @@ dependencies = [
  "tempfile",
  "vorn-screen",
  "vorn-sessiond-wire",
+ "vorn-spawn",
  "vorn-term-proto",
  "windows-sys 0.61.2",
 ]
@@ -3771,6 +3776,7 @@ version = "0.0.0"
 dependencies = [
  "serde",
  "serde_json",
+ "vorn-spawn",
 ]
 
 [[package]]
@@ -3813,6 +3819,7 @@ dependencies = [
  "tokio",
  "vorn-logfile",
  "vorn-sessiond-wire",
+ "vorn-spawn",
  "vorn-term-proto",
  "windows-sys 0.61.2",
 ]
@@ -3830,6 +3837,13 @@ dependencies = [
 [[package]]
 name = "vorn-size"
 version = "0.7.5"
+
+[[package]]
+name = "vorn-spawn"
+version = "0.0.0"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "vorn-store"
@@ -3911,6 +3925,7 @@ dependencies = [
  "tempfile",
  "vorn-git",
  "vorn-remote",
+ "vorn-spawn",
 ]
 
 [[package]]
@@ -3953,6 +3968,7 @@ dependencies = [
  "vorn-sessiond",
  "vorn-sessiond-wire",
  "vorn-size",
+ "vorn-spawn",
  "vorn-store",
  "vorn-term-proto",
  "vorn-vault",

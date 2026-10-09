@@ -1,14 +1,14 @@
 //! git itself, as a child process, with the limits `execFileSync` applied.
 
 use std::io::Read;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::mpsc;
 use std::thread;
 
 use crate::{command_line, Error, Request};
 
 pub(crate) fn run(req: &Request) -> Result<String, Error> {
-    let mut cmd = Command::new(&req.bin);
+    let mut cmd = vorn_spawn::command(&req.bin);
     cmd.args(&req.args)
         .current_dir(&req.cwd)
         .env_clear()
@@ -16,13 +16,6 @@ pub(crate) fn run(req: &Request) -> Result<String, Error> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // No console window flashing up for every call from a GUI app.
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
 
     let mut child = cmd.spawn().map_err(|error| Error::Spawn {
         bin: req.bin.clone(),

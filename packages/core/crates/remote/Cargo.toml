@@ -9,5 +9,6 @@ publish = false
 description = "Commands run on a remote host over ssh, with the options and multiplexing the app uses"
 
 [dependencies]
+vorn-spawn = { path = "../spawn" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

@@ -170,12 +170,12 @@ impl SafeEnv {
 /// `$SHELL -ilc env`, with this process's filtered environment.
 fn login_shell_env() -> Result<Env, String> {
     use std::io::Read;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     let shell = std::env::var("SHELL")
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "/bin/zsh".to_owned());
-    let mut child = Command::new(&shell)
+    let mut child = vorn_spawn::command(&shell)
         .args(["-ilc", "env"])
         .env_clear()
         .envs(filter(std::env::vars()))

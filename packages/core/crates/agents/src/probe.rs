@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
@@ -264,7 +264,7 @@ enum Out {
 pub fn probe(context: &ProbeContext, agent: Agent) -> Result<Vec<ModelChoice>, DiscoveryError> {
     let cwd = context.cwd.to_string_lossy();
     let mut probe = Probe::new(agent, &cwd).ok_or(DiscoveryError::Failed)?;
-    let mut child = Command::new(&context.command)
+    let mut child = vorn_spawn::command(&context.command)
         .args(probe.arguments(&context.args))
         .current_dir(&context.cwd)
         .env_clear()

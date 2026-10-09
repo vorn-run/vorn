@@ -974,7 +974,7 @@ impl Session {
             .argv
             .split_first()
             .ok_or_else(|| std::io::Error::other("empty argv"))?;
-        let mut cmd = Command::new(program);
+        let mut cmd = vorn_spawn::command(program);
         if is_cmd(program) {
             verbatim(&mut cmd, args);
         } else {
@@ -1661,10 +1661,8 @@ fn wait(child: &mut Box<dyn Child + Send + Sync>) -> ExitInfo {
 /// sessiond's console reaches it.
 #[cfg(windows)]
 fn detach(cmd: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    use vorn_spawn::Hidden;
+    cmd.hidden_with(vorn_spawn::CREATE_NEW_PROCESS_GROUP);
 }
 
 /// Whether `program` is cmd.exe, which reads its own command line rather

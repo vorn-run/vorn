@@ -21,7 +21,7 @@ fn booted() -> Option<SystemTime> {
 
 #[cfg(target_os = "macos")]
 fn booted() -> Option<SystemTime> {
-    let out = std::process::Command::new("/usr/sbin/sysctl")
+    let out = vorn_spawn::command("/usr/sbin/sysctl")
         .args(["-n", "kern.boottime"])
         .output()
         .ok()?;

@@ -13,6 +13,7 @@ description = "Connectors for Vorn: the packs on disk and their manifests, the c
 test-support = []
 
 [dependencies]
+vorn-spawn = { path = "../spawn", features = ["tokio"] }
 data-encoding = "2"
 flate2 = "1"
 getrandom = "0.4"

@@ -220,7 +220,7 @@ impl Runner for ProcessRunner {
         env: &[(String, String)],
         timeout: Duration,
     ) -> Result<(String, String), String> {
-        let mut child = std::process::Command::new(file)
+        let mut child = vorn_spawn::command(file)
             .args(args)
             .env_clear()
             .envs(env.iter().map(|(k, v)| (k, v)))

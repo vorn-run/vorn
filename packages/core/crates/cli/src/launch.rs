@@ -25,6 +25,7 @@ pub struct ServerCommand {
 impl ServerCommand {
     /// vornd serving `data_dir`, on `port` and `host` when given.
     pub fn command(&self, data_dir: &Path, port: Option<u16>, host: Option<&str>) -> Command {
+        // spawn-visible: `vorn server serve` runs it in the caller's console; a detached start hides it.
         let mut command = Command::new(&self.vornd);
         command.arg("--data-dir").arg(data_dir);
         if let Some(sessiond) = &self.sessiond {

@@ -8,6 +8,7 @@ publish = false
 description = "The session holder: owns terminals and piped agents, numbers what they print into a record log, and keeps it while vornd is away"
 
 [dependencies]
+vorn-spawn = { path = "../spawn" }
 crc32fast = "1"
 postcard = { version = "1", default-features = false, features = ["use-std"] }
 serde = { version = "1", features = ["derive"] }

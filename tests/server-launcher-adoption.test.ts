@@ -421,6 +421,27 @@ describe('the server it spawns', () => {
     expect(spawned[0].opts.detached).toBe(true)
   })
 
+  it('opens no console window on Windows', async () => {
+    const { launchServer } = await import('../src/main/server/server-launcher')
+
+    await launchServer()
+
+    expect(spawned[0].opts.windowsHide).toBe(true)
+  })
+
+  it('opens no console window on Windows in dev either', async () => {
+    process.env.ELECTRON_RENDERER_URL = 'http://localhost:5173'
+    try {
+      const { launchServer } = await import('../src/main/server/server-launcher')
+
+      await launchServer()
+
+      expect(spawned[0].opts.windowsHide).toBe(true)
+    } finally {
+      delete process.env.ELECTRON_RENDERER_URL
+    }
+  })
+
   it("is NOT detached in dev, so a restart cannot adopt yesterday's source", async () => {
     // Every adoption check would pass for a leftover dev server -- same data
     // directory, same build channel -- and it would be running the code as it
