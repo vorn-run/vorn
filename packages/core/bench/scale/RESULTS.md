@@ -112,24 +112,24 @@ Findings from this run:
 
 ### 1,000 sessions · 2026-10-09 · `9b69effc` · n2-standard-16 (16 vCPU, 62.8 GiB, Linux 7.0.0-1011-gcp)
 
-| | holder alone | vornd + holder |
-|---|---|---|
-| sessions (idle + busy) | 899 + 100 | 899 + 100 |
-| spawn rate (each p50 / p99) | 3832/s (14.1 / 35.8 ms) | 2454/s (12.0 / 19.8 ms) |
-| holder RSS idle / busy | 5.2 MiB / 20.4 MiB | 7.0 MiB / 14.7 MiB |
-| holder per idle / per busy terminal | 2.3 KiB / 155.3 KiB | 3.8 KiB / 79.0 KiB |
-| holder threads idle / busy | 2 / 2 | 2 / 2 |
-| holder fds idle / busy | 3,614 / 4,014 | 3,614 / 4,014 |
-| vornd RSS idle / busy | — | 87.1 MiB / 110.6 MiB |
-| vornd per idle / per busy terminal | — | 82.7 KiB / 240.7 KiB |
-| vornd threads idle / busy | — | 28 / 26 |
-| vornd fds idle / busy | — | 917 / 1,017 |
-| machine memory per idle terminal, program included | — | 689.7 KiB |
-| probe echo p50 / p99, others idle | 0.22 / 0.34 ms | 0.46 / 0.66 ms |
-| probe echo p50 / p99, 10 % streaming | 0.13 / 0.23 ms | 0.31 / 0.49 ms |
-| attach to snapshot p50 / p99 | — | 0.33 / 0.55 ms |
-| throughput to one grid client | — | — |
-| handoff of every live session | 1,000 sessions in 83 ms | — |
+|                                                    | holder alone            | vornd + holder          |
+| -------------------------------------------------- | ----------------------- | ----------------------- |
+| sessions (idle + busy)                             | 899 + 100               | 899 + 100               |
+| spawn rate (each p50 / p99)                        | 3832/s (14.1 / 35.8 ms) | 2454/s (12.0 / 19.8 ms) |
+| holder RSS idle / busy                             | 5.2 MiB / 20.4 MiB      | 7.0 MiB / 14.7 MiB      |
+| holder per idle / per busy terminal                | 2.3 KiB / 155.3 KiB     | 3.8 KiB / 79.0 KiB      |
+| holder threads idle / busy                         | 2 / 2                   | 2 / 2                   |
+| holder fds idle / busy                             | 3,614 / 4,014           | 3,614 / 4,014           |
+| vornd RSS idle / busy                              | —                       | 87.1 MiB / 110.6 MiB    |
+| vornd per idle / per busy terminal                 | —                       | 82.7 KiB / 240.7 KiB    |
+| vornd threads idle / busy                          | —                       | 28 / 26                 |
+| vornd fds idle / busy                              | —                       | 917 / 1,017             |
+| machine memory per idle terminal, program included | —                       | 689.7 KiB               |
+| probe echo p50 / p99, others idle                  | 0.22 / 0.34 ms          | 0.46 / 0.66 ms          |
+| probe echo p50 / p99, 10 % streaming               | 0.13 / 0.23 ms          | 0.31 / 0.49 ms          |
+| attach to snapshot p50 / p99                       | —                       | 0.33 / 0.55 ms          |
+| throughput to one grid client                      | —                       | —                       |
+| handoff of every live session                      | 1,000 sessions in 83 ms | —                       |
 
 Idle sessions run `cat` (holder alone) or `bash` (vornd + holder); busy ones print a build log at 16.0 KiB/s each. Throughput: 16 sessions printing 16.0 MiB each as fast as they can.
 
@@ -139,73 +139,72 @@ Limits hit:
 
 An early check of this branch: the flood attached to a session vornd had opened before its engine worker had, and was told there was no such session. Fixed before the run below.
 
-
 ### 100 sessions · 2026-10-09 · `af5ca915` · n2-standard-16 (16 vCPU, 62.8 GiB, Linux 7.0.0-1011-gcp)
 
-| | holder alone | vornd + holder |
-|---|---|---|
-| sessions (idle + busy) | 89 + 10 | 89 + 10 |
-| spawn rate (each p50 / p99) | 2005/s (37.7 / 37.7 ms) | 1587/s (22.8 / 23.6 ms) |
-| holder RSS idle / busy | 3.8 MiB / 5.2 MiB | 4.0 MiB / 4.6 MiB |
-| holder per idle / per busy terminal | 6.7 KiB / 151.6 KiB | 4.6 KiB / 64.8 KiB |
-| holder threads idle / busy | 2 / 2 | 2 / 2 |
-| holder fds idle / busy | 374 / 414 | 374 / 414 |
-| vornd RSS idle / busy | — | 24.4 MiB / 28.3 MiB |
-| vornd per idle / per busy terminal | — | 113.5 KiB / 393.2 KiB |
-| vornd threads idle / busy | — | 28 / 26 |
-| vornd fds idle / busy | — | 107 / 117 |
-| machine memory per idle terminal, program included | — | 393.9 KiB |
-| probe echo p50 / p99, others idle | 0.30 / 0.43 ms | 0.75 / 0.93 ms |
-| probe echo p50 / p99, 10 % streaming | 0.32 / 0.44 ms | 0.67 / 0.88 ms |
-| attach to snapshot p50 / p99 | — | 0.41 / 0.65 ms |
-| throughput to one grid client | — | 93.8 MB/s over 16 sessions, 1671 frames/s (2.1 MiB/s of frames) |
-| handoff of every live session | 100 sessions in 26 ms | — |
+|                                                    | holder alone            | vornd + holder                                                  |
+| -------------------------------------------------- | ----------------------- | --------------------------------------------------------------- |
+| sessions (idle + busy)                             | 89 + 10                 | 89 + 10                                                         |
+| spawn rate (each p50 / p99)                        | 2005/s (37.7 / 37.7 ms) | 1587/s (22.8 / 23.6 ms)                                         |
+| holder RSS idle / busy                             | 3.8 MiB / 5.2 MiB       | 4.0 MiB / 4.6 MiB                                               |
+| holder per idle / per busy terminal                | 6.7 KiB / 151.6 KiB     | 4.6 KiB / 64.8 KiB                                              |
+| holder threads idle / busy                         | 2 / 2                   | 2 / 2                                                           |
+| holder fds idle / busy                             | 374 / 414               | 374 / 414                                                       |
+| vornd RSS idle / busy                              | —                       | 24.4 MiB / 28.3 MiB                                             |
+| vornd per idle / per busy terminal                 | —                       | 113.5 KiB / 393.2 KiB                                           |
+| vornd threads idle / busy                          | —                       | 28 / 26                                                         |
+| vornd fds idle / busy                              | —                       | 107 / 117                                                       |
+| machine memory per idle terminal, program included | —                       | 393.9 KiB                                                       |
+| probe echo p50 / p99, others idle                  | 0.30 / 0.43 ms          | 0.75 / 0.93 ms                                                  |
+| probe echo p50 / p99, 10 % streaming               | 0.32 / 0.44 ms          | 0.67 / 0.88 ms                                                  |
+| attach to snapshot p50 / p99                       | —                       | 0.41 / 0.65 ms                                                  |
+| throughput to one grid client                      | —                       | 93.8 MB/s over 16 sessions, 1671 frames/s (2.1 MiB/s of frames) |
+| handoff of every live session                      | 100 sessions in 26 ms   | —                                                               |
 
 Idle sessions run `cat` (holder alone) or `bash` (vornd + holder); busy ones print a build log at 16.0 KiB/s each. Throughput: 16 sessions printing 16.0 MiB each as fast as they can.
 
 ### 1,000 sessions · 2026-10-09 · `af5ca915` · n2-standard-16 (16 vCPU, 62.8 GiB, Linux 7.0.0-1011-gcp)
 
-| | holder alone | vornd + holder |
-|---|---|---|
-| sessions (idle + busy) | 899 + 100 | 899 + 100 |
-| spawn rate (each p50 / p99) | 2740/s (23.3 / 33.9 ms) | 1912/s (16.3 / 25.4 ms) |
-| holder RSS idle / busy | 5.1 MiB / 20.4 MiB | 7.0 MiB / 14.7 MiB |
-| holder per idle / per busy terminal | 2.3 KiB / 157.1 KiB | 3.8 KiB / 79.0 KiB |
-| holder threads idle / busy | 2 / 2 | 2 / 2 |
-| holder fds idle / busy | 3,614 / 4,014 | 3,614 / 4,014 |
-| vornd RSS idle / busy | — | 85.2 MiB / 111.0 MiB |
-| vornd per idle / per busy terminal | — | 80.0 KiB / 264.4 KiB |
-| vornd threads idle / busy | — | 28 / 26 |
-| vornd fds idle / busy | — | 917 / 1,017 |
-| machine memory per idle terminal, program included | — | 733.3 KiB |
-| probe echo p50 / p99, others idle | 0.34 / 0.48 ms | 0.73 / 0.94 ms |
-| probe echo p50 / p99, 10 % streaming | 0.17 / 0.38 ms | 0.44 / 0.68 ms |
-| attach to snapshot p50 / p99 | — | 0.45 / 0.69 ms |
-| throughput to one grid client | — | 90.0 MB/s over 16 sessions, 1713 frames/s (2.2 MiB/s of frames) |
-| handoff of every live session | 1,000 sessions in 103 ms | — |
+|                                                    | holder alone             | vornd + holder                                                  |
+| -------------------------------------------------- | ------------------------ | --------------------------------------------------------------- |
+| sessions (idle + busy)                             | 899 + 100                | 899 + 100                                                       |
+| spawn rate (each p50 / p99)                        | 2740/s (23.3 / 33.9 ms)  | 1912/s (16.3 / 25.4 ms)                                         |
+| holder RSS idle / busy                             | 5.1 MiB / 20.4 MiB       | 7.0 MiB / 14.7 MiB                                              |
+| holder per idle / per busy terminal                | 2.3 KiB / 157.1 KiB      | 3.8 KiB / 79.0 KiB                                              |
+| holder threads idle / busy                         | 2 / 2                    | 2 / 2                                                           |
+| holder fds idle / busy                             | 3,614 / 4,014            | 3,614 / 4,014                                                   |
+| vornd RSS idle / busy                              | —                        | 85.2 MiB / 111.0 MiB                                            |
+| vornd per idle / per busy terminal                 | —                        | 80.0 KiB / 264.4 KiB                                            |
+| vornd threads idle / busy                          | —                        | 28 / 26                                                         |
+| vornd fds idle / busy                              | —                        | 917 / 1,017                                                     |
+| machine memory per idle terminal, program included | —                        | 733.3 KiB                                                       |
+| probe echo p50 / p99, others idle                  | 0.34 / 0.48 ms           | 0.73 / 0.94 ms                                                  |
+| probe echo p50 / p99, 10 % streaming               | 0.17 / 0.38 ms           | 0.44 / 0.68 ms                                                  |
+| attach to snapshot p50 / p99                       | —                        | 0.45 / 0.69 ms                                                  |
+| throughput to one grid client                      | —                        | 90.0 MB/s over 16 sessions, 1713 frames/s (2.2 MiB/s of frames) |
+| handoff of every live session                      | 1,000 sessions in 103 ms | —                                                               |
 
 Idle sessions run `cat` (holder alone) or `bash` (vornd + holder); busy ones print a build log at 16.0 KiB/s each. Throughput: 16 sessions printing 16.0 MiB each as fast as they can.
 
 ### 10,000 sessions · 2026-10-09 · `af5ca915` · n2-standard-16 (16 vCPU, 62.8 GiB, Linux 7.0.0-1011-gcp)
 
-| | holder alone | vornd + holder |
-|---|---|---|
-| sessions (idle + busy) | 8,999 + 1,000 | 8,999 + 1,000 |
-| spawn rate (each p50 / p99) | 1216/s (55.6 / 89.7 ms) | 995/s (30.9 / 55.8 ms) |
-| holder RSS idle / busy | 18.0 MiB / 350.8 MiB | 35.5 MiB / 295.1 MiB |
-| holder per idle / per busy terminal | 1.7 KiB / 340.8 KiB | 3.6 KiB / 265.9 KiB |
-| holder threads idle / busy | 2 / 2 | 2 / 2 |
-| holder fds idle / busy | 36,014 / 40,014 | 36,014 / 40,014 |
-| vornd RSS idle / busy | — | 686.5 MiB / 1.1 GiB |
-| vornd per idle / per busy terminal | — | 76.5 KiB / 424.1 KiB |
-| vornd threads idle / busy | — | 26 / 26 |
-| vornd fds idle / busy | — | 9,017 / 10,017 |
-| machine memory per idle terminal, program included | — | 999.3 KiB |
-| probe echo p50 / p99, others idle | 0.38 / 0.48 ms | 0.82 / 1.84 ms |
-| probe echo p50 / p99, 10 % streaming | 0.12 / 0.24 ms | 0.41 / 1.94 ms |
-| attach to snapshot p50 / p99 | — | 0.40 / 0.99 ms |
-| throughput to one grid client | — | 67.2 MB/s over 16 sessions, 1768 frames/s (2.3 MiB/s of frames) |
-| handoff of every live session | 10,000 sessions in 1666 ms | — |
+|                                                    | holder alone               | vornd + holder                                                  |
+| -------------------------------------------------- | -------------------------- | --------------------------------------------------------------- |
+| sessions (idle + busy)                             | 8,999 + 1,000              | 8,999 + 1,000                                                   |
+| spawn rate (each p50 / p99)                        | 1216/s (55.6 / 89.7 ms)    | 995/s (30.9 / 55.8 ms)                                          |
+| holder RSS idle / busy                             | 18.0 MiB / 350.8 MiB       | 35.5 MiB / 295.1 MiB                                            |
+| holder per idle / per busy terminal                | 1.7 KiB / 340.8 KiB        | 3.6 KiB / 265.9 KiB                                             |
+| holder threads idle / busy                         | 2 / 2                      | 2 / 2                                                           |
+| holder fds idle / busy                             | 36,014 / 40,014            | 36,014 / 40,014                                                 |
+| vornd RSS idle / busy                              | —                          | 686.5 MiB / 1.1 GiB                                             |
+| vornd per idle / per busy terminal                 | —                          | 76.5 KiB / 424.1 KiB                                            |
+| vornd threads idle / busy                          | —                          | 26 / 26                                                         |
+| vornd fds idle / busy                              | —                          | 9,017 / 10,017                                                  |
+| machine memory per idle terminal, program included | —                          | 999.3 KiB                                                       |
+| probe echo p50 / p99, others idle                  | 0.38 / 0.48 ms             | 0.82 / 1.84 ms                                                  |
+| probe echo p50 / p99, 10 % streaming               | 0.12 / 0.24 ms             | 0.41 / 1.94 ms                                                  |
+| attach to snapshot p50 / p99                       | —                          | 0.40 / 0.99 ms                                                  |
+| throughput to one grid client                      | —                          | 67.2 MB/s over 16 sessions, 1768 frames/s (2.3 MiB/s of frames) |
+| handoff of every live session                      | 10,000 sessions in 1666 ms | —                                                               |
 
 Idle sessions run `cat` (holder alone) or `bash` (vornd + holder); busy ones print a build log at 16.0 KiB/s each. Throughput: 16 sessions printing 16.0 MiB each as fast as they can.
 
