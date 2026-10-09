@@ -7,34 +7,20 @@
  * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix: the agent is a shell
  * script.
  */
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import WebSocket from 'ws'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '../packages/shared/src/protocol'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import { normalizeWorktrees } from './helpers/worktrees-parity'
-import { stopServerChild } from './helpers/real-server'
+import { builtSessiond, builtVornd, startServed, type Served } from './helpers/served'
 import { recorded } from './helpers/vornd-fixtures'
 
 const TEST_CREDENTIAL = 'native-server-worktrees-credential'
 
-const vornd = [
-  process.env.VORN_CONFORMANCE_VORND,
-  path.resolve(__dirname, '../packages/core/vornd'),
-  path.resolve(__dirname, '../packages/core/target/release/vornd')
-].find((p): p is string => !!p && fs.existsSync(p))
-const runnable =
-  !!vornd &&
-  process.platform !== 'win32' &&
-  fs.existsSync(path.join(path.dirname(vornd), 'vorn-sessiond'))
-
-vi.mock('../packages/server/src/tailscale', () => ({
-  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
-  clearBinaryCache: vi.fn()
-}))
+const runnable = !!builtVornd && !!builtSessiond && process.platform !== 'win32'
 
 type Frame = Record<string, unknown>
 
@@ -100,11 +86,9 @@ class Client {
 }
 
 interface RealServer {
-  child: ChildProcess
+  served: Served
   dirs: { home: string; data: string; work: string }
   port: number
-  vornd: number
-  log: string[]
 }
 
 const realServers: RealServer[] = []
@@ -112,55 +96,17 @@ const realServers: RealServer[] = []
 async function startRealServer(): Promise<RealServer> {
   const made = (name: string): string =>
     fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `vorn-wt-${name}-`)))
-  const dirs = { home: made('home'), data: made('data'), work: made('work') }
-  const log: string[] = []
-  const child = spawn(
-    process.execPath,
-    [
-      '--import',
-      'tsx',
-      path.join(__dirname, '..', 'packages', 'server', 'src', 'index.ts'),
-      '--data-dir',
-      dirs.data,
-      '--port',
-      '0'
-    ],
-    {
-      cwd: path.join(__dirname, '..'),
-      env: {
-        ...process.env,
-        HOME: dirs.home,
-        [BOOTSTRAP_ENV_VAR]: TEST_CREDENTIAL,
-        VORN_VORND_PATH: vornd!,
-        VORND_GROUPS: '',
-        NODE_ENV: 'test',
-        VITEST: ''
-      },
-      stdio: ['ignore', 'pipe', 'pipe']
-    }
-  )
-  child.stdout?.on('data', (d) => log.push(String(d)))
-  child.stderr?.on('data', (d) => log.push(String(d)))
-  const server: RealServer = { child, dirs, port: 0, vornd: 0, log }
+  const home = made('home')
+  const work = made('work')
+  const served = await startServed({ home, credential: TEST_CREDENTIAL, sessiond: true })
+  const server: RealServer = {
+    served,
+    dirs: { home, data: served.dataDir, work },
+    port: served.port
+  }
   realServers.push(server)
-  await until('the server to listen', () => {
-    try {
-      const record = JSON.parse(fs.readFileSync(path.join(dirs.data, WS_PORT_FILENAME), 'utf-8'))
-      server.port = typeof record.port === 'number' ? (record.port as number) : 0
-    } catch {
-      server.port = 0
-    }
-    return server.port > 0
-  })
-  const direct = await Client.open(server.port)
-  await until('vornd to start', async () => {
-    const s = await direct.result<{ state: string; port?: number }>('server:vornd')
-    if (s.state !== 'on' || !s.port) return false
-    server.vornd = s.port
-    return true
-  })
   await until('the session holder, and the copy fed', async () => {
-    const res = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
+    const res = await fetch(`http://127.0.0.1:${server.port}/vornd/health`)
     const health = (await res.json()) as {
       sessiond?: { current?: { pid?: number } }
       registry?: { fed?: boolean; decides?: boolean }
@@ -168,12 +114,23 @@ async function startRealServer(): Promise<RealServer> {
     if (!health.sessiond?.current?.pid) return false
     return health.registry?.fed === true && health.registry.decides === true
   })
-  direct.close()
   return server
 }
 
-function stopRealServer(server: RealServer): Promise<void> {
-  return stopServerChild(server.child, server.vornd, server.dirs.data)
+type Groups = Record<string, { native?: number; forwarded?: number }>
+
+async function groupsOf(server: RealServer): Promise<Groups> {
+  const health = await fetch(`http://127.0.0.1:${server.port}/vornd/health`)
+  return ((await health.json()) as { groups: Groups }).groups
+}
+
+/** How many calls of `name` were answered each way since `before`. */
+function since(before: Groups, after: Groups, name: string): { native: number; forwarded: number } {
+  const count = (g: Groups, k: 'native' | 'forwarded'): number => g[name]?.[k] ?? 0
+  return {
+    native: count(after, 'native') - count(before, 'native'),
+    forwarded: count(after, 'forwarded') - count(before, 'forwarded')
+  }
 }
 
 /**
@@ -220,7 +177,7 @@ function answered(frame: Frame): unknown {
   return { result: frame.result }
 }
 
-/** The same calls, on one server, through its vornd; answers the transcript. */
+/** The same calls, on one server; answers the transcript. */
 async function scenario(
   server: RealServer
 ): Promise<{ transcript: Record<string, unknown>; sessions: string[] }> {
@@ -231,7 +188,7 @@ async function scenario(
   const { repo, wt } = repository(work)
 
   const direct = await Client.open(server.port)
-  const through = await Client.open(server.vornd)
+  const through = await Client.open(server.port)
   const replies: Record<string, unknown> = {}
   const call = async (step: string, method: string, params?: unknown): Promise<void> => {
     replies[step] = answered(await through.call(method, params))
@@ -255,6 +212,7 @@ async function scenario(
       return active.count === 1
     })
 
+    const before = await groupsOf(server)
     await call('inventory', 'worktree:inventory')
     await call('inventory of one project, measured again', 'worktree:inventory', {
       projectPaths: [repo],
@@ -280,18 +238,13 @@ async function scenario(
       force: true
     })
     await call('inventory after', 'worktree:inventory')
+    const after = await groupsOf(server)
 
     await direct.result('headless:kill', agent.id)
-    const health = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-    const groups = (
-      (await health.json()) as {
-        groups: Record<string, { native?: number; forwarded?: number }>
-      }
-    ).groups
     const transcript = {
       answeredBy: {
-        worktree: { native: groups.worktree?.native, forwarded: groups.worktree?.forwarded },
-        git: { native: groups.git?.native, forwarded: groups.git?.forwarded }
+        worktree: since(before, after, 'worktree'),
+        git: since(before, after, 'git')
       },
       replies,
       left: ['merged', 'unmerged', 'dirty', 'busy', 'orphan'].filter((n) => fs.existsSync(wt(n))),
@@ -306,7 +259,7 @@ async function scenario(
 
 spawnsRealServers()
 
-describe.skipIf(!runnable)('the worktree manager in vornd, against the server', () => {
+describe.skipIf(!runnable)('the worktree manager in vornd', () => {
   let run: Record<string, unknown>
 
   beforeAll(async () => {
@@ -314,12 +267,8 @@ describe.skipIf(!runnable)('the worktree manager in vornd, against the server', 
     try {
       const { transcript, sessions } = await scenario(server)
       run = normalizeWorktrees(transcript, server.dirs.work, sessions)
-    } catch (err) {
-      throw new Error(`${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
-        cause: err
-      })
     } finally {
-      await stopRealServer(server)
+      await server.served.stop()
     }
   }, 240_000)
 

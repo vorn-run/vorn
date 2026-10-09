@@ -18,8 +18,6 @@ export interface ServerArgs {
   dataDir?: string
   /** Label for `token create`. */
   name?: string
-  /** Never typed by a person: passed by the server being replaced. See `handoff/heir.ts`. */
-  adoptHandoff?: string
   help: boolean
   /** Everything that is not an option: `serve`, `token`, `create`, an id. */
   positionals: string[]
@@ -33,7 +31,6 @@ export const SERVER_OPTIONS = {
   port: { type: 'string' },
   'data-dir': { type: 'string' },
   name: { type: 'string' },
-  'adopt-handoff': { type: 'string' },
   help: { type: 'boolean', short: 'h' }
 } as const
 
@@ -49,7 +46,6 @@ export function parseServerArgs(argv: string[]): ServerArgs {
     port?: string
     'data-dir'?: string
     name?: string
-    'adopt-handoff'?: string
     help?: boolean
   }
   let positionals: string[]
@@ -82,7 +78,6 @@ export function parseServerArgs(argv: string[]): ServerArgs {
     port,
     dataDir: values['data-dir'],
     name: values.name,
-    adoptHandoff: values['adopt-handoff'],
     help: values.help ?? false,
     positionals
   }

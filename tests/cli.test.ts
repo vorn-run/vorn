@@ -7,17 +7,15 @@ vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
 
-// `serve` is the one command that needs a listening server. Mocking the entry
-// point keeps the test to the CLI's own behaviour — dispatch, output, and the
-// first-run mint — without binding a port.
-const startServer = vi.hoisted(() => vi.fn())
-vi.mock('../packages/server/src/index', () => ({ startServer }))
-
 import { runCli, type CliDeps } from '../packages/server/src/cli'
 import { initDatabase, closeDatabase } from '../packages/server/src/database'
 import { mintOwnerToken } from '../packages/server/src/token-manager'
 
 let dataDir: string
+
+// `serve` runs vornd; a stand-in keeps the test to the CLI's dispatch, output and first-run mint.
+const runVornd = vi.fn(async () => 0)
+const findVornd = vi.fn(() => ({ vornd: '/opt/vorn/vornd', sessiond: '/opt/vorn/vorn-sessiond' }))
 
 /** Collects what the CLI wrote, so assertions read against real output. */
 function capture(isTty = false): CliDeps & { out: () => string; err: () => string } {
@@ -27,6 +25,8 @@ function capture(isTty = false): CliDeps & { out: () => string; err: () => strin
     write: (t) => outParts.push(t),
     writeErr: (t) => errParts.push(t),
     isTty,
+    findVornd,
+    runVornd,
     out: () => outParts.join(''),
     err: () => errParts.join('')
   }
@@ -38,22 +38,10 @@ function run(argv: string[]) {
   return runCli([...argv, '--data-dir', dataDir], io).then((code) => ({ code, io }))
 }
 
-/**
- * The real `startServer` initializes the database on its way up, and `runServe`
- * reads tokens afterwards. The stand-in has to do the same or it would hide that
- * ordering rather than exercise it.
- */
-function mockServe(port = 4400): void {
-  startServer.mockImplementation(async (opts?: { dataDir?: string }) => {
-    initDatabase(opts?.dataDir)
-    return { port }
-  })
-}
-
 beforeEach(() => {
-  startServer.mockReset()
+  runVornd.mockClear()
+  findVornd.mockClear()
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-cli-'))
-  mockServe()
 })
 
 afterEach(() => {
@@ -126,7 +114,7 @@ describe('usage and dispatch', () => {
     const io = capture()
     expect(await runCli(['serve', '--port=abc'], io)).toBe(2)
     expect(io.err()).toContain('must be a number')
-    expect(startServer).not.toHaveBeenCalled()
+    expect(runVornd).not.toHaveBeenCalled()
   })
 
   it('reports an unknown option', async () => {
@@ -222,19 +210,21 @@ describe('serve', () => {
     expect(io.out()).toContain('vorn server token create')
   })
 
-  it('reports the port and mints a first-run token on an empty data dir', async () => {
+  it('runs vornd for the data dir and mints a first-run token on an empty one', async () => {
     const io = capture(true)
     const code = await runCli(['serve', '--data-dir', dataDir], io)
 
     expect(code).toBe(0)
-    expect(startServer).toHaveBeenCalledWith({
-      host: undefined,
-      port: undefined,
+    expect(runVornd).toHaveBeenCalledTimes(1)
+    const [binaries, args] = runVornd.mock.calls[0] as unknown as [unknown, string[]]
+    expect(binaries).toEqual({ vornd: '/opt/vorn/vornd', sessiond: '/opt/vorn/vorn-sessiond' })
+    expect(args.slice(0, 4)).toEqual([
+      '--data-dir',
       dataDir,
-      // A server somebody ran on purpose does not get to decide it is done.
-      idleShutdown: false
-    })
-    expect(io.out()).toContain('Vorn server listening on port 4400')
+      '--sessiond',
+      '/opt/vorn/vorn-sessiond'
+    ])
+    expect(io.out()).toContain(`Starting the Vorn server for ${dataDir}`)
     expect(io.out()).toContain('No device tokens existed')
     expect(io.out()).toContain('vorn_')
   })
@@ -242,25 +232,40 @@ describe('serve', () => {
   it('does not mint again when a token already exists', async () => {
     initDatabase(dataDir)
     mintOwnerToken('existing')
+    closeDatabase()
 
     const io = capture()
     expect(await runCli(['serve', '--data-dir', dataDir], io)).toBe(0)
 
-    expect(io.out()).toContain('listening on port 4400')
+    expect(io.out()).toContain('Starting the Vorn server')
     expect(io.out()).not.toContain('No device tokens existed')
   })
 
-  it('passes host and port through to the server', async () => {
-    mockServe(9999)
+  it('passes host and port through, and vornd’s exit code back', async () => {
+    runVornd.mockResolvedValueOnce(3)
     const io = capture()
-    await runCli(['serve', '--host', '0.0.0.0', '--port', '9999', '--data-dir', dataDir], io)
+    const code = await runCli(
+      ['serve', '--host', '0.0.0.0', '--port', '9999', '--data-dir', dataDir],
+      io
+    )
 
-    expect(startServer).toHaveBeenCalledWith({
-      host: '0.0.0.0',
-      port: 9999,
-      dataDir,
-      idleShutdown: false
-    })
-    expect(io.out()).toContain('listening on port 9999')
+    expect(code).toBe(3)
+    const [, args] = runVornd.mock.calls[0] as unknown as [unknown, string[]]
+    expect(args.slice(-4)).toEqual(['--port', '9999', '--host', '0.0.0.0'])
+  })
+
+  it('says so when this install has no vornd', async () => {
+    findVornd.mockReturnValueOnce(null as never)
+    const io = capture()
+    expect(await runCli(['serve', '--data-dir', dataDir], io)).toBe(1)
+    expect(io.err()).toContain('no vornd')
+    expect(runVornd).not.toHaveBeenCalled()
+  })
+
+  it('will not serve the default data directory from source', async () => {
+    const io = capture()
+    expect(await runCli(['serve', '--data-dir', path.join(os.homedir(), '.vorn')], io)).toBe(1)
+    expect(io.err()).toContain('default data directory')
+    expect(runVornd).not.toHaveBeenCalled()
   })
 })

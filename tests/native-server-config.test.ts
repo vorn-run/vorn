@@ -26,7 +26,6 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 interface Health {
   groups: Record<string, { forwarded?: number; native?: number }>
   unexpectedForwards: Record<string, number>
-  stillForwarded: Record<string, string>
 }
 
 describe.runIf(runnable)('the configuration in vornd', () => {
@@ -131,13 +130,10 @@ describe.runIf(runnable)('the configuration in vornd', () => {
     }
   })
 
-  it('never hands a configuration call to the server', async () => {
-    const { groups, unexpectedForwards, stillForwarded } = await health()
+  it('answers every configuration call itself', async () => {
+    const { groups, unexpectedForwards } = await health()
     expect(groups.config?.forwarded ?? 0).toBe(0)
     expect(groups.config?.native ?? 0).toBeGreaterThan(0)
     expect(unexpectedForwards).toEqual({})
-    expect(stillForwarded.extension).toBeUndefined()
-    expect(stillForwarded.browser).toBeUndefined()
-    expect(stillForwarded.config).toBeUndefined()
   })
 })

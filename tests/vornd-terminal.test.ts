@@ -101,21 +101,21 @@ describe.runIf(vorndSessionsAvailable)('terminal calls through vornd', () => {
     expect(report).toMatch(/033 \[ \? .* c/)
   })
 
-  it('answers the attach of a session nothing holds, and leaves its writes to the server', async () => {
+  it('answers the attach and the writes of a session nothing holds, forwarding neither', async () => {
     const c = await client()
     expect(await c.call('terminal:attach', { id: 'not-held-by-vornd' })).toEqual({
       data: '',
       seq: 0,
       live: false
     })
-    // The stand-in server answers nothing, so a forwarded call never comes back.
+    // The stand-in server answers nothing, so only vornd can answer.
     const answered = await Promise.race([
       c.call('terminal:write', { id: 'not-held-by-vornd', data: 'x' }).then(
         () => true,
         () => true
       ),
-      new Promise((r) => setTimeout(() => r(false), 500))
+      new Promise((r) => setTimeout(() => r(false), 2_000))
     ])
-    expect(answered).toBe(false)
+    expect(answered).toBe(true)
   })
 })

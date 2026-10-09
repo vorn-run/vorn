@@ -36,14 +36,13 @@ describe('connector pack RPC wiring', () => {
     expect(protocol).toContain(`'${channels.CONNECTOR_INSTALL_PROGRESS}': ConnectorInstallProgress`)
   })
 
-  it('answers each request in vornd, and lets its progress through the server', () => {
+  it('answers each request in vornd, which tells clients the progress itself', () => {
     const methods = read('packages/core/crates/vornd/src/native/connectors.rs')
     for (const channel of Object.values(channels)) {
       if (channel === channels.CONNECTOR_INSTALL_PROGRESS) continue
       expect(methods).toContain(`"${channel}"`)
     }
     expect(methods).toContain(`"${channels.CONNECTOR_INSTALL_PROGRESS}"`)
-    expect(read('packages/server/src/vornd-reach.ts')).toContain('IPC.CONNECTOR_INSTALL_PROGRESS')
   })
 
   it('forwards each request from the main process', () => {

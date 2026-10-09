@@ -1,23 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { RUNTIME_PROTOCOL_VERSION, type ServerIdentity } from '@vornrun/shared/protocol'
-import type { VorndStatus } from '@vornrun/shared/types'
 
-/**
- * The launcher talking to the server through the vornd the server keeps in
- * front of itself.
- *
- * What matters most is the way out: whatever goes wrong with vornd, the app
- * ends up talking to the server directly, and says why.
- */
+/** The launcher and vornd, which is the server: what Settings is told of it. */
 
 const published = { port: 50091 as number | null }
-/** What the server answers to `server:vornd`, or the error it fails with. */
-const server = {
-  vornd: { state: 'on', port: 47001 } as VorndStatus | Error,
-  /** Whether the bridge connects once pointed at vornd. */
-  reachable: true
-}
 
 const bridges: FakeBridge[] = []
 
@@ -44,23 +31,13 @@ class FakeBridge extends EventEmitter {
   }
   connect(): void {
     setImmediate(() => {
-      if (!this.url.includes(':50091') && !server.reachable) return
       this.isConnected = true
       this.emit('connected')
       this.emit('identity', identity)
     })
   }
-  /** The connection dropping, as it does when vornd ends. */
-  drop(): void {
-    this.isConnected = false
-    this.emit('disconnected')
-  }
   async request(method: string): Promise<unknown> {
     this.requests.push(method)
-    if (method === 'server:vornd') {
-      if (server.vornd instanceof Error) throw server.vornd
-      return server.vornd
-    }
     return {}
   }
   close(): void {
@@ -111,8 +88,6 @@ beforeEach(() => {
   vi.resetModules()
   bridges.length = 0
   published.port = 50091
-  server.vornd = { state: 'on', port: 47001 }
-  server.reachable = true
   holders.read.mockReset()
   holders.read.mockResolvedValue({ current: null, older: [], error: null })
 })
@@ -123,85 +98,29 @@ async function launch() {
   return { ...launcher, bridge }
 }
 
-const settled = (): Promise<void> => new Promise((resolve) => setImmediate(resolve))
-
-describe('vornd in front of the server', () => {
-  it('connects through the vornd the server keeps', async () => {
+describe('vornd as the server', () => {
+  it('talks to vornd where it published its port, asking nothing more', async () => {
     const { bridge, getVorndStatus } = await launch()
-    expect(bridge.requests).toContain('server:vornd')
-    expect(bridge.url).toBe('ws://127.0.0.1:47001/ws')
-    expect(bridge.isConnected).toBe(true)
-    expect(getVorndStatus()).toEqual({ state: 'on', port: 47001 })
+    expect(bridge.requests).not.toContain('server:vornd')
+    expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
+    expect(getVorndStatus()).toEqual({ state: 'on', port: 50091 })
   })
 
-  it('reads the session holders from that vornd', async () => {
+  it('reads the session holders from it', async () => {
     const { getSessionHolders } = await launch()
     expect(await getSessionHolders()).toEqual({ current: null, older: [], error: null })
-    expect(holders.read).toHaveBeenCalledWith(47001)
+    expect(holders.read).toHaveBeenCalledWith(50091)
   })
 
-  it('stays on the server, and says why, when its vornd is not running', async () => {
-    server.vornd = { state: 'failed', detail: 'vornd is not in this build' }
-    const { bridge, getVorndStatus, getSessionHolders, endOlderSessionHolder } = await launch()
-    expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
-    expect(getVorndStatus()).toEqual({ state: 'failed', detail: 'vornd is not in this build' })
+  it('reads no holders once the app lets go of the server', async () => {
+    const { detachFromServer, getVorndStatus, getSessionHolders, endOlderSessionHolder } =
+      await launch()
+    detachFromServer()
+    expect(getVorndStatus()).toEqual({ state: 'off' })
     expect(await getSessionHolders()).toBeNull()
     expect(await endOlderSessionHolder('1a2b')).toEqual({
       ok: false,
       detail: 'vornd is not in use'
     })
-  })
-
-  it('stays on the server when it cannot say where its vornd is', async () => {
-    server.vornd = new Error('Method not found: server:vornd')
-    const { bridge, getVorndStatus } = await launch()
-    expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
-    expect(getVorndStatus()).toEqual({
-      state: 'failed',
-      detail: 'Method not found: server:vornd'
-    })
-  })
-
-  it('stays on the server when vornd answers nothing it can use', async () => {
-    server.vornd = { state: 'off' }
-    const { bridge, getVorndStatus } = await launch()
-    expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
-    expect(getVorndStatus()).toEqual({ state: 'failed', detail: 'the server reports no vornd' })
-  })
-
-  it('goes back to the server when nothing connects through vornd', async () => {
-    server.reachable = false
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    try {
-      const launcher = await import('../src/main/server/server-launcher')
-      const attempt = launcher.launchServer()
-      await vi.advanceTimersByTimeAsync(6_000)
-      const bridge = (await attempt) as unknown as FakeBridge
-      expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
-      expect(launcher.getVorndStatus()).toEqual({
-        state: 'failed',
-        detail: 'the server could not be reached through vornd'
-      })
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('follows vornd to its new port when it starts again', async () => {
-    const { bridge, getVorndStatus } = await launch()
-    server.vornd = { state: 'on', port: 47002 }
-    bridge.drop()
-    // Back to the server, which says where vornd is now.
-    expect(bridge.url).toBe('ws://127.0.0.1:50091/ws')
-    expect(getVorndStatus()).toEqual({ state: 'failed', detail: 'vornd went away' })
-    for (let i = 0; i < 5; i++) await settled()
-    expect(bridge.url).toBe('ws://127.0.0.1:47002/ws')
-    expect(getVorndStatus()).toEqual({ state: 'on', port: 47002 })
-  })
-
-  it('forgets vornd when the app lets go of the server', async () => {
-    const { detachFromServer, getVorndStatus } = await launch()
-    detachFromServer()
-    expect(getVorndStatus()).toEqual({ state: 'off' })
   })
 })

@@ -1,6 +1,11 @@
-//! vornd's copy of the server's session registry.
+//! The session registry: every terminal's and headless agent's record.
 //!
-//! The server owns its terminals' and headless agents' records: their names,
+//! vornd owns the records: it creates, changes and closes them itself, and
+//! carries them from one run to the next ([`Registry::own_records`]). What
+//! follows of a server feeding a copy (`vornd:record`) is kept for tests
+//! and a server of an older build.
+//!
+//! The server owned its terminals' and headless agents' records: their names,
 //! groups, agents, worktrees and statuses. While vornd runs native work it
 //! keeps a copy, fed by the server over the app's channel
 //! ([`crate::control`]) as `vornd:record` notes: a whole snapshot when the
@@ -1699,6 +1704,73 @@ impl Registry {
         Ok((record, !ended, notes))
     }
 
+    /// Terminal `id`'s program ended with `code` at `at` (`processEnded`):
+    /// the record goes idle, a shell keeps its exit code, and it leaves the
+    /// order. Told again by a replay, or for a terminal ended already, it
+    /// changes nothing. Answers the notes and, when the terminal was the last
+    /// session in its worktree, the cleanup offer to make.
+    pub fn terminal_exit(&mut self, id: &str, code: i32, at: Stamp) -> (Vec<Value>, Option<Value>) {
+        let Some(row) = self.terminals.get_mut(id) else {
+            return (Vec::new(), None);
+        };
+        if row.ended || stale(Some(at), row.exit_at) {
+            return (Vec::new(), None);
+        }
+        row.ended = true;
+        row.exit_at = Some(at);
+        row.status_at = None;
+        row.record.status = AgentStatus::Idle;
+        if row.record.agent_type == "shell" {
+            row.record.shell_exit_code = Some(code);
+        }
+        let worktree = row.record.worktree_path.clone();
+        let offer = json!({
+            "id": id,
+            "projectPath": row.record.project_path,
+            "worktreePath": worktree,
+        });
+        self.quiet(id);
+        let mut notes = Vec::with_capacity(2);
+        notes.extend(self.native_upsert(id, json!({ "exited": code })));
+        if self.order.iter().any(|o| o == id) {
+            self.order.retain(|o| o != id);
+            let order = json!({ "op": "order", "order": self.order });
+            notes.push(self.native_note(order));
+        }
+        let last = worktree
+            .as_deref()
+            .is_some_and(|w| self.active_in_worktree(w).is_empty());
+        (notes, last.then_some(offer))
+    }
+
+    /// A shell's working directory, as it reports it (`noteShellCwd`).
+    pub fn terminal_cwd(&mut self, id: &str, cwd: &str) -> Option<Value> {
+        let row = self.terminals.get_mut(id)?;
+        if row.record.agent_type != "shell" || row.record.shell_cwd.as_deref() == Some(cwd) {
+            return None;
+        }
+        row.record.shell_cwd = Some(cwd.to_owned());
+        self.native_upsert(id, json!({}))
+    }
+
+    /// The commit a terminal's tree is at (`HeadRefresh`).
+    pub fn set_head_commit(&mut self, id: &str, head: &str) -> Option<Value> {
+        let row = self.terminals.get_mut(id)?;
+        if row.ended || row.record.head_commit.as_deref() == Some(head) {
+            return None;
+        }
+        row.record.head_commit = Some(head.to_owned());
+        self.native_upsert(id, json!({}))
+    }
+
+    /// Lets go of a headless agent's record, as the server did a while after it ended.
+    pub fn forget_headless(&mut self, id: &str) -> Option<Value> {
+        if !self.headless.remove(id) {
+            return None;
+        }
+        Some(self.native_note(json!({ "op": "remove", "kind": Kind::Headless, "id": id })))
+    }
+
     /// Sets the order the terminals are listed in (`reorderSessions`): every
     /// id once, each a terminal the registry holds. Told even when it is the
     /// order there was, as the server tells clients, and marked
@@ -2123,6 +2195,14 @@ struct Fed {
     feed_pending: bool,
 }
 
+impl Fed {
+    /// Whether the copy can be answered from: the server fed it, or vornd
+    /// owns the records itself and needs no one to.
+    fn trusted(&self) -> bool {
+        self.feeder.is_some() || self.registry.owns()
+    }
+}
+
 impl SessionRegistry {
     /// An empty registry, in a generation of its own.
     pub fn new() -> Arc<SessionRegistry> {
@@ -2182,7 +2262,7 @@ impl SessionRegistry {
     pub fn expect_holder(&self) {
         let mut fed = self.lock();
         fed.holder_pending = true;
-        fed.feed_pending = fed.feeder.is_none();
+        fed.feed_pending = !fed.trusted();
     }
 
     /// Waits, at most `limit`, until the copy says what runs and what is
@@ -2221,6 +2301,49 @@ impl SessionRegistry {
 
     pub fn decides(&self) -> bool {
         self.lock().registry.decides()
+    }
+
+    /// The terminals whose program runs and the headless agents still
+    /// running, which keep the app's server from stopping as idle.
+    pub fn live(&self) -> Value {
+        let fed = self.lock();
+        let r = &fed.registry;
+        let headless = r
+            .headless()
+            .filter(|h| h.status == HeadlessStatus::Running)
+            .count();
+        json!({ "sessions": r.live_terminals().count(), "headless": headless })
+    }
+
+    /// [`Registry::terminal_exit`]: `None` when it changed nothing (told
+    /// again, or no such terminal), else the cleanup offer to make, if any.
+    pub fn terminal_exit(&self, id: &str, code: i32, at: Stamp) -> Option<Option<Value>> {
+        let mut fed = self.lock();
+        let (notes, offer) = fed.registry.terminal_exit(id, code, at);
+        let first = !notes.is_empty();
+        self.tell(notes);
+        first.then_some(offer)
+    }
+
+    /// [`Registry::terminal_cwd`].
+    pub fn terminal_cwd(&self, id: &str, cwd: &str) {
+        let mut fed = self.lock();
+        let note = fed.registry.terminal_cwd(id, cwd);
+        self.tell(note);
+    }
+
+    /// [`Registry::set_head_commit`].
+    pub fn set_head_commit(&self, id: &str, head: &str) {
+        let mut fed = self.lock();
+        let note = fed.registry.set_head_commit(id, head);
+        self.tell(note);
+    }
+
+    /// [`Registry::forget_headless`].
+    pub fn forget_headless(&self, id: &str) {
+        let mut fed = self.lock();
+        let note = fed.registry.forget_headless(id);
+        self.tell(note);
     }
 
     /// [`Registry::screen_status`].
@@ -2315,7 +2438,7 @@ impl SessionRegistry {
     /// call is the server's to make.
     pub fn change<T>(&self, f: impl FnOnce(&mut Registry) -> (T, Vec<Value>)) -> Option<T> {
         let mut fed = self.lock();
-        if fed.feeder.is_none() || !fed.registry.decides() {
+        if !fed.trusted() || !fed.registry.decides() {
             return None;
         }
         let (answer, notes) = f(&mut fed.registry);
@@ -2327,7 +2450,7 @@ impl SessionRegistry {
     /// before the server has sent them, or after it went.
     pub fn read<T>(&self, f: impl FnOnce(&Registry) -> T) -> Option<T> {
         let fed = self.lock();
-        fed.feeder.is_some().then(|| f(&fed.registry))
+        fed.trusted().then(|| f(&fed.registry))
     }
 
     /// Owns the records between runs ([`Registry::own_records`]).
@@ -2412,7 +2535,7 @@ impl SessionRegistry {
     /// list while it owns the records, else the server's copy once fed.
     pub fn restored(&self) -> Option<Vec<Value>> {
         let fed = self.lock();
-        (fed.registry.owns() || fed.feeder.is_some()).then(|| fed.registry.restored())
+        fed.trusted().then(|| fed.registry.restored())
     }
 
     /// [`Registry::set_environment`], and tells subscribers.
@@ -2428,7 +2551,7 @@ impl SessionRegistry {
         json!({
             "gen": fed.registry.gen,
             "rev": fed.registry.rev,
-            "fed": fed.feeder.is_some(),
+            "fed": fed.trusted(),
             "decides": fed.registry.decides(),
             "owns": fed.registry.owns(),
             "terminals": fed.registry.terminals.rows.len(),

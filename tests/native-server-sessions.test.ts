@@ -1,103 +1,39 @@
 /**
- * vornd's copy of the server's session registry, against the registry itself;
- * then the terminals vornd creates and changes.
- *
- * One server is started on a real database, and the vornd it keeps in front of
- * it shadows the calls that read the registry
- * (`terminal=shadow,headless=shadow,worktree=shadow`): the server answers each,
- * vornd answers it too from the copy the server feeds it, and the two answers
- * are compared. The test then does to sessions what the app does (shells and
- * agents created, hooks linking them, renames, groups, a reorder, an exit, a
- * resume, a kill, a headless agent) and reads the registry through vornd after
- * each step. Every comparison must have matched: a record the server changes
- * without telling vornd shows up here as a mismatch.
+ * The terminals and headless agents vornd creates and changes, as the app
+ * drives them: shells and agents created, hooks linking them, renames,
+ * groups, a reorder, an exit, a resume, a kill and a headless agent, through
+ * vornd in front of a real server on a real database. What clients are
+ * answered, started and told is checked against a recorded run
+ * (`fixtures/vornd/terminals.json`), first made while the server still held
+ * the sessions.
  *
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
  * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix: the agents are shell
  * scripts.
  */
-import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { isDeepStrictEqual } from 'node:util'
-import WebSocket from 'ws'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { HeadlessSession, TerminalSession } from '../packages/shared/src/types'
-import type { SessionMirror as Mirror } from '../packages/server/src/vornd-sessions'
-import { hookEndpoint, postHook } from './helpers/hooks'
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import {
-  TEST_CREDENTIAL,
   Watcher,
   answered,
-  holderPid,
   removeRealServerDirs,
   repository,
   runnable,
   startRealServer,
-  stopHolder,
   stopRealServer,
-  vornd,
   type Frame,
   type RealServer
 } from './helpers/real-server'
-import { normalizeRun, outputWhole, withoutHookLinks } from './helpers/sessions-parity'
+import {
+  normalizeRun,
+  outputWhole,
+  withoutHeadlessExits,
+  withoutHookLinks
+} from './helpers/sessions-parity'
 import { recorded } from './helpers/vornd-fixtures'
-
-const GROUPS = 'terminal=shadow,shell=shadow,headless=shadow,worktree=shadow,git=shadow'
-
-// Booting a server probes Tailscale with a real process; nothing here needs it.
-vi.mock('../packages/server/src/tailscale', () => ({
-  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
-  clearBinaryCache: vi.fn()
-}))
-
-/** A WebSocket client that sends one call at a time and returns its frame. */
-class Client {
-  private next = 1
-  private constructor(private ws: WebSocket) {}
-
-  static async open(port: number): Promise<Client> {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
-      headers: { Authorization: `Bearer ${TEST_CREDENTIAL}` }
-    })
-    await new Promise<void>((resolve, reject) => {
-      ws.once('open', resolve)
-      ws.once('error', reject)
-    })
-    const client = new Client(ws)
-    // The server's first answer is what shows vornd the socket was admitted.
-    await client.call('config:load')
-    return client
-  }
-
-  call(method: string, params?: unknown): Promise<Frame> {
-    const id = this.next++
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`timeout: ${method}`)), 30_000)
-      const onMessage = (raw: WebSocket.RawData): void => {
-        const frame = JSON.parse(raw.toString()) as Frame
-        if (frame.id !== id) return
-        this.ws.off('message', onMessage)
-        clearTimeout(timer)
-        resolve(frame)
-      }
-      this.ws.on('message', onMessage)
-      this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
-    })
-  }
-
-  async result<T = unknown>(method: string, params?: unknown): Promise<T> {
-    const frame = await this.call(method, params)
-    if (frame.error) throw new Error(`${method}: ${JSON.stringify(frame.error)}`)
-    return frame.result as T
-  }
-
-  close(): void {
-    this.ws.close()
-  }
-}
 
 type Counts = Record<
   string,
@@ -113,394 +49,6 @@ async function until(what: string, check: () => boolean | Promise<boolean>): Pro
     await new Promise((r) => setTimeout(r, 50))
   }
 }
-
-/** Records as they go on the wire: what is undefined is not there. */
-function wire<T>(records: T): T {
-  return JSON.parse(JSON.stringify(records)) as T
-}
-
-/** A record as the server answers it: without the registry's revision and stamps. */
-function plain<T extends object>(records: readonly T[]): T[] {
-  return records.map((r) => {
-    const {
-      rev: _rev,
-      statusAt: _statusAt,
-      exitAt: _exitAt,
-      ...rest
-    } = r as T & { rev?: number; statusAt?: unknown; exitAt?: unknown }
-    return rest as T
-  })
-}
-
-describe.skipIf(!runnable)('vornd keeps a copy of the session registry that agrees', () => {
-  let dataDir: string
-  let closeServer: (() => Promise<void>) | undefined
-  let direct: Client
-  let through: Client
-  let vorndPort: number
-  let work: { projA: string; projC: string; wt: string; agent: string }
-  let server: {
-    ptyManager: typeof import('../packages/server/src/pty-manager').ptyManager
-    headlessManager: typeof import('../packages/server/src/headless-manager').headlessManager
-    vorndSessions: typeof import('../packages/server/src/vornd-sessions').vorndSessions
-    SessionMirror: typeof Mirror
-  }
-  /**
-   * How many compared calls went through vornd, to check the counts against:
-   * the reads, and the calls that create or change a terminal, whose plan or
-   * refusal vornd works out beside the server's.
-   */
-  const made: Record<string, number> = { terminal: 0, shell: 0, headless: 0, worktree: 0 }
-  const saved: Record<string, string | undefined> = {}
-
-  async function counts(): Promise<Counts> {
-    const res = await fetch(`http://127.0.0.1:${vorndPort}/vornd/health`)
-    return ((await res.json()) as { groups: Counts }).groups
-  }
-
-  /** What the server holds, as one string, to tell when it has stopped changing. */
-  function serverState(): string {
-    return JSON.stringify([
-      server.ptyManager.getActiveSessions(),
-      server.headlessManager.getActiveSessions()
-    ])
-  }
-
-  /**
-   * Waits until the server's registry is still and vornd's copy says the same,
-   * then reads the registry through vornd: each read is answered by the server
-   * and compared with vornd's own answer from the copy.
-   */
-  async function compare(worktrees: string[] = []): Promise<void> {
-    let last = ''
-    let stillSince = 0
-    await until('the registry to settle and the copy to agree', async () => {
-      const now = serverState()
-      if (now !== last) {
-        last = now
-        stillSince = Date.now()
-        return false
-      }
-      if (Date.now() - stillSince < 300) return false
-      // Asked on the channel the records go out on: every record sent before
-      // it is in the answer.
-      const copy = await server.vorndSessions.registry()
-      if (!copy) return false
-      // Listed as the server lists them, from the copy's records and order.
-      const listed = new server.SessionMirror(() => {})
-      listed.load(copy)
-      // Compared as values: vornd writes a record's keys in an order of its own.
-      return (
-        isDeepStrictEqual(plain(listed.terminals()), wire(server.ptyManager.getActiveSessions())) &&
-        isDeepStrictEqual(plain(copy.headless), wire(server.headlessManager.getActiveSessions()))
-      )
-    })
-    const before = serverState()
-    const answers: Array<[string, unknown]> = [
-      ['terminal:listActive', undefined],
-      ['headless:list', undefined],
-      ...worktrees.map((w): [string, unknown] => ['worktree:activeSessions', w])
-    ]
-    for (const [method, params] of answers) {
-      await through.result(method, params)
-      made[method.split(':')[0]!]!++
-    }
-    // Nothing moved while the reads were made, or a mismatch would mean nothing.
-    expect(serverState()).toBe(before)
-    await until('every comparison to be counted', async () => {
-      const c = await counts()
-      return Object.entries(made).every(
-        ([group, n]) => (c[group]?.shadowMatched ?? 0) + (c[group]?.shadowMismatched ?? 0) === n
-      )
-    })
-    const c = await counts()
-    const compared = Object.fromEntries(
-      Object.keys(made).map((group) => [
-        group,
-        { matched: c[group]?.shadowMatched ?? 0, mismatched: c[group]?.shadowMismatched ?? 0 }
-      ])
-    )
-    expect(compared).toEqual(
-      Object.fromEntries(
-        Object.entries(made).map(([group, n]) => [group, { matched: n, mismatched: 0 }])
-      )
-    )
-    // The server follows vornd's copy too.
-    await until('the mirror to catch up', () =>
-      isDeepStrictEqual(
-        plain(server.vorndSessions.mirror.terminals()),
-        wire(server.ptyManager.getActiveSessions())
-      )
-    )
-  }
-
-  function record(id: string): TerminalSession | undefined {
-    return server.ptyManager.getActiveSessions().find((s) => s.id === id)
-  }
-
-  async function hook(
-    session_id: string,
-    cwd: string,
-    hook_event_name = 'SessionStart'
-  ): Promise<void> {
-    let endpoint = hookEndpoint()
-    await until('vornd to register its hook endpoint', () => !!(endpoint = hookEndpoint()))
-    const res = await postHook(endpoint!, { session_id, cwd, hook_event_name })
-    expect(res.status).toBe(200)
-  }
-
-  beforeAll(async () => {
-    for (const key of ['SECRET_VORN_BOOTSTRAP_TOKEN', 'VORN_VORND_PATH', 'VORND_GROUPS']) {
-      saved[key] = process.env[key]
-    }
-    process.env.SECRET_VORN_BOOTSTRAP_TOKEN = TEST_CREDENTIAL
-    process.env.VORN_VORND_PATH = vornd
-    process.env.VORND_GROUPS = GROUPS
-    // Short: the session holder's socket lives under it.
-    dataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-sess-')))
-    const base = path.join(dataDir, 'work')
-    work = {
-      projA: path.join(base, 'proj-a'),
-      projC: path.join(base, 'proj-c'),
-      wt: path.join(base, 'wt-a'),
-      agent: path.join(base, 'bin', 'fake-agent')
-    }
-    for (const dir of [work.projA, work.projC, work.wt, path.dirname(work.agent)]) {
-      fs.mkdirSync(dir, { recursive: true })
-    }
-    // An agent that says nothing and waits on a terminal; headless, on pipes,
-    // it reads its prompt, prints and ends.
-    fs.writeFileSync(
-      work.agent,
-      '#!/bin/sh\nif [ -t 0 ]; then exec sleep 600; fi\ncat >/dev/null\necho done\nexit 3\n',
-      { mode: 0o755 }
-    )
-
-    const { startServer } = await import('../packages/server/src/index')
-    const origWrite = process.stdout.write.bind(process.stdout)
-    process.stdout.write = (() => true) as typeof process.stdout.write
-    try {
-      const { app, port } = await startServer({ port: 0, dataDir })
-      closeServer = () => app.close()
-      direct = await Client.open(port)
-    } finally {
-      process.stdout.write = origWrite
-    }
-    server = {
-      ptyManager: (await import('../packages/server/src/pty-manager')).ptyManager,
-      headlessManager: (await import('../packages/server/src/headless-manager')).headlessManager,
-      vorndSessions: (await import('../packages/server/src/vornd-sessions')).vorndSessions,
-      SessionMirror: (await import('../packages/server/src/vornd-sessions')).SessionMirror
-    }
-    let state: { state?: string; port?: number } = {}
-    await until('vornd', async () => {
-      state = await direct.result<{ state?: string; port?: number }>('server:vornd')
-      return state.state === 'on' && !!state.port
-    })
-    vorndPort = state.port!
-    await until('vornd to ask for the records', () => server.vorndSessions.inUse())
-    // The holder too: the server asks for a spawn once it is up, and a
-    // create's comparison waits for that spawn.
-    await until('the copy to be fed and the session holder up', async () => {
-      const res = await fetch(`http://127.0.0.1:${vorndPort}/vornd/health`)
-      const health = (await res.json()) as {
-        registry?: { fed?: boolean }
-        sessiond?: { current?: { pid?: number } }
-      }
-      return health.registry?.fed === true && !!health.sessiond?.current?.pid
-    })
-    expect((await counts()).terminal?.mode).toBe('shadow')
-    through = await Client.open(vorndPort)
-    // Saved, not set in place: vornd reads the agents' commands from the database.
-    const config = await direct.result<Record<string, unknown>>('config:load')
-    await direct.result('config:save', {
-      ...config,
-      agentCommands: {
-        claude: { command: work.agent, args: [] },
-        copilot: { command: work.agent, args: [] }
-      }
-    })
-  }, 60_000)
-
-  afterAll(async () => {
-    direct?.close()
-    through?.close()
-    for (const s of server?.ptyManager.getActiveSessions() ?? []) {
-      server.ptyManager.killPty(s.id)
-    }
-    // The session holder outlives the server, by design: ended here, once
-    // vornd has seen every session end, so nothing writes to the data
-    // directory while it is removed.
-    if (vorndPort) {
-      await until('every session to end', async () => {
-        const res = await fetch(`http://127.0.0.1:${vorndPort}/vornd/sessions`)
-        const report = (await res.json()) as { sessions?: unknown[] }
-        return (report.sessions ?? []).length === 0
-      }).catch(() => {})
-    }
-    const holder = vorndPort ? await holderPid(vorndPort) : undefined
-    // Resolves once vornd has exited, after its last writes to the data directory.
-    await closeServer?.()
-    await stopHolder(holder)
-    for (const [key, value] of Object.entries(saved)) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
-    if (dataDir) {
-      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
-    }
-  }, 90_000)
-
-  it('agrees after every change the app makes to its sessions', async () => {
-    await compare([work.wt])
-
-    // Shells, through vornd as the app creates them.
-    const shellA = await through.result<TerminalSession>('shell:create', work.projA)
-    const shellB = await through.result<TerminalSession>('shell:create', work.projA)
-    await until('both shells to start', () => [shellA, shellB].every((s) => record(s.id)!.pid > 0))
-    made.shell += 2
-    await compare()
-
-    // An agent in a worktree, linked by a hook as Claude's SessionStart does.
-    const claude = await through.result<TerminalSession>('terminal:create', {
-      agentType: 'claude',
-      projectName: 'proj-a',
-      projectPath: work.projA,
-      existingWorktreePath: work.wt
-    })
-    await until('the agent to start', () => record(claude.id)!.pid > 0)
-    made.terminal++
-    await hook('claude-conversation', work.wt)
-    await until(
-      'the hook to link it',
-      () =>
-        record(claude.id)?.hookSessionId === 'claude-conversation' &&
-        record(claude.id)?.statusSource === 'hooks'
-    )
-    await compare([work.wt])
-    expect(await through.result('worktree:activeSessions', work.wt)).toEqual({
-      count: 1,
-      sessionIds: [claude.id]
-    })
-    made.worktree++
-
-    // Copilot is linked when it is created, by the hooks file written for it.
-    const copilot = await through.result<TerminalSession>('terminal:create', {
-      agentType: 'copilot',
-      projectName: 'proj-c',
-      projectPath: work.projC
-    })
-    await until('copilot to start', () => record(copilot.id)!.pid > 0)
-    made.terminal++
-    const linked = record(copilot.id)?.hookSessionId
-    if (linked) {
-      await hook(linked, work.projC)
-      await until('copilot on hooks', () => record(copilot.id)?.statusSource === 'hooks')
-    }
-    await compare([work.wt, work.projC])
-
-    // What a person does to the cards.
-    await through.result('terminal:rename', { id: shellA.id, displayName: 'Build' })
-    await through.result('terminal:setGroup', { id: shellB.id, groupId: 'group-1' })
-    await through.result('terminal:reorder', [copilot.id, shellB.id, claude.id, shellA.id])
-    await through.result('terminal:setGroup', { id: shellB.id, groupId: null })
-    // And what the server refuses: vornd would have refused it in the same words.
-    const twice = await through.call('terminal:reorder', [shellA.id, shellA.id])
-    expect((twice.error as { message: string }).message).toBe('Duplicate session IDs')
-    const missing = await through.call('terminal:rename', { id: 'no-such', displayName: 'x' })
-    expect((missing.error as { message: string }).message).toBe('Session not found: no-such')
-    made.terminal += 6
-    await compare([work.wt])
-
-    // A shell that ends keeps its card, idle, with how it ended.
-    server.ptyManager.writeToPty(shellB.id, 'exit 3\r')
-    await until('the shell to end', () => record(shellB.id)?.shellExitCode === 3)
-    await compare()
-
-    // Resumed under the same id, with the fields of the record it replaces.
-    const resumed = await through.result<{ ok: boolean; session?: TerminalSession }>(
-      'sessions:resume',
-      { id: shellB.id }
-    )
-    expect(resumed.ok).toBe(true)
-    await until('the resumed shell', () => {
-      const r = record(shellB.id)
-      return !!r && r.pid > 0 && r.shellExitCode === undefined
-    })
-    await compare()
-
-    // A card closed.
-    await through.result('terminal:kill', shellA.id)
-    await until('the card to go', () => record(shellA.id) === undefined)
-    made.terminal++
-    await compare([work.wt])
-
-    // A headless agent, from start to its exit.
-    const agent = await through.result<HeadlessSession>('headless:create', {
-      agentType: 'claude',
-      projectName: 'proj-a',
-      projectPath: work.projA,
-      existingWorktreePath: work.wt,
-      initialPrompt: 'write the tests'
-    })
-    await until(
-      'the headless agent to end',
-      () =>
-        server.headlessManager.getActiveSessions().find((s) => s.id === agent.id)?.status ===
-        'exited'
-    )
-    // Its create was compared too, as the spawn each side would ask for.
-    made.headless++
-    await compare([work.wt])
-
-    // And the comparison can fail: a record changed in place without telling
-    // vornd is counted as a mismatch.
-    const drifted = server.ptyManager.getActiveSessions()[0]!
-    drifted.displayName = 'changed behind vornd'
-    await through.result('terminal:listActive')
-    await until(
-      'the mismatch to be counted',
-      async () => (await counts()).terminal?.shadowMismatched === 1
-    )
-  }, 120_000)
-
-  it('foresees a worktree’s branch rename and move as the server answers them', async () => {
-    const base = path.join(dataDir, 'work')
-    const repo = path.join(base, 'shadow-repo')
-    repository(repo)
-    const wt = path.join(base, 'shadow-1a2b3c4d')
-    execFileSync('git', ['worktree', 'add', '-q', '-b', 'shadowed', wt], {
-      cwd: repo,
-      stdio: 'ignore'
-    })
-    const git = async (): Promise<Required<Counts[string]> & { shadowUnported: number }> => {
-      const g = (await counts()).git as Counts[string] & { shadowUnported?: number }
-      return {
-        mode: g?.mode ?? '',
-        forwarded: g?.forwarded ?? 0,
-        shadowMatched: g?.shadowMatched ?? 0,
-        shadowMismatched: g?.shadowMismatched ?? 0,
-        shadowUnported: g?.shadowUnported ?? 0
-      }
-    }
-    const before = await git()
-    expect(before.mode).toBe('shadow')
-    const rename = (newBranch: string): Promise<unknown> =>
-      through.result('git:renameWorktreeBranch', { worktreePath: wt, newBranch })
-    expect(await rename('main')).toBe(false)
-    expect(await rename('renamed')).toBe(true)
-    expect(
-      await through.result('git:renameWorktree', { worktreePath: wt, newName: 'moved' })
-    ).toEqual({ newPath: path.join(base, 'moved-1a2b3c4d'), name: 'moved' })
-    const settled = (g: Awaited<ReturnType<typeof git>>): number =>
-      g.shadowMatched + g.shadowMismatched + g.shadowUnported
-    await until('the comparisons', async () => settled(await git()) - settled(before) === 3)
-    const after = await git()
-    // A branch name is judged only where gix reads the repository; the move always is.
-    expect(after.shadowMismatched - before.shadowMismatched).toBe(0)
-    expect(after.shadowMatched - before.shadowMatched).toBeGreaterThanOrEqual(1)
-  })
-})
 
 spawnsRealServers()
 
@@ -542,7 +90,7 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     return (frame.result as TerminalSession).id
   }
   const listed = (): Promise<TerminalSession[]> =>
-    direct.result<TerminalSession[]>('terminal:listActive')
+    through.result<TerminalSession[]>('terminal:listActive')
   const live = async (ids: string[]): Promise<void> => {
     await until('the sessions to start', async () => {
       const all = await listed()
@@ -699,7 +247,7 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     })
     const headlessEnded = async (ids: string[]): Promise<void> => {
       await until('the headless agents to end', async () => {
-        const all = await direct.result<HeadlessSession[]>('headless:list')
+        const all = await through.result<HeadlessSession[]>('headless:list')
         const exits = direct.toldBy('headless:exit') as { id: string }[]
         return ids.every(
           (id) =>
@@ -722,7 +270,7 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     await headlessEnded([stopped])
     await call('stop one that ended', 'headless:kill', headless.claude)
     await call('stop one that is not there', 'headless:kill', 'no-such-agent')
-    const agentsListed = await direct.result<HeadlessSession[]>('headless:list')
+    const agentsListed = await through.result<HeadlessSession[]>('headless:list')
     const byAgent = { ...headless, stopped }
 
     // Settled: the registry stops changing.
@@ -741,13 +289,20 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     const groups = (
       (await health.json()) as { groups: Counts & Record<string, { native?: number }> }
     ).groups
-    const by = (group: string): { native?: number; forwarded?: number } => ({
-      native: groups[group]?.native,
-      forwarded: groups[group]?.forwarded
+    const by = (group: string): { native: number; forwarded: number } => ({
+      native: groups[group]?.native ?? 0,
+      forwarded: groups[group]?.forwarded ?? 0
     })
     const exits = toldOf('headless:exit') as { id: string; exitCode: number }[]
-    const exitsTold = toldOf('terminal:exit').map((p) => (p as { id: string }).id)
-    const heardThrough = through.toldBy('terminal:exit').map((p) => (p as { id: string }).id)
+    const headlessIds = Object.values(byAgent)
+    const exitsTold = withoutHeadlessExits(
+      toldOf('terminal:exit').map((p) => (p as { id: string }).id),
+      headlessIds
+    )
+    const heardThrough = withoutHeadlessExits(
+      through.toldBy('terminal:exit').map((p) => (p as { id: string }).id),
+      headlessIds
+    )
     return {
       answeredBy: {
         terminal: by('terminal'),
@@ -836,18 +391,14 @@ describe.skipIf(!runnable)('the terminals vornd creates and changes, against the
     expect(Object.values(seen.agentsExits).map((e) => e.exitCode)).toEqual([3, 3, 3, 3, 3, 143])
   })
 
-  it('has vornd answer them, and the server what is its own', () => {
-    // Refused by the server in its words: a card that is not there, a
-    // duplicate in an order, one missing from it; and a close of a card that
-    // is not there, which the server tells clients of anyway.
-    // A stop of an agent the registry does not hold is the server's, which
-    // answers nothing for it too.
-    expect(run.answeredBy).toEqual({
-      terminal: { native: 15, forwarded: 4 },
-      shell: { native: 3, forwarded: 0 },
-      headless: { native: 8, forwarded: 1 },
-      git: { native: 4, forwarded: 0 }
-    })
+  it('has vornd answer every one of them', () => {
+    // Refusals included; the reads are polled, so only that none was forwarded counts.
+    const answeredBy = run.answeredBy as Record<string, { native: number; forwarded: number }>
+    expect(Object.keys(answeredBy).sort()).toEqual(['git', 'headless', 'shell', 'terminal'])
+    for (const [group, counts] of Object.entries(answeredBy)) {
+      expect({ group, forwarded: counts.forwarded }).toEqual({ group, forwarded: 0 })
+      expect(counts.native).toBeGreaterThan(0)
+    }
   })
 
   it('answers, starts, tells and lists as the app expects', () => {

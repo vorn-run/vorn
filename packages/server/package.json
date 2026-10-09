@@ -3,12 +3,10 @@
   "version": "0.8.0-beta.5",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./src/cli.ts",
   "exports": {
-    ".": "./src/index.ts",
     "./rpc-client": "./src/rpc-client.ts",
     "./config-manager": "./src/config-manager.ts",
-    "./pty-manager": "./src/pty-manager.ts",
     "./scheduler": "./src/scheduler.ts",
     "./database": "./src/database.ts",
     "./git-utils": "./src/git-utils.ts"

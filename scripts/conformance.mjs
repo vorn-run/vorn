@@ -14,15 +14,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 /**
  * Every test file that talks to a started server over a real WebSocket, and
  * the terminal and attach files for sessions vornd holds itself, which also
- * need the session holder. With them, the launch builders against the
- * TypeScript, which needs vorn_core.node beside vornd.
+ * need the session holder. With them, the launch builders against what the
+ * TypeScript gave, which needs vorn_core.node beside vornd.
  */
 const FILES = [
-  'tests/server-integration.test.ts',
+  'tests/vorn-without-node.test.ts',
   'tests/vornd-terminal.test.ts',
   'tests/vornd-attach.test.ts',
-  'tests/vornd-app-channel.test.ts',
-  'tests/vornd-app-sessions.test.ts',
   'tests/js-reference.test.ts',
   'tests/launch-parity.test.ts',
   'tests/native-server-git.test.ts',

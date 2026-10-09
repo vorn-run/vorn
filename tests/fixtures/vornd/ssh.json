@@ -132,19 +132,6 @@
       "remoteHostId": "key",
       "remoteHostLabel": "Key box",
       "rows": 24
-    },
-    {
-      "agentType": "codex",
-      "cols": 80,
-      "createdAt": "<moment>",
-      "displayName": "Keyed",
-      "id": "<minted 2>",
-      "pid": 0,
-      "projectName": "far",
-      "projectPath": "<work>/far",
-      "remoteHostId": "key",
-      "remoteHostLabel": "Key box",
-      "rows": 24
     }
   ]
 }

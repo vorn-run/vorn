@@ -5,8 +5,8 @@
  *
  * Three servers: a scripted one, which answers every call with fixed data so
  * every table, message and error path can be compared exactly (and records
- * what each side asked, which must match too); a real server started in this
- * process on a database of its own; and none, for the token commands, which
+ * what each side asked, which must match too); vornd as the server, on a
+ * data directory of its own; and none, for the token commands, which
  * work on the database file directly.
  *
  * Runs where the binary has been built (`yarn build:core`, cargo, or the
@@ -17,7 +17,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { WebSocketServer } from 'ws'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   MCP_USAGE_LINE,
   MINTED_TOKEN,
@@ -30,13 +30,8 @@ import {
   type Ran
 } from './helpers/cli-parity'
 
-// Booting a server probes Tailscale with a real process; nothing here needs it.
-vi.mock('../packages/server/src/tailscale', () => ({
-  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
-  clearBinaryCache: vi.fn()
-}))
-
 import { runCli } from '../packages/server/src/cli'
+import { builtVornd, startServed, type Served } from './helpers/served'
 
 const CREDENTIAL = 'native-cli-test-credential'
 
@@ -625,21 +620,18 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
     })
   })
 
-  describe('against a real server', () => {
+  describe.skipIf(!builtVornd)('against a real server', () => {
     let dataDir: string
-    let stop: () => Promise<void>
+    let served: Served | undefined
 
     beforeAll(async () => {
       dataDir = tempDir('vorn-native-cli-server-')
-      const { startServer } = await import('../packages/server/src/index')
-      const { app } = await startServer({ port: 0, dataDir, idleShutdown: false })
-      stop = () => app.close()
+      served = await startServed({ dataDir, credential: CREDENTIAL, sessiond: true })
     }, 30_000)
 
     afterAll(async () => {
-      await stop?.()
-      const { closeDatabase } = await import('../packages/server/src/database')
-      closeDatabase()
+      await served?.stop()
+      if (served) fs.rmSync(served.home, { recursive: true, force: true })
       try {
         fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
       } catch (err) {

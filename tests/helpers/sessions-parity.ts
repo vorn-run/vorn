@@ -160,3 +160,12 @@ export function withoutRecordedHeads<T extends { environment?: unknown }>(offere
     return { ...one, environment: { ...environment, head } }
   })
 }
+
+/**
+ * Exits told as `terminal:exit` without the headless agents'. vornd tells every
+ * client each held program's end, headless ones too; the server told only
+ * `headless:exit` for those, and a client has no terminal by that id.
+ */
+export function withoutHeadlessExits(ids: string[], headless: string[]): string[] {
+  return ids.filter((id) => !headless.includes(id))
+}

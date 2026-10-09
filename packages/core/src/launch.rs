@@ -163,8 +163,8 @@ pub fn launch_tokens(line: String) -> Option<Vec<LaunchToken>> {
     })
 }
 
-/// `getShellIntegration` for `shell`, with the shims the server wrote under
-/// `shimRoot`; throws when they cannot be used.
+/// `getShellIntegration` for `shell`, with its shims written under
+/// `shimRoot`; throws when they cannot be written there.
 #[napi(catch_unwind)]
 pub fn shell_setup(
     shell: String,

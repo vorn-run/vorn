@@ -75,8 +75,13 @@ export class Vornd {
     readonly port: number
   ) {}
 
-  /** With `desktopToken`, a connection that opens with it is the desktop's. */
-  static async start(upstreamPort: number, home: string, desktopToken?: string): Promise<Vornd> {
+  /** With `desktopToken`, a connection that opens with it is the desktop's; with `db`, vornd reads the settings there. */
+  static async start(
+    upstreamPort: number,
+    home: string,
+    desktopToken?: string,
+    db?: string
+  ): Promise<Vornd> {
     const child = spawn(
       vorndBinary!,
       [
@@ -86,12 +91,17 @@ export class Vornd {
         sessiondBinary!,
         '--home',
         home,
-        '--debug-spawn'
+        '--debug-spawn',
+        ...(db ? ['--db', db] : [])
       ],
       {
         stdio: ['ignore', 'pipe', 'inherit'],
         env: {
           ...process.env,
+          // Its own home: nothing it writes reaches this machine's user.
+          HOME: home,
+          USERPROFILE: home,
+          VORND_KEYCHAIN: '0',
           VORND_LOG: process.env.VORND_LOG ?? 'warn',
           ...(desktopToken ? { VORND_DESKTOP_TOKEN: desktopToken } : {})
         }

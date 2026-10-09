@@ -72,14 +72,12 @@ extraResources:
     to: 'web/dist'
     filter:
       - '**/*'
-  # The Rust core, beside the server that loads it rather than in asarUnpack:
-  # the server runs from resources/server, outside the asar, and looks for
-  # ../core/vorn_core.node. Built per platform by `yarn build:core`; when it was
-  # not built the entry is skipped and the server runs git on a child process.
+  # The Rust core, beside the Node command line that loads it from
+  # resources/server, outside the asar. Built per platform by `yarn build:core`.
   - from: 'packages/core/vorn_core.node'
     to: 'core/vorn_core.node'
-  # vornd, from the same `yarn build:core`. Only one of the two exists on any
-  # platform. The server starts it, at ../vornd/, and every terminal runs in it.
+  # vornd, the server, from the same `yarn build:core`. Only one of the two
+  # exists on any platform. The app starts it, and serves web/dist through it.
   - from: 'packages/core/vornd'
     to: 'vornd/vornd'
   - from: 'packages/core/vornd.exe'
@@ -90,8 +88,8 @@ extraResources:
     to: 'vornd/vorn-sessiond'
   - from: 'packages/core/vorn-sessiond.exe'
     to: 'vornd/vorn-sessiond.exe'
-  # The vorn command, built beside them. It runs the server in ../server when
-  # there is none, with the app as its Node.
+  # The vorn command, built beside them. It starts vornd beside it when no
+  # server runs.
   - from: 'packages/core/vorn'
     to: 'vornd/vorn'
   - from: 'packages/core/vorn.exe'

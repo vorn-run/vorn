@@ -84,7 +84,6 @@ pub const SERVER_OPTIONS: &[OptionSpec] = &[
     string("port"),
     string("data-dir"),
     string("name"),
-    string("adopt-handoff"),
     HELP,
 ];
 

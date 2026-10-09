@@ -2,13 +2,12 @@
  * The terminals' statuses, which vornd's copy of the session registry
  * decides.
  *
- * One real server is started on a home and a data directory of its own, and
+ * vornd is started as the server on a home and a data directory of its own, and
  * runs the same stub agent under each of the five agent types: a
  * script that prints, on cue, a line that reads as running, a prompt that reads
  * as waiting and an error, then goes quiet until it is idle. Its cues come both
- * through the server (a write it sees, which wakes a waiting terminal) and
- * through vornd (one it never sees, so only the output wakes it). Then the
- * agent's hooks are posted to the server's hook endpoint as the agent would:
+ * as notifications and as calls. Then the
+ * agent's hooks are posted to vornd's hook endpoint as the agent would:
  * the session linked, waiting, a permission asked, stopped, running again, and
  * a screen error its hooks overrule. Every `session:updated` the server
  * broadcasts is collected, and each agent must go through the scripted
@@ -17,29 +16,17 @@
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on a
  * Unix: the agent is a shell script.
  */
-import { spawn, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import WebSocket from 'ws'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '@vornrun/shared/protocol'
 import type { AgentStatus, TerminalSession } from '@vornrun/shared/types'
 import { spawnsRealServers } from './helpers/one-at-a-time'
-import { stopServerChild } from './helpers/real-server'
+import { builtSessiond, builtVornd, startServed, type Served } from './helpers/served'
 
-const repoRoot = path.join(__dirname, '..')
 const CREDENTIAL = 'native-status-test-credential'
-const built = path.join(repoRoot, 'packages', 'core', 'target', 'release')
-const vornd = [
-  process.env.VORN_CONFORMANCE_VORND,
-  path.join(repoRoot, 'packages', 'core', 'vornd'),
-  path.join(built, 'vornd')
-].find((p): p is string => !!p && fs.existsSync(p))
-const runnable =
-  !!vornd &&
-  process.platform !== 'win32' &&
-  fs.existsSync(path.join(path.dirname(vornd), 'vorn-sessiond'))
+const runnable = !!builtVornd && !!builtSessiond && process.platform !== 'win32'
 
 const AGENTS = ['claude', 'codex', 'copilot', 'gemini', 'opencode'] as const
 type Agent = (typeof AGENTS)[number]
@@ -174,12 +161,9 @@ function statusesOf(
 }
 
 interface Server {
-  child: ChildProcess
+  served: Served
   dirs: string[]
   port: number
-  vornd: number
-  home: string
-  log: string[]
 }
 
 const servers: Server[] = []
@@ -188,54 +172,11 @@ async function startServer(): Promise<Server> {
   // Its own home: the hook endpoint's port and token are written there, and
   // the agents' hook settings, which a test must not touch for real.
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-status-home-')))
-  const dataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-status-')))
-  const log: string[] = []
-  const child = spawn(
-    process.execPath,
-    [
-      '--import',
-      'tsx',
-      path.join(repoRoot, 'packages', 'server', 'src', 'index.ts'),
-      '--data-dir',
-      dataDir,
-      '--port',
-      '0'
-    ],
-    {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        HOME: home,
-        [BOOTSTRAP_ENV_VAR]: CREDENTIAL,
-        VORN_VORND_PATH: vornd!,
-        VORND_GROUPS: '',
-        NODE_ENV: 'test',
-        VITEST: ''
-      },
-      stdio: ['ignore', 'pipe', 'pipe']
-    }
-  )
-  child.stdout?.on('data', (d) => log.push(String(d)))
-  child.stderr?.on('data', (d) => log.push(String(d)))
-  const server: Server = { child, dirs: [home, dataDir], port: 0, vornd: 0, home, log }
+  const served = await startServed({ home, credential: CREDENTIAL, sessiond: true })
+  const server: Server = { served, dirs: [home, served.dataDir], port: served.port }
   servers.push(server)
-  server.port = await waitFor('the server to listen', () => {
-    try {
-      const record = JSON.parse(fs.readFileSync(path.join(dataDir, WS_PORT_FILENAME), 'utf-8'))
-      return typeof record.port === 'number' ? (record.port as number) : null
-    } catch {
-      return null
-    }
-  })
-  const direct = await Client.open(server.port)
-  const status = await waitFor('vornd to start', async () => {
-    const s = await direct.result<{ state: string; port?: number }>('server:vornd')
-    return s.state === 'on' && s.port ? s : null
-  })
-  server.vornd = status.port!
-  // Terminals start once vornd's session holder is up.
   await waitFor('the session holder', async () => {
-    const res = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
+    const res = await fetch(`http://127.0.0.1:${server.port}/vornd/health`)
     const health = (await res.json()) as {
       sessiond?: { current?: { pid?: number } }
       registry?: { fed?: boolean; decides?: boolean }
@@ -243,7 +184,6 @@ async function startServer(): Promise<Server> {
     if (!health.sessiond?.current?.pid) return null
     return health.registry?.fed && health.registry.decides ? true : null
   })
-  direct.close()
   return server
 }
 
@@ -253,7 +193,7 @@ async function postHook(
   event: Record<string, unknown>,
   signal?: AbortSignal
 ): Promise<void> {
-  const vorn = path.join(server.home, '.vorn')
+  const vorn = path.join(server.served.home, '.vorn')
   const port = await waitFor('the hook endpoint', () =>
     fs.existsSync(path.join(vorn, 'port'))
       ? Number(fs.readFileSync(path.join(vorn, 'port'), 'utf-8'))
@@ -287,7 +227,7 @@ async function run(server: Server): Promise<Record<Agent, AgentStatus[]>> {
   fs.writeFileSync(stub, AGENT_SCRIPT, { mode: 0o755 })
 
   const direct = await Client.open(server.port)
-  const through = await Client.open(server.vornd)
+  const through = await Client.open(server.port)
   try {
     const config = await direct.result<Record<string, unknown>>('config:load')
     const defaults = config.defaults as Record<string, unknown>
@@ -318,12 +258,12 @@ async function run(server: Server): Promise<Record<Agent, AgentStatus[]>> {
         return ids.every((id) => listed.find((s) => s.id === id)?.status === status) ? true : null
       })
     }
-    /** A cue the server writes: it sees it, as input to the terminal. */
-    const cueThroughServer = (): void => {
+    /** A cue written as a notification. */
+    const cueByNotice = (): void => {
       for (const id of ids) direct.notify('terminal:write', { id, data: '\r' })
     }
-    /** A cue vornd writes for a client: the server never sees it. */
-    const cueThroughVornd = async (): Promise<void> => {
+    /** A cue written as a call. */
+    const cueByCall = async (): Promise<void> => {
       for (const id of ids) await through.result('terminal:write', { id, data: '\r' })
     }
 
@@ -337,14 +277,14 @@ async function run(server: Server): Promise<Record<Agent, AgentStatus[]>> {
     // What the shell printed before the agent started is not the script's.
     const from = direct.updated.length
 
-    cueThroughServer()
+    cueByNotice()
     await all('waiting')
-    cueThroughServer()
+    cueByNotice()
     await all('error')
-    cueThroughServer()
+    cueByNotice()
     await all('running')
     await all('idle')
-    await cueThroughVornd()
+    await cueByCall()
     await all('running')
 
     // The hooks, linking each session first. Copilot's is linked when it is
@@ -390,7 +330,7 @@ async function run(server: Server): Promise<Record<Agent, AgentStatus[]>> {
     await hook('PostToolUse')
     await all('running')
     // Its screen says error; its hooks say how it is.
-    await cueThroughVornd()
+    await cueByCall()
     await waitFor('the late error on screen', async () => {
       for (const id of ids) {
         const out = await through.result<string[]>('terminal:readOutput', { id })
@@ -414,7 +354,7 @@ async function run(server: Server): Promise<Record<Agent, AgentStatus[]>> {
 }
 
 function stop(server: Server): Promise<void> {
-  return stopServerChild(server.child, server.vornd, server.dirs[1]!)
+  return server.served.stop()
 }
 
 afterAll(async () => {
@@ -426,17 +366,13 @@ afterAll(async () => {
   }
 }, 60_000)
 
-describe.skipIf(!runnable)('the statuses vornd decides, against the server', () => {
+describe.skipIf(!runnable)('the statuses vornd decides', () => {
   let statuses: Record<Agent, AgentStatus[]>
 
   beforeAll(async () => {
     const server = await startServer()
     try {
       statuses = await run(server)
-    } catch (err) {
-      throw new Error(`${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
-        cause: err
-      })
     } finally {
       await stop(server)
     }

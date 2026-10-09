@@ -4,14 +4,13 @@
 //! A headless agent runs on pipes in vornd's session holder, never on a
 //! terminal: its prompt goes in on stdin, which then closes, and some agents
 //! behave differently on a TTY. Each call answers as the server's
-//! `HeadlessManager` does, from the copy of the session registry vornd
-//! keeps ([`crate::registry`]), which then holds the record and tells the
-//! server so (`native: true`): the record it created, its program's start,
-//! or why it could not start. How the program ended the registry reads from
-//! the session's exit effect ([`crate::registry::Registry::headless_exit`]),
-//! whoever started it. The server follows the notes as it follows its own
-//! starts: it reads the output, tells clients and the workflow waiting on
-//! the agent, and lets the record go a while after the exit.
+//! `HeadlessManager` did, from the session registry vornd keeps
+//! ([`crate::registry`]), which then holds the record: the record it
+//! created, its program's start, or why it could not start. How the program
+//! ended the registry reads from the session's exit effect
+//! ([`crate::registry::Registry::headless_exit`]). Clients are sent the
+//! output as it comes (`headless:data`) and the end
+//! ([`super::session_events`]), and the record goes a while after the exit.
 //!
 //! A create prepares the workspace as a terminal's does
 //! ([`super::sessions::workspace`]) and builds the process as
@@ -20,10 +19,8 @@
 //! Nothing new starts while the server drains. A stop sends the program
 //! `SIGTERM`, and `SIGKILL` [`FORCE_KILL_DELAY`] later if it still runs.
 //!
-//! The server keeps a create vornd cannot answer as it would: one for a
-//! remote host, one whose params are not the shape its handler reads, and
-//! every call while the registry does not hold the server's records or the
-//! session holder is not connected. In shadow mode nothing here changes
+//! A create naming a remote host runs the agent here, as the server ran it.
+//! In shadow mode nothing here changes
 //! anything: a create is compared as what each side would start ([`plan`]),
 //! a stop as what each would answer ([`foresee`]).
 
@@ -42,11 +39,12 @@ use vorn_git::repo::extract_worktree_name;
 use vorn_sessiond_wire::{Io, Sig, SpawnSpec, Stdin};
 use vorn_store::AgentSettings;
 
+use super::sessions::NO_HOLDER;
 use super::sessions::{
     closing, fed_and_held, given, new_id, now_ms, plan_of, var, workspace, CreateRequest, Holds,
     Input,
 };
-use super::{agent, Answer, Native};
+use super::{agent, bad_params, not_answered, not_ready, Answer, Native};
 use crate::applink::{Closing, DRAINING_MESSAGE};
 use crate::registry::{HeadlessSession, HeadlessStatus};
 
@@ -59,16 +57,22 @@ const PROMPT_NAME_LEN: usize = 60;
 /// Answers `method` with `params`.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     match method {
+        // A remote host named runs the agent here, as the server ran it.
         "headless:create" => match CreateRequest::read(params) {
-            // A remote host's agent is the server's.
-            Some(req) if req.remote().is_none() => create(native, &req),
-            _ => Answer::Forward,
+            Some(req) => create(
+                native,
+                &CreateRequest {
+                    remote_host_id: None,
+                    ..req
+                },
+            ),
+            None => bad_params(method),
         },
         "headless:kill" => match params.as_str() {
             Some(id) => kill(native, id),
-            None => Answer::Forward,
+            None => bad_params(method),
         },
-        _ => Answer::Forward,
+        _ => not_answered(method),
     }
 }
 
@@ -88,12 +92,13 @@ pub fn foresee(native: &Native, params: &Value) -> Option<Answer> {
         .read(|r| r.headless_record(id).map(|_| Answer::Void))?
 }
 
-/// Whether vornd can start an agent now: it starts headless agents (as
-/// `vornd:hello` told the server, which follows them only then), and the
-/// registry and the session holder are ready ([`fed_and_held`]).
-fn can_start(native: &Native) -> bool {
-    let creates = native.link.get().is_some_and(|l| l.creates_headless());
-    creates && fed_and_held(native)
+/// Why vornd cannot start an agent now, if it cannot: the records are not
+/// read yet, or the session holder is not connected.
+fn unstartable(native: &Native) -> Option<Answer> {
+    if !native.link.get().is_some_and(|l| l.creates_headless()) {
+        return Some(not_ready());
+    }
+    (!fed_and_held(native)).then(|| Answer::Error(NO_HOLDER.into()))
 }
 
 /// The server's refusal of a new agent while it drains (`isDraining`), if
@@ -104,17 +109,17 @@ fn refusal(native: &Native) -> Option<&'static str> {
 
 /// `headless:create` for a local agent.
 fn create(native: &Native, req: &CreateRequest) -> Answer {
-    if !can_start(native) {
-        return Answer::Forward;
+    if let Some(answer) = unstartable(native) {
+        return answer;
     }
     if let Some(why) = refusal(native) {
         return Answer::Error(why.to_owned());
     }
     let Some(settings) = agent::settings(native) else {
-        return Answer::Forward;
+        return agent::no_settings();
     };
     let Some(config) = agent::command_of(&settings, req.agent) else {
-        return Answer::Forward;
+        return agent::unreadable_command(req.agent);
     };
     let mut holds = Holds::new(native);
     // Held from here until the record is in, so a worktree action in between
@@ -281,7 +286,7 @@ fn process_of(command: &str, args: &[String]) -> (Vec<String>, String) {
 /// the record, as the server answers before its program is up.
 fn register(native: &Native, launch: Launch) -> Answer {
     let (Some(registry), Some(host)) = (native.registry.get(), native.host.get()) else {
-        return Answer::Forward;
+        return not_ready();
     };
     let Launch {
         record,
@@ -323,10 +328,22 @@ fn register(native: &Native, launch: Launch) -> Answer {
     let (registry, host_after) = (Arc::clone(registry), Arc::clone(host));
     let sessions = Arc::clone(&native.sessions);
     let name = id.clone();
-    host.start(
+    let (output_tx, output) = tokio::sync::mpsc::unbounded_channel();
+    let (ended_tx, _ended) = tokio::sync::oneshot::channel();
+    let watch = super::sessions::Watch {
+        output: output_tx,
+        ended: ended_tx,
+    };
+    if let (Some(notifier), Ok(runtime)) =
+        (native.notifier(), tokio::runtime::Handle::try_current())
+    {
+        runtime.spawn(tell_output(notifier, id.clone(), output));
+    }
+    host.start_watched(
         spec,
         name,
         Input::Prompt(stdin.map(String::into_bytes)),
+        watch,
         Box::new(move |outcome| {
             let pending = sessions.lock_starting().remove(&id).flatten();
             match outcome {
@@ -354,6 +371,25 @@ fn register(native: &Native, launch: Launch) -> Answer {
     Answer::Result(answer)
 }
 
+/// Tells clients what a headless agent prints, as text, as it prints it (`headless:data`).
+async fn tell_output(
+    notifier: super::Notifier,
+    id: String,
+    mut output: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+) {
+    let mut text = super::script::Utf8::default();
+    while let Some(bytes) = output.recv().await {
+        let data = text.push(&bytes);
+        if !data.is_empty() {
+            notifier.tell(
+                "headless:data",
+                json!({ "id": id, "data": data }),
+                Some(&id),
+            );
+        }
+    }
+}
+
 /// Sends `sig`, and `SIGKILL` after [`FORCE_KILL_DELAY`] when it was `SIGTERM`.
 fn stop(host: &dyn super::sessions::Host, id: &str, sig: Sig) {
     host.signal(id, sig);
@@ -363,8 +399,7 @@ fn stop(host: &dyn super::sessions::Host, id: &str, sig: Sig) {
 }
 
 /// `headless:kill`: the agent is asked to stop, and made to a while later.
-/// Answers nothing, as the server does, for an agent the copy holds, ended
-/// or not; one it does not hold is the server's.
+/// Answers nothing, as the server does, whether or not an agent runs under `id`.
 fn kill(native: &Native, id: &str) -> Answer {
     let running = native.registry.get().and_then(|r| {
         r.read(|r| {
@@ -372,8 +407,12 @@ fn kill(native: &Native, id: &str) -> Answer {
                 .map(|h| h.status == HeadlessStatus::Running)
         })
     });
-    let Some(Some(running)) = running else {
-        return Answer::Forward;
+    let Some(running) = running else {
+        return not_ready();
+    };
+    // An agent no record names is answered with nothing, as `killHeadless` answers it.
+    let Some(running) = running else {
+        return Answer::Void;
     };
     if !running || native.sessions.doom(id, Sig::Term) {
         return Answer::Void;
@@ -587,14 +626,14 @@ mod tests {
         );
         assert_eq!(call(&fed.native, "headless:kill", &json!(id)), Answer::Void);
         assert_eq!(fed.host.signals().len(), 4);
-        // One the copy does not hold is the server's.
+        // One no record names: nothing, as the server answers it.
         assert_eq!(
             call(&fed.native, "headless:kill", &json!("x")),
-            Answer::Forward
+            Answer::Void
         );
         assert_eq!(
             call(&fed.native, "headless:kill", &json!(3)),
-            Answer::Forward
+            bad_params("headless:kill")
         );
     }
 
@@ -607,19 +646,21 @@ mod tests {
                 "headless:create",
                 &request("claude", json!({}))
             ),
-            Answer::Forward
+            not_ready()
         );
-        // A remote host's agent is the server's.
-        let fed = ready();
         assert_eq!(
-            call(
-                &fed.native,
-                "headless:create",
-                &request("claude", json!({ "remoteHostId": "h" }))
-            ),
-            Answer::Forward
+            call(&fed.native, "headless:create", &json!({})),
+            bad_params("headless:create")
         );
-        assert!(fed.host.starts.lock().unwrap().is_empty());
+        // A remote host named runs the agent here, as the server ran it.
+        let fed = ready();
+        let made = call(
+            &fed.native,
+            "headless:create",
+            &request("claude", json!({ "remoteHostId": "h" })),
+        );
+        assert!(matches!(made, Answer::Result(_)), "{made:?}");
+        assert_eq!(fed.host.starts.lock().unwrap().len(), 1);
     }
 
     #[test]

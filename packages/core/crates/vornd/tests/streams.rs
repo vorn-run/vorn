@@ -1155,16 +1155,9 @@ async fn write_resize_and_reads_are_answered_by_vornd() {
         c.answer(rpc).await,
         json!({ "data": "", "seq": 0, "live": false })
     );
-    // Writing to it is still the server's.
-    let text = json!({ "jsonrpc": "2.0", "id": 99, "method": "terminal:write", "params": { "id": "nodes", "data": "x" } })
-        .to_string();
-    assert!(!vornd::terminal::handle(
-        &v.engine,
-        c.conn.id(),
-        &c.conn.forwarder(),
-        &text,
-        false
-    ));
+    // Writing to it goes nowhere, as the server's write to a session it had no program for.
+    let rpc = c.call("terminal:write", json!({ "id": "nodes", "data": "x" }));
+    assert_eq!(c.answer(rpc).await, Value::Null);
     v.kill().await;
 }
 

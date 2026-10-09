@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { RUNTIME_PROTOCOL_VERSION, type ServerIdentity } from '@vornrun/shared/protocol'
 
@@ -23,6 +23,8 @@ const published = {
   protocolVersion: RUNTIME_PROTOCOL_VERSION as number,
   /** Whether the adopted server's process is still alive, when asked. */
   pidAlive: true,
+  /** Whether it exits when asked to stop. */
+  stopsOnShutdown: false,
   /** Whether the running server closes the socket after greeting us. */
   rejectsCredential: false,
   /** Whether the name refuses the connection outright: a socket nobody holds. */
@@ -81,6 +83,7 @@ class FakeBridge extends EventEmitter {
   }
   async request(method: string): Promise<unknown> {
     this.requests.push(method)
+    if (method === 'server:shutdown' && published.stopsOnShutdown) published.pidAlive = false
     // `subscribe:set` is what the launcher uses to prove the credential was
     // accepted; a server that refuses this app answers it with a rejection.
     if (method === 'subscribe:set' && published.rejectsCredential) {
@@ -98,6 +101,15 @@ vi.mock('../src/main/server/host-store', () => ({
   readHostSettings: () => hostSettings.value
 }))
 vi.mock('../src/main/server/server-bridge', () => ({ ServerBridge: FakeBridge }))
+/** Whether an older server asked to stop over a socket of its own does. */
+const stopping = { asked: [] as string[], stops: false }
+vi.mock('../src/main/server/stop-direct', () => ({
+  askToStop: async (target: string) => {
+    stopping.asked.push(target)
+    if (!stopping.stops) throw new Error('the server never answered')
+    published.pidAlive = false
+  }
+}))
 vi.mock('../src/main/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
@@ -131,6 +143,9 @@ vi.mock('node:fs', async (importOriginal) => {
   return {
     ...actual,
     mkdirSync: (dir: string) => void madeDirs.push(dir),
+    // A vornd and its session holder, wherever the launcher looks for them.
+    existsSync: (file: string) =>
+      /[\\/](vornd|vorn-sessiond)(\.exe)?$/.test(String(file)) || actual.existsSync(file),
     openSync: (file: string) => {
       opened.push(String(file))
       return 99
@@ -184,7 +199,7 @@ function identityFrom(over: Partial<ServerIdentity> = {}): ServerIdentity {
     dataDir: '/Users/x/.vorn',
     buildChannel: 'packaged',
     pid: 999,
-    appVersion: '0.7.0-beta.3',
+    appVersion: '0.7.0-beta.4',
     ...over
   }
 }
@@ -204,10 +219,20 @@ beforeEach(() => {
   published.identity = null
   published.protocolVersion = RUNTIME_PROTOCOL_VERSION
   published.pidAlive = true
+  published.stopsOnShutdown = false
   published.rejectsCredential = false
   published.refused = false
   published.spawnedPid = null
   hostSettings.value = { mode: 'local', url: '', token: undefined }
+  stopping.asked = []
+  stopping.stops = false
+  // The pids here are made up; no signal may reach a real process.
+  vi.spyOn(process, 'kill').mockImplementation(() => true)
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllEnvs()
 })
 
 describe('finding a server that is already running', () => {
@@ -235,14 +260,29 @@ describe('finding a server that is already running', () => {
     expect((bridge as unknown as FakeBridge).credential).toBe('local-secret')
   })
 
-  it('adopts one running an older app version', async () => {
+  it('replaces one running an older release with its own', async () => {
     published.port = 50091
     published.identity = identityFrom({ appVersion: '0.6.0' })
+    published.stopsOnShutdown = true
     const { launchServer } = await import('../src/main/server/server-launcher')
 
     await launchServer()
 
-    expect(spawned).toEqual([])
+    expect(bridges[0].requests).toContain('server:shutdown')
+    expect(spawned).toHaveLength(1)
+  })
+
+  it('adopts an older dev build rather than replacing it', async () => {
+    published.port = 50091
+    published.identity = identityFrom({ appVersion: '0.6.0', buildChannel: 'dev' })
+    process.env.ELECTRON_RENDERER_URL = 'http://localhost:5173'
+    try {
+      const { launchServer } = await import('../src/main/server/server-launcher')
+      await launchServer()
+      expect(spawned).toEqual([])
+    } finally {
+      delete process.env.ELECTRON_RENDERER_URL
+    }
   })
 })
 
@@ -256,7 +296,7 @@ describe('declining a server that is running', () => {
    * winning. tmux does not kill a server it cannot speak to and does not start one
    * beside it either -- the client prints the mismatch and exits.
    */
-  it('refuses on a protocol mismatch, and never kills the incumbent', async () => {
+  it('refuses on a protocol mismatch when the older server will not stop', async () => {
     published.port = 50091
     published.identity = identityFrom()
     published.protocolVersion = RUNTIME_PROTOCOL_VERSION + 1
@@ -268,6 +308,21 @@ describe('declining a server that is running', () => {
     expect(spawned).toEqual([])
     expect(getLastAdoptionRefusal()).toMatchObject({ reason: 'protocol-mismatch' })
     expect(bridges[0].requests).not.toContain('server:shutdown')
+  })
+
+  it('asks an older server of ours to stop on a protocol mismatch, then starts its own', async () => {
+    published.port = 50091
+    published.identity = identityFrom()
+    published.protocolVersion = RUNTIME_PROTOCOL_VERSION + 1
+    stopping.stops = true
+    const { launchServer, getLastAdoptionRefusal } =
+      await import('../src/main/server/server-launcher')
+
+    await launchServer()
+
+    expect(stopping.asked).toEqual(['ws://127.0.0.1:50091/ws'])
+    expect(spawned).toHaveLength(1)
+    expect(getLastAdoptionRefusal()).toBeNull()
   })
 
   it('refuses when the running server is the other build', async () => {
@@ -382,15 +437,16 @@ describe('the server it spawns', () => {
     }
   })
 
-  it('runs the Electron binary as Node rather than as another app', async () => {
-    // process.execPath is the Electron binary. Spawning it without this variable
-    // launches a second full Vorn — an infinite spawn loop this code has hit.
+  it('runs vornd from the app, as the server for its data directory', async () => {
+    vi.stubEnv('VORN_ALLOW_DEFAULT_DATA_DIR', undefined)
     const { launchServer } = await import('../src/main/server/server-launcher')
 
     await launchServer()
 
-    const env = spawned[0].opts.env as Record<string, string>
-    expect(env.ELECTRON_RUN_AS_NODE).toBe('1')
+    expect(spawned[0].cmd).toBe('/app/Resources/vornd/vornd')
+    const env = spawned[0].opts.env as Record<string, string | undefined>
+    // A packaged app never lifts the guard on the default data directory.
+    expect(env.VORN_ALLOW_DEFAULT_DATA_DIR).toBeUndefined()
   })
 
   it('tells the server which build it is, so the next launch can judge it', async () => {
@@ -436,6 +492,42 @@ describe('quitting', () => {
 
     expect(bridges.at(-1)?.requests).toContain('server:shutdown')
   }, 30000)
+})
+
+describe('moving onto this build', () => {
+  it('stops the adopted server and starts this build in its place', async () => {
+    published.port = 50091
+    published.identity = identityFrom({ appVersion: '0.7.0-beta.4', sessions: 2 })
+    const { launchServer, upgradeServerInPlace } =
+      await import('../src/main/server/server-launcher')
+    await launchServer()
+    published.pidAlive = false
+
+    const outcome = await upgradeServerInPlace(true)
+
+    expect(outcome).toEqual({ kind: 'handed-over', sessions: 2 })
+    expect(bridges[0].requests).toContain('server:shutdown')
+    await vi.waitFor(() => expect(spawned).toHaveLength(1))
+  })
+
+  it('leaves a server that is already this build alone unless asked', async () => {
+    published.port = 50091
+    published.identity = identityFrom({ appVersion: '0.7.0-beta.4' })
+    const { launchServer, upgradeServerInPlace } =
+      await import('../src/main/server/server-launcher')
+    await launchServer()
+
+    expect((await upgradeServerInPlace()).kind).toBe('not-needed')
+    expect(bridges[0].requests).not.toContain('server:shutdown')
+  })
+
+  it('has nothing to do for a server it started itself', async () => {
+    const { launchServer, upgradeServerInPlace } =
+      await import('../src/main/server/server-launcher')
+    await launchServer()
+
+    expect((await upgradeServerInPlace(true)).kind).toBe('not-needed')
+  })
 })
 
 describe('an adopted server that dies', () => {

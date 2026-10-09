@@ -5,7 +5,6 @@ vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
 // `serve` is the only command that needs one, and no test here runs it.
-vi.mock('../packages/server/src/index', () => ({ startServer: vi.fn() }))
 
 import { runCli, type CliDeps } from '../packages/server/src/cli'
 import type { RpcTransport } from '../packages/server/src/cli/transport'

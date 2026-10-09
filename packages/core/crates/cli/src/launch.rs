@@ -1,47 +1,49 @@
-//! Running the Node server: what `vorn server serve` does, and what a client
-//! command does when no server is running.
+//! Running the Vorn server, vornd: what `vorn server serve` does, and what a
+//! client command does when no server is running.
 //!
-//! The server is still the TypeScript one, so this binary finds its command
-//! line entry, `cli.cjs`, and the runtime to run it with, from where this
-//! binary sits:
+//! vornd is found beside this binary:
 //!
-//! - In the packaged app it is `resources/vornd/vorn`, beside
-//!   `resources/server/cli.cjs`, and the app's own executable is the runtime
-//!   (`ELECTRON_RUN_AS_NODE`), set up as the `vorn` shell command sets it up.
-//! - In a checkout it is `packages/core/vorn` (or `target/<profile>/vorn`),
-//!   and the entry is `packages/server/dist/cli.cjs`, run with `node`; without
-//!   a build, `packages/server/src/cli.ts` through `npx tsx`, as the
-//!   TypeScript command re-invokes itself from source.
+//! - In the packaged app both are in `resources/vornd`, and the web client
+//!   it serves is `resources/web/dist`.
+//! - In a checkout it is `packages/core/vornd` beside `packages/core/vorn`, or
+//!   in the same `target/<profile>` directory; the web client is
+//!   `packages/web/dist`.
 //!
-//! `VORN_SERVER_ENTRY` names an entry elsewhere, run with `node` (or `npx tsx`
-//! for a `.ts` file).
+//! `VORN_VORND_PATH` names a vornd elsewhere.
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// How to start the server's command line.
+/// How to start the server.
 #[derive(Debug, Clone)]
 pub struct ServerCommand {
-    program: PathBuf,
-    /// Before the server's own arguments: the entry, and a loader for source.
-    leading: Vec<OsString>,
-    env: Vec<(&'static str, OsString)>,
+    vornd: PathBuf,
+    sessiond: Option<PathBuf>,
+    web: Option<PathBuf>,
 }
 
 impl ServerCommand {
-    /// A command running the server's CLI with `args`.
-    pub fn command(&self, args: &[String]) -> Command {
-        let mut command = Command::new(&self.program);
-        command.args(&self.leading).args(args);
-        for (key, value) in &self.env {
-            command.env(key, value);
+    /// vornd serving `data_dir`, on `port` and `host` when given.
+    pub fn command(&self, data_dir: &Path, port: Option<u16>, host: Option<&str>) -> Command {
+        let mut command = Command::new(&self.vornd);
+        command.arg("--data-dir").arg(data_dir);
+        if let Some(sessiond) = &self.sessiond {
+            command.arg("--sessiond").arg(sessiond);
+        }
+        if let Some(web) = &self.web {
+            command.arg("--web").arg(web);
+        }
+        if let Some(port) = port {
+            command.arg("--port").arg(port.to_string());
+        }
+        if let Some(host) = host {
+            command.arg("--host").arg(host);
         }
         command
     }
 }
 
-/// No server entry anywhere this binary looked.
+/// No vornd anywhere this binary looked.
 #[derive(Debug)]
 pub struct NotFound {
     pub looked: Vec<PathBuf>,
@@ -51,7 +53,7 @@ impl std::fmt::Display for NotFound {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,
-            "This vorn cannot start a Vorn server: the server it runs was not found beside it."
+            "This vorn cannot start a Vorn server: vornd was not found beside it."
         )?;
         writeln!(f, "Looked for:")?;
         for path in &self.looked {
@@ -59,125 +61,148 @@ impl std::fmt::Display for NotFound {
         }
         write!(
             f,
-            "Start the Vorn app, or run `vorn server serve` from the Vorn install, and try again.\nSet VORN_SERVER_ENTRY to the server's cli.cjs to start one from elsewhere."
+            "Start the Vorn app, or run `vorn server serve` from the Vorn install, and try again.\nSet VORN_VORND_PATH to a vornd to start one from elsewhere."
         )
     }
 }
 
 impl std::error::Error for NotFound {}
 
-/// An executable on `PATH`.
-fn on_path(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    let names: Vec<String> = if cfg!(windows) {
-        vec![
-            format!("{name}.exe"),
-            format!("{name}.cmd"),
-            name.to_owned(),
-        ]
-    } else {
-        vec![name.to_owned()]
-    };
-    std::env::split_paths(&path)
-        .filter(|dir| !dir.as_os_str().is_empty())
-        .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
-        .find(|candidate| candidate.is_file())
+/// Lets a debug build use the default data directory.
+pub const ALLOW_DEFAULT_VAR: &str = "VORN_ALLOW_DEFAULT_DATA_DIR";
+
+/// Refuses `dir` when it is the default data directory, `~/.vorn`, and this is
+/// a debug build not told otherwise: a test that forgets its own directory
+/// must never reach a person's data.
+pub fn refuse_default(dir: &Path) -> Result<(), String> {
+    let allowed = std::env::var(ALLOW_DEFAULT_VAR).is_ok_and(|v| v == "1");
+    refuse_default_in(dir, &crate::rpc::home_dir(), allowed)
 }
 
-/// `node <entry>`, or `npx tsx <entry>` for TypeScript source.
-fn with_node(entry: &Path) -> Option<ServerCommand> {
-    if entry.extension().is_some_and(|e| e == "ts") {
-        return Some(ServerCommand {
-            program: on_path("npx")?,
-            leading: vec!["tsx".into(), entry.into()],
-            env: Vec::new(),
-        });
+fn refuse_default_in(dir: &Path, home: &Path, allowed: bool) -> Result<(), String> {
+    if !cfg!(debug_assertions) || allowed {
+        return Ok(());
     }
-    Some(ServerCommand {
-        program: on_path("node")?,
-        leading: vec![entry.into()],
-        env: Vec::new(),
-    })
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_owned());
+    if canon(dir) == canon(&home.join(".vorn")) {
+        return Err(format!(
+            "a debug build will not use the default data directory {}; set {ALLOW_DEFAULT_VAR}=1 to allow it",
+            dir.display()
+        ));
+    }
+    Ok(())
 }
 
-/// The app's executable, given its resources directory.
-fn app_executable(resources: &Path) -> Option<PathBuf> {
-    let parent = resources.parent()?;
-    let candidate = if cfg!(target_os = "macos") {
-        parent.join("MacOS").join("Vorn")
-    } else if cfg!(windows) {
-        parent.join("Vorn.exe")
+fn exe(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{name}.exe")
     } else {
-        parent.join("vorn")
-    };
-    candidate.is_file().then_some(candidate)
+        name.to_owned()
+    }
 }
 
-/// The packaged app's server, run by the app as Node, as the shell command runs it.
-fn packaged(resources: &Path, entry: &Path) -> Option<ServerCommand> {
-    let Some(app) = app_executable(resources) else {
-        return with_node(entry);
-    };
-    let unpacked = resources.join("app.asar.unpacked").join("node_modules");
-    let mut node_path = OsString::from(resources.join("app.asar").join("node_modules"));
-    node_path.push(if cfg!(windows) { ";" } else { ":" });
-    node_path.push(&unpacked);
-    Some(ServerCommand {
-        program: app,
-        leading: vec![entry.into()],
-        env: vec![
-            ("ELECTRON_RUN_AS_NODE", "1".into()),
-            ("VORN_NATIVE_MODULES_PATH", unpacked.into()),
-            ("NODE_PATH", node_path),
-        ],
+/// The web client's build, looked for above `dir`.
+fn web_client(dir: &Path) -> Option<PathBuf> {
+    dir.ancestors().take(5).find_map(|up| {
+        [
+            up.join("web").join("dist"),
+            up.join("packages").join("web").join("dist"),
+        ]
+        .into_iter()
+        .find(|d| d.is_dir())
     })
 }
 
-/// Finds the server's command line entry and how to run it.
+fn found(vornd: PathBuf) -> ServerCommand {
+    let dir = vornd.parent().map(Path::to_owned).unwrap_or_default();
+    let sessiond = dir.join(exe("vorn-sessiond"));
+    ServerCommand {
+        web: web_client(&dir),
+        sessiond: sessiond.is_file().then_some(sessiond),
+        vornd,
+    }
+}
+
+/// Finds vornd.
 pub fn locate() -> Result<ServerCommand, NotFound> {
     let mut looked = Vec::new();
-
-    if let Some(entry) = std::env::var_os("VORN_SERVER_ENTRY").filter(|v| !v.is_empty()) {
-        let entry = PathBuf::from(entry);
-        if entry.is_file() {
-            if let Some(found) = with_node(&entry) {
-                return Ok(found);
-            }
+    if let Some(named) = std::env::var_os("VORN_VORND_PATH").filter(|v| !v.is_empty()) {
+        let named = PathBuf::from(named);
+        if named.is_file() {
+            return Ok(found(named));
         }
-        looked.push(entry);
+        looked.push(named);
         return Err(NotFound { looked });
     }
-
-    let exe = std::env::current_exe().and_then(|p| p.canonicalize().or(Ok(p)));
-    let Some(dir) = exe.ok().and_then(|p| p.parent().map(Path::to_owned)) else {
+    let here = std::env::current_exe().and_then(|p| p.canonicalize().or(Ok(p)));
+    let Some(dir) = here.ok().and_then(|p| p.parent().map(Path::to_owned)) else {
         return Err(NotFound { looked });
     };
-
-    // Packaged: resources/vornd/vorn beside resources/server/cli.cjs.
-    if let Some(resources) = dir.parent() {
-        let entry = resources.join("server").join("cli.cjs");
-        if entry.is_file() {
-            if let Some(found) = packaged(resources, &entry) {
-                return Ok(found);
-            }
-        }
-        looked.push(entry);
+    let candidate = dir.join(exe("vornd"));
+    if candidate.is_file() {
+        return Ok(found(candidate));
     }
-
-    // A checkout: packages/core/vorn, or packages/core/target/<profile>/vorn.
-    for packages in [dir.parent(), dir.ancestors().nth(3)].into_iter().flatten() {
-        let server = packages.join("server");
-        for entry in [
-            server.join("dist").join("cli.cjs"),
-            server.join("src").join("cli.ts"),
-        ] {
-            if entry.is_file() {
-                if let Some(found) = with_node(&entry) {
-                    return Ok(found);
-                }
-            }
-            looked.push(entry);
-        }
-    }
+    looked.push(candidate);
     Err(NotFound { looked })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_debug_build_keeps_off_the_default_data_directory() {
+        let home = tempfile::tempdir().unwrap();
+        let default = home.path().join(".vorn");
+        assert_eq!(
+            refuse_default_in(&default, home.path(), false).is_err(),
+            cfg!(debug_assertions)
+        );
+        assert!(refuse_default_in(&default, home.path(), true).is_ok());
+        assert!(refuse_default_in(&home.path().join("x"), home.path(), false).is_ok());
+    }
+
+    #[test]
+    fn runs_vornd_as_the_server_for_a_data_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("resources").join("vornd");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(dir.path().join("resources").join("web").join("dist")).unwrap();
+        std::fs::write(bin.join(exe("vornd")), "").unwrap();
+        std::fs::write(bin.join(exe("vorn-sessiond")), "").unwrap();
+        let server = found(bin.join(exe("vornd")));
+        let command = server.command(Path::new("/data"), Some(5000), Some("0.0.0.0"));
+        let args: Vec<_> = command
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let web = dir.path().join("resources").join("web").join("dist");
+        assert_eq!(
+            args,
+            [
+                "--data-dir".to_owned(),
+                "/data".into(),
+                "--sessiond".into(),
+                bin.join(exe("vorn-sessiond"))
+                    .to_string_lossy()
+                    .into_owned(),
+                "--web".into(),
+                web.to_string_lossy().into_owned(),
+                "--port".into(),
+                "5000".into(),
+                "--host".into(),
+                "0.0.0.0".into(),
+            ]
+        );
+        // Without a session holder or a web client, only the directory.
+        let bare = tempfile::tempdir().unwrap();
+        let alone = found(bare.path().join(exe("vornd")));
+        assert_eq!(
+            alone
+                .command(Path::new("/d"), None, None)
+                .get_args()
+                .count(),
+            2
+        );
+    }
 }

@@ -4,8 +4,8 @@
 //! vornd tells the server what only the server can act on: a broadcast to
 //! every client (the server holds the registry of them, and some clients
 //! connect to it directly), a device token just revoked (the server closes
-//! the sockets holding it) and the offer to clean up a worktree whose last
-//! terminal vornd closed. The server tells vornd where it is bound, which
+//! the sockets holding it) and how many sessions run, which keeps it from
+//! stopping as idle. The server tells vornd where it is bound, which
 //! decides the addresses a browser on the network can use; whether it is
 //! winding down, when vornd may start no new terminal ([`Closing`]); the
 //! conversations its own starts claim ([`Claims`]); and the spawns it asks

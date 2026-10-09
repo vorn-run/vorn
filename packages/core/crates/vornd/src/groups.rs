@@ -95,48 +95,9 @@ pub const NATIVE_GROUPS: &[&str] = &[
     "permission",
 ];
 
-/// Why vornd may still hand a call to the server.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StillForwarded {
-    /// Not native yet.
-    NotYetNative,
-}
-
-impl StillForwarded {
-    pub fn name(self) -> &'static str {
-        match self {
-            StillForwarded::NotYetNative => "not yet native",
-        }
-    }
-}
-
-/// The calls vornd may still forward to the server, as a whole group or one
-/// method. Any other call that reaches the server is a fault the health
-/// endpoint reports (`unexpectedForwards`) and the tests fail on. It shrinks
-/// to nothing.
-pub const STILL_FORWARDED: &[(&str, StillForwarded)] = &[
-    ("auth:authenticate", StillForwarded::NotYetNative),
-    ("subscribe", StillForwarded::NotYetNative),
-    ("session", StillForwarded::NotYetNative),
-    ("server", StillForwarded::NotYetNative),
-    ("terminal", StillForwarded::NotYetNative),
-    ("headless", StillForwarded::NotYetNative),
-    ("sessions", StillForwarded::NotYetNative),
-    ("shell", StillForwarded::NotYetNative),
-];
-
-/// Whether neither vornd nor the server has `method`: no native group, and
-/// not one the server still answers.
+/// Whether vornd has no group for `method`.
 pub fn unknown(method: &str) -> bool {
-    !NATIVE_GROUPS.contains(&group_of(method)) && still_forwarded(method).is_none()
-}
-
-/// Whether `method` may still go to the server, and why.
-pub fn still_forwarded(method: &str) -> Option<StillForwarded> {
-    STILL_FORWARDED
-        .iter()
-        .find(|(entry, _)| *entry == method || *entry == group_of(method))
-        .map(|(_, why)| *why)
+    !NATIVE_GROUPS.contains(&group_of(method))
 }
 
 /// The group a method belongs to: everything before the first colon.
@@ -167,7 +128,7 @@ pub enum Counted {
 pub struct Groups {
     modes: BTreeMap<String, Mode>,
     seen: Mutex<BTreeMap<String, GroupCounts>>,
-    /// Forwarded calls [`STILL_FORWARDED`] does not allow, by method.
+    /// Calls left unanswered, by method.
     unexpected: Mutex<BTreeMap<String, u64>>,
 }
 
@@ -251,14 +212,12 @@ impl Groups {
         match what {
             Counted::Forwarded => {
                 counts.forwarded += 1;
-                if still_forwarded(method).is_none() {
-                    *self
-                        .unexpected
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .entry(method.to_owned())
-                        .or_default() += 1;
-                }
+                *self
+                    .unexpected
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .entry(method.to_owned())
+                    .or_default() += 1;
             }
             Counted::BeforeAuth => counts.forwarded += 1,
             Counted::Native => counts.native += 1,
@@ -283,7 +242,7 @@ impl Groups {
         self.seen.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// The calls forwarded that [`STILL_FORWARDED`] does not allow, by method.
+    /// The calls left unanswered, by method: with nothing behind vornd, every one is a fault.
     pub fn unexpected_forwards(&self) -> BTreeMap<String, u64> {
         self.unexpected
             .lock()
@@ -369,31 +328,25 @@ mod tests {
     }
 
     #[test]
-    fn reports_a_forward_the_list_does_not_allow() {
+    fn reports_every_call_left_unanswered() {
         let groups = Groups::new(None).unwrap();
-        groups.count("shell:create", Counted::Forwarded);
         groups.count("config:save", Counted::Forwarded);
         groups.count("config:save", Counted::Forwarded);
         groups.count("config:load", Counted::Native);
+        groups.count("config:load", Counted::BeforeAuth);
         assert_eq!(
             groups.unexpected_forwards(),
             BTreeMap::from([("config:save".to_owned(), 2)])
         );
-        assert_eq!(
-            still_forwarded("shell:create"),
-            Some(StillForwarded::NotYetNative)
-        );
-        assert_eq!(still_forwarded("config:load"), None);
-        assert_eq!(still_forwarded("browser:navigate"), None);
-        groups.count("config:load", Counted::BeforeAuth);
-        assert_eq!(groups.unexpected_forwards().len(), 1);
         assert!(unknown("nonexistent:method"));
         assert!(!unknown("config:save"));
         assert!(!unknown("shell:create"));
     }
 
     /// Every call a client can make, from the protocol's request map, is
-    /// answered by vornd unless [`STILL_FORWARDED`] names it.
+    /// answered by vornd: by a native group, or by the socket itself
+    /// ([`crate::serve::socket::ANSWERED_HERE`]); the calls vornd makes of the
+    /// desktop are no client's.
     #[test]
     fn every_protocol_call_is_native_or_listed() {
         let protocol = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -415,7 +368,11 @@ mod tests {
         assert!(methods.len() > 150, "read {} methods", methods.len());
         let missing: Vec<&str> = methods
             .into_iter()
-            .filter(|m| crate::native::effect(m).is_none() && still_forwarded(m).is_none())
+            .filter(|m| {
+                crate::native::effect(m).is_none()
+                    && !crate::serve::socket::ANSWERED_HERE.contains(m)
+                    && !crate::bridge::ASKED_OF_DESKTOP.contains(m)
+            })
             .collect();
         assert!(missing.is_empty(), "forwarded and not listed: {missing:?}");
     }

@@ -13,7 +13,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { TerminalSession } from '../packages/shared/src/types'
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import {
@@ -29,12 +29,6 @@ import {
 } from './helpers/real-server'
 import { PASSWORD_BEFORE_PROMPT, normalizeRun } from './helpers/sessions-parity'
 import { recorded } from './helpers/vornd-fixtures'
-
-// Booting a server probes Tailscale with a real process; nothing here needs it.
-vi.mock('../packages/server/src/tailscale', () => ({
-  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
-  clearBinaryCache: vi.fn()
-}))
 
 spawnsRealServers()
 
@@ -184,8 +178,16 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     // The agent ended and ssh with it: the local shell is told to end too.
     through.notify('terminal:write', { id: byKey, data: 'exit\r' })
     await exited(byKey)
+    const toldBefore = direct.toldBy('session:updated').length
     await call('resume the ended session', 'sessions:resume', { id: byKey })
     const resumedShown = await said(byKey, /ARGV:/)
+    // Its card is told the session runs again, as an update of the one it has.
+    await until('the resume told', () =>
+      direct
+        .toldBy('session:updated')
+        .slice(toldBefore)
+        .some((p) => (p as TerminalSession).id === byKey && (p as TerminalSession).pid > 0)
+    )
     await until('the resume to log in', () => lines(path.join(log, 'argv')).length === 3).catch(
       (err: Error) => {
         throw new Error(
@@ -197,8 +199,7 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
     await call('close the password session', 'terminal:kill', byPassword)
     await exited(byPassword)
     await call('close the resumed session', 'terminal:kill', byKey)
-    // vornd answers the close before the server hears of it.
-    await until('the server to drop the resumed session', async () =>
+    await until('the resumed session to go', async () =>
       (await listed()).every((s) => s.id !== byKey)
     )
 
@@ -236,9 +237,14 @@ describe.skipIf(!runnable)('terminals on a remote host, through vornd', () => {
     try {
       run = normalizeRun(await scenario(server), server.dirs)
       const health = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-      const groups = ((await health.json()) as { groups: Record<string, { native?: number }> })
-        .groups
-      counts = { terminal: groups.terminal?.native, sessions: groups.sessions?.native }
+      const groups = (
+        (await health.json()) as { groups: Record<string, { native?: number; forwarded?: number }> }
+      ).groups
+      counts = {
+        terminal: groups.terminal?.forwarded ?? 0,
+        sessions: groups.sessions?.forwarded ?? 0,
+        answered: (groups.terminal?.native ?? 0) > 0 && (groups.sessions?.native ?? 0) > 0
+      }
     } catch (err) {
       throw new Error(`${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
         cause: err
@@ -284,8 +290,8 @@ describe.skipIf(!runnable)('terminals on a remote host, through vornd', () => {
     })
   })
 
-  it('has vornd create and resume them', () => {
-    expect(counts).toEqual({ terminal: 4, sessions: 1 })
+  it('has vornd create and resume them, forwarding nothing', () => {
+    expect(counts).toEqual({ terminal: 0, sessions: 0, answered: true })
   })
 
   it('logs in, answers, tells and lists what it recorded', () => {

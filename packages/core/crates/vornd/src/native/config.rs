@@ -132,6 +132,7 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
                 Ok(Saved { before, after }) => {
                     fire_triggers(native, &before, &sent).await;
                     native.broadcast("config:changed", after);
+                    native.config_changed();
                     Answer::Void
                 }
                 Err(message) => Answer::Error(message),
@@ -150,7 +151,10 @@ pub(crate) async fn announce(native: &Arc<Native>) {
     })
     .await;
     match loaded {
-        Ok(config) => native.broadcast("config:changed", config),
+        Ok(config) => {
+            native.broadcast("config:changed", config);
+            native.config_changed();
+        }
         Err(err) => warn!(%err, "could not read the configuration to announce it"),
     }
 }

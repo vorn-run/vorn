@@ -6,7 +6,7 @@
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
  * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix.
  */
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import {
@@ -20,11 +20,6 @@ import {
   until,
   type RealServer
 } from './helpers/real-server'
-
-vi.mock('../packages/server/src/tailscale', () => ({
-  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
-  clearBinaryCache: vi.fn()
-}))
 
 spawnsRealServers()
 

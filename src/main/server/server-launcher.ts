@@ -1,11 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { closeSync, mkdirSync, openSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs'
 import path, { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { app } from 'electron'
 import log from '../logger'
-import { augmentedPath, resolveBinary } from '../binary-path'
 import {
   BOOTSTRAP_ENV_VAR,
   SERVER_PORT_ENV_VAR,
@@ -27,14 +26,14 @@ import {
   resolveDataDir,
   type AdoptionVerdict
 } from './server-adoption'
-import { SERVER_LOG_FILENAME, type HandoffResult } from '@vornrun/shared/protocol'
+import { SERVER_LOG_FILENAME } from '@vornrun/shared/protocol'
 import {
   decideHandoff,
-  buildHandoffRequest,
   devRepoRoot,
+  replacesIncumbent,
   updateEndsSessions
 } from './handoff-request'
-import { askForHandoff } from './handoff-direct'
+import { askToStop } from './stop-direct'
 import type { SessionHolders, VorndStatus } from '@vornrun/shared/types'
 import { endOlderHolder, readSessionHolders } from './session-holder'
 
@@ -88,9 +87,6 @@ let adoptedPid: number | null = null
 /** Held because the decision they feed happens after the launch, not during it. */
 let adoptedIdentity: ServerIdentity | null = null
 let adoptedTarget: string | null = null
-
-/** Or the disconnect after a successful handoff reads as a crash and spawns a third server. */
-let handingOver = false
 
 /**
  * What the last adoption attempt refused, and the pid still holding the sessions.
@@ -274,22 +270,6 @@ async function connectToHost(url: string, token: string): Promise<ServerBridge> 
 const HOST_CONNECT_TIMEOUT_MS = 15_000
 
 /**
- * Spawns the @vornrun/server process and returns a connected ServerBridge.
- *
- * The server writes `{"port": N}` to stdout on startup.
- * We read the port, then connect a WebSocket bridge.
- *
- * Both modes spawn detached, so the server outlives this app: quitting Vorn is a
- * window closing, not every agent dying. Dev runs `npx tsx` over the TypeScript
- * source; production spawns the Electron binary with ELECTRON_RUN_AS_NODE=1,
- * which yields a plain Node process from the same signed bundle.
- *
- * NOTE: `process.execPath` is the Electron binary, and spawning it *without*
- * ELECTRON_RUN_AS_NODE launches another full Electron app — an infinite spawn
- * loop this code has hit before. The variable is what makes it a Node process,
- * so it is not optional.
- */
-/**
  * `VORN_SERVER_PORT`, if it is a port.
  *
  * Checked here rather than forwarded blind. `parseServerArgs` does reject a
@@ -329,144 +309,43 @@ function readDevPort(): string | undefined {
  */
 async function spawnServer(): Promise<number> {
   lastSpawnAt = Date.now()
-  const serverEntryPoint = resolveServerEntry()
-  log.info(`[launcher] starting server: ${serverEntryPoint}`)
-
-  // A per-run credential for the servers we spawn. Generated here rather than
-  // persisted: nothing to leak at rest, and it dies with the app. The name is
-  // stripped unconditionally by `filterEnv`, so it never reaches a PTY, headless
-  // agent or script node. Reused across a relaunch -- see the declaration.
-  bootstrapToken ??= randomBytes(32).toString('base64url')
-
-  // Deliberately does NOT pass --data-dir. Vorn's data directory is ~/.vorn —
-  // that is where the database, ws-port file and scheduler locks have always
-  // lived, and where `packages/mcp` looks for all three. This used to pass
-  // Electron's userData, which the server then ignored for everything except
-  // task images, so it was inert. Passing it once the server honours it would
-  // point the database at an empty directory and read as total data loss.
-  const isDev = buildChannel() === 'dev'
-
+  const spec = serverProcessSpec()
+  if (!spec) {
+    throw new Error('This build of Vorn has no vornd to start. Run `yarn build:core` first.')
+  }
+  log.info(`[launcher] starting vornd: ${spec.exec}`)
   let port: number
 
-  if (isDev) {
-    // Dev mode: use npx tsx to run TypeScript directly
-    const repoRoot = path.join(__dirname, '../..')
-
-    // A port for this launch only, which no stored setting could give. A dev
-    // server and a packaged Vorn share one data directory and therefore one
-    // remembered port, and the reason to set this is to make them differ.
-    // Passed as `--port` rather than through the environment so it travels the
-    // same path the CLI already takes and is refused the same way if malformed.
-    const devPort = readDevPort()
-
-    // Resolved for the same reason the simulator's companion is: a dev app
-    // started from Finder has no `npx` on its PATH. The name is kept as the
-    // fallback so a launch that works today cannot start failing here.
-    const npx = resolveBinary('npx').path ?? 'npx'
-
-    const child = spawn(npx, ['tsx', serverEntryPoint, ...(devPort ? ['--port', devPort] : [])], {
+  if (buildChannel() === 'dev') {
+    // Not detached: a dev server outliving `yarn dev` would be adopted while running stale code.
+    const child = spawn(spec.exec, spec.args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      // Deliberately NOT detached, where production is.
-      //
-      // A detached dev server outlives `yarn dev`, and the next `yarn dev` would
-      // adopt it -- same data directory, same build channel, so every check
-      // passes. It would be running the source as it was before the edit that
-      // prompted the restart, and nothing would say so. An hour lost to a fix
-      // that "did not work" is a worse trade than restarting sessions a
-      // developer was going to restart anyway.
-      //
-      // Sessions surviving a quit is a property of the shipped app. Dev keeps
-      // the old lifetime, and the buildChannel check still earns its place: a
-      // packaged server does outlive its app, and this is what stops `yarn dev`
-      // from adopting it.
-      env: {
-        ...process.env,
-        [BOOTSTRAP_ENV_VAR]: bootstrapToken,
-        NODE_ENV: process.env.NODE_ENV ?? 'development',
-        // `npx` runs through `#!/usr/bin/env node`, so finding npx itself is
-        // not enough: the child needs a PATH that holds node as well.
-        PATH: augmentedPath(),
-        ...identityEnv()
-        // Connectors live in their own repository now, so a local build is
-        // preferred by setting VORN_CONNECTORS_ROOT to that checkout. It
-        // passes through with the rest of the environment above; deriving it
-        // from this repo's root would point at packages that are not here.
-      },
-      cwd: repoRoot
+      cwd: spec.cwd,
+      env: { ...process.env, ...spec.env }
     })
-
-    // Tracked before anything is awaited. `readServerPort` can reject on a ten
-    // second timeout with the child still running, and a child assigned only
-    // after that is one nothing holds a reference to -- unkillable by
-    // `stopServer`, invisible to the relaunch logic, and still on the port.
+    // Tracked before anything is awaited, so a timeout still leaves it killable.
     serverProcess = child
     child.on('exit', onChildExit)
-
     port = await readServerPort(child).catch((err) => {
       child.kill('SIGKILL')
       throw err
     })
   } else {
-    // Deliberately NOT utilityProcess.fork: a utility process is tied to this
-    // app's lifetime by design, so it can never outlive the window -- which is
-    // the whole point here. Spawning the Electron binary with
-    // ELECTRON_RUN_AS_NODE gives a plain Node process from the same signed
-    // bundle, which the hardened runtime already permits because
-    // `resources/entitlements.mac.plist` grants
-    // com.apple.security.cs.allow-dyld-environment-variables.
-    //
-    // The variable is not optional: process.execPath is the Electron binary, and
-    // spawning it without this launches a second full Vorn -- an infinite spawn
-    // loop this code has hit before.
-    //
-    // The main process has Electron's ASAR patching so it can resolve native
-    // modules. A plain Node child does NOT, so the absolute paths are resolved
-    // here and passed through the environment for the server to use.
-    // Created here rather than at the top of this function: only this branch
-    // reads it, and the dev branch would otherwise pay a blocking recursive
-    // mkdirSync on every spawn -- including every crash relaunch during a
-    // `yarn dev` session -- for a value it never touches.
-    const dataDir = ensureDataDir()
-    // One definition of how this app starts a server, shared with the handoff
-    // that asks a running server to start its replacement. Two spellings of this
-    // environment is how a handed-over server ends up subtly unlike a spawned
-    // one -- see `serverProcessSpec`.
-    const spec = serverProcessSpec()
-    if (!spec) throw new Error('[launcher] could not describe how to start a server')
-
-    // Straight to a file, not to pipes.
-    //
-    // A pipe held by this process dies with this process, and the server is
-    // meant to outlive it: the next write to stderr after that raises EPIPE, and
-    // the server installs no uncaughtException handler, so it exits. Its logger
-    // writes to `process.stderr` on every request, so the window is one log line
-    // wide. Measured both ways -- destroying the parent's end and merely
-    // unref'ing it both killed the child on its next write.
-    //
-    // A file descriptor does not care that the parent is gone, and the startup
-    // diagnostics a pipe existed to carry end up somewhere durable rather than
-    // in a log that stops the moment the app does.
-    const logFd = openSync(join(dataDir, SERVER_LOG_FILENAME), 'a')
+    // A file, not a pipe: a pipe dies with this process, and the server outlives it.
+    const logFd = openSync(join(spec.cwd, SERVER_LOG_FILENAME), 'a')
     const child = spawn(spec.exec, spec.args, {
       stdio: ['ignore', logFd, logFd],
       detached: true,
       cwd: spec.cwd,
       env: { ...process.env, ...spec.env }
     })
-
-    // Closed here as soon as the child holds its own copy; leaving it open would
-    // keep a descriptor in this process for a file only the server writes to.
     closeSync(logFd)
-
     serverProcess = child
     child.on('exit', onChildExit)
     child.on('error', (err) => {
-      log.error({ err }, '[launcher] could not start the server')
+      log.error({ err }, '[launcher] could not start vornd')
     })
-
-    // Nothing to read from: the port arrives through the file the server writes
-    // for MCP, and the same watcher that waits for it proves the server got as
-    // far as listening.
+    // The port arrives through the file vornd writes for every client on this machine.
     port = await waitForPublishedPort(child).catch((err) => {
       child.kill('SIGKILL')
       throw err
@@ -474,8 +353,7 @@ async function spawnServer(): Promise<number> {
     child.unref()
   }
 
-  // A server we started is one we supervise through its child handle, so any
-  // earlier adoption no longer describes what is running.
+  // A server we started is one we supervise through its child handle.
   adoptedPid = null
   return port
 }
@@ -531,12 +409,9 @@ function onServerExit(detail: string, endpointTaken = false): void {
     }
     void spawnServer()
       .then(async (port) => {
-        const url = `ws://127.0.0.1:${port}/ws`
-        if (bridge && directTarget !== null && directTarget !== url) {
-          // A server that came back keeps a vornd of its own, which the bridge
-          // finds when it reconnects.
-          directTarget = url
-        } else if (bridge && directTarget === null && bridge.target() !== url) {
+        const url = portUrl(port)
+        if (bridge) vorndStatus = vorndAt(url)
+        if (bridge && bridge.target() !== url) {
           // Usually a no-op now that the port is remembered across restarts,
           // which is the case the reconnect loop already handles on its own. It
           // matters when the old port was taken in the moment between the two.
@@ -645,6 +520,8 @@ async function tryAdopt(
   self: { dataDir: string; buildChannel: 'dev' | 'packaged' }
 ): Promise<
   | { bridge: ServerBridge }
+  /** An older build stood down for this one, which starts its own. */
+  | { retired: true }
   | {
       refusal: AdoptionVerdict & { kind: 'refuse' }
       sessions: number | null
@@ -751,6 +628,18 @@ async function tryAdopt(
     }
   }
 
+  if (
+    replacesIncumbent(identity, { appVersion: app.getVersion(), buildChannel: self.buildChannel })
+  ) {
+    log.info(
+      `[launcher] the running server is ${identity.appVersion}; replacing it with this build`
+    )
+    await candidate.request('server:shutdown', undefined, 5_000).catch(() => {})
+    candidate.close()
+    await ensureGone(identity.pid)
+    return { retired: true }
+  }
+
   // Carried forward, not discarded. If this server later dies and a replacement
   // is spawned, `spawnServer` reuses this value rather than minting a fresh one
   // -- and the bridge is retargeted, never rebuilt, so its credential is fixed
@@ -772,8 +661,6 @@ async function tryAdopt(
   // that is merely busy while the bridge retries.
   candidate.on('disconnected', () => {
     if (adoptedPid === null || stoppingDeliberately) return
-    // The incumbent exits on purpose once its replacement is serving.
-    if (handingOver) return
     if (isPidAlive(adoptedPid)) return
     onServerExit(`adopted server pid=${adoptedPid} is gone`)
   })
@@ -783,74 +670,27 @@ async function tryAdopt(
 }
 
 /**
- * Ask a server to hand its terminals to a replacement built from this bundle.
- *
- * One way to ask, over a socket that needs no adoption. The bridge could carry
- * this whenever one happens to be open, but then there would be two ways to send
- * the same request and only one of them would work in the case that matters --
- * a release that changed the wire format, where there is no bridge at all.
- *
- * Owns the `handingOver` latch, so the incumbent's death is expected on both
- * paths without either remembering to say so.
+ * Asks an unadoptable server of ours to stop, over a socket that needs no
+ * agreement on the protocol, and waits for it to go. Its terminals stay in the
+ * session holder, which the server this app starts next takes over.
  */
-type AskOutcome = { ok: true; result: HandoffResult } | { ok: false; why: string }
-
-async function requestHandoff(target: string, dataDir: string): Promise<AskOutcome> {
-  if (!target.startsWith('ws+unix://')) {
-    return { ok: false, why: 'the running server was reached by port rather than by name' }
-  }
+async function standAside(
+  target: string,
+  pid: number | undefined,
+  dataDir: string
+): Promise<boolean> {
   const credential = readLocalToken(dataDir)
-  if (!credential) return { ok: false, why: 'the running server published no credential' }
-  const spec = serverProcessSpec()
-  if (!spec) return { ok: false, why: 'this app cannot describe how to start a server' }
-
-  handingOver = true
+  if (!credential || pid === undefined) {
+    log.warn('[launcher] could not ask the older server to stop: it published no credential or pid')
+    return false
+  }
   try {
-    const result = await askForHandoff(
-      target,
-      credential,
-      buildHandoffRequest({ ...spec, appVersion: app.getVersion() })
-    )
-    return { ok: true, result }
+    await askToStop(target, credential)
   } catch (err) {
-    return { ok: false, why: (err as Error).message }
-  } finally {
-    // Held past the request so the disconnect it causes is covered.
-    setTimeout(() => {
-      handingOver = false
-    }, HANDOFF_SETTLE_MS)
-  }
-}
-
-/** Whether an unadoptable-but-ours server gave up its terminals. */
-async function standAside(target: string, dataDir: string): Promise<boolean> {
-  const outcome = await requestHandoff(target, dataDir)
-  if (!outcome.ok) {
-    log.warn(`[handoff] could not ask the older server to stand aside: ${outcome.why}`)
+    log.warn(`[launcher] the older server did not stop: ${(err as Error).message}`)
     return false
   }
-  if (outcome.result.kind === 'declined') {
-    log.warn(`[handoff] the older server declined to stand aside: ${outcome.result.because}`)
-    return false
-  }
-  log.info(`[handoff] ${outcome.result.sessions} terminal(s) moved off the older protocol`)
-  return true
-}
-
-/** The replacement needs a moment to claim the name the old server just released. */
-async function adoptAfterHandoff(dataDir: string): Promise<ServerBridge | null> {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    for (const candidate of discoverable(dataDir)) {
-      const outcome = await tryAdopt(candidate.target, candidate.pid, {
-        dataDir,
-        buildChannel: buildChannel()
-      })
-      if ('bridge' in outcome) return outcome.bridge
-    }
-  }
-  log.warn('[handoff] the replacement never became adoptable')
-  return null
+  return ensureGone(pid)
 }
 
 /**
@@ -944,29 +784,26 @@ export async function launchServer(): Promise<ServerBridge> {
   return connectedLocally(spawned, dataDir)
 }
 
-/**
- * The last step of every local launch, spawned or adopted: talk to the server
- * through the vornd it keeps in front of itself.
- */
-async function connectedLocally(connected: ServerBridge, dataDir: string): Promise<ServerBridge> {
+/** The last step of every local launch, spawned or adopted. */
+function connectedLocally(connected: ServerBridge, dataDir: string): ServerBridge {
   bridge = connected
   vorndHome = dataDir
-  await routeThroughVornd()
+  vorndStatus = vorndAt(connected.target())
   return connected
+}
+
+/** vornd, the server, as Settings reports it, from the address the bridge reaches it at. */
+function vorndAt(target: string): VorndStatus {
+  const port = /^ws:\/\/127\.0\.0\.1:(\d+)\//.exec(target)?.[1]
+  return port
+    ? { state: 'on', port: Number(port) }
+    : { state: 'failed', detail: 'the server was reached by its local endpoint' }
 }
 
 /** The data directory vornd keeps its session holder in. */
 let vorndHome: string | null = null
 let vorndStatus: VorndStatus = { state: 'off' }
-/** Where the bridge reaches the server itself, while it is pointed at vornd. */
-let directTarget: string | null = null
-
-/** How long the bridge has to connect through vornd. */
-const VORND_CONNECT_TIMEOUT_MS = 5_000
-/** How long the server has to say where its vornd is; it may be starting it. */
-const VORND_ASK_TIMEOUT_MS = 10_000
-
-/** Whether the app is talking to its server through vornd, for Settings. */
+/** Whether the app is talking to vornd, for Settings. */
 export function getVorndStatus(): VorndStatus {
   return vorndStatus
 }
@@ -992,76 +829,9 @@ export async function endOlderSessionHolder(
   return outcome
 }
 
-/** Stop following vornd; the server it belongs to keeps it. */
+/** Stop following vornd, which keeps running. */
 function forgetVornd(): void {
-  directTarget = null
   vorndStatus = { state: 'off' }
-}
-
-/**
- * Point the bridge at the vornd the server keeps in front of itself, or leave
- * it on the server and say why.
- *
- * vornd forwards everything else to the server, and serves the terminals it
- * holds itself, so a window that reaches the server directly can start
- * terminals but not see them. Every failure ends on the server's own address,
- * so the app is never without a server.
- */
-async function routeThroughVornd(): Promise<void> {
-  const current = bridge
-  if (!current) return
-  const direct = directTarget ?? current.target()
-  const fallBack = (detail: string): void => {
-    vorndStatus = { state: 'failed', detail }
-    directTarget = null
-    log.warn(`[launcher] not using vornd: ${detail}. Talking to the server directly.`)
-    if (bridge === current && current.target() !== direct) current.retarget(direct)
-  }
-
-  const answer = (await current
-    .request('server:vornd', undefined, VORND_ASK_TIMEOUT_MS)
-    .catch((err: Error) => ({ state: 'failed', detail: err.message }))) as VorndStatus | null
-  if (bridge !== current) return
-  if (!answer || answer.state !== 'on') {
-    fallBack(answer?.state === 'failed' ? answer.detail : 'the server reports no vornd')
-    return
-  }
-  const through = portUrl(answer.port)
-  if (current.target() !== through) {
-    directTarget = direct
-    current.retarget(through)
-    const connected = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => {
-        current.off('connected', done)
-        resolve(false)
-      }, VORND_CONNECT_TIMEOUT_MS)
-      function done(): void {
-        clearTimeout(timer)
-        resolve(true)
-      }
-      current.once('connected', done)
-    })
-    if (bridge !== current) return
-    if (!connected) {
-      fallBack('the server could not be reached through vornd')
-      return
-    }
-    // vornd ends with its server, and a server that starts again starts a
-    // new one on a new port: back to the server, then to wherever it is now.
-    current.once('disconnected', () => {
-      if (bridge !== current || current.target() !== through) return
-      log.info('[launcher] lost vornd; asking the server where it is now')
-      const back = directTarget ?? direct
-      directTarget = null
-      vorndStatus = { state: 'failed', detail: 'vornd went away' }
-      current.retarget(back)
-      current.once('connected', () => {
-        if (bridge === current) void routeThroughVornd()
-      })
-    })
-  }
-  vorndStatus = answer
-  log.info(`[launcher] talking to the server through vornd on ${answer.port}`)
 }
 
 /**
@@ -1085,6 +855,7 @@ async function adoptSomethingRunning(dataDir: string): Promise<ServerBridge | nu
       buildChannel: buildChannel()
     })
     if ('bridge' in outcome) return outcome.bridge
+    if ('retired' in outcome) return null
     const { refusal } = outcome
 
     // Nothing was there. Try the next way of finding a server, and if there is
@@ -1107,20 +878,13 @@ async function adoptSomethingRunning(dataDir: string): Promise<ServerBridge | nu
         `${refusal.detail}. It keeps running and keeps its sessions.`
     )
 
-    // A protocol mismatch is the one refusal that should not be final.
-    //
-    // Every other reason says this is somebody else's server -- another data
-    // directory, another build channel -- and the right answer is to stand down.
-    // This one says it is *our* server, holding our terminals, speaking a wire
-    // format this release changed. Standing down there ends exactly what the
-    // handoff exists to protect, so it is asked to stand aside instead, over a
-    // socket that needs no agreement about the protocol it just disagreed on.
-    if (refusal.reason === 'protocol-mismatch' && (await standAside(candidate.target, dataDir))) {
-      // It committed, so the machine now has a server this app can speak to.
-      // Discovery runs again rather than recursing: the endpoint is the same name
-      // and the replacement has just claimed it.
-      const replacement = await adoptAfterHandoff(dataDir)
-      if (replacement) return replacement
+    // A mismatch is our own older server: asked to stop, it leaves its terminals to this build's.
+    if (
+      refusal.reason === 'protocol-mismatch' &&
+      (await standAside(candidate.target, candidate.pid ?? undefined, dataDir))
+    ) {
+      lastRefusal = null
+      return null
     }
     // Declining to adopt is not a reason to start a rival.
     //
@@ -1231,7 +995,7 @@ export function detachFromServer(): void {
 
   // In dev the child is not detached, and on POSIX nothing kills a plain child
   // when its parent exits -- it is simply reparented. Walking away would leave
-  // the `npx tsx` server running for the next `yarn dev` to adopt, which is the
+  // the dev server running for the next `yarn dev` to adopt, which is the
   // stale-source trap the dev spawn is written to avoid. Dev keeps the old
   // lifetime in full: the server goes when the app goes.
   if (serverProcess && buildChannel() === 'dev') {
@@ -1256,48 +1020,63 @@ export function serverProcessSpec(): {
   cwd: string
 } | null {
   bootstrapToken ??= randomBytes(32).toString('base64url')
-  const entry = resolveServerEntry()
-
-  if (buildChannel() === 'dev') {
-    // `--import tsx`, never the `tsx` binary: the CLI re-executes in a child of its
-    // own, which does not inherit the pty masters a handoff travels on. Measured.
-    const repoRoot = devRepoRoot(__dirname)
-    const devPort = readDevPort()
-    return {
-      exec: process.execPath,
-      args: ['--import', 'tsx', entry, ...(devPort ? ['--port', devPort] : [])],
-      // The repo root, because ESM resolution walks up from cwd rather than NODE_PATH.
-      cwd: repoRoot,
-      env: {
-        // `process.execPath` is the Electron binary; without this it launches a second Vorn.
-        ELECTRON_RUN_AS_NODE: '1',
-        [BOOTSTRAP_ENV_VAR]: bootstrapToken,
-        NODE_ENV: process.env.NODE_ENV ?? 'development',
-        ...identityEnv()
-      }
-    }
-  }
-
+  const binaries = vorndBinaries()
+  if (!binaries) return null
   const dataDir = ensureDataDir()
-  const asarUnpacked = path.join(app.getAppPath() + '.unpacked', 'node_modules')
+  const web = webClientDir()
+  const devPort = buildChannel() === 'dev' ? readDevPort() : undefined
   return {
-    exec: process.execPath,
-    args: [entry],
+    exec: binaries.vornd,
+    args: [
+      '--data-dir',
+      dataDir,
+      ...(binaries.sessiond ? ['--sessiond', binaries.sessiond] : []),
+      ...(web ? ['--web', web] : []),
+      ...(devPort ? ['--port', devPort] : []),
+      // An app's server stops once nothing has used it for a while.
+      '--idle-exit'
+    ],
     // A daemon must not hold a directory an update can delete underneath it.
     cwd: dataDir,
     env: {
-      ELECTRON_RUN_AS_NODE: '1',
       [BOOTSTRAP_ENV_VAR]: bootstrapToken,
-      NODE_ENV: 'production',
-      VORN_NATIVE_MODULES_PATH: asarUnpacked,
-      NODE_PATH: [path.join(app.getAppPath(), 'node_modules'), asarUnpacked].join(path.delimiter),
+      // The dev app means its data directory; a debug vornd refuses the default one otherwise.
+      ...(buildChannel() === 'dev' ? { VORN_ALLOW_DEFAULT_DATA_DIR: '1' } : {}),
       ...identityEnv()
     }
   }
 }
 
-/** "Which version am I running" has two answers now, and the app's is the less useful one. */
-/** A server this app started or adopted; in host mode there is none to own. */
+/** vornd and its session holder: in the app's resources, or built in a checkout. */
+function vorndBinaries(): { vornd: string; sessiond: string | null } | null {
+  const exe = (name: string): string => (process.platform === 'win32' ? `${name}.exe` : name)
+  const dirs =
+    buildChannel() === 'dev'
+      ? (() => {
+          const core = path.join(devRepoRoot(__dirname), 'packages', 'core')
+          return [core, path.join(core, 'target', 'release'), path.join(core, 'target', 'debug')]
+        })()
+      : [path.join(process.resourcesPath, 'vornd')]
+  const override = process.env.VORN_VORND_PATH
+  const candidates = [
+    ...(override ? [path.resolve(override)] : []),
+    ...dirs.map((d) => path.join(d, exe('vornd')))
+  ]
+  const vornd = candidates.find((file) => existsSync(file))
+  if (!vornd) return null
+  const sessiond = path.join(path.dirname(vornd), exe('vorn-sessiond'))
+  return { vornd, sessiond: existsSync(sessiond) ? sessiond : null }
+}
+
+/** The web client's build, which vornd serves under /app, when there is one. */
+function webClientDir(): string | null {
+  const dir =
+    buildChannel() === 'dev'
+      ? path.join(devRepoRoot(__dirname), 'packages', 'web', 'dist')
+      : path.join(process.resourcesPath, 'web', 'dist')
+  return existsSync(dir) ? dir : null
+}
+
 function ownsServer(): boolean {
   return serverProcess !== null || adoptedPid !== null
 }
@@ -1329,7 +1108,6 @@ export function serverRuntime(): {
     }
   }
   const verdict = decideHandoff({
-    target: adoptedTarget,
     platform: process.platform,
     incumbent: identity,
     self: { appVersion: app.getVersion(), buildChannel: buildChannel() },
@@ -1353,48 +1131,39 @@ export type UpgradeOutcome =
   | { kind: 'failed'; why: string }
 
 /**
- * Move the running server onto this app's build without ending its terminals, by
- * asking it to start the replacement itself and pass the descriptors across.
- * Nothing here kills anything; the commit boundary in `handoff/donor.ts` guarantees it.
+ * Moves onto this app's build by stopping the adopted older server and
+ * starting this build's; the terminals stay in the session holder throughout.
  */
 export async function upgradeServerInPlace(forced = false): Promise<UpgradeOutcome> {
-  if (!adoptedIdentity || !adoptedTarget) {
+  if (!adoptedIdentity || adoptedPid === null || !bridge) {
     // This app spawned its own server, so it is already this build.
     return { kind: 'not-needed', why: 'this app started the server it is talking to' }
   }
-
   const verdict = decideHandoff({
-    target: adoptedTarget,
     platform: process.platform,
     incumbent: adoptedIdentity,
     self: { appVersion: app.getVersion(), buildChannel: buildChannel() },
     forced
   })
   if (!verdict.ask) {
-    log.info(`[handoff] not asking: ${verdict.why}`)
+    log.info(`[launcher] not replacing the server: ${verdict.why}`)
     return { kind: 'not-needed', why: verdict.why }
   }
-
-  log.info(`[handoff] asking the running server to hand over: ${verdict.why}`)
-  const outcome = await requestHandoff(adoptedTarget, resolveDataDir())
-  if (!outcome.ok) {
-    log.error(`[handoff] the request failed: ${outcome.why}`)
-    return { kind: 'failed', why: outcome.why }
+  log.info(`[launcher] replacing the running server: ${verdict.why}`)
+  const pid = adoptedPid
+  const sessions = adoptedIdentity.sessions ?? 0
+  // Cleared first, so the disconnect this causes is not read as a crash as well.
+  adoptedPid = null
+  await bridge.request('server:shutdown', undefined, 5_000).catch(() => {})
+  if (!(await ensureGone(pid))) {
+    adoptedPid = pid
+    return { kind: 'failed', why: 'the running server did not stop' }
   }
-  if (outcome.result.kind === 'declined') {
-    log.warn(`[handoff] the running server declined: ${outcome.result.because}`)
-    return { kind: 'failed', why: outcome.result.because }
-  }
-
-  // Recorded before the disconnect arrives, so the reconnect finds a live pid.
-  adoptedPid = outcome.result.pid
-  adoptedIdentity = { ...adoptedIdentity, appVersion: app.getVersion(), pid: outcome.result.pid }
-  log.info(`[handoff] ${outcome.result.sessions} terminal(s) moved to pid ${outcome.result.pid}`)
-  return { kind: 'handed-over', sessions: outcome.result.sessions }
+  adoptedIdentity = null
+  adoptedTarget = null
+  onServerExit('replaced with this build')
+  return { kind: 'handed-over', sessions }
 }
-
-/** How long the incumbent's death stays expected after a successful handoff. */
-const HANDOFF_SETTLE_MS = 30_000
 
 export async function stopServer(): Promise<void> {
   beginDeliberateStop()
@@ -1458,26 +1227,11 @@ export async function stopServer(): Promise<void> {
   adoptedPid = null
 }
 
-function resolveServerEntry(): string {
-  // In dev: packages/server/src/index.ts (run via tsx)
-  // In production: resources/server/index.cjs (bundled)
-  if (buildChannel() === 'dev') {
-    // Dev mode — use tsx to run TypeScript directly
-    return path.join(__dirname, '../../packages/server/src/index.ts')
-  }
-  return path.join(process.resourcesPath, 'server', 'index.cjs')
-}
-
 /**
  * Wait for a server we just spawned to publish its port.
  *
- * Only for the packaged branch, which spawns the server directly. Dev goes
- * through `npx tsx`, so its child is npx -- a parent of the process that
- * actually listens -- and the pid in the port file is the server's, never the
- * child's. Merging the two readiness paths onto this one therefore cannot work:
- * in dev the match below would never be satisfied and the launch would hang for
- * the full timeout. `tests/server-port-stability.test.ts` runs the tsx binary
- * directly for the same reason.
+ * Only for the packaged branch, whose output goes to a file; the dev branch
+ * reads the port vornd prints.
  *
  * Only ever satisfied by a file naming *this* child. The same file is what
  * `launchServer` reads before deciding whether to adopt, so a launch that
@@ -1575,13 +1329,7 @@ function readServerPort(child: ChildProcess): Promise<number> {
     }
 
     const timeout = setTimeout(() => {
-      // No port-file fallback here, deliberately. This is the dev path, and dev
-      // spawns through `npx`, so the child is a parent of the process that
-      // actually listens -- there is no pid to match the file against. A file
-      // written by somebody else's server would resolve to somebody else's port,
-      // and the bridge would be built with a credential that server never
-      // issued: the wrong-server failure this whole change exists to prevent.
-      // The packaged path has a pid to check, and checks it.
+      // No port-file fallback: another server's file would name a port this credential cannot use.
       settle(() => reject(new Error('Timeout waiting for server port')))
     }, 10_000)
 

@@ -1,25 +1,18 @@
-//! The endpoint: HTTP and WebSocket in front of the Node server.
+//! The endpoint: HTTP and WebSocket for every client.
 //!
-//! Clients connect to vornd exactly as they would to the server. A WebSocket
-//! upgrade is answered only after the server has accepted the same upgrade, so a
-//! refusal (a bad Origin, a wrong token) reaches the client as the server gave
-//! it. After that, frames go through unchanged in both directions, binary
-//! terminal frames and the server's own requests to the desktop included. Every
-//! other HTTP request is forwarded as it is.
+//! As the Vorn server ([`crate::serve`]), vornd answers everything itself:
+//! the socket protocol, the plain routes, and every call. Started in front of
+//! another server instead (`--upstream`, which tests use), a WebSocket
+//! upgrade is answered only after that server accepted the same upgrade, and
+//! frames go through unchanged both ways but for what vornd answers itself.
 //!
-//! The exceptions: terminal calls for a session vornd itself holds are
-//! answered here and never reach the server ([`crate::terminal`]), and so
-//! are the calls of the groups vornd has taken over ([`crate::native`]). What
-//! vornd sends a client and what the server sends it share one ordered
-//! outbox per connection ([`crate::streams::ClientConn`]). A connection that
-//! opens with the desktop's launch token in its `Authorization` is the
-//! desktop's, which the size rule favours ([`crate::size`]); nothing a
-//! client says later changes that.
-//!
-//! Headers that describe the client's request go through untouched, `Host` and
-//! `Origin` in particular: the server checks that they match, and both name
-//! vornd's address, which is what the client connected to. vornd listens only on
-//! loopback, so the server judging every peer to be on this machine is true.
+//! Either way, terminal calls for a session vornd holds are answered here
+//! ([`crate::terminal`]), and so are the calls of its groups
+//! ([`crate::native`]). What vornd sends a client shares one ordered outbox
+//! per connection ([`crate::streams::ClientConn`]). A connection that opens
+//! with the desktop's launch token in its `Authorization` is the desktop's,
+//! which the size rule favours ([`crate::size`]); nothing a client says
+//! later changes that.
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -84,7 +77,10 @@ const UPSTREAM_QUEUE: usize = 64;
 
 /// One vornd: where the server is, the group switches and what it has seen.
 pub struct Daemon {
-    upstream: SocketAddr,
+    /// The Node server vornd forwards to; `None` when vornd is the server.
+    upstream: Option<SocketAddr>,
+    /// What vornd keeps as the server, when it is one.
+    serving: std::sync::OnceLock<Arc<crate::serve::Serving>>,
     groups: Arc<Groups>,
     /// What answers the native groups' calls, when any group is not forwarded.
     native: Option<Arc<Native>>,
@@ -107,15 +103,24 @@ pub struct Daemon {
 
 impl Daemon {
     pub fn new(upstream: SocketAddr, groups: Groups) -> Arc<Daemon> {
-        Daemon::build(upstream, groups, None)
+        Daemon::build(Some(upstream), groups, None)
     }
 
     /// A daemon that also reports on the session holder it keeps.
     pub fn with_holder(upstream: SocketAddr, groups: Groups, holder: Arc<Holder>) -> Arc<Daemon> {
-        Daemon::build(upstream, groups, Some(holder))
+        Daemon::build(Some(upstream), groups, Some(holder))
     }
 
-    fn build(upstream: SocketAddr, groups: Groups, holder: Option<Arc<Holder>>) -> Arc<Daemon> {
+    /// A daemon that is the server itself, with the session holder it keeps.
+    pub fn serving(groups: Groups, holder: Option<Arc<Holder>>) -> Arc<Daemon> {
+        Daemon::build(None, groups, holder)
+    }
+
+    fn build(
+        upstream: Option<SocketAddr>,
+        groups: Groups,
+        holder: Option<Arc<Holder>>,
+    ) -> Arc<Daemon> {
         // The engine's streams, so its sessions' clients are served here.
         #[cfg(feature = "engine")]
         let streams = holder
@@ -137,8 +142,13 @@ impl Daemon {
                 engine.decide_statuses();
                 // The terminals vornd creates are started in the engine.
                 if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-                    let host = crate::engine::EngineHost::new(Arc::clone(engine), runtime);
+                    let host = crate::engine::EngineHost::new(Arc::clone(engine), runtime.clone());
                     native.set_host(Arc::new(host));
+                    // Clients are told of the sessions from what they do and what the registry records.
+                    runtime.spawn(crate::native::session_events::follow(
+                        Arc::downgrade(&native),
+                        Arc::clone(engine),
+                    ));
                 }
             }
             native
@@ -151,6 +161,7 @@ impl Daemon {
             listen: std::sync::OnceLock::new(),
             mcp: std::sync::OnceLock::new(),
             upstream,
+            serving: std::sync::OnceLock::new(),
             groups: Arc::new(groups),
             client: Client::builder(TokioExecutor::new()).build_http(),
             probe: Client::builder(TokioExecutor::new()).build_http(),
@@ -318,7 +329,7 @@ impl Daemon {
         };
         let declared = std::env::var("VORN_APP_ORIGINS").ok();
         let ancestors =
-            page::frame_ancestors(&[addr.port(), self.upstream.port()], declared.as_deref());
+            page::frame_ancestors(&[addr.port(), self.server_port()], declared.as_deref());
         let home = crate::native::shell::home_dir().into();
         let extensions =
             Extensions::new(supervisor, Arc::new(around), bridge_origin, ancestors, home);
@@ -355,7 +366,7 @@ impl Daemon {
         };
         native.set_link(Arc::clone(&link));
         link.set_native(native);
-        native.set_server_port(self.upstream.port());
+        native.set_server_port(self.server_port());
         if self.groups.mode("terminal") == Mode::Native {
             link.set_creates_terminals();
         }
@@ -398,9 +409,55 @@ impl Daemon {
         is_desktop_credential(auth, token)
     }
 
+    /// The port clients reach the server on: the Node server's, or vornd's own as the server.
+    fn server_port(&self) -> u16 {
+        match (self.upstream, self.serving.get()) {
+            (Some(upstream), _) => upstream.port(),
+            (None, Some(serving)) => serving.addr().port(),
+            (None, None) => self.listen.get().map_or(0, SocketAddr::port),
+        }
+    }
+
+    /// Whether a Node server is behind vornd.
+    pub(crate) fn has_upstream(&self) -> bool {
+        self.upstream.is_some()
+    }
+
+    /// vornd is the server from now on, as `serving` keeps it.
+    pub fn set_serving(&self, serving: Arc<crate::serve::Serving>) {
+        let _ = self.serving.set(serving);
+    }
+
+    pub(crate) fn streams(&self) -> &Arc<Streams> {
+        &self.streams
+    }
+
+    /// What answers the native calls, to keep.
+    pub fn native_handle(&self) -> Option<Arc<Native>> {
+        self.native.clone()
+    }
+
+    pub(crate) fn native(&self) -> Option<&Arc<Native>> {
+        self.native.as_ref()
+    }
+
+    pub(crate) fn groups_arc(&self) -> &Arc<Groups> {
+        &self.groups
+    }
+
+    /// Connection `conn` is the desktop's, which the size rule favours.
+    pub(crate) fn mark_desktop(&self, conn: u64) {
+        mark_desktop(self, conn);
+    }
+
+    /// Whether vornd answered a client's terminal frame itself.
+    pub(crate) fn answered_here(&self, conn: u64, reply: &Forwarder, text: &str) -> bool {
+        answered_here(self, conn, reply, text)
+    }
+
     /// Asks the server's own health route, and answers its status if it answered.
     pub async fn probe_upstream(&self) -> Option<StatusCode> {
-        let uri: Uri = format!("http://{}/health", self.upstream).parse().ok()?;
+        let uri: Uri = format!("http://{}/health", self.upstream?).parse().ok()?;
         let req = Request::get(uri).body(Full::new(Bytes::new())).ok()?;
         match tokio::time::timeout(UPSTREAM_PROBE_TIMEOUT, self.probe.request(req)).await {
             Ok(Ok(res)) => Some(res.status()),
@@ -427,17 +484,26 @@ pub async fn serve(
             },
             () = &mut shutdown => break,
         };
-        let daemon = daemon.clone();
-        tokio::spawn(async move {
-            let service = service_fn(move |req| handle(daemon.clone(), req, peer));
-            let conn = hyper::server::conn::http1::Builder::new()
-                .serve_connection(TokioIo::new(stream), service)
-                .with_upgrades();
-            if let Err(err) = conn.await {
-                debug!(%peer, %err, "connection ended with an error");
-            }
-        });
+        serve_connection(&daemon, stream, peer);
     }
+}
+
+/// Serves one accepted connection's requests, upgrades included.
+pub(crate) fn serve_connection(
+    daemon: &Arc<Daemon>,
+    stream: tokio::net::TcpStream,
+    peer: SocketAddr,
+) {
+    let daemon = daemon.clone();
+    tokio::spawn(async move {
+        let service = service_fn(move |req| handle(daemon.clone(), req, peer));
+        let conn = hyper::server::conn::http1::Builder::new()
+            .serve_connection(TokioIo::new(stream), service)
+            .with_upgrades();
+        if let Err(err) = conn.await {
+            debug!(%peer, %err, "connection ended with an error");
+        }
+    });
 }
 
 async fn handle(
@@ -445,6 +511,22 @@ async fn handle(
     req: Request<Incoming>,
     peer: SocketAddr,
 ) -> Result<Response<Body>, Infallible> {
+    if let Some(serving) = daemon.serving.get().cloned() {
+        if !peer.ip().is_loopback() && !public_route(req.uri().path()) {
+            return Ok(crate::serve::http::not_found());
+        }
+        if is_websocket_upgrade(req.headers()) {
+            return Ok(serve_websocket(daemon, serving, req, peer).await);
+        }
+        let path = req.uri().path();
+        if req.method() == Method::GET && crate::serve::http::answers(path) {
+            return Ok(crate::serve::http::answer(
+                path,
+                serving.web(),
+                serving.data_dir(),
+            ));
+        }
+    }
     #[cfg(feature = "engine")]
     if req.uri().path() == crate::engine::SESSIONS_PATH && req.method() == Method::GET {
         let digests = req
@@ -515,7 +597,88 @@ async fn handle(
                 .count(crate::mcp::COUNTED_AS, Counted::Forwarded),
         }
     }
+    if daemon.upstream.is_none() {
+        return Ok(crate::serve::http::not_found());
+    }
     Ok(forward_http(&daemon, req).await)
+}
+
+/// The routes a peer on another machine may reach, as the Node server
+/// served them: everything else is this machine's.
+fn public_route(path: &str) -> bool {
+    path == "/ws"
+        || crate::serve::http::answers(path)
+        || crate::pair::is_pair_path(path)
+        || path.starts_with("/artifact/")
+        || path.starts_with("/gate-view/")
+}
+
+/// A WebSocket with vornd as the server: only `/ws`, from a page it trusts.
+async fn serve_websocket(
+    daemon: Arc<Daemon>,
+    serving: Arc<crate::serve::Serving>,
+    mut req: Request<Incoming>,
+    peer: SocketAddr,
+) -> Response<Body> {
+    if req.uri().path() != "/ws" {
+        return crate::serve::http::not_found();
+    }
+    let Some(key) = req.headers().get(header::SEC_WEBSOCKET_KEY).cloned() else {
+        return plain(StatusCode::BAD_REQUEST, "missing Sec-WebSocket-Key");
+    };
+    if let Some(native) = daemon.native.as_ref() {
+        daemon.groups.count(ORIGIN_METHOD, Counted::Native);
+        if !origin_allowed(native, req.headers()) {
+            return origin_refused();
+        }
+    }
+    let desktop = daemon.is_desktop(req.headers());
+    let credential = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(vorn_reach::token::bearer_from)
+        .map(str::to_owned);
+    let topics = crate::serve::clients::Topics::from_query(req.uri().query());
+    let on_upgrade = hyper::upgrade::on(&mut req);
+    let mut res = Response::new(full(Bytes::new()));
+    *res.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
+    let headers = res.headers_mut();
+    headers.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+    headers.insert(header::CONNECTION, HeaderValue::from_static("Upgrade"));
+    if let Ok(accept) = HeaderValue::from_str(&derive_accept_key(key.as_bytes())) {
+        headers.insert(header::SEC_WEBSOCKET_ACCEPT, accept);
+    }
+    headers.insert(VORND_PROTOCOL_HEADER, HeaderValue::from(VORND_PROTOCOL));
+    tokio::spawn(async move {
+        let upgraded = match on_upgrade.await {
+            Ok(u) => u,
+            Err(err) => {
+                debug!(%err, "the client left before the upgrade finished");
+                return;
+            }
+        };
+        let client = WebSocketStream::from_raw_socket(
+            TokioIo::new(upgraded),
+            Role::Server,
+            Some(ws_config()),
+        )
+        .await;
+        daemon.open.fetch_add(1, Ordering::Relaxed);
+        daemon.served.fetch_add(1, Ordering::Relaxed);
+        crate::serve::socket::run(
+            Arc::clone(&daemon),
+            serving,
+            client,
+            desktop,
+            credential,
+            peer,
+            topics,
+        )
+        .await;
+        daemon.open.fetch_sub(1, Ordering::Relaxed);
+    });
+    res
 }
 
 /// The connection a browser connector's child calls its window for:
@@ -588,7 +751,8 @@ async fn mcp(daemon: &Daemon, req: Request<Incoming>) -> Response<Body> {
 
 async fn health(daemon: &Daemon) -> Response<Body> {
     let upstream = daemon.probe_upstream().await;
-    let reachable = upstream.is_some_and(|s| s.is_success());
+    // As the server, vornd answering is the server answering.
+    let reachable = daemon.upstream.is_none() || upstream.is_some_and(|s| s.is_success());
     let counts = daemon.groups.counts();
     let mut groups = serde_json::Map::new();
     for (group, mode) in daemon.groups.modes() {
@@ -614,18 +778,13 @@ async fn health(daemon: &Daemon) -> Response<Body> {
     if let (Some(mcp), Some(entry)) = (daemon.mcp.get(), groups.get_mut(crate::mcp::GROUP)) {
         entry["sessions"] = json!(mcp.sessions());
     }
-    let still: serde_json::Map<String, serde_json::Value> = crate::groups::STILL_FORWARDED
-        .iter()
-        .map(|(entry, why)| ((*entry).to_owned(), json!(why.name())))
-        .collect();
     let body = json!({
         "ok": reachable,
-        "stillForwarded": still,
         "unexpectedForwards": daemon.groups.unexpected_forwards(),
         "protocol": VORND_PROTOCOL,
         "serverProtocols": [SERVER_PROTOCOLS.start(), SERVER_PROTOCOLS.end()],
         "upstream": {
-            "address": daemon.upstream.to_string(),
+            "address": daemon.upstream.map(|u| u.to_string()),
             "reachable": reachable,
             "status": upstream.map(|s| s.as_u16()),
         },
@@ -696,7 +855,10 @@ async fn sessions(daemon: &Daemon, digests: bool) -> Response<Body> {
 async fn forward_http(daemon: &Daemon, req: Request<Incoming>) -> Response<Body> {
     let (mut parts, body) = req.into_parts();
     let path = parts.uri.path_and_query().map_or("/", |p| p.as_str());
-    parts.uri = match format!("http://{}{}", daemon.upstream, path).parse() {
+    let Some(upstream) = daemon.upstream else {
+        return crate::serve::http::not_found();
+    };
+    parts.uri = match format!("http://{upstream}{path}").parse() {
         Ok(uri) => uri,
         Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request path"),
     };
@@ -726,7 +888,10 @@ impl Daemon {
         body: Bytes,
     ) -> Response<Body> {
         let path = parts.uri.path_and_query().map_or("/", |p| p.as_str());
-        parts.uri = match format!("http://{}{}", self.upstream, path).parse() {
+        let Some(upstream) = self.upstream else {
+            return crate::serve::http::not_found();
+        };
+        parts.uri = match format!("http://{upstream}{path}").parse() {
             Ok(uri) => uri,
             Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request path"),
         };
@@ -780,7 +945,10 @@ async fn websocket(daemon: Arc<Daemon>, mut req: Request<Incoming>) -> Response<
         .and_then(vorn_reach::token::bearer_from)
         .map(str::to_owned);
     let path = req.uri().path_and_query().map_or("/", |p| p.as_str());
-    let mut upstream_req = match format!("ws://{}{}", daemon.upstream, path).into_client_request() {
+    let Some(upstream) = daemon.upstream else {
+        return crate::serve::http::not_found();
+    };
+    let mut upstream_req = match format!("ws://{upstream}{path}").into_client_request() {
         Ok(r) => r,
         Err(_) => return plain(StatusCode::BAD_REQUEST, "bad request path"),
     };
@@ -1225,14 +1393,17 @@ fn plain(status: StatusCode, message: &'static str) -> Response<Body> {
 
 /// Logs once whether the server answers, for the start of the log.
 pub async fn log_upstream(daemon: &Daemon) {
+    if daemon.upstream.is_none() {
+        return;
+    }
     match daemon.probe_upstream().await {
         Some(status) if status.is_success() => {
-            info!(upstream = %daemon.upstream, "the server answers")
+            info!(upstream = ?daemon.upstream, "the server answers")
         }
         Some(status) => {
-            warn!(upstream = %daemon.upstream, %status, "the server answered its health check with an error")
+            warn!(upstream = ?daemon.upstream, %status, "the server answered its health check with an error")
         }
-        None => warn!(upstream = %daemon.upstream, "the server is not answering yet"),
+        None => warn!(upstream = ?daemon.upstream, "the server is not answering yet"),
     }
 }
 

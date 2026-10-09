@@ -1,11 +1,11 @@
 /**
  * vornd's MCP server at `/mcp`, against the TypeScript MCP server.
  *
- * One server is started, with its store in memory, and vornds in front of
- * it: one serving MCP, one that has no local credential to check against,
- * and one leaving `/mcp` to the server. The TypeScript server runs in this
- * process and reaches the same server over its socket, as it does when an
- * agent starts it; vornd's tools reach it through vornd's own `/ws`.
+ * vornd is started as the server on a data directory of its own, serving
+ * MCP, and a second one leaving `/mcp` unserved. The TypeScript server runs
+ * in this process on the same database, and reaches vornd over its socket
+ * as it does when an agent starts it; vornd's tools reach it through vornd's
+ * own `/ws`.
  *
  * Every message goes to both and the two responses must be the same, and so
  * must the configuration a call leaves behind, but for the differences
@@ -18,18 +18,18 @@
  * Runs where vornd has been built (`yarn build:core`, or the binary in
  * `VORN_CONFORMANCE_VORND`).
  */
-import { spawn, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { PassThrough } from 'node:stream'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
-import type { AppConfig, WorkflowDefinition } from '../packages/shared/src/types'
+import type { AppConfig } from '../packages/shared/src/types'
 import { comparable, randomArgs, refusedArgs, seeded, uuidsIn } from './helpers/mcp-parity'
+import { startServed, type Served } from './helpers/served'
 
 const TEST_CREDENTIAL = 'native-server-mcp-test-credential'
 const EXE = process.platform === 'win32' ? '.exe' : ''
@@ -43,66 +43,7 @@ const vornd = [
   path.resolve(__dirname, `../packages/core/target/release/vornd${EXE}`)
 ].find((p): p is string => !!p && fs.existsSync(p))
 
-const store = vi.hoisted(() => ({ dir: '', config: null as unknown }))
-
-vi.mock('node-pty', () => ({
-  default: { spawn: vi.fn() },
-  spawn: vi.fn()
-}))
-
-vi.mock('../packages/server/src/tailscale', () => ({
-  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
-  clearBinaryCache: vi.fn()
-}))
-
-// The configuration lives in `store.config`, which each case resets.
-vi.mock(
-  '../packages/server/src/database',
-  () =>
-    ({
-      closeDatabase: vi.fn(),
-      initDatabase: vi.fn(),
-      getDataDir: vi.fn(() => store.dir),
-      dbGetOwnerUser: vi.fn(() => ({
-        id: 'owner-1',
-        name: 'test',
-        role: 'owner' as const,
-        createdAt: new Date().toISOString()
-      })),
-      dbInsertDeviceToken: vi.fn(),
-      dbListDeviceTokens: vi.fn(() => []),
-      dbGetDeviceTokenSecret: vi.fn(),
-      dbRevokeDeviceToken: vi.fn(() => true),
-      dbTouchDeviceToken: vi.fn(),
-      loadConfig: vi.fn(() => structuredClone(store.config)),
-      saveConfig: vi.fn((config: unknown) => {
-        store.config = structuredClone(config)
-      }),
-      dbListTasks: vi.fn(() => []),
-      dbGetTask: vi.fn(),
-      dbInsertTask: vi.fn(),
-      dbUpdateTask: vi.fn(),
-      dbDeleteTask: vi.fn(),
-      dbGetMaxTaskOrder: vi.fn(() => 0),
-      dbGetProject: vi.fn(),
-      dbListProjects: vi.fn(() => []),
-      dbListWorkflows: vi.fn(() => []),
-      dbInsertWorkflow: vi.fn(),
-      dbUpdateWorkflow: vi.fn(),
-      dbDeleteWorkflow: vi.fn(),
-      saveWorkflowRun: vi.fn(),
-      listWorkflowRuns: vi.fn(() => []),
-      listWorkflowRunIds: vi.fn(() => []),
-      deleteArtifactsUpdatedBefore: vi.fn(() => []),
-      listArtifactIds: vi.fn(() => []),
-      listWorkflowRunsByTask: vi.fn(() => []),
-      updateWorkflowRunStatus: vi.fn(),
-      dbReleaseConnectorInboxLeases: vi.fn(),
-      dbCountActiveConnectorInboxLeases: vi.fn(() => 0),
-      dbClaimConnectorInbox: vi.fn(() => []),
-      dbGetWorkflowRunByConnectorInboxId: vi.fn(() => null)
-    }) satisfies Partial<Record<keyof typeof import('../packages/server/src/database'), unknown>>
-)
+const store = { dir: '' }
 
 const TASK_TODO = '0b6f3f0e-4c1a-4e8e-9a51-0d2f1c1e7a01'
 const TASK_DONE = '0b6f3f0e-4c1a-4e8e-9a51-0d2f1c1e7a02'
@@ -369,53 +310,15 @@ async function vorndSide(port: number, credentials: Record<string, string>): Pro
   }
 }
 
-interface Vornd {
-  port: number
-  child: ChildProcess
-}
-
-async function startVornd(
-  upstream: number,
-  args: string[],
-  env: Record<string, string> = {}
-): Promise<Vornd> {
-  const child = spawn(vornd!, ['--upstream', `127.0.0.1:${upstream}`, ...args], {
-    stdio: ['ignore', 'pipe', 'inherit'],
-    env: { ...process.env, VORND_LOG: process.env.VORND_LOG ?? 'warn', ...env }
-  })
-  const port = await new Promise<number>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('vornd did not start')), 10_000)
-    createInterface({ input: child.stdout! }).once('line', (line) => {
-      clearTimeout(timer)
-      resolve((JSON.parse(line) as { port: number }).port)
-    })
-    child.once('exit', (code) => {
-      clearTimeout(timer)
-      reject(new Error(`vornd exited with ${code} before listening`))
-    })
-  })
-  return { port, child }
-}
-
-function stopVornd(v: Vornd | undefined): Promise<void> {
-  if (!v || v.child.exitCode !== null || v.child.signalCode !== null) return Promise.resolve()
-  return new Promise((resolve) => {
-    v.child.once('exit', () => resolve())
-    v.child.kill()
-  })
-}
-
 type Groups = Record<string, { mode?: string; native?: number; forwarded?: number }>
 
-async function groups(v: Vornd): Promise<Groups> {
+async function groups(v: Served): Promise<Groups> {
   const res = await fetch(`http://127.0.0.1:${v.port}/vornd/health`)
   return ((await res.json()) as { groups: Groups }).groups
 }
 
-let closeServer: () => Promise<void>
-let native: Vornd | undefined
-let untold: Vornd | undefined
-let forward: Vornd | undefined
+let native: Served | undefined
+let forward: Served | undefined
 let ts: Side
 let rust: Side
 let version: string
@@ -429,14 +332,27 @@ const credentials = (): Record<string, string> => ({
   'Vorn-Cwd': encodeURIComponent(process.cwd())
 })
 
-function reset(): void {
-  store.config = structuredClone(start)
+/** Writes the starting configuration back, for the next call to start from. */
+async function reset(): Promise<void> {
+  const { configManager } = await import('../packages/server/src/config-manager')
+  configManager.saveConfig(structuredClone(start))
+  await forgetCache()
 }
 
-/** Clears the server's cached configuration, so the next read is the store's. */
+/** Clears the in-process cached configuration, so the next read is the database's. */
 async function forgetCache(): Promise<void> {
   const { configManager } = await import('../packages/server/src/config-manager')
   ;(configManager as unknown as { cachedConfig: unknown }).cachedConfig = null
+}
+
+/** The configuration as the database holds it now, but for how many times it was saved. */
+async function stored(): Promise<unknown> {
+  await forgetCache()
+  const { configManager } = await import('../packages/server/src/config-manager')
+  const { revision: _revision, ...config } = configManager.loadConfig() as AppConfig & {
+    revision?: number
+  }
+  return config
 }
 
 /** One tool call on each side, each from the starting configuration. */
@@ -448,14 +364,12 @@ async function both(name: string, args: Record<string, unknown> | undefined) {
     method: 'tools/call',
     params: args === undefined ? { name } : { name, arguments: args }
   } as JSONRPCMessage
-  reset()
-  await forgetCache()
+  await reset()
   const theirs = await ts.send(call)
-  const theirConfig = store.config
-  reset()
-  await forgetCache()
+  const theirConfig = await stored()
+  await reset()
   const ours = await rust.send(call)
-  const ourConfig = store.config
+  const ourConfig = await stored()
   return {
     theirs: comparable(theirs, theirConfig, fixtureIds),
     ours: comparable(ours, ourConfig, fixtureIds),
@@ -468,62 +382,13 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
     delete process.env.VORN_SESSION_ID
     store.dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-native-mcp-')))
     process.env.VORN_DATA_DIR = store.dir
+    native = await startServed({ dataDir: store.dir, credential: TEST_CREDENTIAL })
+    forward = await startServed({ credential: TEST_CREDENTIAL, args: ['--groups', 'mcp=forward'] })
+    const { configManager } = await import('../packages/server/src/config-manager')
+    configManager.init(store.dir)
     start = fixture(process.cwd())
     fixtureIds = uuidsIn(start)
-    reset()
-    process.env.SECRET_VORN_BOOTSTRAP_TOKEN = TEST_CREDENTIAL
-    const { startServer } = await import('../packages/server/src/index')
-    const origWrite = process.stdout.write.bind(process.stdout)
-    process.stdout.write = (() => true) as typeof process.stdout.write
-    let serverPort: number
-    try {
-      const { app, port } = await startServer({ port: 0 })
-      serverPort = port
-      closeServer = () => app.close()
-    } finally {
-      process.stdout.write = origWrite
-    }
-    // vornd answers the configuration from vorn.db; here it lives in the mocked store, so the server answers it for both sides.
-    const { registerMethod } = await import('../packages/server/src/ws-handler')
-    const { configManager } = await import('../packages/server/src/config-manager')
-    registerMethod('config:load', () => configManager.loadConfig())
-    registerMethod('config:save', (config) => {
-      configManager.saveConfig(config as AppConfig)
-      configManager.notifyChanged()
-    })
-    // The TypeScript tools write workflows through their own methods, which vornd answers; here they edit the same store.
-    const editWorkflows = (change: (list: WorkflowDefinition[]) => WorkflowDefinition[]) => {
-      const config = configManager.loadConfig()
-      configManager.saveConfig({ ...config, workflows: change(config.workflows ?? []) })
-      configManager.notifyChanged()
-    }
-    registerMethod('workflow:create', (params) => {
-      const { workflow } = params as { workflow: WorkflowDefinition }
-      editWorkflows((list) => [...list, workflow])
-      return workflow
-    })
-    registerMethod('workflow:update', (params) => {
-      const { id, updates } = params as { id: string; updates: Partial<WorkflowDefinition> }
-      const ok = (configManager.loadConfig().workflows ?? []).some((w) => w.id === id)
-      editWorkflows((list) => list.map((w) => (w.id === id ? { ...w, ...updates } : w)))
-      return { ok }
-    })
-    registerMethod('workflow:delete', (params) => {
-      const { id } = params as { id: string }
-      const ok = (configManager.loadConfig().workflows ?? []).some((w) => w.id === id)
-      editWorkflows((list) => list.filter((w) => w.id !== id))
-      return { ok }
-    })
-    // Connectors are vornd's too, which has no vorn.db here: a fixed empty set answers both sides alike.
-    registerMethod('connector:list', () => [])
-    registerMethod('connector:catalog', () => ({ items: [], templates: [], mcpServers: [] }))
-    registerMethod('connector:status', () => [])
-    registerMethod('connector:listPacks', () => [])
-    registerMethod('connection:list', () => [])
-    const token = { VORND_DESKTOP_TOKEN: TEST_CREDENTIAL }
-    native = await startVornd(serverPort, ['--groups', 'mcp=native'], token)
-    untold = await startVornd(serverPort, ['--groups', 'mcp=native'])
-    forward = await startVornd(serverPort, ['--groups', 'mcp=forward'], token)
+    await reset()
 
     version = (
       JSON.parse(
@@ -550,9 +415,12 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
   }, 60_000)
 
   afterAll(async () => {
-    await Promise.all([stopVornd(native), stopVornd(untold), stopVornd(forward)])
-    await closeServer?.()
-    if (store.dir) fs.rmSync(store.dir, { recursive: true, force: true })
+    const { configManager } = await import('../packages/server/src/config-manager')
+    configManager.close()
+    await Promise.all([native?.stop(), forward?.stop()])
+    for (const dir of [store.dir, native?.home, forward?.home, forward?.dataDir]) {
+      if (dir) fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('lists the same tools', async () => {
@@ -660,8 +528,7 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
     expect((await post(native!.port, {}, ping)).status).toBe(401)
     const wrong = await post(native!.port, { Authorization: 'Bearer not-it' }, ping)
     expect(wrong.status).toBe(401)
-    expect((await post(untold!.port, credentials(), ping)).status).toBe(503)
-    // Forwarded, `/mcp` is the server's, which has no such route.
+    // Not served, `/mcp` is no route at all.
     expect((await post(forward!.port, credentials(), ping)).status).toBe(404)
   })
 
@@ -696,12 +563,10 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
     expect(init.result.serverInfo).toEqual({ name: 'vorn', version })
     stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
 
-    reset()
-    await forgetCache()
+    await reset()
     const call = { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_projects' } }
     const viaRelay = await ask(call)
-    reset()
-    await forgetCache()
+    await reset()
     expect(viaRelay).toEqual(await ts.send(call as JSONRPCMessage))
 
     stdin.end()

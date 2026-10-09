@@ -19,6 +19,7 @@
 //! at `/mcp` ([`mcp`]).
 
 pub mod applink;
+pub mod boot;
 pub mod bridge;
 pub mod carry;
 pub mod claims;
@@ -39,6 +40,7 @@ mod pair;
 pub mod protocol;
 pub mod proxy;
 pub mod registry;
+pub mod serve;
 #[cfg(feature = "engine")]
 pub mod size;
 pub mod streams;

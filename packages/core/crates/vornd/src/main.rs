@@ -1,4 +1,8 @@
+//! `vornd --data-dir DIR [--port N] [--host IP] [--web DIR] [--idle-exit] [--sessiond PATH] [--log-file PATH]`
+//! runs vornd as the Vorn server ([`vornd::serve`]).
+//!
 //! `vornd --upstream 127.0.0.1:50091 [--listen 127.0.0.1:0] [--groups workflow=shadow] [--db PATH] [--log-file PATH] [--sessiond PATH --home DIR] [--debug-spawn]`
+//! runs it in front of another server, as tests do.
 //!
 //! The app passes the desktop's launch token in `VORND_DESKTOP_TOKEN`: a
 //! WebSocket that opens with it is the desktop's (TP §10). It is read once
@@ -18,17 +22,29 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
 use tokio::net::TcpListener;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use vorn_logfile::{LogFile, Rotation};
 use vornd::applink::AppLink;
 use vornd::holder::{self, Holder, HolderConfig};
 use vornd::protocol::VORND_PROTOCOL;
+use vornd::serve::ServeConfig;
 use vornd::{proxy, Daemon, Groups};
 
-const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--groups group=mode,...] [--db PATH] [--log-file PATH] [--exit-with-stdin] [--sessiond PATH --home DIR] [--debug-spawn]
+const USAGE: &str = "usage: vornd --data-dir DIR [--port N] [--host IP] [--web DIR] [--idle-exit] [--sessiond PATH] [--log-file PATH] [--exit-with-stdin]
+       vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT] [--groups group=mode,...] [--db PATH] [--log-file PATH] [--exit-with-stdin] [--sessiond PATH --home DIR] [--debug-spawn]
 
-  --upstream   the Node server to forward to
+  --data-dir   serve as the Vorn server from this data directory, $VORN_HOME:
+               its database, the port and credential it publishes, and the
+               session holder's home
+  --port       the port to listen on, for this run only (default: the one this
+               install keeps, else 50091)
+  --host       the address to listen on (default: every interface with Network
+               Access on, else loopback)
+  --web        the web client's build, served under /app
+  --idle-exit  stop once nothing has used the server for a while
+               ($VORN_IDLE_TIMEOUT_MS, default 30 minutes)
+  --upstream   another server to stand in front of, for tests
   --listen     where to listen; loopback only (default 127.0.0.1:0)
   --groups     per-group switches, forward | shadow | native, for tests
                (default: every implemented group native, the rest forwarded;
@@ -51,7 +67,9 @@ const USAGE: &str = "usage: vornd --upstream HOST:PORT [--listen 127.0.0.1:PORT]
 
 #[derive(Debug)]
 struct Args {
-    upstream: SocketAddr,
+    upstream: Option<SocketAddr>,
+    /// Set when vornd is the server.
+    serve: Option<ServeConfig>,
     listen: SocketAddr,
     groups: Groups,
     db: Option<PathBuf>,
@@ -71,6 +89,11 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut sessiond = None;
     let mut home = None;
     let mut debug_spawn = false;
+    let mut data_dir: Option<PathBuf> = None;
+    let mut port = None;
+    let mut host = None;
+    let mut web = None;
+    let mut idle_exit = false;
     while let Some(flag) = args.next() {
         let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
         match flag.as_str() {
@@ -93,11 +116,30 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--sessiond" => sessiond = Some(PathBuf::from(value("--sessiond")?)),
             "--home" => home = Some(PathBuf::from(value("--home")?)),
             "--debug-spawn" => debug_spawn = true,
+            "--data-dir" => data_dir = Some(PathBuf::from(value("--data-dir")?)),
+            "--port" => {
+                port = Some(
+                    value("--port")?
+                        .parse::<u16>()
+                        .map_err(|e| format!("--port: {e}"))?,
+                )
+            }
+            "--host" => {
+                host = Some(
+                    value("--host")?
+                        .parse::<std::net::IpAddr>()
+                        .map_err(|e| format!("--host: {e}"))?,
+                )
+            }
+            "--web" => web = Some(PathBuf::from(value("--web")?)),
+            "--idle-exit" => idle_exit = true,
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument `{other}`")),
         }
     }
-    let upstream = upstream.ok_or("--upstream is required")?;
+    if upstream.is_some() == data_dir.is_some() {
+        return Err("give either --data-dir, to serve, or --upstream".into());
+    }
     // Everything behind vornd trusts that its peers are on this machine, which
     // only stays true while vornd itself is reachable from nowhere else.
     if !listen.ip().is_loopback() {
@@ -107,13 +149,37 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         ));
     }
     let groups = Groups::new(groups.as_deref()).map_err(|e| format!("--groups: {e}"))?;
+    // As the server, the data directory is the session holder's home.
+    let home = home.or_else(|| sessiond.as_ref().and(data_dir.clone()));
+    let allowed = std::env::var(vornd::serve::files::ALLOW_DEFAULT_VAR).is_ok_and(|v| v == "1");
+    let user_home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    for dir in [data_dir.as_ref(), home.as_ref()].into_iter().flatten() {
+        vornd::serve::files::refuse_default(dir, user_home.as_deref(), allowed)?;
+    }
     let holder = match (sessiond, home) {
         (Some(bundled), Some(home)) => Some(HolderConfig { home, bundled }),
         (None, None) => None,
         _ => return Err("--sessiond and --home go together".into()),
     };
+    let serve = data_dir.map(|data_dir| ServeConfig {
+        data_dir,
+        port,
+        host,
+        web,
+        idle: idle_exit.then(|| {
+            vornd::serve::idle::window(std::env::var("VORN_IDLE_TIMEOUT_MS").ok().as_deref())
+        }),
+        build_channel: std::env::var("VORN_BUILD_CHANNEL")
+            .ok()
+            .filter(|c| c == "dev" || c == "packaged")
+            .unwrap_or_else(|| "packaged".to_owned()),
+        app_version: std::env::var("VORN_APP_VERSION").unwrap_or_else(|_| "unknown".to_owned()),
+    });
     Ok(Args {
         upstream,
+        serve,
         listen,
         groups,
         db,
@@ -266,6 +332,7 @@ fn carry_records(
     let engine = holder.engine()?;
     let registry = engine.registry();
     registry.own_records();
+    registry.set_boot_time(vornd::boot::time_ms());
     registry.expect_holder();
     let file = vornd::carry::CarryFile::in_dir(&cfg.home.join("vornd"));
     if let Some(carried) = file.load() {
@@ -279,6 +346,37 @@ fn carry_records(
     Some(file)
 }
 
+/// The sessions an older server saved in its database, taken once and then
+/// forgotten there, so they are offered by this vornd and never again.
+#[cfg(feature = "engine")]
+fn take_old_table(engine: &vornd::engine::Engine, db: &std::path::Path) {
+    let mut store = match vorn_store::Store::open_beside(db) {
+        Ok(Some(store)) => store,
+        Ok(None) => return,
+        Err(err) => return warn!(%err, "could not open the database for the old session records"),
+    };
+    let old = match store.call("getPreviousSessions", serde_json::json!([])) {
+        Ok(rows) => rows,
+        Err(err) => return warn!(%err, "could not read the old session records"),
+    };
+    let terminals: Vec<vornd::registry::TerminalSession> = match serde_json::from_value(old) {
+        Ok(t) => t,
+        Err(err) => return warn!(%err, "the old session records do not read"),
+    };
+    if terminals.is_empty() {
+        return;
+    }
+    let records = terminals.len();
+    let carried = engine.carry_old(terminals);
+    if let Err(err) = store.call("clearSessions", serde_json::json!([])) {
+        warn!(%err, "could not forget the old session records");
+    }
+    info!(
+        records,
+        carried, "took the old session records from the database"
+    );
+}
+
 #[cfg(not(feature = "engine"))]
 fn carry_records(_: &HolderConfig, _: &Holder, _: bool) -> Option<vornd::carry::CarryFile> {
     None
@@ -287,12 +385,21 @@ fn carry_records(_: &HolderConfig, _: &Holder, _: bool) -> Option<vornd::carry::
 /// Where the app passes the desktop's launch token.
 const DESKTOP_TOKEN_VAR: &str = "VORND_DESKTOP_TOKEN";
 
-/// The desktop's launch token, taken out of the environment. Called first
-/// in `main`, while vornd has one thread and has started nothing.
+/// The name the app has always passed the server's credential under.
+const BOOTSTRAP_VAR: &str = "SECRET_VORN_BOOTSTRAP_TOKEN";
+
+/// The desktop's launch token, taken out of the environment, under either
+/// name. Called first in `main`, while vornd has one thread and has started
+/// nothing, so no program it runs inherits it.
 fn take_desktop_token() -> Option<Vec<u8>> {
-    let token = std::env::var_os(DESKTOP_TOKEN_VAR)?;
-    std::env::remove_var(DESKTOP_TOKEN_VAR);
-    Some(token.into_encoded_bytes()).filter(|t| !t.is_empty())
+    let mut found = None;
+    for var in [DESKTOP_TOKEN_VAR, BOOTSTRAP_VAR] {
+        if let Some(token) = std::env::var_os(var) {
+            std::env::remove_var(var);
+            found = found.or(Some(token.into_encoded_bytes()).filter(|t| !t.is_empty()));
+        }
+    }
+    found
 }
 
 fn main() -> ExitCode {
@@ -321,129 +428,269 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    runtime.block_on(async move {
-        let listener = match TcpListener::bind(args.listen).await {
-            Ok(l) => l,
+    runtime.block_on(run(args, desktop_token))
+}
+
+/// What vornd as the server holds before anything else starts.
+struct Served {
+    held: vornd::serve::files::Held,
+    config: ServeConfig,
+    db: PathBuf,
+    credential: Vec<u8>,
+}
+
+async fn run(args: Args, desktop_token: Option<Vec<u8>>) -> ExitCode {
+    // As the server: the data directory first, so a second vornd touches nothing.
+    let served = match &args.serve {
+        Some(config) => {
+            let held = match vornd::serve::files::Held::take(&config.data_dir) {
+                Ok(held) => held,
+                Err(_) => {
+                    error!(dir = %config.data_dir.display(), "another Vorn server is serving this data directory");
+                    return ExitCode::from(vornd::serve::files::EXIT_TAKEN);
+                }
+            };
+            let db = match vornd::serve::open_database(&config.data_dir) {
+                Ok(db) => db,
+                Err(err) => {
+                    error!(%err, "could not start");
+                    return ExitCode::FAILURE;
+                }
+            };
+            Some(Served {
+                held,
+                config: config.clone(),
+                db,
+                credential: vornd::serve::files::credential(desktop_token.clone()),
+            })
+        }
+        None => None,
+    };
+    let listener = match (&served, args.upstream) {
+        (None, Some(_)) => match TcpListener::bind(args.listen).await {
+            Ok(l) => Some(l),
             Err(err) => {
                 error!(listen = %args.listen, %err, "could not listen");
                 return ExitCode::FAILURE;
             }
-        };
-        let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
-        for (group, mode) in args.groups.modes() {
-            info!(group, %mode, "group switch");
-        }
-        let mut kept = None;
-        let mut grid: Option<String> = None;
-        let mut app: Option<(PathBuf, String)> = None;
-        let link = Arc::new(AppLink::default());
-        let mut carry = None;
-        let daemon = match args.holder {
-            Some(cfg) => {
-                let home = cfg.home.clone();
-                match tokio::task::spawn_blocking(move || vorn_sessiond::rundir::sweep(&home)).await
-                {
-                    Ok(0) => {}
-                    Ok(swept) => info!(swept, "removed what dead owners left in run/"),
-                    Err(err) => error!(%err, "could not sweep run/"),
-                }
-                let holder = Arc::new(new_holder(&cfg));
-                // Before the holder connects: what it holds is adopted then.
-                let owned = args.groups.mode("sessions") == vornd::Mode::Native;
-                carry = carry_records(&cfg, &holder, owned);
-                grid = serve_grid(&cfg, &holder);
-                app = serve_app(&cfg, &holder, &link).map(|e| (cfg.home.clone(), e));
-                tokio::spawn(holder::keep(cfg, holder.clone()));
-                kept = Some(holder.clone());
-                Daemon::with_holder(args.upstream, args.groups, holder)
+        },
+        _ => None,
+    };
+    for (group, mode) in args.groups.modes() {
+        info!(group, %mode, "group switch");
+    }
+    let mut kept = None;
+    let mut grid: Option<String> = None;
+    let mut app: Option<(PathBuf, String)> = None;
+    let link = Arc::new(AppLink::default());
+    let mut carry = None;
+    let daemon = match args.holder {
+        Some(cfg) => {
+            let home = cfg.home.clone();
+            match tokio::task::spawn_blocking(move || vorn_sessiond::rundir::sweep(&home)).await {
+                Ok(0) => {}
+                Ok(swept) => info!(swept, "removed what dead owners left in run/"),
+                Err(err) => error!(%err, "could not sweep run/"),
             }
-            None => Daemon::new(args.upstream, args.groups),
-        };
-        if args.debug_spawn {
-            daemon.allow_spawn();
+            let holder = Arc::new(new_holder(&cfg));
+            // Before the holder connects: what it holds is adopted then.
+            let owned = args.groups.mode("sessions") == vornd::Mode::Native;
+            carry = carry_records(&cfg, &holder, owned);
+            grid = serve_grid(&cfg, &holder);
+            app = serve_app(&cfg, &holder, &link).map(|e| (cfg.home.clone(), e));
+            tokio::spawn(holder::keep(cfg, holder.clone()));
+            kept = Some(holder.clone());
+            match args.upstream {
+                Some(upstream) => Daemon::with_holder(upstream, args.groups, holder),
+                None => Daemon::serving(args.groups, Some(holder)),
+            }
         }
-        if let Some(db) = args.db {
-            daemon.set_database(db);
-        }
-        if let Some(token) = desktop_token {
-            daemon.set_desktop_token(token);
-        }
-        if let Ok(addr) = listener.local_addr() {
-            daemon.set_listen_addr(addr);
-        }
-        daemon.set_app_link(Arc::clone(&link));
-        daemon.start_connectors().await;
-        daemon.start_work(&link);
-        daemon.start_widget();
-        daemon.start_hooks().await;
-        daemon.start_extensions().await;
-        proxy::log_upstream(&daemon).await;
-        info!(port, protocol = VORND_PROTOCOL, upstream = %args.upstream, "listening");
-        let mut stdout = std::io::stdout().lock();
-        let mut ready = serde_json::json!({ "port": port, "protocol": VORND_PROTOCOL });
-        if let Some(g) = &grid {
-            ready["grid"] = g.as_str().into();
-        }
-        if let Some((_, e)) = &app {
-            ready["app"] = e.as_str().into();
-        }
-        let native: Vec<&str> = daemon
-            .groups()
-            .modes()
-            .filter(|(_, mode)| *mode == vornd::groups::Mode::Native)
-            .map(|(group, _)| group)
-            .collect();
-        ready["native"] = native.into();
-        let _ = writeln!(stdout, "{ready}");
-        let _ = stdout.flush();
-        drop(stdout);
-        let exit_with_stdin = args.exit_with_stdin;
-        // Saved as soon as a stop is asked for: the server kills a vornd still winding down.
+        None => match args.upstream {
+            Some(upstream) => Daemon::new(upstream, args.groups),
+            None => Daemon::serving(args.groups, None),
+        },
+    };
+    if args.debug_spawn {
+        daemon.allow_spawn();
+    }
+    let db = args.db.or_else(|| served.as_ref().map(|s| s.db.clone()));
+    if let Some(db) = db {
         #[cfg(feature = "engine")]
-        let saving = kept
-            .as_ref()
-            .and_then(|h| h.engine().map(Arc::clone))
-            .zip(carry.clone());
-        #[cfg(not(feature = "engine"))]
-        drop(carry);
-        let stop = async move {
-            if exit_with_stdin {
-                tokio::select! {
-                    () = shutdown_signal() => {}
-                    () = stdin_closed() => info!("stdin closed; stopping"),
+        if let Some(engine) = carry.as_ref().and(kept.as_ref()).and_then(|h| h.engine()) {
+            let (engine, db) = (Arc::clone(engine), db.clone());
+            tokio::task::spawn_blocking(move || take_old_table(&engine, &db));
+        }
+        daemon.set_database(db);
+    }
+    let desktop_token = served
+        .as_ref()
+        .map(|s| s.credential.clone())
+        .or(desktop_token);
+    if let Some(token) = desktop_token {
+        daemon.set_desktop_token(token);
+    }
+    let serving = match served {
+        Some(served) => {
+            let Some(native) = daemon.native_handle() else {
+                error!("vornd answers nothing, so it cannot be the server");
+                return ExitCode::FAILURE;
+            };
+            match vornd::serve::Serving::start(
+                served.config,
+                served.held,
+                &native,
+                served.credential,
+            )
+            .await
+            {
+                Ok(serving) => {
+                    daemon.set_serving(Arc::clone(&serving));
+                    Some(serving)
                 }
-            } else {
-                shutdown_signal().await;
+                Err(err) => {
+                    error!(%err, "could not start");
+                    return ExitCode::FAILURE;
+                }
             }
-            #[cfg(feature = "engine")]
-            if let Some((engine, file)) = saving {
-                vornd::carry::save_now(engine.registry(), &file).await;
+        }
+        None => None,
+    };
+    let addr = match (&serving, &listener) {
+        (Some(s), _) => SocketAddr::new(std::net::Ipv4Addr::LOCALHOST.into(), s.addr().port()),
+        (None, Some(l)) => match l.local_addr() {
+            Ok(a) => a,
+            Err(err) => {
+                error!(%err, "could not tell where vornd listens");
+                return ExitCode::FAILURE;
+            }
+        },
+        (None, None) => unreachable!("vornd listens as the server or in front of one"),
+    };
+    let port = addr.port();
+    daemon.set_listen_addr(addr);
+    daemon.set_app_link(Arc::clone(&link));
+    if let Some(serving) = &serving {
+        link.set_server_host(serving.addr().ip().to_string());
+    }
+    daemon.start_connectors().await;
+    daemon.start_work(&link);
+    daemon.start_widget();
+    daemon.start_hooks().await;
+    daemon.start_extensions().await;
+    proxy::log_upstream(&daemon).await;
+    if let Some(serving) = &serving {
+        serving.publish();
+        let native = daemon
+            .native_handle()
+            .map(|n| Arc::downgrade(&n))
+            .unwrap_or_default();
+        tokio::spawn(Arc::clone(serving).follow_config(native.clone()));
+        if let Some(window) = serving.idle_window() {
+            tokio::spawn(Arc::clone(serving).watch_idle(native, window));
+        }
+        ignore_hangups();
+        info!(addr = %serving.addr(), protocol = VORND_PROTOCOL, "serving");
+    } else {
+        info!(port, protocol = VORND_PROTOCOL, upstream = ?args.upstream, "listening");
+    }
+    let mut stdout = std::io::stdout().lock();
+    let mut ready = serde_json::json!({ "port": port, "protocol": VORND_PROTOCOL });
+    if let Some(g) = &grid {
+        ready["grid"] = g.as_str().into();
+    }
+    if let Some((_, e)) = &app {
+        ready["app"] = e.as_str().into();
+    }
+    let native: Vec<&str> = daemon
+        .groups()
+        .modes()
+        .filter(|(_, mode)| *mode == vornd::groups::Mode::Native)
+        .map(|(group, _)| group)
+        .collect();
+    ready["native"] = native.into();
+    let _ = writeln!(stdout, "{ready}");
+    let _ = stdout.flush();
+    drop(stdout);
+    let exit_with_stdin = args.exit_with_stdin;
+    // Saved as soon as a stop is asked for: whoever started vornd kills one still winding down.
+    #[cfg(feature = "engine")]
+    let saving = kept
+        .as_ref()
+        .and_then(|h| h.engine().map(Arc::clone))
+        .zip(carry.clone());
+    #[cfg(not(feature = "engine"))]
+    drop(carry);
+    let asked = serving.clone();
+    let stop = async move {
+        let asked = async {
+            match &asked {
+                Some(serving) => serving.stopped().await,
+                None => std::future::pending().await,
             }
         };
-        let stopping = Arc::clone(&daemon);
-        proxy::serve(listener, daemon, stop).await;
-        stopping.stop_hooks();
-        // The endpoints go first, so a kill during the flush leaves none.
+        if exit_with_stdin {
+            tokio::select! {
+                () = shutdown_signal() => {}
+                () = stdin_closed() => info!("stdin closed; stopping"),
+                () = asked => {}
+            }
+        } else {
+            tokio::select! {
+                () = shutdown_signal() => {}
+                () = asked => {}
+            }
+        }
+        #[cfg(feature = "engine")]
+        if let Some((engine, file)) = saving {
+            vornd::carry::save_now(engine.registry(), &file).await;
+        }
+    };
+    let stopping = Arc::clone(&daemon);
+    match (&serving, listener) {
+        (Some(serving), _) => {
+            vornd::serve::accept(serving.listeners(), daemon, stop).await;
+            serving.request_stop();
+            serving.withdraw();
+        }
+        (None, Some(listener)) => proxy::serve(listener, daemon, stop).await,
+        (None, None) => {}
+    }
+    stopping.stop_hooks();
+    // The endpoints go first, so a kill during the flush leaves none.
+    #[cfg(unix)]
+    if let Some(endpoint) = &grid {
+        let _ = std::fs::remove_file(endpoint);
+    }
+    #[cfg(feature = "engine")]
+    if let Some((home, _endpoint)) = &app {
+        vornd::control::withdraw(home);
         #[cfg(unix)]
-        if let Some(endpoint) = &grid {
-            let _ = std::fs::remove_file(endpoint);
+        let _ = std::fs::remove_file(_endpoint);
+    }
+    // A clean stop checkpoints every session, so the next vornd replays nothing.
+    #[cfg(feature = "engine")]
+    if let Some(engine) = kept.as_ref().and_then(|h| h.engine()) {
+        engine.flush().await;
+    }
+    drop(kept);
+    info!("stopped");
+    ExitCode::SUCCESS
+}
+
+/// A hangup is not a request to stop: the server outlives the terminal or
+/// app that started it.
+fn ignore_hangups() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut hup) = signal(SignalKind::hangup()) {
+            tokio::spawn(async move {
+                while hup.recv().await.is_some() {
+                    info!("ignoring SIGHUP; sessions keep running");
+                }
+            });
         }
-        #[cfg(feature = "engine")]
-        if let Some((home, _endpoint)) = &app {
-            vornd::control::withdraw(home);
-            #[cfg(unix)]
-            let _ = std::fs::remove_file(_endpoint);
-        }
-        // A clean stop leaves a checkpoint at the end of every session, so
-        // the next vornd has nothing to replay.
-        #[cfg(feature = "engine")]
-        if let Some(engine) = kept.as_ref().and_then(|h| h.engine()) {
-            engine.flush().await;
-        }
-        drop(kept);
-        info!("stopped");
-        ExitCode::SUCCESS
-    })
+    }
 }
 
 #[cfg(test)]

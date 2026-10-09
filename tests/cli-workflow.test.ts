@@ -4,7 +4,6 @@ import type { WorkflowDefinition, WorkflowExecution } from '../packages/shared/s
 vi.mock('../packages/server/src/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
-vi.mock('../packages/server/src/index', () => ({ startServer: vi.fn() }))
 
 import { runCli, type CliDeps } from '../packages/server/src/cli'
 import type { RpcTransport } from '../packages/server/src/cli/transport'

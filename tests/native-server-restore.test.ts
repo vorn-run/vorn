@@ -14,7 +14,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type {
   HeadlessSession,
   RestoredSession,
@@ -35,12 +35,6 @@ import {
 } from './helpers/real-server'
 import { normalizeRun, withoutRecordedHeads, type RunDirs } from './helpers/sessions-parity'
 import { recorded } from './helpers/vornd-fixtures'
-
-// Booting a server probes Tailscale with a real process; nothing here needs it.
-vi.mock('../packages/server/src/tailscale', () => ({
-  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
-  clearBinaryCache: vi.fn()
-}))
 
 spawnsRealServers()
 

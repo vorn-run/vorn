@@ -4,8 +4,8 @@
 //! mode ([`crate::groups`]), whether vornd answers it, the server does, or
 //! both do and the answers are compared:
 //!
-//! - **native**: the call is answered here, framed exactly as the server's
-//!   `ws-handler` frames it (`{jsonrpc, id, result}`, no `result` at all for
+//! - **native**: the call is answered here, framed exactly as the server
+//!   frames it (`{jsonrpc, id, result}`, no `result` at all for
 //!   a call that returns nothing, `{code: -32000, message}` for an error), on
 //!   the connection's one ordered outbox. Some calls are still the server's,
 //!   and go to it: those in [`SERVER_ONLY`], which need what only the server
@@ -52,6 +52,8 @@ pub mod reach;
 pub mod remote;
 pub mod script;
 pub mod secrets;
+#[cfg(feature = "engine")]
+pub mod session_events;
 pub mod sessions;
 pub mod shell;
 pub mod ssh;
@@ -147,6 +149,11 @@ pub const METHODS: &[(&str, Effect)] = &[
     // ([`sessions`]) or start and stop a headless agent ([`headless`]);
     // the worktree manager's from it and the repositories ([`worktree`]).
     ("terminal:listActive", Effect::Read),
+    // Answered by `crate::terminal` for the session they name.
+    ("terminal:attach", Effect::Read),
+    ("terminal:readOutput", Effect::Read),
+    ("terminal:readScrollback", Effect::Read),
+    ("terminal:lockSize", Effect::Change),
     ("terminal:create", Effect::Change),
     ("terminal:kill", Effect::Change),
     ("terminal:rename", Effect::Change),
@@ -172,10 +179,6 @@ pub const METHODS: &[(&str, Effect)] = &[
 /// Calls in a native group that the server keeps answering, and why.
 pub const SERVER_ONLY: &[(&str, &str)] = &[
     ("server:shutdown", "stops the server itself"),
-    (
-        "server:handoff",
-        "hands the server's listener and sessions to the server taking over",
-    ),
     (
         "server:vornd",
         "reports on the vornd the server keeps running",
@@ -345,6 +348,10 @@ pub struct Native {
     reach: reach::Reach,
     /// The app's channel, for what only the server can do.
     link: OnceLock<Arc<AppLink>>,
+    /// The clients vornd serves itself, as the server: notifications go to them.
+    clients: OnceLock<Arc<crate::serve::clients::Clients>>,
+    /// Raised when vornd itself changed the configuration.
+    config_changed: tokio::sync::Notify,
     /// The desktop's launch credential, which is also the server's local one.
     desktop: OnceLock<Vec<u8>>,
     secrets: secrets::Secrets,
@@ -378,6 +385,9 @@ pub struct Native {
 /// starts: the server's own wait for the holder (`HOLDER_WAIT_MS`).
 const SETTLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How long a session or script waits for the session holder to connect before it fails.
+const HOLDER_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The calls that say what runs and what is offered from the last run, which
 /// wait for the copy to settle ([`SessionRegistry::settle`]): a window opening
 /// as Vorn starts reads its board from them, and resumes what they offer.
@@ -403,6 +413,8 @@ impl Native {
             ides: ide::Ides::default(),
             reach: reach::Reach::default(),
             link: OnceLock::new(),
+            clients: OnceLock::new(),
+            config_changed: tokio::sync::Notify::new(),
             desktop: OnceLock::new(),
             secrets,
             mcp: mcp::McpClients::default(),
@@ -470,6 +482,30 @@ impl Native {
         if let Some(registry) = self.registry.get() {
             tokio::spawn(widget::follow(Arc::clone(self), Arc::clone(registry)));
         }
+    }
+
+    /// vornd changed the configuration: what depends on it reads it again.
+    pub(crate) fn config_changed(&self) {
+        self.config_changed.notify_one();
+    }
+
+    /// Resolves at the next [`Native::config_changed`].
+    pub(crate) async fn config_change(&self) {
+        self.config_changed.notified().await;
+    }
+
+    /// How many terminals and headless agents run, from the registry.
+    pub fn registry_live(&self) -> Option<Value> {
+        self.registry.get().map(|r| r.live())
+    }
+
+    /// The clients vornd serves as the server, which notifications go to.
+    pub fn set_clients(&self, clients: Arc<crate::serve::clients::Clients>) {
+        let _ = self.clients.set(clients);
+    }
+
+    pub(crate) fn clients(&self) -> Option<&Arc<crate::serve::clients::Clients>> {
+        self.clients.get()
     }
 
     /// The server's port, which the addresses a browser uses name.
@@ -679,6 +715,9 @@ impl Native {
                 Answer::Error(format!("{method} failed in vornd"))
             });
         }
+        if sessions::starts(&method) {
+            self.await_holder().await;
+        }
         let Ok(_slot) = self.slots.acquire().await else {
             return Answer::Error(format!("{method} failed in vornd: it is stopping"));
         };
@@ -690,6 +729,16 @@ impl Native {
                 warn!(%method, %err, "a native call failed");
                 Answer::Error(format!("{method} failed in vornd"))
             }
+        }
+    }
+
+    /// Waits, at most [`HOLDER_WAIT`], for the session holder to connect: a
+    /// session asked for as vornd starts is started once it is, not refused.
+    pub(crate) async fn await_holder(&self) {
+        let deadline = tokio::time::Instant::now() + HOLDER_WAIT;
+        while !self.host.get().is_some_and(|h| h.ready()) && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 
@@ -813,13 +862,17 @@ impl Native {
 
     /// [`Native::broadcast`] to the clients of one session only, when `scope` names it.
     pub(crate) fn broadcast_to(&self, method: &str, params: Value, scope: Option<&str>) {
-        if let Some(link) = self.link.get() {
-            let mut note = json!({ "method": method, "params": params });
-            if let Some(scope) = scope {
-                note["scope"] = json!(scope);
-            }
-            link.tell("vornd:broadcast", note);
+        if let Some(notifier) = self.notifier() {
+            notifier.tell(method, params, scope);
         }
+    }
+
+    /// Where notifications for every client go, to keep beyond this call.
+    pub(crate) fn notifier(&self) -> Option<Notifier> {
+        if let Some(clients) = self.clients.get() {
+            return Some(Notifier::Clients(Arc::clone(clients)));
+        }
+        self.link.get().map(|l| Notifier::Link(Arc::clone(l)))
     }
 
     /// The database, once given.
@@ -827,19 +880,10 @@ impl Native {
         self.db.get().map(PathBuf::as_path)
     }
 
-    /// The calls that read the server's session registry, from vornd's copy
-    /// of it. Forwarded while there is no copy to trust.
+    /// The calls that read the session records.
     fn sessions(&self, method: &str, params: &Value) -> Answer {
-        // Without a copy of the records, the server still holds the terminals and agents.
-        let unread = || {
-            if method == "worktree:activeSessions" {
-                not_ready()
-            } else {
-                Answer::Forward
-            }
-        };
         let Some(registry) = self.registry.get() else {
-            return unread();
+            return not_ready();
         };
         let records = |list: Vec<Value>| Answer::Result(Value::Array(list));
         registry
@@ -855,7 +899,7 @@ impl Native {
                 },
                 _ => not_answered(method),
             })
-            .unwrap_or_else(unread)
+            .unwrap_or_else(not_ready)
     }
 
     fn ide(&self, method: &str, params: &Value) -> Answer {
@@ -893,6 +937,30 @@ impl Native {
     fn local_path(&self, path: &str) -> bool {
         self.hosts()
             .is_some_and(|h| h.for_path(path) == Placement::Local)
+    }
+}
+
+/// Where notifications for every client go: vornd's own clients, or the
+/// server's through the app's channel.
+#[derive(Debug, Clone)]
+pub(crate) enum Notifier {
+    Clients(Arc<crate::serve::clients::Clients>),
+    Link(Arc<AppLink>),
+}
+
+impl Notifier {
+    /// Tells `method` with `params`; `scope` is the session it is about.
+    pub(crate) fn tell(&self, method: &str, params: Value, scope: Option<&str>) {
+        match self {
+            Notifier::Clients(clients) => clients.broadcast(method, params, scope),
+            Notifier::Link(link) => {
+                let mut note = json!({ "method": method, "params": params });
+                if let Some(scope) = scope {
+                    note["scope"] = json!(scope);
+                }
+                link.tell("vornd:broadcast", note);
+            }
+        }
     }
 }
 
@@ -1096,6 +1164,13 @@ impl Conn {
 
     fn admitted(&self) -> bool {
         self.authed.load(Ordering::Acquire)
+    }
+
+    /// Admits the connection, which presented `raw`: vornd, serving it
+    /// itself, has checked the credential.
+    pub fn admit(&self, raw: &str) {
+        *self.viewer.lock().unwrap_or_else(|e| e.into_inner()) = self.native.viewer_of(raw);
+        self.authed.store(true, Ordering::Release);
     }
 
     /// Checks the credential a client presents, on its upgrade or in
@@ -1582,13 +1657,13 @@ mod tests {
         let native = Native::new();
         assert_eq!(
             native.call("terminal:listActive", &Value::Null),
-            Answer::Forward
+            not_ready()
         );
         let registry = SessionRegistry::new();
         native.set_registry(Arc::clone(&registry));
         assert!(registry.wanted());
-        // Not fed yet: vornd cannot tell what the server holds.
-        assert_eq!(native.call("headless:list", &Value::Null), Answer::Forward);
+        // Not read yet: vornd cannot tell what runs.
+        assert_eq!(native.call("headless:list", &Value::Null), not_ready());
 
         let terminal = json!({
             "id": "t", "agentType": "claude", "projectName": "p", "projectPath": "/p",
@@ -1617,7 +1692,10 @@ mod tests {
             native.call("worktree:activeSessions", &json!({ "path": "/w" })),
             bad_params("worktree:activeSessions")
         );
-        assert_eq!(native.call("terminal:create", &json!({})), Answer::Forward);
+        assert_eq!(
+            native.call("terminal:create", &json!({})),
+            bad_params("terminal:create")
+        );
     }
 
     #[test]

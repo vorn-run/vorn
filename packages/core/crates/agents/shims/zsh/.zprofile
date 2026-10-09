@@ -1,0 +1,7 @@
+if [[ -f "${VORN_USER_ZDOTDIR:-$HOME}/.zprofile" ]]; then
+  VORN_SHIM_ZDOTDIR="$ZDOTDIR"
+  ZDOTDIR="${VORN_USER_ZDOTDIR:-$HOME}"
+  builtin source "$ZDOTDIR/.zprofile"
+  VORN_USER_ZDOTDIR="$ZDOTDIR"
+  ZDOTDIR="$VORN_SHIM_ZDOTDIR"
+fi

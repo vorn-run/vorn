@@ -45,6 +45,8 @@ pub enum TokenError {
     Random(getrandom::Error),
     /// The database has no owner to mint for.
     NoOwner,
+    /// A debug build kept off the default data directory.
+    Refused(String),
 }
 
 impl std::fmt::Display for TokenError {
@@ -56,6 +58,7 @@ impl std::fmt::Display for TokenError {
             TokenError::NoOwner => {
                 f.write_str("No owner user found. The database may not have been migrated.")
             }
+            TokenError::Refused(why) => f.write_str(why),
         }
     }
 }
@@ -102,6 +105,7 @@ fn store_options() -> StoreOptions {
 
 /// Opens (creating and migrating if need be) the database in `dir`.
 fn open(dir: &Path) -> Result<Store, TokenError> {
+    crate::launch::refuse_default(dir).map_err(TokenError::Refused)?;
     if !dir.exists() {
         let mut builder = std::fs::DirBuilder::new();
         builder.recursive(true);
@@ -223,9 +227,15 @@ fn token_command(args: &ServerArgs, io: &mut dyn Io) -> Result<ExitCode, TokenEr
     }
 }
 
-/// Runs the Node server's own `serve` with the same arguments, in the
-/// foreground, and passes its exit code through.
-fn serve(argv: &[String], io: &mut dyn Io) -> ExitCode {
+/// Runs vornd as the server for the data directory, in the foreground, and
+/// passes its exit code through. A data directory with no device token gets
+/// one first, shown on a terminal only: a log is no place for a secret.
+fn serve(args: &ServerArgs, io: &mut dyn Io) -> ExitCode {
+    let dir = database_dir(args.data_dir.as_deref());
+    if let Err(why) = crate::launch::refuse_default(&dir) {
+        io.write_err(&format!("vorn: {why}\n"));
+        return ExitCode::Failure;
+    }
     let server = match crate::launch::locate() {
         Ok(server) => server,
         Err(err) => {
@@ -233,7 +243,33 @@ fn serve(argv: &[String], io: &mut dyn Io) -> ExitCode {
             return ExitCode::Failure;
         }
     };
-    let mut command = server.command(argv);
+    match open(&dir).and_then(|store| Ok((store.db_has_device_tokens()?, store))) {
+        Ok((false, store)) if io.is_tty() => match mint_owner_token(&store, "first-run") {
+            Ok(minted) => {
+                print_minted(
+                    io,
+                    "\nNo device tokens existed, so one was created for this server:",
+                    &minted.plaintext,
+                );
+                io.write("Manage tokens with: vorn server token list\n\n");
+            }
+            Err(err) => io.write_err(&format!("vorn: could not mint a token: {err}\n")),
+        },
+        Ok((false, _)) => io.write(
+            "\nNo device tokens exist. Mint one with: vorn server token create --name <name>\n",
+        ),
+        Ok((true, _)) => {}
+        Err(err) => {
+            io.write_err(&format!("vorn: {err}\n"));
+            return ExitCode::Failure;
+        }
+    }
+    io.write(&format!("Starting the Vorn server for {}\n", dir.display()));
+    let port = args
+        .port
+        .filter(|p| p.fract() == 0.0 && (0.0..=65535.0).contains(p))
+        .map(|p| p as u16);
+    let mut command = server.command(&dir, port, args.host.as_deref());
 
     #[cfg(unix)]
     {
@@ -274,7 +310,7 @@ pub fn run(argv: &[String], io: &mut dyn Io) -> ExitCode {
             io.write_err(SERVER_USAGE);
             ExitCode::Usage
         }
-        Some("serve") => serve(argv, io),
+        Some("serve") => serve(&args, io),
         Some("token") => match token_command(&args, io) {
             Ok(code) => code,
             Err(err) => {

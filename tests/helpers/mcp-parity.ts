@@ -12,6 +12,8 @@
  *   recurs.
  * - {@link clockTimes}: `createdAt`, `updatedAt` and the like are the moment
  *   each side ran.
+ * - {@link configRevision}: how many times the configuration was saved, which
+ *   the database counts and each side's call adds to.
  * - {@link jsonParseWording}: `import_workflow` passes on `JSON.parse`'s
  *   message for a workflow that is not JSON. V8 and serde_json word the same
  *   failure differently; both say it is not valid JSON, and only the parser's
@@ -49,6 +51,10 @@ export function clockTimes<T>(value: T): T {
 }
 
 /** `JSON.parse`'s own wording after "not valid JSON" is dropped. */
+export function configRevision<T>(value: T): T {
+  return mapStrings(value, (s) => s.replace(/"revision": \d+/g, '"revision": <n>'))
+}
+
 export function jsonParseWording<T>(value: T): T {
   return mapStrings(value, (s) => s.replace(JSON_PARSE, '$1SyntaxError: <parser message>'))
 }
@@ -65,9 +71,23 @@ export function comparable(answer: unknown, config: unknown, fixtureIds: Set<str
       s.replace(UUID, (id) => (fixtureIds.has(id.toLowerCase()) ? `<fixture ${id}>` : id))
     )
   const normalized = [answer, config].map((v) =>
-    jsonParseWording(clockTimes(madeUpIds(keep(v), seen)))
+    keyOrder(configRevision(jsonParseWording(clockTimes(madeUpIds(keep(v), seen)))))
   )
   return JSON.stringify(normalized, null, 2)
+}
+
+/**
+ * Objects with their keys sorted. A config written through vornd's workflow
+ * methods comes back in its own key order; the order means nothing.
+ */
+export function keyOrder(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(keyOrder)
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((k) => [k, keyOrder((value as Record<string, unknown>)[k])])
+  )
 }
 
 /** Every UUID in `value`, for {@link comparable}'s `fixtureIds`. */

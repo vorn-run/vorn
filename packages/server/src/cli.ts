@@ -1,9 +1,10 @@
-import { startServer } from './index'
+import path from 'node:path'
 import { initDatabase, closeDatabase } from './database'
 import { mintOwnerToken, listTokens, hasTokens, revokeToken } from './token-manager'
 import { parseServerArgs, ServerArgsError, SERVER_OPTIONS, type ServerArgs } from './server-args'
 import { parseClientArgs, ClientArgsError, CLIENT_OPTIONS } from './client-args'
-import { useDataDir } from './rpc-client'
+import { dataDir, useDataDir } from './rpc-client'
+import { findVornd, findWebClient, refusesDefault, runVornd, serveArgs } from './vornd-binary'
 import { clientContext, type CliDeps } from './cli/deps'
 import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE } from './cli/exit'
 import { runSessionCommand } from './cli/session'
@@ -82,8 +83,10 @@ function printMintedToken(deps: CliDeps, lead: string, plaintext: string, traile
 }
 
 /** Token commands need the database but not a running server. */
-function withDatabase<T>(dataDir: string | undefined, fn: () => T): T {
-  initDatabase(dataDir)
+function withDatabase<T>(dir: string | undefined, fn: () => T): T {
+  const refused = refusesDefault(dir ? path.resolve(dir) : dataDir())
+  if (refused) throw new Error(refused)
+  initDatabase(dir)
   try {
     return fn()
   } finally {
@@ -140,26 +143,33 @@ function runTokenCommand(args: ServerArgs, deps: CliDeps): number {
   }
 }
 
+/**
+ * `vorn server serve`: vornd as the server for the data directory, in the
+ * foreground, until it stops. It never stops on its own for being idle: it
+ * was run on purpose, and nothing would bring it back.
+ */
 async function runServe(args: ServerArgs, deps: CliDeps): Promise<number> {
-  const { port } = await startServer({
-    host: args.host,
-    port: args.port,
-    dataDir: args.dataDir,
-    // A server somebody ran on purpose does not get to decide it is done. There
-    // is no app watching to restart it, and the next line hands out a token for
-    // other machines to connect with -- so exiting would strand exactly the
-    // clients this command exists to serve.
-    idleShutdown: false
-  })
-  deps.write(`Vorn server listening on port ${port}\n`)
+  const binaries = (deps.findVornd ?? findVornd)()
+  if (!binaries) {
+    deps.writeErr(
+      'vorn: this install has no vornd to run as the server. In a checkout, build it with `yarn build:core`.\n'
+    )
+    return EXIT_FAILURE
+  }
+  const dir = args.dataDir ? path.resolve(args.dataDir) : dataDir()
+  const refused = refusesDefault(dir)
+  if (refused) {
+    deps.writeErr(`vorn: ${refused}\n`)
+    return EXIT_FAILURE
+  }
 
   // A fresh data directory has no way for anyone to authenticate later, so mint
   // one token now rather than making the operator find the token command first.
-  if (!hasTokens()) {
+  if (!withDatabase(dir, () => hasTokens())) {
     // Auto-start redirects this stream to a log file, and a secret does not go
     // in one. A person watching a terminal still gets the token.
     if (deps.isTty ?? Boolean(process.stdout.isTTY)) {
-      const { plaintext } = mintOwnerToken('first-run')
+      const { plaintext } = withDatabase(dir, () => mintOwnerToken('first-run'))
       printMintedToken(
         deps,
         '\nNo device tokens existed, so one was created for this server:',
@@ -172,7 +182,14 @@ async function runServe(args: ServerArgs, deps: CliDeps): Promise<number> {
       )
     }
   }
-  return EXIT_OK
+  deps.write(`Starting the Vorn server for ${dir}\n`)
+  const argv = serveArgs(binaries, {
+    dataDir: dir,
+    port: args.port,
+    host: args.host,
+    web: findWebClient()
+  })
+  return (deps.runVornd ?? runVornd)(binaries, argv)
 }
 
 /** `vorn server ...`, and the bare `serve`/`token` that `vorn-server` has always taken. */
@@ -280,10 +297,7 @@ function withoutCommand(argv: string[], command: string): string[] {
   return [...argv.slice(0, at), ...argv.slice(at + 1)]
 }
 
-/**
- * Run one command. Returns the process exit code; `serve` returns 0 while
- * leaving the server listening, so the caller must not exit on success.
- */
+/** Run one command. Returns the process exit code; `serve` returns once the server stopped. */
 export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   const command = findCommand(argv)
 
@@ -347,9 +361,7 @@ if (isDirectRun) {
 
   runCli(process.argv.slice(2), deps)
     .then((code) => {
-      // Exit only on failure. `serve` returns 0 with the server still listening,
-      // and an explicit exit(0) would kill it; the other commands have nothing
-      // pending, so the event loop drains and node exits 0 by itself.
+      // Exit only on failure; otherwise the event loop drains and node exits 0 by itself.
       if (code !== 0) process.exit(code)
     })
     .catch((err) => {
