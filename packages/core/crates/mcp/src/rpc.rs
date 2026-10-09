@@ -1,7 +1,7 @@
 //! How a tool reaches the Vorn server: the host's half of every call.
 //!
 //! The TypeScript tools call `rpcCall` and `rpcNotify` from
-//! `@vornrun/server/rpc-client`, which open a socket to the server per call.
+//! `packages/mcp/src/rpc-client`, which open a socket to the server per call.
 //! Here the host decides how a call travels; vornd sends it over one socket to
 //! its own `/ws`, so it goes wherever any other client's would.
 

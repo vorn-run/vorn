@@ -58,7 +58,7 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
         "git:deleteBranches" => delete_branches(native, params),
         "git:commit" => commit(native, params),
         "git:push" => any_path(native, params).map(|(p, place)| done_json(place.git(native).push(Path::new(p)))),
-        _ => return Answer::Forward,
+        _ => return Answer::Unanswered,
     };
     answered.map_or_else(|| bad_params(method), Answer::Result)
 }

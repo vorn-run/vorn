@@ -583,12 +583,10 @@ fn sideloaded_conpty_in_use(home: &Path) {
     );
 }
 
-/// Starts the eight sessions on the app's channel: four PTYs, four piped.
+/// Starts the eight sessions over vornd's WebSocket: four PTYs, four piped.
 async fn spawn_all(rig: &Rig, emitter: &Path, plan: Plan) -> Vec<Spawned> {
     let vornd = rig.vornd.as_ref().expect("a vornd");
-    let mut app = App::connect(&rig.home, vornd.child.id(), &vornd.log).await;
-    let hello = app.call("vornd:hello", json!({})).await.expect("hello");
-    assert!(hello["protocol"].as_u64().is_some(), "{hello}");
+    let mut app = App::connect(&rig.home, vornd.port).await;
     // Room for everything, and for what a terminal adds to it.
     let ring = u32::try_from(plan.bytes.saturating_mul(4) + (1 << 20)).unwrap_or(u32::MAX);
     let mut out = Vec::new();
@@ -634,87 +632,65 @@ async fn spawn_all(rig: &Rig, emitter: &Path, plan: Plan) -> Vec<Spawned> {
     out
 }
 
-/// The app's channel to one vornd ([`vornd::control`]): length-prefixed
-/// frames of JSON-RPC.
+/// A client of vornd's WebSocket, which starts sessions with `vornd:spawn` (`--debug-spawn`).
 struct App {
-    s: Box<dyn Duplex>,
-    frames: vornd::control::Frames,
+    ws: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
     next: u64,
 }
 
-trait Duplex: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
-impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> Duplex for T {}
-
 impl App {
-    /// Connects to the endpoint vornd `pid` announced under `home`.
-    async fn connect(home: &Path, pid: u32, log: &Path) -> App {
-        let file = home.join("run").join(vornd::control::ANNOUNCEMENT);
-        let t = Instant::now();
-        loop {
-            let named = std::fs::read_to_string(&file)
-                .ok()
-                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-                .filter(|v| v["pid"].as_u64() == Some(u64::from(pid)))
-                .and_then(|v| v["endpoint"].as_str().map(str::to_owned));
-            if let Some(endpoint) = named {
-                match vorn_sessiond::os::connect(&endpoint).await {
-                    Ok(s) => {
-                        return App {
-                            s: Box::new(s),
-                            frames: Default::default(),
-                            next: 0,
-                        }
-                    }
-                    Err(e) if t.elapsed() > PATIENCE => panic!("connect to {endpoint}: {e}"),
-                    Err(_) => {}
-                }
-            }
-            assert!(
-                t.elapsed() < PATIENCE,
-                "vornd {pid} announced no app endpoint in {}; its log:\n{}",
-                file.display(),
-                std::fs::read_to_string(log).unwrap_or_default()
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+    /// Connects with the local credential vornd published under `home`.
+    async fn connect(home: &Path, port: u16) -> App {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let token = std::fs::read_to_string(home.join("local-token")).expect("a local credential");
+        let mut req = format!("ws://127.0.0.1:{port}/ws")
+            .into_client_request()
+            .unwrap();
+        req.headers_mut().insert(
+            "authorization",
+            format!("Bearer {}", token.trim()).parse().unwrap(),
+        );
+        let (ws, _) = tokio_tungstenite::connect_async(req)
+            .await
+            .expect("connect to vornd");
+        App { ws, next: 0 }
     }
 
     /// One call, answered with its result or its error's message.
     async fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as Ws;
         self.next += 1;
         let id = self.next;
         let body = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        let payload = body.to_string();
-        let len = u32::try_from(payload.len() + 1).expect("a small frame");
-        let mut frame = len.to_le_bytes().to_vec();
-        frame.push(vornd::control::KIND_TEXT);
-        frame.extend_from_slice(payload.as_bytes());
-        self.s.write_all(&frame).await.expect("send to vornd");
-        let mut buf = vec![0u8; 64 << 10];
+        self.ws
+            .send(Ws::text(body.to_string()))
+            .await
+            .expect("send to vornd");
         let deadline = tokio::time::Instant::now() + PATIENCE;
         loop {
-            while let Some((kind, payload)) = self.frames.take().expect("well-formed frames") {
-                if kind != vornd::control::KIND_TEXT {
-                    continue;
-                }
-                let v: Value = serde_json::from_slice(&payload).expect("JSON");
-                if v["id"].as_u64() != Some(id) {
-                    continue;
-                }
-                return match v.get("error") {
-                    Some(e) => Err(e["message"].as_str().unwrap_or("an error").to_owned()),
-                    None => Ok(v["result"].clone()),
-                };
-            }
-            let n = tokio::time::timeout_at(deadline, self.s.read(&mut buf))
+            let msg = tokio::time::timeout_at(deadline, self.ws.next())
                 .await
                 .unwrap_or_else(|_| panic!("no answer to {method} within {PATIENCE:?}"))
+                .unwrap_or_else(|| panic!("vornd closed the socket during {method}"))
                 .expect("read from vornd");
-            assert!(n > 0, "vornd closed the app's channel during {method}");
-            self.frames.push(&buf[..n]);
+            let Ws::Text(text) = msg else { continue };
+            let v: Value = serde_json::from_str(text.as_str()).expect("JSON");
+            if v["id"].as_u64() != Some(id) {
+                continue;
+            }
+            return match v.get("error") {
+                Some(e) => Err(e["message"].as_str().unwrap_or("an error").to_owned()),
+                None => Ok(v["result"].clone()),
+            };
         }
     }
 }
+
+trait Duplex: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> Duplex for T {}
 
 /// What sessiond holds of each session, by its program's pid: where its
 /// log ends, and its records from the session start when it still retains
@@ -887,27 +863,26 @@ impl Vornd {
     fn start(home: &Path, sessiond: &Path) -> Vornd {
         let log = home.join("vornd.log");
         let mut cmd = Command::new(VORND);
-        // Nothing listens on the discard port: the holder does not need the
-        // Node server.
-        cmd.args([
-            "--upstream",
-            "127.0.0.1:9",
-            "--exit-with-stdin",
-            "--sessiond",
-        ])
-        .arg(sessiond)
-        .arg("--home")
-        .arg(home)
-        .env("HOME", home)
-        .env("USERPROFILE", home)
-        .arg("--log-file")
-        .arg(&log)
-        .env_remove("VORND_GROUPS")
-        .env_remove("VORN_SESSIOND_IDLE_EXIT")
-        .env("VORND_LOG", "info")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        cmd.arg("--data-dir")
+            .arg(home)
+            .args([
+                "--port",
+                "0",
+                "--exit-with-stdin",
+                "--debug-spawn",
+                "--sessiond",
+            ])
+            .arg(sessiond)
+            .env("HOME", home)
+            .env("USERPROFILE", home)
+            .env("VORND_KEYCHAIN", "0")
+            .arg("--log-file")
+            .arg(&log)
+            .env_remove("VORN_SESSIOND_IDLE_EXIT")
+            .env("VORND_LOG", "info")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
         let mut child = cmd.spawn().expect("start vornd");
         let stdout = child.stdout.take().expect("piped stdout");
         let (tx, rx) = std::sync::mpsc::channel();

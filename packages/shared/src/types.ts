@@ -1864,9 +1864,9 @@ export interface SessionHolders {
   error: string | null
 }
 
-/** What `core:status` reports: whether the server loaded the Rust core. */
+/** What `core:status` reports: the version of vornd, which is the core. */
 export interface CoreStatus {
-  /** Whether `vorn_core.node` loaded. */
+  /** Always true: vornd, which answers, is the core. */
   loaded: boolean
   version: string | null
   /** Why it did not load. */

@@ -15,10 +15,9 @@
 //! which conversation to start is given an id; one that names a
 //! conversation already running is answered with the session running it,
 //! and creates naming one conversation while one prepares share its answer
-//! ([`crate::claims`]). Nothing new is started while the server is winding
-//! down (`vornd:draining`).
+//! ([`crate::claims`]).
 //!
-//! While vornd owns the records between runs ([`crate::applink::AppLink::restores`])
+//! While vornd owns the records between runs ([`crate::registry::SessionRegistry::owns`])
 //! it also answers `sessions:restored`, `sessions:resume` and
 //! `sessions:clear`, and a `terminal:kill` of a session of an earlier run,
 //! as the server's handlers do: a resume takes the offered session once,
@@ -33,13 +32,8 @@
 //! ([`super::not_ready`]) or while the session holder is not connected
 //! ([`NO_HOLDER`]). A start asked for as vornd starts waits for the holder
 //! first ([`super::Native::await_holder`]).
-//!
-//! In shadow mode nothing here changes anything: a create or a resume is
-//! compared with the server's as the spawn each would ask for ([`plan`]),
-//! and the other calls as what each would answer ([`foresee`]), read from
-//! the copy.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 use std::sync::Mutex;
@@ -58,7 +52,7 @@ use vorn_git::repo::{extract_worktree_name, node_basename, Git};
 use vorn_sessiond_wire::{Io, Sig, SpawnSpec};
 
 use super::ssh::{KeyFile, Remote, Secret};
-use super::{agent, bad_params, headless, not_ready, shell, Answer, Native};
+use super::{agent, bad_params, not_ready, shell, Answer, Native};
 use crate::claims::{Claims, OnePerKey};
 use crate::registry::{AgentStatus, HeadlessStatus, Registry, Restored, TerminalSession};
 
@@ -219,23 +213,9 @@ pub struct Sessions {
     starting: Mutex<HashMap<String, Option<Sig>>>,
     /// Creates naming a conversation, while they prepare.
     creating: OnePerKey<Answer>,
-    /// Terminals closed while their program ran, whose exit clients are still to be told.
-    hung_up: Mutex<std::collections::HashSet<String>>,
 }
 
-/// The refusal for a new session while the server winds down
-/// (`refuseWhileClosing`), if it is.
-fn refusal(native: &Native) -> Option<&'static str> {
-    native.link.get()?.closing().refusal()
-}
-
-/// How the server is winding down, if it is.
-pub(super) fn closing(native: &Native) -> Option<crate::applink::Closing> {
-    native.link.get().map(|l| l.closing())
-}
-
-/// The conversations being started, which vornd's creates and the server's
-/// starts claim alike.
+/// The conversations being started.
 fn claims(native: &Native) -> Option<&Claims> {
     native.link.get().map(|l| l.claims())
 }
@@ -243,7 +223,7 @@ fn claims(native: &Native) -> Option<&Claims> {
 /// Whether vornd owns the records between runs, and so answers the calls
 /// about the sessions of earlier runs.
 fn restores(native: &Native) -> bool {
-    native.link.get().is_some_and(|l| l.restores())
+    native.registry.get().is_some_and(|r| r.owns())
 }
 
 /// The error while the session holder is not connected.
@@ -325,52 +305,6 @@ fn asked(method: &str, params: &Value) -> Option<Asked> {
         "terminal:reorder" => strings(params).map(Asked::Order),
         _ => None,
     }
-}
-
-/// Whether [`foresee`] can say what `method` would answer.
-pub fn foresees(method: &str) -> bool {
-    matches!(
-        method,
-        "terminal:kill"
-            | "terminal:rename"
-            | "terminal:setGroup"
-            | "terminal:reorder"
-            | "sessions:clear"
-    ) || headless::foresees(method)
-        || super::worktree_move::foresees(method)
-}
-
-/// What vornd would answer `method`, read from the copy of the registry
-/// without changing it, for the comparison with the server's answer in
-/// shadow mode. `None` when the answer is the server's own: a terminal the
-/// copy does not hold, params of a shape its handler does not read, or no
-/// copy of its records yet.
-pub fn foresee(native: &Native, method: &str, params: &Value) -> Option<Answer> {
-    if headless::foresees(method) {
-        return headless::foresee(native, params);
-    }
-    if super::worktree_move::foresees(method) {
-        return super::worktree_move::foresee(native, method, params);
-    }
-    if method == "sessions:clear" {
-        return native.registry.get()?.read(|_| Answer::Void);
-    }
-    let asked = asked(method, params)?;
-    native.registry.get()?.read(|r| match &asked {
-        // A session of an earlier run closes without an exit, as the server closes one.
-        Asked::Kill(id) => r
-            .terminal(id)
-            .map(|_| ())
-            .or_else(|| {
-                r.restored()
-                    .iter()
-                    .find(|o| o["session"]["id"] == *id)
-                    .map(|_| ())
-            })
-            .map(|()| Answer::Void),
-        Asked::Fields(id, _) => Some(refused(r.check_terminal(id))),
-        Asked::Order(ids) => Some(refused(r.check_order(ids))),
-    })?
 }
 
 /// `sessions:restored`: the sessions of earlier runs still offered.
@@ -833,14 +767,6 @@ pub fn verify_restored(native: &Native) {
     }
 }
 
-/// A check's outcome as the server answers it: nothing, or its refusal.
-pub(super) fn refused(check: Result<(), crate::registry::RegistryError>) -> Answer {
-    match check {
-        Ok(()) => Answer::Void,
-        Err(e) => Answer::Error(e.to_string()),
-    }
-}
-
 /// An array of strings, or `None`.
 fn strings(v: &Value) -> Option<Vec<String>> {
     v.as_array()?
@@ -973,23 +899,18 @@ pub(super) fn fed_and_held(native: &Native) -> bool {
     fed && native.host.get().is_some_and(|h| h.ready())
 }
 
-/// Why vornd cannot start a session now, if it cannot: the server is
-/// winding down, the records are not read yet, or the holder is not connected.
+/// Why vornd cannot start a session now: the records are not read yet, or no holder.
 fn unstartable(native: &Native) -> Option<Answer> {
-    if let Some(why) = refusal(native) {
-        return Some(Answer::Error(why.to_owned()));
-    }
     unread(native).or_else(|| unheld(native))
 }
 
 /// The error while the records are not read yet, if they are not.
 fn unread(native: &Native) -> Option<Answer> {
-    let creates = native.link.get().is_some_and(|l| l.creates_terminals());
     let decides = native
         .registry
         .get()
         .is_some_and(|r| r.read(|r| r.decides()) == Some(true));
-    (!creates || !decides).then(not_ready)
+    (!decides).then(not_ready)
 }
 
 /// The error while the session holder is not connected, if it is not.
@@ -1166,9 +1087,6 @@ fn start_agent(
     group_id: Option<String>,
     made: Made,
 ) -> Answer {
-    if let Some(why) = refusal(native) {
-        return Answer::Error(why.to_owned());
-    }
     if let Some(answer) = unheld(native) {
         return answer;
     }
@@ -1202,10 +1120,6 @@ fn start_agent(
         Ok(p) => p,
         Err(answer) => return answer,
     };
-    // Again: closing may have begun while the workspace was prepared.
-    if let Some(why) = refusal(native) {
-        return Answer::Error(why.to_owned());
-    }
     let shell = launch_shell::default_shell(settings.shell.as_deref(), Platform::HOST, var);
     let mut argv = vec![shell];
     argv.extend(
@@ -1692,22 +1606,6 @@ fn register(
 }
 
 impl Sessions {
-    /// Remembers that terminal `id` was closed while its program ran.
-    fn hung_up(&self, id: &str) {
-        self.hung_up
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id.to_owned());
-    }
-
-    /// Whether terminal `id` was closed while its program ran, once.
-    pub(super) fn take_hung_up(&self, id: &str) -> bool {
-        self.hung_up
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(id)
-    }
-
     pub(super) fn lock_starting(&self) -> std::sync::MutexGuard<'_, HashMap<String, Option<Sig>>> {
         self.starting.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -1778,12 +1676,9 @@ fn kill(native: &Native, id: &str) -> Answer {
     if !live {
         // No program to hang up: clients are told it ended, so a closing card finishes.
         exited(native, id);
-    } else {
-        native.sessions.hung_up(id);
-        if !native.sessions.doom(id, Sig::Hup) {
-            if let Some(host) = native.host.get() {
-                host.signal(id, Sig::Hup);
-            }
+    } else if !native.sessions.doom(id, Sig::Hup) {
+        if let Some(host) = native.host.get() {
+            host.signal(id, Sig::Hup);
         }
     }
     Answer::Void
@@ -1832,321 +1727,6 @@ fn reorder(native: &Native, ids: Vec<String>) -> Answer {
         Some(Err(e)) => Answer::Error(e.to_string()),
         None => not_ready(),
     }
-}
-
-/// Whether [`plan`] works out what `method` would start.
-pub fn plans(method: &str) -> bool {
-    matches!(
-        method,
-        "terminal:create" | "shell:create" | "headless:create" | "sessions:resume"
-    )
-}
-
-/// What a create or a shell would start, worked out without starting or
-/// changing anything, for the spawn-plan comparison in shadow mode:
-/// `{argv, cwd, envKeys, record}`, the record as [`plan_record`] keeps it.
-/// `shells` is how many shells there were when the call came. `None` when
-/// it cannot be worked out without a change (a worktree to make, a branch
-/// to check out, a conversation to claim) or vornd could not start it
-/// itself.
-pub fn plan(native: &Native, method: &str, params: &Value, shells: usize) -> Option<Value> {
-    match method {
-        "terminal:create" => plan_agent(native, &CreateRequest::read(params)?),
-        "headless:create" => headless::plan(native, &CreateRequest::read(params)?),
-        "shell:create" => {
-            let cwd = match params {
-                Value::Null => None,
-                Value::String(c) if c.is_empty() => None,
-                Value::String(c) if Path::new(c).is_absolute() => Some(c.as_str()),
-                _ => return None,
-            };
-            plan_shell(native, cwd, shells)
-        }
-        "sessions:resume" => plan_resume(native, params.get("id")?.as_str()?),
-        _ => None,
-    }
-}
-
-/// What a resume would start: a shell where the session was, or the agent
-/// on the conversation the record names, under its id. `None` when the id
-/// names no session to resume, or the start needs a change (a worktree to
-/// make) or a conversation looked up in the agent's history.
-fn plan_resume(native: &Native, id: &str) -> Option<Value> {
-    let previous = native.registry.get()?.read(|r| {
-        r.restored()
-            .iter()
-            .find(|o| o["session"]["id"] == id)
-            .and_then(|o| serde_json::from_value::<TerminalSession>(o["session"].clone()).ok())
-            .or_else(|| r.ended_terminal(id).cloned())
-    })??;
-    if given(previous.remote_host_id.as_deref()).is_some() {
-        let req = restore_request(&previous, pinned_free(native, &previous))?;
-        let settings = agent::settings(native)?;
-        let config = agent::command_of(&settings, req.agent)?;
-        return plan_remote(
-            native,
-            &req,
-            &config,
-            &settings,
-            id,
-            previous.group_id.clone(),
-        );
-    }
-    let cwd = resume_cwd_for(&previous)?;
-    if previous.agent_type == "shell" {
-        let settings = agent::settings(native).unwrap_or_default();
-        let (shell, setup) = native
-            .shells
-            .setup(
-                &native.env,
-                settings.shell.as_deref(),
-                settings.minimal_shell_prompt,
-            )
-            .ok()?;
-        let mut argv = vec![shell];
-        match setup.args {
-            Some(args) => argv.extend(args),
-            None => argv.extend(
-                launch_shell::default_shell_args(Platform::HOST)
-                    .iter()
-                    .map(|a| (*a).to_owned()),
-            ),
-        }
-        let mut env = native.env.get();
-        for (k, v) in setup.env {
-            set(&mut env, &k, v);
-        }
-        let count = shells_before(native, id)?;
-        return Some(plan_json(
-            argv,
-            &cwd,
-            env,
-            &resumed_shell(&previous, &cwd, count),
-        ));
-    }
-    let previous = grounded(&previous, &cwd);
-    // Only a conversation the record names: a history lookup is the server's to make.
-    let transcript = given(previous.agent_session_id.as_deref()).map(str::to_owned);
-    let req = restore_request(&previous, transcript)?;
-    let settings = agent::settings(native)?;
-    let config = agent::command_of(&settings, req.agent)?;
-    if given(req.existing_worktree_path.as_deref()).is_none_or(|e| !Path::new(e).exists())
-        && req.use_worktree
-    {
-        return None;
-    }
-    let mut holds = Holds::new(native);
-    let prepared = prepare(native, &req, &config, &mut holds).ok()?;
-    let shell = launch_shell::default_shell(settings.shell.as_deref(), Platform::HOST, var);
-    let mut argv = vec![shell];
-    argv.extend(
-        launch_shell::default_shell_args(Platform::HOST)
-            .iter()
-            .map(|a| (*a).to_owned()),
-    );
-    let data_dir = native.db.get().and_then(|db| db.parent());
-    let env = native.env.launch(&settings.env_passthrough, data_dir);
-    let record = TerminalSession {
-        display_name: given(req.display_name.as_deref()).map(str::to_owned),
-        branch: prepared.branch.filter(|b| !b.is_empty()),
-        head_commit: prepared.head_commit.filter(|h| !h.is_empty()),
-        is_worktree: prepared.worktree_path.as_ref().map(|_| true),
-        worktree_name: prepared
-            .worktree_path
-            .as_ref()
-            .and(prepared.worktree_name.clone()),
-        worktree_path: prepared.worktree_path,
-        agent_session_id: prepared.agent_session_id.filter(|a| !a.is_empty()),
-        group_id: previous.group_id.clone(),
-        ..skeleton(id, req.agent.id(), &req.project_name, &req.project_path)
-    };
-    Some(plan_json(argv, &prepared.cwd, env, &record))
-}
-
-fn plan_agent(native: &Native, req: &CreateRequest) -> Option<Value> {
-    let settings = agent::settings(native)?;
-    let config = agent::command_of(&settings, req.agent)?;
-    if req.remote().is_some() {
-        return plan_remote(native, req, &config, &settings, "", None);
-    }
-    let existing = given(req.existing_worktree_path.as_deref());
-    // Making a worktree or checking out a branch is a change.
-    let reuses = existing.is_some_and(|e| Path::new(e).exists());
-    if !reuses && given(req.branch.as_deref()).is_some() {
-        return None;
-    }
-    if req.named().is_some() {
-        return None;
-    }
-    let mut holds = Holds::new(native);
-    let prepared = prepare(native, req, &config, &mut holds).ok()?;
-    let shell = launch_shell::default_shell(settings.shell.as_deref(), Platform::HOST, var);
-    let mut argv = vec![shell];
-    argv.extend(
-        launch_shell::default_shell_args(Platform::HOST)
-            .iter()
-            .map(|a| (*a).to_owned()),
-    );
-    let data_dir = native.db.get().and_then(|db| db.parent());
-    let env = native.env.launch(&settings.env_passthrough, data_dir);
-    let record = TerminalSession {
-        display_name: given(req.display_name.as_deref())
-            .map(str::to_owned)
-            .or_else(|| {
-                given(req.initial_prompt.as_deref())
-                    .and_then(|p| display_name_from_prompt(p, PROMPT_NAME_LEN))
-            }),
-        branch: prepared.branch.filter(|b| !b.is_empty()),
-        head_commit: prepared.head_commit.filter(|h| !h.is_empty()),
-        is_worktree: prepared.worktree_path.as_ref().map(|_| true),
-        worktree_name: prepared
-            .worktree_path
-            .as_ref()
-            .and(prepared.worktree_name.clone()),
-        worktree_path: prepared.worktree_path,
-        agent_session_id: prepared.agent_session_id.filter(|a| !a.is_empty()),
-        ..skeleton("", req.agent.id(), &req.project_name, &req.project_path)
-    };
-    Some(plan_json(argv, &prepared.cwd, env, &record))
-}
-
-/// A remote terminal's plan: what [`prepare_remote`] works out, its login typed later and not compared.
-fn plan_remote(
-    native: &Native,
-    req: &CreateRequest,
-    config: &vorn_agents::AgentCommand,
-    settings: &vorn_store::AgentSettings,
-    id: &str,
-    group_id: Option<String>,
-) -> Option<Value> {
-    let start = prepare_remote(native, req, config, settings, id, group_id).ok()?;
-    Some(plan_json(start.argv, &start.cwd, start.env, &start.record))
-}
-
-fn plan_shell(native: &Native, cwd: Option<&str>, count: usize) -> Option<Value> {
-    let settings = agent::settings(native).unwrap_or_default();
-    let (shell, setup) = native
-        .shells
-        .setup(
-            &native.env,
-            settings.shell.as_deref(),
-            settings.minimal_shell_prompt,
-        )
-        .ok()?;
-    let dir = cwd.map_or_else(shell::home_dir, str::to_owned);
-    let mut argv = vec![shell];
-    match setup.args {
-        Some(args) => argv.extend(args),
-        None => argv.extend(
-            launch_shell::default_shell_args(Platform::HOST)
-                .iter()
-                .map(|a| (*a).to_owned()),
-        ),
-    }
-    let mut env = native.env.get();
-    for (k, v) in setup.env {
-        set(&mut env, &k, v);
-    }
-    let project_name = match node_basename(&dir) {
-        "" => "shell".to_owned(),
-        name => name.to_owned(),
-    };
-    let record = TerminalSession {
-        display_name: Some(format!("Shell {}", count + 1)),
-        shell_cwd: Some(dir.clone()),
-        ..skeleton("", "shell", &project_name, &dir)
-    };
-    Some(plan_json(argv, &dir, env, &record))
-}
-
-/// A plan as it is compared: the environment by its names, sorted, with
-/// the two vornd adds at the spawn.
-fn plan_json(
-    argv: Vec<String>,
-    cwd: &str,
-    env: Vec<(String, String)>,
-    record: &TerminalSession,
-) -> Value {
-    let mut keys: Vec<String> = env.into_iter().map(|(k, _)| k).collect();
-    keys.push("VORN_SESSION_ID".to_owned());
-    if !cfg!(windows) {
-        keys.push("TERM".to_owned());
-    }
-    plan_of(argv, cwd, keys, &record_json(record))
-}
-
-/// What a minted conversation id reads as in a plan, wherever it appears.
-const MINTED: &str = "<agentSessionId>";
-
-/// The conversation id `record` was given, when it was given one.
-fn minted(record: &Value) -> Option<&str> {
-    given(record.get("agentSessionId").and_then(Value::as_str))
-}
-
-/// A plan from its parts, the environment's names sorted, and the minted
-/// conversation id the same on both sides.
-pub(super) fn plan_of(
-    argv: Vec<String>,
-    cwd: &str,
-    mut keys: Vec<String>,
-    record: &Value,
-) -> Value {
-    keys.sort();
-    keys.dedup();
-    let argv: Vec<String> = match minted(record) {
-        Some(id) => argv.iter().map(|a| a.replace(id, MINTED)).collect(),
-        None => argv,
-    };
-    json!({
-        "argv": argv,
-        "cwd": cwd,
-        "envKeys": keys,
-        "record": plan_record(record),
-    })
-}
-
-/// A record as a plan is compared: without what differs from one start to
-/// the next (the id, when it was made, the pid, a minted conversation id)
-/// and the hook session the server links copilot to once it has the record.
-pub fn plan_record(record: &Value) -> Value {
-    let mut kept = BTreeMap::new();
-    if let Value::Object(fields) = record {
-        for (k, v) in fields {
-            if matches!(
-                k.as_str(),
-                "id" | "createdAt"
-                    | "startedAt"
-                    | "pid"
-                    | "rev"
-                    | "statusAt"
-                    | "exitAt"
-                    | "hookSessionId"
-            ) {
-                continue;
-            }
-            // Minted for an agent that pins one: only that there is one,
-            // and the same wherever the launch names it.
-            let v = match (k.as_str(), v.as_str(), minted(record)) {
-                ("agentSessionId", _, _) => json!(true),
-                ("launchCommand", Some(line), Some(id)) => json!(line.replace(id, MINTED)),
-                _ => v.clone(),
-            };
-            kept.insert(k.clone(), v);
-        }
-    }
-    json!(kept)
-}
-
-/// A spawn as the server asked vornd for it, as a plan is compared.
-pub fn spawn_plan(spawn: &Value, reply: &Value) -> Value {
-    let argv = spawn.get("argv").and_then(strings).unwrap_or_default();
-    let cwd = spawn.get("cwd").and_then(Value::as_str).unwrap_or_default();
-    let keys: Vec<String> = spawn
-        .get("env")
-        .and_then(Value::as_object)
-        .map(|m| m.keys().cloned().collect())
-        .unwrap_or_default();
-    plan_of(argv, cwd, keys, reply)
 }
 
 #[cfg(test)]
@@ -2294,6 +1874,45 @@ pub(super) mod tests {
         pub(in crate::native) registry: std::sync::Arc<crate::registry::SessionRegistry>,
         pub(in crate::native) host: std::sync::Arc<FakeHost>,
         pub(in crate::native) link: std::sync::Arc<crate::applink::AppLink>,
+        streams: std::sync::Arc<crate::streams::Streams>,
+        clients: std::sync::Arc<crate::serve::clients::Clients>,
+    }
+
+    impl Fed {
+        /// A client that hears every note told from now on.
+        pub(in crate::native) fn notes(&self) -> Notes {
+            let conn = self.streams.connect();
+            let forwarder = conn.forwarder();
+            self.clients
+                .add(conn.id(), forwarder, std::sync::Arc::default(), None, None);
+            Notes {
+                conn,
+                held: std::collections::VecDeque::new(),
+            }
+        }
+    }
+
+    /// What one client is told.
+    pub(in crate::native) struct Notes {
+        conn: crate::streams::ClientConn,
+        held: std::collections::VecDeque<Value>,
+    }
+
+    impl Notes {
+        /// The next note, as `{method, params}`; an error when none is waiting.
+        pub(in crate::native) fn try_recv(&mut self) -> Result<Value, &'static str> {
+            if self.held.is_empty() {
+                for msg in self.conn.drain_now() {
+                    if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
+                        let frame: Value = serde_json::from_str(text.as_str()).unwrap();
+                        self.held.push_back(
+                            json!({ "method": frame["method"], "params": frame["params"] }),
+                        );
+                    }
+                }
+            }
+            self.held.pop_front().ok_or("nothing told")
+        }
     }
 
     /// vornd holding the server's records: two agents in one worktree, one
@@ -2325,13 +1944,16 @@ pub(super) mod tests {
         let host = std::sync::Arc::new(FakeHost::default());
         native.set_host(std::sync::Arc::clone(&host) as std::sync::Arc<dyn Host>);
         let link = std::sync::Arc::new(crate::applink::AppLink::default());
-        link.set_creates_terminals();
         native.set_link(std::sync::Arc::clone(&link));
+        let clients = std::sync::Arc::new(crate::serve::clients::Clients::default());
+        native.set_clients(std::sync::Arc::clone(&clients));
         Fed {
             native,
             registry,
             host,
             link,
+            streams: crate::streams::Streams::new(),
+            clients,
         }
     }
 
@@ -2344,7 +1966,7 @@ pub(super) mod tests {
     #[test]
     fn closes_a_terminal_hangs_it_up_and_offers_the_worktree_once_none_is_at_work() {
         let fed = fed();
-        let (mut asks, _listening) = fed.link.listen();
+        let mut asks = fed.notes();
         assert_eq!(
             call(&fed.native, "terminal:kill", &json!("a")),
             Answer::Void
@@ -2352,14 +1974,11 @@ pub(super) mod tests {
         assert_eq!(ids(&fed), ["b", "sh"]);
         assert_eq!(fed.host.signalled(), ["a"]);
         // `b` is idle, so nothing is at work in the worktree any more.
-        let offer = asks.try_recv().unwrap();
-        assert_eq!(offer["method"], "vornd:broadcast");
         assert_eq!(
-            offer["params"],
+            asks.try_recv().unwrap(),
             json!({
                 "method": "worktree:confirmCleanup",
                 "params": { "id": "a", "projectPath": "/p", "worktreePath": "/w" },
-                "scope": "a",
             })
         );
         assert!(asks.try_recv().is_err());
@@ -2368,10 +1987,9 @@ pub(super) mod tests {
             call(&fed.native, "terminal:kill", &json!("a")),
             Answer::Void
         );
-        let exit = asks.try_recv().unwrap();
         assert_eq!(
-            exit["params"],
-            json!({ "method": "terminal:exit", "params": { "id": "a", "exitCode": 0 }, "scope": "a" })
+            asks.try_recv().unwrap(),
+            json!({ "method": "terminal:exit", "params": { "id": "a", "exitCode": 0 } })
         );
         assert_eq!(
             call(&fed.native, "terminal:kill", &json!(5)),
@@ -2419,19 +2037,6 @@ pub(super) mod tests {
             .unwrap();
         fed.host.up(78);
         assert_eq!(fed.host.signalled(), ["n", "m"]);
-    }
-
-    #[test]
-    fn creates_nothing_unless_vornd_creates_terminals() {
-        let fed = fed();
-        let link = std::sync::Arc::new(crate::applink::AppLink::default());
-        let native = Native::new();
-        native.set_registry(std::sync::Arc::clone(&fed.registry));
-        native.set_host(std::sync::Arc::clone(&fed.host) as std::sync::Arc<dyn Host>);
-        native.set_link(link);
-        // Not told to create terminals: the records are not vornd's yet.
-        assert_eq!(call(&native, "shell:create", &Value::Null), not_ready());
-        assert!(fed.host.starts.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -2528,23 +2133,9 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn refuses_a_new_agent_while_the_server_winds_down() {
+    fn answers_a_create_naming_a_running_conversation_with_its_session() {
         let fed = fed();
-        fed.link.set_closing(crate::applink::Closing::Draining);
-        let req = CreateRequest::read(&json!({
-            "agentType": "claude", "projectName": "p", "projectPath": project(),
-        }))
-        .unwrap();
-        assert_eq!(
-            create(&fed.native, &req),
-            Answer::Error(crate::applink::DRAINING_MESSAGE.to_owned())
-        );
-        fed.link.set_closing(crate::applink::Closing::HandingOver);
-        assert_eq!(
-            create(&fed.native, &req),
-            Answer::Error(crate::applink::HANDOVER_MESSAGE.to_owned())
-        );
-        // A conversation already running is shown, closing or not.
+        // A conversation already running is shown rather than started again.
         let mut fields = Map::new();
         fields.insert("agentSessionId".into(), json!("conv"));
         fed.registry
@@ -2557,96 +2148,10 @@ pub(super) mod tests {
         assert!(matches!(create(&fed.native, &named), Answer::Result(r) if r["id"] == "a"));
     }
 
-    #[test]
-    fn compares_a_plan_without_what_differs_between_starts() {
-        let reply = json!({
-            "id": "a", "agentType": "claude", "projectName": "p", "projectPath": "/p",
-            "status": "running", "createdAt": 5, "cols": 80, "rows": 24, "pid": 0,
-            "agentSessionId": "minted",
-        });
-        let spawn = json!({
-            "argv": ["/bin/sh", "-l"], "cwd": "/p",
-            "env": { "TERM": "x", "PATH": "/bin", "VORN_SESSION_ID": "a" },
-        });
-        let mut record = skeleton("b", "claude", "p", "/p");
-        record.agent_session_id = Some("other".into());
-        let ours = plan_json(
-            vec!["/bin/sh".into(), "-l".into()],
-            "/p",
-            vec![("PATH".into(), "/bin".into())],
-            &record,
-        );
-        if !cfg!(windows) {
-            assert_eq!(ours, spawn_plan(&spawn, &reply));
-        }
-        assert_eq!(plan_record(&reply)["agentSessionId"], true);
-        assert!(plan_record(&reply).get("pid").is_none());
-        // A minted id reads the same wherever the launch names it.
-        let mut headless = reply.clone();
-        headless["launchCommand"] = json!("claude --session-id minted -p");
-        let spawn = json!({ "argv": ["claude", "--session-id", "minted", "-p"], "cwd": "/p" });
-        let planned = spawn_plan(&spawn, &headless);
-        assert_eq!(planned["argv"][2], "<agentSessionId>");
-        assert_eq!(
-            planned["record"]["launchCommand"],
-            "claude --session-id <agentSessionId> -p"
-        );
-        let mut linked = reply.clone();
-        linked["hookSessionId"] = json!("copilot-hook");
-        assert_eq!(plan_record(&linked), plan_record(&reply));
-    }
-
-    #[test]
-    fn foresees_what_the_server_answers_a_change_without_making_it() {
-        let fed = fed();
-        let foreseen = |method: &str, params: Value| foresee(&fed.native, method, &params);
-        assert_eq!(foreseen("terminal:kill", json!("a")), Some(Answer::Void));
-        assert_eq!(
-            foreseen("terminal:rename", json!({ "id": "a", "displayName": "n" })),
-            Some(Answer::Void)
-        );
-        assert_eq!(
-            foreseen("terminal:rename", json!({ "id": "x", "displayName": "n" })),
-            Some(Answer::Error("Session not found: x".into()))
-        );
-        assert_eq!(
-            foreseen("terminal:setGroup", json!({ "id": "b", "groupId": null })),
-            Some(Answer::Void)
-        );
-        assert_eq!(
-            foreseen("terminal:reorder", json!(["sh", "b", "a"])),
-            Some(Answer::Void)
-        );
-        assert_eq!(
-            foreseen("terminal:reorder", json!(["a", "a"])),
-            Some(Answer::Error("Duplicate session IDs".into()))
-        );
-        assert_eq!(
-            foreseen("terminal:reorder", json!(["a", "x"])),
-            Some(Answer::Error("Session not found: x".into()))
-        );
-        // The server's own: a terminal the copy does not hold, a shape its
-        // handler does not read.
-        assert_eq!(foreseen("terminal:kill", json!("x")), None);
-        assert_eq!(
-            foreseen("terminal:setGroup", json!({ "id": "a", "groupId": 3 })),
-            None
-        );
-        // Nothing moved.
-        assert_eq!(ids(&fed), ["a", "b", "sh"]);
-        assert!(fed.host.signalled().is_empty());
-        assert_eq!(
-            fed.registry
-                .read(|r| r.terminal("a").unwrap().0.display_name.clone()),
-            Some(None)
-        );
-    }
-
     /// vornd owning the records between runs, with a project directory
     /// that is there, so a resume has somewhere to start.
     fn owning() -> (Fed, tempfile::TempDir) {
         let fed = fed();
-        fed.link.set_creates_headless();
         fed.native.set_database(
             std::env::temp_dir()
                 .join("vornd-no-such-db")
@@ -2835,43 +2340,6 @@ pub(super) mod tests {
         );
         assert!(fed.registry.restored().unwrap().is_empty());
         assert_eq!(fed.host.forgotten.lock().unwrap().as_slice(), ["x", "y"]);
-        // In shadow, a close of an offered session is foreseen as nothing.
-        let other = self::fed();
-        other.registry.feed(1, &json!({ "op": "restored", "restored": [{ "session": carried_agent("q", dir.path(), json!({})), "endedAt": 1 }] })).unwrap();
-        assert_eq!(
-            foresee(&other.native, "terminal:kill", &json!("q")),
-            Some(Answer::Void)
-        );
-        assert_eq!(
-            foresee(&other.native, "terminal:kill", &json!("nope")),
-            None
-        );
-        assert_eq!(
-            foresee(&other.native, "sessions:clear", &Value::Null),
-            Some(Answer::Void)
-        );
-    }
-
-    #[test]
-    fn plans_a_resume_as_the_start_it_would_make_without_taking_the_offer() {
-        let (fed, dir) = owning();
-        offer(
-            &fed,
-            vec![carried_agent(
-                "p",
-                dir.path(),
-                json!({ "agentSessionId": "conv-p" }),
-            )],
-        );
-        let planned = plan(&fed.native, "sessions:resume", &json!({ "id": "p" }), 0).unwrap();
-        assert_eq!(planned["cwd"], dir.path().to_str().unwrap());
-        assert_eq!(planned["record"]["agentType"], "claude");
-        assert_eq!(planned["record"]["groupId"], "g");
-        assert_eq!(planned["record"]["agentSessionId"], true);
-        let shell_args = launch_shell::default_shell_args(Platform::HOST).len();
-        assert!(planned["argv"].as_array().unwrap().len() > shell_args);
-        assert_eq!(fed.registry.restored().unwrap().len(), 1);
-        assert!(plan(&fed.native, "sessions:resume", &json!({ "id": "nope" }), 0).is_none());
     }
 
     #[test]
@@ -3069,7 +2537,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn credentials_never_reach_a_log_a_record_a_plan_or_an_argv() {
+    fn credentials_never_reach_a_log_a_record_or_an_argv() {
         let captured = Captured::default();
         let subscriber = tracing_subscriber::fmt()
             .with_writer(captured.clone())
@@ -3086,10 +2554,6 @@ pub(super) mod tests {
                 let (spec, input) = fed.host.last_start();
                 seen.push(format!("{spec:?} {input:?}"));
                 seen.push(format!("{:?}", CreateRequest::read(&params)));
-                seen.push(format!(
-                    "{:?}",
-                    plan(&fed.native, "terminal:create", &params, 0)
-                ));
                 // A failed start is logged with its reason.
                 fed.host.down("no holder");
                 fed.registry.read(|r| {
@@ -3118,23 +2582,9 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn plans_a_remote_terminal_as_the_shell_it_starts_in() {
-        let fed = fed();
-        let _db = with_host(&fed, "password");
-        let planned =
-            plan(&fed.native, "terminal:create", &remote_create(json!({})), 0).expect("a plan");
-        assert_eq!(planned["cwd"], shell::home_dir());
-        assert_eq!(planned["record"]["remoteHostLabel"], "Box");
-        let keys = planned["envKeys"].as_array().unwrap();
-        assert!(keys.contains(&json!("VORN_SESSION_ID")));
-        assert!(fed.host.starts.lock().unwrap().is_empty());
-    }
-
-    #[test]
     fn resumes_a_remote_session_by_logging_in_again_on_its_conversation() {
         let fed = fed();
         let _db = with_host(&fed, "agent");
-        fed.link.set_creates_headless();
         fed.registry.own_records();
         // Its project is on the host, not here: a resume reconnects anyway.
         let far = Path::new("/srv/far-not-here");
@@ -3146,9 +2596,6 @@ pub(super) mod tests {
                 json!({ "agentSessionId": "conv-rr", "remoteHostId": "h", "remoteHostLabel": "Box" }),
             )],
         );
-        let planned =
-            plan(&fed.native, "sessions:resume", &json!({ "id": "rr" }), 0).expect("a plan");
-        assert_eq!(planned["record"]["groupId"], "g");
         let answer = call(&fed.native, "sessions:resume", &json!({ "id": "rr" }));
         let Answer::Result(answer) = answer else {
             panic!("not resumed: {answer:?}");

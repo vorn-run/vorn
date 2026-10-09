@@ -36,7 +36,7 @@ describe('ws-port file parsing (readPort via isServerRunning)', () => {
   })
 
   async function loadIsServerRunning() {
-    const mod = await import('../packages/server/src/rpc-client')
+    const mod = await import('../packages/mcp/src/rpc-client')
     return mod.isServerRunning
   }
 

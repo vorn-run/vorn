@@ -5,7 +5,6 @@ import {
   home,
   killPid,
   until,
-  upstream,
   vorndSessionsAvailable
 } from './helpers/vornd-sessions'
 
@@ -16,11 +15,10 @@ import {
  * a snapshot and the reason. Real vornd and session holder; vornd is killed
  * with SIGKILL, as a crash would.
  *
- * Runs in `yarn test:conformance`, which builds both binaries; skipped
- * otherwise.
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`);
+ * skipped otherwise.
  */
 describe.runIf(vorndSessionsAvailable)('attaching through vornd', () => {
-  let server: Awaited<ReturnType<typeof upstream>>
   let dir: ReturnType<typeof home>
   let vornd: Vornd
   let holder: number | null = null
@@ -28,15 +26,14 @@ describe.runIf(vorndSessionsAvailable)('attaching through vornd', () => {
 
   async function client(port = vornd.port): Promise<BytesClient> {
     const c = new BytesClient()
-    await c.connect(port)
+    await c.connect(port, vornd.credential)
     clients.push(c)
     return c
   }
 
   beforeAll(async () => {
-    server = await upstream()
     dir = home()
-    vornd = await Vornd.start(server.port, dir.dir)
+    vornd = await Vornd.start(dir.dir)
     holder = await vornd.sessiondPid()
   }, 30_000)
 
@@ -44,7 +41,6 @@ describe.runIf(vorndSessionsAvailable)('attaching through vornd', () => {
     for (const c of clients) c.close()
     await vornd.kill()
     killPid(holder)
-    server.close()
     dir.remove()
   })
 
@@ -93,12 +89,12 @@ describe.runIf(vorndSessionsAvailable)('attaching through vornd', () => {
     await vornd.kill()
     c.close()
     await new Promise((r) => setTimeout(r, 1000))
-    vornd = await Vornd.start(server.port, dir.dir)
+    vornd = await Vornd.start(dir.dir)
     await until('the session to be live again', async () =>
       (await vornd.report()).sessions.some((s) => s.session === id && s.state === 'live')
     )
 
-    await c.connect(vornd.port)
+    await c.connect(vornd.port, vornd.credential)
     const a = await c.attach(id, true)
     expect(a.continued).toBe(true)
     await until('the last line', async () => (await c.text()).includes('line 59'))

@@ -16,15 +16,11 @@
 //! ([`super::sessions::workspace`]) and builds the process as
 //! `buildHeadlessSpawnArgs` does ([`vorn_agents::launch::headless_spawn`]):
 //! the arguments first, so arguments that cannot be built create nothing.
-//! Nothing new starts while the server drains. A stop sends the program
+//! A stop sends the program
 //! `SIGTERM`, and `SIGKILL` [`FORCE_KILL_DELAY`] later if it still runs.
 //!
 //! A create naming a remote host runs the agent here, as the server ran it.
-//! In shadow mode nothing here changes
-//! anything: a create is compared as what each side would start ([`plan`]),
-//! a stop as what each would answer ([`foresee`]).
 
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -41,11 +37,9 @@ use vorn_store::AgentSettings;
 
 use super::sessions::NO_HOLDER;
 use super::sessions::{
-    closing, fed_and_held, given, new_id, now_ms, plan_of, var, workspace, CreateRequest, Holds,
-    Input,
+    fed_and_held, given, new_id, now_ms, var, workspace, CreateRequest, Holds, Input,
 };
 use super::{agent, bad_params, not_answered, not_ready, Answer, Native};
-use crate::applink::{Closing, DRAINING_MESSAGE};
 use crate::registry::{HeadlessSession, HeadlessStatus};
 
 /// How long after `SIGTERM` an agent that still runs is sent `SIGKILL`.
@@ -76,44 +70,15 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     }
 }
 
-/// Whether [`foresee`] can say what `method` would answer.
-pub fn foresees(method: &str) -> bool {
-    method == "headless:kill"
-}
-
-/// What vornd would answer `headless:kill`, read from the copy without
-/// changing it: nothing, as the server answers it, for an agent the copy
-/// holds. `None` when the answer is the server's own.
-pub fn foresee(native: &Native, params: &Value) -> Option<Answer> {
-    let id = params.as_str()?;
-    native
-        .registry
-        .get()?
-        .read(|r| r.headless_record(id).map(|_| Answer::Void))?
-}
-
-/// Why vornd cannot start an agent now, if it cannot: the records are not
-/// read yet, or the session holder is not connected.
+/// Why vornd cannot start an agent now: the session holder is not connected.
 fn unstartable(native: &Native) -> Option<Answer> {
-    if !native.link.get().is_some_and(|l| l.creates_headless()) {
-        return Some(not_ready());
-    }
     (!fed_and_held(native)).then(|| Answer::Error(NO_HOLDER.into()))
-}
-
-/// The server's refusal of a new agent while it drains (`isDraining`), if
-/// it does. A handover does not refuse one: the server's handler does not ask.
-fn refusal(native: &Native) -> Option<&'static str> {
-    (closing(native)? == Closing::Draining).then_some(DRAINING_MESSAGE)
 }
 
 /// `headless:create` for a local agent.
 fn create(native: &Native, req: &CreateRequest) -> Answer {
     if let Some(answer) = unstartable(native) {
         return answer;
-    }
-    if let Some(why) = refusal(native) {
-        return Answer::Error(why.to_owned());
     }
     let Some(settings) = agent::settings(native) else {
         return agent::no_settings();
@@ -131,10 +96,6 @@ fn create(native: &Native, req: &CreateRequest) -> Answer {
         Ok(launch) => launch,
         Err(answer) => return answer,
     };
-    // Again: draining may have begun while the workspace was prepared.
-    if let Some(why) = refusal(native) {
-        return Answer::Error(why.to_owned());
-    }
     let answer = register(native, launch);
     drop(holds);
     answer
@@ -423,31 +384,8 @@ fn kill(native: &Native, id: &str) -> Answer {
     Answer::Void
 }
 
-/// What a create would start, worked out without starting or changing
-/// anything, for the comparison with the spawn the server asks for
-/// ([`super::sessions::plan`]). `None` when it cannot be worked out without
-/// a change (a worktree to make, a branch to check out).
-pub fn plan(native: &Native, req: &CreateRequest) -> Option<Value> {
-    if req.remote().is_some() {
-        return None;
-    }
-    let settings = agent::settings(native)?;
-    let config = agent::command_of(&settings, req.agent)?;
-    let existing = given(req.existing_worktree_path.as_deref());
-    let reuses = existing.is_some_and(|e| Path::new(e).exists());
-    if !reuses && given(req.branch.as_deref()).is_some() {
-        return None;
-    }
-    let mut holds = Holds::new(native);
-    let launch = prepare(native, req, &settings, &config, &mut holds).ok()?;
-    let keys = launch.env.into_iter().map(|(k, _)| k).collect();
-    let record = serde_json::to_value(&launch.record).unwrap_or(Value::Null);
-    Some(plan_of(launch.argv, &launch.cwd, keys, &record))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::sessions::plan_record;
     use super::super::sessions::tests::{fed, Fed};
     use super::*;
     use serde_json::json;
@@ -465,7 +403,6 @@ mod tests {
     /// vornd starting headless agents, with the agents' default commands.
     fn ready() -> Fed {
         let fed = fed();
-        fed.link.set_creates_headless();
         fed.native.set_database(
             std::env::temp_dir()
                 .join("vornd-no-such-db")
@@ -638,22 +575,13 @@ mod tests {
     }
 
     #[test]
-    fn creates_nothing_unless_vornd_starts_headless_agents() {
-        let fed = fed();
-        assert_eq!(
-            call(
-                &fed.native,
-                "headless:create",
-                &request("claude", json!({}))
-            ),
-            not_ready()
-        );
+    fn reads_a_create_and_runs_a_remote_hosts_agent_here() {
+        let fed = ready();
         assert_eq!(
             call(&fed.native, "headless:create", &json!({})),
             bad_params("headless:create")
         );
         // A remote host named runs the agent here, as the server ran it.
-        let fed = ready();
         let made = call(
             &fed.native,
             "headless:create",
@@ -661,75 +589,5 @@ mod tests {
         );
         assert!(matches!(made, Answer::Result(_)), "{made:?}");
         assert_eq!(fed.host.starts.lock().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn refuses_a_new_agent_while_the_server_drains_and_not_while_it_hands_over() {
-        let fed = ready();
-        fed.link.set_closing(Closing::Draining);
-        assert_eq!(
-            call(
-                &fed.native,
-                "headless:create",
-                &request("claude", json!({}))
-            ),
-            Answer::Error(DRAINING_MESSAGE.to_owned())
-        );
-        fed.link.set_closing(Closing::HandingOver);
-        assert!(matches!(
-            call(
-                &fed.native,
-                "headless:create",
-                &request("claude", json!({}))
-            ),
-            Answer::Result(_)
-        ));
-    }
-
-    #[test]
-    fn plans_a_create_and_foresees_a_stop_without_starting_anything() {
-        let fed = ready();
-        let req = CreateRequest::read(&request("opencode", json!({}))).unwrap();
-        let planned = plan(&fed.native, &req).unwrap();
-        assert_eq!(planned["cwd"], project());
-        assert!(planned["envKeys"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|k| k == "PATH"));
-        assert_eq!(planned["record"]["agentType"], "opencode");
-        assert!(planned["record"].get("startedAt").is_none());
-        let line: Vec<&str> = planned["argv"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(Value::as_str)
-            .collect();
-        if !cfg!(windows) {
-            assert_eq!(planned["record"]["launchCommand"], line.join(" "));
-        }
-        assert_eq!(planned["record"], plan_record(&planned["record"]));
-        assert!(fed.host.starts.lock().unwrap().is_empty());
-        assert_eq!(fed.registry.read(|r| r.headless().count()), Some(0));
-        // A worktree to make is a change: not planned.
-        let branched = CreateRequest::read(&request(
-            "opencode",
-            json!({ "useWorktree": true, "branch": "b" }),
-        ))
-        .unwrap();
-        assert_eq!(plan(&fed.native, &branched), None);
-
-        assert_eq!(foresee(&fed.native, &json!("x")), None);
-        call(
-            &fed.native,
-            "headless:create",
-            &request("claude", json!({})),
-        );
-        let id = fed
-            .registry
-            .read(|r| r.headless().next().unwrap().id.clone())
-            .unwrap();
-        assert_eq!(foresee(&fed.native, &json!(id)), Some(Answer::Void));
-        assert!(fed.host.signalled().is_empty());
     }
 }

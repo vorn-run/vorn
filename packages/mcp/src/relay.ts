@@ -26,10 +26,7 @@ export interface RelayDeps {
   fetch: typeof fetch
 }
 
-/**
- * vornd's `/mcp`, when the running server's vornd serves MCP itself; null
- * when it does not or cannot be asked, and the TypeScript tools answer.
- */
+/** vornd's `/mcp` when it answers its health check; null otherwise, and the TypeScript tools answer. */
 export async function vorndMcpUrl(deps: RelayDeps): Promise<URL | null> {
   try {
     const status = await deps.vorndStatus()
@@ -37,9 +34,7 @@ export async function vorndMcpUrl(deps: RelayDeps): Promise<URL | null> {
     const res = await deps.fetch(`http://127.0.0.1:${status.port}/vornd/health`, {
       signal: AbortSignal.timeout(ASK_TIMEOUT_MS)
     })
-    // vornd answers 503 while the server is unreachable, with the same body.
-    const health = (await res.json()) as { groups?: Record<string, { mode?: string }> }
-    if (health.groups?.mcp?.mode !== 'native') return null
+    if (!res.ok) return null
     return new URL(`http://127.0.0.1:${status.port}/mcp`)
   } catch {
     return null

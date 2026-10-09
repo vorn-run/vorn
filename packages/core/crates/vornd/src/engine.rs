@@ -183,7 +183,7 @@ pub struct Engine {
     sizes: Arc<Sizes>,
     names: Mutex<Names>,
     journal: Mutex<Journal>,
-    /// The copy of the app's session records, which the app's channel feeds.
+    /// The session records.
     registry: Arc<SessionRegistry>,
     /// Sessions whose output is read as it comes, by name: a remote login's.
     taps: Mutex<HashMap<String, Tap>>,
@@ -270,7 +270,7 @@ impl Engine {
         &self.streams
     }
 
-    /// The app's session records, as the app's channel told them.
+    /// The session records.
     pub fn registry(&self) -> &Arc<SessionRegistry> {
         &self.registry
     }
@@ -284,7 +284,7 @@ impl Engine {
             return;
         }
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-            warn!("no runtime to follow the sessions on; the server keeps deciding their statuses");
+            warn!("no runtime to follow the sessions on; their statuses are not decided");
             return;
         };
         self.registry.decide_statuses();

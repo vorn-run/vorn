@@ -13,6 +13,6 @@ export default defineConfig({
   },
   // Bundle workspace packages so the npm package is self-contained
   noExternal: [/@vorn\//],
-  // Native/CJS modules must remain external
-  external: ['libsql', 'ws', 'pino']
+  // CJS modules must remain external
+  external: ['ws']
 })

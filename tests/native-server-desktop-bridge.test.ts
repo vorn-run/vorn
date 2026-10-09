@@ -3,8 +3,8 @@
  * with `bridge:identify`, an agent's `browser:*` and `device:*` calls reach
  * main through vornd and come back, and none of them reaches the server.
  *
- * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
- * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix.
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on
+ * a Unix.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
@@ -116,19 +116,6 @@ describe.skipIf(!runnable)('the desktop bridge through vornd', () => {
       ['string', 'browser:tabs'],
       ['string', 'device:list']
     ])
-  })
-
-  it('answers them all in vornd', async () => {
-    const health = (await (
-      await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-    ).json()) as { groups: Record<string, { native?: number; forwarded?: number }> }
-    for (const group of ['bridge', 'browser', 'device']) {
-      expect({ group, forwarded: health.groups[group]?.forwarded ?? 0 }).toEqual({
-        group,
-        forwarded: 0
-      })
-      expect(health.groups[group]?.native).toBeGreaterThan(0)
-    }
   })
 
   it('fails the calls once main has gone', async () => {

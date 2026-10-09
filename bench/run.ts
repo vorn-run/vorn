@@ -3,7 +3,7 @@
  * report the median with its spread.
  *
  *   yarn bench                      three runs of everything, compared to the baseline
- *   yarn bench --only=git,flush     a subset
+ *   yarn bench --only=renderer      a subset
  *   yarn bench --runs=5             more runs
  *   yarn bench --quick              one short run, a smoke check rather than a number
  *   yarn bench --save               write the baseline for this platform and the doc table
@@ -23,7 +23,7 @@ import { median, round } from './lib/stats'
 import type { Metric, SuiteResult } from './lib/suite'
 
 const ROOT = path.resolve(__dirname, '..')
-const SUITES = ['git', 'renderer']
+const SUITES = ['renderer']
 /**
  * Processes per run, for suites whose numbers move between processes more than
  * within one. One run of these is the median of that many processes.

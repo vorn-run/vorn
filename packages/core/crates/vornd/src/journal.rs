@@ -191,6 +191,12 @@ fn set<T>(slot: &mut Option<Stamped<T>>, value: T, id: &EffectId) {
     }
 }
 
+/// The string an effect is known by: the same in every replay of the
+/// records that caused it.
+pub fn effect_key(id: &EffectId) -> String {
+    format!("{}/{}/{}/{}", id.session, id.epoch, id.rseq, id.index)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

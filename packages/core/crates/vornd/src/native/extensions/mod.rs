@@ -268,7 +268,7 @@ impl Extensions {
                 Ok(s) => Ok(self.match_links(&s, text(params, "text")).await),
                 Err(err) => Err(err),
             },
-            _ => return Answer::Forward,
+            _ => return Answer::Unanswered,
         };
         answered.map_or_else(Answer::Error, Answer::Result)
     }

@@ -2,8 +2,7 @@
 //!
 //! `terminal:attach`, `write`, `resize`, `readScrollback` and `readOutput`
 //! are answered here whatever session they name: one the engine holds from
-//! [`crate::streams`], any other as the server answered a session it had no
-//! program for (nothing to read, nothing to write to).
+//! [`crate::streams`], any other as a session with no program.
 //!
 //! The size of a held session is the size rule's ([`crate::size`]). A
 //! client reports `terminal:viewport {id, cols, rows}` and
@@ -18,12 +17,7 @@
 //! share one connection, and the size rule counts each pane as its own client.
 //! A lock another client holds is refused, in the answer to the request.
 //!
-//! `vornd:spawn` starts a session in sessiond through the engine. The app's
-//! server sends it on its own channel ([`crate::control`]), naming each
-//! session with its own id ([`crate::names`]); a client may send it only
-//! when vornd was started with `--debug-spawn`, which tests use. The app's
-//! own calls never count toward the size rule: the server writing to a
-//! session for a workflow is not a person typing into it.
+//! `vornd:spawn`, which tests use, is answered only with `--debug-spawn`.
 
 use std::time::Instant;
 
@@ -50,44 +44,13 @@ const NATIVE: [&str; 10] = [
     "\"vornd:spawn\"",
 ];
 
-/// Who a call comes from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Caller {
-    /// A client: the renderer, the web client, the phone.
-    Client { allow_spawn: bool },
-    /// The app's server, on its own channel.
-    App,
-}
-
-/// Answers `text` from client connection `conn` if it is a terminal call
-/// for a session vornd holds. False when it is for the server.
+/// Answers `text` from client connection `conn` if it is a terminal call.
 pub fn handle(
     engine: &std::sync::Arc<Engine>,
     conn: u64,
     reply: &Forwarder,
     text: &str,
     allow_spawn: bool,
-) -> bool {
-    route(engine, conn, reply, text, Caller::Client { allow_spawn })
-}
-
-/// Answers `text` from the app's server on connection `conn` if it is a
-/// terminal call for a session vornd holds, or `vornd:spawn`.
-pub fn handle_for_app(
-    engine: &std::sync::Arc<Engine>,
-    conn: u64,
-    reply: &Forwarder,
-    text: &str,
-) -> bool {
-    route(engine, conn, reply, text, Caller::App)
-}
-
-fn route(
-    engine: &std::sync::Arc<Engine>,
-    conn: u64,
-    reply: &Forwarder,
-    text: &str,
-    caller: Caller,
 ) -> bool {
     if !NATIVE.iter().any(|m| text.contains(m)) {
         return false;
@@ -101,7 +64,7 @@ fn route(
     let rpc = frame.get("id").cloned();
     let params = frame.get("params").cloned().unwrap_or(Value::Null);
     if method == "vornd:spawn" {
-        if caller == (Caller::Client { allow_spawn: false }) {
+        if !allow_spawn {
             return false;
         }
         spawn(engine, reply, rpc, &params);
@@ -132,8 +95,6 @@ fn route(
         return true;
     }
     let sizes = engine.sizes();
-    // The app's calls leave the size rule alone.
-    let counted = matches!(caller, Caller::Client { .. });
     // 0 when the client names no pane: the connection is then one client.
     let pane = params.get("pane").and_then(Value::as_u64).unwrap_or(0);
     let who = Who::Bytes { conn, pane };
@@ -142,13 +103,11 @@ fn route(
         "terminal:attach" => {
             let Some(rpc) = rpc else { return true };
             let cursor = params.get("cursor").and_then(cursor_of);
-            if counted {
-                let ev = Ev::Attach {
-                    viewport: size_of(&params),
-                    presence: Presence::Watching,
-                };
-                sizes.on(session, who, ev, now);
-            }
+            let ev = Ev::Attach {
+                viewport: size_of(&params),
+                presence: Presence::Watching,
+            };
+            sizes.on(session, who, ev, now);
             engine.perform(streams.attach(conn, session, rpc, cursor));
         }
         "terminal:readScrollback" => {
@@ -168,13 +127,11 @@ fn route(
                 Some(data) => {
                     // A person's typing takes the size; focus and scroll
                     // reports do not.
-                    if counted && vorn_size::typed(data.as_bytes()) {
+                    if vorn_size::typed(data.as_bytes()) {
                         sizes.on(session, who, Ev::Input, now);
                     }
                     // A person's input wakes an idle or waiting agent, before what it makes the program print.
-                    if counted {
-                        let _ = engine.registry().input(session, engine.head_stamp(session));
-                    }
+                    let _ = engine.registry().input(session, engine.head_stamp(session));
                     engine.write(session, data.as_bytes().to_vec())
                 }
                 None => Err("terminal:write needs data".to_owned()),
@@ -183,8 +140,6 @@ fn route(
         }
         "terminal:resize" => {
             let done = match size_of(&params) {
-                // The app's resize is applied as it is, past the rule.
-                Some(size) if !counted => engine.resize(session, size.cols, size.rows),
                 Some(size) => {
                     sizes.on(session, who, Ev::TakeSize(Some(size)), now);
                     Ok(())

@@ -34,31 +34,9 @@ beforeEach(() => {
 })
 
 describe('NativeCoreStatus', () => {
-  it('shows the native core it runs on, and nothing else about it when it is whole', async () => {
+  it('shows the native core it runs on', async () => {
     render(<NativeCoreStatus />)
-    await screen.findByText('Native core 0.2.0')
-    expect(screen.queryByText(/did not load|was made without/)).not.toBeInTheDocument()
-  })
-
-  it('says what is missing when the core did not load', async () => {
-    status = core({ loaded: false, version: null, error: 'vorn_core.node not found' })
-    render(<NativeCoreStatus />)
-    expect(
-      await screen.findByText(
-        'The native core did not load, so git runs more slowly: vorn_core.node not found'
-      )
-    ).toBeInTheDocument()
-    expect(screen.queryByText(/Native core \d/)).not.toBeInTheDocument()
-  })
-
-  it('names what a core was built without', async () => {
-    status = core({ missing: ['git', 'the native store'] })
-    render(<NativeCoreStatus />)
-    expect(
-      await screen.findByText(
-        'This build of the native core was made without git, the native store.'
-      )
-    ).toBeInTheDocument()
+    expect(await screen.findByText('Native core 0.2.0')).toBeInTheDocument()
   })
 
   it('says nothing about the core when the server cannot report on it', async () => {

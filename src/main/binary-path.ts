@@ -12,15 +12,11 @@ import log from './logger'
  * installed" while the binary sits on disk. That is the misleading answer
  * this module exists to prevent.
  *
- * The server already asks a login shell for the real PATH
- * (`packages/server/src/process-utils.ts`), so the first question is put to
- * it, over the bridge. Nothing waits on that answer to begin with: the fixed
+ * The server already asks a login shell for the real PATH (`env:path`), so the first question is put to it, over the bridge. Nothing waits on that answer to begin with: the fixed
  * Homebrew directories below cover an ordinary install, and a claim that
  * would otherwise fail is worth a short wait only once they have missed.
  *
- * `findOnPath` is deliberately a twin of the server's
- * (`packages/server/src/resolve-executable.ts`) rather than a shared import.
- * Neither shared directory will take it: `packages/shared` is free of `node:*`
+ * `findOnPath` is deliberately its own rather than a shared import. Neither shared directory will take it: `packages/shared` is free of `node:*`
  * because the renderer loads it, and `src/shared` is in the renderer's own
  * build. Fifteen lines of `fs.accessSync` is the cheaper of the two prices.
  */

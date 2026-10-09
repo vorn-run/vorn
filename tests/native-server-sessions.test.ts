@@ -2,14 +2,13 @@
  * The terminals and headless agents vornd creates and changes, as the app
  * drives them: shells and agents created, hooks linking them, renames,
  * groups, a reorder, an exit, a resume, a kill and a headless agent, through
- * vornd in front of a real server on a real database. What clients are
+ * vornd as the server on a real database. What clients are
  * answered, started and told is checked against a recorded run
  * (`fixtures/vornd/terminals.json`), first made while the server still held
  * the sessions.
  *
- * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
- * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix: the agents are shell
- * scripts.
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on
+ * a Unix: the agents are shell scripts.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -34,11 +33,6 @@ import {
   withoutHookLinks
 } from './helpers/sessions-parity'
 import { recorded } from './helpers/vornd-fixtures'
-
-type Counts = Record<
-  string,
-  { mode?: string; forwarded?: number; shadowMatched?: number; shadowMismatched?: number }
->
 
 const PATIENCE_MS = 30_000
 
@@ -285,14 +279,6 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
       return Date.now() - since > 500
     })
     const toldOf = (method: string): unknown[] => direct.toldBy(method)
-    const health = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-    const groups = (
-      (await health.json()) as { groups: Counts & Record<string, { native?: number }> }
-    ).groups
-    const by = (group: string): { native: number; forwarded: number } => ({
-      native: groups[group]?.native ?? 0,
-      forwarded: groups[group]?.forwarded ?? 0
-    })
     const exits = toldOf('headless:exit') as { id: string; exitCode: number }[]
     const headlessIds = Object.values(byAgent)
     const exitsTold = withoutHeadlessExits(
@@ -304,12 +290,6 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
       headlessIds
     )
     return {
-      answeredBy: {
-        terminal: by('terminal'),
-        shell: by('shell'),
-        headless: by('headless'),
-        git: by('git')
-      },
       replies: withoutHookLinks(replies),
       argv,
       listed: await listed(),
@@ -389,16 +369,6 @@ describe.skipIf(!runnable)('the terminals vornd creates and changes, against the
       'wt-two'
     ])
     expect(Object.values(seen.agentsExits).map((e) => e.exitCode)).toEqual([3, 3, 3, 3, 3, 143])
-  })
-
-  it('has vornd answer every one of them', () => {
-    // Refusals included; the reads are polled, so only that none was forwarded counts.
-    const answeredBy = run.answeredBy as Record<string, { native: number; forwarded: number }>
-    expect(Object.keys(answeredBy).sort()).toEqual(['git', 'headless', 'shell', 'terminal'])
-    for (const [group, counts] of Object.entries(answeredBy)) {
-      expect({ group, forwarded: counts.forwarded }).toEqual({ group, forwarded: 0 })
-      expect(counts.native).toBeGreaterThan(0)
-    }
   })
 
   it('answers, starts, tells and lists as the app expects', () => {

@@ -7,8 +7,7 @@
 //! `auth:authenticate`, within [`AUTH_TIMEOUT`], and at most
 //! [`MAX_PENDING`] sockets wait at a time. Once admitted, `subscribe:set`
 //! names the notifications it wants and the `server:` calls are answered
-//! here; every other call goes where it always went in vornd, and one nobody
-//! answers is refused as unknown.
+//! here; the rest go to [`crate::terminal`] or [`crate::native`].
 
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
@@ -17,23 +16,14 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 use super::clients::{close, Topics, CLOSE_CREDENTIAL_REJECTED, CLOSE_UNAUTHENTICATED};
 use super::Serving;
+use crate::endpoint::Daemon;
 use crate::native::{Conn, Offer};
-use crate::proxy::Daemon;
 use crate::streams::Forwarder;
-
-/// The calls this socket answers itself rather than through a native group.
-pub const ANSWERED_HERE: &[&str] = &[
-    crate::native::AUTH_METHOD,
-    "subscribe:set",
-    "server:vornd",
-    "server:shutdown",
-];
 
 /// How long a socket has to authenticate.
 pub const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -75,26 +65,13 @@ pub async fn run<C>(
         }
         let _ = to_client.close().await;
     });
-    let Some(native) = daemon.native().cloned() else {
-        out.send_message_now(close(1011, "vornd answers nothing"));
-        let _ = writer.await;
-        return;
-    };
+    let native = Arc::clone(daemon.native());
     out.send_now(&serving.hello());
     if peer.ip().is_loopback() {
         let sessions = native.registry_live().and_then(|l| l["sessions"].as_u64());
         out.send_now(&serving.identity(sessions));
     }
-    let (unanswered, refused) = mpsc::channel::<Message>(16);
-    tokio::spawn(refuse_unanswered(refused, out.clone()));
-    let calls = Conn::new(
-        id,
-        Arc::clone(&native),
-        Arc::clone(daemon.groups_arc()),
-        out.clone(),
-        &unanswered,
-        desktop,
-    );
+    let calls = Conn::new(id, Arc::clone(&native), out.clone(), desktop);
     let mut session = Session {
         id,
         out: out.clone(),
@@ -160,7 +137,6 @@ pub async fn run<C>(
     }
     session.leave();
     calls.closed();
-    drop(unanswered);
     // Ends the writer, which flushes the close handshake to the client.
     out.send_message_now(Message::Close(None));
     if tokio::time::timeout(Duration::from_secs(5), writer)
@@ -319,28 +295,5 @@ impl Session {
             self.reply(&id, Err((-32601, format!("Method not found: {method}"))));
         }
         true
-    }
-}
-
-/// Refuses each call no part of vornd answered, as unknown.
-async fn refuse_unanswered(mut calls: mpsc::Receiver<Message>, out: Forwarder) {
-    while let Some(msg) = calls.recv().await {
-        let Message::Text(text) = msg else {
-            continue;
-        };
-        let Ok(frame) = serde_json::from_str::<Value>(text.as_str()) else {
-            continue;
-        };
-        let (Some(id), Some(method)) = (
-            frame.get("id").filter(|id| !id.is_null()),
-            frame.get("method").and_then(Value::as_str),
-        ) else {
-            continue;
-        };
-        out.send_now(&json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": { "code": -32601, "message": format!("Method not found: {method}") },
-        }));
     }
 }

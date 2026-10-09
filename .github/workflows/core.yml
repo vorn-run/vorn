@@ -11,39 +11,26 @@ on:
     branches: [main]
     paths: &paths
       - 'packages/core/**'
-      - 'packages/server/src/native-core.ts'
-      - 'packages/server/src/git-runner.ts'
-      - 'packages/server/src/git-utils.ts'
-      - 'tests/native-core.test.ts'
-      - 'tests/git-native-parity.test.ts'
       - 'tests/js-reference.test.ts'
       - 'tests/fixtures/js-reference/**'
+      - 'tests/fixtures/launch-lines.json'
       - 'tests/helpers/screen-view.ts'
       - 'tests/helpers/screen-parity.ts'
       - 'tests/native-server-workflows.test.ts'
-      - 'scripts/conformance.mjs'
       - 'tests/vornd-app-platforms.test.ts'
       - 'tests/helpers/vornd-sessions.ts'
-      - 'packages/server/src/database.ts'
-      - 'packages/server/src/store-types.ts'
+      - 'tests/helpers/served.ts'
       - 'packages/shared/src/types.ts'
+      - 'packages/shared/src/store-types.ts'
       - 'scripts/gen-store-schema.mjs'
-      - 'tests/store-reference.test.ts'
-      - 'tests/fixtures/js-reference/store.json'
       - 'packages/mcp/src/**'
       - 'scripts/gen-mcp-tools.mjs'
       - 'tests/native-server-mcp.test.ts'
       - 'tests/helpers/mcp-parity.ts'
       - 'tests/mcp-relay.test.ts'
-      - 'tests/helpers/store-parity.ts'
-      - 'packages/server/src/cli.ts'
-      - 'packages/server/src/cli/**'
-      - 'packages/server/src/client-args.ts'
-      - 'packages/server/src/server-args.ts'
-      - 'packages/server/src/rpc-client.ts'
       - 'tests/native-cli.test.ts'
-      - 'tests/helpers/cli-parity.ts'
-      - 'tests/database-*.test.ts'
+      - 'tests/helpers/cli-reference.ts'
+      - 'tests/fixtures/cli-reference.json'
       - 'tests/artifact-*.test.ts'
       - 'THIRD_PARTY_NOTICES.md'
       - 'electron-builder.yml'
@@ -68,7 +55,7 @@ on:
         type: string
         default: ''
       quick:
-        description: Stop after the Rust tests (skip conformance, packaging and the packaged checks)
+        description: Stop after the Rust tests (skip the vornd tests, packaging and the packaged checks)
         type: boolean
         default: false
 
@@ -82,7 +69,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # A night with no new commits to the core, the server or the tests skips the run.
+  # A night with no new commits to the core or the tests skips the run.
   changed:
     runs-on: ubuntu-latest
     outputs:
@@ -93,7 +80,7 @@ jobs:
           fetch-depth: 0
       - id: check
         run: |
-          if [ "${{ github.event_name }}" != schedule ] || [ -n "$(git log --since='25 hours ago' --format=%H -1 -- packages/core packages/server tests package.json yarn.lock .github/workflows/core.yml)" ]; then
+          if [ "${{ github.event_name }}" != schedule ] || [ -n "$(git log --since='25 hours ago' --format=%H -1 -- packages/core tests package.json yarn.lock .github/workflows/core.yml)" ]; then
             echo run=true >> "$GITHUB_OUTPUT"
           else
             echo run=false >> "$GITHUB_OUTPUT"
@@ -195,10 +182,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.145
 
-      # Every crate but the napi adapter, whose test binary would not link on
-      # every platform and which holds no tests of its own. One run, so each
-      # crate compiles once: separate runs over different package sets resolve
-      # features differently and rebuild the shared crates each time. Cargo
+      # Every crate in one run, so each compiles once. Cargo
       # builds the binaries the tests start (vornd, vorn-sessiond, the recovery
       # programs) side by side in target/ci. On Windows sessiond hosts its
       # sessions in the ConPTY the app ships, so the gate test installs it
@@ -215,7 +199,7 @@ jobs:
           if [ -n "$CRATES" ]; then
             packages=$(printf -- '-p %s ' $CRATES)
           else
-            packages='--workspace --exclude vorn-core'
+            packages='--workspace'
           fi
           cargo nextest run --cargo-profile ci --locked --no-fail-fast --no-tests=warn $packages
           cargo test --doc --profile ci --locked --no-fail-fast $packages
@@ -235,38 +219,17 @@ jobs:
         run: node scripts/gen-mcp-tools.mjs --check
 
       # Pull requests reuse the ci profile the tests compiled; main and the nightly run build the shipping release.
-      - name: Build vorn_core.node
+      - name: Build vornd and vorn
         if: ${{ !inputs.quick }}
         shell: bash
         env:
           PROFILE: ${{ github.event_name == 'pull_request' && '--profile=ci' || '' }}
         run: yarn build:core $PROFILE
 
-      # The RPC test files again, with every client going through vornd, which
-      # answers every group it implements: the vornd and sessiond the build
-      # above put beside vorn_core.node. Linux
-      # only for now: the files themselves only run on Linux in the main suite.
-      - name: Conformance through vornd
-        if: ${{ !inputs.quick && (runner.os == 'Linux') }}
-        env:
-          VORN_CONFORMANCE_VORND: packages/core/vornd
-        run: yarn test:conformance
-
-      # With the binary present these run the real call from Node.
-      - name: Native call
-        if: ${{ !inputs.quick }}
-        run: yarn vitest run tests/native-core.test.ts tests/git-native-parity.test.ts
-
-      # The Rust vorn against the TypeScript one, on each platform.
+      # The vorn command against its recorded output, on each platform.
       - name: Native CLI
         if: ${{ !inputs.quick }}
         run: yarn vitest run tests/native-cli.test.ts
-
-      # The store against what the TypeScript store it replaced answered, on
-      # each platform.
-      - name: Store against the JS reference
-        if: ${{ !inputs.quick }}
-        run: yarn vitest run tests/store-reference.test.ts
 
       # A client's sessions through the real vornd and session holder, on
       # each platform: a named pipe and ConPTY on Windows. The
@@ -274,10 +237,7 @@ jobs:
       # shell) do.
       - name: Sessions through vornd
         if: ${{ !inputs.quick }}
-        shell: bash
-        run: |
-          export VORN_CONFORMANCE_VORND="$(pwd -W 2>/dev/null || pwd)/packages/core/vornd$([ "$RUNNER_OS" = Windows ] && echo .exe)"
-          yarn vitest run tests/vornd-app-platforms.test.ts tests/js-reference.test.ts
+        run: yarn vitest run tests/vornd-app-platforms.test.ts tests/js-reference.test.ts
 
       - name: Build app
         if: ${{ !inputs.quick }}
@@ -301,23 +261,6 @@ jobs:
             yarn dist --publish never -c.mac.notarize=false
           fi
 
-      - name: Packaged core loads
-        if: ${{ !inputs.quick }}
-        shell: bash
-        run: |
-          # -ipath: the mac app keeps it under Contents/Resources.
-          file=$(find dist -ipath '*/resources/core/vorn_core.node' -print -quit)
-          if [ -z "$file" ]; then
-            echo "ERROR: vorn_core.node is not in the packaged resources"
-            exit 1
-          fi
-          echo "found $file"
-          node -e "
-            const m = { exports: {} };
-            process.dlopen(m, process.argv[1]);
-            console.log(m.exports.hello('ci'), m.exports.info());
-          " "$file"
-
       # Started the way the app starts it. Stdin is already closed, so it says
       # where it listens and then stops at once.
       - name: Packaged vornd runs
@@ -330,7 +273,7 @@ jobs:
             exit 1
           fi
           echo "found $file"
-          out=$("$file" --upstream 127.0.0.1:9 --exit-with-stdin < /dev/null)
+          out=$("$file" --data-dir "$RUNNER_TEMP/packaged-vornd" --port 0 --exit-with-stdin < /dev/null)
           echo "$out"
           case "$out" in
             '{"port":'*) ;;

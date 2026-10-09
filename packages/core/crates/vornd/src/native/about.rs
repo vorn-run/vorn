@@ -48,6 +48,6 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value) -> Answer
                 Err(err) => Answer::Error(err.to_string()),
             }
         }
-        _ => Answer::Forward,
+        _ => Answer::Unanswered,
     }
 }

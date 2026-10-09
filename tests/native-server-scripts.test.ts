@@ -3,8 +3,8 @@
  * directory with its arguments, and tells clients what it printed and how it
  * ended, read as `tests/helpers/scripts-parity.ts` names.
  *
- * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
- * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix.
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on
+ * a Unix.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -80,7 +80,6 @@ async function scenario(server: RealServer): Promise<Record<string, ScriptRun>> 
 
 describe.skipIf(!runnable)('project scripts through vornd', () => {
   let run: unknown
-  let answered: unknown
 
   beforeAll(async () => {
     const server = await startRealServer()
@@ -92,11 +91,6 @@ describe.skipIf(!runnable)('project scripts through vornd', () => {
         ),
         server.dirs
       )
-      const health = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-      const groups = (await health.json()) as {
-        groups: Record<string, { native?: number; forwarded?: number }>
-      }
-      answered = groups.groups.script
     } catch (err) {
       throw new Error(`${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
         cause: err
@@ -143,10 +137,5 @@ describe.skipIf(!runnable)('project scripts through vornd', () => {
       output: '',
       error: 'Unsupported script type: ruby'
     })
-  })
-
-  it('has vornd run them', () => {
-    expect(answered).toMatchObject({ native: 4 })
-    expect((answered as { forwarded?: number }).forwarded ?? 0).toBe(0)
   })
 })

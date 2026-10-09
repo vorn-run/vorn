@@ -1,23 +1,15 @@
-//! `git:renameWorktreeBranch`, `git:renameWorktree` and `git:checkoutBranch`, answered by vornd
-//! once it holds the session records: the git is `vorn_git::repo`, and the
-//! sessions in the worktree take the new branch, or path and name, in the
-//! copy of the records ([`crate::registry::WorktreeMove`]), which tells the
-//! server and so its clients.
-//!
-//! The server keeps both calls while it holds the records itself (vornd
-//! neither creates its terminals nor starts its headless agents), and for a
-//! worktree in a project on a remote host.
+//! `git:renameWorktreeBranch`, `git:renameWorktree` and `git:checkoutBranch`, moving the sessions in the worktree with it.
 
 use std::path::Path;
 
 use serde_json::{json, Value};
-use vorn_git::repo::{Done, Git, MovedWorktree};
+use vorn_git::repo::{Done, MovedWorktree};
 
 use super::{absolute_str, Answer, Native};
 use crate::registry::WorktreeMove;
 
 /// Whether `method` is one of the calls this module answers.
-pub fn foresees(method: &str) -> bool {
+pub fn answers(method: &str) -> bool {
     matches!(
         method,
         "git:renameWorktreeBranch" | "git:renameWorktree" | "git:checkoutBranch"
@@ -64,14 +56,6 @@ impl<'a> Asked<'a> {
     }
 }
 
-fn git(native: &Native) -> Git {
-    Git {
-        bin: native.env.git_bin(),
-        env: native.env.get(),
-        ssh: None,
-    }
-}
-
 fn moved_json(moved: Option<MovedWorktree>) -> Value {
     moved.map_or(
         Value::Null,
@@ -79,14 +63,9 @@ fn moved_json(moved: Option<MovedWorktree>) -> Value {
     )
 }
 
-/// Whether vornd holds the records the server would change: it decides
-/// them, and the server follows vornd's terminals and headless agents.
+/// Whether vornd decides the session records, and so moves them.
 fn holds_records(native: &Native) -> bool {
-    let follows = native
-        .link
-        .get()
-        .is_some_and(|l| l.creates_terminals() && l.creates_headless());
-    follows && native.registry.get().is_some_and(|r| r.decides())
+    native.registry.get().is_some_and(|r| r.decides())
 }
 
 /// Answers `method`, renaming or moving the worktree and its sessions.
@@ -142,28 +121,6 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     Answer::Result(answer)
 }
 
-/// What vornd would answer `method`, worked out without changing the
-/// repository, for the comparison with the server's answer in shadow mode.
-/// `None` when the server's answer is its own: a remote worktree, params of
-/// another shape, or a branch name vornd cannot judge without git.
-pub fn foresee(native: &Native, method: &str, params: &Value) -> Option<Answer> {
-    let asked = Asked::read(native, method, params)?;
-    // A remote worktree's answer is git's there.
-    if !native.local_path(asked.worktree()) {
-        return None;
-    }
-    let git = git(native);
-    let answer = match asked {
-        Asked::Branch { worktree, branch } => {
-            json!(git.foresee_branch_rename(Path::new(worktree), branch)?)
-        }
-        Asked::Move { worktree, name } => moved_json(git.foresee_worktree_move(worktree, name)),
-        // Whether git takes the checkout is git's to say.
-        Asked::Checkout { .. } => return None,
-    };
-    Some(Answer::Result(answer))
-}
-
 #[cfg(test)]
 mod tests {
     use std::process::Command;
@@ -215,12 +172,14 @@ mod tests {
     }
 
     /// vornd holding the records of a terminal and a headless agent in
-    /// `worktree`, with the server following both when `follows`.
-    fn holding(worktree: &str, follows: bool) -> (Arc<Native>, Arc<SessionRegistry>) {
+    /// `worktree`, deciding them when `decides`.
+    fn holding(worktree: &str, decides: bool) -> (Arc<Native>, Arc<SessionRegistry>) {
         let native = Native::new();
         let registry = SessionRegistry::new();
         native.set_registry(Arc::clone(&registry));
-        registry.decide_statuses();
+        if decides {
+            registry.decide_statuses();
+        }
         let snapshot = json!({
             "op": "snapshot", "order": ["t"],
             "terminals": [{
@@ -235,12 +194,7 @@ mod tests {
             }],
         });
         registry.feed(1, &snapshot).unwrap();
-        let link = Arc::new(AppLink::default());
-        if follows {
-            link.set_creates_terminals();
-            link.set_creates_headless();
-        }
-        native.set_link(link);
+        native.set_link(Arc::new(AppLink::default()));
         native.set_database(
             std::env::temp_dir()
                 .join("vornd-no-such-db")
@@ -264,21 +218,11 @@ mod tests {
             .unwrap()
     }
 
-    /// The branch rename foreseen to succeed, unless gix declines to judge
-    /// it here (the environment carries git config it does not read).
-    fn foreseen_true(native: &Native, params: &Value) -> bool {
-        matches!(
-            foresee(native, "git:renameWorktreeBranch", params),
-            None | Some(Answer::Result(Value::Bool(true)))
-        )
-    }
-
     #[test]
     fn renames_the_branch_and_moves_the_worktree_with_its_sessions() {
         let (_dir, wt) = repo();
         let (native, registry) = holding(&wt, true);
         let rename = json!({ "worktreePath": wt, "newBranch": " renamed " });
-        assert!(foreseen_true(&native, &rename));
         assert_eq!(
             call(&native, "git:renameWorktreeBranch", &rename),
             Answer::Result(json!(true))
@@ -295,10 +239,6 @@ mod tests {
         let moved = json!({ "worktreePath": wt, "newName": "New Name" });
         let target = Path::new(&wt).with_file_name("New-Name-1a2b3c4d");
         let expected = json!({ "newPath": target.to_str().unwrap(), "name": "New-Name" });
-        assert_eq!(
-            foresee(&native, "git:renameWorktree", &moved),
-            Some(Answer::Result(expected.clone()))
-        );
         assert_eq!(
             call(&native, "git:renameWorktree", &moved),
             Answer::Result(expected)
@@ -330,7 +270,6 @@ mod tests {
         sh(&dir.path().join("main"), &["branch", "other"]);
         let (native, registry) = holding(&wt, true);
         let checkout = json!({ "cwd": wt, "branch": "other" });
-        assert_eq!(foresee(&native, "git:checkoutBranch", &checkout), None);
         assert_eq!(
             call(&native, "git:checkoutBranch", &checkout),
             Answer::Result(json!({ "ok": true }))
@@ -355,8 +294,6 @@ mod tests {
             Answer::Result(json!(true))
         );
         assert_eq!(terminal(&registry).0.as_deref(), Some("feature"));
-        // Foreseen all the same: the server answers what vornd would.
-        assert!(foreseen_true(&native, &rename));
     }
 
     #[test]
@@ -380,11 +317,6 @@ mod tests {
                 super::super::bad_params(method),
                 "{params}"
             );
-            assert_eq!(foresee(&native, method, &params), None, "{params}");
         }
-        // Without the database vornd cannot tell a remote worktree.
-        let bare = Native::new();
-        let params = json!({ "worktreePath": wt, "newName": "x" });
-        assert_eq!(foresee(&bare, "git:renameWorktree", &params), None);
     }
 }

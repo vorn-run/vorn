@@ -12,8 +12,7 @@
  * differences `helpers/agents-parity` names. The shell lookups name this
  * machine's programs, so those are checked for the stand-ins only.
  *
- * Runs where vornd has been built (`yarn build:core`, or the binary in
- * `VORN_CONFORMANCE_VORND`).
+ * Runs where vornd has been built (`yarn build:core`).
  */
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -32,7 +31,6 @@ const TEST_CREDENTIAL = 'native-server-agents-credential'
 const EXE = process.platform === 'win32' ? '.exe' : ''
 
 const vornd = [
-  process.env.VORN_CONFORMANCE_VORND,
   path.resolve(__dirname, `../packages/core/vornd${EXE}`),
   path.resolve(__dirname, `../packages/core/target/release/vornd${EXE}`)
 ].find((p): p is string => !!p && fs.existsSync(p))
@@ -83,23 +81,6 @@ class Client {
   close(): void {
     this.ws.close()
   }
-}
-
-type Counts = Record<
-  string,
-  {
-    mode?: string
-    forwarded?: number
-    native?: number
-    shadowMatched?: number
-    shadowMismatched?: number
-    shadowUnported?: number
-  }
->
-
-async function counts(v: Served): Promise<Counts> {
-  const res = await fetch(`http://127.0.0.1:${v.port}/vornd/health`)
-  return ((await res.json()) as { groups: Counts }).groups
 }
 
 function write(file: string, text: string, mode?: number): void {
@@ -412,21 +393,12 @@ describe.skipIf(!runnable)(
       } finally {
         through.close()
       }
-      const groups = await counts(native!)
-      for (const group of ['agent', 'sessions', 'shell']) {
-        expect(groups[group]?.mode).toBe('native')
-        expect(groups[group]?.native ?? 0).toBeGreaterThan(0)
-      }
     }, 60_000)
 
     it('lists each agent’s models as the server does, cached and refreshed alike', async () => {
       const through = await Client.open(native!.port)
-      const before = await counts(native!)
-      let made = 0
-      const models = (params: unknown): Promise<Answer> => {
-        made++
-        return same(through, 'agent:listModels', params, catalogFetchedAt)
-      }
+      const models = (params: unknown): Promise<Answer> =>
+        same(through, 'agent:listModels', params, catalogFetchedAt)
       try {
         for (const agentType of ['claude', 'codex', 'copilot', 'opencode']) {
           const first = await models({ agentType, projectPath: fx.project })
@@ -470,13 +442,10 @@ describe.skipIf(!runnable)(
       } finally {
         through.close()
       }
-      const after = await counts(native!)
-      expect((after.agent?.native ?? 0) - (before.agent?.native ?? 0)).toBe(made)
     }, 60_000)
 
     it('answers every one of them, refusals included', async () => {
       const through = await Client.open(native!.port)
-      const before = await counts(native!)
       await through.call('sessions:restored')
       const relative = await through.call('sessions:getRecent', 'relative/project')
       expect(relative).toHaveProperty('error')
@@ -486,9 +455,6 @@ describe.skipIf(!runnable)(
       })
       expect(models).toHaveProperty('error')
       through.close()
-      const after = await counts(native!)
-      expect((after.sessions?.forwarded ?? 0) - (before.sessions?.forwarded ?? 0)).toBe(0)
-      expect((after.agent?.forwarded ?? 0) - (before.agent?.forwarded ?? 0)).toBe(0)
     }, 60_000)
   }
 )

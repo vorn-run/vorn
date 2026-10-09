@@ -8,8 +8,8 @@
  * second end and resumes it, and is compared as one transcript, normalized by
  * `tests/helpers/sessions-parity.ts`, with `tests/fixtures/vornd/ssh.json`.
  *
- * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
- * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix.
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on
+ * a Unix.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -230,21 +230,11 @@ async function scenario(server: RealServer): Promise<Record<string, unknown>> {
 
 describe.skipIf(!runnable)('terminals on a remote host, through vornd', () => {
   let run: Record<string, unknown> = {}
-  let counts: unknown
 
   beforeAll(async () => {
     const server = await startRealServer()
     try {
       run = normalizeRun(await scenario(server), server.dirs)
-      const health = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-      const groups = (
-        (await health.json()) as { groups: Record<string, { native?: number; forwarded?: number }> }
-      ).groups
-      counts = {
-        terminal: groups.terminal?.forwarded ?? 0,
-        sessions: groups.sessions?.forwarded ?? 0,
-        answered: (groups.terminal?.native ?? 0) > 0 && (groups.sessions?.native ?? 0) > 0
-      }
     } catch (err) {
       throw new Error(`${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {
         cause: err
@@ -288,10 +278,6 @@ describe.skipIf(!runnable)('terminals on a remote host, through vornd', () => {
       passwords: [PASSWORD],
       remote: ["cd <work>/far && <work>/bin/argv-agent 'fix the remote build'"]
     })
-  })
-
-  it('has vornd create and resume them, forwarding nothing', () => {
-    expect(counts).toEqual({ terminal: 0, sessions: 0, answered: true })
   })
 
   it('logs in, answers, tells and lists what it recorded', () => {

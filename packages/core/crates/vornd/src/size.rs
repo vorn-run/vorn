@@ -11,7 +11,7 @@
 //! client says: every grid client is on this user's local socket, and a
 //! bytes connection is the desktop's only when it opened with the desktop's
 //! launch token ([`Sizes::desktop`],
-//! [`crate::proxy::is_desktop_credential`]). A phone over the tunnel cannot claim
+//! [`crate::endpoint::is_desktop_credential`]). A phone over the tunnel cannot claim
 //! it.
 //!
 //! The policy decides; the engine's driver sends. It asks [`Sizes::due`]
@@ -319,7 +319,7 @@ impl Sizes {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proxy::is_desktop_credential;
+    use crate::endpoint::is_desktop_credential;
     use std::time::Duration;
     use vorn_size::Reason;
 

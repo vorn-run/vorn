@@ -113,13 +113,6 @@ async function post(port: number, route: string, body: unknown, type = 'applicat
   return { status: res.status, body: (await res.json()) as Record<string, unknown> }
 }
 
-type Counts = Record<string, { native?: number; forwarded?: number }>
-
-async function counts(port: number): Promise<Counts> {
-  const res = await fetch(`http://127.0.0.1:${port}/vornd/health`)
-  return ((await res.json()) as { groups: Counts }).groups
-}
-
 async function refusal(port: number, headers: Record<string, string>) {
   return Client.open(port, headers).then(
     (c) => {
@@ -248,9 +241,5 @@ describe.skipIf(!builtVornd || !builtSessiond)('reach answered by vornd', () => 
   it('answers reachable URLs and Tailscale itself', async () => {
     expect(await desktop.result('server:reachableUrls')).toEqual(expect.anything())
     await desktop.result('tailscale:status')
-    const groups = await counts(server.port)
-    for (const group of ['server', 'tailscale', 'token', 'pairing']) {
-      expect({ group, native: (groups[group]?.native ?? 0) > 0 }).toEqual({ group, native: true })
-    }
   })
 })

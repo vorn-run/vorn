@@ -36,7 +36,7 @@ function noPortFile(): void {
 }
 
 async function load() {
-  return import('../packages/server/src/rpc-client')
+  return import('../packages/mcp/src/rpc-client')
 }
 
 beforeEach(() => {

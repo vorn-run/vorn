@@ -23,7 +23,6 @@ export async function readSessionHolders(
 ): Promise<SessionHolders | null> {
   let body: unknown
   try {
-    // vornd answers 503 while the server is down, with the same report.
     const res = await fetchImpl(`http://127.0.0.1:${port}/vornd/health`, {
       signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS)
     })

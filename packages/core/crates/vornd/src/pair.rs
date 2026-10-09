@@ -1,12 +1,4 @@
-//! The phone's half of pairing, once the `pairing` group is vornd's:
-//! `POST /api/pair/redeem` and `POST /api/pair/poll`, answered as the
-//! server's routes answer them ([`crate::native::reach`]).
-//!
-//! A phone reaches the server, not vornd, which listens on loopback; the
-//! server relays these two requests here with the phone's address in
-//! `x-vorn-peer`. What the server would refuse before its handler ran (a
-//! body that is not plain JSON, or one its parser rejects) goes to the
-//! server as it is, marked so it does not relay it back.
+//! The phone's half of pairing: `POST /api/pair/redeem` and `POST /api/pair/poll`.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -18,9 +10,8 @@ use hyper::header::{self, HeaderMap, HeaderValue};
 use hyper::{Request, Response, StatusCode};
 use serde_json::{json, Value};
 
-use crate::groups::Counted;
+use crate::endpoint::{full, Body};
 use crate::native::Native;
-use crate::proxy::{full, Body, Daemon};
 
 pub const REDEEM: &str = "/api/pair/redeem";
 pub const POLL: &str = "/api/pair/poll";
@@ -29,25 +20,20 @@ pub const POLL: &str = "/api/pair/poll";
 /// may say.
 pub const PEER_HEADER: &str = "x-vorn-peer";
 
-/// Set on a pairing request vornd hands the server, so the server answers
-/// it itself rather than relaying it back.
-pub const FORWARDED_HEADER: &str = "x-vornd-forwarded";
-
-/// The server's own limit for a body.
+/// The limit for a body.
 const MAX_BODY: usize = 1 << 20;
 
 pub fn is_pair_path(path: &str) -> bool {
     path == REDEEM || path == POLL
 }
 
-/// Answers a pairing request, or hands it to the server.
+/// Answers a pairing request.
 pub async fn answer(
-    daemon: &Daemon,
     native: &Arc<Native>,
     req: Request<Incoming>,
     peer: SocketAddr,
 ) -> Response<Body> {
-    let (mut parts, body) = req.into_parts();
+    let (parts, body) = req.into_parts();
     let bytes = match Limited::new(body, MAX_BODY).collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(_) => return too_large(),
@@ -57,17 +43,8 @@ pub async fn answer(
     } else {
         "pairing:poll"
     };
-    let body = plain_json(&parts.headers, &bytes);
-    if body.is_none() && !daemon.has_upstream() {
-        daemon.groups().count(method, Counted::Native);
+    let Some(body) = plain_json(&parts.headers, &bytes) else {
         return unreadable(&parts.headers);
-    }
-    let Some(body) = body else {
-        daemon.groups().count(method, Counted::Forwarded);
-        parts
-            .headers
-            .insert(FORWARDED_HEADER, HeaderValue::from_static("1"));
-        return daemon.forward_buffered(parts, bytes).await;
     };
     let address = address_of(&parts.headers, peer);
     let redeem = method == "pairing:redeem";
@@ -86,12 +63,10 @@ pub async fn answer(
             json!({ "statusCode": 500, "error": "Internal Server Error", "message": "pairing failed" }),
         )
     });
-    daemon.groups().count(method, Counted::Native);
     json_response(status, &body)
 }
 
-/// What the server answered a body it would not read: one that is not JSON
-/// at all, or JSON that does not parse.
+/// The answer to a body that is not JSON, or JSON that does not parse.
 fn unreadable(headers: &HeaderMap) -> Response<Body> {
     let json_typed = headers
         .get(header::CONTENT_TYPE)
@@ -107,9 +82,7 @@ fn unreadable(headers: &HeaderMap) -> Response<Body> {
     }
 }
 
-/// The body, when the server's parser would read it as this JSON: an
-/// `application/json` body that parses and names no prototype key, which
-/// the server's parser refuses.
+/// The body, when it is `application/json` that parses and names no prototype key.
 fn plain_json(headers: &HeaderMap, bytes: &Bytes) -> Option<Value> {
     let content_type = headers.get(header::CONTENT_TYPE)?.to_str().ok()?;
     let essence = content_type.split(';').next().unwrap_or("").trim();
@@ -123,7 +96,7 @@ fn plain_json(headers: &HeaderMap, bytes: &Bytes) -> Option<Value> {
     serde_json::from_str(text).ok()
 }
 
-/// The phone's address: the one the server relayed, or the peer's own.
+/// The phone's address: the one a peer on this machine relayed, or the peer's own.
 fn address_of(headers: &HeaderMap, peer: SocketAddr) -> String {
     let said = headers
         .get(PEER_HEADER)
@@ -145,7 +118,7 @@ fn json_response(status: u16, body: &Value) -> Response<Body> {
     res
 }
 
-/// What the server answers a body over its limit.
+/// The answer to a body over the limit.
 fn too_large() -> Response<Body> {
     json_response(
         413,
@@ -169,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn answers_only_bodies_the_server_would_parse_the_same() {
+    fn reads_only_plain_json_bodies() {
         let body = Bytes::from_static(br#"{"code":"ABCD-EFGH"}"#);
         assert!(plain_json(&json_headers("application/json"), &body).is_some());
         assert!(plain_json(&json_headers("Application/JSON; charset=utf-8"), &body).is_some());

@@ -2,7 +2,7 @@
   "name": "@vornrun/core",
   "version": "0.8.0-beta.6",
   "private": true,
-  "description": "Vorn's Rust core, built into vorn_core.node and loaded by the server",
+  "description": "Vorn's Rust core: vornd, vorn-sessiond and the vorn command",
   "scripts": {
     "build": "node scripts/build.mjs",
     "build:debug": "node scripts/build.mjs --debug",

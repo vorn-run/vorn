@@ -1,17 +1,4 @@
-/**
- * The Rust `vorn` against the TypeScript `runCli`: the same command line, the
- * same server, the same data directory, and the same stdout, stderr and exit
- * code but for the differences `helpers/cli-parity` names.
- *
- * Three servers: a scripted one, which answers every call with fixed data so
- * every table, message and error path can be compared exactly (and records
- * what each side asked, which must match too); vornd as the server, on a
- * data directory of its own; and none, for the token commands, which
- * work on the database file directly.
- *
- * Runs where the binary has been built (`yarn build:core`, cargo, or the
- * binary in `VORN_CLI_BINARY`).
- */
+/** The `vorn` command's output and calls against a scripted server, vornd and none, as recorded in `fixtures/cli-reference.json`. */
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -19,63 +6,37 @@ import type { AddressInfo } from 'node:net'
 import { WebSocketServer } from 'ws'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
-  MCP_USAGE_LINE,
-  MINTED_TOKEN,
-  SERVER_LOG_LINES,
-  VERSION,
-  normalized,
+  CliReference,
   runBinary,
-  runTypeScript,
+  scrub,
+  scrubIds,
   vornBinary,
   type Ran
-} from './helpers/cli-parity'
-
-import { runCli } from '../packages/server/src/cli'
+} from './helpers/cli-reference'
 import { builtVornd, startServed, type Served } from './helpers/served'
 
 const CREDENTIAL = 'native-cli-test-credential'
 
-/** The environment both sides run in: no colour asked for or against, no data dir named. */
-function cleanEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
-  delete env.NO_COLOR
-  delete env.VORN_DATA_DIR
-  return env
-}
+const reference = new CliReference()
+afterAll(() => reference.save())
 
-async function viaTypeScript(args: string[]): Promise<Ran> {
-  const out: string[] = []
-  const err: string[] = []
-  const code = await runCli(args, {
-    write: (text) => out.push(text),
-    writeErr: (text) => err.push(text),
-    isTty: false
-  })
-  return { code, out: out.join(''), err: err.join('') }
-}
-
-/** Runs `args` through both, and returns both with the accepted differences taken out. */
-async function both(args: string[], accepted: string[] = []): Promise<{ ts: Ran; rs: Ran }> {
-  const saved = { NO_COLOR: process.env.NO_COLOR, VORN_DATA_DIR: process.env.VORN_DATA_DIR }
-  delete process.env.NO_COLOR
-  delete process.env.VORN_DATA_DIR
-  let ts: Ran
-  try {
-    ts = await viaTypeScript(args)
-  } finally {
-    for (const [key, value] of Object.entries(saved)) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
+/** Runs `args` and checks its output against the recording under `group`; `note` tells two runs apart. */
+async function pinned(
+  group: string,
+  args: string[],
+  options: { dirs?: Record<string, string>; note?: string; ids?: boolean } = {}
+): Promise<Ran> {
+  const dirs = options.dirs ?? {}
+  const ran = await runBinary(args)
+  const clean = (text: string): string => {
+    const scrubbed = scrub(text, dirs)
+    return options.ids ? scrubIds(scrubbed) : scrubbed
   }
-  const rs = await runBinary(args, cleanEnv())
-  return { ts: normalized(ts, accepted), rs: normalized(rs, accepted) }
-}
-
-async function same(args: string[], accepted: string[] = []): Promise<Ran> {
-  const { ts, rs } = await both(args, accepted)
-  expect(rs).toEqual(ts)
-  return ts
+  const got = { code: ran.code, out: clean(ran.out), err: clean(ran.err) }
+  const key = [group, JSON.stringify(args.map(clean)), options.note].filter(Boolean).join(' ')
+  // The key rides along, so a failure says which command it was.
+  expect({ key, ...got }).toEqual({ key, ...reference.want(key, got) })
+  return ran
 }
 
 function tempDir(prefix: string): string {
@@ -333,16 +294,18 @@ function sorted(calls: Call[]): string[] {
   return calls.map((c) => JSON.stringify(c)).sort()
 }
 
-describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
+describe.skipIf(!vornBinary)('vorn', () => {
   describe('without a server', () => {
-    it('prints usage, help and version alike', async () => {
+    const same = (args: string[]): Promise<Ran> => pinned('no server', args)
+
+    it('prints usage, help and version', async () => {
       expect.hasAssertions()
-      await same([], [MCP_USAGE_LINE])
-      await same(['--help'], [MCP_USAGE_LINE])
-      await same(['-h'], [MCP_USAGE_LINE])
-      await same(['help'], [MCP_USAGE_LINE])
-      await same(['--json'], [MCP_USAGE_LINE])
-      await same(['--version'], [VERSION])
+      await same([])
+      await same(['--help'])
+      await same(['-h'])
+      await same(['help'])
+      await same(['--json'])
+      await same(['--version'])
       await same(['server'])
       await same(['server', '--help'])
       await same(['server', 'help'])
@@ -352,7 +315,7 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
       await same(['workflow'])
     })
 
-    it('refuses what it does not understand alike', async () => {
+    it('refuses what it does not understand', async () => {
       expect.hasAssertions()
       for (const args of [
         ['bogus'],
@@ -397,40 +360,30 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
       fs.rmSync(dataDir, { recursive: true, force: true })
     })
 
-    /** Both sides as processes of their own, the TypeScript first. */
-    async function tokens(args: string[], accepted: string[] = []): Promise<Ran> {
-      const names = [SERVER_LOG_LINES, ...accepted]
-      const ts = normalized(await runTypeScript(args, cleanEnv()), names)
-      const rs = normalized(await runBinary(args, cleanEnv()), names)
-      expect(rs).toEqual(ts)
-      return ts
-    }
+    const tokens = (args: string[], note?: string): Promise<Ran> =>
+      pinned('tokens', args, { dirs: { 'data-dir': dataDir }, note, ids: true })
 
-    it('lists, mints, revokes and refuses alike', async () => {
+    it('lists, mints, revokes and refuses', async () => {
       const dir = ['--data-dir', dataDir]
-      // The first open creates and migrates the file; the TypeScript goes first.
-      await tokens(['token', 'list', ...dir])
+      // The first open creates and migrates the file.
+      await tokens(['token', 'list', ...dir], 'empty')
 
-      const created = await tokens(['token', 'create', '--name', 'iPhone', ...dir], [MINTED_TOKEN])
+      const created = await tokens(['token', 'create', '--name', 'iPhone', ...dir])
       expect(created.code).toBe(0)
 
-      const listed = await runBinary(['token', 'list', ...dir], cleanEnv())
-      const [first, second] = listed.out.trim().split('\n')
-      expect(first).toMatch(/ {2}active {3}last seen never {2}iPhone$/)
-      expect(second).toMatch(/ {2}active {3}last seen never {2}iPhone$/)
-      await tokens(['server', 'token', 'list', ...dir])
+      const listed = await runBinary(['token', 'list', ...dir])
+      expect(listed.out).toMatch(/ {2}active {3}last seen never {2}iPhone\n$/)
+      await tokens(['server', 'token', 'list', ...dir], 'one active')
 
-      // Each side revokes one, then neither can revoke it again.
-      const ids = [first.split(' ')[0], second.split(' ')[0]]
-      const tsRevoke = await runTypeScript(['token', 'revoke', ids[0], ...dir], cleanEnv())
-      const rsRevoke = await runBinary(['token', 'revoke', ids[1], ...dir], cleanEnv())
-      const names = [SERVER_LOG_LINES, MINTED_TOKEN]
-      expect(normalized(rsRevoke, names)).toEqual(normalized(tsRevoke, names))
-      expect(rsRevoke).toEqual({ code: 0, out: `Revoked ${ids[1]}\n`, err: '' })
-      await tokens(['token', 'revoke', ids[0], ...dir])
+      const id = listed.out.split(' ')[0]
+      expect(await runBinary(['token', 'revoke', id, ...dir])).toEqual({
+        code: 0,
+        out: `Revoked ${id}\n`,
+        err: ''
+      })
+      await tokens(['token', 'revoke', id, ...dir], 'again')
       await tokens(['token', 'revoke', 'not-a-token', ...dir])
-      await tokens(['--data-dir', dataDir, 'token', 'list'])
-      // Each TypeScript command is a process of its own, loaded from source.
+      await tokens(['--data-dir', dataDir, 'token', 'list'], 'one revoked')
     }, 120_000)
   })
 
@@ -449,22 +402,19 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
       fs.rmSync(dataDir, { recursive: true, force: true })
     })
 
-    /** Both sides, and the calls each made, which must be the same calls. */
-    async function call(args: string[]): Promise<Ran> {
-      const full = [...args, '--data-dir', dataDir]
+    /** The command, and the calls it made, as recorded. */
+    async function call(args: string[], dirs: Record<string, string> = {}): Promise<Ran> {
+      const all = { 'data-dir': dataDir, ...dirs }
       server.calls.length = 0
-      const ts = await viaTypeScript(full)
+      const ran = await pinned('scripted', [...args, '--data-dir', dataDir], { dirs: all })
       await settled()
-      const tsCalls = sorted(server.calls)
-      server.calls.length = 0
-      const rs = await runBinary(full, cleanEnv())
-      await settled()
-      expect(sorted(server.calls)).toEqual(tsCalls)
-      expect(rs).toEqual(ts)
-      return ts
+      const calls = sorted(server.calls).map((c) => scrub(c, all))
+      const key = `scripted calls ${JSON.stringify(args.map((a) => scrub(a, all)))}`
+      expect({ key, calls }).toEqual({ key, calls: reference.want(key, calls) })
+      return ran
     }
 
-    it('lists sessions alike, as a table and as json', async () => {
+    it('lists sessions, as a table and as json', async () => {
       const table = await call(['session', 'list'])
       expect(table.out).toContain('ID        AGENT')
       await call(['session', 'list', '--json'])
@@ -477,7 +427,7 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
       await call(['session', 'list', '--recent', '--path', '/work/./vorn/'])
     })
 
-    it('reads, steers and kills sessions alike', async () => {
+    it('reads, steers and kills sessions', async () => {
       expect.hasAssertions()
       await call(['session', 'logs', 'c3f1a2e8', '--lines', '50'])
       await call(['session', 'logs', 'c3f1a2e8', '--json'])
@@ -495,37 +445,42 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
       await call(['session', 'kill'])
     })
 
-    it('starts sessions alike', async () => {
+    it('starts sessions', async () => {
       expect.hasAssertions()
-      const outside = tempDir('vorn-native-cli-project-')
+      const parent = tempDir('vorn-native-cli-project-')
+      const outside = path.join(parent, 'outside')
+      fs.mkdirSync(outside)
       try {
         await call(['session', 'start'])
         await call(['session', 'start', '--agent', 'hal'])
         await call(['session', 'start', '--agent', 'claude', '--project', 'website'])
         await call(['session', 'start', '--agent', 'codex', '--path', '/work/vorn/'])
-        await call([
-          'session',
-          'start',
-          '--agent',
-          'gemini',
-          '--path',
-          outside,
-          '--prompt',
-          'fix it',
-          '--branch',
-          'feature',
-          '--worktree',
-          '--name',
-          'Fixer'
-        ])
+        await call(
+          [
+            'session',
+            'start',
+            '--agent',
+            'gemini',
+            '--path',
+            outside,
+            '--prompt',
+            'fix it',
+            '--branch',
+            'feature',
+            '--worktree',
+            '--name',
+            'Fixer'
+          ],
+          { project: outside }
+        )
         await call(['session', 'start', '--agent', 'claude', '--headless', '--json'])
         await call(['session', 'start', '--agent', 'opencode', '--project', 'brand-new'])
       } finally {
-        fs.rmSync(outside, { recursive: true, force: true })
+        fs.rmSync(parent, { recursive: true, force: true })
       }
     })
 
-    it('lists, runs and stops workflows alike', async () => {
+    it('lists, runs and stops workflows', async () => {
       const listed = await call(['workflow', 'list'])
       expect(listed.out).toContain('system:default-task-workflow')
       await call(['workflow', 'list', '--json'])
@@ -547,13 +502,15 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
       await call(['workflow', 'runs', '--workflow', 'import:'])
     })
 
-    it('reports what the server could not do alike', async () => {
+    it('reports what the server could not do', async () => {
       expect.hasAssertions()
       const failing = await scriptedServer(({ method }) => ({
         error: method === 'workflow:list' ? 'Method not found: workflow:list' : 'database is locked'
       }))
       const dir = tempDir('vorn-native-cli-failing-')
       announce(dir, failing.port)
+      const same = (args: string[]): Promise<Ran> =>
+        pinned('failing', args, { dirs: { 'data-dir': dir } })
       try {
         await same(['workflow', 'list', '--data-dir', dir])
         await same(['session', 'list', '--data-dir', dir])
@@ -566,14 +523,17 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
   })
 
   describe('when the server cannot answer', () => {
-    it('names a refused credential, and any other close, alike', async () => {
+    it('names a refused credential, and any other close', async () => {
       expect.hasAssertions()
       for (const code of [4001, 4002, 4000]) {
         const closing = await scriptedServer(() => ({ close: code }))
         const dir = tempDir('vorn-native-cli-closing-')
         announce(dir, closing.port)
         try {
-          await same(['workflow', 'list', '--data-dir', dir])
+          await pinned('closing', ['workflow', 'list', '--data-dir', dir], {
+            dirs: { 'data-dir': dir },
+            note: `with ${code}`
+          })
         } finally {
           await closing.close()
           fs.rmSync(dir, { recursive: true, force: true })
@@ -581,12 +541,18 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
       }
     })
 
-    it('gives up after --timeout alike', async () => {
+    it('gives up after --timeout', async () => {
       const silent = await scriptedServer(() => null)
       const dir = tempDir('vorn-native-cli-silent-')
       announce(dir, silent.port)
       try {
-        const ran = await same(['session', 'list', '--timeout', '300', '--data-dir', dir])
+        const ran = await pinned(
+          'silent',
+          ['session', 'list', '--timeout', '300', '--data-dir', dir],
+          {
+            dirs: { 'data-dir': dir }
+          }
+        )
         expect(ran.err).toContain('timed out after 300ms')
       } finally {
         await silent.close()
@@ -594,25 +560,29 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
       }
     })
 
-    it('says the credential is missing alike', async () => {
+    it('says the credential is missing', async () => {
       const dir = tempDir('vorn-native-cli-nocred-')
       announce(dir, 9, false)
       try {
-        const ran = await same(['workflow', 'runs', '--data-dir', dir])
+        const ran = await pinned('no credential', ['workflow', 'runs', '--data-dir', dir], {
+          dirs: { 'data-dir': dir }
+        })
         expect(ran.err).toContain('Vorn local credential not found')
       } finally {
         fs.rmSync(dir, { recursive: true, force: true })
       }
     })
 
-    it('says nothing listens on the announced port alike', async () => {
+    it('says nothing listens on the announced port', async () => {
       const dir = tempDir('vorn-native-cli-refused-')
       const probe = await scriptedServer()
       const port = probe.port
       await probe.close()
       announce(dir, port)
       try {
-        const ran = await same(['workflow', 'list', '--data-dir', dir])
+        const ran = await pinned('refused', ['workflow', 'list', '--data-dir', dir], {
+          dirs: { 'data-dir': dir }
+        })
         expect(ran.err).toContain('ECONNREFUSED')
       } finally {
         fs.rmSync(dir, { recursive: true, force: true })
@@ -641,8 +611,10 @@ describe.skipIf(!vornBinary)('vorn, in Rust, against runCli', () => {
       }
     }, 30_000)
 
-    it('answers the same commands alike', async () => {
+    it('answers the same commands', async () => {
       const dir = ['--data-dir', dataDir]
+      const same = (args: string[]): Promise<Ran> =>
+        pinned('real server', args, { dirs: { 'data-dir': dataDir } })
       expect(fs.existsSync(path.join(dataDir, 'local-token'))).toBe(true)
       const listed = await same(['workflow', 'list', ...dir])
       expect(listed.code).toBe(0)

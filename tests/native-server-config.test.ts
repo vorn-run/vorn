@@ -23,18 +23,10 @@ import {
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
-interface Health {
-  groups: Record<string, { forwarded?: number; native?: number }>
-  unexpectedForwards: Record<string, number>
-}
-
 describe.runIf(runnable)('the configuration in vornd', () => {
   let server: RealServer
   let viaVornd: Watcher
   let direct: Watcher
-
-  const health = async (): Promise<Health> =>
-    (await (await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)).json()) as Health
 
   const project = (name: string): ProjectConfig =>
     ({ name, path: `/tmp/${name}`, preferredAgents: ['claude'] }) as ProjectConfig
@@ -128,12 +120,5 @@ describe.runIf(runnable)('the configuration in vornd', () => {
     } finally {
       phone.close()
     }
-  })
-
-  it('answers every configuration call itself', async () => {
-    const { groups, unexpectedForwards } = await health()
-    expect(groups.config?.forwarded ?? 0).toBe(0)
-    expect(groups.config?.native ?? 0).toBeGreaterThan(0)
-    expect(unexpectedForwards).toEqual({})
   })
 })

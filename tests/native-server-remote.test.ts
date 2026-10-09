@@ -173,16 +173,5 @@ describe.runIf(runnable)('a project on a remote host, from vornd', () => {
       await call('git:removeWorktree', { projectPath: repo, worktreePath: worktree, force: true })
     ).toBe(true)
     expect(fs.existsSync(worktree)).toBe(false)
-
-    const health = (await (
-      await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-    ).json()) as {
-      unexpectedForwards: Record<string, number>
-      groups: Record<string, { forwarded?: number }>
-    }
-    expect(health.unexpectedForwards).toEqual({})
-    for (const group of ['git', 'file', 'worktree']) {
-      expect(health.groups[group]?.forwarded ?? 0).toBe(0)
-    }
   })
 })

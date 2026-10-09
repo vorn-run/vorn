@@ -9,9 +9,8 @@
 //! registry's notes then tell clients: a terminal new to them
 //! (`session:created`), one that changed (`session:updated`), an order a
 //! person set (`session:reordered`), and a headless agent's end
-//! (`headless:exit`), whose record goes a while later. The app's server is
-//! told how many sessions run (`vornd:live`), which keeps it from stopping as
-//! idle. Each terminal's HEAD is read again every thirty seconds.
+//! (`headless:exit`), whose record goes a while later. Each terminal's HEAD is
+//! read again every thirty seconds.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -59,7 +58,6 @@ pub async fn follow(native: Weak<Native>, engine: Arc<Engine>) {
             note = notes.recv() => match note {
                 Ok(note) => {
                     told.note(&n, &registry, &note);
-                    told.live(&n, registry.live());
                 }
                 Err(RecvError::Lagged(missed)) => warn!(missed, "clients missed changes to the sessions"),
                 Err(RecvError::Closed) => return,
@@ -84,32 +82,14 @@ fn effected(
             let Some(offer) = registry.terminal_exit(id, code, Stamp::from(fx)) else {
                 return;
             };
-            // vornd's own clients hear it from the stream; a server's behind vornd, from this.
-            if native.clients().is_none() {
-                native.broadcast_to(
-                    "terminal:exit",
-                    json!({ "id": id, "exitCode": code }),
-                    Some(id),
-                );
-            }
+            // Clients hear the exit itself from the stream.
             if let Some(offer) = offer {
                 native.broadcast_to("worktree:confirmCleanup", offer, Some(id));
             }
         }
-        // Closed while it ran: its record is gone, and clients are told it ended.
-        Effect::Exit { code, signal } if native.sessions.take_hung_up(id) => {
-            let code = crate::streams::exit_code(code, signal);
-            if native.clients().is_none() {
-                native.broadcast_to(
-                    "terminal:exit",
-                    json!({ "id": id, "exitCode": code }),
-                    Some(id),
-                );
-            }
-        }
         Effect::Cwd(cwd) if terminal => registry.terminal_cwd(id, &cwd),
         Effect::Notify { title, body } => {
-            let key = crate::control::effect_key(fx);
+            let key = crate::journal::effect_key(fx);
             if first_notice(native, &key) {
                 let note = json!({ "id": id, "title": title, "body": body, "effectId": key });
                 native.broadcast_to("terminal:notify", note, Some(id));
@@ -136,21 +116,9 @@ fn first_notice(native: &Native, key: &str) -> bool {
 struct Told {
     terminals: HashSet<String>,
     exited: HashSet<String>,
-    live: Value,
 }
 
 impl Told {
-    /// Tells the app's server how many sessions run, when that changed.
-    fn live(&mut self, native: &Native, live: Value) {
-        if live == self.live {
-            return;
-        }
-        if let Some(link) = native.link.get() {
-            link.tell("vornd:live", live.clone());
-        }
-        self.live = live;
-    }
-
     fn note(&mut self, native: &Native, registry: &Arc<SessionRegistry>, note: &Value) {
         let kind = note.get("kind").and_then(Value::as_str);
         match note.get("op").and_then(Value::as_str) {
@@ -277,14 +245,9 @@ mod tests {
     use super::*;
     use vorn_engine::EffectId;
 
-    /// The broadcasts and notes told to the app's server since the last look.
-    fn told(rx: &mut tokio::sync::broadcast::Receiver<Value>) -> Vec<Value> {
-        std::iter::from_fn(|| rx.try_recv().ok())
-            .map(|mut v| {
-                v.as_object_mut().map(|o| o.remove("jsonrpc"));
-                v
-            })
-            .collect()
+    /// What a client was told since the last look.
+    fn told(rx: &mut super::super::sessions::tests::Notes) -> Vec<Value> {
+        std::iter::from_fn(|| rx.try_recv().ok()).collect()
     }
 
     fn fx(session: &str, rseq: u64) -> EffectId {
@@ -299,7 +262,7 @@ mod tests {
     #[test]
     fn tells_a_new_terminal_then_its_changes_and_an_order_a_person_set() {
         let fed = fed();
-        let (mut rx, _listening) = fed.link.listen();
+        let mut rx = fed.notes();
         let mut t = Told::default();
         let record = json!({ "id": "t", "status": "running", "rev": 4, "statusAt": [1, 2, 0] });
         let upsert = json!({ "op": "upsert", "kind": "terminal", "record": record });
@@ -319,9 +282,9 @@ mod tests {
         assert_eq!(
             told(&mut rx),
             [
-                json!({ "method": "vornd:broadcast", "params": { "method": "session:created", "params": shown } }),
-                json!({ "method": "vornd:broadcast", "params": { "method": "session:updated", "params": shown, "scope": "t" } }),
-                json!({ "method": "vornd:broadcast", "params": { "method": "session:reordered", "params": ["t"] } }),
+                json!({ "method": "session:created", "params": shown }),
+                json!({ "method": "session:updated", "params": shown }),
+                json!({ "method": "session:reordered", "params": ["t"] }),
             ]
         );
         // Gone and back: new to clients again.
@@ -331,29 +294,13 @@ mod tests {
             &json!({ "op": "remove", "kind": "terminal", "id": "t" }),
         );
         t.note(&fed.native, &fed.registry, &upsert);
-        assert_eq!(
-            told(&mut rx)[0]["params"]["method"],
-            json!("session:created")
-        );
-    }
-
-    #[test]
-    fn tells_the_server_how_many_run_only_when_that_changes() {
-        let fed = fed();
-        let (mut rx, _listening) = fed.link.listen();
-        let mut t = Told::default();
-        t.live(&fed.native, fed.registry.live());
-        t.live(&fed.native, fed.registry.live());
-        assert_eq!(
-            told(&mut rx),
-            [json!({ "method": "vornd:live", "params": { "sessions": 3, "headless": 0 } })]
-        );
+        assert_eq!(told(&mut rx)[0]["method"], json!("session:created"));
     }
 
     #[test]
     fn an_ended_program_idles_its_terminal_and_offers_its_worktree_once() {
         let fed = fed();
-        let (mut rx, _listening) = fed.link.listen();
+        let mut rx = fed.notes();
         // `b` is idle already, so `a` ending leaves nothing at work in `/w`.
         let exit = Effect::Exit {
             code: Some(2),
@@ -363,20 +310,10 @@ mod tests {
         effected(&fed.native, &fed.registry, &fx("a", 5), exit);
         assert_eq!(
             told(&mut rx),
-            [
-                json!({
-                    "method": "vornd:broadcast",
-                    "params": { "method": "terminal:exit", "params": { "id": "a", "exitCode": 2 }, "scope": "a" },
-                }),
-                json!({
-                    "method": "vornd:broadcast",
-                    "params": {
-                        "method": "worktree:confirmCleanup",
-                        "params": { "id": "a", "projectPath": "/p", "worktreePath": "/w" },
-                        "scope": "a",
-                    },
-                }),
-            ]
+            [json!({
+                "method": "worktree:confirmCleanup",
+                "params": { "id": "a", "projectPath": "/p", "worktreePath": "/w" },
+            })]
         );
         let a = fed
             .registry
@@ -405,48 +342,20 @@ mod tests {
     }
 
     #[test]
-    fn a_terminal_closed_while_it_ran_is_told_ended_once_its_program_is() {
-        let fed = fed();
-        assert_eq!(
-            super::super::sessions::call(&fed.native, "terminal:kill", &json!("a")),
-            super::super::Answer::Void
-        );
-        let (mut rx, _listening) = fed.link.listen();
-        let exit = Effect::Exit {
-            code: None,
-            signal: Some(1),
-        };
-        effected(&fed.native, &fed.registry, &fx("a", 9), exit.clone());
-        effected(&fed.native, &fed.registry, &fx("a", 9), exit);
-        let code = crate::streams::exit_code(None, Some(1));
-        assert_eq!(
-            told(&mut rx),
-            [json!({
-                "method": "vornd:broadcast",
-                "params": { "method": "terminal:exit", "params": { "id": "a", "exitCode": code }, "scope": "a" },
-            })]
-        );
-    }
-
-    #[test]
     fn a_notice_is_told_with_its_effect_id() {
         let fed = fed();
-        let (mut rx, _listening) = fed.link.listen();
+        let mut rx = fed.notes();
         let notify = Effect::Notify {
             title: "done".into(),
             body: "built".into(),
         };
         effected(&fed.native, &fed.registry, &fx("a", 7), notify);
-        let key = crate::control::effect_key(&fx("a", 7));
+        let key = crate::journal::effect_key(&fx("a", 7));
         assert_eq!(
             told(&mut rx),
             [json!({
-                "method": "vornd:broadcast",
-                "params": {
-                    "method": "terminal:notify",
-                    "params": { "id": "a", "title": "done", "body": "built", "effectId": key },
-                    "scope": "a",
-                },
+                "method": "terminal:notify",
+                "params": { "id": "a", "title": "done", "body": "built", "effectId": key },
             })]
         );
     }
@@ -454,7 +363,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_headless_agents_end_is_told_once_and_its_record_goes_later() {
         let fed = fed();
-        let (mut rx, _listening) = fed.link.listen();
+        let mut rx = fed.notes();
         let mut t = Told::default();
         let ended = json!({
             "op": "upsert", "kind": "headless",
@@ -464,10 +373,7 @@ mod tests {
         t.note(&fed.native, &fed.registry, &ended);
         assert_eq!(
             told(&mut rx),
-            [json!({
-                "method": "vornd:broadcast",
-                "params": { "method": "headless:exit", "params": { "id": "h", "exitCode": 3 }, "scope": "h" },
-            })]
+            [json!({ "method": "headless:exit", "params": { "id": "h", "exitCode": 3 } })]
         );
         tokio::time::sleep(HEADLESS_KEPT + Duration::from_secs(1)).await;
         assert!(told(&mut rx).is_empty());

@@ -61,9 +61,9 @@ export function shimPath(): string {
 }
 
 export interface ShimPaths {
-  /** The app binary, which doubles as this bundle's Node. */
+  /** The app binary, which opens the app and, in an AppImage, reaches inside it. */
   exe: string
-  /** Where `server/cli.cjs` and the unpacked native modules sit. */
+  /** Where `vornd/vorn`, the command itself, sits. */
   resources: string
   /** The AppImage this app was started from, when it was. */
   appImage?: string
@@ -74,15 +74,13 @@ export interface ShimPaths {
  *
  * Pure, and told which platform it is writing for, so a test can read all three
  * shapes rather than only the one it happens to run on. An AppImage cannot be
- * referenced from outside its own mount, which is why that shape resolves its
- * entry point from `APPDIR` on the inside.
+ * referenced from outside its own mount, which is why that shape resolves the
+ * command from `APPDIR` on the inside.
  */
 export function shimScript(paths: ShimPaths, platform: NodeJS.Platform = process.platform): string {
   if (platform === 'win32') {
     // `path.win32`, not `path` -- this script may be written from a machine that
     // is not Windows, and a batch file with forward slashes in it is a bug.
-    const inResources = (...parts: string[]): string => path.win32.join(paths.resources, ...parts)
-
     return [
       '@echo off',
       'setlocal',
@@ -90,10 +88,7 @@ export function shimScript(paths: ShimPaths, platform: NodeJS.Platform = process
       `  start "" "${paths.exe}"`,
       '  exit /b',
       ')',
-      'set "ELECTRON_RUN_AS_NODE=1"',
-      `set "VORN_NATIVE_MODULES_PATH=${inResources('app.asar.unpacked', 'node_modules')}"`,
-      `set "NODE_PATH=${inResources('app.asar', 'node_modules')};%VORN_NATIVE_MODULES_PATH%"`,
-      `"${paths.exe}" "${inResources('server', 'cli.cjs')}" %*`,
+      `"${path.win32.join(paths.resources, 'vornd', 'vorn.exe')}" %*`,
       ''
     ].join('\r\n')
   }
@@ -106,7 +101,7 @@ if [ "$#" -eq 0 ]; then
   exec "$APPIMAGE"
 fi
 
-BOOTSTRAP='var entry = process.env.APPDIR + "/resources/server/cli.cjs"; process.argv.splice(1, 0, entry); require(entry)'
+BOOTSTRAP='var r = require("child_process").spawnSync(process.env.APPDIR + "/resources/vornd/vorn", process.argv.slice(1), { stdio: "inherit" }); process.exit(r.status === null ? 1 : r.status)'
 
 ELECTRON_RUN_AS_NODE=1 exec "$APPIMAGE" -e "$BOOTSTRAP" "$@"
 `
@@ -120,20 +115,12 @@ ELECTRON_RUN_AS_NODE=1 exec "$APPIMAGE" -e "$BOOTSTRAP" "$@"
       : `exec "${paths.exe}"`
 
   return `#!/bin/sh
-APP_EXE="${paths.exe}"
-RESOURCES="${paths.resources}"
-
 # No command: open the app, which is what typing \`vorn\` should mean.
 if [ "$#" -eq 0 ]; then
   ${launch}
 fi
 
-ELECTRON_RUN_AS_NODE=1
-VORN_NATIVE_MODULES_PATH="\${RESOURCES}/app.asar.unpacked/node_modules"
-NODE_PATH="\${RESOURCES}/app.asar/node_modules:\${VORN_NATIVE_MODULES_PATH}"
-export ELECTRON_RUN_AS_NODE VORN_NATIVE_MODULES_PATH NODE_PATH
-
-exec "$APP_EXE" "\${RESOURCES}/server/cli.cjs" "$@"
+exec "${paths.resources}/vornd/vorn" "$@"
 `
 }
 
@@ -156,6 +143,38 @@ export function cliShimStatus(): ShimStatus {
   }
 }
 
+/** Every place this app or the install scripts may have put the command. */
+function installedShims(): string[] {
+  if (process.platform === 'win32') return [path.join(path.dirname(app.getPath('exe')), 'vorn.cmd')]
+  return ['/usr/local/bin', path.join(os.homedir(), '.local', 'bin')].map((dir) =>
+    path.join(dir, 'vorn')
+  )
+}
+
+function currentShim(): string {
+  return shimScript({
+    exe: app.getPath('exe'),
+    resources: process.resourcesPath,
+    appImage: process.env.APPIMAGE
+  })
+}
+
+/** Rewrites a command an older build installed, which ran the command line this build no longer ships. */
+export function refreshStaleShims(): string[] {
+  if (!app.isPackaged) return []
+  const rewritten: string[] = []
+  for (const file of installedShims()) {
+    try {
+      if (!fs.readFileSync(file, 'utf-8').includes('cli.cjs')) continue
+      fs.writeFileSync(file, currentShim(), 'utf-8')
+      rewritten.push(file)
+    } catch {
+      // Not there, or not this app's to rewrite.
+    }
+  }
+  return rewritten
+}
+
 export function installCliShim(): { ok: true; path: string } | { ok: false; error: string } {
   if (!app.isPackaged) {
     return { ok: false, error: 'Only a packaged Vorn can install the command.' }
@@ -164,15 +183,7 @@ export function installCliShim(): { ok: true; path: string } | { ok: false; erro
   const target = shimPath()
   try {
     fs.mkdirSync(path.dirname(target), { recursive: true })
-    fs.writeFileSync(
-      target,
-      shimScript({
-        exe: app.getPath('exe'),
-        resources: process.resourcesPath,
-        appImage: process.env.APPIMAGE
-      }),
-      'utf-8'
-    )
+    fs.writeFileSync(target, currentShim(), 'utf-8')
     if (process.platform !== 'win32') fs.chmodSync(target, 0o755)
     return { ok: true, path: target }
   } catch (err) {

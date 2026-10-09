@@ -5,36 +5,33 @@ import {
   home,
   killPid,
   until,
-  upstream,
   vorndSessionsAvailable
 } from './helpers/vornd-sessions'
 
 /**
- * The terminal calls for a session vornd holds, answered by vornd itself and
- * never forwarded: attach, write, resize, readOutput and readScrollback, and
- * the data, resized and exit notifications. Real vornd, real session holder,
+ * The terminal calls for a session vornd holds, answered by vornd itself:
+ * attach, write, resize, readOutput and readScrollback, and the data, resized
+ * and exit notifications. Real vornd, real session holder,
  * real shells; the client is xterm.js wired as the renderer wires it.
  *
- * Runs in `yarn test:conformance`, which builds both binaries; skipped
- * otherwise.
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`);
+ * skipped otherwise.
  */
 describe.runIf(vorndSessionsAvailable)('terminal calls through vornd', () => {
-  let server: Awaited<ReturnType<typeof upstream>>
   let dir: ReturnType<typeof home>
   let vornd: Vornd
   const clients: BytesClient[] = []
 
   async function client(): Promise<BytesClient> {
     const c = new BytesClient()
-    await c.connect(vornd.port)
+    await c.connect(vornd.port, vornd.credential)
     clients.push(c)
     return c
   }
 
   beforeAll(async () => {
-    server = await upstream()
     dir = home()
-    vornd = await Vornd.start(server.port, dir.dir)
+    vornd = await Vornd.start(dir.dir)
   }, 30_000)
 
   afterAll(async () => {
@@ -42,7 +39,6 @@ describe.runIf(vorndSessionsAvailable)('terminal calls through vornd', () => {
     const holder = await vornd.sessiondPid().catch(() => null)
     await vornd.kill()
     killPid(holder)
-    server.close()
     dir.remove()
   })
 
@@ -101,14 +97,13 @@ describe.runIf(vorndSessionsAvailable)('terminal calls through vornd', () => {
     expect(report).toMatch(/033 \[ \? .* c/)
   })
 
-  it('answers the attach and the writes of a session nothing holds, forwarding neither', async () => {
+  it('answers the attach and the writes of a session nothing holds', async () => {
     const c = await client()
     expect(await c.call('terminal:attach', { id: 'not-held-by-vornd' })).toEqual({
       data: '',
       seq: 0,
       live: false
     })
-    // The stand-in server answers nothing, so only vornd can answer.
     const answered = await Promise.race([
       c.call('terminal:write', { id: 'not-held-by-vornd', data: 'x' }).then(
         () => true,

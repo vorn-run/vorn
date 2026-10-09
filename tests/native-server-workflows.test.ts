@@ -136,13 +136,6 @@ describe.runIf(runnable)('the work model in vornd', () => {
     expect(await direct.result('webhook:info')).toEqual({
       baseUrl: `http://127.0.0.1:${server.port}`
     })
-    const health = (await (
-      await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-    ).json()) as {
-      groups: Record<string, { mode: string; native?: number }>
-    }
-    expect(health.groups.workflow.mode).toBe('native')
-    expect(health.groups.workflow.native).toBeGreaterThan(0)
     expect(await viaVornd.result('workflow:delete', { id: 'wf-list' })).toEqual({ ok: true })
   })
 

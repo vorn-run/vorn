@@ -42,7 +42,7 @@ import {
   listRunsWithWaitingGates,
   dbSignalChange
 } from '../data-access'
-import { rpcCall } from '@vornrun/server/rpc-client'
+import { rpcCall } from '../rpc-client'
 import {
   toPortable,
   fromPortable,

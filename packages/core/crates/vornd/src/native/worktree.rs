@@ -2,10 +2,7 @@
 //! to remove, and the removal itself, read from its copy of the session
 //! records ([`crate::registry`]) and the repositories ([`vorn_worktrees`]).
 //!
-//! A project on a remote host is reached over ssh, as the server reaches it
-//! ([`super::remote`]). After a change it tells the
-//! server which worktrees it cleaned (`vornd:worktreesCleaned`), so the
-//! server forgets their sizes as it does after its own.
+//! A project on a remote host is reached over ssh ([`super::remote`]).
 
 use std::path::Path;
 
@@ -17,16 +14,6 @@ use vorn_worktrees::{Cleanup, Guard, Project, RemoveItem, Retention, Scan};
 
 use super::{absolute_str, bad_params, Answer, Native};
 use crate::registry::Registry;
-
-/// The note that names the worktrees a change cleaned.
-pub const CLEANED: &str = "vornd:worktreesCleaned";
-
-/// The calls whose shadow answer [`foresee`] predicts: the ones that delete.
-const ACTIONS: &[&str] = &[
-    "worktree:removeMany",
-    "worktree:reclaimArtifacts",
-    "worktree:pruneOrphans",
-];
 
 /// Answers `method` with `params`.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
@@ -55,71 +42,13 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
     }
 }
 
-/// Whether [`foresee`] can say what `method` would answer.
-pub fn foresees(method: &str) -> bool {
-    ACTIONS.contains(&method)
-}
-
-/// What vornd would answer a deleting call, for the comparison with the
-/// server's answer in shadow mode: its refusal, or an empty result. `None`
-/// when the answer is the server's own.
-pub fn foresee(native: &Native, method: &str, params: &Value) -> Option<Answer> {
-    let asked = Asked::read(method, params)?;
-    let settings = settings(native)?;
-    if !all_local(&settings, &asked.paths()) {
-        return None;
-    }
-    let refused = native
-        .registry
-        .get()?
-        .read(|r| asked.paths().iter().try_for_each(|p| idle(r, p)))?;
-    Some(match refused {
-        Ok(()) => Answer::Result(json!({})),
-        Err(e) => Answer::Error(e),
-    })
-}
-
-/// `answer` as shadow mode compares it, for `method`. An inventory without
-/// what is measured or the time it was taken, which the two sides take at
-/// different moments; a deleting call by whether it was refused up front,
-/// since only one side deletes.
-pub fn compared(method: &str, mut answer: Value) -> Value {
-    if method == "worktree:inventory" {
-        let Some(result) = answer.get_mut("result").and_then(Value::as_object_mut) else {
-            return answer;
-        };
-        result.remove("scannedAt");
-        let projects = result.get_mut("projects").and_then(Value::as_array_mut);
-        for project in projects.into_iter().flatten() {
-            let entries = project.get_mut("entries").and_then(Value::as_array_mut);
-            for entry in entries
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_object_mut)
-            {
-                for key in ["sizeBytes", "artifactBytes", "sizeMeasured"] {
-                    entry.remove(key);
-                }
-                if let Some(verdict) = entry.get_mut("verdict").and_then(Value::as_object_mut) {
-                    verdict.remove("freesBytes");
-                }
-            }
-        }
-        return answer;
-    }
-    if foresees(method) {
-        return json!({ "refused": answer.pointer("/error/message") });
-    }
-    answer
-}
-
 /// The projects and retention, fresh from the database. `None` when vornd
 /// cannot read them.
 fn settings(native: &Native) -> Option<WorktreeSettings> {
     match WorktreeSettings::read(native.db.get()?) {
         Ok(settings) => settings,
         Err(err) => {
-            tracing::debug!(%err, "could not read the projects; the server answers");
+            tracing::debug!(%err, "could not read the projects");
             None
         }
     }
@@ -152,12 +81,6 @@ fn remote_of(native: &Native, placement: Placement) -> Option<vorn_worktrees::Re
             .map(|login| vorn_worktrees::Remote { id, login }),
         Placement::Local => None,
     }
-}
-
-fn all_local(settings: &WorktreeSettings, paths: &[&str]) -> bool {
-    paths
-        .iter()
-        .all(|p| settings.hosts.for_path(p) == Placement::Local)
 }
 
 /// `worktree:inventory`: `null`, or `{projectPaths?, refresh?}`.
@@ -240,7 +163,6 @@ fn remove_one(native: &Native, method: &str, params: &Value) -> Answer {
     let removed = native.turns.take(&place.turn(project), || {
         git.remove_worktree(Path::new(project), worktree, force, delete_branch)
     });
-    tell_cleaned(native, &[worktree.to_owned()]);
     Answer::Result(json!(removed))
 }
 
@@ -314,14 +236,7 @@ fn act(native: &Native, settings: &WorktreeSettings, git: &Git, asked: &Asked) -
         Asked::Reclaim(paths) => vorn_worktrees::reclaim_artifacts(paths, &ctx),
         Asked::Prune(paths) => vorn_worktrees::prune_orphan_dirs(paths, &ctx),
     };
-    tell_cleaned(native, &result.succeeded);
     Answer::Result(super::json_of(result))
-}
-
-fn tell_cleaned(native: &Native, paths: &[String]) {
-    if let (false, Some(link)) = (paths.is_empty(), native.link.get()) {
-        link.tell(CLEANED, json!({ "paths": paths }));
-    }
 }
 
 /// The session records' promise around a deletion: nothing running in the
@@ -406,7 +321,6 @@ mod tests {
         _dir: tempfile::TempDir,
         native: Arc<Native>,
         registry: Arc<SessionRegistry>,
-        link: Arc<AppLink>,
         project: String,
         busy: String,
         dirty: String,
@@ -460,13 +374,11 @@ mod tests {
                 }),
             )
             .unwrap();
-        let link = Arc::new(AppLink::default());
-        native.set_link(Arc::clone(&link));
+        native.set_link(Arc::new(AppLink::default()));
         Fixture {
             _dir: dir,
             native,
             registry,
-            link,
             project,
             busy,
             dirty,
@@ -519,10 +431,6 @@ mod tests {
             assert!(matches!(call(&f.native, method, &paths), Answer::Error(_)));
         }
         assert!(Path::new(&f.busy).is_dir());
-        assert!(matches!(
-            foresee(&f.native, "worktree:removeMany", &items),
-            Some(Answer::Error(e)) if e == refusal
-        ));
     }
 
     #[test]
@@ -536,7 +444,6 @@ mod tests {
         assert_eq!(dirty["verdict"]["level"], "review");
         assert_eq!(dirty["verdict"]["reasons"], json!(["uncommitted changes"]));
 
-        let (mut notes, _listening) = f.link.listen();
         let items = json!({ "items": [{ "projectPath": f.project, "worktreePath": f.dirty }] });
         let Answer::Result(result) = call(&f.native, "worktree:removeMany", &items) else {
             panic!("vornd answers the removal");
@@ -544,15 +451,10 @@ mod tests {
         assert_eq!(result["succeeded"], json!([]));
         assert_eq!(result["failed"][0]["path"], f.dirty);
         assert!(Path::new(&f.dirty).join("work.txt").is_file());
-        assert!(notes.try_recv().is_err(), "nothing was cleaned");
-        assert!(matches!(
-            foresee(&f.native, "worktree:removeMany", &items),
-            Some(Answer::Result(_))
-        ));
     }
 
     #[test]
-    fn removes_an_idle_worktree_and_tells_the_server() {
+    fn removes_an_idle_worktree() {
         let f = fixture();
         f.registry
             .feed(
@@ -560,7 +462,6 @@ mod tests {
                 &json!({ "op": "snapshot", "headless": [], "order": [], "terminals": [] }),
             )
             .unwrap();
-        let (mut notes, _listening) = f.link.listen();
         let items = json!({ "items": [{ "projectPath": f.project, "worktreePath": f.busy, "deleteBranch": true }] });
         let Answer::Result(result) = call(&f.native, "worktree:removeMany", &items) else {
             panic!("vornd answers the removal");
@@ -568,9 +469,6 @@ mod tests {
         assert_eq!(result["succeeded"], json!([f.busy]));
         assert_eq!(result["deletedBranches"], json!(["busy"]));
         assert!(!Path::new(&f.busy).exists());
-        let note = notes.try_recv().expect("the server is told");
-        assert_eq!(note["method"], CLEANED);
-        assert_eq!(note["params"]["paths"], json!([f.busy]));
 
         let one = json!({ "projectPath": f.project, "worktreePath": f.dirty, "force": true });
         assert!(matches!(
@@ -615,7 +513,6 @@ mod tests {
                 "{method} {params}"
             );
         }
-        assert!(foresee(&f.native, "worktree:pruneOrphans", &json!({})).is_none());
 
         let unfed = Native::new();
         unfed.set_registry(SessionRegistry::new());
@@ -644,46 +541,11 @@ mod tests {
             },
             retention: None,
         };
-        assert!(!all_local(&settings, &["/r/x"]));
-        assert!(all_local(&settings, &["/l/x"]));
         // A host vornd cannot read is reached as this machine, as the server reaches it.
         let listed = projects(&Native::new(), &settings);
         assert_eq!(
             (listed[0].remote.clone(), listed[1].host_ids.clone()),
             (None, vec!["local".to_owned()])
         );
-    }
-
-    #[test]
-    fn compares_inventories_without_what_is_measured() {
-        let a = json!({ "result": {
-            "scannedAt": "t1",
-            "projects": [{ "entries": [{ "path": "/w", "sizeBytes": 1, "artifactBytes": 2,
-                "sizeMeasured": true, "verdict": { "level": "remove", "freesBytes": 1 } }] }],
-        } });
-        let b = json!({ "result": {
-            "scannedAt": "t2",
-            "projects": [{ "entries": [{ "path": "/w", "sizeBytes": 9, "artifactBytes": 0,
-                "sizeMeasured": false, "verdict": { "level": "remove", "freesBytes": 9 } }] }],
-        } });
-        assert_eq!(
-            compared("worktree:inventory", a.clone()),
-            compared("worktree:inventory", b)
-        );
-        assert_eq!(
-            compared(
-                "worktree:removeMany",
-                json!({ "result": { "succeeded": ["/w"] } })
-            ),
-            json!({ "refused": null })
-        );
-        assert_eq!(
-            compared(
-                "worktree:pruneOrphans",
-                json!({ "error": { "code": 1, "message": "no" } })
-            ),
-            json!({ "refused": "no" })
-        );
-        assert_eq!(compared("git:getBranch", a.clone()), a);
     }
 }

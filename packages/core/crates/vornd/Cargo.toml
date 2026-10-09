@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 publish = false
-description = "Vorn's daemon: one endpoint in front of the Node server, forwarding every call it has not taken over"
+description = "Vorn's server: the endpoint every client uses, its session holder and every call"
 
 [[bin]]
 name = "vornd"
@@ -22,8 +22,8 @@ bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 http-body-util = "0.1"
-hyper = { version = "1", features = ["server", "client", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio", "server", "client-legacy", "http1"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "http1"] }
 # Connector MCP servers are spoken to through the official Rust SDK, as a client
 # of a child on stdio.
 rmcp = { version = "3.5", default-features = false, features = ["client", "transport-child-process"] }
@@ -65,6 +65,9 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
 
 [dev-dependencies]
+# What the /mcp test posts with.
+hyper = { version = "1", features = ["client"] }
+hyper-util = { version = "0.1", features = ["client-legacy"] }
 libghostty-vt = { version = "0.2.2", default-features = false }
 tempfile = "3"
 vorn-grid-client = { path = "../grid-client" }

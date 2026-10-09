@@ -236,14 +236,13 @@ describe.runIf(builtVornd && builtSessiond && process.platform !== 'win32')(
       })
     })
 
-    it('handed nothing on, there being nothing behind it', async () => {
+    it('reports itself healthy, with nothing behind it', async () => {
       const res = await fetch(`http://127.0.0.1:${served.port}/vornd/health`)
-      const health = (await res.json()) as {
-        unexpectedForwards: Record<string, number>
-        upstream: { address: string | null }
-      }
-      expect(health.unexpectedForwards).toEqual({})
-      expect(health.upstream.address).toBeNull()
+      expect(res.status).toBe(200)
+      const health = (await res.json()) as Record<string, unknown>
+      expect(health.ok).toBe(true)
+      expect(health).not.toHaveProperty('upstream')
+      expect(health).not.toHaveProperty('groups')
     })
   }
 )

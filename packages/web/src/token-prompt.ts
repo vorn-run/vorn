@@ -52,7 +52,7 @@ export function renderTokenPrompt(onSubmit: (token: string) => void): void {
   const command = el(
     'code',
     `display:block;${SURFACE};${MONO};font-size:12.5px;overflow-x:auto`,
-    'vorn-server token create --name "This device"'
+    'vorn server token create --name "This device"'
   )
 
   const input = document.createElement('input')

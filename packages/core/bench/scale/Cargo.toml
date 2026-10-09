@@ -12,9 +12,11 @@ name = "vorn-scale-bench"
 path = "src/main.rs"
 
 [dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "io-util", "sync", "macros", "time", "process"] }
+tokio-tungstenite = "0.28"
 vorn-grid-client = { path = "../../crates/grid-client" }
 vorn-sessiond-wire = { path = "../../crates/sessiond-wire" }
 vorn-term-proto = { path = "../../crates/term-proto" }

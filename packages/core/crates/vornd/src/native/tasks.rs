@@ -49,8 +49,8 @@ fn text(params: &Value, key: &str) -> String {
 /// Answers `method`.
 pub async fn answer(native: &Arc<Native>, method: &str, params: Value) -> Answer {
     if native.database().is_none() {
-        // Only a test starts vornd without one; its server answers then.
-        return Answer::Forward;
+        // Only a test starts vornd without one.
+        return Answer::Unanswered;
     }
     if method.starts_with("task:image") {
         return images(native, method, &params);
@@ -167,7 +167,7 @@ fn images(native: &Native, method: &str, params: &Value) -> Answer {
                 .unwrap_or_else(|| vorn_work::js::to_string(params));
             images.cleanup(&task).map(|()| Value::Null)
         }
-        _ => return Answer::Forward,
+        _ => return Answer::Unanswered,
     };
     match done {
         Ok(Value::Null) => Answer::Void,

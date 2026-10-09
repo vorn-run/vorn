@@ -17,13 +17,11 @@ export default defineConfig({
       reporter: ['text', 'text-summary', 'lcov'],
       include: [
         'packages/connector-sdk/src/**/*.ts',
-        'packages/server/src/**/*.ts',
         'packages/shared/src/**/*.ts',
         'src/renderer/lib/**/*.ts',
         'src/renderer/components/**/*.tsx'
       ],
       exclude: [
-        'packages/server/src/logger.ts',
         'src/renderer/lib/terminal-registry.ts',
         'src/renderer/lib/workflow-execution.ts',
         'src/renderer/lib/workflow-triggers.ts',

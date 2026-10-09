@@ -1,43 +1,36 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
-import WebSocket, { WebSocketServer } from 'ws'
+import WebSocket from 'ws'
 import { Terminal as Headless } from '@xterm/headless'
 import type { Terminal } from '@xterm/xterm'
 import type { RecordCursor } from '../../packages/shared/src/types'
 import { decodeTerminalFrameV2, frameResume } from '../../packages/shared/src/terminal-frame'
 import { swallowQueries } from '../../src/renderer/lib/vornd-replies'
 
-/**
- * Sessions held by vornd, for tests that go through the real binaries.
- *
- * The conformance run (`yarn test:conformance`) builds vornd and vorn-sessiond
- * and names them in `VORN_CONFORMANCE_VORND` and `VORN_CONFORMANCE_SESSIOND`.
- * Until the app creates its sessions through vornd, a test starts them with
- * `vornd:spawn`, which vornd answers only with `--debug-spawn`.
- */
+/** vornd as the server on a test's own data directory, with sessions started by `vornd:spawn` (`--debug-spawn`). */
 
-const vorndBinary = process.env.VORN_CONFORMANCE_VORND
-const sessiondBinary =
-  process.env.VORN_CONFORMANCE_SESSIOND ??
-  (vorndBinary
-    ? path.join(
-        path.dirname(vorndBinary),
-        process.platform === 'win32' ? 'vorn-sessiond.exe' : 'vorn-sessiond'
-      )
-    : undefined)
+const EXE = process.platform === 'win32' ? '.exe' : ''
+
+const vorndBinary = [
+  path.resolve(__dirname, `../../packages/core/vornd${EXE}`),
+  path.resolve(__dirname, `../../packages/core/target/release/vornd${EXE}`)
+].find((p) => existsSync(p))
+const sessiondBinary = vorndBinary && path.join(path.dirname(vorndBinary), `vorn-sessiond${EXE}`)
 
 /** Whether this run can start vornd with a session holder: both binaries. */
 export const vorndBinariesAvailable =
-  !!vorndBinary && existsSync(vorndBinary) && !!sessiondBinary && existsSync(sessiondBinary)
+  !!vorndBinary && !!sessiondBinary && existsSync(sessiondBinary)
 
 /** The same on a Unix, for tests whose programs are POSIX shell scripts. */
 export const vorndSessionsAvailable = process.platform !== 'win32' && vorndBinariesAvailable
 
 const PATIENCE_MS = 15_000
+
+/** The desktop's credential, which vornd as the server takes as its own. */
+export const DESKTOP_CREDENTIAL = 'vornd-sessions-desktop-credential'
 
 /** Polls `check` until it holds. */
 export async function until(what: string, check: () => boolean | Promise<boolean>): Promise<void> {
@@ -48,52 +41,19 @@ export async function until(what: string, check: () => boolean | Promise<boolean
   }
 }
 
-/**
- * A server for vornd to stand in front of. vornd opens a client's socket only
- * once the server accepted the same upgrade; for sessions vornd holds, that is
- * all the server does.
- */
-export async function upstream(): Promise<{ port: number; close(): void }> {
-  // Its health route answers too, so vornd's start-up check finds it up.
-  const http = createServer((_, res) => res.end('ok'))
-  const server = new WebSocketServer({ server: http })
-  await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', () => resolve()))
-  const address = http.address()
-  return {
-    port: typeof address === 'object' && address ? address.port : 0,
-    close: () => {
-      server.close()
-      http.close()
-    }
-  }
-}
-
-/** A vornd with a session holder under `home`. */
+/** vornd as the server on `home`, with a session holder. */
 export class Vornd {
   private constructor(
     private readonly child: ChildProcess,
-    readonly port: number
+    readonly port: number,
+    /** The desktop's credential: a socket that opens with it is the desktop's. */
+    readonly credential: string
   ) {}
 
-  /** With `desktopToken`, a connection that opens with it is the desktop's; with `db`, vornd reads the settings there. */
-  static async start(
-    upstreamPort: number,
-    home: string,
-    desktopToken?: string,
-    db?: string
-  ): Promise<Vornd> {
+  static async start(home: string, credential = DESKTOP_CREDENTIAL): Promise<Vornd> {
     const child = spawn(
       vorndBinary!,
-      [
-        '--upstream',
-        `127.0.0.1:${upstreamPort}`,
-        '--sessiond',
-        sessiondBinary!,
-        '--home',
-        home,
-        '--debug-spawn',
-        ...(db ? ['--db', db] : [])
-      ],
+      ['--data-dir', home, '--port', '0', '--sessiond', sessiondBinary!, '--debug-spawn'],
       {
         stdio: ['ignore', 'pipe', 'inherit'],
         env: {
@@ -101,9 +61,9 @@ export class Vornd {
           // Its own home: nothing it writes reaches this machine's user.
           HOME: home,
           USERPROFILE: home,
+          SECRET_VORN_BOOTSTRAP_TOKEN: credential,
           VORND_KEYCHAIN: '0',
-          VORND_LOG: process.env.VORND_LOG ?? 'warn',
-          ...(desktopToken ? { VORND_DESKTOP_TOKEN: desktopToken } : {})
+          VORND_LOG: process.env.VORND_LOG ?? 'warn'
         }
       }
     )
@@ -112,9 +72,20 @@ export class Vornd {
       lines.once('line', (line) => resolve((JSON.parse(line) as { port: number }).port))
       child.once('exit', (code) => reject(new Error(`vornd exited with ${code}`)))
     })
-    const v = new Vornd(child, port)
+    const v = new Vornd(child, port, credential)
     await until('vornd to hold sessions', async () => (await v.report()).connected === true)
     return v
+  }
+
+  /** A device token's plaintext: a socket that opens with it is not the desktop's. */
+  async deviceToken(name: string): Promise<string> {
+    const desktop = new BytesClient()
+    await desktop.connect(this.port, this.credential)
+    try {
+      return (await desktop.call<{ plaintext: string }>('token:create', { name })).plaintext
+    } finally {
+      desktop.close()
+    }
   }
 
   async report(): Promise<{
@@ -202,12 +173,11 @@ export class BytesClient {
     })
   }
 
-  /** Opens with `token` as its bearer credential, as the desktop does, when given one. */
-  async connect(port: number, token?: string): Promise<void> {
-    this.ws = new WebSocket(
-      `ws://127.0.0.1:${port}/ws`,
-      token ? { headers: { Authorization: `Bearer ${token}` } } : {}
-    )
+  /** Opens with `token` as its bearer credential. */
+  async connect(port: number, token: string): Promise<void> {
+    this.ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
     this.ws.binaryType = 'nodebuffer'
     this.ws.on('message', (raw: Buffer, isBinary: boolean) => this.receive(raw, isBinary))
     await new Promise<void>((resolve, reject) => {
@@ -340,17 +310,5 @@ export function killPid(pid: number | null): void {
     process.kill(pid, 'SIGTERM')
   } catch {
     /* already gone */
-  }
-}
-
-/** The channel vornd announced in `dataDir` for its server, if it announced one. */
-export function announcedEndpoint(dataDir: string): string | null {
-  try {
-    const said = JSON.parse(readFileSync(path.join(dataDir, 'run', 'vornd-app'), 'utf8')) as {
-      endpoint?: unknown
-    }
-    return typeof said.endpoint === 'string' ? said.endpoint : null
-  } catch {
-    return null
   }
 }

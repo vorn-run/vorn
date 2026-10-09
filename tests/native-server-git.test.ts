@@ -9,8 +9,7 @@
  * differences `helpers/git-parity` names. A call that changes a repository
  * is made on a copy of the fixture of its own.
  *
- * Runs where vornd has been built (`yarn build:core`, or the binary in
- * `VORN_CONFORMANCE_VORND`).
+ * Runs where vornd has been built (`yarn build:core`).
  */
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -34,7 +33,6 @@ const TEST_CREDENTIAL = 'native-server-test-credential'
 const EXE = process.platform === 'win32' ? '.exe' : ''
 
 const vornd = [
-  process.env.VORN_CONFORMANCE_VORND,
   path.resolve(__dirname, `../packages/core/vornd${EXE}`),
   path.resolve(__dirname, `../packages/core/target/release/vornd${EXE}`)
 ].find((p): p is string => !!p && fs.existsSync(p))
@@ -75,23 +73,6 @@ class Client {
   close(): void {
     this.ws.close()
   }
-}
-
-type Counts = Record<
-  string,
-  {
-    mode?: string
-    forwarded?: number
-    native?: number
-    shadowMatched?: number
-    shadowMismatched?: number
-    shadowUnported?: number
-  }
->
-
-async function counts(v: Served): Promise<Counts> {
-  const res = await fetch(`http://127.0.0.1:${v.port}/vornd/health`)
-  return ((await res.json()) as { groups: Counts }).groups
 }
 
 function sh(cwd: string, ...args: string[]): string {
@@ -278,11 +259,6 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
     } finally {
       through.close()
     }
-    const groups = await counts(native!)
-    for (const group of ['git', 'file', 'ide']) {
-      expect(groups[group]?.mode).toBe('native')
-      expect(groups[group]?.native ?? 0).toBeGreaterThan(0)
-    }
   })
 
   it('makes the same changes the server makes, and answers them the same', async () => {
@@ -417,8 +393,6 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
     })
     expect(renamed.result).toBe(false)
     through.close()
-    const after = await counts(native!)
-    for (const group of ['git', 'file', 'ide']) expect(after[group]?.forwarded ?? 0).toBe(0)
   })
 
   it('answers only once the socket is admitted', async () => {
@@ -429,21 +403,15 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
 
     const authed = await Client.open(native!.port, false)
     await authed.call('auth:authenticate', { token: TEST_CREDENTIAL })
-    const before = await counts(native!)
     const answered = await authed.call('git:getBranch', reads.repo)
     expect(answered.result).toBe('main')
-    const after = await counts(native!)
-    expect((after.git?.native ?? 0) - (before.git?.native ?? 0)).toBe(1)
     authed.close()
   })
 
   it('answers the desktop’s socket from its first call', async () => {
     const through = await Client.open(native!.port)
-    const before = await counts(native!)
     const answered = await through.call('git:getBranch', reads.repo)
     expect(answered.result).toBe('main')
-    const after = await counts(native!)
-    expect((after.git?.native ?? 0) - (before.git?.native ?? 0)).toBe(1)
     through.close()
   })
 })

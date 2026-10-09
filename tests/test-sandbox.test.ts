@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import electronLog from 'electron-log/main'
 import { describe, expect, inject, it, vi } from 'vitest'
 import log from '../src/main/logger'
-import { dataDir } from '../packages/server/src/rpc-client'
+import { dataDir } from '../packages/mcp/src/rpc-client'
 import { appLogFiles, linesSince, snapshotLogs } from './helpers/app-log'
 import { assertSandboxed, isInside } from './helpers/sandbox'
 

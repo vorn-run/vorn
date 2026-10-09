@@ -190,7 +190,7 @@ Any CLI tool that runs in a terminal works with Vorn. These are the agents with 
 # Install dependencies
 yarn install
 
-# Build the native core the server's terminals run on
+# Build vornd, the server, with its session holder and the vorn command
 yarn build:core
 
 # Start in development mode

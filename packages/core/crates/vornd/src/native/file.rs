@@ -1,8 +1,7 @@
 //! The file explorer's calls on this machine: list a directory, read, stamp
 //! and write a file, as the server's `file-utils` answers them.
 //!
-//! A call naming a remote host is the server's, which reaches it over SSH;
-//! the dispatcher forwards those before they get here.
+//! A call naming a remote host is answered over SSH ([`super::remote`]) before it gets here.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};

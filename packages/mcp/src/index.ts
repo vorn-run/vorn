@@ -4,8 +4,7 @@ declare const __MCP_VERSION__: string | undefined
 
 import { createRequire } from 'node:module'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { configManager } from '@vornrun/server/config-manager'
-import { readLocalToken, rpcCall } from '@vornrun/server/rpc-client'
+import { readLocalToken, rpcCall } from './rpc-client'
 import { relay, relayHeaders, vorndMcpUrl, type Upstream } from './relay'
 import { createMcpServer } from './server'
 
@@ -32,9 +31,6 @@ async function main() {
     process.exit(0)
   }
 
-  // Initialize database only (lightweight — no PTY, no scheduler)
-  configManager.init()
-
   const version =
     typeof __MCP_VERSION__ !== 'undefined'
       ? __MCP_VERSION__
@@ -43,11 +39,7 @@ async function main() {
   const transport = new StdioServerTransport()
   await server.connect(transport)
 
-  // Graceful shutdown
-  transport.onclose = () => {
-    configManager.close()
-    process.exit(0)
-  }
+  transport.onclose = () => process.exit(0)
 }
 
 main().catch((err) => {

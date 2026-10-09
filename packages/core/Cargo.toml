@@ -1,6 +1,6 @@
 [workspace]
+resolver = "2"
 members = [
-  ".",
   "crates/screen",
   "crates/analysis",
   "crates/pipeline",
@@ -36,32 +36,6 @@ members = [
 # The app's version (scripts/sync-versions.sh); every binary that reports a version inherits it.
 [workspace.package]
 version = "0.8.0-beta.6"
-
-[package]
-name = "vorn-core"
-version.workspace = true
-edition = "2021"
-rust-version = "1.90"
-license = "MIT"
-publish = false
-description = "Vorn's native core, loaded into the Node server through napi-rs: thin adapters over the vorn-* crates"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-napi = { version = "3", default-features = false, features = ["napi6", "async", "tokio_rt"] }
-napi-derive = "3"
-tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "sync"] }
-vorn-agents = { path = "crates/agents" }
-vorn-git = { path = "crates/vorn-git" }
-vorn-protocol = { path = "crates/protocol" }
-vorn-store = { path = "crates/store" }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-
-[build-dependencies]
-napi-build = "2"
 
 [profile.release]
 lto = true

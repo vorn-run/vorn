@@ -2,15 +2,12 @@
 //!
 //! Two halves behind one name. `vorn server` works on this machine's server:
 //! its device tokens, read and written in the database directly, and `serve`,
-//! which runs the Node server. The rest talks to a server that is already
+//! which runs vornd as the server. The rest talks to a server that is already
 //! running, starting one first if there is none, and every one of those verbs
 //! is an RPC the app has always had. `vorn mcp` relays an agent's MCP over
 //! stdio to vornd.
 //!
-//! Commands, flags, help text, output, messages and exit codes are the
-//! TypeScript command's (`packages/server/src/cli.ts`), so scripts written
-//! against one work against the other; `tests/native-cli.test.ts` runs both
-//! and compares them.
+//! Its output is the TypeScript command's it replaced, pinned by `tests/native-cli.test.ts`.
 //!
 //! [`run`] takes its argv and its output sinks as arguments and returns an
 //! exit code instead of writing to the process and exiting, so every command

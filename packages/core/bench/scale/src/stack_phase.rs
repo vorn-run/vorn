@@ -1,5 +1,5 @@
 //! vornd with the session holder it launches, driven as the app is:
-//! sessions started on the app's channel, followed over the grid endpoint.
+//! sessions started over its WebSocket, followed over the grid endpoint.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -20,6 +20,8 @@ use crate::stats::Latency;
 use crate::Plan;
 
 const MARKER: &str = "FLOOD-DONE";
+/// The local credential vornd is started with.
+const CREDENTIAL: &str = "vorn-scale-bench";
 const ATTACH_SAMPLES: usize = 20;
 const WAIT: Duration = Duration::from_secs(60);
 /// vornd's refusal while its holder is still starting.
@@ -59,23 +61,24 @@ impl Spawner for AppSpawner<'_> {
 
 /// The JSON line vornd prints once it listens.
 struct Ready {
+    port: u16,
     grid: String,
-    app: String,
 }
 
 fn ready(line: &str) -> Result<Ready, Error> {
     let v: Value = serde_json::from_str(line)
         .map_err(|e| Error::Protocol(format!("vornd said {line:?}: {e}")))?;
-    let field = |k: &str| {
-        v.get(k)
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .ok_or_else(|| Error::Protocol(format!("no {k} in {line}; built without `engine`?")))
-    };
-    Ok(Ready {
-        grid: field("grid")?,
-        app: field("app")?,
-    })
+    let port = v
+        .get("port")
+        .and_then(Value::as_u64)
+        .and_then(|p| u16::try_from(p).ok())
+        .ok_or_else(|| Error::Protocol(format!("no port in {line}")))?;
+    let grid = v
+        .get("grid")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| Error::Protocol(format!("no grid in {line}; built without `engine`?")))?;
+    Ok(Ready { port, grid })
 }
 
 /// The pid in the holder's announcement under `home/run`.
@@ -102,14 +105,17 @@ pub async fn run(plan: &Plan, out: &mut StackPhase) -> Result<(), Error> {
     std::fs::create_dir_all(&home)?;
     out.mem_available.base = procfs::mem_available().ok();
     let mut cmd = Command::new(&plan.vornd);
-    cmd.args(["--upstream", "127.0.0.1:9", "--sessiond"])
-        .arg(&plan.sessiond)
-        .arg("--home")
+    cmd.arg("--data-dir")
         .arg(&home)
+        .args(["--port", "0", "--debug-spawn", "--sessiond"])
+        .arg(&plan.sessiond)
         .arg("--log-file")
         .arg(home.join("vornd.log"))
         .env("VORND_LOG", "warn")
         .env("VORN_HOME", &home)
+        .env("HOME", &home)
+        .env("SECRET_VORN_BOOTSTRAP_TOKEN", CREDENTIAL)
+        .env("VORND_KEYCHAIN", "0")
         .stdin(Stdio::null())
         .stderr(Stdio::inherit());
     let (mut vornd, line) = Daemon::start("vornd", cmd).await?;
@@ -139,7 +145,7 @@ async fn measure(
     out: &mut StackPhase,
 ) -> Result<(), Error> {
     let ready = ready(line)?;
-    let mut app = AppClient::connect(&ready.app).await?;
+    let mut app = AppClient::connect(ready.port, CREDENTIAL).await?;
     let mut grid = GridClient::connect(&ready.grid, WAIT).await?;
     let cwd = plan.work.display().to_string();
     let bash: Argv = Box::new(|_| {
@@ -334,12 +340,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_ready_line_names_both_sockets() {
-        let r = ready(r#"{"port":1,"protocol":3,"grid":"/h/g.sock","app":"/h/a.sock"}"#).unwrap();
-        assert_eq!(
-            (r.grid.as_str(), r.app.as_str()),
-            ("/h/g.sock", "/h/a.sock")
-        );
+    fn the_ready_line_names_the_port_and_the_grid_socket() {
+        let r = ready(r#"{"port":1,"protocol":3,"grid":"/h/g.sock"}"#).unwrap();
+        assert_eq!((r.port, r.grid.as_str()), (1, "/h/g.sock"));
         assert!(ready(r#"{"port":1}"#).is_err());
         assert!(ready("listening").is_err());
     }

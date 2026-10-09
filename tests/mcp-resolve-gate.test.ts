@@ -16,7 +16,7 @@ const { rpcCall, listAllWorkflowRuns, listRunsWithWaitingGates, dbListWorkflows 
   })
 )
 
-vi.mock('../packages/server/src/rpc-client', () => ({
+vi.mock('../packages/mcp/src/rpc-client', () => ({
   rpcCall: (...a: unknown[]) => rpcCall(...a)
 }))
 vi.mock('../packages/mcp/src/data-access', () => ({

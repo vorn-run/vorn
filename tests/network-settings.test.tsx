@@ -261,7 +261,7 @@ describe('sharing this machine', () => {
     await renderPanel()
 
     expect(screen.getByText('Add device')).toBeInTheDocument()
-    expect(screen.queryByText(/vorn-server token create/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/vorn server token create/)).not.toBeInTheDocument()
   })
 
   it('asks before enabling without a tailnet, and does not save until confirmed', async () => {

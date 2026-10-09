@@ -2,18 +2,7 @@
 //!
 //! vornd owns the records: it creates, changes and closes them itself, and
 //! carries them from one run to the next ([`Registry::own_records`]). What
-//! follows of a server feeding a copy (`vornd:record`) is kept for tests
-//! and a server of an older build.
-//!
-//! The server owned its terminals' and headless agents' records: their names,
-//! groups, agents, worktrees and statuses. While vornd runs native work it
-//! keeps a copy, fed by the server over the app's channel
-//! ([`crate::control`]) as `vornd:record` notes: a whole snapshot when the
-//! server connects, then each record the server changes, the order of its
-//! terminals and the workspaces it holds while a session is being prepared.
-//! The copy answers the calls that only read the registry in shadow mode, so
-//! the two can be compared and any place the server changes a record without
-//! saying so shows up.
+//! follows of a feeder sending changes ([`SessionRegistry::feed`]) is how the tests set it up.
 //!
 //! Every change the copy takes moves its revision ([`Rev`]) on by one and is
 //! told to subscribers as a `vornd:session` note carrying the generation
@@ -2168,8 +2157,7 @@ fn takes_screen(row: &Row<TerminalSession>) -> bool {
     !row.ended && !is_shell(row) && row.record.status_source != Some(StatusSource::Hooks)
 }
 
-/// The registry as vornd shares it: the app's channel feeds it, the native
-/// calls read it, and subscribers are told each change.
+/// The registry as vornd shares it, with each change told to subscribers.
 #[derive(Debug)]
 pub struct SessionRegistry {
     state: Mutex<Fed>,
@@ -2227,9 +2215,7 @@ impl SessionRegistry {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Asks the server for its records: set when vornd has native work that
-    /// reads them. `vornd:hello` tells the server, and a server that is not
-    /// asked sends nothing.
+    /// Marks the registry as in use, which the health check then reports on.
     pub fn want(&self) {
         self.wanted.store(true, Ordering::Release);
     }
@@ -2304,7 +2290,7 @@ impl SessionRegistry {
     }
 
     /// The terminals whose program runs and the headless agents still
-    /// running, which keep the app's server from stopping as idle.
+    /// running.
     pub fn live(&self) -> Value {
         let fed = self.lock();
         let r = &fed.registry;

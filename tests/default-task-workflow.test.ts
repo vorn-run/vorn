@@ -1,29 +1,39 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, it, expect } from 'vitest'
-import {
-  buildDefaultTaskWorkflow,
-  DEFAULT_TASK_WORKFLOW_ID
-} from '../packages/server/src/default-workflows'
 import type {
   LaunchAgentConfig,
-  TaskStatusChangedTriggerConfig
+  TaskStatusChangedTriggerConfig,
+  WorkflowDefinition
 } from '../packages/shared/src/types'
 
-describe('buildDefaultTaskWorkflow', () => {
+/** The workflows vornd seeds into a new database, as it ships them. */
+const SEEDS = JSON.parse(
+  fs.readFileSync(
+    path.resolve(__dirname, '../packages/core/crates/vornd/src/serve/seed-workflows.json'),
+    'utf-8'
+  )
+) as Array<{ flag: string; workflow: WorkflowDefinition }>
+
+const seeded = (): WorkflowDefinition => {
+  const seed = SEEDS.find((s) => s.flag === 'hasSeededDefaultTaskWorkflow')
+  expect(seed).toBeDefined()
+  return seed!.workflow
+}
+
+describe('the seeded default task workflow', () => {
   it('has the stable system id', () => {
-    const wf = buildDefaultTaskWorkflow()
-    expect(wf.id).toBe(DEFAULT_TASK_WORKFLOW_ID)
-    expect(DEFAULT_TASK_WORKFLOW_ID).toBe('system:default-task-workflow')
+    expect(seeded().id).toBe('system:default-task-workflow')
   })
 
   it('is enabled and scoped to the personal workspace', () => {
-    const wf = buildDefaultTaskWorkflow()
+    const wf = seeded()
     expect(wf.enabled).toBe(true)
     expect(wf.workspaceId).toBe('personal')
   })
 
   it('triggers on todo → in_progress with no project filter', () => {
-    const wf = buildDefaultTaskWorkflow()
-    const triggerNode = wf.nodes.find((n) => n.type === 'trigger')
+    const triggerNode = seeded().nodes.find((n) => n.type === 'trigger')
     expect(triggerNode).toBeDefined()
     const trigger = triggerNode!.config as TaskStatusChangedTriggerConfig
     expect(trigger.triggerType).toBe('taskStatusChanged')
@@ -33,8 +43,7 @@ describe('buildDefaultTaskWorkflow', () => {
   })
 
   it('has exactly one headless launchAgent node using fromTask', () => {
-    const wf = buildDefaultTaskWorkflow()
-    const launchNodes = wf.nodes.filter((n) => n.type === 'launchAgent')
+    const launchNodes = seeded().nodes.filter((n) => n.type === 'launchAgent')
     expect(launchNodes).toHaveLength(1)
     const launch = launchNodes[0].config as LaunchAgentConfig
     expect(launch.agentType).toBe('fromTask')
@@ -42,7 +51,7 @@ describe('buildDefaultTaskWorkflow', () => {
   })
 
   it('connects the trigger to the launchAgent with one edge', () => {
-    const wf = buildDefaultTaskWorkflow()
+    const wf = seeded()
     expect(wf.edges).toHaveLength(1)
     const [edge] = wf.edges
     const trigger = wf.nodes.find((n) => n.type === 'trigger')!
@@ -51,9 +60,9 @@ describe('buildDefaultTaskWorkflow', () => {
     expect(edge.target).toBe(launch.id)
   })
 
-  it('round-trips through JSON without losing fields', () => {
-    const wf = buildDefaultTaskWorkflow()
-    const roundTripped = JSON.parse(JSON.stringify(wf))
-    expect(roundTripped).toEqual(wf)
+  it('seeds the dev server workflow switched off', () => {
+    const seed = SEEDS.find((s) => s.flag === 'hasSeededDevServerWorkflow')
+    expect(seed?.workflow.id).toBe('system:dev-server-on-restore')
+    expect(seed?.workflow.enabled).toBe(false)
   })
 })

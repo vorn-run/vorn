@@ -219,11 +219,9 @@ describe.runIf(runnable)('agents’ hooks in vornd', () => {
     const health = (await (
       await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
     ).json()) as {
-      unexpectedForwards: Record<string, number>
       hooks: { owner: boolean; pendingPermissions: number }
     }
     expect(health.hooks).toMatchObject({ owner: true, pendingPermissions: 0 })
-    expect(health.unexpectedForwards).toEqual({})
     await stopRealServer(server)
     await until('the registration to go', () => !fs.existsSync(path.join(home, '.vorn', 'port')))
     expect(fs.existsSync(path.join(home, '.vorn', 'token'))).toBe(false)

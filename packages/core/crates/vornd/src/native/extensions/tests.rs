@@ -255,7 +255,7 @@ async fn bridge(w: &World, route: Route, token: Option<&str>, body: &str) -> (St
     read(routes::answer(&w.ext, route, req, LOCAL).await).await
 }
 
-async fn read(res: hyper::Response<crate::proxy::Body>) -> (StatusCode, String) {
+async fn read(res: hyper::Response<crate::endpoint::Body>) -> (StatusCode, String) {
     let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     (status, String::from_utf8_lossy(&bytes).into_owned())
@@ -297,7 +297,10 @@ async fn a_call_about_an_unknown_session_fails_as_the_server_worded_it() {
         let answer = w.call(method, json!({ "sessionId": "nope" })).await;
         assert_eq!(answer, Answer::Error("Session not found: nope".into()));
     }
-    assert_eq!(w.call("extension:other", json!({})).await, Answer::Forward);
+    assert_eq!(
+        w.call("extension:other", json!({})).await,
+        Answer::Unanswered
+    );
 }
 
 #[tokio::test]

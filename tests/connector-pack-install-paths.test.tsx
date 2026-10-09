@@ -16,7 +16,7 @@ vi.mock('../src/renderer/stores', () => ({
 }))
 
 const rpcCall = vi.fn()
-vi.mock('../packages/server/src/rpc-client', () => ({
+vi.mock('../packages/mcp/src/rpc-client', () => ({
   rpcCall: (...a: unknown[]) => rpcCall(...a)
 }))
 

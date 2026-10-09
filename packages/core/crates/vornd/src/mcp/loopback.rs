@@ -1,10 +1,4 @@
-//! The MCP tools' way to the server: one WebSocket to vornd's own `/ws`.
-//!
-//! Going through vornd's own listener rather than straight to the server means
-//! a tool's call is routed as any client's is: a native group answers it here,
-//! a terminal vornd holds is answered from the engine, and everything else is
-//! forwarded. The TypeScript client opens a socket per call; one socket with
-//! its requests multiplexed by id costs a handshake once instead of per call.
+//! The MCP tools' way to vornd: one WebSocket to vornd's own `/ws`, its requests multiplexed by id.
 //! It is opened on first use and again after it drops, and a call in flight
 //! when it drops fails the way the TypeScript client's does.
 

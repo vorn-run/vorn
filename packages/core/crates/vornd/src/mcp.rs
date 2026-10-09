@@ -1,11 +1,4 @@
-//! `/mcp`: Vorn's MCP server, once the `mcp` group is vornd's.
-//!
-//! The protocol, the tools and the Streamable HTTP transport are
-//! [`vorn_mcp`]'s; this module decides who may use them and gives the tools
-//! their way to the server ([`loopback`]). In forward and shadow mode the
-//! path is the server's, like any other, and the agent's stdio relay serves
-//! the TypeScript tools itself; there is nothing to run twice, because a
-//! relay talks to one or the other.
+//! `/mcp`, Vorn's MCP server: who may use [`vorn_mcp`]'s tools, and their way back to vornd ([`loopback`]).
 //!
 //! Who may call: an agent on this machine, holding the local credential.
 //! - A request with an `Origin` is refused (403). Agents are not browsers,
@@ -17,9 +10,7 @@
 //!   an agent's tools. While vornd knows no token, nothing can be checked,
 //!   so every request is refused (503).
 //!
-//! The agent's working directory and Vorn session, which the TypeScript
-//! server reads from its own process, come in `Vorn-Cwd` (percent-encoded)
-//! and `Vorn-Session-Id` on every request.
+//! The agent's directory and session come in `Vorn-Cwd` (percent-encoded) and `Vorn-Session-Id`.
 
 mod loopback;
 
@@ -34,16 +25,11 @@ use serde_json::{json, Value};
 use vorn_mcp::http::{self, Transport};
 use vorn_mcp::{Caller, Server};
 
-use crate::groups::Counted;
-use crate::proxy::{full, Body};
+use crate::endpoint::{full, Body};
 
 pub use loopback::Loopback;
 
-/// The path, and the group its counts go under.
 pub const PATH: &str = "/mcp";
-pub const GROUP: &str = "mcp";
-/// What each request is counted as.
-pub const COUNTED_AS: &str = "mcp:request";
 
 /// A tool call carries at most a workflow or a file's worth of JSON.
 const MAX_BODY: usize = 16 << 20;
@@ -51,7 +37,7 @@ const MAX_BODY: usize = 16 << 20;
 const CWD_HEADER: &str = "vorn-cwd";
 const SESSION_HEADER: &str = "vorn-session-id";
 
-/// `packages/mcp`'s version, which the TypeScript server reports as its own.
+/// `packages/mcp`'s version, which the stdio relay reports too.
 static VERSION: LazyLock<String> = LazyLock::new(|| {
     serde_json::from_str::<Value>(include_str!("../../../../mcp/package.json"))
         .ok()
@@ -60,7 +46,7 @@ static VERSION: LazyLock<String> = LazyLock::new(|| {
 });
 
 /// The MCP server vornd runs: the transport and its sessions, and the
-/// socket its tools reach the server through.
+/// socket its tools reach vornd through.
 pub struct Mcp {
     transport: Transport,
     rpc: Loopback,
@@ -95,7 +81,7 @@ pub fn refusal(headers: &HeaderMap, token: Option<&[u8]>) -> Option<Response<Bod
     let presented = headers
         .get(header::AUTHORIZATION)
         .map(HeaderValue::as_bytes);
-    if !crate::proxy::is_desktop_credential(presented, token) {
+    if !crate::endpoint::is_desktop_credential(presented, token) {
         let mut res = error(StatusCode::UNAUTHORIZED, "Unauthorized");
         res.headers_mut()
             .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
@@ -105,13 +91,12 @@ pub fn refusal(headers: &HeaderMap, token: Option<&[u8]>) -> Option<Response<Bod
 }
 
 /// Answers one request to `/mcp` that [`refusal`] let through.
-pub async fn answer(groups: &crate::Groups, mcp: &Mcp, req: Request<Incoming>) -> Response<Body> {
+pub async fn answer(mcp: &Mcp, req: Request<Incoming>) -> Response<Body> {
     let (parts, body) = req.into_parts();
     let bytes = match Limited::new(body, MAX_BODY).collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(_) => return error(StatusCode::PAYLOAD_TOO_LARGE, "Request body is too large"),
     };
-    groups.count(COUNTED_AS, Counted::Native);
     let headers = &parts.headers;
     let text = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
     let caller = caller(text(CWD_HEADER), text(SESSION_HEADER));

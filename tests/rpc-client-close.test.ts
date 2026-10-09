@@ -53,7 +53,7 @@ vi.mock('node:fs', () => {
   return { default: fs, ...fs }
 })
 
-import { rpcCall } from '../packages/server/src/rpc-client'
+import { rpcCall } from '../packages/mcp/src/rpc-client'
 
 /** The socket for the call just made, once it has sent its request. */
 async function sent(): Promise<Fake> {

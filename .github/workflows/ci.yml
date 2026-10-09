@@ -59,21 +59,9 @@ jobs:
       - name: Format check
         run: yarn format:check
 
-      - name: Verify CLI CJS bundle
-        run: |
-          yarn workspace @vornrun/server build
-          # Fail if import.meta snuck into CJS bundle (causes runtime crash in Electron)
-          if grep -q 'import_meta' packages/server/dist/cli.cjs; then
-            echo "ERROR: import_meta found in CJS bundle — will crash at runtime"
-            exit 1
-          fi
-          # Smoke-test: the bundle loads and answers --help
-          node packages/server/dist/cli.cjs --help > /dev/null
-
       - name: Verify production build
         # Catches renderer/main/preload build regressions (e.g. Vite 8 rolldown
         # rejecting object-form manualChunks) that the unit tests don't exercise.
-        # The CLI bundle is already built in the step above.
         run: |
           yarn build:web
           yarn electron-vite build
@@ -131,9 +119,7 @@ jobs:
       - name: Electron binary
         run: node node_modules/electron/install.js
 
-      # The server runs its terminals on the Rust core, so the tests need
-      # vorn_core.node. libghostty-vt-sys builds Ghostty's VT library with Zig,
-      # and the Ghostty commit it pins refuses any Zig but 0.15.2.
+      # The tests start vornd, vorn-sessiond and vorn, built here with Zig 0.15.2 for libghostty-vt.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.15.2
@@ -155,7 +141,7 @@ jobs:
           key: core-ci-v2-${{ runner.os }}-${{ hashFiles('packages/core/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
           restore-keys: core-ci-v2-${{ runner.os }}-
 
-      # The tests only need the core to load and run, so this skips the
+      # The tests only need the binaries to run, so this skips the
       # whole-program LTO pass the shipped build does: the Core workflow
       # builds and packages that one.
       - name: Build the native core

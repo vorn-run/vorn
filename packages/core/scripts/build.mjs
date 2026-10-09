@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-// Builds the crate and copies the cdylib to ./vorn_core.node, the one name the
-// server and electron-builder look for on every platform. Then builds vornd and
-// vorn-sessiond and the vorn command and copies them to ./vornd,
+// Builds vornd, vorn-sessiond and the vorn command and copies them to ./vornd,
 // ./vorn-sessiond and ./vorn (with .exe on Windows), where the app looks for
 // them and electron-builder picks them up. On Windows it also fetches the
 // ConPTY vorn-sessiond ships with to beside it (scripts/fetch-conpty.mjs).
@@ -10,8 +8,8 @@
 //   --profile=NAME build with another cargo profile, such as ci (release
 //                  without LTO), for a check that needs no shipping binary
 //   --no-ghostty   build vornd without its session engine and libghostty-vt,
-//                  for a machine without Zig 0.15.2; vorn_core.node and
-//                  vorn-sessiond never link Ghostty
+//                  for a machine without Zig 0.15.2; vorn-sessiond never
+//                  links Ghostty
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
@@ -26,7 +24,6 @@ const profile = args.has('--debug') ? 'debug' : (named ?? 'release')
 // Cargo builds debug by default and spells release as a flag of its own.
 const profileArgs =
   profile === 'debug' ? [] : profile === 'release' ? ['--release'] : ['--profile', profile]
-const cargoArgs = ['build', '--locked', ...profileArgs]
 
 function cargo(argv) {
   const built = spawnSync('cargo', argv, { cwd: root, stdio: 'inherit' })
@@ -36,14 +33,6 @@ function cargo(argv) {
   }
   if (built.status !== 0) process.exit(built.status ?? 1)
 }
-
-cargo(cargoArgs)
-
-const library =
-  {
-    darwin: 'libvorn_core.dylib',
-    win32: 'vorn_core.dll'
-  }[process.platform] ?? 'libvorn_core.so'
 
 // Relative to the crate, as cargo (which runs there) resolves it.
 const targetDir = process.env.CARGO_TARGET_DIR
@@ -61,11 +50,7 @@ function copyOut(name, as) {
   console.log(`built ${path.relative(process.cwd(), to)}`)
 }
 
-copyOut(library, 'vorn_core.node')
-
-// Their own build. vornd's session engine parses with libghostty-vt, so
-// --no-ghostty builds vornd without it; vorn-sessiond never links Ghostty.
-// vornd starts the vorn-sessiond shipped beside it.
+// --no-ghostty builds vornd without its session engine, which parses with libghostty-vt.
 const exe = process.platform === 'win32' ? '.exe' : ''
 const daemonArgs = [
   'build',
