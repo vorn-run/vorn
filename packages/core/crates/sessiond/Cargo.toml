@@ -11,6 +11,7 @@ description = "The session holder: owns terminals and piped agents, numbers what
 crc32fast = "1"
 postcard = { version = "1", default-features = false, features = ["use-std"] }
 serde = { version = "1", features = ["derive"] }
+vorn-logfile = { path = "../logfile" }
 vorn-sessiond-wire = { path = "../sessiond-wire" }
 vorn-term-proto = { path = "../term-proto", features = ["serde"] }
 portable-pty = "0.9"

@@ -18,8 +18,8 @@ import { rpcCall } from '@vornrun/server/rpc-client'
  * wrong backlog and reports confidently on it.
  *
  * Everything here lives in the config blob, which `config:load` and `config:save`
- * already carry — so this needs no new server methods, and it goes to whichever
- * server this MCP is talking to, local or remote, without knowing which.
+ * carry, except workflow writes, which have their own methods. Either way it goes
+ * to whichever server this MCP is talking to, local or remote, without knowing which.
  *
  * Read-modify-write per call is safe now that a save carries the revision it was
  * based on: the server keeps rows added by anyone else since, rather than pruning
@@ -104,25 +104,25 @@ export async function dbListWorkflows(): Promise<WorkflowDefinition[]> {
   return (await loadConfig()).workflows ?? []
 }
 
+/**
+ * Workflows are written through their own methods rather than the config blob, so
+ * the server arms or disarms a schedule as it stores the change.
+ */
 export async function dbInsertWorkflow(workflow: WorkflowDefinition): Promise<void> {
-  await mutate((config) => ({ ...config, workflows: [...(config.workflows ?? []), workflow] }))
+  await rpcCall('workflow:create', { workflow })
 }
 
 export async function dbUpdateWorkflow(
   id: string,
   updates: Partial<WorkflowDefinition>
 ): Promise<void> {
-  await mutate((config) => ({
-    ...config,
-    workflows: (config.workflows ?? []).map((w) => (w.id === id ? { ...w, ...updates } : w))
-  }))
+  const { ok } = await rpcCall<{ ok: boolean }>('workflow:update', { id, updates })
+  if (!ok) throw new Error(`workflow "${id}" not found`)
 }
 
 export async function dbDeleteWorkflow(id: string): Promise<void> {
-  await mutate((config) => ({
-    ...config,
-    workflows: (config.workflows ?? []).filter((w) => w.id !== id)
-  }))
+  const { ok } = await rpcCall<{ ok: boolean }>('workflow:delete', { id })
+  if (!ok) throw new Error(`workflow "${id}" not found`)
 }
 
 // ─── Tasks ───────────────────────────────────────────────────────

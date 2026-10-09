@@ -3818,6 +3818,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-logfile"
+version = "0.8.0-beta.5"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "vorn-mcp"
 version = "0.0.0"
 dependencies = [
@@ -3921,6 +3928,7 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
+ "vorn-logfile",
  "vorn-sessiond-wire",
  "vorn-term-proto",
  "windows-sys 0.61.2",
@@ -4051,6 +4059,7 @@ dependencies = [
  "vorn-git",
  "vorn-grid-client",
  "vorn-hooks",
+ "vorn-logfile",
  "vorn-mcp",
  "vorn-pipeline",
  "vorn-protocol",

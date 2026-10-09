@@ -14,6 +14,13 @@
 //! With the session engine built in, the connection to the current sessiond
 //! is also where every session it holds is attached and parsed (see
 //! [`crate::engine`]).
+//!
+//! A holder that is only slow is never replaced, since a second one would
+//! split the sessions between two: one whose process is alive and whose
+//! endpoint takes connections is waited for, round after round, and so is
+//! one this vornd started that has not announced itself yet. Only one that
+//! is gone (no announcement, a dead process, a refused connection) is
+//! started anew.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -23,7 +30,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tracing::{info, warn};
-use vorn_sessiond::launch::{self, Instance};
+use vorn_sessiond::launch::{self, Instance, Starting};
 use vorn_sessiond::os;
 #[cfg(unix)]
 use vorn_sessiond_wire::Adopt;
@@ -34,14 +41,41 @@ use vorn_sessiond_wire::{
 /// The sessiond protocols this vornd speaks.
 pub const SESSIOND_PROTOS: std::ops::RangeInclusive<u16> = PROTO..=PROTO;
 
-const START_TIMEOUT: Duration = Duration::from_secs(10);
-const ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long vornd waits on the session holder in each round of [`keep`].
+const PATIENCE: Patience = Patience {
+    start: Duration::from_secs(10),
+    answer: Wait {
+        warn: Duration::from_secs(5),
+        give_up: Duration::from_secs(60),
+    },
+};
+/// An older sessiond is only asked to drain, so it is not waited on for long.
+const OLDER_ANSWER: Wait = Wait {
+    warn: Duration::from_secs(5),
+    give_up: Duration::from_secs(5),
+};
 const PING_EVERY: Duration = Duration::from_secs(15);
 const RESTART_AFTER: Duration = Duration::from_secs(1);
 /// A handoff moves fds and ring copies over a local socket; this is far past
 /// any number of sessions, and only bounds a sessiond that hangs.
 #[cfg(unix)]
 const ADOPT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long to wait for a sessiond's Welcome: past `warn` it is logged as
+/// slow, past `give_up` this round ends and the next one asks again.
+#[derive(Debug, Clone, Copy)]
+struct Wait {
+    warn: Duration,
+    give_up: Duration,
+}
+
+/// How long one round waits for a sessiond it starts to announce itself, and
+/// for the current one to answer.
+#[derive(Debug, Clone, Copy)]
+struct Patience {
+    start: Duration,
+    answer: Wait,
+}
 
 /// Where the holder lives and what to run.
 #[derive(Debug, Clone)]
@@ -162,8 +196,10 @@ pub async fn keep(cfg: HolderConfig, holder: std::sync::Arc<Holder>) {
             return;
         }
     };
+    // One this vornd started that has not announced itself yet.
+    let mut starting = None;
     loop {
-        match up(&cfg, &version, &holder).await {
+        match up(&cfg, &version, &holder, &mut starting, PATIENCE).await {
             Ok((conn, welcome)) => {
                 holder.state().error = None;
                 let why = holder.hold(conn, welcome).await;
@@ -186,13 +222,19 @@ pub async fn keep(cfg: HolderConfig, holder: std::sync::Arc<Holder>) {
 /// Answers why it ended. Dropping the future drops the connection, which
 /// is what a vornd killed looks like to sessiond.
 pub async fn connect(endpoint: &str, holder: &Holder) -> io::Result<String> {
-    let (conn, welcome) = Conn::open(endpoint).await?;
+    let (conn, welcome) = Conn::open(endpoint, PATIENCE.answer).await?;
     Ok(holder.hold(conn, welcome).await)
 }
 
 /// Find or start this build's sessiond, have it adopt the others' sessions
 /// or drain them, and connect.
-async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<(Conn, Welcome)> {
+async fn up(
+    cfg: &HolderConfig,
+    version: &str,
+    holder: &Holder,
+    starting: &mut Option<Starting>,
+    patience: Patience,
+) -> io::Result<(Conn, Welcome)> {
     let home = cfg.home.clone();
     let bundled = cfg.bundled.clone();
     let version_owned = version.to_owned();
@@ -207,21 +249,13 @@ async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<(C
     .await
     .map_err(io::Error::other)??;
 
-    let instance = match mine.into_iter().next_back() {
+    let instance = match reachable(mine).await {
         Some(i) => {
             info!(pid = i.pid, build = %i.build, "found the session holder");
+            *starting = None;
             i
         }
-        None => {
-            let home = cfg.home.clone();
-            let i = tokio::task::spawn_blocking(move || {
-                launch::start(&installed, &home, START_TIMEOUT)
-            })
-            .await
-            .map_err(io::Error::other)??;
-            info!(pid = i.pid, build = %i.build, "started the session holder");
-            i
-        }
+        None => start(installed, cfg.home.clone(), starting, patience.start).await?,
     };
     let mut older = Vec::new();
     for i in others {
@@ -233,7 +267,7 @@ async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<(C
     }
     holder.state().older = older;
     // After the adoptions, so the Welcome lists what was adopted.
-    let (conn, welcome) = Conn::open(&instance.endpoint).await?;
+    let (conn, welcome) = Conn::open(&instance.endpoint, patience.answer).await?;
     holder.state().current = Some(HolderInstance {
         pid: instance.pid,
         instance: instance.instance,
@@ -244,6 +278,69 @@ async fn up(cfg: &HolderConfig, version: &str, holder: &Holder) -> io::Result<(C
         handed_off: false,
     });
     Ok((conn, welcome))
+}
+
+/// The newest of this build's announced sessionds that is still there. One
+/// whose endpoint refuses connections or is missing is gone even if its pid
+/// is alive (reused, or on its way out); one that accepts is kept however
+/// slowly it answers.
+async fn reachable(mut mine: Vec<Instance>) -> Option<Instance> {
+    while let Some(i) = mine.pop() {
+        match os::connect(&i.endpoint).await {
+            Err(err) if gone(&err) => {
+                warn!(pid = i.pid, %err, "an announced session holder takes no connections; not using it")
+            }
+            // Dropped unused: sessiond closes a connection that never says Hello.
+            _ => return Some(i),
+        }
+    }
+    None
+}
+
+/// Whether a connect error means nothing serves the endpoint, rather than
+/// that it is busy.
+fn gone(err: &io::Error) -> bool {
+    matches!(
+        err.kind(),
+        io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+    )
+}
+
+/// Start this build's sessiond and wait for it to announce itself, or keep
+/// waiting for the one an earlier round started. One that has not announced
+/// itself in time is kept for the next round rather than replaced.
+async fn start(
+    installed: PathBuf,
+    home: PathBuf,
+    starting: &mut Option<Starting>,
+    timeout: Duration,
+) -> io::Result<Instance> {
+    let earlier = starting.take();
+    let (s, waited) = tokio::task::spawn_blocking(move || {
+        let mut s = match earlier {
+            Some(s) => s,
+            None => launch::spawn(&installed, &home)?,
+        };
+        let waited = s.wait(timeout);
+        io::Result::Ok((s, waited))
+    })
+    .await
+    .map_err(io::Error::other)??;
+    match waited {
+        Ok(i) => {
+            info!(pid = i.pid, build = %i.build, "started the session holder");
+            Ok(i)
+        }
+        Err(err) if err.kind() == io::ErrorKind::TimedOut => {
+            warn!(
+                pid = s.pid(),
+                "the session holder has not announced itself yet; waiting for it"
+            );
+            *starting = Some(s);
+            Err(err)
+        }
+        Err(err) => Err(err),
+    }
 }
 
 impl HolderInstance {
@@ -286,7 +383,7 @@ async fn retire(current: &Instance, i: &Instance) -> HolderInstance {
 /// error `from` still holds them all. Answers how many moved.
 #[cfg(unix)]
 async fn adopt(current: &Instance, from: &Instance) -> io::Result<usize> {
-    let (mut conn, _) = Conn::open(&current.endpoint).await?;
+    let (mut conn, _) = Conn::open(&current.endpoint, PATIENCE.answer).await?;
     conn.send(&ToSessiond::Adopt(Adopt {
         req: 1,
         from: from.endpoint.clone(),
@@ -317,7 +414,7 @@ async fn drain(i: &Instance, mut seen: HolderInstance) -> HolderInstance {
         );
         return seen;
     }
-    match Conn::open(&i.endpoint).await {
+    match Conn::open(&i.endpoint, OLDER_ANSWER).await {
         Ok((mut conn, welcome)) => {
             seen.sessions = Some(live(&welcome));
             if conn.send(&ToSessiond::Drain(Drain)).await.is_ok() {
@@ -396,7 +493,9 @@ impl Writer {
 }
 
 impl Conn {
-    async fn open(endpoint: &str) -> io::Result<(Conn, Welcome)> {
+    /// Connects and says Hello. A sessiond that is slow to answer is waited
+    /// for, up to `wait.give_up`.
+    async fn open(endpoint: &str, wait: Wait) -> io::Result<(Conn, Welcome)> {
         let s: Box<dyn Duplex> = Box::new(os::connect(endpoint).await?);
         let (r, w) = tokio::io::split(s);
         let mut conn = Conn {
@@ -414,11 +513,27 @@ impl Conn {
             vornd_build: env!("CARGO_PKG_VERSION").into(),
         }))
         .await?;
-        match tokio::time::timeout(ANSWER_TIMEOUT, conn.recv()).await {
-            Ok(Ok(ToVornd::Welcome(w))) => Ok((conn, w)),
-            Ok(Ok(_)) => Err(io::Error::other("answered without a Welcome")),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(io::Error::new(io::ErrorKind::TimedOut, "no Welcome")),
+        let answer = match tokio::time::timeout(wait.warn, conn.recv()).await {
+            Ok(answer) => answer,
+            Err(_) => {
+                warn!(
+                    endpoint,
+                    "the session holder is slow to answer; waiting for it"
+                );
+                // Cancel-safe: a frame half read stays buffered in the reader.
+                tokio::time::timeout(wait.give_up.saturating_sub(wait.warn), conn.recv())
+                    .await
+                    .map_err(|_| {
+                        io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            format!("no Welcome after {:?}", wait.give_up),
+                        )
+                    })?
+            }
+        };
+        match answer? {
+            ToVornd::Welcome(w) => Ok((conn, w)),
+            _ => Err(io::Error::other("answered without a Welcome")),
         }
     }
 
@@ -462,4 +577,188 @@ fn instance_id() -> u128 {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     nanos ^ (u128::from(std::process::id()) << 96)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use std::sync::Arc;
+    use vorn_sessiond::server;
+
+    const VERSION: &str = "0.0.0-test";
+
+    /// [`PATIENCE`] scaled down, so a slow holder takes milliseconds to show.
+    fn quick(give_up: Duration) -> Patience {
+        Patience {
+            start: Duration::from_millis(300),
+            answer: Wait {
+                warn: Duration::from_millis(100),
+                give_up,
+            },
+        }
+    }
+
+    /// A home whose bundled sessiond is `program`, installed as vornd would.
+    fn home_with(program: &[u8]) -> (tempfile::TempDir, HolderConfig, PathBuf) {
+        let home = tempfile::tempdir().unwrap();
+        let bundled = home.path().join("bundled-sessiond");
+        std::fs::write(&bundled, program).unwrap();
+        let installed = launch::install(&bundled, home.path(), VERSION).unwrap();
+        let cfg = HolderConfig {
+            home: home.path().to_owned(),
+            bundled,
+        };
+        (home, cfg, installed)
+    }
+
+    fn announced(cfg: &HolderConfig, installed: &Path, instance: u128) -> Instance {
+        let i = Instance {
+            endpoint: server::endpoint(&cfg.home, instance),
+            // Alive for as long as the test runs.
+            pid: std::process::id(),
+            proto: PROTO,
+            build: VERSION.into(),
+            instance,
+            exe: Some(installed.to_owned()),
+            handoff: None,
+        };
+        launch::announce(&cfg.home, &i).unwrap();
+        i
+    }
+
+    /// A sessiond of this build, served from this process, that answers each
+    /// Hello after `delay` (never, for `None`); counts the Hellos.
+    fn slow_holder(
+        cfg: &HolderConfig,
+        installed: &Path,
+        delay: Option<Duration>,
+    ) -> (Instance, Arc<AtomicUsize>) {
+        let i = announced(cfg, installed, 0xfeed);
+        let mut listener = os::Listener::bind(&cfg.home, &i.endpoint).unwrap();
+        let hellos = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&hellos);
+        let instance = i.instance;
+        tokio::spawn(async move {
+            while let Ok(mut s) = listener.accept().await {
+                let counted = Arc::clone(&counted);
+                tokio::spawn(async move {
+                    let mut frames = FrameReader::default();
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        match frames.read::<ToSessiond>() {
+                            Ok(Some(ToSessiond::Hello(_))) => break,
+                            Ok(_) => {}
+                            Err(_) => return,
+                        }
+                        match s.read(&mut buf).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => frames.push(&buf[..n]),
+                        }
+                    }
+                    counted.fetch_add(1, SeqCst);
+                    if let Some(delay) = delay {
+                        tokio::time::sleep(delay).await;
+                        let welcome = ToVornd::Welcome(Welcome {
+                            proto: PROTO,
+                            sessiond_instance: instance,
+                            sessiond_build: VERSION.into(),
+                            sessions: Vec::new(),
+                        });
+                        let _ = s.write_all(&welcome.encode()).await;
+                    }
+                    // Held open, as sessiond holds its vornd's connection.
+                    std::future::pending::<()>().await;
+                });
+            }
+        });
+        (i, hellos)
+    }
+
+    #[tokio::test]
+    async fn a_holder_that_answers_after_the_timeout_is_reused_not_duplicated() {
+        // Not a program: had vornd tried to start another, it would fail at once.
+        let (home, cfg, installed) = home_with(b"not a sessiond");
+        let (fake, hellos) = slow_holder(&cfg, &installed, Some(Duration::from_millis(500)));
+        let mut starting = None;
+        let (_conn, welcome) = up(
+            &cfg,
+            VERSION,
+            &Holder::new(),
+            &mut starting,
+            quick(Duration::from_secs(10)),
+        )
+        .await
+        .expect("the slow holder is used");
+        assert_eq!(welcome.sessiond_instance, fake.instance);
+        assert_eq!(hellos.load(SeqCst), 1, "one Hello, waited on");
+        assert!(starting.is_none());
+        assert_eq!(launch::running(home.path()), vec![fake]);
+    }
+
+    #[tokio::test]
+    async fn a_holder_that_does_not_answer_is_asked_again_not_replaced() {
+        let (home, cfg, installed) = home_with(b"not a sessiond");
+        let (fake, hellos) = slow_holder(&cfg, &installed, None);
+        let mut starting = None;
+        for round in 1..=2 {
+            let err = up(
+                &cfg,
+                VERSION,
+                &Holder::new(),
+                &mut starting,
+                quick(Duration::from_millis(300)),
+            )
+            .await
+            .err()
+            .expect("no Welcome");
+            assert_eq!(err.kind(), io::ErrorKind::TimedOut, "round {round}: {err}");
+            assert_eq!(hellos.load(SeqCst), round);
+        }
+        assert!(starting.is_none(), "nothing was started");
+        assert_eq!(launch::running(home.path()), vec![fake]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_refused_holder_is_replaced_and_a_slow_start_is_waited_for() {
+        // Starts, but never announces itself.
+        let (_home, cfg, installed) = home_with(b"#!/bin/sh\nexec sleep 30\n");
+        // Announced and alive, but nothing serves its endpoint.
+        let refused = announced(&cfg, &installed, 0xdead);
+        assert!(!Path::new(&refused.endpoint).exists());
+        let mut starting = None;
+        let err = up(
+            &cfg,
+            VERSION,
+            &Holder::new(),
+            &mut starting,
+            quick(Duration::from_secs(1)),
+        )
+        .await
+        .err()
+        .expect("the new one never announces itself");
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut, "{err}");
+        let pid = starting
+            .as_ref()
+            .map(Starting::pid)
+            .expect("one was started");
+        let err = up(
+            &cfg,
+            VERSION,
+            &Holder::new(),
+            &mut starting,
+            quick(Duration::from_secs(1)),
+        )
+        .await
+        .err()
+        .expect("still not announced");
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut, "{err}");
+        assert_eq!(
+            starting.as_ref().map(Starting::pid),
+            Some(pid),
+            "the same one is waited for, not a second"
+        );
+        let _ = launch::kill(pid);
+    }
 }

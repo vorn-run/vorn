@@ -7,6 +7,8 @@
 // ConPTY vorn-sessiond ships with to beside it (scripts/fetch-conpty.mjs).
 //
 //   --debug        unoptimized build
+//   --profile=NAME build with another cargo profile, such as ci (release
+//                  without LTO), for a check that needs no shipping binary
 //   --no-ghostty   build vornd without its session engine and libghostty-vt,
 //                  for a machine without Zig 0.15.2; vorn_core.node and
 //                  vorn-sessiond never link Ghostty
@@ -18,10 +20,13 @@ import { fetchConpty } from './fetch-conpty.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const args = new Set(process.argv.slice(2))
-const profile = args.has('--debug') ? 'debug' : 'release'
+const named = [...args].find((a) => a.startsWith('--profile='))?.slice('--profile='.length)
+const profile = args.has('--debug') ? 'debug' : (named ?? 'release')
 
-const cargoArgs = ['build', '--locked']
-if (profile === 'release') cargoArgs.push('--release')
+// Cargo builds debug by default and spells release as a flag of its own.
+const profileArgs =
+  profile === 'debug' ? [] : profile === 'release' ? ['--release'] : ['--profile', profile]
+const cargoArgs = ['build', '--locked', ...profileArgs]
 
 function cargo(argv) {
   const built = spawnSync('cargo', argv, { cwd: root, stdio: 'inherit' })
@@ -62,8 +67,17 @@ copyOut(library, 'vorn_core.node')
 // --no-ghostty builds vornd without it; vorn-sessiond never links Ghostty.
 // vornd starts the vorn-sessiond shipped beside it.
 const exe = process.platform === 'win32' ? '.exe' : ''
-const daemonArgs = ['build', '--locked', '-p', 'vornd', '-p', 'vorn-sessiond', '-p', 'vorn-cli']
-if (profile === 'release') daemonArgs.push('--release')
+const daemonArgs = [
+  'build',
+  '--locked',
+  ...profileArgs,
+  '-p',
+  'vornd',
+  '-p',
+  'vorn-sessiond',
+  '-p',
+  'vorn-cli'
+]
 if (args.has('--no-ghostty')) daemonArgs.push('--no-default-features')
 cargo(daemonArgs)
 for (const daemon of ['vornd', 'vorn-sessiond', 'vorn']) copyOut(daemon + exe, daemon + exe)
