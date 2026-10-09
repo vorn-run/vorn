@@ -51,6 +51,7 @@ pub struct Parts {
 }
 
 impl Parts {
+    #[cfg(unix)]
     pub fn total(&self) -> u64 {
         self.vornd + self.holder + self.programs
     }
