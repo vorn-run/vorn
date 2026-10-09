@@ -26,7 +26,7 @@ mod term;
 pub use pool::{Pool, Sink};
 pub use session::{
     Base, Brief, Cadence, Config, Effect, EffectId, Input, Open, Out, Session, State, Summary,
-    PIPED_SIZE,
+    Viewed, PIPED_SIZE,
 };
 pub use snapshot::VtSnapshot;
 pub use term::{Fidelity, Rejected, FORMAT};

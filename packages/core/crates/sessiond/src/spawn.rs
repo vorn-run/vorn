@@ -12,6 +12,12 @@
 //! sessiond ignores or blocks are back at their defaults, and the program
 //! leads a session of its own; a terminal's program opens the terminal as
 //! that session's leader, so it is its controlling one.
+//!
+//! On Linux a child still gets a descriptor table as large as sessiond's,
+//! closed or not: at ten thousand sessions that is half a megabyte of kernel
+//! memory per program, kept until it exits. So there programs are started
+//! by a small [`helper`] process holding few descriptors, and `posix_spawn`
+//! is only the fallback when the helper cannot be started.
 
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::io;
@@ -19,6 +25,9 @@ use std::os::fd::RawFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 use std::sync::OnceLock;
+
+#[cfg(target_os = "linux")]
+pub mod helper;
 
 /// Signals whose disposition the child gets back at its default: one sessiond
 /// ignores (Rust ignores SIGPIPE) would otherwise stay ignored across exec.
@@ -51,9 +60,9 @@ pub struct Program {
 /// What the program's stdin, stdout and stderr are.
 #[derive(Debug, Clone, Copy)]
 pub enum Stdio<'a> {
-    /// All three are the terminal at this path, opened by the program as the
-    /// leader of its session.
-    Terminal(&'a CStr),
+    /// All three are the terminal at `path`, which `slave` holds open; the
+    /// program, as the leader of its session, takes it as its controlling one.
+    Terminal { path: &'a CStr, slave: RawFd },
     /// Pipe ends sessiond made; no stdin reads `/dev/null`.
     Pipes {
         stdin: Option<RawFd>,
@@ -117,10 +126,18 @@ impl Program {
 
     /// Start it with `stdio`, leading a session of its own. The pid.
     pub fn spawn(&self, stdio: Stdio<'_>) -> io::Result<libc::pid_t> {
+        #[cfg(target_os = "linux")]
+        if let Some(started) = helper::spawn(self, stdio) {
+            return started;
+        }
+        self.posix_spawn(stdio)
+    }
+
+    fn posix_spawn(&self, stdio: Stdio<'_>) -> io::Result<libc::pid_t> {
         let mut attr = Attr::new()?;
         let mut acts = Actions::new()?;
         match stdio {
-            Stdio::Terminal(path) => {
+            Stdio::Terminal { path, .. } => {
                 // No O_NOCTTY: as its session's leader, the program takes
                 // the terminal as its controlling one by opening it.
                 acts.open(0, path, libc::O_RDWR)?;

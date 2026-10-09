@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # Runs the scale bench on a throwaway GCP Spot VM in one command: creates
-# the VM, builds the release binaries there, runs the tiers, copies the
-# results back and appends them to packages/core/bench/scale/RESULTS.md.
+# the VM, builds the release binaries there, runs the comparison method
+# (before and after) and the tiers, copies the results back and appends
+# them to packages/core/bench/scale/RESULTS.md.
 # The VM and its disk are deleted on the way out, however the run ends.
 #
 #   scripts/bench-gcp.sh [TIER...]          (default: 100 1000 10000)
 #
 # Env: PROJECT (required, the GCP project to bill), ZONE (us-central1-c),
 #      MACHINE (n2-standard-16), MAX_RUN (3h), PHASES (holder,stack),
-#      TESTS (set to run the Rust tests on the VM before the tiers).
+#      TESTS (set to run the Rust tests on the VM before the tiers),
+#      COMPARE (1; 0 skips the comparison method), BASE (the commit "before"
+#      is built from; default the merge base with origin/main, "none" for
+#      no before), TIERS (1; 0 runs only the comparison).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -19,6 +23,11 @@ machine=${MACHINE:-n2-standard-16}
 max_run=${MAX_RUN:-3h}
 phases=${PHASES:-holder,stack}
 tests=${TESTS:-}
+compare=${COMPARE:-1}
+[ "$compare" != 0 ] || compare=
+run_tiers=${TIERS:-1}
+base=${BASE:-$(git merge-base HEAD origin/main)}
+[ "$base" != none ] || base=
 tiers=("$@")
 vm="vorn-scale-bench-$(date +%Y%m%d-%H%M%S)"
 commit=$(git rev-parse --short HEAD)
@@ -94,6 +103,12 @@ wait_boot none
 echo "copying packages/core at $commit"
 # vornd compiles packages/mcp/package.json in.
 git archive --format=tar --prefix=vorn/ HEAD packages/core packages/mcp/package.json | ssh_vm 'tar -x -C "$HOME"'
+base_core=
+if [ -n "$compare" ] && [ -n "$base" ]; then
+  echo "copying packages/core at $(git rev-parse --short "$base") for the comparison's before"
+  git archive --format=tar --prefix=base/ "$base" packages/core packages/mcp/package.json | ssh_vm 'tar -x -C "$HOME"'
+  base_core='$HOME/base/packages/core'
+fi
 
 echo "setting up"
 ssh_vm 'bash "$HOME/vorn/packages/core/bench/scale/setup-vm.sh"'
@@ -104,10 +119,10 @@ wait_boot "$boot"
 # Detached on the VM, so a dropped ssh connection does not end the run.
 echo "building and running tiers ${tiers[*]:-100 1000 10000}"
 # The timeout only frees this side should ssh linger after the launch.
-timeout 120 "${gc[@]}" compute ssh "$vm" --zone "$zone" -- "mkdir -p \"\$HOME/results\" && PHASES=$phases TESTS=$tests setsid nohup bash -c 'bash \"\$HOME/vorn/packages/core/bench/scale/run-tiers.sh\" \"\$HOME/results\" ${tiers[*]:-}; touch \"\$HOME/results/done\"' >\"\$HOME/run.log\" 2>&1 </dev/null &" </dev/null || true
+timeout 120 "${gc[@]}" compute ssh "$vm" --zone "$zone" -- "mkdir -p \"\$HOME/results\" && PHASES=$phases TESTS=$tests COMPARE=$compare BASE_CORE=$base_core TIERS=$run_tiers setsid nohup bash -c 'bash \"\$HOME/vorn/packages/core/bench/scale/run-tiers.sh\" \"\$HOME/results\" ${tiers[*]:-}; touch \"\$HOME/results/done\"' >\"\$HOME/run.log\" 2>&1 </dev/null &" </dev/null || true
 mkdir -p "$dest"
 # Copies what the tiers wrote so far, so a preempted VM keeps finished tiers.
-fetch() { ssh_vm 'tar -c -C "$HOME/results" --exclude=build.log .' 2>/dev/null | tar -x -C "$dest" 2>/dev/null; }
+fetch() { ssh_vm 'tar -c -C "$HOME/results" --exclude=build.log --exclude=build-base.log .' 2>/dev/null | tar -x -C "$dest" 2>/dev/null; }
 misses=0
 while :; do
   sleep 60
@@ -130,14 +145,27 @@ done
 ssh_vm 'cp "$HOME/run.log" "$HOME/results/run.log"; rm -f "$HOME/results/done"'
 fetch
 
+report="\$HOME/vorn/packages/core/target/release/vorn-scale-bench"
+wrote=
+if [ -f "$dest/compare-after.json" ]; then
+  {
+    echo
+    ssh_vm "cd \"\$HOME/results\" && $report report-compare --date $date --commit $commit --machine $machine \
+      \$(ls compare-before.json 2>/dev/null) compare-after.json"
+  } >>"$root/packages/core/bench/scale/RESULTS.md"
+  wrote=1
+fi
 if ls "$dest"/tier-*.json >/dev/null 2>&1; then
   {
     echo
     ssh_vm "cd \"\$HOME/results\" && \"\$HOME/vorn/packages/core/target/release/vorn-scale-bench\" report \
       --date $date --commit $commit --machine $machine \$(ls tier-*.json | sort -t- -k2 -n)"
   } >>"$root/packages/core/bench/scale/RESULTS.md"
+  wrote=1
+fi
+if [ -n "$wrote" ]; then
   echo "appended to packages/core/bench/scale/RESULTS.md; raw results in $dest"
 else
-  echo "no tier wrote results; see $dest" >&2
+  echo "nothing wrote results; see $dest" >&2
   exit 1
 fi

@@ -602,6 +602,28 @@ impl Streams {
         out.catching.store(behind, Ordering::Release);
     }
 
+    /// Whether `session` has a bytes client attached or waiting to be.
+    pub fn viewed(&self, session: &str) -> bool {
+        self.inner()
+            .sessions
+            .get(session)
+            .is_some_and(|s| !s.attached.is_empty() || !s.early.is_empty())
+    }
+
+    /// The session's terminal was put away: its tail goes too, unless a
+    /// client came since. A client resuming before the head fetches from
+    /// sessiond's ring instead, as it would past the tail's cap.
+    pub fn asleep(&self, session: &str) {
+        let mut inner = self.inner();
+        let Some(s) = inner.sessions.get_mut(session) else {
+            return;
+        };
+        if s.attached.is_empty() && s.early.is_empty() && s.fetch.is_none() {
+            s.tail = VecDeque::new();
+            s.tail_bytes = 0;
+        }
+    }
+
     /// Whether vornd answers terminal calls for `session` itself.
     pub fn holds(&self, session: &str) -> bool {
         let inner = self.inner();

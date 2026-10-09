@@ -53,6 +53,16 @@ const PRIMARY_DA: PrimaryDeviceAttributes = PrimaryDeviceAttributes::new(
     &[DeviceAttributeFeature::ANSI_COLOR],
 );
 
+/// What [`Emulator::parsed_bytes`], [`Emulator::joiners_printed`] and
+/// [`Emulator::history_clears`] stand at: kept beside a checkpoint by a host
+/// that drops a terminal and rebuilds it later.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Counters {
+    parsed: u64,
+    joiners: u64,
+    clears: u64,
+}
+
 #[derive(Debug)]
 pub struct Emulator {
     pub(crate) term: Terminal<'static, 'static>,
@@ -292,6 +302,22 @@ impl Emulator {
             .zero_width
             .entry(cp)
             .or_insert_with(|| probe_zero_width(cp).unwrap_or(true))
+    }
+
+    /// The counters that follow the output, which a checkpoint does not carry.
+    pub fn counters(&self) -> Counters {
+        Counters {
+            parsed: self.parsed,
+            joiners: self.joiners,
+            clears: self.scan.clears,
+        }
+    }
+
+    /// Takes up `c`, as a terminal rebuilt in place of the one they were read from.
+    pub fn set_counters(&mut self, c: Counters) {
+        self.parsed = c.parsed;
+        self.joiners = c.joiners;
+        self.scan.clears = c.clears;
     }
 
     /// Takes the counters and caches that follow the output from the terminal this replaces.

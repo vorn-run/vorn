@@ -21,18 +21,18 @@ use crate::Plan;
 
 const MARKER: &str = "FLOOD-DONE";
 /// The local credential vornd is started with.
-const CREDENTIAL: &str = "vorn-scale-bench";
+pub(crate) const CREDENTIAL: &str = "vorn-scale-bench";
 const ATTACH_SAMPLES: usize = 20;
-const WAIT: Duration = Duration::from_secs(60);
+pub(crate) const WAIT: Duration = Duration::from_secs(60);
 /// vornd's refusal while its holder is still starting.
 const NOT_CONNECTED: &str = "no session holder connected";
 
-type Argv = Box<dyn Fn(usize) -> Vec<String> + Send>;
+pub(crate) type Argv = Box<dyn Fn(usize) -> Vec<String> + Send>;
 
-struct AppSpawner<'a> {
-    c: &'a mut AppClient,
-    argv: Argv,
-    cwd: String,
+pub(crate) struct AppSpawner<'a> {
+    pub(crate) c: &'a mut AppClient,
+    pub(crate) argv: Argv,
+    pub(crate) cwd: String,
 }
 
 impl Spawner for AppSpawner<'_> {
@@ -60,12 +60,12 @@ impl Spawner for AppSpawner<'_> {
 }
 
 /// The JSON line vornd prints once it listens.
-struct Ready {
-    port: u16,
-    grid: String,
+pub(crate) struct Ready {
+    pub(crate) port: u16,
+    pub(crate) grid: String,
 }
 
-fn ready(line: &str) -> Result<Ready, Error> {
+pub(crate) fn ready(line: &str) -> Result<Ready, Error> {
     let v: Value = serde_json::from_str(line)
         .map_err(|e| Error::Protocol(format!("vornd said {line:?}: {e}")))?;
     let port = v
@@ -82,7 +82,7 @@ fn ready(line: &str) -> Result<Ready, Error> {
 }
 
 /// The pid in the holder's announcement under `home/run`.
-fn holder_pid(home: &Path) -> Option<u32> {
+pub(crate) fn holder_pid(home: &Path) -> Option<u32> {
     std::fs::read_dir(home.join("run"))
         .ok()?
         .flatten()
@@ -101,24 +101,8 @@ fn info_pid(text: &str) -> Option<u32> {
 /// an error ends it early.
 pub async fn run(plan: &Plan, out: &mut StackPhase) -> Result<(), Error> {
     let home = plan.work.join("stack");
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home)?;
     out.mem_available.base = procfs::mem_available().ok();
-    let mut cmd = Command::new(&plan.vornd);
-    cmd.arg("--data-dir")
-        .arg(&home)
-        .args(["--port", "0", "--debug-spawn", "--sessiond"])
-        .arg(&plan.sessiond)
-        .arg("--log-file")
-        .arg(home.join("vornd.log"))
-        .env("VORND_LOG", "warn")
-        .env("VORN_HOME", &home)
-        .env("HOME", &home)
-        .env("SECRET_VORN_BOOTSTRAP_TOKEN", CREDENTIAL)
-        .env("VORND_KEYCHAIN", "0")
-        .stdin(Stdio::null())
-        .stderr(Stdio::inherit());
-    let (mut vornd, line) = Daemon::start("vornd", cmd).await?;
+    let (mut vornd, line) = start(&plan.vornd, &plan.sessiond, &home).await?;
     let res = match measure(plan, &home, &vornd, &line, out).await {
         Err(e) => {
             let e = explain(e, std::slice::from_mut(&mut vornd));
@@ -135,6 +119,51 @@ pub async fn run(plan: &Plan, out: &mut StackPhase) -> Result<(), Error> {
         kill_tree(pid);
     }
     res
+}
+
+/// Starts vornd, with `sessiond` as its holder, in a fresh `home`.
+pub(crate) async fn start(
+    vornd: &Path,
+    sessiond: &Path,
+    home: &Path,
+) -> Result<(Daemon, String), Error> {
+    let _ = std::fs::remove_dir_all(home);
+    std::fs::create_dir_all(home)?;
+    let mut cmd = Command::new(vornd);
+    cmd.arg("--data-dir")
+        .arg(home)
+        .args(["--port", "0", "--debug-spawn", "--sessiond"])
+        .arg(sessiond)
+        .arg("--log-file")
+        .arg(home.join("vornd.log"))
+        .env("VORND_LOG", "warn")
+        .env("VORN_HOME", home)
+        .env("HOME", home)
+        .env("SECRET_VORN_BOOTSTRAP_TOKEN", CREDENTIAL)
+        .env("VORND_KEYCHAIN", "0")
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit());
+    Daemon::start("vornd", cmd).await
+}
+
+/// The first session, asked for again while vornd is still connecting to
+/// the holder it launched, which it refuses spawns until it has. Answers
+/// the session and the next free request number.
+pub(crate) async fn first_spawn(s: &mut AppSpawner<'_>) -> Result<(String, u64), Error> {
+    let deadline = Instant::now() + WAIT;
+    let mut req = 1;
+    loop {
+        let mut probe = spawn_many(s, 1, 1, req).await?;
+        req += 1;
+        if let Some(id) = probe.ids.pop() {
+            return Ok((id, req));
+        }
+        let why = probe.refused.unwrap_or_default();
+        if !why.contains(NOT_CONNECTED) || Instant::now() > deadline {
+            return Err(Error::Failed(why));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 async fn measure(
@@ -158,21 +187,7 @@ async fn measure(
         argv: bash,
         cwd: cwd.clone(),
     };
-    // vornd refuses spawns until it has connected to the holder it launched.
-    let deadline = Instant::now() + WAIT;
-    let mut req = 1;
-    let probe = loop {
-        let mut probe = spawn_many(&mut s, 1, 1, req).await?;
-        req += 1;
-        if let Some(id) = probe.ids.pop() {
-            break id;
-        }
-        let why = probe.refused.unwrap_or_default();
-        if !why.contains(NOT_CONNECTED) || Instant::now() > deadline {
-            return Err(Error::Failed(why));
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    };
+    let (probe, _) = first_spawn(&mut s).await?;
     let holder = holder_pid(home).ok_or(Error::Failed("no holder announced".into()))?;
     out.vornd.base = procfs::usage(vornd.pid).ok();
     out.holder.base = procfs::usage(holder).ok();

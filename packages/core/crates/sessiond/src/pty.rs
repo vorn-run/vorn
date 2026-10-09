@@ -51,7 +51,10 @@ impl AsRawFd for Master {
 pub fn spawn(program: &Program, cols: u16, rows: u16) -> io::Result<(Master, libc::pid_t)> {
     let (master, slave, name) = open()?;
     set_size(&master, cols, rows, 0, 0)?;
-    let pid = program.spawn(Stdio::Terminal(&name))?;
+    let pid = program.spawn(Stdio::Terminal {
+        path: &name,
+        slave: slave.as_raw_fd(),
+    })?;
     // Held until the program has the terminal open, so the master never
     // reads the end of a terminal nobody opened yet. Now only the program
     // and what it starts hold it, and the master reads EOF once they all

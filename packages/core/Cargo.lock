@@ -3628,6 +3628,7 @@ name = "vorn-engine"
 version = "0.7.5"
 dependencies = [
  "crc32fast",
+ "libc",
  "libghostty-vt",
  "postcard",
  "tempfile",
@@ -3939,6 +3940,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "jiff",
+ "libc",
  "libghostty-vt",
  "rmcp",
  "serde",
