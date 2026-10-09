@@ -1,10 +1,14 @@
 //! What a process costs, read from Linux's `/proc`: resident memory,
 //! threads and open descriptors, plus the machine's free memory and the
-//! kernel limits a tier can run into. On other systems every read fails,
-//! which the bench reports rather than guesses around.
+//! kernel limits a tier can run into. On other Unix systems every read
+//! fails, which the bench reports rather than guesses around; off Unix only
+//! the types a report reads are built, since `run` is Unix-only.
 
+#[cfg(unix)]
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::io;
+#[cfg(unix)]
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +22,7 @@ pub struct Usage {
     pub fds: u64,
 }
 
+#[cfg(unix)]
 pub fn usage(pid: u32) -> io::Result<Usage> {
     let proc = Path::new("/proc").join(pid.to_string());
     let status = std::fs::read_to_string(proc.join("status"))?;
@@ -28,11 +33,13 @@ pub fn usage(pid: u32) -> io::Result<Usage> {
 }
 
 /// `VmRSS` in bytes and `Threads` from `/proc/<pid>/status`.
+#[cfg(unix)]
 pub fn parse_status(text: &str) -> Option<(u64, u64)> {
     Some((field(text, "VmRSS:")? * 1024, field(text, "Threads:")?))
 }
 
 /// The first number after `key` at the start of a line.
+#[cfg(unix)]
 fn field(text: &str, key: &str) -> Option<u64> {
     text.lines()
         .find_map(|l| l.strip_prefix(key))
@@ -41,14 +48,17 @@ fn field(text: &str, key: &str) -> Option<u64> {
 }
 
 /// `MemAvailable`, in bytes.
+#[cfg(unix)]
 pub fn mem_available() -> io::Result<u64> {
     meminfo("MemAvailable:")
 }
 
+#[cfg(unix)]
 pub fn mem_total() -> io::Result<u64> {
     meminfo("MemTotal:")
 }
 
+#[cfg(unix)]
 fn meminfo(key: &str) -> io::Result<u64> {
     let text = std::fs::read_to_string("/proc/meminfo")?;
     field(&text, key)
@@ -58,12 +68,14 @@ fn meminfo(key: &str) -> io::Result<u64> {
 
 /// The parent pid in `/proc/<pid>/stat`. The command name before it is in
 /// parentheses and may hold spaces and parentheses itself.
+#[cfg(unix)]
 pub fn parse_ppid(stat: &str) -> Option<u32> {
     let after = &stat[stat.rfind(')')? + 1..];
     after.split_whitespace().nth(1)?.parse().ok()
 }
 
 /// Every live descendant of `roots`, children before grandchildren.
+#[cfg(unix)]
 pub fn descendants(roots: &[u32]) -> Vec<u32> {
     let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
     let Ok(dir) = std::fs::read_dir("/proc") else {
@@ -84,6 +96,7 @@ pub fn descendants(roots: &[u32]) -> Vec<u32> {
     tree(&children, roots)
 }
 
+#[cfg(unix)]
 fn tree(children: &HashMap<u32, Vec<u32>>, roots: &[u32]) -> Vec<u32> {
     let mut out = Vec::new();
     let mut next: Vec<u32> = roots.to_vec();
@@ -111,6 +124,7 @@ pub struct Limits {
     pub nproc: Option<u64>,
 }
 
+#[cfg(unix)]
 impl Limits {
     pub fn read() -> Limits {
         let sysctl = |name: &str| {
@@ -129,6 +143,7 @@ impl Limits {
     }
 }
 
+#[cfg(unix)]
 enum Resource {
     Files,
     Processes,
@@ -150,11 +165,6 @@ fn rlimit(r: Resource) -> Option<u64> {
     (ok && lim.rlim_cur != libc::RLIM_INFINITY).then_some(lim.rlim_cur)
 }
 
-#[cfg(not(unix))]
-fn rlimit(_: Resource) -> Option<u64> {
-    None
-}
-
 /// Bytes each of `n` sessions added between two readings; negative when
 /// memory went back to the system in between.
 pub fn per_session(before: u64, after: u64, n: usize) -> Option<i64> {
@@ -167,6 +177,7 @@ pub fn per_session(before: u64, after: u64, n: usize) -> Option<i64> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn reads_rss_and_threads_from_status() {
         let status =
@@ -175,6 +186,7 @@ mod tests {
         assert_eq!(parse_status("Name:\tzombie\nThreads:\t1\n"), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_parent_follows_the_last_parenthesis() {
         assert_eq!(parse_ppid("42 (bash) S 7 42 42 0"), Some(7));
@@ -182,6 +194,7 @@ mod tests {
         assert_eq!(parse_ppid("garbage"), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn descendants_come_level_by_level() {
         let children = HashMap::from([(1, vec![2, 3]), (2, vec![4]), (4, vec![5]), (9, vec![10])]);

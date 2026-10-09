@@ -1,5 +1,6 @@
 //! Summaries of what was timed: latency percentiles and rates.
 
+#[cfg(unix)]
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,7 @@ pub struct Latency {
     pub max_ms: f64,
 }
 
+#[cfg(unix)]
 impl Latency {
     /// Summarises `samples`, which it sorts in place.
     pub fn of(samples: &mut [Duration]) -> Latency {
@@ -35,6 +37,7 @@ pub struct Rate {
     pub each: Latency,
 }
 
+#[cfg(unix)]
 impl Rate {
     pub fn of(elapsed: Duration, samples: &mut [Duration]) -> Rate {
         let secs = elapsed.as_secs_f64();
@@ -53,6 +56,7 @@ impl Rate {
 
 /// Nearest-rank percentile of sorted samples: always one that was measured,
 /// never an interpolation between two.
+#[cfg(unix)]
 pub fn percentile(sorted: &[Duration], p: f64) -> Duration {
     if sorted.is_empty() {
         return Duration::ZERO;
@@ -61,11 +65,12 @@ pub fn percentile(sorted: &[Duration], p: f64) -> Duration {
     sorted[rank.clamp(1, sorted.len()) - 1]
 }
 
+#[cfg(unix)]
 pub fn ms(d: Duration) -> f64 {
     d.as_secs_f64() * 1e3
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

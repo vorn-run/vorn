@@ -13,7 +13,7 @@ import {
   vornBinary,
   type Ran
 } from './helpers/cli-reference'
-import { builtVornd, startServed, type Served } from './helpers/served'
+import { builtVornd, servedDir, startServed, type Served } from './helpers/served'
 
 const CREDENTIAL = 'native-cli-test-credential'
 
@@ -595,7 +595,7 @@ describe.skipIf(!vornBinary)('vorn', () => {
     let served: Served | undefined
 
     beforeAll(async () => {
-      dataDir = tempDir('vorn-native-cli-server-')
+      dataDir = servedDir('vorn-native-cli-server-')
       served = await startServed({ dataDir, credential: CREDENTIAL, sessiond: true })
     }, 30_000)
 

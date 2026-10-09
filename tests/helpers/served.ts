@@ -25,6 +25,16 @@ export const builtSessiond = builtVornd
   ? [path.join(path.dirname(builtVornd), `vorn-sessiond${EXE}`)].find((p) => fs.existsSync(p))
   : undefined
 
+/**
+ * A new directory vornd can serve or live in. On macOS it is under /tmp:
+ * the sockets vornd and its holder bind under `<dir>/run/` would pass the
+ * 104-byte socket path limit under macOS's own, deeper temp directory.
+ */
+export function servedDir(prefix: string): string {
+  const base = process.platform === 'darwin' ? '/tmp' : os.tmpdir()
+  return fs.realpathSync(fs.mkdtempSync(path.join(base, prefix)))
+}
+
 export interface Served {
   port: number
   child: ChildProcess
@@ -49,10 +59,8 @@ export async function startServed(options: {
   port?: number | null
 }): Promise<Served> {
   if (!builtVornd) throw new Error('vornd is not built')
-  const made = (name: string): string =>
-    fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `vorn-served-${name}-`)))
-  const dataDir = options.dataDir ?? made('data')
-  const home = options.home ?? made('home')
+  const dataDir = options.dataDir ?? servedDir('vorn-served-data-')
+  const home = options.home ?? servedDir('vorn-served-home-')
   const port = options.port === undefined ? 0 : options.port
   const args = [
     '--data-dir',
