@@ -1,0 +1,11 @@
+nofile: 1048576  nproc: unlimited
+kernel.pty.max = 65536
+kernel.pid_max = 4194304
+kernel.threads-max = 4194304
+vm.max_map_count = 1048576
+TasksMax=infinity
+TasksMax=infinity
+16
+               total        used        free      shared  buff/cache   available
+Mem:              62           1          58           0           3          61
+Swap:              0           0           0

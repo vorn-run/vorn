@@ -176,6 +176,16 @@ fn a_clean_shutdown_cuts_a_last_checkpoint() {
     assert_eq!(last, [d.log.head()]);
 }
 
+/// A session is known as soon as it is opened, before its worker runs it,
+/// so an attach right after a spawn finds it.
+#[test]
+fn a_session_is_there_once_opened() {
+    let (pool, _rx) = pool_on_channel((*config(1 << 30)).clone());
+    assert!(!pool.has("a"));
+    pool.open("a", Open::spawned(Cursor::start(0), Some(SIZE)));
+    assert!(pool.has("a"));
+}
+
 /// A pool whose outputs arrive on a channel.
 fn pool_on_channel(cfg: Config) -> (Pool, mpsc::Receiver<(String, Out)>) {
     let (tx, rx) = mpsc::channel::<(String, Out)>();

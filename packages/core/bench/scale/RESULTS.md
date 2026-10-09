@@ -109,3 +109,31 @@ Findings from this run:
 - **Threads: three per session in the holder** (27,001 at 9,000 idle, 30,001 with 1,000 more busy); vornd stays at 26–28 threads at every tier.
 - **Handoff grows faster than N:** 48 ms at 100, 234 ms at 1,000, 14.6 s at 10,000.
 - Spot VMs in us-central1-a were preempted twice within 20 minutes; this run used us-central1-c. The driver now copies finished tiers back on every poll.
+
+### 1,000 sessions · 2026-10-09 · `9b69effc` · n2-standard-16 (16 vCPU, 62.8 GiB, Linux 7.0.0-1011-gcp)
+
+| | holder alone | vornd + holder |
+|---|---|---|
+| sessions (idle + busy) | 899 + 100 | 899 + 100 |
+| spawn rate (each p50 / p99) | 3832/s (14.1 / 35.8 ms) | 2454/s (12.0 / 19.8 ms) |
+| holder RSS idle / busy | 5.2 MiB / 20.4 MiB | 7.0 MiB / 14.7 MiB |
+| holder per idle / per busy terminal | 2.3 KiB / 155.3 KiB | 3.8 KiB / 79.0 KiB |
+| holder threads idle / busy | 2 / 2 | 2 / 2 |
+| holder fds idle / busy | 3,614 / 4,014 | 3,614 / 4,014 |
+| vornd RSS idle / busy | — | 87.1 MiB / 110.6 MiB |
+| vornd per idle / per busy terminal | — | 82.7 KiB / 240.7 KiB |
+| vornd threads idle / busy | — | 28 / 26 |
+| vornd fds idle / busy | — | 917 / 1,017 |
+| machine memory per idle terminal, program included | — | 689.7 KiB |
+| probe echo p50 / p99, others idle | 0.22 / 0.34 ms | 0.46 / 0.66 ms |
+| probe echo p50 / p99, 10 % streaming | 0.13 / 0.23 ms | 0.31 / 0.49 ms |
+| attach to snapshot p50 / p99 | — | 0.33 / 0.55 ms |
+| throughput to one grid client | — | — |
+| handoff of every live session | 1,000 sessions in 83 ms | — |
+
+Idle sessions run `cat` (holder alone) or `bash` (vornd + holder); busy ones print a build log at 16.0 KiB/s each. Throughput: 16 sessions printing 16.0 MiB each as fast as they can.
+
+Limits hit:
+
+- stack at 1,000 sessions: timed out waiting for a snapshot
+

@@ -25,7 +25,7 @@ fi
 bin="$core/target/release"
 
 if [ -n "${TESTS:-}" ]; then
-  cargo test --release --locked -p vorn-sessiond -p vorn-engine -p vornd >"$out/tests.log" 2>&1 ||
+  cargo test --release --locked --no-fail-fast -p vorn-sessiond -p vorn-engine -p vornd >"$out/tests.log" 2>&1 ||
     echo "tests failed" >>"$out/tests.log"
   grep -E '^test result|FAILED|panicked|tests failed' "$out/tests.log" || true
 fi
