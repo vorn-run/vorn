@@ -1,4 +1,4 @@
-# libghostty-rs 3ddcb10's sys crate; build.rs pins Ghostty a60e9e2 for its fix to wide characters split by a resize.
+# libghostty-rs 3ddcb10's sys crate without its bindings' doc comments; build.rs pins Ghostty a60e9e2 for its fix to wide characters split by a resize.
 [package]
 name = "libghostty-vt-sys"
 description = "Raw FFI bindings for libghostty-vt, the Ghostty terminal emulation library"
