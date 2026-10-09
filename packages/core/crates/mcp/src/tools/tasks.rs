@@ -132,14 +132,40 @@ pub async fn update_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
             ("branch", "branch"),
             ("useWorktree", "use_worktree"),
             ("assignedAgent", "assigned_agent"),
-            ("order", "order"),
         ]
         .map(|(key, arg)| (key, args.get(arg).cloned())),
     );
-    match data::write(cx, "task:update", params).await? {
-        Some(answer) => Ok(pretty(answer.get("task").unwrap_or(&Value::Null))),
-        None => Ok(not_found(id)),
+    let Some(answer) = data::write(cx, "task:update", params).await? else {
+        return Ok(not_found(id));
+    };
+    let task = answer.get("task").cloned().unwrap_or(Value::Null);
+    match args.get("order").and_then(Value::as_f64) {
+        Some(order) => place(cx, &task, order).await,
+        None => Ok(pretty(&task)),
     }
+}
+
+/// `task:update` ignores `order`, so a requested order becomes a place on the
+/// board: before the first other task ordered after it, applied by
+/// `task:reorder`, which permutes the slots the project's tasks already hold.
+async fn place<R: Rpc>(cx: &Cx<'_, R>, task: &Value, order: f64) -> Outcome {
+    let id = task.get("id").and_then(Value::as_str).unwrap_or_default();
+    let order_of = |t: &Value| t.get("order").and_then(Value::as_f64).unwrap_or(0.0);
+    let project = task.get("projectName").and_then(Value::as_str);
+    let mut board = data::tasks(cx, project, None).await?;
+    board.retain(|t| t.get("id").and_then(Value::as_str) != Some(id));
+    board.sort_by(|a, b| order_of(a).total_cmp(&order_of(b)));
+    let at = board.partition_point(|t| order_of(t) <= order);
+    let mut ids: Vec<Value> = board.iter().filter_map(|t| t.get("id").cloned()).collect();
+    ids.insert(at, Value::from(id));
+    if data::write(cx, "task:reorder", json!({ "ids": ids }))
+        .await?
+        .is_none()
+    {
+        return Ok(not_found(id));
+    }
+    let placed = data::find(cx, "tasks", "id", id).await?;
+    Ok(pretty(&placed.unwrap_or(Value::Null)))
 }
 
 pub async fn delete_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {

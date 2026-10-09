@@ -98,12 +98,12 @@ fn updates_a_task_through_task_update() {
     let result = run(
         &rpc,
         "update_task",
-        json!({ "id": "t2", "order": 4, "status": "done", "title": "Second" }),
+        json!({ "id": "t2", "status": "done", "title": "Second" }),
     );
     assert_eq!(parsed(&result), stored_task());
     assert_eq!(
         rpc.last("task:update"),
-        Some(json!({ "id": "t2", "title": "Second", "status": "done", "order": 4 }))
+        Some(json!({ "id": "t2", "title": "Second", "status": "done" }))
     );
     assert_eq!(writes(&rpc), ["task:update"]);
 
@@ -111,6 +111,34 @@ fn updates_a_task_through_task_update() {
     let gone = run(&rpc, "update_task", json!({ "id": "t9", "title": "x" }));
     assert_eq!(gone["isError"], true);
     assert_eq!(text(&gone), "Error: task \"t9\" not found");
+}
+
+#[test]
+fn an_updated_order_places_the_task_through_task_reorder() {
+    let mut config = sample_config();
+    config["tasks"] = json!(["a", "b", "c"]
+        .iter()
+        .zip(1..)
+        .map(|(id, order)| json!({ "id": id, "projectName": "app", "title": id, "order": order }))
+        .collect::<Vec<_>>());
+    let rpc = FakeRpc::new(config.clone());
+    let c = config["tasks"][2].clone();
+    rpc.answer("task:update", json!({ "ok": true, "task": c }));
+    rpc.answer("task:reorder", json!({ "ok": true }));
+    for (order, ids) in [
+        (1.5, ["a", "c", "b"]),
+        (1.0, ["a", "c", "b"]),
+        (0.0, ["c", "a", "b"]),
+    ] {
+        let result = run(&rpc, "update_task", json!({ "id": "c", "order": order }));
+        assert_eq!(parsed(&result), c);
+        assert_eq!(rpc.last("task:update"), Some(json!({ "id": "c" })));
+        assert_eq!(rpc.last("task:reorder"), Some(json!({ "ids": ids })));
+    }
+
+    rpc.answer("task:reorder", json!({ "ok": false }));
+    let gone = run(&rpc, "update_task", json!({ "id": "c", "order": 0 }));
+    assert_eq!(text(&gone), "Error: task \"c\" not found");
 }
 
 #[test]
