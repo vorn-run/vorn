@@ -205,12 +205,7 @@ yarn dist
 
 ## Contributing
 
-Contributions are welcome. Please open an issue first to discuss what you'd like to change.
-
-1. Fork the repo
-2. Create your branch (`git checkout -b feature/my-feature`)
-3. Commit your changes
-4. Push and open a Pull Request
+Vorn takes contributions as issues. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

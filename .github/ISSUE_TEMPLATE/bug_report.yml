@@ -1,0 +1,55 @@
+name: Bug report
+description: Report something in Vorn that is broken.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Search the existing issues first. One clear bug per report.
+  - type: input
+    id: version
+    attributes:
+      label: Vorn version
+      description: Find it in Settings › Updates.
+      placeholder: 0.8.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      placeholder: macOS 15.3
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Start from a fresh launch and list each step.
+      placeholder: |
+        1. Open a workspace
+        2. Start a session
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Add screenshots if the problem is visual.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Paste the lines around the time of the problem. Remove anything private first.
+        Daemon log: `~/.vorn/server.log`
+        App log: `~/Library/Logs/vorn/main.log` (macOS), `~/.config/vorn/logs/main.log` (Linux), `%USERPROFILE%\AppData\Roaming\vorn\logs\main.log` (Windows)
+      render: text
