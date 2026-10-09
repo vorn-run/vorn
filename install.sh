@@ -91,25 +91,17 @@ case "$OS" in
     BIN_DIR="$(choose_bin_dir)"
     mkdir -p "$BIN_DIR"
 
-    # The command runs the app's own Node — the same trick the app uses to start
-    # its server — so nothing else has to be installed and the native modules
-    # inside the bundle resolve.
+    # The command is the vorn binary inside the app bundle.
     cat > "${BIN_DIR}/vorn" <<'SHIM'
 #!/bin/sh
 APP="/Applications/Vorn.app"
-RESOURCES="${APP}/Contents/Resources"
 
 # No command: open the app, which is what typing `vorn` should mean.
 if [ "$#" -eq 0 ]; then
   exec open -a "$APP"
 fi
 
-ELECTRON_RUN_AS_NODE=1
-VORN_NATIVE_MODULES_PATH="${RESOURCES}/app.asar.unpacked/node_modules"
-NODE_PATH="${RESOURCES}/app.asar/node_modules:${VORN_NATIVE_MODULES_PATH}"
-export ELECTRON_RUN_AS_NODE VORN_NATIVE_MODULES_PATH NODE_PATH
-
-exec "${APP}/Contents/MacOS/Vorn" "${RESOURCES}/server/cli.cjs" "$@"
+exec "${APP}/Contents/Resources/vornd/vorn" "$@"
 SHIM
     chmod +x "${BIN_DIR}/vorn"
 
@@ -147,10 +139,8 @@ if [ "$#" -eq 0 ]; then
   exec "$APPIMAGE"
 fi
 
-# The CLI lives inside the AppImage, whose mount point is only known once it is
-# running — so the entry point is resolved from APPDIR in there, and spliced
-# into argv where a normally-invoked script would have been.
-BOOTSTRAP='var entry = process.env.APPDIR + "/resources/server/cli.cjs"; process.argv.splice(1, 0, entry); require(entry)'
+# The command lives inside the AppImage, so it is started from APPDIR in there.
+BOOTSTRAP='var r = require("child_process").spawnSync(process.env.APPDIR + "/resources/vornd/vorn", process.argv.slice(1), { stdio: "inherit" }); process.exit(r.status === null ? 1 : r.status)'
 
 ELECTRON_RUN_AS_NODE=1 exec "$APPIMAGE" -e "$BOOTSTRAP" "$@"
 SHIM

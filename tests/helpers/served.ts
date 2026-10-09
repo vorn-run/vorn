@@ -15,7 +15,6 @@ const EXE = process.platform === 'win32' ? '.exe' : ''
 
 /** Where a built vornd is, when there is one. */
 export const builtVornd = [
-  process.env.VORN_CONFORMANCE_VORND,
   path.resolve(__dirname, `../../packages/core/vornd${EXE}`),
   path.resolve(__dirname, `../../packages/core/target/release/vornd${EXE}`),
   path.resolve(__dirname, `../../packages/core/target/debug/vornd${EXE}`)

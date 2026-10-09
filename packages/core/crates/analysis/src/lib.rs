@@ -1,7 +1,7 @@
 //! Output analysis: what the server's JavaScript `appendOutput`, `stripAnsi` and
 //! status parser did per raw PTY chunk, in one pass over the bytes.
 //!
-//! Plain Rust with no Node in it; `vorn-core` wraps it for the server. It keeps
+//! Plain Rust, which vornd's session engine uses. It keeps
 //! the JavaScript's outputs (a ring of stripped lines, bracketed-paste status,
 //! the status patterns on the last lines), recorded in
 //! `tests/fixtures/js-reference`, with differences that make it closer to a

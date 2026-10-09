@@ -421,7 +421,7 @@ async fn connector_leases(native: &Native) -> u64 {
 /// Accepts connections on whichever listener is current until `shutdown`.
 pub async fn accept(
     mut listeners: watch::Receiver<Option<Arc<TcpListener>>>,
-    daemon: Arc<crate::proxy::Daemon>,
+    daemon: Arc<crate::endpoint::Daemon>,
     shutdown: impl std::future::Future<Output = ()>,
 ) {
     tokio::pin!(shutdown);
@@ -436,7 +436,7 @@ pub async fn accept(
         };
         tokio::select! {
             accepted = listener.accept() => match accepted {
-                Ok((stream, peer)) => crate::proxy::serve_connection(&daemon, stream, peer),
+                Ok((stream, peer)) => crate::endpoint::serve_connection(&daemon, stream, peer),
                 Err(err) => warn!(%err, "accept failed"),
             },
             changed = listeners.changed() => if changed.is_err() { return },

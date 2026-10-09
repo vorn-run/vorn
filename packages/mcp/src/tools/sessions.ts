@@ -9,7 +9,7 @@ import type {
   SessionEvent
 } from '@vornrun/shared/types'
 import { V } from '../validation'
-import { rpcCall, rpcNotify } from '@vornrun/server/rpc-client'
+import { rpcCall, rpcNotify } from '../rpc-client'
 
 /**
  * Deliberately `AiAgentType`, not `AgentType`.

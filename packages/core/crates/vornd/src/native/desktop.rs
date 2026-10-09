@@ -152,8 +152,7 @@ impl Desktop {
     }
 
     /// Settles a pending call with `frame`, a frame connection `conn` sent
-    /// without a method. False when it was not an answer to vornd from main,
-    /// so it goes on to the server.
+    /// without a method. False when it was not an answer to vornd from main.
     pub fn settle(&self, conn: u64, frame: &str) -> bool {
         if !frame.contains(ID_PREFIX) || !self.holds(conn) {
             return false;

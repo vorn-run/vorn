@@ -9,7 +9,6 @@ import {
   home,
   killPid,
   until,
-  upstream,
   vorndSessionsAvailable
 } from './helpers/vornd-sessions'
 import screenReference from './fixtures/js-reference/screen.json'
@@ -26,8 +25,8 @@ import screenReference from './fixtures/js-reference/screen.json'
  * client's emulator and read back per feature, as `screen-parity` defines it,
  * with every accepted difference named in `helpers/screen-parity.ts`.
  *
- * Runs in `yarn test:conformance`, which builds vornd and its holder; skipped
- * otherwise.
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`);
+ * skipped otherwise.
  */
 
 interface ScreenCase {
@@ -43,16 +42,14 @@ const rowOf = (v: View, y: number): string[] =>
   v.styles.filter((s) => s.split(' ')[0].endsWith(`,${y}`))
 
 describe.runIf(vorndSessionsAvailable)('vornd’s screen against the JS reference', () => {
-  let server: Awaited<ReturnType<typeof upstream>>
   let dir: ReturnType<typeof home>
   let vornd: Vornd
   let holder: number | null = null
   const clients: BytesClient[] = []
 
   beforeAll(async () => {
-    server = await upstream()
     dir = home()
-    vornd = await Vornd.start(server.port, dir.dir)
+    vornd = await Vornd.start(dir.dir)
     holder = await vornd.sessiondPid()
   }, 30_000)
 
@@ -60,7 +57,6 @@ describe.runIf(vorndSessionsAvailable)('vornd’s screen against the JS referenc
     for (const c of clients) c.close()
     await vornd.kill()
     killPid(holder)
-    server.close()
     dir.remove()
   })
 
@@ -69,7 +65,7 @@ describe.runIf(vorndSessionsAvailable)('vornd’s screen against the JS referenc
     const input = path.join(dir.dir, `case-${n}.bin`)
     fs.writeFileSync(input, c.input)
     const client = new BytesClient()
-    await client.connect(vornd.port)
+    await client.connect(vornd.port, vornd.credential)
     clients.push(client)
     // Raw, so the line discipline passes the bytes as they are, then a mark
     // the screen never shows, to say the input is all through.

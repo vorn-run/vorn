@@ -9,8 +9,8 @@
  * start each again under its id, and close one without a program. The run is
  * one transcript, normalized by `tests/helpers/sessions-parity.ts`.
  *
- * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
- * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix.
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on
+ * a Unix.
  */
 import fs from 'node:fs'
 import path from 'node:path'

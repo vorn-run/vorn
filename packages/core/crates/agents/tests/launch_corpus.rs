@@ -1,11 +1,4 @@
-//! `vorn_agents::launch` against the corpus the server's TypeScript is
-//! checked against too: `tests/fixtures/launch-lines.json` at the repository
-//! root. `tests/launch-parity.test.ts` checks the TypeScript against it and
-//! puts both through the same cases and random lines besides.
-//!
-//! Cases that need executables in `{bin}` run on Unix, where their expected
-//! paths are spelled; shells whose integration reads the server's shim files
-//! are left to the parity test, which has the server write them.
+//! `vorn_agents::launch` against `tests/fixtures/launch-lines.json`; cases needing executables in `{bin}` run on Unix.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -264,4 +257,47 @@ fn sets_up_shells_without_shims_as_the_corpus_says() {
         checked += 1;
     }
     assert!(checked >= 10, "only {checked} shell cases ran");
+}
+
+#[test]
+fn sets_up_shells_with_shims_as_the_corpus_says() {
+    let corpus = corpus();
+    let shims = tempfile::tempdir().unwrap();
+    let root = shims.path().to_str().unwrap().to_owned();
+    let vars = HashMap::from([("shims", root.clone())]);
+    let mut checked = 0;
+    for case in corpus["shell"].as_array().unwrap() {
+        let path = case["shell"].as_str().unwrap();
+        if !matches!(
+            shell::ShellFamily::of(path),
+            Some(shell::ShellFamily::Zsh | shell::ShellFamily::Bash | shell::ShellFamily::Fish)
+        ) {
+            continue;
+        }
+        let env: Vec<(String, String)> = case["env"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_owned()))
+            .collect();
+        let cx = shell::ShellContext {
+            minimal_prompt: case["minimalPrompt"].as_bool().unwrap(),
+            env: &env,
+            home: case["home"].as_str().unwrap(),
+            shim_root: &root,
+        };
+        let setup = shell::shell_setup(path, &cx).unwrap();
+        let env: serde_json::Map<String, Value> = setup
+            .env
+            .into_iter()
+            .map(|(k, v)| (k, Value::String(v)))
+            .collect();
+        assert_eq!(
+            json!({ "env": env, "args": setup.args }),
+            fill(&case["setup"], &vars),
+            "{path}"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 3, "only {checked} shell cases ran");
 }

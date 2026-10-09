@@ -2,8 +2,7 @@
 //! the coding agents without starting one, answered by `vorn_agents`.
 //!
 //! The agents' configured commands and the names passed through to what they
-//! run are the server's settings, read fresh from its database on each call
-//! that needs them; a call vornd cannot read them for goes to the server.
+//! run are settings, read fresh from the database on each call.
 //! Past sessions need no settings, only the agents' own files and the
 //! project's worktrees.
 
@@ -27,7 +26,7 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
         "agent:detectInstalled" => detect_installed(native),
         "agent:listModels" => list_models(native, params),
         "sessions:getRecent" => recent_sessions(native, params),
-        _ => Answer::Forward,
+        _ => Answer::Unanswered,
     }
 }
 
@@ -50,7 +49,7 @@ pub(super) fn settings(native: &Native) -> Option<AgentSettings> {
     match AgentSettings::read(db) {
         Ok(settings) => Some(settings.unwrap_or_default()),
         Err(err) => {
-            debug!(%err, "could not read the agent settings; the server answers");
+            debug!(%err, "could not read the agent settings");
             None
         }
     }

@@ -262,18 +262,6 @@ impl Git {
         self.exec_default(&args, worktree, 10_000).is_ok()
     }
 
-    /// Whether [`Git::rename_branch`] would succeed now, read with gix and
-    /// without changing anything. `None` when gix cannot tell as git would.
-    pub fn foresee_branch_rename(&self, worktree: &Path, new_branch: &str) -> Option<bool> {
-        if self.ssh.is_some() {
-            return None;
-        }
-        let Some(name) = branch_rename_name(new_branch) else {
-            return Some(false);
-        };
-        crate::fast::branch_name_free(worktree, name)
-    }
-
     /// Moves a vorn worktree to `<parent>/<new name>-<its id>`
     /// (`renameWorktree`). `None` when the name sanitizes to nothing, the
     /// directory carries no id, the target is the worktree itself or is
@@ -301,17 +289,6 @@ impl Git {
         let cwd = common_git_dir(Path::new(worktree))?;
         self.exec_default(&args, &cwd, 10_000).ok()?;
         Some(target)
-    }
-
-    /// What [`Git::move_worktree`] would answer now, read without moving
-    /// anything: git moves a linked worktree, whose `.git` is a file.
-    pub fn foresee_worktree_move(&self, worktree: &str, new_name: &str) -> Option<MovedWorktree> {
-        if self.ssh.is_some() {
-            return None;
-        }
-        let target = worktree_move_target(worktree, new_name)?;
-        let linked = Path::new(worktree).join(".git").is_file();
-        (linked && !Path::new(&target.path).exists()).then_some(target)
     }
 
     /// Makes a worktree for `branch` at

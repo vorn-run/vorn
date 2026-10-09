@@ -72,27 +72,20 @@ impl Vornd {
     fn start_with(home: &Path, bundled: &Path, env: &[(&str, &str)]) -> Vornd {
         let log = home.join("vornd.log");
         let mut cmd = Command::new(VORND);
-        // Nothing listens on the discard port: the holder does not need the
-        // Node server.
-        cmd.args([
-            "--upstream",
-            "127.0.0.1:9",
-            "--exit-with-stdin",
-            "--sessiond",
-        ])
-        .arg(bundled)
-        .arg("--home")
-        .arg(home)
-        .env("HOME", home)
-        .env("USERPROFILE", home)
-        .arg("--log-file")
-        .arg(&log)
-        .env_remove("VORND_GROUPS")
-        .env_remove("VORN_SESSIOND_IDLE_EXIT")
-        .env("VORND_LOG", "debug")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        cmd.arg("--data-dir")
+            .arg(home)
+            .args(["--port", "0", "--exit-with-stdin", "--sessiond"])
+            .arg(bundled)
+            .env("HOME", home)
+            .env("USERPROFILE", home)
+            .env("VORND_KEYCHAIN", "0")
+            .arg("--log-file")
+            .arg(&log)
+            .env_remove("VORN_SESSIOND_IDLE_EXIT")
+            .env("VORND_LOG", "debug")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
         for (k, v) in env {
             cmd.env(k, v);
         }
@@ -127,8 +120,7 @@ impl Vornd {
         std::fs::read_to_string(&self.log).unwrap_or_default()
     }
 
-    /// The health check's body. The status is 503 here, as the upstream is
-    /// down; the body is what matters.
+    /// The health check's body.
     fn health(&self) -> Value {
         self.get("/vornd/health")
     }
@@ -553,12 +545,13 @@ fn run_holds_only_live_sockets() {
     for p in &theirs {
         assert!(p.exists(), "{} was removed", p.display());
     }
-    // Only the session engine serves the app and grid endpoints.
-    let own: Vec<PathBuf> = ["app", "grid"]
-        .iter()
-        .filter_map(|k| v.ready[k].as_str().map(PathBuf::from))
+    // Only the session engine serves the grid endpoint.
+    let own: Vec<PathBuf> = v.ready["grid"]
+        .as_str()
+        .map(PathBuf::from)
+        .into_iter()
         .collect();
-    assert_eq!(own.len(), if cfg!(feature = "engine") { 2 } else { 0 });
+    assert_eq!(own.len(), if cfg!(feature = "engine") { 1 } else { 0 });
     for p in &own {
         assert!(p.exists(), "{} is missing", p.display());
     }
@@ -566,12 +559,6 @@ fn run_holds_only_live_sockets() {
     for p in &own {
         assert!(!p.exists(), "{} is left after a stop", p.display());
     }
-    #[cfg(feature = "engine")]
-    assert!(!home
-        .path()
-        .join("run")
-        .join(vornd::control::ANNOUNCEMENT)
-        .exists());
 }
 
 /// A blocking client of one sessiond, as vornd: keeps each session's

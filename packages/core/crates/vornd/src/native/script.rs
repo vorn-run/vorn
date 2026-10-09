@@ -1,28 +1,9 @@
-//! The server's project scripts, run in vornd's session holder
-//! (`vornd:script`).
-//!
-//! The server stays the entry point (`script:execute`, which its workflows
-//! call in process), and asks vornd on the app's channel to run each script
-//! under a session id it chose and already follows. vornd builds the
-//! process as the server's `executeScript` does, with the environment its
-//! agents get ([`super::env::SafeEnv::launch`]) and the step's secrets
-//! the server sends, and starts it on pipes in the session holder: its
-//! output is the session's records and its end the session's exit effect,
-//! which the server reads as it reads a headless agent's and tells clients
-//! and the workflow waiting on it. The answer is the program's start, or
-//! why vornd could not start it: then nothing ran, and the server runs it
-//! itself.
+//! Project scripts, run on pipes in vornd's session holder (`script:execute`, [`execute`]).
 //!
 //! bash (but on Windows) and PowerShell read their program as they go, so
 //! it is written to a file under the data directory, which goes when the
 //! session ends ([`Scripts::ended`]); python and node read it whole from
-//! stdin, which then closes. A cancel sends `SIGTERM`, and `SIGKILL`
-//! [`FORCE_KILL_DELAY`] later if the script still runs.
-//!
-//! In shadow mode the server runs every script itself and sends vornd what
-//! it started (`vornd:scriptPlan`): the arguments, the working directory and
-//! the environment's names, which are compared with what vornd would have
-//! started ([`Scripts::compare`]) and counted under `script:execute`.
+//! stdin, which then closes.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,21 +15,10 @@ use vorn_sessiond_wire::{Io, Sig, SpawnSpec, Stdin};
 
 use super::headless::FORCE_KILL_DELAY;
 use super::sessions::{set, Input, Started, Then, Watch};
-use super::{agent, first_difference, Answer, Native};
-use crate::groups::{Counted, Groups, Mode};
+use super::{agent, Answer, Native};
 
-/// What a script's call is counted as, wherever the server was asked.
+/// The call that runs a script.
 pub const METHOD: &str = "script:execute";
-
-/// What stands for the script's file in a compared plan: each side writes
-/// its own.
-const FILE: &str = "<script>";
-
-/// Whether a client's `method` is compared by the server's plan
-/// (`vornd:scriptPlan`) rather than here as it passes.
-pub fn compared_by_server(method: &str) -> bool {
-    method == METHOD
-}
 
 /// How a script type is run, as the server's `interpreterFor` runs it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,15 +74,14 @@ impl Interpreter {
     }
 }
 
-/// One `vornd:script` or `vornd:scriptPlan`, as the server sends it.
+/// One script to run.
 #[derive(Debug)]
 struct Request {
     interpreter: Interpreter,
-    /// Where it runs: the server resolved it, as `executeScript` does.
+    /// Where it runs, resolved by [`execute`].
     cwd: String,
     args: Vec<String>,
-    /// The step's secrets: values to run with, or only their names for a
-    /// plan.
+    /// The step's secrets: values to run with.
     secrets: Vec<(String, String)>,
 }
 
@@ -140,10 +109,7 @@ impl Request {
                 .iter()
                 .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
                 .collect(),
-            _ => strings(params.get("secretKeys"))
-                .into_iter()
-                .map(|k| (k, String::new()))
-                .collect(),
+            _ => Vec::new(),
         };
         Ok(Request {
             interpreter,
@@ -154,24 +120,13 @@ impl Request {
     }
 }
 
-fn strings(v: Option<&Value>) -> Vec<String> {
-    v.and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// A script's own directory under the data directory, removed with it.
 #[derive(Debug)]
 struct ScriptDir(PathBuf);
 
 impl ScriptDir {
     /// Writes `contents` to `name` in a new directory of `root`, readable by
-    /// this account only, as the server's `scriptFileFor` does.
+    /// this account only.
     fn write(root: &Path, name: &str, contents: &str) -> std::io::Result<(ScriptDir, PathBuf)> {
         private_dir(root, true)?;
         let dir = ScriptDir(root.join(format!("vorn-script-{}", uuid::Uuid::new_v4().simple())));
@@ -200,55 +155,34 @@ fn private_dir(path: &Path, recursive: bool) -> std::io::Result<()> {
     builder.create(path)
 }
 
-/// The scripts vornd runs for the server, in the mode its `script` group
-/// is in.
+/// The scripts vornd runs.
 #[derive(Debug)]
 pub struct Scripts {
-    mode: Mode,
-    /// Weak: the native side holds the app's channel, which holds this.
+    /// Weak: the native side holds the link, which holds this.
     native: Weak<Native>,
-    groups: Arc<Groups>,
     /// The files of the scripts running, by session id.
     files: Mutex<HashMap<String, Option<ScriptDir>>>,
 }
 
 impl Scripts {
-    pub fn new(mode: Mode, native: &Arc<Native>, groups: Arc<Groups>) -> Arc<Scripts> {
+    pub fn new(native: &Arc<Native>) -> Arc<Scripts> {
         Arc::new(Scripts {
-            mode,
             native: Arc::downgrade(native),
-            groups,
             files: Mutex::default(),
         })
-    }
-
-    pub fn mode(&self) -> Mode {
-        self.mode
     }
 
     fn lock_files(&self) -> std::sync::MutexGuard<'_, HashMap<String, Option<ScriptDir>>> {
         self.files.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// `vornd:script`: starts the script under the session id the server
-    /// gave, then hands `then` its start or why it failed. An error is why
-    /// nothing was started. Blocks while the environment is read.
-    pub fn run(self: &Arc<Self>, params: &Value, then: Then) -> Result<(), String> {
-        self.start(params, None, then)?;
-        // Counted here: the server was asked, and the proxy counted the call as forwarded.
-        self.groups.count(METHOD, Counted::Native);
-        Ok(())
-    }
-
+    /// Starts the script in `params` and hands `then` its start; an error is why nothing started.
     fn start(
         self: &Arc<Self>,
         params: &Value,
         watch: Option<Watch>,
         then: Then,
     ) -> Result<(), String> {
-        if self.mode != Mode::Native {
-            return Err("vornd does not run scripts".to_owned());
-        }
         let native = self.native.upgrade().ok_or("vornd is stopping")?;
         let host = native
             .host
@@ -343,22 +277,6 @@ impl Scripts {
         Ok(())
     }
 
-    /// `vornd:scriptCancel`: the script is asked to stop, and made to a
-    /// while later; one still starting is once it is up.
-    pub fn cancel(&self, id: &str) -> Result<(), String> {
-        if !self.lock_files().contains_key(id) {
-            return Err(format!("no script runs as {id}"));
-        }
-        let native = self.native.upgrade().ok_or("vornd is stopping")?;
-        if native.sessions.doom(id, Sig::Term) {
-            return Ok(());
-        }
-        if let Some(host) = native.host.get() {
-            stop(host.as_ref(), id, Sig::Term);
-        }
-        Ok(())
-    }
-
     /// Session `id` ended: a script's file goes with it.
     pub fn ended(&self, id: &str) {
         self.lock_files().remove(id);
@@ -368,44 +286,6 @@ impl Scripts {
     pub fn runs(&self, id: &str) -> bool {
         self.lock_files().contains_key(id)
     }
-
-    /// `vornd:scriptPlan`: what the server started, compared with what vornd
-    /// would have, and counted. Answers whether they are the same.
-    pub fn compare(&self, params: &Value) -> Result<Value, String> {
-        if self.mode != Mode::Shadow {
-            return Err("vornd does not compare scripts".to_owned());
-        }
-        let theirs = params.get("plan").ok_or("a plan to compare")?;
-        let ours = self.plan(params)?;
-        if &ours == theirs {
-            self.groups.count(METHOD, Counted::ShadowMatched);
-            return Ok(json!({ "same": true }));
-        }
-        let at = first_difference(&ours, theirs);
-        warn!(method = METHOD, differs_at = %at, "shadow plan differs from the server's");
-        self.groups.count(METHOD, Counted::ShadowMismatched);
-        Ok(json!({ "same": false, "differsAt": at }))
-    }
-
-    /// What vornd would start for a script, as `{argv, cwd, envKeys}`, its
-    /// file [`FILE`] and the names sorted. Blocks while the environment is
-    /// read.
-    fn plan(&self, params: &Value) -> Result<Value, String> {
-        let native = self.native.upgrade().ok_or("vornd is stopping")?;
-        let req = Request::read(params)?;
-        let settings = agent::settings(&native).ok_or("vornd cannot read the settings")?;
-        let data_dir = native.db.get().and_then(|db| db.parent());
-        let env = native.env.launch(&settings.env_passthrough, data_dir);
-        Ok(plan_of(req, env))
-    }
-}
-
-fn plan_of(req: Request, env: Vec<(String, String)>) -> Value {
-    let mut keys: Vec<String> = env.into_iter().chain(req.secrets).map(|(k, _)| k).collect();
-    keys.sort();
-    keys.dedup();
-    let argv = req.interpreter.argv(cfg!(windows), FILE, &req.args);
-    json!({ "argv": argv, "cwd": req.cwd, "envKeys": keys })
 }
 
 /// Sends `sig`, and `SIGKILL` after [`FORCE_KILL_DELAY`] when it was `SIGTERM`.
@@ -419,7 +299,7 @@ fn stop(host: &dyn super::sessions::Host, id: &str, sig: Sig) {
 /// `script:execute`: runs a script in the session holder, tells its
 /// output and end to every client by its `runId` (`script:data`,
 /// `script:exit`), and answers `{success, output, error?, exitCode}` once
-/// it ended, as the server's `executeScript` does.
+/// it ended.
 pub async fn execute(native: &Arc<Native>, params: Value) -> Answer {
     let run = params
         .get("runId")
@@ -561,103 +441,6 @@ impl Utf8 {
     }
 }
 
-/// Answers the app's `vornd:script`, `vornd:scriptCancel` and
-/// `vornd:scriptPlan`; a start is answered once its program is up, and its
-/// file goes when the session's exit effect is in.
-#[cfg(feature = "engine")]
-pub fn call(
-    engine: &Arc<crate::engine::Engine>,
-    scripts: Option<&Arc<Scripts>>,
-    fwd: &crate::streams::Forwarder,
-    rpc: Option<Value>,
-    method: &str,
-    params: Value,
-) {
-    use crate::streams::{answer, refuse};
-    let reply = {
-        let fwd = fwd.clone();
-        move |done: Result<Value, String>| {
-            if let Some(rpc) = &rpc {
-                match done {
-                    Ok(v) => fwd.send_now(&answer(rpc, v)),
-                    Err(e) => fwd.send_now(&refuse(rpc, &e)),
-                }
-            }
-        }
-    };
-    let Some(scripts) = scripts.cloned() else {
-        return reply(Err("vornd does not run scripts".to_owned()));
-    };
-    match method {
-        "vornd:scriptCancel" => {
-            let id = params.get("id").and_then(Value::as_str).unwrap_or_default();
-            reply(scripts.cancel(id).map(|()| Value::Null));
-        }
-        "vornd:scriptPlan" => {
-            tokio::task::spawn_blocking(move || reply(scripts.compare(&params)));
-        }
-        _ => {
-            let events = engine.subscribe();
-            let (engine, runtime) = (Arc::clone(engine), tokio::runtime::Handle::current());
-            tokio::task::spawn_blocking(move || {
-                let id = params
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned();
-                let reply = Arc::new(Mutex::new(Some(reply)));
-                let answered = Arc::clone(&reply);
-                let after = Arc::clone(&scripts);
-                let started = scripts.run(
-                    &params,
-                    Box::new(move |outcome| {
-                        let reply = answered.lock().unwrap_or_else(|e| e.into_inner()).take();
-                        let done = outcome.map(|s| {
-                            runtime.spawn(clean_up(engine, events, after, id.clone()));
-                            json!({ "id": id, "pid": s.pid, "epoch": s.epoch })
-                        });
-                        if let Some(reply) = reply {
-                            reply(done);
-                        }
-                    }),
-                );
-                if let Err(why) = started {
-                    if let Some(reply) = reply.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                        reply(Err(why));
-                    }
-                }
-            });
-        }
-    }
-}
-
-/// Waits for script `id` to end, then lets its file go.
-#[cfg(feature = "engine")]
-async fn clean_up(
-    engine: Arc<crate::engine::Engine>,
-    mut events: tokio::sync::broadcast::Receiver<crate::engine::Event>,
-    scripts: Arc<Scripts>,
-    id: String,
-) {
-    use crate::engine::Event;
-    use tokio::sync::broadcast::error::RecvError;
-    loop {
-        match events.recv().await {
-            Ok(Event::Effect(fx, vorn_engine::Effect::Exit { .. })) if fx.session == id => break,
-            Ok(Event::Closed(s)) if s.brief.session == id => break,
-            Ok(_) => {}
-            Err(RecvError::Lagged(_)) => {
-                let held = engine.journal().held();
-                if !held.iter().any(|h| h.session == id && h.exit.is_none()) {
-                    break;
-                }
-            }
-            Err(RecvError::Closed) => break,
-        }
-    }
-    scripts.ended(&id);
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::sessions::tests::{fed, Fed};
@@ -674,12 +457,11 @@ mod tests {
         assert_eq!(text.finish(), "\u{fffd}");
     }
 
-    fn ready(mode: Mode) -> (Fed, Arc<Scripts>, tempfile::TempDir) {
+    fn ready() -> (Fed, Arc<Scripts>, tempfile::TempDir) {
         let fed = fed();
         let data = tempfile::tempdir().unwrap();
         fed.native.set_database(data.path().join("vorn.db"));
-        let groups = Arc::new(Groups::parse(&format!("script={mode}")).unwrap());
-        let scripts = Scripts::new(mode, &fed.native, groups);
+        let scripts = Scripts::new(&fed.native);
         fed.link.set_scripts(Arc::clone(&scripts));
         (fed, scripts, data)
     }
@@ -698,13 +480,13 @@ mod tests {
 
     #[test]
     fn a_bash_script_runs_from_a_private_file_that_goes_when_it_ends() {
-        let (fed, scripts, data) = ready(Mode::Native);
+        let (fed, scripts, data) = ready();
         let (outcomes, then) = kept();
         let params = json!({
             "id": "s1", "scriptType": "bash", "scriptContent": "echo hi", "cwd": cwd(),
             "args": ["a b"], "secretEnv": { "API_KEY": "k" },
         });
-        scripts.run(&params, then).unwrap();
+        scripts.start(&params, None, then).unwrap();
         let (spec, input) = fed.host.last_start();
         let (fed_in, stdin) = if cfg!(windows) {
             (Input::Prompt(Some(b"echo hi".to_vec())), Stdin::Pipe)
@@ -745,13 +527,13 @@ mod tests {
 
     #[test]
     fn python_and_node_read_the_script_from_stdin() {
-        let (fed, scripts, _data) = ready(Mode::Native);
+        let (fed, scripts, _data) = ready();
         for (kind, program) in [("python", "python3"), ("node", "node")] {
             let id = format!("s-{kind}");
             let params = json!({
                 "id": id, "scriptType": kind, "scriptContent": "print(1)", "cwd": cwd(),
             });
-            scripts.run(&params, kept().1).unwrap();
+            scripts.start(&params, None, kept().1).unwrap();
             let (spec, input) = fed.host.last_start();
             let program = if cfg!(windows) && kind == "python" {
                 "python"
@@ -766,11 +548,11 @@ mod tests {
 
     #[test]
     fn a_script_that_cannot_start_is_refused_and_leaves_nothing() {
-        let (fed, scripts, data) = ready(Mode::Native);
+        let (fed, scripts, data) = ready();
         let (outcomes, then) = kept();
         let params =
             json!({ "id": "s1", "scriptType": "bash", "scriptContent": "x", "cwd": cwd() });
-        scripts.run(&params, then).unwrap();
+        scripts.start(&params, None, then).unwrap();
         fed.host.down("no such directory");
         assert_eq!(
             outcomes.lock().unwrap().as_slice(),
@@ -784,7 +566,7 @@ mod tests {
 
     #[test]
     fn what_cannot_run_is_refused_before_anything_starts() {
-        let (fed, scripts, _data) = ready(Mode::Native);
+        let (fed, scripts, _data) = ready();
         let base = json!({ "id": "s1", "scriptType": "bash", "scriptContent": "x", "cwd": cwd() });
         let with = |k: &str, v: Value| {
             let mut p = base.clone();
@@ -800,97 +582,13 @@ mod tests {
             (with("id", json!("")), "a script needs an id"),
             (with("args", json!([1])), "a script's args are strings"),
         ] {
-            assert_eq!(scripts.run(&params, kept().1), Err(why.to_owned()));
+            assert_eq!(scripts.start(&params, None, kept().1), Err(why.to_owned()));
         }
-        scripts.run(&base, kept().1).unwrap();
+        scripts.start(&base, None, kept().1).unwrap();
         assert_eq!(
-            scripts.run(&base, kept().1),
+            scripts.start(&base, None, kept().1),
             Err("a script runs as s1 already".to_owned())
         );
         assert_eq!(fed.host.starts.lock().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn a_cancel_stops_the_script_then_kills_it() {
-        let (fed, scripts, _data) = ready(Mode::Native);
-        let params = json!({ "id": "s1", "scriptType": "node", "scriptContent": "", "cwd": cwd() });
-        scripts.run(&params, kept().1).unwrap();
-        // Cancelled while it starts: told once it is up.
-        scripts.cancel("s1").unwrap();
-        assert!(fed.host.signals().is_empty());
-        fed.host.up(7);
-        assert_eq!(
-            fed.host.signals(),
-            [("s1".to_owned(), Sig::Term), ("s1".to_owned(), Sig::Kill)]
-        );
-        scripts.cancel("s1").unwrap();
-        assert_eq!(fed.host.signals().len(), 4);
-        scripts.ended("s1");
-        assert_eq!(scripts.cancel("s1"), Err("no script runs as s1".to_owned()));
-    }
-
-    #[test]
-    fn a_shadow_plan_is_compared_and_counted() {
-        let (fed, _, _data) = ready(Mode::Native);
-        let native_mode = Scripts::new(Mode::Native, &fed.native, Arc::new(Groups::all_forward()));
-        assert!(native_mode.compare(&json!({})).is_err());
-        let (_fed, scripts, _data) = ready(Mode::Shadow);
-        assert_eq!(
-            scripts.run(&json!({}), kept().1),
-            Err("vornd does not run scripts".to_owned())
-        );
-        let params = json!({
-            "scriptType": "python", "cwd": "/p", "args": ["x"], "secretKeys": ["TOKEN"],
-        });
-        let ours = scripts.plan(&params).unwrap();
-        let program = if cfg!(windows) { "python" } else { "python3" };
-        assert_eq!(ours["argv"], json!([program, "-", "x"]));
-        let keys = strings(ours.get("envKeys"));
-        assert!(keys.contains(&"TOKEN".to_owned()), "{keys:?}");
-        assert!(keys.contains(&"VORN_DATA_DIR".to_owned()), "{keys:?}");
-        assert!(keys.windows(2).all(|w| w[0] < w[1]), "{keys:?}");
-
-        let mut same = params.clone();
-        same["plan"] = ours.clone();
-        assert_eq!(scripts.compare(&same).unwrap(), json!({ "same": true }));
-        let mut other = params;
-        let mut theirs = ours;
-        theirs["cwd"] = json!("/q");
-        other["plan"] = theirs;
-        assert_eq!(
-            scripts.compare(&other).unwrap(),
-            json!({ "same": false, "differsAt": "/cwd" })
-        );
-        let counts = &scripts.groups.counts()["script"];
-        assert_eq!((counts.shadow_matched, counts.shadow_mismatched), (1, 1));
-    }
-
-    #[test]
-    fn a_bash_plan_names_its_file_the_same_on_both_sides() {
-        let req = Request::read(&json!({ "scriptType": "bash", "cwd": "/p" })).unwrap();
-        let plan = plan_of(req, vec![("PATH".into(), "/bin".into())]);
-        let argv = if cfg!(windows) {
-            json!(["bash.exe", "-s"])
-        } else {
-            json!(["bash", FILE])
-        };
-        assert_eq!(
-            plan,
-            json!({ "argv": argv, "cwd": "/p", "envKeys": ["PATH"] })
-        );
-        let ps = Request::read(&json!({ "scriptType": "powershell", "cwd": "/p" })).unwrap();
-        assert_eq!(
-            plan_of(ps, Vec::new())["argv"],
-            json!([
-                "pwsh",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                FILE
-            ])
-        );
-        assert!(compared_by_server(METHOD));
-        assert!(!compared_by_server("script:other"));
     }
 }

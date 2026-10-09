@@ -45,6 +45,7 @@ import type { ServerBridge } from './server/server-bridge'
 import { primeHostPath, resetHostPath, setPathSource } from './binary-path'
 import log from './logger'
 import { loginItemFor } from './login-item'
+import { refreshStaleShims } from './cli-shim'
 import { NoticeReceipts } from './notice-receipts'
 
 let isQuitting = false
@@ -497,6 +498,7 @@ function hardenWebviews(): void {
 
 app.whenReady().then(async () => {
   hardenWebviews()
+  for (const file of refreshStaleShims()) log.info(`[cli] pointed ${file} at the native vorn`)
   // Before launchServer, unlike everything else: these are what let someone
   // correct an unreachable host, so they cannot depend on reaching one.
   registerConnectHandlers()

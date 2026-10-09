@@ -12,7 +12,7 @@ use hyper::header::{self, HeaderValue};
 use hyper::{Response, StatusCode};
 use serde_json::{json, Value};
 
-use crate::proxy::{full, Body};
+use crate::endpoint::{full, Body};
 
 /// The prefix the web client is served under.
 pub const APP_PREFIX: &str = "/app";

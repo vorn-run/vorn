@@ -11,8 +11,8 @@
  * its conversation, once, and its pane must attach through vornd with a
  * screen and a live stream. Nothing is clicked.
  *
- * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
- * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix.
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on
+ * a Unix.
  */
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'

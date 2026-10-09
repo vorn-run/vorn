@@ -13,8 +13,7 @@
 //! server keep its rule that a flush's sequence number and the state it reads
 //! never disagree.
 //!
-//! Plain Rust with no Node in it: the napi adapter in `vorn-core` turns
-//! `Event`s into calls on the event loop.
+//! Plain Rust; its caller turns `Event`s into what it does with them.
 
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};

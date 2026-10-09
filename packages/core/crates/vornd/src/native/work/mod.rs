@@ -54,7 +54,7 @@ impl std::fmt::Debug for Work {
 
 /// Whether `method` is the work model's.
 pub fn is_work(method: &str) -> bool {
-    GROUPS.contains(&crate::groups::group_of(method))
+    GROUPS.contains(&crate::native::group_of(method))
 }
 
 /// Every call the work model answers.
@@ -307,7 +307,7 @@ impl Work {
 
     /// Answers one of the work model's own calls.
     pub async fn call(self: &Arc<Self>, method: &str, params: &Value) -> Answer {
-        match crate::groups::group_of(method) {
+        match crate::native::group_of(method) {
             "artifact" => self.artifact(method, params).await,
             _ => self.workflow(method, params).await,
         }
@@ -1170,22 +1170,6 @@ impl Work {
             self.drain.notify_one();
         }
         received
-    }
-
-    /// A call a client connected to the server made, which the server
-    /// hands here: the work model's, or any other vornd answers.
-    pub async fn relayed(self: &Arc<Self>, method: String, params: Value) -> Answer {
-        if is_work(&method) {
-            return self.answer(&method, &params).await;
-        }
-        match self.native.upgrade() {
-            Some(native) => {
-                native
-                    .answer(method, params, &super::config::Viewer::Local)
-                    .await
-            }
-            None => Answer::Forward,
-        }
     }
 
     /// A workflow trigger a configuration save fires: a task created or moved. It

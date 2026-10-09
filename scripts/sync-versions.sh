@@ -8,7 +8,6 @@ ROOT_VERSION=$(node -p "require('$ROOT_DIR/package.json').version")
 PACKAGES=(
   "packages/web"
   "packages/desktop"
-  "packages/server"
   "packages/shared"
   "packages/mcp"
   "packages/connector-sdk"

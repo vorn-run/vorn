@@ -415,7 +415,7 @@ impl Connectors {
             "connector:detectRepo" => Ok(Some(self.detect_repo(&params))),
             "credentials:import" => self.import(&params).await,
             "http:request" => Ok(Some(self.http_request(&params).await)),
-            _ => return Answer::Forward,
+            _ => return Answer::Unanswered,
         };
         match result {
             Ok(Some(value)) => Answer::Result(value),

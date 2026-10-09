@@ -18,7 +18,6 @@ export const TEST_CREDENTIAL = 'native-server-sessions-credential'
 
 /** Where a built vornd is, when there is one. */
 export const vornd = [
-  process.env.VORN_CONFORMANCE_VORND,
   path.resolve(__dirname, '../../packages/core/vornd'),
   path.resolve(__dirname, '../../packages/core/target/release/vornd')
 ].find((p): p is string => !!p && fs.existsSync(p))
@@ -145,7 +144,6 @@ export async function startRealServer(
         ...process.env,
         HOME: dirs.home,
         [BOOTSTRAP_ENV_VAR]: TEST_CREDENTIAL,
-        VORND_GROUPS: '',
         // Secrets go to a private file in the data directory, never this machine's keychain.
         VORND_KEYCHAIN: '0',
         VORND_LOG: process.env.VORND_LOG ?? 'info'
@@ -195,18 +193,6 @@ export async function vorndStopped(port: number): Promise<void> {
   )
 }
 
-/** The pid vornd announced in `dataDir`, read before it stops and withdraws it. */
-export function announcedVornd(dataDir: string): number | undefined {
-  try {
-    const said = JSON.parse(fs.readFileSync(path.join(dataDir, 'run', 'vornd-app'), 'utf8')) as {
-      pid?: unknown
-    }
-    return typeof said.pid === 'number' ? said.pid : undefined
-  } catch {
-    return undefined
-  }
-}
-
 /** The session holder's pid, as the vornd on `port` reports it. */
 export function holderPid(port: number): Promise<number | undefined> {
   return fetch(`http://127.0.0.1:${port}/vornd/health`)
@@ -239,41 +225,22 @@ export async function stopHolder(pid: number | undefined): Promise<void> {
   await processGone(pid)
 }
 
-/** @param keepHolder Leaves the session holder and its sessions running, for a server to start again on. */
-/** Stops it, and fails if vornd left a call to a server that is not there. */
+/** Stops it. @param keepHolder Leaves the session holder and its sessions running, for a server to start again on. */
 export async function stopRealServer(server: RealServer, keepHolder = false): Promise<void> {
-  const unexpected = await unexpectedForwards(server.vornd)
-  await stopServerChild(server.child, server.vornd, server.dirs.data, keepHolder)
-  if (Object.keys(unexpected).length > 0) {
-    throw new Error(`vornd left calls unanswered: ${JSON.stringify(unexpected)}`)
-  }
-}
-
-/** The calls vornd forwarded that its list of still-forwarded calls does not allow. */
-export async function unexpectedForwards(port: number): Promise<Record<string, number>> {
-  if (!port) return {}
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/vornd/health`)
-    const health = (await res.json()) as { unexpectedForwards?: Record<string, number> }
-    return health.unexpectedForwards ?? {}
-  } catch {
-    // A vornd the test already stopped has nothing left to report.
-    return {}
-  }
+  await stopServerChild(server.child, server.vornd, keepHolder)
 }
 
 /**
- * Stops vornd, started as a child on `dataDir` and listening on `vorndPort`,
- * and, unless kept, its session holder, and waits for each to exit.
+ * Stops vornd, started as a child and listening on `vorndPort`, and, unless
+ * kept, its session holder, and waits for each to exit.
  */
 export async function stopServerChild(
   child: ChildProcess,
   vorndPort: number,
-  dataDir: string,
   keepHolder = false
 ): Promise<void> {
   const holder = await holderPid(vorndPort)
-  const vorndPid = announcedVornd(dataDir)
+  const vorndPid = child.pid
   if (child.exitCode === null) {
     const exited = new Promise((r) => child.once('exit', r))
     child.kill()

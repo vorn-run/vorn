@@ -3,8 +3,8 @@
  * app makes through vornd, and its answers once {@link normalizeWorktrees}
  * has taken out what each run makes its own.
  *
- * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
- * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix: the agent is a shell
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on
+ * a Unix: the agent is a shell
  * script.
  */
 import { execFileSync } from 'node:child_process'
@@ -117,22 +117,6 @@ async function startRealServer(): Promise<RealServer> {
   return server
 }
 
-type Groups = Record<string, { native?: number; forwarded?: number }>
-
-async function groupsOf(server: RealServer): Promise<Groups> {
-  const health = await fetch(`http://127.0.0.1:${server.port}/vornd/health`)
-  return ((await health.json()) as { groups: Groups }).groups
-}
-
-/** How many calls of `name` were answered each way since `before`. */
-function since(before: Groups, after: Groups, name: string): { native: number; forwarded: number } {
-  const count = (g: Groups, k: 'native' | 'forwarded'): number => g[name]?.[k] ?? 0
-  return {
-    native: count(after, 'native') - count(before, 'native'),
-    forwarded: count(after, 'forwarded') - count(before, 'forwarded')
-  }
-}
-
 /**
  * A repository with the same commits on every run, and worktrees beside it:
  * one merged, one unmerged with build output, one with uncommitted work, one
@@ -212,7 +196,6 @@ async function scenario(
       return active.count === 1
     })
 
-    const before = await groupsOf(server)
     await call('inventory', 'worktree:inventory')
     await call('inventory of one project, measured again', 'worktree:inventory', {
       projectPaths: [repo],
@@ -238,14 +221,9 @@ async function scenario(
       force: true
     })
     await call('inventory after', 'worktree:inventory')
-    const after = await groupsOf(server)
 
     await direct.result('headless:kill', agent.id)
     const transcript = {
-      answeredBy: {
-        worktree: since(before, after, 'worktree'),
-        git: since(before, after, 'git')
-      },
       replies,
       left: ['merged', 'unmerged', 'dirty', 'busy', 'orphan'].filter((n) => fs.existsSync(wt(n))),
       buildOutput: fs.existsSync(path.join(wt('unmerged'), 'node_modules'))
@@ -292,13 +270,6 @@ describe.skipIf(!runnable)('the worktree manager in vornd', () => {
     expect(removed.result.failed.map((f) => f.path)).toEqual(['<work>/.vorn-worktrees/repo/dirty'])
     expect(removed.result.deletedBranches).toEqual(['merged'])
     expect(left).toEqual(['unmerged', 'busy'])
-  })
-
-  it('has vornd answer them itself', () => {
-    expect(run.answeredBy).toEqual({
-      worktree: { native: 8, forwarded: 0 },
-      git: { native: 1, forwarded: 0 }
-    })
   })
 
   it('answers every call as the app expects', () => {

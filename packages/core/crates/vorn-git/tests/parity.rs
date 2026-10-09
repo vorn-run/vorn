@@ -383,7 +383,7 @@ fn checks_out_a_branch_reads_head_and_names_a_worktree_before_making_it() {
 }
 
 #[test]
-fn renames_a_worktree_branch_and_moves_a_worktree_as_foreseen() {
+fn renames_a_worktree_branch_and_moves_a_worktree() {
     use vorn_git::repo::{Git, MovedWorktree};
     let t = tmp();
     let dir = repo(t.path(), "rename");
@@ -398,19 +398,7 @@ fn renames_a_worktree_branch_and_moves_a_worktree_as_foreseen() {
         .create_worktree(dir.to_str().unwrap(), "first", Some("tree"))
         .unwrap();
     let wt = PathBuf::from(&made.worktree_path);
-    // What gix foresees, when it does, is what the rename then does.
-    let rename = |name: &str| {
-        let foreseen = g.foresee_branch_rename(&wt, name);
-        assert!(
-            foreseen.is_some() || !vorn_git::gix_answers_here(),
-            "{name:?}"
-        );
-        let done = g.rename_branch(&wt, name);
-        if let Some(foreseen) = foreseen {
-            assert_eq!(foreseen, done, "{name:?}");
-        }
-        done
-    };
+    let rename = |name: &str| g.rename_branch(&wt, name);
     assert!(!rename("  "));
     assert!(!rename("-x"));
     assert!(!rename("taken"));
@@ -428,12 +416,7 @@ fn renames_a_worktree_branch_and_moves_a_worktree_as_foreseen() {
     let path = made.worktree_path.as_str();
     let id = &path[path.len() - 8..];
     let beside = |name: &str| wt.with_file_name(format!("{name}-{id}"));
-    let moved = |p: &str, name: &str| {
-        let foreseen = g.foresee_worktree_move(p, name);
-        let done = g.move_worktree(p, name);
-        assert_eq!(foreseen, done, "{p} {name:?}");
-        done
-    };
+    let moved = |p: &str, name: &str| g.move_worktree(p, name);
     assert_eq!(moved(path, "!!"), None);
     assert_eq!(moved(path, "tree"), None);
     assert_eq!(moved(dir.to_str().unwrap(), "x"), None);

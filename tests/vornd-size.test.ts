@@ -5,7 +5,6 @@ import {
   home,
   killPid,
   until,
-  upstream,
   vorndSessionsAvailable
 } from './helpers/vornd-sessions'
 
@@ -14,17 +13,16 @@ import {
  * a phone use it over the WebSocket. Which connection is the desktop's is
  * decided by the launch token it opened with, never by anything it says.
  *
- * Runs in `yarn test:conformance`, which builds both binaries; skipped
- * otherwise.
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`);
+ * skipped otherwise.
  */
 describe.runIf(vorndSessionsAvailable)('the size of a session vornd holds', () => {
   const TOKEN = 'desktop-launch-token'
-  let server: Awaited<ReturnType<typeof upstream>>
   let dir: ReturnType<typeof home>
   let vornd: Vornd
   const clients: BytesClient[] = []
 
-  async function client(token?: string): Promise<BytesClient> {
+  async function client(token: string): Promise<BytesClient> {
     const c = new BytesClient()
     await c.connect(vornd.port, token)
     clients.push(c)
@@ -34,9 +32,8 @@ describe.runIf(vorndSessionsAvailable)('the size of a session vornd holds', () =
   const pause = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
   beforeAll(async () => {
-    server = await upstream()
     dir = home()
-    vornd = await Vornd.start(server.port, dir.dir, TOKEN)
+    vornd = await Vornd.start(dir.dir, TOKEN)
   }, 30_000)
 
   afterAll(async () => {
@@ -44,14 +41,13 @@ describe.runIf(vorndSessionsAvailable)('the size of a session vornd holds', () =
     const holder = await vornd.sessiondPid().catch(() => null)
     await vornd.kill()
     killPid(holder)
-    server.close()
     dir.remove()
   })
 
   it('stays still while looked at, follows typing once, and the desktop wins ties', async () => {
     const desktop = await client(TOKEN)
-    // A phone over the tunnel, presenting a token that is not the desktop's.
-    const phone = await client('not-the-desktop')
+    // A phone over the tunnel, presenting a device token rather than the desktop's.
+    const phone = await client(await vornd.deviceToken('phone'))
     const id = await desktop.spawn(['cat'], 100, 30)
     await desktop.attach(id)
     await phone.attach(id)

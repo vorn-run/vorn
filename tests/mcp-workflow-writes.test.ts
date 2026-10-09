@@ -11,7 +11,7 @@ import type { AppConfig, WorkflowDefinition } from '../packages/shared/src/types
 const calls: Array<{ method: string; params?: unknown }> = []
 let workflows: WorkflowDefinition[]
 
-vi.mock('../packages/server/src/rpc-client', () => ({
+vi.mock('../packages/mcp/src/rpc-client', () => ({
   rpcCall: async (method: string, params?: unknown) => {
     calls.push({ method, params })
     const id = (params as { id?: string } | undefined)?.id

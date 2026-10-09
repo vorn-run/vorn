@@ -62,8 +62,7 @@ try {
     }
 
     # The `vorn` command, beside the app and inside the directory just added to
-    # PATH. It runs the app's own Node, so nothing else has to be installed and
-    # the native modules inside the bundle resolve.
+    # PATH. It runs the vorn binary the app ships.
     # Joined with CRLF rather than written as a here-string: this file may be
     # fetched with LF endings, and cmd.exe is unreliable about a multi-line
     # block that arrives that way.
@@ -75,10 +74,7 @@ try {
         '  start "" "%APPDIR%Vorn.exe"',
         '  exit /b',
         ')',
-        'set "ELECTRON_RUN_AS_NODE=1"',
-        'set "VORN_NATIVE_MODULES_PATH=%APPDIR%resources\app.asar.unpacked\node_modules"',
-        'set "NODE_PATH=%APPDIR%resources\app.asar\node_modules;%VORN_NATIVE_MODULES_PATH%"',
-        '"%APPDIR%Vorn.exe" "%APPDIR%resources\server\cli.cjs" %*'
+        '"%APPDIR%resources\vornd\vorn.exe" %*'
     )
     $Shim = ($ShimLines -join "`r`n") + "`r`n"
     Set-Content -Path (Join-Path $InstallDir "vorn.cmd") -Value $Shim -Encoding ASCII -NoNewline

@@ -2,14 +2,7 @@
 //! half of pairing (`/api/pair/redeem` and `/api/pair/poll`), and the
 //! credential and Origin checks vornd makes for itself.
 //!
-//! Tokens are rows in the server's database, read and written from here as
-//! a second process ([`vorn_store::DeviceTokens`]). Pairing is held here, in
-//! memory, once the `pairing` group is vornd's: the desktop's calls and the
-//! phone's HTTP requests both reach this one state, the server relaying the
-//! phone's to vornd. What only the server can do, it is told to over the
-//! app's channel ([`crate::applink`]): broadcast to every client, and close
-//! the sockets holding a token just revoked. Without that channel, the calls
-//! that need it are the server's.
+//! Tokens are rows in the database ([`vorn_store::DeviceTokens`]); pairing is held here, in memory.
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -54,17 +47,6 @@ pub struct Authenticated {
     pub user_id: String,
     /// The device token, which is closed out when revoked; `None` for this machine's credential.
     pub token_id: Option<String>,
-}
-
-/// What vornd makes of a credential.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Verdict {
-    /// The desktop's launch credential, or a live device token.
-    Admitted,
-    /// Malformed, unknown, tampered with or revoked.
-    Refused,
-    /// The database could not be read: the server decides.
-    CannotTell,
 }
 
 fn now_ms() -> u64 {
@@ -144,37 +126,9 @@ impl Reach {
             None => tailscale::failed(),
         }
     }
-
-    /// The desktop's credential, or a device token checked against the
-    /// database at `db`.
-    pub fn verify(&self, raw: &str, desktop: Option<&[u8]>, db: Option<&PathBuf>) -> Verdict {
-        if desktop.is_some_and(|d| token::constant_time_eq(raw.as_bytes(), d)) {
-            return Verdict::Admitted;
-        }
-        if local_token(db).is_some_and(|t| token::constant_time_eq(raw.as_bytes(), &t)) {
-            return Verdict::Admitted;
-        }
-        let Some(parsed) = token::parse(raw) else {
-            return Verdict::Refused;
-        };
-        let Some(Ok(Some(tokens))) = db.map(|db| DeviceTokens::open(db)) else {
-            return Verdict::CannotTell;
-        };
-        match tokens.secret(parsed.id) {
-            Ok(Some(row)) if row.revoked_at.is_none() => {
-                if token::secret_matches(parsed.secret, &row.token_hash) {
-                    Verdict::Admitted
-                } else {
-                    Verdict::Refused
-                }
-            }
-            Ok(_) => Verdict::Refused,
-            Err(_) => Verdict::CannotTell,
-        }
-    }
 }
 
-/// The server's local credential, which it keeps beside the database.
+/// The local credential, kept beside the database.
 fn local_token(db: Option<&PathBuf>) -> Option<Vec<u8>> {
     let file = db?.parent()?.join("local-token");
     let token = std::fs::read(file).ok()?;
@@ -291,7 +245,7 @@ impl Native {
                 self.pairing().cancel();
                 Answer::Result(json!({ "ok": true }))
             }
-            _ => Answer::Forward,
+            _ => Answer::Unanswered,
         }
     }
 
@@ -394,12 +348,10 @@ impl Native {
         };
         match tokens.revoke(id, &now_iso()) {
             Ok(revoked) => {
-                // The sockets holding it are closed by whoever holds them.
+                // The sockets holding it are closed.
                 if revoked {
                     if let Some(clients) = self.clients() {
                         clients.disconnect_token(id);
-                    } else if let Some(link) = self.link() {
-                        link.tell("vornd:tokenRevoked", json!({ "tokenId": id }));
                     }
                 }
                 Answer::Result(json!({ "revoked": revoked }))
@@ -468,13 +420,6 @@ impl Native {
 
     pub(crate) fn link(&self) -> Option<&Arc<AppLink>> {
         self.link.get()
-    }
-
-    /// Checks a credential as the server would: the desktop's launch
-    /// credential, which is the server's local one, or a device token.
-    pub fn verify_credential(&self, raw: &str) -> Verdict {
-        let desktop = self.desktop.get().map(Vec::as_slice);
-        self.reach.verify(raw, desktop, self.db.get())
     }
 
     /// Who `raw` authenticates as: the owner for this machine's credential,

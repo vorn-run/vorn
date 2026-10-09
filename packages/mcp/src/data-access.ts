@@ -6,7 +6,7 @@ import type {
   WorkspaceConfig,
   WorkflowExecution
 } from '@vornrun/shared/types'
-import { rpcCall } from '@vornrun/server/rpc-client'
+import { rpcCall } from './rpc-client'
 
 /**
  * Tasks, projects, workspaces and workflows, read and written over the socket.

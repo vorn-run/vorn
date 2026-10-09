@@ -1,18 +1,7 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-
-vi.mock('../packages/server/src/logger', () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
-}))
-
-import {
-  initDatabase,
-  closeDatabase,
-  loadConfig,
-  saveConfig
-} from '../packages/server/src/database'
-import { IPC } from '../packages/shared/src/types'
+import { IPC, type AppConfig } from '../packages/shared/src/types'
 import WebSocket from 'ws'
 import { BytesClient, until, home as testHome, killPid } from './helpers/vornd-sessions'
 import { builtSessiond, builtVornd, startServed, type Served } from './helpers/served'
@@ -79,26 +68,24 @@ describe.skipIf(!builtVornd || !builtSessiond)('sessions through vornd on this p
 
   beforeAll(async () => {
     h = testHome()
-    initDatabase(h.dir)
     const agent = script(
       'fake-agent',
       "process.stdout.write('prompt: ')\n" +
         'process.stdin.pipe(process.stdout)\n' +
         "process.stdin.on('end', () => process.exit(5))\n"
     )
-    const config = loadConfig()
-    saveConfig({
+    vornd = await serve()
+    listener = await listen(vornd.port, told)
+    client = new BytesClient()
+    await client.connect(vornd.port, DESKTOP)
+    const config = await client.call<AppConfig>('config:load', undefined)
+    await client.call('config:save', {
       ...config,
       agentCommands: {
         ...config.agentCommands,
         claude: { command: process.execPath, args: [agent] }
       }
     })
-    closeDatabase()
-    vornd = await serve()
-    listener = await listen(vornd.port, told)
-    client = new BytesClient()
-    await client.connect(vornd.port, DESKTOP)
   }, 30_000)
 
   afterAll(async () => {

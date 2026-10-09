@@ -39,7 +39,7 @@ use vorn_hooks::owner::{may_claim, may_release, Owner};
 use vorn_hooks::{claude, copilot, permission, Event, Mapper, Terminal};
 
 use super::{Answer, Native};
-use crate::proxy::{full, Body};
+use crate::endpoint::{full, Body};
 use crate::registry::{HookStatus, Patch, TerminalSession};
 
 /// Every call this module answers.
@@ -107,12 +107,7 @@ pub struct Hooks {
     pending: Mutex<Vec<Pending>>,
     mapper: Mutex<Mapper>,
     last_activity: Mutex<Instant>,
-    /// When the server was last told of hook activity.
-    told: Mutex<Option<Instant>>,
 }
-
-/// How often the server is told hooks are active, at most.
-const TELL_EVERY: Duration = Duration::from_secs(1);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -149,7 +144,6 @@ impl Hooks {
             pending: Mutex::default(),
             mapper: Mutex::default(),
             last_activity: Mutex::new(Instant::now()),
-            told: Mutex::new(None),
         });
         tokio::spawn(serve(Arc::downgrade(&hooks), listener));
         if !hooks.try_claim() {
@@ -267,22 +261,6 @@ impl Hooks {
         }
     }
 
-    /// Tells the server hooks are active and how many requests are open, which
-    /// keep it from stopping as idle (`vornd:hooks`); `now` past the throttle.
-    fn tell(&self, now: bool) {
-        {
-            let mut told = lock(&self.told);
-            if !now && told.is_some_and(|t| t.elapsed() < TELL_EVERY) {
-                return;
-            }
-            *told = Some(Instant::now());
-        }
-        let pending = lock(&self.pending).len();
-        if let Some(link) = self.native.upgrade().and_then(|n| n.link.get().cloned()) {
-            link.tell("vornd:hooks", json!({ "pending": pending }));
-        }
-    }
-
     /// How long since a hook posted, and how many requests are open.
     pub fn activity(&self) -> Value {
         json!({
@@ -376,7 +354,6 @@ impl Hooks {
             permission::info(&id, &event, &about),
         );
         hook_status(&native, &resolved.terminal, Some(Status::Waiting), false);
-        self.tell(true);
         (Some(id), rx)
     }
 
@@ -388,7 +365,6 @@ impl Hooks {
         };
         pending.remove(at);
         drop(pending);
-        self.tell(true);
         if let Some(native) = self.native.upgrade() {
             native.broadcast("widget:permission-cancelled", json!(id));
         }
@@ -401,9 +377,6 @@ impl Hooks {
             *pending = kept;
             gone
         };
-        if !gone.is_empty() {
-            self.tell(true);
-        }
         for p in gone {
             info!(request = %p.id, session, "a permission request the agent moved past");
             let _ = p.reply.send("{}".to_owned());
@@ -433,7 +406,6 @@ impl Hooks {
         };
         let p = pending.remove(at);
         drop(pending);
-        self.tell(true);
         let body = if top {
             permission::decision(allow, None, None)
         } else {
@@ -652,7 +624,6 @@ async fn handle(hooks: Weak<Hooks>, req: Request<Incoming>) -> Result<Response<B
     }
     // Past the token only: an agent outside Vorn posts here too, and nothing else may hold vornd up.
     *lock(&hooks.last_activity) = Instant::now();
-    hooks.tell(false);
     let header = req
         .headers()
         .get(vorn_hooks::event::TERMINAL_HEADER)

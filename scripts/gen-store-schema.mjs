@@ -1,6 +1,6 @@
 // Writes the JSON Schema the native store's serde types are generated from:
 // the records in packages/shared/src/types.ts and the store's own shapes in
-// packages/server/src/store-types.ts. The vorn-protocol crate turns it into
+// packages/shared/src/store-types.ts. The vorn-protocol crate turns it into
 // Rust when it builds, so this is the only step that reads TypeScript.
 //
 //   node scripts/gen-store-schema.mjs           write the schema
@@ -51,7 +51,7 @@ const SOURCES = [
     ]
   },
   {
-    path: 'packages/server/src/store-types.ts',
+    path: 'packages/shared/src/store-types.ts',
     types: [
       'ArtifactCommentChange',
       'ArtifactCommentFilter',

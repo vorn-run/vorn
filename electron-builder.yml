@@ -54,30 +54,14 @@ npmRebuild: true
 files:
   - 'out/**/*'
   - 'node_modules/**/*'
-  # The core workspace is linked into node_modules like every workspace, and
-  # would bring its cargo target/ with it. Its one binary ships as an
-  # extraResource below.
+  # The core workspace would bring its cargo target/ with it; its binaries ship as extraResources below.
   - '!node_modules/@vornrun/core/**'
-asarUnpack:
-  - 'node_modules/libsql/**'
-  - 'node_modules/@libsql/**'
-  - 'node_modules/@neon-rs/**'
-  - 'node_modules/detect-libc/**'
 extraResources:
-  - from: 'packages/server/dist'
-    to: 'server'
-    filter:
-      - '**/*'
   - from: 'packages/web/dist'
     to: 'web/dist'
     filter:
       - '**/*'
-  # The Rust core, beside the Node command line that loads it from
-  # resources/server, outside the asar. Built per platform by `yarn build:core`.
-  - from: 'packages/core/vorn_core.node'
-    to: 'core/vorn_core.node'
-  # vornd, the server, from the same `yarn build:core`. Only one of the two
-  # exists on any platform. The app starts it, and serves web/dist through it.
+  # vornd, the server, from `yarn build:core`; only one of the two exists on any platform.
   - from: 'packages/core/vornd'
     to: 'vornd/vornd'
   - from: 'packages/core/vornd.exe'

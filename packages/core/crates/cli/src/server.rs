@@ -6,7 +6,7 @@
 //! secret is kept only as its SHA-256, and whose plaintext,
 //! `vorn_<id>_<base64url secret>`, is printed once and never again.
 //!
-//! `serve` runs the Node server, which is still the one that serves.
+//! `serve` runs vornd as the server.
 
 use std::path::{Path, PathBuf};
 

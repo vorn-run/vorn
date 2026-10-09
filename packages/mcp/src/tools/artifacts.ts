@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { Artifact, ArtifactComment, ArtifactVersion } from '@vornrun/shared/types'
 import { V } from '../validation'
-import { rpcCall } from '@vornrun/server/rpc-client'
+import { rpcCall } from '../rpc-client'
 import { pageResult, withSession, type ToolResult } from './browser'
 
 const MAX_CONTENT = 5 * 1024 * 1024

@@ -1,6 +1,6 @@
 [package]
 name = "vorn-agents"
-# Never published and never versioned on its own; vorn-core carries the app version.
+# Never published and never versioned on its own; the workspace carries the app version.
 version = "0.0.0"
 edition = "2021"
 rust-version = "1.90"

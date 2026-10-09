@@ -1,35 +1,10 @@
-//! The calls vornd answers itself, in the groups it has taken over.
-//!
-//! [`Conn::offer`] sees each call a client sends and decides, by its group's
-//! mode ([`crate::groups`]), whether vornd answers it, the server does, or
-//! both do and the answers are compared:
-//!
-//! - **native**: the call is answered here, framed exactly as the server
-//!   frames it (`{jsonrpc, id, result}`, no `result` at all for
-//!   a call that returns nothing, `{code: -32000, message}` for an error), on
-//!   the connection's one ordered outbox. Some calls are still the server's,
-//!   and go to it: those in [`SERVER_ONLY`], which need what only the server
-//!   holds; any call whose path is in a project on a remote host; and any
-//!   whose params are not the shape the server's handler expects. A
-//!   connection is answered here only once the server has admitted it: the
-//!   desktop's from the start, any other after the server's `auth:ok` or its
-//!   first answer, so a socket that has not authenticated never reaches git
-//!   or the file system through vornd.
-//! - **shadow**: the call goes to the server, whose answer the client gets,
-//!   and calls that change nothing ([`Effect::Read`]) are also run here; the
-//!   two answers are compared when both are in ([`Conn::on_server_text`]),
-//!   and a difference is logged with the method and counted. The client
-//!   never sees vornd's answer. A create (`terminal:create`,
-//!   `shell:create`, `headless:create`) is not run twice either; what
-//!   vornd would start for it is worked out instead ([`sessions::plan`])
-//!   and compared with the spawn the server asks for and the record it
-//!   answers.
+//! The calls vornd answers ([`Conn::offer`]); one nothing here answers is refused as unknown.
 //!
 //! The work runs on blocking threads, at most [`MAX_CONCURRENT`] at a time,
 //! and the calls that change a repository take turns per repository
-//! ([`Turns`]), as the server's do. Calls on an MCP connection's child wait on
-//! the child rather than a thread, and run on the runtime instead. The work
-//! model's calls ([`work`]) are async too: they run workflows.
+//! ([`Turns`]). Calls on an MCP connection's child wait on the child rather
+//! than a thread, and run on the runtime instead. The work model's calls
+//! ([`work`]) are async too: they run workflows.
 //!
 //! Connections and connectors, their secrets included, are vornd's
 //! ([`connectors`]).
@@ -65,137 +40,103 @@ pub mod worktree_move;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{json, Value};
-use tokio::sync::{mpsc, Semaphore};
-use tokio_tungstenite::tungstenite::Message;
+use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
-use vorn_store::{Placement, ProjectHosts, Store};
+use vorn_store::{ProjectHosts, Store};
 
 use crate::applink::AppLink;
-use crate::groups::{Counted, Groups, Mode};
-use crate::registry::{Registry, SessionRegistry};
+use crate::registry::SessionRegistry;
 use crate::streams::Forwarder;
-
-/// How long the comparison of a create's plan waits for the spawn the
-/// server asks for after it answers: it asks once the session holder is up,
-/// which a cold start can take seconds over.
-const SPAWN_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Native calls running at once; the rest wait their turn. A board
 /// refreshing thirty diff panels would otherwise start thirty gits together.
 pub const MAX_CONCURRENT: usize = 8;
 
-/// Whether a call changes anything, which decides whether shadow mode may run
-/// it a second time.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Effect {
-    Read,
-    Change,
-}
-
-/// Every call vornd answers, and its effect. `git:listRemoteBranches`
-/// fetches, `ide:open` starts an editor, `agent:listModels` starts the
-/// agent's CLI, and the two connection calls that start a child run its
-/// tools, so none of them runs twice.
-pub const METHODS: &[(&str, Effect)] = &[
-    ("git:isGitRepo", Effect::Read),
-    ("git:listBranches", Effect::Read),
-    ("git:listRemoteBranches", Effect::Change),
-    ("git:createWorktree", Effect::Change),
-    ("git:getWorktreeBranch", Effect::Read),
-    ("git:worktreeDirty", Effect::Read),
-    ("git:listWorktrees", Effect::Read),
-    ("git:deleteBranches", Effect::Change),
-    ("git:getBranch", Effect::Read),
-    ("git:diffStat", Effect::Read),
-    ("git:diffFull", Effect::Read),
-    ("git:commit", Effect::Change),
-    ("git:push", Effect::Change),
+/// The calls vornd answers beside those its modules list.
+pub const METHODS: &[&str] = &[
+    "git:isGitRepo",
+    "git:listBranches",
+    "git:listRemoteBranches",
+    "git:createWorktree",
+    "git:getWorktreeBranch",
+    "git:worktreeDirty",
+    "git:listWorktrees",
+    "git:deleteBranches",
+    "git:getBranch",
+    "git:diffStat",
+    "git:diffFull",
+    "git:commit",
+    "git:push",
     // Answered once vornd holds the session records ([`worktree_move`]).
-    ("git:renameWorktreeBranch", Effect::Change),
-    ("git:renameWorktree", Effect::Change),
-    ("git:checkoutBranch", Effect::Change),
-    ("file:listDir", Effect::Read),
-    ("file:readContent", Effect::Read),
-    ("file:stamp", Effect::Read),
-    ("file:writeContent", Effect::Change),
-    ("ide:detect", Effect::Read),
-    ("ide:open", Effect::Change),
-    ("server:reachableUrls", Effect::Read),
-    ("tailscale:status", Effect::Read),
-    ("token:list", Effect::Read),
-    ("token:create", Effect::Change),
-    ("token:revoke", Effect::Change),
-    // Pairing is held in one place, the server's or vornd's, so its calls
-    // are never run on both sides to compare: listing prunes, too.
-    ("pairing:start", Effect::Change),
-    ("pairing:pending", Effect::Change),
-    ("pairing:approve", Effect::Change),
-    ("pairing:deny", Effect::Change),
-    ("pairing:cancel", Effect::Change),
-    ("agent:detectInstalled", Effect::Read),
-    ("agent:listModels", Effect::Change),
-    ("sessions:getRecent", Effect::Read),
-    ("sessions:restored", Effect::Read),
-    ("sessions:resume", Effect::Change),
-    ("sessions:clear", Effect::Change),
-    ("shell:listExecutables", Effect::Read),
-    ("shell:listInstalled", Effect::Read),
+    "git:renameWorktreeBranch",
+    "git:renameWorktree",
+    "git:checkoutBranch",
+    "file:listDir",
+    "file:readContent",
+    "file:stamp",
+    "file:writeContent",
+    "ide:detect",
+    "ide:open",
+    "server:reachableUrls",
+    "tailscale:status",
+    "token:list",
+    "token:create",
+    "token:revoke",
+    "pairing:start",
+    "pairing:pending",
+    "pairing:approve",
+    "pairing:deny",
+    "pairing:cancel",
+    "agent:detectInstalled",
+    "agent:listModels",
+    "sessions:getRecent",
+    "sessions:restored",
+    "sessions:resume",
+    "sessions:clear",
+    "shell:listExecutables",
+    "shell:listInstalled",
     // Answered from the copy of the server's records ([`crate::registry`]),
     // which vornd changes itself for the calls that change a terminal
     // ([`sessions`]) or start and stop a headless agent ([`headless`]);
     // the worktree manager's from it and the repositories ([`worktree`]).
-    ("terminal:listActive", Effect::Read),
+    "terminal:listActive",
     // Answered by `crate::terminal` for the session they name.
-    ("terminal:attach", Effect::Read),
-    ("terminal:readOutput", Effect::Read),
-    ("terminal:readScrollback", Effect::Read),
-    ("terminal:lockSize", Effect::Change),
-    ("terminal:create", Effect::Change),
-    ("terminal:kill", Effect::Change),
-    ("terminal:rename", Effect::Change),
-    ("terminal:setGroup", Effect::Change),
-    ("terminal:reorder", Effect::Change),
-    ("shell:create", Effect::Change),
-    ("headless:list", Effect::Read),
-    ("headless:create", Effect::Change),
-    ("headless:kill", Effect::Change),
-    ("worktree:activeSessions", Effect::Read),
-    ("worktree:inventory", Effect::Read),
-    ("worktree:removeMany", Effect::Change),
-    ("worktree:reclaimArtifacts", Effect::Change),
-    ("worktree:pruneOrphans", Effect::Change),
-    ("git:removeWorktree", Effect::Change),
+    "terminal:attach",
+    "terminal:readOutput",
+    "terminal:readScrollback",
+    "terminal:lockSize",
+    "terminal:create",
+    "terminal:kill",
+    "terminal:rename",
+    "terminal:setGroup",
+    "terminal:reorder",
+    "shell:create",
+    "headless:list",
+    "headless:create",
+    "headless:kill",
+    "worktree:activeSessions",
+    "worktree:inventory",
+    "worktree:removeMany",
+    "worktree:reclaimArtifacts",
+    "worktree:pruneOrphans",
+    "git:removeWorktree",
     // The connector inbox's leases are the work model's ([`work`]).
-    ("connector:inboxComplete", Effect::Change),
-    ("connector:inboxRenew", Effect::Change),
-    ("config:load", Effect::Read),
-    ("config:save", Effect::Change),
-];
-
-/// Calls in a native group that the server keeps answering, and why.
-pub const SERVER_ONLY: &[(&str, &str)] = &[
-    ("server:shutdown", "stops the server itself"),
-    (
-        "server:vornd",
-        "reports on the vornd the server keeps running",
-    ),
-    (
-        "auth:authenticate",
-        "admits the server's own socket; vornd checks the credential beside it",
-    ),
+    "connector:inboxComplete",
+    "connector:inboxRenew",
+    "config:load",
+    "config:save",
 ];
 
 /// The desktop's main process claiming its connection ([`desktop`]).
 pub const IDENTIFY: &str = "bridge:identify";
 
-/// The effect of a call vornd answers, or `None` for one it does not. The
-/// work model's calls are all answered here, never compared.
-pub fn effect(method: &str) -> Option<Effect> {
-    if work::METHODS.contains(&method)
+/// Whether vornd answers `method`.
+pub fn answers(method: &str) -> bool {
+    work::METHODS.contains(&method)
         || extensions::METHODS.contains(&method)
         || connectors::METHODS.contains(&method)
         || desktop::answers(method)
@@ -206,10 +147,12 @@ pub fn effect(method: &str) -> Option<Effect> {
         || method == script::METHOD
         || credential::METHODS.contains(&method)
         || hooks::METHODS.contains(&method)
-    {
-        return Some(Effect::Change);
-    }
-    METHODS.iter().find(|(m, _)| *m == method).map(|(_, e)| *e)
+        || METHODS.contains(&method)
+}
+
+/// The group a method belongs to: everything before the first colon.
+pub fn group_of(method: &str) -> &str {
+    method.split_once(':').map_or(method, |(group, _)| group)
 }
 
 /// What a call came to.
@@ -218,14 +161,14 @@ pub enum Answer {
     Result(Value),
     /// A call that returns nothing: the frame has no `result`.
     Void,
-    /// The server's handler would have thrown this message.
+    /// The call failed with this message.
     Error(String),
-    /// The server's to answer.
-    Forward,
+    /// Nothing here answers it: refused as unknown.
+    Unanswered,
 }
 
 impl Answer {
-    /// The frame a client gets for request `id`; `None` to forward.
+    /// The frame a client gets for request `id`; `None` when unanswered.
     pub fn frame(&self, id: &Value) -> Option<Value> {
         let mut frame = json!({ "jsonrpc": "2.0", "id": id });
         match self {
@@ -234,76 +177,9 @@ impl Answer {
             Answer::Error(message) => {
                 frame["error"] = json!({ "code": -32000, "message": message });
             }
-            Answer::Forward => return None,
+            Answer::Unanswered => return None,
         }
         Some(frame)
-    }
-}
-
-/// What two answers to one request are compared by: the result, or the
-/// error's code and message.
-fn comparable(frame: &Value) -> Value {
-    let mut out = serde_json::Map::new();
-    if let Some(result) = frame.get("result") {
-        out.insert("result".into(), result.clone());
-    }
-    if let Some(error) = frame.get("error") {
-        out.insert(
-            "error".into(),
-            json!({ "code": error.get("code"), "message": error.get("message") }),
-        );
-    }
-    Value::Object(out)
-}
-
-/// Where two answers first differ, as a JSON pointer, for the log. The
-/// values themselves are not logged: they can be a file's contents.
-pub fn first_difference(a: &Value, b: &Value) -> String {
-    fn walk(a: &Value, b: &Value, at: &mut String) -> bool {
-        match (a, b) {
-            (Value::Object(x), Value::Object(y)) => {
-                let mut keys: Vec<&String> = x.keys().chain(y.keys()).collect();
-                keys.sort();
-                keys.dedup();
-                for k in keys {
-                    let len = at.len();
-                    at.push('/');
-                    at.push_str(k);
-                    match (x.get(k), y.get(k)) {
-                        (Some(p), Some(q)) if !walk(p, q, at) => return false,
-                        (Some(_), Some(_)) => {}
-                        _ => return false,
-                    }
-                    at.truncate(len);
-                }
-                true
-            }
-            (Value::Array(x), Value::Array(y)) => {
-                for (i, (p, q)) in x.iter().zip(y).enumerate() {
-                    let len = at.len();
-                    at.push_str(&format!("/{i}"));
-                    if !walk(p, q, at) {
-                        return false;
-                    }
-                    at.truncate(len);
-                }
-                if x.len() != y.len() {
-                    at.push_str(&format!("/{}", x.len().min(y.len())));
-                    return false;
-                }
-                true
-            }
-            _ => a == b,
-        }
-    }
-    let mut at = String::new();
-    if walk(a, b, &mut at) {
-        return String::new();
-    }
-    if at.is_empty() {
-        "/".to_owned()
-    } else {
-        at
     }
 }
 
@@ -338,15 +214,14 @@ impl Turns {
 pub struct Native {
     env: Arc<env::SafeEnv>,
     /// `vorn.db`, read to tell a project on this machine from one on a
-    /// remote host, and for how the agents are configured. Without it every
-    /// call that needs either goes to the server, which can tell.
+    /// remote host, and for how the agents are configured.
     db: OnceLock<PathBuf>,
     slots: Semaphore,
     turns: Turns,
     ignored: file::IgnoreCache,
     ides: ide::Ides,
     reach: reach::Reach,
-    /// The app's channel, for what only the server can do.
+    /// What the calls share beyond one connection ([`AppLink`]).
     link: OnceLock<Arc<AppLink>>,
     /// The clients vornd serves itself, as the server: notifications go to them.
     clients: OnceLock<Arc<crate::serve::clients::Clients>>,
@@ -564,7 +439,7 @@ impl Native {
         &self.main
     }
 
-    /// The app's channel. Only the first one given is kept.
+    /// What the calls share beyond one connection. Only the first one given is kept.
     pub fn set_link(&self, link: Arc<AppLink>) {
         let _ = self.link.set(link);
     }
@@ -612,7 +487,7 @@ impl Native {
             Some("worktree") if method != "worktree:activeSessions" => {
                 worktree::call(self, method, params)
             }
-            Some("git") if worktree_move::foresees(method) => {
+            Some("git") if worktree_move::answers(method) => {
                 worktree_move::call(self, method, params)
             }
             Some("git") => git::call(self, method, params),
@@ -634,7 +509,7 @@ impl Native {
                 "shell:create" => sessions::call(self, method, params),
                 _ => not_answered(method),
             },
-            _ => Answer::Forward,
+            _ => Answer::Unanswered,
         }
     }
 
@@ -704,9 +579,9 @@ impl Native {
             });
         }
         if connectors::METHODS.contains(&method.as_str()) {
-            // Only a vornd with no database starts none; its server answers then.
+            // Only a vornd with no database starts none.
             let Some(connectors) = self.connectors.get().cloned() else {
-                return Answer::Forward;
+                return Answer::Unanswered;
             };
             let m = method.clone();
             let running = tokio::spawn(async move { connectors.answer(&m, params).await });
@@ -742,14 +617,13 @@ impl Native {
         }
     }
 
-    /// The server's database, opened beside it for one call. `None` without
-    /// one, and when it cannot be opened (the server answers then).
+    /// The database, opened for one call; `None` without one or when it cannot be opened.
     fn store(&self) -> Option<Store> {
         let db = self.db.get()?;
         match Store::open_beside(db) {
             Ok(store) => store,
             Err(err) => {
-                debug!(%err, "could not open the database; the server answers");
+                debug!(%err, "could not open the database");
                 None
             }
         }
@@ -834,7 +708,7 @@ impl Native {
                     _ => bad_params(method),
                 }
             }
-            _ => Answer::Forward,
+            _ => Answer::Unanswered,
         }
     }
 
@@ -855,7 +729,7 @@ impl Native {
     }
 
     /// Tells every client `method`. Every broadcast vornd makes goes
-    /// through here; for now the server, which holds the clients, sends it.
+    /// through here.
     pub(crate) fn broadcast(&self, method: &str, params: Value) {
         self.broadcast_to(method, params, None);
     }
@@ -869,10 +743,7 @@ impl Native {
 
     /// Where notifications for every client go, to keep beyond this call.
     pub(crate) fn notifier(&self) -> Option<Notifier> {
-        if let Some(clients) = self.clients.get() {
-            return Some(Notifier::Clients(Arc::clone(clients)));
-        }
-        self.link.get().map(|l| Notifier::Link(Arc::clone(l)))
+        self.clients.get().map(|c| Notifier(Arc::clone(c)))
     }
 
     /// The database, once given.
@@ -927,40 +798,21 @@ impl Native {
         match ProjectHosts::read(db) {
             Ok(hosts) => Some(hosts.unwrap_or_default()),
             Err(err) => {
-                debug!(%err, "could not read the projects; the server answers");
+                debug!(%err, "could not read the projects");
                 None
             }
         }
     }
-
-    /// Whether `path` is known to be in no project on a remote host.
-    fn local_path(&self, path: &str) -> bool {
-        self.hosts()
-            .is_some_and(|h| h.for_path(path) == Placement::Local)
-    }
 }
 
-/// Where notifications for every client go: vornd's own clients, or the
-/// server's through the app's channel.
+/// Where notifications for every client go: vornd's clients.
 #[derive(Debug, Clone)]
-pub(crate) enum Notifier {
-    Clients(Arc<crate::serve::clients::Clients>),
-    Link(Arc<AppLink>),
-}
+pub(crate) struct Notifier(Arc<crate::serve::clients::Clients>);
 
 impl Notifier {
     /// Tells `method` with `params`; `scope` is the session it is about.
     pub(crate) fn tell(&self, method: &str, params: Value, scope: Option<&str>) {
-        match self {
-            Notifier::Clients(clients) => clients.broadcast(method, params, scope),
-            Notifier::Link(link) => {
-                let mut note = json!({ "method": method, "params": params });
-                if let Some(scope) = scope {
-                    note["scope"] = json!(scope);
-                }
-                link.tell("vornd:broadcast", note);
-            }
-        }
+        self.0.broadcast(method, params, scope);
     }
 }
 
@@ -998,167 +850,43 @@ fn absolute_str(v: &Value) -> Option<&str> {
         .filter(|p| p.starts_with('/') || Path::new(p).is_absolute())
 }
 
-/// Requests out to the server and to vornd at once, in shadow mode.
-#[derive(Debug, Default)]
-pub struct Shadows {
-    pending: Mutex<HashMap<String, Pending>>,
-    open: AtomicUsize,
-}
-
-#[derive(Debug)]
-struct Pending {
-    method: String,
-    native: Option<Value>,
-    server: Option<Value>,
-}
-
-enum Side {
-    Native,
-    Server,
-}
-
-impl Shadows {
-    fn begin(&self, key: String, method: &str) {
-        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        pending.insert(
-            key,
-            Pending {
-                method: method.to_owned(),
-                native: None,
-                server: None,
-            },
-        );
-        self.open.store(pending.len(), Ordering::Release);
-    }
-
-    fn cancel(&self, key: &str) -> Option<String> {
-        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        let gone = pending.remove(key).map(|p| p.method);
-        self.open.store(pending.len(), Ordering::Release);
-        gone
-    }
-
-    /// Files one side's answer; compares and counts once both are in.
-    fn settle(&self, key: &str, side: Side, answer: Value, groups: &Groups) {
-        let done = {
-            let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(p) = pending.get_mut(key) else {
-                return;
-            };
-            match side {
-                Side::Native => p.native = Some(answer),
-                Side::Server => p.server = Some(answer),
-            }
-            if p.native.is_none() || p.server.is_none() {
-                return;
-            }
-            let done = pending.remove(key);
-            self.open.store(pending.len(), Ordering::Release);
-            done
-        };
-        let Some(Pending {
-            method,
-            native: Some(native),
-            server: Some(server),
-        }) = done
-        else {
-            return;
-        };
-        let (native, server) = (
-            worktree::compared(&method, native),
-            worktree::compared(&method, server),
-        );
-        if native == server {
-            groups.count(&method, Counted::ShadowMatched);
-        } else {
-            let at = first_difference(&native, &server);
-            warn!(%method, differs_at = %at, "shadow answer differs from the server's");
-            groups.count(&method, Counted::ShadowMismatched);
-        }
-    }
-
-    fn waiting(&self) -> bool {
-        self.open.load(Ordering::Acquire) > 0
-    }
-}
-
-/// The group of the credential and Origin checks.
-pub const AUTH_GROUP: &str = "auth";
-/// What a credential check is counted as, wherever the credential came from.
+/// What a credential check is called, wherever the credential came from.
 pub const AUTH_METHOD: &str = "auth:authenticate";
-/// What an Origin check is counted as.
-pub const ORIGIN_METHOD: &str = "auth:origin";
-/// The error code the server answers a call on a socket it has not admitted with.
-const NOT_AUTHENTICATED: i64 = -32001;
-/// The close code the server refuses a credential with.
-pub const CLOSE_CREDENTIAL_REJECTED: u16 = 4002;
-/// The shadow comparison of the credential check, which no request id can
-/// name: ids are JSON, quoted or numbers.
-const CREDENTIAL: &str = "credential";
 
 /// What [`Conn::offer`] did with a frame.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Offer {
-    /// vornd has it; it is not to be sent to the server.
+    /// vornd has it, and answers it.
     Taken,
-    /// Send it to the server as it is.
+    /// Nothing here takes it: refused as unknown.
     Pass,
 }
 
-/// One client connection's view of the native calls.
+/// One client connection's view of the calls.
 pub struct Conn {
     /// The connection's id in [`crate::streams`].
     id: u64,
     native: Arc<Native>,
-    groups: Arc<Groups>,
     reply: Forwarder,
-    /// Where a call vornd took after all goes. Weak, so a call still running
-    /// never keeps the server's side of a closed connection open.
-    upstream: mpsc::WeakSender<Message>,
     authed: AtomicBool,
     /// Who this connection is, as its credential says.
     viewer: Mutex<config::Viewer>,
-    shadows: Arc<Shadows>,
-    /// Shadowed creates whose plan is compared, by request id.
-    plans: Mutex<HashMap<String, Planned>>,
-}
-
-/// A create shadowed, kept until the server answers it and asks for its
-/// spawn: what vornd would start is worked out then ([`Conn::planned_answer`]).
-#[derive(Debug)]
-struct Planned {
-    method: String,
-    params: Value,
-    /// How many shells there were when the call came, before the server's
-    /// answer adds one: a new shell is numbered after them.
-    shells: usize,
 }
 
 impl Conn {
     /// `desktop` connections are admitted from the start: vornd checked
     /// their credential itself.
-    pub fn new(
-        id: u64,
-        native: Arc<Native>,
-        groups: Arc<Groups>,
-        reply: Forwarder,
-        upstream: &mpsc::Sender<Message>,
-        desktop: bool,
-    ) -> Arc<Conn> {
+    pub fn new(id: u64, native: Arc<Native>, reply: Forwarder, desktop: bool) -> Arc<Conn> {
         Arc::new(Conn {
             id,
             native,
-            groups,
             reply,
-            upstream: upstream.downgrade(),
             authed: AtomicBool::new(desktop),
             viewer: Mutex::new(if desktop {
                 config::Viewer::Desktop
             } else {
                 config::Viewer::Local
             }),
-            shadows: Arc::default(),
-            plans: Mutex::default(),
         })
     }
 
@@ -1166,173 +894,43 @@ impl Conn {
         self.authed.load(Ordering::Acquire)
     }
 
-    /// Admits the connection, which presented `raw`: vornd, serving it
-    /// itself, has checked the credential.
+    /// Admits the connection, which presented `raw`, once vornd has checked it.
     pub fn admit(&self, raw: &str) {
         *self.viewer.lock().unwrap_or_else(|e| e.into_inner()) = self.native.viewer_of(raw);
         self.authed.store(true, Ordering::Release);
     }
 
-    /// Checks the credential a client presents, on its upgrade or in
-    /// `auth:authenticate`, by the `auth` group's mode. The server checks it
-    /// too, and closes the socket if it refuses, whatever vornd made of it.
-    ///
-    /// - **native**: a credential vornd admits admits the connection here
-    ///   at once, without waiting for the server's word. One it refuses or
-    ///   cannot read is the server's to judge.
-    /// - **shadow**: vornd's verdict is compared with the server's, which is
-    ///   an answer or `auth:ok` (admitted) or a close with
-    ///   [`CLOSE_CREDENTIAL_REJECTED`] (refused).
-    ///
-    /// The check runs off this task; what it returns ends when it is done,
-    /// which the upgrade's first frame waits for.
-    pub fn check_credential(self: &Arc<Self>, raw: String) -> Option<tokio::task::JoinHandle<()>> {
-        let mode = self.groups.mode(AUTH_GROUP);
-        if mode == Mode::Forward || self.admitted() {
-            self.groups.count(AUTH_METHOD, Counted::Forwarded);
-            return None;
-        }
-        if mode == Mode::Shadow {
-            self.shadows.begin(CREDENTIAL.to_owned(), AUTH_METHOD);
-        }
-        // Who it is counts only once admitted, by vornd or by the server, which may answer first.
-        *self.viewer.lock().unwrap_or_else(|e| e.into_inner()) = self.native.viewer_of(&raw);
-        let conn = Arc::clone(self);
-        Some(tokio::spawn(async move {
-            let native = Arc::clone(&conn.native);
-            let verdict = tokio::task::spawn_blocking(move || native.verify_credential(&raw))
-                .await
-                .unwrap_or(reach::Verdict::CannotTell);
-            match (mode, verdict) {
-                (Mode::Native, reach::Verdict::Admitted) => {
-                    conn.authed.store(true, Ordering::Release);
-                    conn.groups.count(AUTH_METHOD, Counted::Native);
-                }
-                (Mode::Native, _) => conn.groups.count(AUTH_METHOD, Counted::Forwarded),
-                (_, reach::Verdict::CannotTell) => {
-                    conn.groups.count(AUTH_METHOD, Counted::Forwarded);
-                    if conn.shadows.cancel(CREDENTIAL).is_some() {
-                        conn.groups.count(AUTH_METHOD, Counted::ShadowUnported);
-                    }
-                }
-                (_, verdict) => {
-                    conn.groups.count(AUTH_METHOD, Counted::Forwarded);
-                    let admitted = verdict == reach::Verdict::Admitted;
-                    conn.shadows
-                        .settle(CREDENTIAL, Side::Native, json!(admitted), &conn.groups);
-                }
-            }
-        }))
-    }
-
-    /// The server closed the connection with `code`.
-    pub fn on_server_close(&self, code: u16) {
-        if code != CLOSE_CREDENTIAL_REJECTED {
-            return;
-        }
-        if self.authed.swap(false, Ordering::AcqRel) {
-            warn!("the server refused a credential vornd admitted");
-        }
-        self.shadows
-            .settle(CREDENTIAL, Side::Server, json!(false), &self.groups);
-    }
-
-    /// Decides who answers a client's call to `method`, whose frame is `text`.
+    /// Takes a client's call to `method`, whose frame is `text`, when vornd answers it.
     pub fn offer(self: &Arc<Self>, method: &str, text: &str) -> Offer {
-        if method == AUTH_METHOD {
-            if let Some(token) = request_of(text)
-                .and_then(|(_, params)| params.get("token")?.as_str().map(str::to_owned))
-                .filter(|t| !t.is_empty())
-            {
-                // The server answers `auth:ok`, which admits the connection here too.
-                let _ = self.check_credential(token);
-            } else {
-                self.groups.count(method, Counted::Forwarded);
-            }
+        if method == AUTH_METHOD || !self.admitted() {
             return Offer::Pass;
         }
-        // Before a connection is admitted the server refuses it, whatever it asks.
-        if !self.admitted() {
-            self.groups.count(method, Counted::BeforeAuth);
-            return Offer::Pass;
-        }
-        if crate::groups::unknown(method) {
-            if let Some((id, _)) = request_of(text) {
-                let frame = json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": { "code": -32601, "message": format!("Method not found: {method}") },
-                });
-                self.reply.send_now(&frame);
-            }
-            self.groups.count(method, Counted::Native);
-            return Offer::Taken;
-        }
-        let mode = self.groups.route(method);
-        if mode == Mode::Forward {
-            self.groups.count(method, Counted::Forwarded);
-            return Offer::Pass;
-        }
-        if method == extensions::SELECTION_RESULT && mode == Mode::Native && self.admitted() {
+        if method == extensions::SELECTION_RESULT {
             if let Some(host) = self.native.extensions.get() {
                 let params = serde_json::from_str::<Value>(text)
                     .ok()
                     .and_then(|mut frame| frame.get_mut("params").map(Value::take))
                     .unwrap_or_default();
                 host.resolve_selection(&params);
-                self.groups.count(method, Counted::Native);
                 return Offer::Taken;
             }
         }
-        if method == IDENTIFY && mode == Mode::Native && self.admitted() {
+        if method == IDENTIFY {
             self.identify(text);
             return Offer::Taken;
         }
-        let call = effect(method)
-            .filter(|_| self.admitted())
-            .and_then(|e| request_of(text).map(|(id, params)| (e, id, params)));
-        match (mode, call) {
-            (Mode::Native, Some((_, id, params))) => {
-                self.answer(method.to_owned(), id, params, text.to_owned());
+        match request_of(text).filter(|_| answers(method)) {
+            Some((id, params)) => {
+                self.answer(method.to_owned(), id, params);
                 Offer::Taken
             }
-            (Mode::Shadow, Some((Effect::Read, id, params))) => {
-                self.groups.count(method, Counted::Forwarded);
-                self.shadow(method.to_owned(), id, params);
-                Offer::Pass
-            }
-            (Mode::Shadow, Some((Effect::Change, id, params))) if sessions::plans(method) => {
-                self.groups.count(method, Counted::Forwarded);
-                self.plan(method.to_owned(), id, params);
-                Offer::Pass
-            }
-            (Mode::Shadow, Some((Effect::Change, id, params)))
-                if sessions::foresees(method) || worktree::foresees(method) =>
-            {
-                self.groups.count(method, Counted::Forwarded);
-                self.foresee(method, &id, &params);
-                Offer::Pass
-            }
-            (Mode::Shadow, _) if script::compared_by_server(method) => {
-                self.groups.count(method, Counted::Forwarded);
-                Offer::Pass
-            }
-            (Mode::Shadow, _) => {
-                self.groups.count(method, Counted::Forwarded);
-                self.groups.count(method, Counted::ShadowUnported);
-                Offer::Pass
-            }
-            _ => {
-                self.groups.count(method, Counted::Forwarded);
-                Offer::Pass
-            }
+            None => Offer::Pass,
         }
     }
 
     /// Main claims this connection as its own and hears whether it holds it.
     fn identify(&self, text: &str) {
         let claimed = self.native.main.claim(self.id, &self.reply);
-        self.groups.count(IDENTIFY, Counted::Native);
         if let Some((id, _)) = request_of(text) {
             self.reply
                 .send_now(&json!({ "jsonrpc": "2.0", "id": id, "result": { "ok": claimed } }));
@@ -1340,7 +938,7 @@ impl Conn {
     }
 
     /// Whether `text`, a frame without a method, answers a call vornd made
-    /// of main; if so it is settled here and never reaches the server.
+    /// of main; if so it is settled here.
     pub fn settle_desktop(&self, text: &str) -> bool {
         self.native.main.settle(self.id, text)
     }
@@ -1350,209 +948,25 @@ impl Conn {
         self.native.main.release(self.id);
     }
 
-    /// Runs the call off this task and answers it, or sends it on to the
-    /// server when it turns out to be the server's.
-    fn answer(self: &Arc<Self>, method: String, id: Value, params: Value, text: String) {
+    /// Runs the call off this task and answers it.
+    fn answer(self: &Arc<Self>, method: String, id: Value, params: Value) {
         let conn = Arc::clone(self);
         tokio::spawn(async move {
-            let answer = conn.run(method.clone(), params).await;
-            match answer.frame(&id) {
-                Some(frame) => {
-                    conn.groups.count(&method, Counted::Native);
-                    conn.reply.send_now(&frame);
-                }
-                None => {
-                    conn.groups.count(&method, Counted::Forwarded);
-                    if let Some(tx) = conn.upstream.upgrade() {
-                        let _ = tx.send(Message::text(text)).await;
-                    }
-                }
-            }
+            let viewer = conn
+                .viewer
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let answer = conn.native.answer(method.clone(), params, &viewer).await;
+            let frame = answer.frame(&id).unwrap_or_else(|| {
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": { "code": -32601, "message": format!("Method not found: {method}") },
+                })
+            });
+            conn.reply.send_now(&frame);
         });
-    }
-
-    fn shadow(self: &Arc<Self>, method: String, id: Value, params: Value) {
-        let key = id.to_string();
-        self.shadows.begin(key.clone(), &method);
-        let conn = Arc::clone(self);
-        tokio::spawn(async move {
-            let answer = conn.run(method.clone(), params).await;
-            match answer.frame(&id) {
-                Some(frame) => {
-                    conn.shadows
-                        .settle(&key, Side::Native, comparable(&frame), &conn.groups);
-                }
-                None => {
-                    if conn.shadows.cancel(&key).is_some() {
-                        conn.groups.count(&method, Counted::ShadowUnported);
-                    }
-                }
-            }
-        });
-    }
-
-    async fn run(&self, method: String, params: Value) -> Answer {
-        let viewer = self
-            .viewer
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        self.native.answer(method, params, &viewer).await
-    }
-
-    /// Keeps a create the server answers, to work out what vornd would have
-    /// started for it once the server has ([`Conn::planned_answer`]). The
-    /// shells there are now are read before the server's answer can add one.
-    fn plan(&self, method: String, id: Value, params: Value) {
-        let Some(shells) = self
-            .native
-            .registry
-            .get()
-            .and_then(|r| r.read(Registry::shells))
-        else {
-            return self.groups.count(&method, Counted::ShadowUnported);
-        };
-        let key = id.to_string();
-        self.shadows.begin(key.clone(), &method);
-        self.lock_plans().insert(
-            key,
-            Planned {
-                method,
-                params,
-                shells,
-            },
-        );
-    }
-
-    /// Files what vornd would answer a call that changes a terminal, read
-    /// without making the change, for the comparison with the server's
-    /// answer when it comes.
-    fn foresee(&self, method: &str, id: &Value, params: &Value) {
-        let frame = sessions::foresee(&self.native, method, params)
-            .or_else(|| worktree::foresee(&self.native, method, params))
-            .and_then(|a| a.frame(id));
-        let Some(frame) = frame else {
-            return self.groups.count(method, Counted::ShadowUnported);
-        };
-        let key = id.to_string();
-        self.shadows.begin(key.clone(), method);
-        self.shadows
-            .settle(&key, Side::Native, comparable(&frame), &self.groups);
-    }
-
-    /// A shadowed call with nothing native to compare: counted so.
-    fn unported(&self, key: &str, method: &str) {
-        self.lock_plans().remove(key);
-        if self.shadows.cancel(key).is_some() {
-            self.groups.count(method, Counted::ShadowUnported);
-        }
-    }
-
-    fn lock_plans(&self) -> std::sync::MutexGuard<'_, HashMap<String, Planned>> {
-        self.plans.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// The server answered a create whose plan is compared: its side is the
-    /// spawn it asked vornd for under the record's id, with the record.
-    /// vornd's side is worked out only then, after the server's start, which
-    /// writes what a launch reads (a shell's shims) as it goes.
-    fn planned_answer(
-        self: &Arc<Self>,
-        key: String,
-        planned: Planned,
-        frame: &serde_json::Map<String, Value>,
-    ) {
-        // A resume answers `{ok, session}`; a create, the record itself.
-        let record = frame
-            .get("result")
-            .map(|r| r.get("session").cloned().unwrap_or_else(|| r.clone()));
-        let name = record
-            .as_ref()
-            .and_then(|r| r.get("id"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let (Some(record), Some(name), Some(link)) = (record, name, self.native.link.get()) else {
-            return self.unported(&key, &planned.method);
-        };
-        let (conn, link) = (Arc::clone(self), Arc::clone(link));
-        tokio::spawn(async move {
-            let Some(spawn) = link.spawned(&name, SPAWN_WAIT).await else {
-                return conn.unported(&key, &planned.method);
-            };
-            let native = Arc::clone(&conn.native);
-            let Planned {
-                method,
-                params,
-                shells,
-            } = planned;
-            let m = method.clone();
-            let ours =
-                tokio::task::spawn_blocking(move || sessions::plan(&native, &m, &params, shells))
-                    .await
-                    .ok()
-                    .flatten();
-            let Some(ours) = ours else {
-                return conn.unported(&key, &method);
-            };
-            conn.shadows.settle(&key, Side::Native, ours, &conn.groups);
-            let theirs = sessions::spawn_plan(&spawn, &record);
-            conn.shadows
-                .settle(&key, Side::Server, theirs, &conn.groups);
-        });
-    }
-
-    /// Reads a frame the server sent this client: whether it admits the
-    /// connection, and whether it answers a shadowed call. The frame itself
-    /// goes to the client unchanged whatever this finds.
-    pub fn on_server_text(self: &Arc<Self>, text: &str) {
-        let admitting = !self.admitted()
-            && (text.contains("\"result\"")
-                || text.contains("\"error\"")
-                || text.contains("\"auth:ok\""));
-        let shadowed = self.shadows.waiting() && text.contains("\"id\"");
-        if !admitting && !shadowed {
-            return;
-        }
-        let Ok(Value::Object(frame)) = serde_json::from_str::<Value>(text) else {
-            return;
-        };
-        let method = frame.get("method").and_then(Value::as_str);
-        let id = frame.get("id").filter(|id| !id.is_null());
-        if admitting {
-            // The server answers, or sends `auth:ok`, only to a socket it has
-            // admitted: any other gets its not-authenticated refusal.
-            let refused = frame
-                .get("error")
-                .and_then(|e| e.get("code"))
-                .and_then(Value::as_i64)
-                == Some(NOT_AUTHENTICATED);
-            let answer = method.is_none()
-                && id.is_some()
-                && !refused
-                && (frame.contains_key("result") || frame.contains_key("error"));
-            if answer || (method == Some("auth:ok") && id.is_none()) {
-                self.authed.store(true, Ordering::Release);
-                self.shadows
-                    .settle(CREDENTIAL, Side::Server, json!(true), &self.groups);
-            }
-        }
-        if shadowed && method.is_none() {
-            if let Some(key) = id.map(Value::to_string) {
-                if let Some(planned) = self.lock_plans().remove(&key) {
-                    self.planned_answer(key, planned, &frame);
-                    return;
-                }
-            }
-            if let Some(id) = id {
-                let frame = Value::Object(frame.clone());
-                self.shadows.settle(
-                    &id.to_string(),
-                    Side::Server,
-                    comparable(&frame),
-                    &self.groups,
-                );
-            }
-        }
     }
 }
 
@@ -1570,9 +984,10 @@ fn request_of(text: &str) -> Option<(Value, Value)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
     #[test]
-    fn frames_answers_as_the_server_does() {
+    fn frames_answers_as_clients_expect() {
         let id = json!(7);
         assert_eq!(
             Answer::Result(json!(null)).frame(&id),
@@ -1590,32 +1005,7 @@ mod tests {
                 json!({ "jsonrpc": "2.0", "id": "a", "error": { "code": -32000, "message": "no" } })
             )
         );
-        assert_eq!(Answer::Forward.frame(&id), None);
-    }
-
-    #[test]
-    fn compares_results_and_errors_not_framing() {
-        let a = json!({ "jsonrpc": "2.0", "id": 1, "result": [1, 2] });
-        let b = json!({ "id": 1, "result": [1, 2], "jsonrpc": "2.0" });
-        assert_eq!(comparable(&a), comparable(&b));
-        let e = json!({ "id": 1, "error": { "code": -32000, "message": "x", "data": null } });
-        assert_eq!(
-            comparable(&e),
-            json!({ "error": { "code": -32000, "message": "x" } })
-        );
-    }
-
-    #[test]
-    fn says_where_two_answers_differ_without_their_values() {
-        let a = json!({ "result": { "files": [{ "diff": "secret a" }], "n": 1 } });
-        let b = json!({ "result": { "files": [{ "diff": "secret b" }], "n": 1 } });
-        assert_eq!(first_difference(&a, &b), "/result/files/0/diff");
-        assert_eq!(first_difference(&a, &a), "");
-        assert_eq!(
-            first_difference(&json!({ "result": [1] }), &json!({ "result": [1, 2] })),
-            "/result/1"
-        );
-        assert_eq!(first_difference(&json!(1), &json!(2)), "/");
+        assert_eq!(Answer::Unanswered.frame(&id), None);
     }
 
     #[test]
@@ -1633,23 +1023,15 @@ mod tests {
     }
 
     #[test]
-    fn every_server_only_call_is_one_vornd_does_not_answer() {
-        for (method, why) in SERVER_ONLY {
-            assert_eq!(effect(method), None, "{method}");
-            assert!(!why.is_empty());
-            assert!(crate::groups::NATIVE_GROUPS.contains(&crate::groups::group_of(method)));
+    fn answers_the_calls_its_modules_list() {
+        for method in METHODS.iter().chain(work::METHODS) {
+            assert!(answers(method), "{method}");
         }
-        for (method, _) in METHODS {
-            let group = crate::groups::group_of(method);
-            assert!(crate::groups::NATIVE_GROUPS.contains(&group), "{method}");
+        for method in ["server:shutdown", "subscribe:set", "nope:never"] {
+            assert!(!answers(method), "{method}");
         }
-        for method in work::METHODS {
-            assert_eq!(effect(method), Some(Effect::Change), "{method}");
-            assert!(
-                crate::groups::NATIVE_GROUPS.contains(&crate::groups::group_of(method)),
-                "{method}"
-            );
-        }
+        assert_eq!(group_of("git:status"), "git");
+        assert_eq!(group_of("ping"), "ping");
     }
 
     #[test]

@@ -3,11 +3,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
 const { rpcCall } = vi.hoisted(() => ({ rpcCall: vi.fn() }))
 
-vi.mock('../packages/server/src/rpc-client', () => ({
+vi.mock('../packages/mcp/src/rpc-client', () => ({
   rpcCall: (...a: unknown[]) => rpcCall(...a)
-}))
-vi.mock('../packages/server/src/logger', () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }))
 
 import { registerArtifactTools } from '../packages/mcp/src/tools/artifacts'

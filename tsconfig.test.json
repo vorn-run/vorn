@@ -5,7 +5,7 @@
   // suite and `yarn typecheck` stayed green.
   //
   // Its own project rather than an addition to `tsconfig.web.json`: tests reach
-  // into the renderer, the server, main and shared -- several in one file -- and
+  // into the renderer, main, mcp and shared -- several in one file -- and
   // dragging those into a `composite` project the root references would put the
   // same files in two projects with conflicting `rootDir`s.
   //
@@ -18,8 +18,8 @@
     "noEmit": true,
     "target": "ESNext",
     // DOM because much of the suite runs under jsdom. That makes this more
-    // permissive than `packages/server`'s own project, which has no DOM lib --
-    // it cannot add errors here, but a server file reaching for a DOM global is
+    // permissive than `packages/mcp`'s own project, which has no DOM lib --
+    // it cannot add errors here, but an mcp file reaching for a DOM global is
     // still only caught over there.
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "module": "ESNext",

@@ -29,7 +29,7 @@ use vorn_extensions::page;
 use vorn_extensions::usage::{usage_for, Conversation};
 
 use super::{Extensions, Live};
-use crate::proxy::{full, Body};
+use crate::endpoint::{full, Body};
 
 /// The largest bridge call taken.
 const MAX_BODY: usize = 1 << 20;

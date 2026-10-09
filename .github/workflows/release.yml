@@ -69,10 +69,7 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      # The native core (vorn_core.node) and vornd ship in every build: the
-      # server runs git and its store on the core, and every terminal in vornd.
-      # libghostty-vt is built from source with Zig, and its pinned Ghostty commit takes only
-      # Zig 0.15.2.
+      # vornd, vorn-sessiond and vorn ship in every build; libghostty-vt needs Zig 0.15.2.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.15.2
@@ -135,12 +132,11 @@ jobs:
           yarn build
           yarn dist --publish never
 
-      # A release without the core would leave every native switch falling
-      # back, so a missing binary fails the build rather than shipping.
+      # A release without the server would not start, so a missing binary fails the build.
       - name: Packaged core present
         shell: bash
         run: |
-          for name in core/vorn_core.node vornd/vornd vornd/vorn-sessiond vornd/vorn; do
+          for name in vornd/vornd vornd/vorn-sessiond vornd/vorn; do
             # Exact, or with .exe: vornd/vorn is a prefix of vornd/vornd.
             file=$(find dist \( -ipath "*/resources/$name" -o -ipath "*/resources/$name.exe" \) -type f -print -quit)
             if [ -z "$file" ]; then
@@ -203,10 +199,7 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      # The native core (vorn_core.node) and vornd ship in every build: the
-      # server runs git and its store on the core, and every terminal in vornd.
-      # libghostty-vt is built from source with Zig, and its pinned Ghostty commit takes only
-      # Zig 0.15.2.
+      # vornd, vorn-sessiond and vorn ship in every build; libghostty-vt needs Zig 0.15.2.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.15.2
@@ -249,13 +242,12 @@ jobs:
           yarn build
           yarn dist --publish never
 
-      # A release without the core would leave every native switch falling
-      # back, so a missing binary fails the build rather than shipping.
+      # A release without the server would not start, so a missing binary fails the build.
       - name: Packaged core present
         shell: bash
         run: |
           # The ConPTY vorn-sessiond hosts Windows sessions in ships beside it.
-          for name in core/vorn_core.node vornd/vornd vornd/vorn-sessiond vornd/vorn vornd/conpty.dll vornd/x64/OpenConsole.exe; do
+          for name in vornd/vornd vornd/vorn-sessiond vornd/vorn vornd/conpty.dll vornd/x64/OpenConsole.exe; do
             # Exact, or with .exe: vornd/vorn is a prefix of vornd/vornd.
             file=$(find dist \( -ipath "*/resources/$name" -o -ipath "*/resources/$name.exe" \) -type f -print -quit)
             if [ -z "$file" ]; then
@@ -310,10 +302,7 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      # The native core (vorn_core.node) and vornd ship in every build: the
-      # server runs git and its store on the core, and every terminal in vornd.
-      # libghostty-vt is built from source with Zig, and its pinned Ghostty commit takes only
-      # Zig 0.15.2.
+      # vornd, vorn-sessiond and vorn ship in every build; libghostty-vt needs Zig 0.15.2.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.15.2
@@ -356,12 +345,11 @@ jobs:
           yarn build
           yarn dist --publish never
 
-      # A release without the core would leave every native switch falling
-      # back, so a missing binary fails the build rather than shipping.
+      # A release without the server would not start, so a missing binary fails the build.
       - name: Packaged core present
         shell: bash
         run: |
-          for name in core/vorn_core.node vornd/vornd vornd/vorn-sessiond vornd/vorn; do
+          for name in vornd/vornd vornd/vorn-sessiond vornd/vorn; do
             # Exact, or with .exe: vornd/vorn is a prefix of vornd/vornd.
             file=$(find dist \( -ipath "*/resources/$name" -o -ipath "*/resources/$name.exe" \) -type f -print -quit)
             if [ -z "$file" ]; then

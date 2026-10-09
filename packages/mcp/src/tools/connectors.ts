@@ -26,7 +26,7 @@ import type {
   SdkProbeResult,
   SourceConnection
 } from '@vornrun/shared/types'
-import { rpcCall } from '@vornrun/server/rpc-client'
+import { rpcCall } from '../rpc-client'
 import {
   SDK_CONNECTOR_ID,
   connectionConnectorId,

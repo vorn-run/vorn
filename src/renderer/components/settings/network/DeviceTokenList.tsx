@@ -31,7 +31,7 @@ function formatRemaining(ms: number): string {
  * The devices allowed to connect, and the only place to make one.
  *
  * Before this, pairing a phone meant finding a terminal on the machine running the
- * server and typing `vorn-server token create`, which the panel could only tell you
+ * server and typing `vorn server token create`, which the panel could only tell you
  * about rather than do. That was tolerable while the server was always the machine
  * in front of you. It stopped being tolerable once the server could be elsewhere.
  *

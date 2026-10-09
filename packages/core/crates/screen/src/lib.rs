@@ -1,9 +1,7 @@
 //! A terminal's screen, kept in a libghostty-vt terminal: what the server's
 //! history checkpoints serialize, and the title and cwd that travel beside it.
 //!
-//! Plain Rust with no Node in it, so the napi adapter in `vorn-core`, a future
-//! daemon and the native UI can all link it, and its tests and benchmarks run
-//! as ordinary binaries.
+//! Plain Rust, so vornd and the native UI can link it and its tests run as ordinary binaries.
 //!
 //! Differences from the headless xterm it replaces that callers see: the parse
 //! is synchronous, so there is no queue to bound and no drain to wait for, and

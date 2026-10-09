@@ -96,9 +96,9 @@ struct Saved {
 
 /// Answers `config:load` or `config:save` for `viewer`.
 pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &Viewer) -> Answer {
-    // A vornd started without the database (a test's) leaves the call to the server.
+    // Only a test starts vornd without the database.
     if native.database().is_none() {
-        return Answer::Forward;
+        return Answer::Unanswered;
     }
     let (n, key) = (Arc::clone(native), viewer.key());
     match method {
@@ -138,7 +138,7 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
                 Err(message) => Answer::Error(message),
             }
         }
-        _ => Answer::Forward,
+        _ => Answer::Unanswered,
     }
 }
 

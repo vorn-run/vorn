@@ -1,0 +1,722 @@
+{
+  "no server []": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: Vorn from the command line\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>]   Start an agent session\n  vorn session list [--recent] [--json]                  What is running\n  vorn session logs|send|kill <id>                       Read, steer, stop one\n  vorn workflow list [--json]                            Workflows\n  vorn workflow run <name> [--input k=v]                 Start one\n  vorn workflow stop <run>                               Stop a run\n  vorn workflow runs [--workflow <name>] [--json]        Their runs\n  vorn server serve|token                                Run a server, or its tokens\n  vorn mcp                                               Vorn's MCP server, over stdio\n  vorn --help | --version\n\nOptions common to the commands that talk to a server\n  --json              Machine-readable output on stdout\n  --data-dir <path>   Reach a server started with the same flag\n  --timeout <ms>      Give up on a call after this long\n\nRunning `vorn` with no command opens the app. With no server running, a command\nstarts one and says so.\n"
+  },
+  "no server [\"--help\"]": {
+    "code": 0,
+    "out": "vorn: Vorn from the command line\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>]   Start an agent session\n  vorn session list [--recent] [--json]                  What is running\n  vorn session logs|send|kill <id>                       Read, steer, stop one\n  vorn workflow list [--json]                            Workflows\n  vorn workflow run <name> [--input k=v]                 Start one\n  vorn workflow stop <run>                               Stop a run\n  vorn workflow runs [--workflow <name>] [--json]        Their runs\n  vorn server serve|token                                Run a server, or its tokens\n  vorn mcp                                               Vorn's MCP server, over stdio\n  vorn --help | --version\n\nOptions common to the commands that talk to a server\n  --json              Machine-readable output on stdout\n  --data-dir <path>   Reach a server started with the same flag\n  --timeout <ms>      Give up on a call after this long\n\nRunning `vorn` with no command opens the app. With no server running, a command\nstarts one and says so.\n",
+    "err": ""
+  },
+  "no server [\"-h\"]": {
+    "code": 0,
+    "out": "vorn: Vorn from the command line\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>]   Start an agent session\n  vorn session list [--recent] [--json]                  What is running\n  vorn session logs|send|kill <id>                       Read, steer, stop one\n  vorn workflow list [--json]                            Workflows\n  vorn workflow run <name> [--input k=v]                 Start one\n  vorn workflow stop <run>                               Stop a run\n  vorn workflow runs [--workflow <name>] [--json]        Their runs\n  vorn server serve|token                                Run a server, or its tokens\n  vorn mcp                                               Vorn's MCP server, over stdio\n  vorn --help | --version\n\nOptions common to the commands that talk to a server\n  --json              Machine-readable output on stdout\n  --data-dir <path>   Reach a server started with the same flag\n  --timeout <ms>      Give up on a call after this long\n\nRunning `vorn` with no command opens the app. With no server running, a command\nstarts one and says so.\n",
+    "err": ""
+  },
+  "no server [\"help\"]": {
+    "code": 0,
+    "out": "vorn: Vorn from the command line\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>]   Start an agent session\n  vorn session list [--recent] [--json]                  What is running\n  vorn session logs|send|kill <id>                       Read, steer, stop one\n  vorn workflow list [--json]                            Workflows\n  vorn workflow run <name> [--input k=v]                 Start one\n  vorn workflow stop <run>                               Stop a run\n  vorn workflow runs [--workflow <name>] [--json]        Their runs\n  vorn server serve|token                                Run a server, or its tokens\n  vorn mcp                                               Vorn's MCP server, over stdio\n  vorn --help | --version\n\nOptions common to the commands that talk to a server\n  --json              Machine-readable output on stdout\n  --data-dir <path>   Reach a server started with the same flag\n  --timeout <ms>      Give up on a call after this long\n\nRunning `vorn` with no command opens the app. With no server running, a command\nstarts one and says so.\n",
+    "err": ""
+  },
+  "no server [\"--json\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: Vorn from the command line\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>]   Start an agent session\n  vorn session list [--recent] [--json]                  What is running\n  vorn session logs|send|kill <id>                       Read, steer, stop one\n  vorn workflow list [--json]                            Workflows\n  vorn workflow run <name> [--input k=v]                 Start one\n  vorn workflow stop <run>                               Stop a run\n  vorn workflow runs [--workflow <name>] [--json]        Their runs\n  vorn server serve|token                                Run a server, or its tokens\n  vorn mcp                                               Vorn's MCP server, over stdio\n  vorn --help | --version\n\nOptions common to the commands that talk to a server\n  --json              Machine-readable output on stdout\n  --data-dir <path>   Reach a server started with the same flag\n  --timeout <ms>      Give up on a call after this long\n\nRunning `vorn` with no command opens the app. With no server running, a command\nstarts one and says so.\n"
+  },
+  "no server [\"--version\"]": {
+    "code": 0,
+    "out": "<version>\n",
+    "err": ""
+  },
+  "no server [\"server\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn server: run a Vorn server without the desktop app\n\nUsage\n  vorn server serve [options]              Start the server\n  vorn server token create --name <name>   Mint a device token\n  vorn server token list                   List device tokens\n  vorn server token revoke <id>            Revoke a device token\n\nOptions\n  --port <port>       Port to listen on (default: chosen by the OS)\n  --data-dir <path>   Where the database lives (default ~/.vorn)\n  -h, --help          Show this message\n\nA server sharing ~/.vorn with a desktop app on the same machine shares one\ndatabase. Pass --data-dir to keep them apart.\n"
+  },
+  "no server [\"server\",\"--help\"]": {
+    "code": 0,
+    "out": "vorn server: run a Vorn server without the desktop app\n\nUsage\n  vorn server serve [options]              Start the server\n  vorn server token create --name <name>   Mint a device token\n  vorn server token list                   List device tokens\n  vorn server token revoke <id>            Revoke a device token\n\nOptions\n  --port <port>       Port to listen on (default: chosen by the OS)\n  --data-dir <path>   Where the database lives (default ~/.vorn)\n  -h, --help          Show this message\n\nA server sharing ~/.vorn with a desktop app on the same machine shares one\ndatabase. Pass --data-dir to keep them apart.\n",
+    "err": ""
+  },
+  "no server [\"server\",\"help\"]": {
+    "code": 0,
+    "out": "vorn server: run a Vorn server without the desktop app\n\nUsage\n  vorn server serve [options]              Start the server\n  vorn server token create --name <name>   Mint a device token\n  vorn server token list                   List device tokens\n  vorn server token revoke <id>            Revoke a device token\n\nOptions\n  --port <port>       Port to listen on (default: chosen by the OS)\n  --data-dir <path>   Where the database lives (default ~/.vorn)\n  -h, --help          Show this message\n\nA server sharing ~/.vorn with a desktop app on the same machine shares one\ndatabase. Pass --data-dir to keep them apart.\n",
+    "err": ""
+  },
+  "no server [\"session\",\"--help\"]": {
+    "code": 0,
+    "out": "Usage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n",
+    "err": ""
+  },
+  "no server [\"session\"]": {
+    "code": 2,
+    "out": "",
+    "err": "Usage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+  },
+  "no server [\"workflow\",\"-h\"]": {
+    "code": 0,
+    "out": "Usage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish.\n",
+    "err": ""
+  },
+  "no server [\"workflow\"]": {
+    "code": 2,
+    "out": "",
+    "err": "Usage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish.\n"
+  },
+  "no server [\"bogus\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: unknown command \"bogus\". Try: session, workflow, server, help\n"
+  },
+  "no server [\"--data-dir\",\"session\",\"list\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: --data-dir needs a value; it took \"session\" as one\n"
+  },
+  "no server [\"--data-dir\",\"session\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: --data-dir needs a value; it took \"session\" as one\n"
+  },
+  "no server [\"--data-dir\",\"/tmp\",\"nope\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: unknown command \"nope\". Try: session, workflow, server, help\n"
+  },
+  "no server [\"session\",\"dance\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: unknown session command \"dance\"\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+  },
+  "no server [\"workflow\",\"dance\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: unknown workflow command \"dance\"\n\nUsage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish.\n"
+  },
+  "no server [\"session\",\"list\",\"--nope\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: Unknown option '--nope'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"--nope\"\n"
+  },
+  "no server [\"session\",\"list\",\"--json=1\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: Option '--json' does not take an argument\n"
+  },
+  "no server [\"session\",\"start\",\"--agent\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: Option '--agent <value>' argument missing\n"
+  },
+  "no server [\"session\",\"start\",\"--agent\",\"--json\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: Option '--agent' argument is ambiguous.\nDid you forget to specify the option argument for '--agent'?\nTo specify an option argument starting with a dash use '--agent=-XYZ'.\n"
+  },
+  "no server [\"session\",\"list\",\"-hx\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: Unknown option '-x'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"-x\"\n"
+  },
+  "no server [\"session\",\"list\",\"--lines\",\"0\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: --lines must be a positive number, got \"0\"\n"
+  },
+  "no server [\"session\",\"list\",\"--limit\",\"many\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: --limit must be a positive number, got \"many\"\n"
+  },
+  "no server [\"session\",\"list\",\"--timeout\",\"-5\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: Option '--timeout' argument is ambiguous.\nDid you forget to specify the option argument for '--timeout'?\nTo specify an option argument starting with a dash use '--timeout=-XYZ'.\n"
+  },
+  "no server [\"workflow\",\"run\",\"x\",\"--input\",\"novalue\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: --input wants key=value, got \"novalue\"\n"
+  },
+  "no server [\"workflow\",\"list\",\"--data-dir=\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: --data-dir needs a directory\n"
+  },
+  "no server [\"session\",\"list\",\"--version\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: Unknown option '--version'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"--version\"\n"
+  },
+  "no server [\"server\",\"bogus\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: unknown server command \"bogus\". Try: serve, token, help\n"
+  },
+  "no server [\"server\",\"serve\",\"--port=abc\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: --port must be a number, got \"abc\"\n"
+  },
+  "no server [\"server\",\"serve\",\"--nope\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: Unknown option '--nope'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"--nope\"\n"
+  },
+  "no server [\"serve\",\"--port\",\"x\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: --port must be a number, got \"x\"\n"
+  },
+  "no server [\"token\",\"create\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: token create requires --name <name>\n"
+  },
+  "no server [\"server\",\"token\",\"revoke\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: token revoke requires a token id\n"
+  },
+  "no server [\"token\",\"wat\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: unknown token command \"wat\". Try: create, list, revoke\n"
+  },
+  "no server [\"token\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: unknown token command \"\". Try: create, list, revoke\n"
+  },
+  "tokens [\"token\",\"list\",\"--data-dir\",\"<data-dir>\"] empty": {
+    "code": 0,
+    "out": "No device tokens.\n",
+    "err": ""
+  },
+  "tokens [\"token\",\"create\",\"--name\",\"iPhone\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "Created token \"iPhone\" (<id>)\n\n  <token>\n\nThis is the only time it is shown. Store it now.\n",
+    "err": ""
+  },
+  "tokens [\"server\",\"token\",\"list\",\"--data-dir\",\"<data-dir>\"] one active": {
+    "code": 0,
+    "out": "<id>  active   last seen never  iPhone\n",
+    "err": ""
+  },
+  "tokens [\"token\",\"revoke\",\"<id>\",\"--data-dir\",\"<data-dir>\"] again": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: no active token with id <id>\n"
+  },
+  "tokens [\"token\",\"revoke\",\"not-a-token\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: no active token with id not-a-token\n"
+  },
+  "tokens [\"--data-dir\",\"<data-dir>\",\"token\",\"list\"] one revoked": {
+    "code": 0,
+    "out": "<id>  revoked  last seen never  iPhone\n",
+    "err": ""
+  },
+  "scripted [\"session\",\"list\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "ID        AGENT    PROJECT  BRANCH  STATUS\nc3f1a2e8  claude   vorn     main    running\naa11bb22  codex    website  -       idle\naa11cc33  gemini   website  -       waiting\n9b4d0117  copilot  vorn     -       running\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"list\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}"
+  ],
+  "scripted [\"session\",\"list\",\"--json\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "[\n  {\n    \"id\": \"c3f1a2e8-1111-2222-3333-444455556666\",\n    \"agentType\": \"claude\",\n    \"projectName\": \"vorn\",\n    \"projectPath\": \"/work/vorn\",\n    \"branch\": \"main\",\n    \"status\": \"running\"\n  },\n  {\n    \"id\": \"aa11bb22-1111-2222-3333-444455556666\",\n    \"agentType\": \"codex\",\n    \"projectName\": \"website\",\n    \"projectPath\": \"/work/website\",\n    \"status\": \"idle\"\n  },\n  {\n    \"id\": \"aa11cc33-1111-2222-3333-444455556666\",\n    \"agentType\": \"gemini\",\n    \"projectName\": \"website\",\n    \"projectPath\": \"/work/website\",\n    \"status\": \"waiting\"\n  },\n  {\n    \"id\": \"9b4d0117-1111-2222-3333-444455556666\",\n    \"agentType\": \"copilot\",\n    \"projectName\": \"vorn\",\n    \"projectPath\": \"/work/vorn\",\n    \"status\": \"running\"\n  }\n]\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"list\",\"--json\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}"
+  ],
+  "scripted [\"session\",\"list\",\"--project\",\"website\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "ID        AGENT   PROJECT  BRANCH  STATUS\naa11bb22  codex   website  -       idle\naa11cc33  gemini  website  -       waiting\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"list\",\"--project\",\"website\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}"
+  ],
+  "scripted [\"session\",\"list\",\"--project\",\"nowhere\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "",
+    "err": "No sessions running.\n"
+  },
+  "scripted calls [\"session\",\"list\",\"--project\",\"nowhere\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}"
+  ],
+  "scripted [\"session\",\"list\",\"--recent\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "ID          AGENT   PROJECT  WHEN       ACTIVITY\nf00dfeed    claude  website  2474d ago  12 turns\nnot-a-uuid  codex   vorn     2474d ago  idle\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"list\",\"--recent\"]": ["{\"method\":\"sessions:getRecent\"}"],
+  "scripted [\"session\",\"list\",\"--recent\",\"--json\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "[\n  {\n    \"sessionId\": \"f00dfeed-1111-2222-3333-444455556666\",\n    \"agentType\": \"claude\",\n    \"projectPath\": \"/work/website/\",\n    \"timestamp\": 1577836800000,\n    \"activityLabel\": \"12 turns\"\n  },\n  {\n    \"sessionId\": \"not-a-uuid\",\n    \"agentType\": \"codex\",\n    \"projectPath\": \"/work/vorn\",\n    \"timestamp\": \"2020-01-01T00:00:00.000Z\",\n    \"activityLabel\": \"idle\",\n    \"extra\": {\n      \"1\": 1e+21,\n      \"2\": 1.5,\n      \"b\": 1\n    }\n  }\n]\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"list\",\"--recent\",\"--json\"]": [
+    "{\"method\":\"sessions:getRecent\"}"
+  ],
+  "scripted [\"session\",\"list\",\"--recent\",\"--project\",\"website\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "ID        AGENT   PROJECT  WHEN       ACTIVITY\nf00dfeed  claude  website  2474d ago  12 turns\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"list\",\"--recent\",\"--project\",\"website\"]": [
+    "{\"method\":\"config:load\"}",
+    "{\"method\":\"sessions:getRecent\",\"params\":\"/work/website\"}"
+  ],
+  "scripted [\"session\",\"list\",\"--recent\",\"--project\",\"nope\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not list sessions: no project named \"nope\"\n"
+  },
+  "scripted calls [\"session\",\"list\",\"--recent\",\"--project\",\"nope\"]": [
+    "{\"method\":\"config:load\"}"
+  ],
+  "scripted [\"session\",\"list\",\"--recent\",\"--path\",\"/work/./vorn/\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "ID        AGENT   PROJECT  WHEN       ACTIVITY\nf00dfeed  claude  website  2474d ago  12 turns\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"list\",\"--recent\",\"--path\",\"/work/./vorn/\"]": [
+    "{\"method\":\"sessions:getRecent\",\"params\":\"/work/vorn\"}"
+  ],
+  "scripted [\"session\",\"logs\",\"c3f1a2e8\",\"--lines\",\"50\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "first line\nsecond line\nlines: 50\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"logs\",\"c3f1a2e8\",\"--lines\",\"50\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}",
+    "{\"method\":\"terminal:readOutput\",\"params\":{\"id\":\"c3f1a2e8-1111-2222-3333-444455556666\",\"lines\":50}}"
+  ],
+  "scripted [\"session\",\"logs\",\"c3f1a2e8\",\"--json\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "[\n  \"first line\",\n  \"second line\",\n  \"lines: undefined\"\n]\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"logs\",\"c3f1a2e8\",\"--json\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}",
+    "{\"method\":\"terminal:readOutput\",\"params\":{\"id\":\"c3f1a2e8-1111-2222-3333-444455556666\"}}"
+  ],
+  "scripted [\"session\",\"logs\",\"aa11bb22\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "",
+    "err": "Nothing kept for aa11bb22 yet.\n"
+  },
+  "scripted calls [\"session\",\"logs\",\"aa11bb22\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}",
+    "{\"method\":\"terminal:readOutput\",\"params\":{\"id\":\"aa11bb22-1111-2222-3333-444455556666\"}}"
+  ],
+  "scripted [\"session\",\"logs\",\"aa11\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not read the session: \"aa11\" matches 2 sessions: aa11bb22, aa11cc33\n"
+  },
+  "scripted calls [\"session\",\"logs\",\"aa11\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}"
+  ],
+  "scripted [\"session\",\"logs\",\"zzz\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not read the session: no session matches \"zzz\"\n"
+  },
+  "scripted calls [\"session\",\"logs\",\"zzz\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}"
+  ],
+  "scripted [\"session\",\"logs\",\"9b4d0117\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: 9b4d0117 is a headless session, which has no terminal to read. Its output streams to Vorn while it runs; kill it with: vorn session kill 9b4d0117\n"
+  },
+  "scripted calls [\"session\",\"logs\",\"9b4d0117\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}"
+  ],
+  "scripted [\"session\",\"logs\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: session logs needs a session id\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+  },
+  "scripted calls [\"session\",\"logs\"]": [],
+  "scripted [\"session\",\"send\",\"c3f1\",\"hello\",\"there\\n\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "",
+    "err": "Sent to c3f1a2e8.\n"
+  },
+  "scripted calls [\"session\",\"send\",\"c3f1\",\"hello\",\"there\\n\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}",
+    "{\"method\":\"terminal:write\",\"params\":{\"id\":\"c3f1a2e8-1111-2222-3333-444455556666\",\"data\":\"hello there\\r\"}}"
+  ],
+  "scripted [\"session\",\"send\",\"c3f1\",\"q\",\"--raw\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "",
+    "err": "Sent to c3f1a2e8.\n"
+  },
+  "scripted calls [\"session\",\"send\",\"c3f1\",\"q\",\"--raw\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}",
+    "{\"method\":\"terminal:write\",\"params\":{\"id\":\"c3f1a2e8-1111-2222-3333-444455556666\",\"data\":\"q\"}}"
+  ],
+  "scripted [\"session\",\"send\",\"9b4d\",\"hi\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: 9b4d0117 is a headless session, which has no terminal to send to. Its output streams to Vorn while it runs; kill it with: vorn session kill 9b4d0117\n"
+  },
+  "scripted calls [\"session\",\"send\",\"9b4d\",\"hi\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}"
+  ],
+  "scripted [\"session\",\"send\",\"c3f1\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: session send needs a session id and text\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+  },
+  "scripted calls [\"session\",\"send\",\"c3f1\"]": [],
+  "scripted [\"session\",\"kill\",\"9b4d\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "",
+    "err": "Killed 9b4d0117.\n"
+  },
+  "scripted calls [\"session\",\"kill\",\"9b4d\"]": [
+    "{\"method\":\"headless:kill\",\"params\":\"9b4d0117-1111-2222-3333-444455556666\"}",
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:listActive\"}"
+  ],
+  "scripted [\"session\",\"kill\",\"c3f1a2e8-1111-2222-3333-444455556666\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "",
+    "err": "Killed c3f1a2e8.\n"
+  },
+  "scripted calls [\"session\",\"kill\",\"c3f1a2e8-1111-2222-3333-444455556666\"]": [
+    "{\"method\":\"headless:list\"}",
+    "{\"method\":\"terminal:kill\",\"params\":\"c3f1a2e8-1111-2222-3333-444455556666\"}",
+    "{\"method\":\"terminal:listActive\"}"
+  ],
+  "scripted [\"session\",\"kill\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: session kill needs a session id\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+  },
+  "scripted calls [\"session\",\"kill\"]": [],
+  "scripted [\"session\",\"start\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: session start needs --agent\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+  },
+  "scripted calls [\"session\",\"start\"]": [],
+  "scripted [\"session\",\"start\",\"--agent\",\"hal\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: unknown agent \"hal\". Try: claude, copilot, codex, opencode, gemini\n\nUsage\n  vorn session start --agent <agent> [--prompt <text>] [options]\n  vorn session list [--recent] [--project <name>] [--json]\n  vorn session logs <id> [--lines <n>] [--json]\n  vorn session send <id> <text> [--raw]\n  vorn session kill <id>\n\nAgents\n  claude, copilot, codex, opencode, gemini\n\nOptions for start\n  --prompt <text>     First thing the agent is told\n  --project <name>    A project Vorn knows, or a name for this one\n  --path <dir>        Project directory (default: the git root of this one)\n  --branch <branch>   Branch to check out\n  --worktree          Run in a new git worktree\n  --headless          No terminal pane; the agent runs to completion\n  --name <label>      Display name for the session\n"
+  },
+  "scripted calls [\"session\",\"start\",\"--agent\",\"hal\"]": [],
+  "scripted [\"session\",\"start\",\"--agent\",\"claude\",\"--project\",\"website\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "session  d00dd00d-1111-2222-3333-444455556666\nagent    claude\nproject  website\npath     /work/website\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"start\",\"--agent\",\"claude\",\"--project\",\"website\"]": [
+    "{\"method\":\"config:load\"}",
+    "{\"method\":\"terminal:create\",\"params\":{\"agentType\":\"claude\",\"projectName\":\"website\",\"projectPath\":\"/work/website\"}}"
+  ],
+  "scripted [\"session\",\"start\",\"--agent\",\"codex\",\"--path\",\"/work/vorn/\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "session  d00dd00d-1111-2222-3333-444455556666\nagent    codex\nproject  vorn\npath     /work/vorn\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"start\",\"--agent\",\"codex\",\"--path\",\"/work/vorn/\"]": [
+    "{\"method\":\"config:load\"}",
+    "{\"method\":\"terminal:create\",\"params\":{\"agentType\":\"codex\",\"projectName\":\"vorn\",\"projectPath\":\"/work/vorn\"}}"
+  ],
+  "scripted [\"session\",\"start\",\"--agent\",\"gemini\",\"--path\",\"<project>\",\"--prompt\",\"fix it\",\"--branch\",\"feature\",\"--worktree\",\"--name\",\"Fixer\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "session  d00dd00d-1111-2222-3333-444455556666\nagent    gemini\nproject  outside\npath     /work/.worktrees/x\nbranch   feature\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"start\",\"--agent\",\"gemini\",\"--path\",\"<project>\",\"--prompt\",\"fix it\",\"--branch\",\"feature\",\"--worktree\",\"--name\",\"Fixer\"]": [
+    "{\"method\":\"config:load\"}",
+    "{\"method\":\"config:save\",\"params\":{\"version\":1,\"defaults\":{\"shell\":\"/bin/zsh\",\"fontSize\":14,\"theme\":\"dark\"},\"projects\":[{\"name\":\"vorn\",\"path\":\"/work/vorn\",\"preferredAgents\":[\"claude\"]},{\"name\":\"website\",\"path\":\"/work/website\"},{\"name\":\"outside\",\"path\":\"<project>\",\"preferredAgents\":[\"gemini\"]}],\"workflows\":[]}}",
+    "{\"method\":\"terminal:create\",\"params\":{\"agentType\":\"gemini\",\"projectName\":\"outside\",\"projectPath\":\"<project>\",\"initialPrompt\":\"fix it\",\"branch\":\"feature\",\"useWorktree\":true,\"displayName\":\"Fixer\"}}"
+  ],
+  "scripted [\"session\",\"start\",\"--agent\",\"claude\",\"--headless\",\"--json\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "{\n  \"id\": \"d00dd00d-1111-2222-3333-444455556666\",\n  \"status\": \"running\",\n  \"agentType\": \"claude\",\n  \"projectName\": \"project\",\n  \"projectPath\": \"<home>/project\",\n  \"branch\": null\n}\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"start\",\"--agent\",\"claude\",\"--headless\",\"--json\"]": [
+    "{\"method\":\"config:load\"}",
+    "{\"method\":\"config:save\",\"params\":{\"version\":1,\"defaults\":{\"shell\":\"/bin/zsh\",\"fontSize\":14,\"theme\":\"dark\"},\"projects\":[{\"name\":\"vorn\",\"path\":\"/work/vorn\",\"preferredAgents\":[\"claude\"]},{\"name\":\"website\",\"path\":\"/work/website\"},{\"name\":\"project\",\"path\":\"<home>/project\",\"preferredAgents\":[\"claude\"]}],\"workflows\":[]}}",
+    "{\"method\":\"headless:create\",\"params\":{\"agentType\":\"claude\",\"projectName\":\"project\",\"projectPath\":\"<home>/project\"}}"
+  ],
+  "scripted [\"session\",\"start\",\"--agent\",\"opencode\",\"--project\",\"brand-new\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "session  d00dd00d-1111-2222-3333-444455556666\nagent    opencode\nproject  brand-new\npath     <home>/project\n",
+    "err": ""
+  },
+  "scripted calls [\"session\",\"start\",\"--agent\",\"opencode\",\"--project\",\"brand-new\"]": [
+    "{\"method\":\"config:load\"}",
+    "{\"method\":\"config:save\",\"params\":{\"version\":1,\"defaults\":{\"shell\":\"/bin/zsh\",\"fontSize\":14,\"theme\":\"dark\"},\"projects\":[{\"name\":\"vorn\",\"path\":\"/work/vorn\",\"preferredAgents\":[\"claude\"]},{\"name\":\"website\",\"path\":\"/work/website\"},{\"name\":\"brand-new\",\"path\":\"<home>/project\",\"preferredAgents\":[\"opencode\"]}],\"workflows\":[]}}",
+    "{\"method\":\"terminal:create\",\"params\":{\"agentType\":\"opencode\",\"projectName\":\"brand-new\",\"projectPath\":\"<home>/project\"}}"
+  ],
+  "scripted [\"workflow\",\"list\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "ID                            NAME                   TRIGGER  ENABLED  LAST RUN  WHEN\nsystem:default-task-workflow  Default Task Workflow  manual   yes      -         -\n0f1e2d3c                      Nightly build          cron     no       error     2474d ago\nimport:alpha                  Twin                   manual   yes      ran       2474d ago\nimport:beta                   twin                   none     yes      -         -\nnever-starts                  Never starts           none     yes      -         -\n",
+    "err": ""
+  },
+  "scripted calls [\"workflow\",\"list\"]": ["{\"method\":\"workflow:list\"}"],
+  "scripted [\"workflow\",\"list\",\"--json\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "[\n  {\n    \"id\": \"system:default-task-workflow\",\n    \"name\": \"Default Task Workflow\",\n    \"enabled\": true,\n    \"nodes\": [\n      {\n        \"id\": \"t\",\n        \"type\": \"trigger\",\n        \"config\": {\n          \"triggerType\": \"manual\"\n        }\n      }\n    ],\n    \"edges\": []\n  },\n  {\n    \"id\": \"0f1e2d3c-1111-2222-3333-444455556666\",\n    \"name\": \"Nightly build\",\n    \"enabled\": false,\n    \"lastRunAt\": \"2020-01-01T00:00:00.000Z\",\n    \"lastRunStatus\": \"error\",\n    \"nodes\": [\n      {\n        \"id\": \"t\",\n        \"type\": \"trigger\",\n        \"config\": {\n          \"triggerType\": \"cron\"\n        }\n      }\n    ],\n    \"edges\": []\n  },\n  {\n    \"id\": \"import:alpha\",\n    \"name\": \"Twin \",\n    \"enabled\": true,\n    \"lastRunAt\": \"2020-01-01T00:00:00.000Z\",\n    \"nodes\": [\n      {\n        \"id\": \"t\",\n        \"type\": \"trigger\",\n        \"config\": {}\n      }\n    ],\n    \"edges\": []\n  },\n  {\n    \"id\": \"import:beta\",\n    \"name\": \"twin\",\n    \"enabled\": true,\n    \"nodes\": [],\n    \"edges\": []\n  },\n  {\n    \"id\": \"never-starts\",\n    \"name\": \"Never starts\",\n    \"enabled\": true,\n    \"nodes\": [],\n    \"edges\": []\n  }\n]\n",
+    "err": ""
+  },
+  "scripted calls [\"workflow\",\"list\",\"--json\"]": ["{\"method\":\"workflow:list\"}"],
+  "scripted [\"workflow\",\"run\",\"nightly BUILD\",\"--input\",\"pr=42\",\"--input\",\"x=a=b\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "run      6b6b6b6b-1111-2222-3333-444455556666\nworkflow Nightly build\nsteps    2 to run\n",
+    "err": "Follow it with: vorn workflow runs --workflow 0f1e2d3c\n"
+  },
+  "scripted calls [\"workflow\",\"run\",\"nightly BUILD\",\"--input\",\"pr=42\",\"--input\",\"x=a=b\"]": [
+    "{\"method\":\"workflow:list\"}",
+    "{\"method\":\"workflow:run\",\"params\":{\"workflowId\":\"0f1e2d3c-1111-2222-3333-444455556666\",\"context\":{\"inputs\":{\"pr\":\"42\",\"x\":\"a=b\"}}}}"
+  ],
+  "scripted [\"workflow\",\"run\",\"0f1e\",\"--json\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "{\n  \"runId\": \"6b6b6b6b-1111-2222-3333-444455556666\",\n  \"workflowId\": \"0f1e2d3c-1111-2222-3333-444455556666\",\n  \"context\": null,\n  \"nodeStates\": [\n    {\n      \"status\": \"pending\"\n    },\n    {\n      \"status\": \"pending\"\n    },\n    {\n      \"status\": \"skipped\"\n    }\n  ]\n}\n",
+    "err": ""
+  },
+  "scripted calls [\"workflow\",\"run\",\"0f1e\",\"--json\"]": [
+    "{\"method\":\"workflow:list\"}",
+    "{\"method\":\"workflow:run\",\"params\":{\"workflowId\":\"0f1e2d3c-1111-2222-3333-444455556666\"}}"
+  ],
+  "scripted [\"workflow\",\"run\",\"import:\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not start the workflow: \"import:\" matches 2 workflows: Twin , twin\n"
+  },
+  "scripted calls [\"workflow\",\"run\",\"import:\"]": ["{\"method\":\"workflow:list\"}"],
+  "scripted [\"workflow\",\"run\",\"twin\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not start the workflow: \"twin\" matches 2 workflows; use an id\n"
+  },
+  "scripted calls [\"workflow\",\"run\",\"twin\"]": ["{\"method\":\"workflow:list\"}"],
+  "scripted [\"workflow\",\"run\",\"missing\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not start the workflow: no workflow matches \"missing\"\n"
+  },
+  "scripted calls [\"workflow\",\"run\",\"missing\"]": ["{\"method\":\"workflow:list\"}"],
+  "scripted [\"workflow\",\"run\",\"never-starts\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: \"Never starts\" did not start. Check the server log.\n"
+  },
+  "scripted calls [\"workflow\",\"run\",\"never-starts\"]": [
+    "{\"method\":\"workflow:list\"}",
+    "{\"method\":\"workflow:run\",\"params\":{\"workflowId\":\"never-starts\"}}"
+  ],
+  "scripted [\"workflow\",\"run\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: workflow run needs a workflow\n\nUsage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish.\n"
+  },
+  "scripted calls [\"workflow\",\"run\"]": [],
+  "scripted [\"workflow\",\"stop\",\"5a5\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not stop the run: \"5a5\" matches 2 runs: 5a5a5a5a, 5a5b0000\n"
+  },
+  "scripted calls [\"workflow\",\"stop\",\"5a5\"]": [
+    "{\"method\":\"workflowRun:listRunning\"}",
+    "{\"method\":\"workflowRun:listWaiting\"}"
+  ],
+  "scripted [\"workflow\",\"stop\",\"5a5a\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "",
+    "err": "Stopped 5a5a5a5a.\n"
+  },
+  "scripted calls [\"workflow\",\"stop\",\"5a5a\"]": [
+    "{\"method\":\"workflow:stopRun\",\"params\":{\"runId\":\"5a5a5a5a-1111-2222-3333-444455556666\"}}",
+    "{\"method\":\"workflowRun:listRunning\"}",
+    "{\"method\":\"workflowRun:listWaiting\"}"
+  ],
+  "scripted [\"workflow\",\"stop\",\"zz\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not stop the run: no run in flight matches \"zz\"\n"
+  },
+  "scripted calls [\"workflow\",\"stop\",\"zz\"]": [
+    "{\"method\":\"workflowRun:listRunning\"}",
+    "{\"method\":\"workflowRun:listWaiting\"}"
+  ],
+  "scripted [\"workflow\",\"stop\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 2,
+    "out": "",
+    "err": "vorn: workflow stop needs a run\n\nUsage\n  vorn workflow list [--json]\n  vorn workflow run <name or id> [--input key=value] [--json]\n  vorn workflow stop <run>\n  vorn workflow runs [--workflow <name or id>] [--limit <n>] [--json]\n\nA run happens in the server, so it keeps going when nothing is watching. The\ncommand answers with the run rather than waiting for it to finish.\n"
+  },
+  "scripted calls [\"workflow\",\"stop\"]": [],
+  "scripted [\"workflow\",\"runs\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "RUN       WORKFLOW       STATUS   STARTED\n5a5a5a5a  Nightly build  running  2474d ago\n5a5b0000  gone-workflow  success  2474d ago\n",
+    "err": ""
+  },
+  "scripted calls [\"workflow\",\"runs\"]": [
+    "{\"method\":\"workflow:list\"}",
+    "{\"method\":\"workflowRun:listAll\",\"params\":{}}"
+  ],
+  "scripted [\"workflow\",\"runs\",\"--limit\",\"1\",\"--json\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "[\n  {\n    \"runId\": \"5a5a5a5a-1111-2222-3333-444455556666\",\n    \"workflowId\": \"0f1e2d3c-1111-2222-3333-444455556666\",\n    \"status\": \"running\",\n    \"startedAt\": \"2020-01-01T00:00:00.000Z\",\n    \"nodeStates\": []\n  }\n]\n",
+    "err": ""
+  },
+  "scripted calls [\"workflow\",\"runs\",\"--limit\",\"1\",\"--json\"]": [
+    "{\"method\":\"workflow:list\"}",
+    "{\"method\":\"workflowRun:listAll\",\"params\":{\"limit\":1}}"
+  ],
+  "scripted [\"workflow\",\"runs\",\"--workflow\",\"nightly build\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "RUN       WORKFLOW       STATUS   STARTED\n5a5a5a5a  Nightly build  running  2474d ago\n",
+    "err": ""
+  },
+  "scripted calls [\"workflow\",\"runs\",\"--workflow\",\"nightly build\"]": [
+    "{\"method\":\"workflow:list\"}",
+    "{\"method\":\"workflowRun:list\",\"params\":{\"workflowId\":\"0f1e2d3c-1111-2222-3333-444455556666\"}}"
+  ],
+  "scripted [\"workflow\",\"runs\",\"--workflow\",\"Never starts\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "",
+    "err": "No runs.\n"
+  },
+  "scripted calls [\"workflow\",\"runs\",\"--workflow\",\"Never starts\"]": [
+    "{\"method\":\"workflow:list\"}",
+    "{\"method\":\"workflowRun:list\",\"params\":{\"workflowId\":\"never-starts\"}}"
+  ],
+  "scripted [\"workflow\",\"runs\",\"--workflow\",\"import:\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not list runs: \"import:\" matches 2 workflows: Twin , twin\n"
+  },
+  "scripted calls [\"workflow\",\"runs\",\"--workflow\",\"import:\"]": [
+    "{\"method\":\"workflow:list\"}"
+  ],
+  "failing [\"workflow\",\"list\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not list workflows: This server does not have workflow:list, so it is older than the vorn command asking for it.\nRestart Vorn to pick up the newer server, or run this against the matching build.\n"
+  },
+  "failing [\"session\",\"list\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not list sessions: database is locked\n"
+  },
+  "failing [\"session\",\"kill\",\"x\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not kill the session: database is locked\n"
+  },
+  "closing [\"workflow\",\"list\",\"--data-dir\",\"<data-dir>\"] with 4001": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not list workflows: A Vorn server on this port refused the credential in <data-dir>/local-token.\nAnother server is listening on it with its own data directory, which a dev build\nrunning beside the app does. Point at that one with --data-dir (or VORN_DATA_DIR),\nor stop it.\n"
+  },
+  "closing [\"workflow\",\"list\",\"--data-dir\",\"<data-dir>\"] with 4002": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not list workflows: A Vorn server on this port refused the credential in <data-dir>/local-token.\nAnother server is listening on it with its own data directory, which a dev build\nrunning beside the app does. Point at that one with --data-dir (or VORN_DATA_DIR),\nor stop it.\n"
+  },
+  "closing [\"workflow\",\"list\",\"--data-dir\",\"<data-dir>\"] with 4000": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not list workflows: The server closed the connection before answering (code 4000).\n"
+  },
+  "silent [\"session\",\"list\",\"--timeout\",\"300\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not list sessions: RPC call \"terminal:listActive\" timed out after 300ms\n"
+  },
+  "no credential [\"workflow\",\"runs\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not list runs: Vorn local credential not found (<data-dir>/local-token).\nThe server writes it on startup and removes it on shutdown, so this usually means\nVorn is not running. Start Vorn (or `vorn server serve`) and try again.\nIf the server runs with --data-dir, pass the same --data-dir here, or set\nVORN_DATA_DIR to that directory -- which is how anything that is not the CLI,\nMCP included, reaches a server that moved.\n"
+  },
+  "refused [\"workflow\",\"list\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not list workflows: Cannot connect to Vorn server: connect ECONNREFUSED 127.0.0.1:<port>. Is the app running?\n"
+  },
+  "real server [\"workflow\",\"list\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "ID                            NAME                       TRIGGER            ENABLED  LAST RUN  WHEN\nsystem:default-task-workflow  Default Task Workflow      taskStatusChanged  yes      -         -\nsystem:dev-server-on-restore  Bring the dev server back  sessionRestored    no       -         -\n",
+    "err": ""
+  },
+  "real server [\"workflow\",\"list\",\"--json\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "[\n  {\n    \"edges\": [\n      {\n        \"id\": \"e1\",\n        \"source\": \"trigger-1\",\n        \"target\": \"launch-1\"\n      }\n    ],\n    \"enabled\": true,\n    \"icon\": \"Play\",\n    \"iconColor\": \"#10b981\",\n    \"id\": \"system:default-task-workflow\",\n    \"name\": \"Default Task Workflow\",\n    \"nodes\": [\n      {\n        \"id\": \"trigger-1\",\n        \"type\": \"trigger\",\n        \"label\": \"When task moves to In Progress\",\n        \"position\": {\n          \"x\": 0,\n          \"y\": 0\n        },\n        \"config\": {\n          \"triggerType\": \"taskStatusChanged\",\n          \"fromStatus\": \"todo\",\n          \"toStatus\": \"in_progress\"\n        }\n      },\n      {\n        \"id\": \"launch-1\",\n        \"type\": \"launchAgent\",\n        \"label\": \"Launch task agent\",\n        \"position\": {\n          \"x\": 0,\n          \"y\": 120\n        },\n        \"config\": {\n          \"agentType\": \"fromTask\",\n          \"projectName\": \"\",\n          \"projectPath\": \"\",\n          \"headless\": true\n        }\n      }\n    ],\n    \"workspaceId\": \"personal\"\n  },\n  {\n    \"edges\": [\n      {\n        \"id\": \"e1\",\n        \"source\": \"trigger-1\",\n        \"target\": \"script-1\"\n      }\n    ],\n    \"enabled\": false,\n    \"icon\": \"RotateCcw\",\n    \"iconColor\": \"#c9972a\",\n    \"id\": \"system:dev-server-on-restore\",\n    \"name\": \"Bring the dev server back\",\n    \"nodes\": [\n      {\n        \"id\": \"trigger-1\",\n        \"type\": \"trigger\",\n        \"label\": \"When a session is restored\",\n        \"position\": {\n          \"x\": 0,\n          \"y\": 0\n        },\n        \"config\": {\n          \"triggerType\": \"sessionRestored\"\n        }\n      },\n      {\n        \"id\": \"script-1\",\n        \"type\": \"script\",\n        \"label\": \"Start the dev server\",\n        \"position\": {\n          \"x\": 0,\n          \"y\": 120\n        },\n        \"config\": {\n          \"scriptType\": \"bash\",\n          \"scriptContent\": \"yarn dev\",\n          \"cwd\": \"{{context.projectPath}}\"\n        }\n      }\n    ],\n    \"workspaceId\": \"personal\"\n  }\n]\n",
+    "err": ""
+  },
+  "real server [\"workflow\",\"runs\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "",
+    "err": "No runs.\n"
+  },
+  "real server [\"workflow\",\"runs\",\"--json\",\"--limit\",\"5\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "[]\n",
+    "err": ""
+  },
+  "real server [\"session\",\"list\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "",
+    "err": "No sessions running.\n"
+  },
+  "real server [\"session\",\"list\",\"--json\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "[]\n",
+    "err": ""
+  },
+  "real server [\"session\",\"list\",\"--recent\",\"--json\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 0,
+    "out": "[]\n",
+    "err": ""
+  },
+  "real server [\"session\",\"logs\",\"nope\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not read the session: no session matches \"nope\"\n"
+  },
+  "real server [\"session\",\"kill\",\"nope\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not kill the session: no session matches \"nope\"\n"
+  },
+  "real server [\"workflow\",\"stop\",\"nope\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not stop the run: no run in flight matches \"nope\"\n"
+  },
+  "real server [\"workflow\",\"run\",\"no such workflow\",\"--data-dir\",\"<data-dir>\"]": {
+    "code": 1,
+    "out": "",
+    "err": "vorn: could not start the workflow: no workflow matches \"no such workflow\"\n"
+  }
+}

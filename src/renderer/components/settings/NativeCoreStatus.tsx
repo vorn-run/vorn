@@ -21,20 +21,6 @@ function olderNote(h: SessionHolder): string {
     : `${held} ${verb} on a session holder (${h.build}) this version cannot talk to. They keep running until you end them.`
 }
 
-/** What is missing when the server runs without all of the native core, or null. */
-function coreNote(status: CoreStatus | null): string | null {
-  if (!status) return null
-  if (!status.loaded) {
-    return `The native core did not load, so git runs more slowly${
-      status.error ? `: ${status.error}` : '.'
-    }`
-  }
-  if (status.missing.length) {
-    return `This build of the native core was made without ${status.missing.join(', ')}.`
-  }
-  return null
-}
-
 /** The native core and vornd's session holders: what is wrong with them, and older holders to end. */
 export function NativeCoreStatus() {
   // Null until it arrives, and for a server older than the method.
@@ -74,7 +60,6 @@ export function NativeCoreStatus() {
     }
   }, [])
 
-  const note = coreNote(status)
   const daemonNote = vorndNote(daemon)
 
   const endHolder = (h: SessionHolder): void => {
@@ -92,11 +77,6 @@ export function NativeCoreStatus() {
   return (
     <div className="mt-6">
       {status?.version && <div className="text-xs text-gray-500">Native core {status.version}</div>}
-      {note && (
-        <div className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
-          {note}
-        </div>
-      )}
       {daemonNote && (
         <div className="mt-2 px-4 py-3 border border-white/[0.08] bg-white/[0.03] rounded-lg text-xs text-gray-400">
           {daemonNote}

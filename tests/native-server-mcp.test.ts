@@ -2,7 +2,7 @@
  * vornd's MCP server at `/mcp`, against the TypeScript MCP server.
  *
  * vornd is started as the server on a data directory of its own, serving
- * MCP, and a second one leaving `/mcp` unserved. The TypeScript server runs
+ * MCP. The TypeScript server runs
  * in this process on the same database, and reaches vornd over its socket
  * as it does when an agent starts it; vornd's tools reach it through vornd's
  * own `/ws`.
@@ -15,8 +15,7 @@
  * whose handler would start something real (a process, a download, an
  * agent) is only sent arguments its schema refuses.
  *
- * Runs where vornd has been built (`yarn build:core`, or the binary in
- * `VORN_CONFORMANCE_VORND`).
+ * Runs where vornd has been built (`yarn build:core`).
  */
 import fs from 'node:fs'
 import os from 'node:os'
@@ -38,7 +37,6 @@ const SEED = Number(process.env.VORN_MCP_PARITY_SEED ?? 0x6d63)
 const RANDOM_CASES = 6
 
 const vornd = [
-  process.env.VORN_CONFORMANCE_VORND,
   path.resolve(__dirname, `../packages/core/vornd${EXE}`),
   path.resolve(__dirname, `../packages/core/target/release/vornd${EXE}`)
 ].find((p): p is string => !!p && fs.existsSync(p))
@@ -310,15 +308,13 @@ async function vorndSide(port: number, credentials: Record<string, string>): Pro
   }
 }
 
-type Groups = Record<string, { mode?: string; native?: number; forwarded?: number }>
-
-async function groups(v: Served): Promise<Groups> {
+/** What vornd's health check says of its MCP server. */
+async function mcpHealth(v: Served): Promise<{ sessions?: number } | null> {
   const res = await fetch(`http://127.0.0.1:${v.port}/vornd/health`)
-  return ((await res.json()) as { groups: Groups }).groups
+  return ((await res.json()) as { mcp?: { sessions?: number } | null }).mcp ?? null
 }
 
 let native: Served | undefined
-let forward: Served | undefined
 let ts: Side
 let rust: Side
 let version: string
@@ -334,22 +330,14 @@ const credentials = (): Record<string, string> => ({
 
 /** Writes the starting configuration back, for the next call to start from. */
 async function reset(): Promise<void> {
-  const { configManager } = await import('../packages/server/src/config-manager')
-  configManager.saveConfig(structuredClone(start))
-  await forgetCache()
-}
-
-/** Clears the in-process cached configuration, so the next read is the database's. */
-async function forgetCache(): Promise<void> {
-  const { configManager } = await import('../packages/server/src/config-manager')
-  ;(configManager as unknown as { cachedConfig: unknown }).cachedConfig = null
+  const { rpcCall } = await import('../packages/mcp/src/rpc-client')
+  await rpcCall('config:save', structuredClone(start))
 }
 
 /** The configuration as the database holds it now, but for how many times it was saved. */
 async function stored(): Promise<unknown> {
-  await forgetCache()
-  const { configManager } = await import('../packages/server/src/config-manager')
-  const { revision: _revision, ...config } = configManager.loadConfig() as AppConfig & {
+  const { rpcCall } = await import('../packages/mcp/src/rpc-client')
+  const { revision: _revision, ...config } = (await rpcCall('config:load')) as AppConfig & {
     revision?: number
   }
   return config
@@ -383,9 +371,6 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
     store.dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-native-mcp-')))
     process.env.VORN_DATA_DIR = store.dir
     native = await startServed({ dataDir: store.dir, credential: TEST_CREDENTIAL })
-    forward = await startServed({ credential: TEST_CREDENTIAL, args: ['--groups', 'mcp=forward'] })
-    const { configManager } = await import('../packages/server/src/config-manager')
-    configManager.init(store.dir)
     start = fixture(process.cwd())
     fixtureIds = uuidsIn(start)
     await reset()
@@ -415,10 +400,8 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
   }, 60_000)
 
   afterAll(async () => {
-    const { configManager } = await import('../packages/server/src/config-manager')
-    configManager.close()
-    await Promise.all([native?.stop(), forward?.stop()])
-    for (const dir of [store.dir, native?.home, forward?.home, forward?.dataDir]) {
+    await native?.stop()
+    for (const dir of [store.dir, native?.home]) {
       if (dir) fs.rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -511,10 +494,8 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
     expect(answered).toBeGreaterThan(ran / 3)
   }, 300_000)
 
-  it('counts its requests under the mcp group', async () => {
-    const counted = await groups(native!)
-    expect(counted.mcp?.mode).toBe('native')
-    expect(counted.mcp?.native ?? 0).toBeGreaterThan(0)
+  it('says in its health check how many MCP sessions it keeps', async () => {
+    expect((await mcpHealth(native!))?.sessions ?? 0).toBeGreaterThan(0)
   })
 
   it('lets in only an agent holding the local credential', async () => {
@@ -528,14 +509,15 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
     expect((await post(native!.port, {}, ping)).status).toBe(401)
     const wrong = await post(native!.port, { Authorization: 'Bearer not-it' }, ping)
     expect(wrong.status).toBe(401)
-    // Not served, `/mcp` is no route at all.
-    expect((await post(forward!.port, credentials(), ping)).status).toBe(404)
   })
 
   it('relays an agent over stdio to vornd when vornd serves MCP', async () => {
     const { relay, relayHeaders, vorndMcpUrl } = await import('../packages/mcp/src/relay')
     const status = (port: number) => async () => ({ state: 'on', port }) as const
-    expect(await vorndMcpUrl({ vorndStatus: status(forward!.port), fetch })).toBeNull()
+    const unreachable = async () => {
+      throw new Error('no server')
+    }
+    expect(await vorndMcpUrl({ vorndStatus: unreachable, fetch })).toBeNull()
     const url = await vorndMcpUrl({ vorndStatus: status(native!.port), fetch })
     expect(url?.href).toBe(`http://127.0.0.1:${native!.port}/mcp`)
 

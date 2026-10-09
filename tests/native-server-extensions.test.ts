@@ -5,8 +5,8 @@
  * its pane page is served, its bridge takes only its own token, and a child
  * that dies is started again.
  *
- * Runs where vornd and vorn-sessiond have been built (`yarn build:core`, or
- * the binaries in `VORN_CONFORMANCE_VORND`), on a Unix.
+ * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on
+ * a Unix.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -217,13 +217,10 @@ describe.skipIf(!runnable)('extensions through vornd', () => {
     expect((await bridge(host, valueOf(before, 'token'), 'status')).status).toBe(401)
   }, 60_000)
 
-  it('answers every extension call in vornd', async () => {
+  it('reports its extension hosts in its health check', async () => {
     const health = (await (
       await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
-    ).json()) as {
-      groups: Record<string, { native?: number; forwarded?: number; hosts?: number }>
-    }
-    expect(health.groups.extension).toMatchObject({ forwarded: 0, hosts: 2 })
-    expect(health.groups.extension.native).toBeGreaterThan(0)
+    ).json()) as { extensions: { hosts?: number } }
+    expect(health.extensions).toMatchObject({ hosts: 2 })
   })
 })

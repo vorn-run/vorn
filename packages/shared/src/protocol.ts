@@ -1110,7 +1110,7 @@ export interface RequestMethods {
   // These are the one family of methods the server does not itself implement.
   // A `<webview>` guest is only reachable from the Electron main process, so
   // the server forwards each call back over the same bridge main uses to reach
-  // it (see `browserBridge` in packages/server) and main answers from its CDP
+  // it (`native::desktop` in vornd) and main answers from its CDP
   // registry. Every one is session-scoped by the *caller's* identity —
   // `VORN_SESSION_ID`, resolved in the MCP layer — and none of them accepts a
   // session argument, so one session cannot address another's pane.

@@ -20,8 +20,8 @@ use serde_json::{json, Map, Value};
 use vorn_work::inbox::{Received, Request as Hook};
 
 use super::Work;
+use crate::endpoint::{full, Body};
 use crate::pair::PEER_HEADER;
-use crate::proxy::{full, Body};
 
 /// The largest webhook body taken, the server's own limit.
 const MAX_BODY: usize = 1 << 20;

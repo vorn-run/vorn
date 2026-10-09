@@ -1,7 +1,4 @@
-//! vornd as the Vorn server, with no other process behind it: what it
-//! publishes, how a socket is greeted and admitted, the notifications a
-//! client asked for, and calls nobody answers. And the guard that keeps a
-//! debug build off a person's own data directory.
+//! vornd as the server: what it publishes, greeting and admission, topics, unknown calls, the default-dir guard.
 
 use std::io::BufRead;
 use std::path::Path;
@@ -173,10 +170,9 @@ async fn serves_clients_with_nothing_behind_it() {
         json!({ "state": "on", "port": served.port })
     );
 
-    // Nothing was handed on: there is nothing to hand on to.
     let health: Value =
         serde_json::from_str(&reqwest_get(served.port, "/vornd/health").await).unwrap();
-    assert_eq!(health["unexpectedForwards"], json!({}));
+    assert_eq!(health["ok"], true);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
