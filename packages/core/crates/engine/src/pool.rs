@@ -277,6 +277,12 @@ impl Pool {
         all
     }
 
+    /// Whether session `id` is open: without copying every brief, as a
+    /// lookup per spawn or attach must not.
+    pub fn has(&self, id: &str) -> bool {
+        self.shared.briefs().contains_key(id)
+    }
+
     /// Every session as its worker last left it, without waiting for any.
     pub fn briefs(&self) -> Vec<Brief> {
         let mut all: Vec<Brief> = self.shared.briefs().values().cloned().collect();
