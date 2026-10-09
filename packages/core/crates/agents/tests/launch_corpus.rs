@@ -41,6 +41,24 @@ fn fill(value: &Value, vars: &HashMap<&str, String>) -> Value {
     }
 }
 
+/// The corpus was recorded on unix, where `path.join(shims, family)` joins
+/// with `/`; on this host it joins with the host's separator.
+fn joined_on_host(value: Value, root: &str) -> Value {
+    match value {
+        Value::String(s) => Value::String(s.replace(
+            &format!("{root}/"),
+            &format!("{root}{}", std::path::MAIN_SEPARATOR),
+        )),
+        Value::Array(a) => Value::Array(a.into_iter().map(|v| joined_on_host(v, root)).collect()),
+        Value::Object(o) => Value::Object(
+            o.into_iter()
+                .map(|(k, v)| (k, joined_on_host(v, root)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
 fn command(v: &Value) -> AgentCommand {
     AgentCommand {
         command: string(&v["command"]).unwrap(),
@@ -294,7 +312,7 @@ fn sets_up_shells_with_shims_as_the_corpus_says() {
             .collect();
         assert_eq!(
             json!({ "env": env, "args": setup.args }),
-            fill(&case["setup"], &vars),
+            joined_on_host(fill(&case["setup"], &vars), &root),
             "{path}"
         );
         checked += 1;

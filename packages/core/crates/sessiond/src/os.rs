@@ -70,7 +70,7 @@ mod windows {
     use std::ptr;
 
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeServer, ServerOptions};
-    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, HANDLE};
+    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, ERROR_PIPE_BUSY, HANDLE};
     use windows_sys::Win32::Security::Authorization::{
         ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
         SDDL_REVISION_1,
@@ -194,9 +194,26 @@ mod windows {
         pub fn close(self) {}
     }
 
+    /// How long a client waits for the server's next pipe instance.
+    const BUSY_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+    /// Connects, waiting out `ERROR_PIPE_BUSY`: between one accept and the
+    /// next instance every instance is taken, where a Unix socket would
+    /// queue the connection in its backlog.
     pub async fn connect(
         endpoint: &str,
     ) -> io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
-        ClientOptions::new().open(endpoint)
+        let deadline = tokio::time::Instant::now() + BUSY_WAIT;
+        loop {
+            match ClientOptions::new().open(endpoint) {
+                Err(e)
+                    if e.raw_os_error() == Some(ERROR_PIPE_BUSY as i32)
+                        && tokio::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                other => return other,
+            }
+        }
     }
 }

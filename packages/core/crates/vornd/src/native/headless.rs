@@ -585,7 +585,11 @@ mod tests {
         let made = call(
             &fed.native,
             "headless:create",
-            &request("claude", json!({ "remoteHostId": "h" })),
+            // A remote project is a POSIX path whatever this host is.
+            &request(
+                "claude",
+                json!({ "remoteHostId": "h", "projectPath": "/p" }),
+            ),
         );
         assert!(matches!(made, Answer::Result(_)), "{made:?}");
         assert_eq!(fed.host.starts.lock().unwrap().len(), 1);
