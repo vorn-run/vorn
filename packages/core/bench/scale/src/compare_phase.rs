@@ -28,9 +28,11 @@ const BUSY: &[u8] = b"while :; do date; sleep 0.1; done\r";
 const IDLE: Duration = Duration::from_secs(60);
 /// The longest the idle reading waits, past [`IDLE`], to settle.
 const IDLE_SETTLE: Duration = Duration::from_secs(180);
-/// vornd and the holder count as quiet below this share of one CPU.
+/// vornd and the holder count as quiet below this share of one CPU per
+/// 1,000 terminals: their housekeeping grows with the count.
 const QUIET_SHARE: f64 = 0.03;
-const QUIET_WITHIN: Duration = Duration::from_secs(900);
+/// Past this the readings go ahead, flagged as taken while not quiet.
+const QUIET_WITHIN: Duration = Duration::from_secs(300);
 /// How long one command may take to answer.
 const ANSWER_WITHIN: Duration = Duration::from_secs(10);
 
@@ -156,7 +158,7 @@ async fn measure(
     let holder = holder_pid(home).ok_or(Error::Failed("no holder announced".into()))?;
     let roots = [vornd.pid, holder];
 
-    quiet(&roots).await?;
+    m.quiet = quiet(&roots, n).await;
     {
         let mut grid = GridClient::connect(&ready.grid, WAIT).await?;
         for id in [&ids[0], &ids[n - 1]] {
@@ -259,10 +261,11 @@ async fn write(app: &mut AppClient, req: u64, id: &str, data: &[u8]) -> Result<(
     }
 }
 
-/// Waits until `roots` use less than [`QUIET_SHARE`] of a CPU for three
-/// seconds running: every terminal has printed and been taken in.
-async fn quiet(roots: &[u32]) -> Result<(), Error> {
-    let hz = clock_ticks();
+/// Waits until `roots` use less than [`QUIET_SHARE`] of a CPU per 1,000
+/// of the `n` terminals for three seconds running: every terminal has
+/// printed and been taken in. False if that took past [`QUIET_WITHIN`].
+async fn quiet(roots: &[u32], n: usize) -> bool {
+    let limit = QUIET_SHARE * clock_ticks() * (n as f64 / 1000.0).max(1.0);
     let ticks = || {
         roots
             .iter()
@@ -274,18 +277,18 @@ async fn quiet(roots: &[u32]) -> Result<(), Error> {
     let mut calm = 0;
     while calm < 3 {
         if Instant::now() > until {
-            return Err(Error::Timeout("the terminals to go quiet".into()));
+            return false;
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
         let now = ticks();
-        calm = if ((now - last) as f64) < QUIET_SHARE * hz {
+        calm = if (now.saturating_sub(last) as f64) < limit {
             calm + 1
         } else {
             0
         };
         last = now;
     }
-    Ok(())
+    true
 }
 
 /// RssAnon of vornd (`roots[0]`), the holder (`roots[1]`) and everything

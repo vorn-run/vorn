@@ -31,6 +31,8 @@ pub struct Memory {
     pub idle: Option<u64>,
     /// Seconds from quiet to the idle reading.
     pub idle_after_secs: f64,
+    /// vornd and the holder went quiet before the live reading.
+    pub quiet: bool,
     /// Processes summed in the live reading.
     pub processes: usize,
     pub live_parts: Option<Parts>,
