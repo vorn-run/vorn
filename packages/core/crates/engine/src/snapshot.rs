@@ -3,7 +3,7 @@
 //!
 //! The terminal is drawn as VT by Ghostty's formatter, so xterm.js (or any
 //! other parser) fed it shows the same screen, then applies the Bytes after
-//! [`VtSnapshot::resume`]. Like a checkpoint, a snapshot is cut only at a
+//! [`VtSnapshot::resume`]. Unlike a checkpoint, a snapshot is cut only at a
 //! record boundary where the parser is in its ground state with no UTF-8
 //! sequence open, because the formatter cannot describe a half-parsed
 //! sequence (TP §14); a request that arrives inside one waits for the next
@@ -100,6 +100,8 @@ fn pad_rows(full: Vec<u8>, content: &[u8], blank: usize) -> Vec<u8> {
     if blank == 0 {
         return full;
     }
+    // The formatter ends the cells with an SGR reset, which the full output moves past the cursor.
+    let content = content.strip_suffix(b"\x1b[0m").unwrap_or(content);
     let at = match find(&full, content) {
         Some(i) => i + content.len(),
         None => full.len(),

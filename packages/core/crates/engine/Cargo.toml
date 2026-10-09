@@ -9,7 +9,7 @@ description = "vornd's session engine: one actor per session on a fixed worker p
 
 [dependencies]
 crc32fast = "1"
-libghostty-vt = { version = "0.2.2", default-features = false }
+libghostty-vt.workspace = true
 vorn-analysis = { path = "../analysis" }
 vorn-grid = { path = "../grid" }
 vorn-pipeline = { path = "../pipeline" }

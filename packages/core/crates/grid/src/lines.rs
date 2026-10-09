@@ -155,15 +155,11 @@ impl Lines {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use libghostty_vt::terminal::Options;
 
     fn term(scrollback: usize) -> Term {
-        Terminal::new(Options {
-            cols: 10,
-            rows: 4,
-            max_scrollback: scrollback,
-        })
-        .unwrap()
+        let mut t = Terminal::new(10, 4).unwrap();
+        t.set_scrollback_max_bytes(Some(scrollback)).unwrap();
+        t
     }
 
     fn lines(t: &mut Term, from: u32, n: u32) {

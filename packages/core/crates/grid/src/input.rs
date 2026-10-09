@@ -197,7 +197,7 @@ impl InputEncoder {
 /// The wire's key code as Ghostty's: both follow the W3C UI Events order,
 /// which a test checks name by name.
 pub fn ghostty_key(code: KeyCode) -> key::Key {
-    key::Key::try_from(u32::from(code.0)).unwrap_or(key::Key::Unidentified)
+    key::Key::try_from(i32::from(code.0)).unwrap_or(key::Key::Unidentified)
 }
 
 fn ghostty_mods(m: u16) -> Mods {
@@ -241,7 +241,6 @@ fn ghostty_button(b: u8) -> mouse::Button {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use libghostty_vt::terminal::Options;
     use vorn_term_proto::msg::KEY_NAMES;
 
     #[test]
@@ -274,12 +273,7 @@ mod tests {
 
     #[test]
     fn pastes_that_would_run_a_command_wait_for_confirmation() {
-        let mut t = Term::new(Options {
-            cols: 20,
-            rows: 5,
-            max_scrollback: 0,
-        })
-        .unwrap();
+        let mut t = Term::new(20, 5).unwrap();
         let mut enc = InputEncoder::new().unwrap();
         let paste = |confirmed| InputEvent::Paste {
             utf8: "rm -rf x\n".into(),

@@ -8,7 +8,7 @@ publish = false
 description = "Grid mode's server half: the row cache, revisions, style and link tables, scrollback line numbers and per-attachment credits that turn a libghostty-vt terminal into snapshots and deltas"
 
 [dependencies]
-libghostty-vt = { version = "0.2.2", default-features = false }
+libghostty-vt.workspace = true
 vorn-screen = { path = "../screen" }
 vorn-term-proto = { path = "../term-proto" }
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }

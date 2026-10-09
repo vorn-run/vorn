@@ -19,7 +19,6 @@ use vorn_term_proto::{Cursor, Entry, Record};
 
 use crate::compare::TermState;
 use crate::log::Size;
-use crate::scan::Scanner;
 use crate::Error;
 
 /// A checkpoint as an engine hands it to storage: where it ends, the size it
@@ -141,7 +140,6 @@ struct Blob {
 pub struct ReferenceEngine {
     config: ReferenceConfig,
     screen: Screen,
-    scanner: Scanner,
     size: Size,
     since_cut: u64,
 }
@@ -151,7 +149,6 @@ impl std::fmt::Debug for ReferenceEngine {
         f.debug_struct("ReferenceEngine")
             .field("config", &self.config)
             .field("size", &self.size)
-            .field("scanner", &self.scanner)
             .finish_non_exhaustive()
     }
 }
@@ -185,7 +182,6 @@ impl Engine for ReferenceEngine {
         Ok(Self {
             config: *config,
             screen: Screen::with_scrollback(size.cols.into(), size.rows.into(), config.scrollback)?,
-            scanner: Scanner::new(),
             size,
             since_cut: 0,
         })
@@ -205,7 +201,6 @@ impl Engine for ReferenceEngine {
         match &entry.rec {
             Record::Data { bytes, .. } => {
                 self.screen.feed(bytes);
-                self.scanner.feed(bytes);
                 self.since_cut += bytes.len() as u64;
             }
             &Record::Resize { cols, rows, .. } => {
@@ -219,7 +214,7 @@ impl Engine for ReferenceEngine {
         // last column, about to wrap": a checkpoint cut then would print the
         // next character over the last one. Waiting for the next record is
         // cheaper than carrying the flag; see `tests/checkpoint.rs`.
-        if self.scanner.is_safe()
+        if self.screen.terminal().is_vt_ground()?
             && self.since_cut >= self.config.checkpoint_every
             && !self.screen.terminal().is_cursor_pending_wrap()?
         {

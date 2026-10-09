@@ -101,11 +101,9 @@ fn transcripts() {
     }
 }
 
-/// RC-T5: records that end inside a CSI, an OSC, a DCS and a split UTF-8
-/// sequence get no checkpoint, even with one due at every record, and a
-/// recovery killed at each of them is still exact.
+/// RC-T5: records ending inside a CSI, OSC, DCS or UTF-8 character get checkpoints, and recover exactly.
 #[test]
-fn no_checkpoint_inside_a_sequence() {
+fn checkpoints_inside_a_sequence() {
     let mut b = LogBuilder::new(Size::new(30, 6));
     let pieces: [&[u8]; 9] = [
         b"plain ",
@@ -122,17 +120,11 @@ fn no_checkpoint_inside_a_sequence() {
         b.data(p);
     }
     let log = b.build();
-    let mut inside = Vec::new();
     let mut e = <Harnessed as vorn_recovery::Engine>::start(&config(0), log.size).unwrap();
     for entry in &log.entries {
         let cut = vorn_recovery::Engine::apply(&mut e, entry).unwrap();
-        inside.push(cut.is_none());
+        assert!(cut.is_some(), "no checkpoint after {entry:?}");
     }
-    assert_eq!(
-        inside,
-        [false, true, false, true, false, true, false, true, false],
-        "a checkpoint at each boundary outside a sequence, none inside"
-    );
     let every: Vec<u64> = (0..log.entries.len() as u64).collect();
     from_checkpoints(&log, &KillPlan::at(every), config(0));
 }

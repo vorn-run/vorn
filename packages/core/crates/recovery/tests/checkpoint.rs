@@ -205,12 +205,9 @@ fn styled_blanks_are_restored() {
     .unwrap();
 }
 
-/// A combining mark that comes back attached to the cell before its base
-/// character ("ok\u{301}e" for "oke\u{301}"). Found by the seed below with
-/// RIS and prompts left out of the mix (a reset hides it); not reduced to a
-/// smaller input yet.
+/// A combining mark stays on its base through the formatter ("ok\u{301}e" once, on this seed).
 #[test]
-fn combining_marks_can_move_a_cell() {
+fn combining_marks_stay_in_their_cell() {
     let mix = Mix {
         reset: 0,
         prompt: 0,
@@ -218,11 +215,8 @@ fn combining_marks_can_move_a_cell() {
     };
     let seed = 184;
     let log = Generator::log(seed, Profile::round_trip().mix(mix).bytes(128 << 10));
-    let err = differential(&log, &KillPlan::random(seed, 6), engine(OFTEN))
-        .expect_err("restores exactly now");
-    let m = err.mismatch().unwrap_or_else(|| panic!("{err}"));
-    assert_eq!(m.checks(), [Check::Screen], "seed {seed}: {m}");
-    assert!(m.to_string().contains("\\u{301}e"), "seed {seed}: {m}");
+    differential(&log, &KillPlan::random(seed, 6), engine(OFTEN))
+        .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
 }
 
 /// Full-screen redraws (CUP, ICH, DCH, ECH, EL) leave blank cells whose

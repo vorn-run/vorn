@@ -740,12 +740,7 @@ impl Columns {
 /// A cell nothing was written to, as Ghostty stores one, if it is what it
 /// should be: empty, narrow, unstyled, unlinked.
 fn blank_cell() -> Option<libghostty_vt::screen::Cell> {
-    let t = Terminal::new(libghostty_vt::terminal::Options {
-        cols: 1,
-        rows: 1,
-        max_scrollback: 0,
-    })
-    .ok()?;
+    let t = Terminal::new(1, 1).ok()?;
     let c = t
         .grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
         .ok()?

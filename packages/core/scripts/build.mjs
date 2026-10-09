@@ -8,7 +8,7 @@
 //   --profile=NAME build with another cargo profile, such as ci (release
 //                  without LTO), for a check that needs no shipping binary
 //   --no-ghostty   build vornd without its session engine and libghostty-vt,
-//                  for a machine without Zig 0.15.2; vorn-sessiond never
+//                  for a machine without Zig 0.16.0; vorn-sessiond never
 //                  links Ghostty
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync } from 'node:fs'

@@ -4,7 +4,7 @@
 # Limits take effect after the reboot bench-gcp.sh does next.
 set -euo pipefail
 
-ZIG_VERSION=0.15.2
+ZIG_VERSION=0.16.0
 RUST_VERSION=$(sed -n 's/^channel = "\(.*\)"/\1/p' "$HOME/vorn/packages/core/rust-toolchain.toml")
 
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq

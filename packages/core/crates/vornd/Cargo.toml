@@ -14,7 +14,7 @@ path = "src/main.rs"
 [features]
 default = ["engine"]
 # The session engine parses every session's output with libghostty-vt, which
-# Zig 0.15.2 builds from source. Without it vornd only keeps the holder.
+# Zig 0.16.0 builds from source. Without it vornd only keeps the holder.
 engine = ["dep:vorn-engine"]
 
 [dependencies]
@@ -68,7 +68,7 @@ windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] 
 # What the /mcp test posts with.
 hyper = { version = "1", features = ["client"] }
 hyper-util = { version = "0.1", features = ["client-legacy"] }
-libghostty-vt = { version = "0.2.2", default-features = false }
+libghostty-vt.workspace = true
 tempfile = "3"
 vorn-grid-client = { path = "../grid-client" }
 vorn-pipeline = { path = "../pipeline" }

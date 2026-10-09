@@ -1,10 +1,9 @@
 //! The seeded generator: deterministic per seed, sized as asked, and cutting
-//! records inside UTF-8 characters and escape sequences, where the scanner
-//! (and Ghostty itself) say a checkpoint may not go.
+//! records inside UTF-8 characters and escape sequences.
 
-use vorn_recovery::gen::{Generator, Mix, Profile};
-use vorn_recovery::{Log, Scanner, Size};
-use vorn_screen::Screen;
+use libghostty_vt::terminal::Terminal;
+use vorn_recovery::gen::{Generator, Profile};
+use vorn_recovery::Log;
 use vorn_term_proto::Record;
 
 fn data(log: &Log) -> impl Iterator<Item = &[u8]> {
@@ -65,96 +64,27 @@ fn a_resize_storm_has_its_resizes() {
     assert!(log.data_len() > 10_000);
 }
 
+/// Ghostty's continuation says where each record leaves it: in a character, in a sequence, or at ground.
 #[test]
 fn records_split_utf8_and_sequences() {
     let log = Generator::log(5, Profile::mixed().bytes(512 << 10));
-    let mut s = Scanner::new();
-    let (mut in_utf8, mut in_seq, mut safe) = (0, 0, 0);
+    let mut t = Terminal::new(log.size.cols, log.size.rows).unwrap();
+    t.set_continuation_max_bytes(1 << 20).unwrap();
+    let (mut in_utf8, mut in_seq, mut ground) = (0, 0, 0);
     for bytes in data(&log) {
-        s.feed(bytes);
-        if s.utf8_open() {
-            in_utf8 += 1;
-        } else if !s.is_safe() {
-            in_seq += 1;
-        } else {
-            safe += 1;
+        t.vt_write(bytes);
+        match t
+            .continuation_alloc(None)
+            .unwrap()
+            .as_deref()
+            .unwrap_or_default()
+        {
+            [] => ground += 1,
+            [0x1b, ..] => in_seq += 1,
+            _ => in_utf8 += 1,
         }
     }
     assert!(in_utf8 > 50, "{in_utf8} boundaries inside a character");
     assert!(in_seq > 100, "{in_seq} boundaries inside a sequence");
-    assert!(safe > in_seq, "{safe} safe boundaries");
-}
-
-/// The scanner against Ghostty: at each record boundary, a fresh terminal
-/// fed everything so far and then `Z` moves its cursor one cell right only
-/// if its parser was in ground with no UTF-8 open. In a CSI `Z` is a final
-/// byte (CBT, backwards), in an escape it dispatches, in a string it is
-/// payload, and after an open UTF-8 lead it prints a replacement first.
-#[test]
-fn the_scanner_agrees_with_ghostty() {
-    let mix = Mix {
-        // Margins make "one cell right" depend on more than the cursor.
-        margins: 0,
-        ..Mix::EVERYTHING
-    };
-    let profile = Profile {
-        max_record: 24,
-        ..Profile::mixed().mix(mix).bytes(12 << 10)
-    };
-    let (mut agreed_safe, mut agreed_unsafe) = (0, 0);
-    for seed in 1..=4 {
-        let log = Generator::log(seed, profile);
-        let mut scanner = Scanner::new();
-        let mut fed: Vec<u8> = Vec::new();
-        let mut size = log.size;
-        let mut resizes: Vec<(usize, Size)> = Vec::new();
-        for e in &log.entries {
-            match &e.rec {
-                Record::Data { bytes, .. } => {
-                    scanner.feed(bytes);
-                    fed.extend_from_slice(bytes);
-                }
-                &Record::Resize { cols, rows, .. } => {
-                    size = Size::new(cols, rows);
-                    resizes.push((fed.len(), size));
-                    continue;
-                }
-                _ => continue,
-            }
-            let mut t = Screen::new(log.size.cols.into(), log.size.rows.into()).unwrap();
-            let mut at = 0;
-            for &(offset, sz) in &resizes {
-                t.feed(&fed[at..offset]);
-                t.resize(sz.cols.into(), sz.rows.into()).unwrap();
-                at = offset;
-            }
-            t.feed(&fed[at..]);
-            let term = t.terminal();
-            let (x, y) = (term.cursor_x().unwrap(), term.cursor_y().unwrap());
-            if term.is_cursor_pending_wrap().unwrap() || x + 2 >= size.cols {
-                continue;
-            }
-            t.feed(b"Z");
-            let term = t.terminal();
-            let moved_one = term.cursor_x().unwrap() == x + 1 && term.cursor_y().unwrap() == y;
-            assert_eq!(
-                scanner.is_safe(),
-                moved_one,
-                "seed {seed}, rseq {}: scanner says {:?} (utf8 open: {}), after {:?}",
-                e.hdr.rseq,
-                scanner.state(),
-                scanner.utf8_open(),
-                String::from_utf8_lossy(&fed[fed.len().saturating_sub(40)..])
-            );
-            if moved_one {
-                agreed_safe += 1;
-            } else {
-                agreed_unsafe += 1;
-            }
-        }
-    }
-    assert!(
-        agreed_safe > 100 && agreed_unsafe > 50,
-        "{agreed_safe} safe, {agreed_unsafe} unsafe"
-    );
+    assert!(ground > in_seq, "{ground} boundaries at ground");
 }

@@ -60,7 +60,7 @@ a session with `vornd:spawn`.
 
 ## Build
 
-Needs a Rust toolchain and [Zig 0.15.2](https://ziglang.org/download/), which
+Needs a Rust toolchain and [Zig 0.16.0](https://ziglang.org/download/), which
 builds libghostty-vt from source on the first build.
 
 ```sh

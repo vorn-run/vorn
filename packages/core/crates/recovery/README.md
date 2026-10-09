@@ -17,8 +17,6 @@ died.
   check with a readable diff.
 - `driver`: the kill driver and the differential test.
 - `child`: the same with the engine in a child process killed by the OS.
-- `scan`: whether a record boundary is a safe checkpoint point (parser in
-  ground, no UTF-8 sequence open).
 
 ## The differential test in one call
 
@@ -67,15 +65,22 @@ implements `Target` instead, or speaks the subject protocol in `child.rs`.
 
 ## What a checkpoint does not restore
 
-`tests/checkpoint.rs` runs the differential from checkpoints over
-`Profile::round_trip()`, the generator features that survive the formatter's
-round trip, and keeps each loss it found as a named case: a pending wrap, saved
-cursors, the inactive screen, kitty keyboard flags, cursor shape, character
-protection, left and right margins, origin mode, background-coloured blank
-rows at the bottom, soft wraps (which come back as hard breaks and reflow
-differently), history when the screen ends in blank rows, styled blank cells
-after redraws, and combining marks. When one starts to restore, its test fails
-and says so.
+The session engine's checkpoints are Ghostty's terminal snapshots.
+`tests/snapshot.rs` cuts one after every record of the generator's logs, the
+transcripts and a log split at every byte, restores each and compares it with
+a replay, then kills a session at every record and recovers it from them. The
+one state a snapshot cannot hold is a pending wrap away from the last column
+(at a right margin, or after a back tab); the engine declines to cut there.
+
+The reference engine's checkpoints are the formatter's VT. `tests/checkpoint.rs`
+runs the differential from them over `Profile::round_trip()`, the generator
+features that survive the formatter's round trip, and keeps each loss it found
+as a named case: a pending wrap, saved cursors, the inactive screen, kitty
+keyboard flags, cursor shape, character protection, left and right margins,
+origin mode, background-coloured blank rows at the bottom, soft wraps (which
+come back as hard breaks and reflow differently), history when the screen ends
+in blank rows, and styled blank cells after redraws. When one starts to
+restore, its test fails and says so.
 
 ## Transcripts
 

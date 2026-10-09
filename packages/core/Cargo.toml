@@ -32,10 +32,19 @@ members = [
   "crates/logfile",
   "bench/scale",
 ]
+exclude = ["vendor"]
 
 # The app's version (scripts/sync-versions.sh); every binary that reports a version inherits it.
 [workspace.package]
 version = "0.8.0-beta.6"
+
+# Terminal snapshots (encode, decode and the parser continuation) are in no published release yet.
+[workspace.dependencies]
+libghostty-vt = { git = "https://github.com/uzaaft/libghostty-rs", rev = "3ddcb1027cdfad14991242d501cf4604cbb20c71", default-features = false }
+
+# The same bindings, building a newer Ghostty (see its Cargo.toml).
+[patch."https://github.com/uzaaft/libghostty-rs"]
+libghostty-vt-sys = { path = "vendor/libghostty-vt-sys" }
 
 [profile.release]
 lto = true
