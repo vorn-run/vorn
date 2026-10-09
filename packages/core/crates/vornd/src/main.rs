@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 use vorn_logfile::{LogFile, Rotation};
 use vornd::applink::AppLink;
@@ -253,15 +253,17 @@ fn take_old_table(engine: &vornd::engine::Engine, db: &std::path::Path) {
     let mut store = match vorn_store::Store::open_beside(db) {
         Ok(Some(store)) => store,
         Ok(None) => return,
-        Err(err) => return warn!(%err, "could not open the database for the old session records"),
+        Err(err) => {
+            return tracing::warn!(%err, "could not open the database for the old session records")
+        }
     };
     let old = match store.call("getPreviousSessions", serde_json::json!([])) {
         Ok(rows) => rows,
-        Err(err) => return warn!(%err, "could not read the old session records"),
+        Err(err) => return tracing::warn!(%err, "could not read the old session records"),
     };
     let terminals: Vec<vornd::registry::TerminalSession> = match serde_json::from_value(old) {
         Ok(t) => t,
-        Err(err) => return warn!(%err, "the old session records do not read"),
+        Err(err) => return tracing::warn!(%err, "the old session records do not read"),
     };
     if terminals.is_empty() {
         return;
@@ -269,7 +271,7 @@ fn take_old_table(engine: &vornd::engine::Engine, db: &std::path::Path) {
     let records = terminals.len();
     let carried = engine.carry_old(terminals);
     if let Err(err) = store.call("clearSessions", serde_json::json!([])) {
-        warn!(%err, "could not forget the old session records");
+        tracing::warn!(%err, "could not forget the old session records");
     }
     info!(
         records,
