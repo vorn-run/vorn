@@ -98,12 +98,15 @@ const HEADLESS = [
   }
 ]
 
+/** A project directory as a config written on this machine holds it: on the current drive on Windows. */
+const here = (dir: string): string => (process.platform === 'win32' ? path.resolve(dir) : dir)
+
 const CONFIG = {
   version: 1,
   defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
   projects: [
-    { name: 'vorn', path: '/work/vorn', preferredAgents: ['claude'] },
-    { name: 'website', path: '/work/website' }
+    { name: 'vorn', path: here('/work/vorn'), preferredAgents: ['claude'] },
+    { name: 'website', path: here('/work/website') }
   ],
   workflows: []
 }
