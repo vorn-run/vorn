@@ -174,8 +174,15 @@ jobs:
           else
             echo "no usable record of what the cached target was built from; building everything"
           fi
-          mkdir -p packages/core/target
-          git rev-parse HEAD > "$stamp"
+          rm -f "$stamp"
+          # Only a run that builds every crate and profile leaves a target that matches HEAD.
+          if [ "$QUICK" != true ] && [ -z "$CRATES" ]; then
+            mkdir -p packages/core/target
+            git rev-parse HEAD > "$stamp"
+          fi
+        env:
+          QUICK: ${{ inputs.quick }}
+          CRATES: ${{ inputs.crates }}
 
       - name: Install dependencies
         run: yarn install
