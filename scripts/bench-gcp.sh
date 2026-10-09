@@ -31,19 +31,38 @@ if ! git diff --quiet HEAD -- packages/core; then
   exit 1
 fi
 
+# Deletes the VM and its disks however the run ends: also on a hangup (the
+# terminal that started it closed) or a broken pipe (the tee it ran into died),
+# and retried until neither is listed, since a lost or preempted VM may still
+# be stopping when the driver gives up on it.
 cleanup() {
   local code=$?
-  trap - EXIT INT TERM
-  echo "deleting $vm"
-  "${gc[@]}" compute instances delete "$vm" --zone "$zone" --delete-disks=all >/dev/null 2>&1 || true
-  # A disk left behind by a failed create or a detach.
-  for d in $("${gc[@]}" compute disks list --filter="name~^$vm" --format='value(name)' 2>/dev/null); do
-    "${gc[@]}" compute disks delete "$d" --zone "$zone" >/dev/null 2>&1 || true
+  trap - EXIT INT TERM HUP
+  trap '' PIPE
+  set +e
+  echo "deleting $vm" >&2
+  local left=
+  for _ in 1 2 3 4 5 6; do
+    if [ -n "$("${gc[@]}" compute instances list --filter="name=$vm" --format='value(name)' 2>/dev/null)" ]; then
+      "${gc[@]}" compute instances delete "$vm" --zone "$zone" --delete-disks=all >/dev/null 2>&1
+    fi
+    # A disk left behind by a failed create, a detach or a preemption.
+    for d in $("${gc[@]}" compute disks list --filter="name~^$vm" --format='value(name)' 2>/dev/null); do
+      "${gc[@]}" compute disks delete "$d" --zone "$zone" >/dev/null 2>&1
+    done
+    # A listing that fails counts as something left.
+    left=$("${gc[@]}" compute instances list --filter="name=$vm" --format='value(name)' 2>/dev/null) || left="$vm?"
+    left+=$("${gc[@]}" compute disks list --filter="name~^$vm" --format='value(name)' 2>/dev/null) || left+=" disks?"
+    [ -z "$left" ] && break
+    sleep 20
   done
-  "${gc[@]}" compute instances list --filter="name=$vm" --format='value(name)'
+  if [ -n "$left" ]; then
+    echo "could not delete $vm or its disks; delete them by hand: $left" >&2
+    [ "$code" -ne 0 ] || code=1
+  fi
   exit "$code"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT INT TERM HUP PIPE
 
 ssh_vm() { "${gc[@]}" compute ssh "$vm" --zone "$zone" -- "$@"; }
 
