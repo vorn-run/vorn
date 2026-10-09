@@ -39,7 +39,7 @@ async function pinned(
   return ran
 }
 
-/** On Windows `vorn` resolves the scripted `/work/...` paths onto the current drive; reads them back as recorded. */
+/** On Windows `vorn` resolves the scripted `/work/...` paths onto its drive; reads them back as recorded. */
 function posixWork(text: string): string {
   if (process.platform !== 'win32') return text
   return text.replace(
@@ -98,8 +98,9 @@ const HEADLESS = [
   }
 ]
 
-/** A project directory as a config written on this machine holds it: on the current drive on Windows. */
-const here = (dir: string): string => (process.platform === 'win32' ? path.resolve(dir) : dir)
+/** A project directory as a config written on this machine holds it: on Windows, on the drive `vorn` runs from (the temp dir's). */
+const here = (dir: string): string =>
+  process.platform === 'win32' ? path.resolve(os.tmpdir(), dir) : dir
 
 const CONFIG = {
   version: 1,
