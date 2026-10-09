@@ -69,7 +69,9 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
 export function scrub(text: string, dirs: Record<string, string>): string {
   let scrubbed = text
   for (const [name, dir] of Object.entries({ ...dirs, home: testHome })) {
-    for (const form of new Set([fs.realpathSync(dir), dir])) {
+    const forms = [fs.realpathSync(dir), dir]
+    // As written inside JSON, where Windows separators are escaped.
+    for (const form of new Set([...forms, ...forms.map((f) => JSON.stringify(f).slice(1, -1))])) {
       scrubbed = scrubbed.split(form).join(`<${name}>`)
     }
   }

@@ -29,7 +29,7 @@ async function pinned(
   const dirs = options.dirs ?? {}
   const ran = await runBinary(args)
   const clean = (text: string): string => {
-    const scrubbed = scrub(text, dirs)
+    const scrubbed = posixWork(scrub(text, dirs))
     return options.ids ? scrubIds(scrubbed) : scrubbed
   }
   const got = { code: ran.code, out: clean(ran.out), err: clean(ran.err) }
@@ -37,6 +37,15 @@ async function pinned(
   // The key rides along, so a failure says which command it was.
   expect({ key, ...got }).toEqual({ key, ...reference.want(key, got) })
   return ran
+}
+
+/** On Windows `vorn` resolves the scripted `/work/...` paths onto its drive; reads them back as recorded. */
+function posixWork(text: string): string {
+  if (process.platform !== 'win32') return text
+  return text.replace(
+    /\b[A-Za-z]:(?:\\\\|\\)work(?![\w.-])((?:(?:\\\\|\\)[\w.-]+)*)/g,
+    (_, rest: string) => `/work${rest.replace(/\\\\|\\/g, '/')}`
+  )
 }
 
 function tempDir(prefix: string): string {
@@ -89,12 +98,16 @@ const HEADLESS = [
   }
 ]
 
+/** A project directory as a config written on this machine holds it: on Windows, on the drive `vorn` runs from (the temp dir's). */
+const here = (dir: string): string =>
+  process.platform === 'win32' ? path.resolve(os.tmpdir(), dir) : dir
+
 const CONFIG = {
   version: 1,
   defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
   projects: [
-    { name: 'vorn', path: '/work/vorn', preferredAgents: ['claude'] },
-    { name: 'website', path: '/work/website' }
+    { name: 'vorn', path: here('/work/vorn'), preferredAgents: ['claude'] },
+    { name: 'website', path: here('/work/website') }
   ],
   workflows: []
 }
@@ -408,7 +421,7 @@ describe.skipIf(!vornBinary)('vorn', () => {
       server.calls.length = 0
       const ran = await pinned('scripted', [...args, '--data-dir', dataDir], { dirs: all })
       await settled()
-      const calls = sorted(server.calls).map((c) => scrub(c, all))
+      const calls = sorted(server.calls).map((c) => posixWork(scrub(c, all)))
       const key = `scripted calls ${JSON.stringify(args.map((a) => scrub(a, all)))}`
       expect({ key, calls }).toEqual({ key, calls: reference.want(key, calls) })
       return ran

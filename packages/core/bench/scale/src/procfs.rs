@@ -244,6 +244,7 @@ mod tests {
         assert_eq!(parse_machine_ticks("intr 1\n"), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_parent_follows_the_last_parenthesis() {
         assert_eq!(parse_ppid("42 (bash) S 7 42 42 0"), Some(7));
