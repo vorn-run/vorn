@@ -12913,7 +12913,6 @@ __metadata:
     lint-staged: "npm:^17.3.0"
     lowlight: "npm:^3.3.0"
     lucide-react: "npm:1.34.0"
-    node-cron: "npm:^4.2.1"
     node-gyp: "npm:^13.0.1"
     playwright-core: "npm:1.56.1"
     postcss: "npm:^8.5.23"

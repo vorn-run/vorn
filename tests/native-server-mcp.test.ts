@@ -28,7 +28,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
-import type { AppConfig } from '../packages/shared/src/types'
+import type { AppConfig, WorkflowDefinition } from '../packages/shared/src/types'
 import { comparable, randomArgs, refusedArgs, seeded, uuidsIn } from './helpers/mcp-parity'
 
 const TEST_CREDENTIAL = 'native-server-mcp-test-credential'
@@ -490,6 +490,29 @@ describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does",
     registerMethod('config:save', (config) => {
       configManager.saveConfig(config as AppConfig)
       configManager.notifyChanged()
+    })
+    // The TypeScript tools write workflows through their own methods, which vornd answers; here they edit the same store.
+    const editWorkflows = (change: (list: WorkflowDefinition[]) => WorkflowDefinition[]) => {
+      const config = configManager.loadConfig()
+      configManager.saveConfig({ ...config, workflows: change(config.workflows ?? []) })
+      configManager.notifyChanged()
+    }
+    registerMethod('workflow:create', (params) => {
+      const { workflow } = params as { workflow: WorkflowDefinition }
+      editWorkflows((list) => [...list, workflow])
+      return workflow
+    })
+    registerMethod('workflow:update', (params) => {
+      const { id, updates } = params as { id: string; updates: Partial<WorkflowDefinition> }
+      const ok = (configManager.loadConfig().workflows ?? []).some((w) => w.id === id)
+      editWorkflows((list) => list.map((w) => (w.id === id ? { ...w, ...updates } : w)))
+      return { ok }
+    })
+    registerMethod('workflow:delete', (params) => {
+      const { id } = params as { id: string }
+      const ok = (configManager.loadConfig().workflows ?? []).some((w) => w.id === id)
+      editWorkflows((list) => list.filter((w) => w.id !== id))
+      return { ok }
     })
     // Connectors are vornd's too, which has no vorn.db here: a fixed empty set answers both sides alike.
     registerMethod('connector:list', () => [])
