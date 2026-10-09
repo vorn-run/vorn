@@ -48,41 +48,40 @@ fn every_listed_tool_is_implemented() {
     assert_eq!(crate::tool_count(), 73);
 }
 
+/// The task, workflow and config methods the calls so far wrote through.
+fn writes(rpc: &FakeRpc) -> Vec<String> {
+    rpc.calls()
+        .into_iter()
+        .map(|(method, _)| method)
+        .filter(|m| m == "config:save" || m.starts_with("task:") || m.starts_with("workflow:"))
+        .collect()
+}
+
+fn stored_task() -> Value {
+    json!({ "id": "t2", "projectName": "app", "title": "Second", "description": "", "status": "done",
+            "order": 2, "createdAt": "2026-01-02T00:00:00.000Z", "updatedAt": "2026-01-02T00:00:00.000Z",
+            "completedAt": "2026-01-02T00:00:00.000Z" })
+}
+
 #[test]
-fn creates_a_task_after_the_last_one() {
+fn creates_a_task_through_task_create() {
     let rpc = FakeRpc::new(sample_config());
+    rpc.answer("task:create", json!({ "ok": true, "task": stored_task() }));
     let result = run(
         &rpc,
         "create_task",
-        json!({ "project_name": "app", "title": "Second", "status": "done", "branch": "" }),
+        json!({ "project_name": "app", "title": "Second", "status": "done", "branch": "", "use_worktree": false }),
     );
-    let task = parsed(&result);
-    assert_eq!(task["order"], 2);
-    assert_eq!(task["description"], "");
-    assert!(task.get("branch").is_none());
-    assert_eq!(task["completedAt"], task["createdAt"]);
-    let keys: Vec<&str> = task
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
+    assert_eq!(parsed(&result), stored_task());
     assert_eq!(
-        keys,
-        [
-            "id",
-            "projectName",
-            "title",
-            "description",
-            "status",
-            "order",
-            "createdAt",
-            "updatedAt",
-            "completedAt"
-        ]
+        rpc.last("task:create"),
+        Some(
+            json!({ "projectName": "app", "title": "Second", "status": "done", "branch": "", "useWorktree": false })
+        )
     );
-    assert_eq!(rpc.config()["tasks"].as_array().unwrap().len(), 2);
+    assert_eq!(writes(&rpc), ["task:create"]);
 
+    rpc.answer("task:create", json!({ "ok": false }));
     let missing = run(
         &rpc,
         "create_task",
@@ -93,24 +92,75 @@ fn creates_a_task_after_the_last_one() {
 }
 
 #[test]
-fn reopening_a_task_clears_when_it_finished() {
+fn updates_a_task_through_task_update() {
     let rpc = FakeRpc::new(sample_config());
-    run(&rpc, "update_task", json!({ "id": "t1", "status": "done" }));
-    assert!(rpc.config()["tasks"][0].get("completedAt").is_some());
-    run(&rpc, "archive_task", json!({ "id": "t1" }));
-    assert!(rpc.config()["tasks"][0].get("archivedAt").is_some());
-    let reopened = parsed(&run(
+    rpc.answer("task:update", json!({ "ok": true, "task": stored_task() }));
+    let result = run(
         &rpc,
         "update_task",
-        json!({ "id": "t1", "status": "todo" }),
-    ));
-    assert!(reopened.get("completedAt").is_none() && reopened.get("archivedAt").is_none());
+        json!({ "id": "t2", "order": 4, "status": "done", "title": "Second" }),
+    );
+    assert_eq!(parsed(&result), stored_task());
+    assert_eq!(
+        rpc.last("task:update"),
+        Some(json!({ "id": "t2", "title": "Second", "status": "done", "order": 4 }))
+    );
+    assert_eq!(writes(&rpc), ["task:update"]);
 
-    let refused = run(&rpc, "archive_task", json!({ "id": "t1" }));
+    rpc.answer("task:update", json!({ "ok": false }));
+    let gone = run(&rpc, "update_task", json!({ "id": "t9", "title": "x" }));
+    assert_eq!(gone["isError"], true);
+    assert_eq!(text(&gone), "Error: task \"t9\" not found");
+}
+
+#[test]
+fn deletes_a_task_through_task_delete() {
+    let rpc = FakeRpc::new(sample_config());
+    rpc.answer("task:delete", json!({ "ok": true }));
+    let deleted = run(&rpc, "delete_task", json!({ "id": "t1" }));
+    assert_eq!(text(&deleted), "Deleted task: First");
+    assert_eq!(rpc.last("task:delete"), Some(json!({ "id": "t1" })));
+
+    let missing = run(&rpc, "delete_task", json!({ "id": "t9" }));
+    assert_eq!(text(&missing), "Error: task \"t9\" not found");
+    assert_eq!(writes(&rpc), ["task:delete"]);
+
+    rpc.answer("task:delete", json!({ "ok": false }));
+    let raced = run(&rpc, "delete_task", json!({ "id": "t1" }));
+    assert_eq!(raced["isError"], true);
+    assert_eq!(text(&raced), "Error: task \"t1\" not found");
+}
+
+#[test]
+fn archives_and_restores_a_task_through_task_archive() {
+    let mut config = sample_config();
+    config["tasks"][0]["status"] = json!("done");
+    let rpc = FakeRpc::new(config.clone());
+    rpc.answer("task:archive", json!({ "ok": true }));
+    let archived = run(&rpc, "archive_task", json!({ "id": "t1" }));
+    assert_eq!(parsed(&archived), config["tasks"][0]);
+    assert_eq!(
+        rpc.last("task:archive"),
+        Some(json!({ "id": "t1", "archived": true }))
+    );
+    run(&rpc, "unarchive_task", json!({ "id": "t1" }));
+    assert_eq!(
+        rpc.last("task:archive"),
+        Some(json!({ "id": "t1", "archived": false }))
+    );
+    assert_eq!(writes(&rpc), ["task:archive", "task:archive"]);
+
+    rpc.answer("task:archive", json!({ "ok": false }));
+    let raced = run(&rpc, "unarchive_task", json!({ "id": "t1" }));
+    assert_eq!(text(&raced), "Error: task \"t1\" not found");
+
+    let open = FakeRpc::new(sample_config());
+    let refused = run(&open, "archive_task", json!({ "id": "t1" }));
     assert_eq!(
         text(&refused),
-        "Error: only done or cancelled tasks can be archived (status: todo)"
+        "Error: only done or cancelled tasks can be archived (status: in_progress)"
     );
+    assert!(writes(&open).is_empty());
 }
 
 #[test]
@@ -373,6 +423,55 @@ fn workflows_are_checked_stored_and_run() {
 }
 
 #[test]
+fn workflows_are_written_through_their_methods() {
+    let mut config = sample_config();
+    config["workflows"] = json!([{ "id": "w", "name": "Nightly", "icon": "Zap", "iconColor": "#000",
+                                   "enabled": true, "nodes": [], "edges": [] }]);
+    let rpc = FakeRpc::new(config);
+    let made = parsed(&run(&rpc, "create_workflow", json!({ "name": "Morning" })));
+    assert_eq!(
+        rpc.last("workflow:create"),
+        Some(json!({ "workflow": made }))
+    );
+
+    let renamed = run(
+        &rpc,
+        "update_workflow",
+        json!({ "workflow_id": "w", "name": "Nightly 2", "enabled": false }),
+    );
+    assert_eq!(parsed(&renamed)["name"], "Nightly 2");
+    assert_eq!(
+        rpc.last("workflow:update"),
+        Some(json!({ "id": "w", "updates": { "name": "Nightly 2", "enabled": false } }))
+    );
+
+    let deleted = run(&rpc, "delete_workflow", json!({ "workflow_id": "w" }));
+    assert_eq!(text(&deleted), "Deleted workflow: Nightly 2");
+    assert_eq!(rpc.last("workflow:delete"), Some(json!({ "id": "w" })));
+    assert_eq!(
+        writes(&rpc),
+        ["workflow:create", "workflow:update", "workflow:delete"]
+    );
+}
+
+#[test]
+fn a_workflow_gone_by_the_time_it_is_written_fails() {
+    let mut config = sample_config();
+    config["workflows"] = json!([{ "id": "w", "name": "Nightly", "nodes": [], "edges": [] }]);
+    let rpc = FakeRpc::new(config);
+    rpc.answer("workflow:update", json!({ "ok": false }));
+    rpc.answer("workflow:delete", json!({ "ok": false }));
+    let updated = run(
+        &rpc,
+        "update_workflow",
+        json!({ "workflow_id": "w", "name": "x" }),
+    );
+    assert_eq!(updated, json!({ "thrown": "workflow \"w\" not found" }));
+    let deleted = run(&rpc, "delete_workflow", json!({ "workflow_id": "w" }));
+    assert_eq!(deleted, json!({ "thrown": "workflow \"w\" not found" }));
+}
+
+#[test]
 fn a_gate_is_answered_on_the_run_that_waits() {
     let rpc = FakeRpc::new(sample_config());
     rpc.answer(
@@ -436,6 +535,13 @@ fn a_workflow_travels_by_file() {
     );
     assert!(text(&again).starts_with("Updated \"Ship\" as import:app:ship"));
     assert_eq!(rpc.config()["workflows"].as_array().unwrap().len(), 2);
+    let created = rpc.last("workflow:create").unwrap();
+    assert_eq!(created["workflow"]["id"], "import:app:ship");
+    assert_eq!(created["workflow"]["enabled"], false);
+    let updated = rpc.last("workflow:update").unwrap();
+    assert_eq!(updated["id"], "import:app:ship");
+    assert_eq!(updated["updates"], created["workflow"]);
+    assert_eq!(writes(&rpc), ["workflow:create", "workflow:update"]);
 
     let broken = run(
         &rpc,

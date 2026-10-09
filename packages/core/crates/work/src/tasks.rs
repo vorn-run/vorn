@@ -148,7 +148,8 @@ pub fn create(store: &mut Store, params: &Value, id: String, now: &str) -> Resul
     Ok((json!({ "ok": true, "task": task }), true))
 }
 
-/// `task:update`: only the six fields it names, never a date a caller sends.
+/// `task:update`: only the fields it names, never a date a caller sends. A
+/// task moved to another project lands at its end unless an `order` is given.
 pub fn update(store: &mut Store, params: &Value, now: &str) -> Result<(Value, bool)> {
     let id = params.get("id").cloned().unwrap_or(Value::Null);
     let Some(task) = task(store, &id)? else {
@@ -168,9 +169,13 @@ pub fn update(store: &mut Store, params: &Value, now: &str) -> Result<(Value, bo
         }
     };
     field("projectName", &mut updates, &mut keys);
-    if moving {
-        let order = max_order(store, project.unwrap_or(&Value::Null))? + 1.0;
-        updates.insert("order".into(), num(order));
+    let order = match params.get("order").filter(|o| o.is_number()) {
+        Some(order) => Some(order.clone()),
+        None if moving => Some(num(max_order(store, project.unwrap_or(&Value::Null))? + 1.0)),
+        None => None,
+    };
+    if let Some(order) = order {
+        updates.insert("order".into(), order);
         keys.push("order".into());
     }
     for k in [
@@ -411,5 +416,22 @@ mod tests {
         );
         assert_eq!(delete(&mut s, &json!({ "id": "a" })).unwrap().0, ok(true));
         assert_eq!(delete(&mut s, &json!({ "id": "a" })).unwrap().0, ok(false));
+    }
+
+    #[test]
+    fn an_update_sets_the_order_it_is_given() {
+        let mut s = store();
+        create(
+            &mut s,
+            &json!({ "projectName": "app", "title": "T" }),
+            "a".into(),
+            "t",
+        )
+        .unwrap();
+        let (answer, _) = update(&mut s, &json!({ "id": "a", "order": 7 }), "t1").unwrap();
+        assert_eq!(answer["task"]["order"].as_f64(), Some(7.0));
+        assert_eq!(answer["task"]["title"], "T");
+        let (answer, _) = update(&mut s, &json!({ "id": "a", "order": "9" }), "t2").unwrap();
+        assert_eq!(answer["task"]["order"].as_f64(), Some(7.0), "only a number");
     }
 }

@@ -1,6 +1,7 @@
 //! A Vorn server in memory, for the tools' tests: it keeps the config blob
-//! that `config:load` and `config:save` carry, answers other methods from a
-//! table, and records every call.
+//! that `config:load` and `config:save` carry, stores the workflow methods'
+//! writes in it, answers other methods from a table (which also overrides
+//! those), and records every call.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -66,21 +67,53 @@ impl FakeRpc {
             .lock()
             .unwrap()
             .push((method.into(), params.clone()));
+        if let Some(answer) = self.answers.lock().unwrap().get(method) {
+            return answer.clone();
+        }
+        let params = params.unwrap_or(Value::Null);
+        let mut config = self.config.lock().unwrap();
         match method {
-            "config:load" => Ok(self.config()),
+            "config:load" => Ok(config.clone()),
             "config:save" => {
-                *self.config.lock().unwrap() = params.unwrap_or(Value::Null);
+                *config = params;
                 Ok(Value::Null)
             }
-            other => self
-                .answers
-                .lock()
-                .unwrap()
-                .get(other)
-                .cloned()
-                .unwrap_or_else(|| Err(RpcError(format!("Method not found: {other}")))),
+            "workflow:create" => {
+                let workflow = params["workflow"].clone();
+                workflows(&mut config).push(workflow.clone());
+                Ok(workflow)
+            }
+            "workflow:update" => {
+                let row = workflows(&mut config)
+                    .iter_mut()
+                    .find(|w| w["id"] == params["id"]);
+                let ok = row.is_some();
+                if let (Some(Value::Object(row)), Value::Object(updates)) =
+                    (row, &params["updates"])
+                {
+                    row.extend(updates.clone());
+                }
+                Ok(json!({ "ok": ok }))
+            }
+            "workflow:delete" => {
+                let rows = workflows(&mut config);
+                let before = rows.len();
+                rows.retain(|w| w["id"] != params["id"]);
+                Ok(json!({ "ok": rows.len() < before }))
+            }
+            other => Err(RpcError(format!("Method not found: {other}"))),
         }
     }
+}
+
+/// The config's workflow rows, made a list if they were not one.
+fn workflows(config: &mut Value) -> &mut Vec<Value> {
+    if !config["workflows"].is_array() {
+        config["workflows"] = json!([]);
+    }
+    config["workflows"]
+        .as_array_mut()
+        .expect("made a list above")
 }
 
 impl Rpc for FakeRpc {

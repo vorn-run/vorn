@@ -462,6 +462,8 @@ export interface RequestMethods {
       branch?: string
       useWorktree?: boolean
       assignedAgent?: AiAgentType
+      /** Its place on the board, which also wins over landing at the end of a new project. */
+      order?: number
     }
     result: { ok: boolean; task?: TaskConfig }
   }

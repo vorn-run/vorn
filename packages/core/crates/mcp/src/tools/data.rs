@@ -1,8 +1,10 @@
-//! Tasks, projects, workspaces and workflows, read and written as the
-//! TypeScript's `data-access.ts` does: through the config blob that
-//! `config:load` and `config:save` carry, load-change-save per call. A save
-//! carries the revision it was based on, so the server keeps what anyone else
-//! added in between.
+//! Tasks, projects, workspaces and workflows, read through the config blob
+//! that `config:load` carries. Tasks and workflows are written through their
+//! own methods, so the server applies its rules and arms a workflow's
+//! schedule as it stores the change; projects and workspaces, which have
+//! none, are written back through `config:save`, load-change-save per call.
+//! A save carries the revision it was based on, so the server keeps what
+//! anyone else added in between.
 
 use serde_json::{json, Map, Value};
 
@@ -42,6 +44,50 @@ async fn mutate<R: Rpc>(
     next.insert(key.to_owned(), Value::Array(change(current)));
     cx.call("config:save", Some(Value::Object(next))).await?;
     Ok(())
+}
+
+/// Calls a write method that answers `{ ok, ... }`: the answer, or `None`
+/// when `ok` is false because the row it names is not there.
+pub async fn write<R: Rpc>(
+    cx: &Cx<'_, R>,
+    method: &str,
+    params: Value,
+) -> Result<Option<Value>, String> {
+    let answer = cx.call(method, Some(params)).await?;
+    Ok(json::truthy(answer.get("ok")).then_some(answer))
+}
+
+/// `rpcCall('workflow:create', { workflow })`.
+pub async fn create_workflow<R: Rpc>(cx: &Cx<'_, R>, workflow: &Value) -> Result<(), String> {
+    cx.call("workflow:create", Some(json!({ "workflow": workflow })))
+        .await?;
+    Ok(())
+}
+
+/// `dbUpdateWorkflow`: a workflow gone by the time it is written is an
+/// error, not a save.
+pub async fn update_workflow<R: Rpc>(
+    cx: &Cx<'_, R>,
+    id: &str,
+    updates: &Value,
+) -> Result<(), String> {
+    let params = json!({ "id": id, "updates": updates });
+    match write(cx, "workflow:update", params).await? {
+        Some(_) => Ok(()),
+        None => Err(workflow_gone(id)),
+    }
+}
+
+/// `dbDeleteWorkflow`, failing the same way.
+pub async fn delete_workflow<R: Rpc>(cx: &Cx<'_, R>, id: &str) -> Result<(), String> {
+    match write(cx, "workflow:delete", json!({ "id": id })).await? {
+        Some(_) => Ok(()),
+        None => Err(workflow_gone(id)),
+    }
+}
+
+fn workflow_gone(id: &str) -> String {
+    format!("workflow \"{id}\" not found")
 }
 
 /// One field of an update: `Some` sets it, `None` is the TypeScript's

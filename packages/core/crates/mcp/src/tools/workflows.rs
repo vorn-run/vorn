@@ -174,7 +174,7 @@ pub async fn create_workflow<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
                 .cloned(),
         ),
     ]);
-    data::insert(cx, "workflows", workflow.clone()).await?;
+    data::create_workflow(cx, &workflow).await?;
     Ok(pretty(&workflow))
 }
 
@@ -219,7 +219,7 @@ pub async fn update_workflow<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
             updates.push((key, Some(value.clone())));
         }
     }
-    data::update(cx, "workflows", "id", &id, &updates).await?;
+    data::update_workflow(cx, &id, &data::merged(&Value::Null, &updates)).await?;
 
     let saved = json::pretty(&data::merged(&workflow, &updates));
     Ok(text(if warnings.is_empty() {
@@ -240,7 +240,7 @@ pub async fn delete_workflow<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     let Some(workflow) = data::find(cx, "workflows", "id", &id).await? else {
         return Ok(not_found(&id));
     };
-    data::delete(cx, "workflows", "id", &id).await?;
+    data::delete_workflow(cx, &id).await?;
     Ok(text(format!(
         "Deleted workflow: {}",
         json::display(workflow.get("name"))
@@ -952,19 +952,11 @@ pub async fn import_workflow<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
         }
     }
 
+    let definition = Value::Object(definition);
     if existing.is_some() {
-        let mut updates: Update = Vec::new();
-        for (k, v) in &definition {
-            if let Some(key) = WORKFLOW_KEYS.iter().find(|known| **known == k.as_str()) {
-                updates.push((key, Some(v.clone())));
-            }
-        }
-        if enabled.is_none() {
-            updates.push(("enabled", None));
-        }
-        data::update(cx, "workflows", "id", &id, &updates).await?;
+        data::update_workflow(cx, &id, &definition).await?;
     } else {
-        data::insert(cx, "workflows", Value::Object(definition.clone())).await?;
+        data::create_workflow(cx, &definition).await?;
     }
 
     let pending: Vec<String> = unresolved
@@ -1008,18 +1000,6 @@ pub async fn import_workflow<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     }
     Ok(text(out))
 }
-
-/// The keys an imported definition carries, for merging it into a stored one.
-const WORKFLOW_KEYS: [&str; 8] = [
-    "id",
-    "name",
-    "icon",
-    "iconColor",
-    "enabled",
-    "staggerDelayMs",
-    "nodes",
-    "edges",
-];
 
 /// `describe_workflow_nodes`: the reference, or the part of it for some types.
 pub fn describe_workflow_nodes(args: &Args) -> Value {

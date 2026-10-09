@@ -418,19 +418,26 @@ impl Work {
                 let changed = self
                     .db
                     .run(move |s| {
-                        s.call("dbUpdateWorkflow", json!([id, updates]))
-                            .map_err(|e| e.to_string())
+                        let n = s
+                            .call("dbUpdateWorkflow", json!([id, updates]))
+                            .map_err(|e| e.to_string())?;
+                        let changed = n.as_f64().unwrap_or(0.0) > 0.0;
+                        // Nothing to set is still an update of a workflow that is there.
+                        let there = changed
+                            || s.call("dbGetWorkflow", json!([id]))
+                                .is_ok_and(|w| w.is_object());
+                        Ok::<_, String>((changed, there))
                     })
                     .await;
                 match changed {
-                    Some(Ok(n)) => {
-                        let ok = n.as_f64().unwrap_or(0.0) > 0.0;
-                        if ok {
+                    Some(Ok((changed, there))) => {
+                        if changed {
                             self.workflows_changed();
                         }
-                        Answer::Result(json!({ "ok": ok }))
+                        Answer::Result(json!({ "ok": there }))
                     }
-                    other => stored(other),
+                    Some(Err(e)) => Answer::Error(e),
+                    None => stored(None),
                 }
             }
             "workflow:delete" => {
@@ -1397,5 +1404,31 @@ mod tests {
             .trigger(&json!({ "kind": "taskCreated" }))
             .await
             .is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_write_to_a_missing_workflow_is_not_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_native, work) = work(dir.path());
+        let wf = conditional("w", json!({ "triggerType": "manual" }));
+        work.call("workflow:create", &json!({ "workflow": wf }))
+            .await;
+        let answer = |a: Answer| match a {
+            Answer::Result(v) => v,
+            other => panic!("{other:?}"),
+        };
+        let update = |id: &str, updates: Value| json!({ "id": id, "updates": updates });
+        for (params, ok) in [
+            (update("w", json!({ "name": "Renamed" })), true),
+            (update("w", json!({})), true),
+            (update("gone", json!({ "name": "x" })), false),
+        ] {
+            let got = answer(work.call("workflow:update", &params).await);
+            assert_eq!(got, json!({ "ok": ok }), "{params}");
+        }
+        for ok in [true, false] {
+            let got = answer(work.call("workflow:delete", &json!({ "id": "w" })).await);
+            assert_eq!(got, json!({ "ok": ok }));
+        }
     }
 }
