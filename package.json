@@ -134,7 +134,7 @@
     "@humanfs/node": "^0.16.8",
     "js-yaml": "^4.3.2",
     "ip-address": "^10.3.1",
-    "fast-uri": "^3.1.6",
+    "fast-uri": "^3.1.8",
     "tsup/esbuild": "^0.28.1",
     "postcss": "^8.5.23"
   }
