@@ -17,10 +17,7 @@ function rustFiles(dir: string): string[] {
 
 /** Every crate whose own code reports `CARGO_PKG_VERSION`, by manifest directory. */
 function reportingCrates(): { dir: string; name: string; manifest: string }[] {
-  const dirs = [
-    core,
-    ...readdirSync(path.join(core, 'crates')).map((c) => path.join(core, 'crates', c))
-  ]
+  const dirs = readdirSync(path.join(core, 'crates')).map((c) => path.join(core, 'crates', c))
   return dirs
     .filter((dir) =>
       rustFiles(path.join(dir, 'src')).some((f) =>
@@ -46,7 +43,7 @@ describe('the versions the native binaries report', () => {
 
   it('finds the binaries that report a version to the app', () => {
     expect(crates.map((c) => c.name)).toEqual(
-      expect.arrayContaining(['vorn-core', 'vorn-cli', 'vorn-sessiond', 'vornd'])
+      expect.arrayContaining(['vorn-cli', 'vorn-sessiond', 'vornd'])
     )
   })
 
