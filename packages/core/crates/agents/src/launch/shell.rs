@@ -539,7 +539,8 @@ mod tests {
         let e = env(&[]);
         let setup = shell_setup("bash", &cx(&e, true, root_str)).unwrap();
         let rc = root.path().join("bash").join("vorn-bashrc");
-        assert_eq!(setup.args.unwrap()[1], rc.to_str().unwrap());
+        // Compared as paths: on Windows the rc path is `<root>\bash/vorn-bashrc`.
+        assert_eq!(Path::new(&setup.args.unwrap()[1]), rc);
         assert_eq!(
             std::fs::read_to_string(&rc).unwrap(),
             include_str!("../../shims/bash/minimal.bashrc")

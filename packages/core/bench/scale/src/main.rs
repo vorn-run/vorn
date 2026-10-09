@@ -8,7 +8,6 @@
 //! for it.
 
 mod buildlog;
-mod error;
 mod procfs;
 mod report;
 mod stats;
@@ -17,6 +16,8 @@ mod stats;
 mod app_client;
 #[cfg(unix)]
 mod daemon;
+#[cfg(unix)]
+mod error;
 #[cfg(unix)]
 mod grid_client;
 #[cfg(unix)]
@@ -28,12 +29,14 @@ mod spawn;
 #[cfg(unix)]
 mod stack_phase;
 
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use crate::report::{Meta, TierResult};
 
 /// The largest tier a machine not marked as a bench host may run.
+#[cfg(unix)]
 const LAPTOP_TIER: usize = 100;
 
 const USAGE: &str = "usage:
@@ -46,6 +49,7 @@ const USAGE: &str = "usage:
 Tiers above 100 need VORN_BENCH_HOST=1.";
 
 /// One tier's settings.
+#[cfg(unix)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
     /// Sessions in all: one probe, a tenth busy, the rest idle.
@@ -64,6 +68,7 @@ pub struct Plan {
     pub flood_bytes: u64,
 }
 
+#[cfg(unix)]
 impl Plan {
     /// Idle and busy sessions; the one left over is the probe.
     pub fn split(&self) -> (usize, usize) {
@@ -126,6 +131,7 @@ impl Plan {
 
 /// Refuses tiers a laptop should not run unless the host says it is a
 /// bench host.
+#[cfg(unix)]
 fn guard(tier: usize, bench_host: Option<&str>) -> Result<(), String> {
     if tier <= LAPTOP_TIER || bench_host == Some("1") {
         return Ok(());
@@ -247,12 +253,13 @@ async fn run_tier(plan: &Plan) -> TierResult {
     r
 }
 
+#[cfg(unix)]
 fn save(plan: &Plan, r: &TierResult) -> Result<(), String> {
     let text = serde_json::to_string_pretty(r).map_err(|e| e.to_string())?;
     std::fs::write(&plan.out, text + "\n").map_err(|e| format!("{}: {e}", plan.out.display()))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
