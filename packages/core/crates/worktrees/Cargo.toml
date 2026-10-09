@@ -9,6 +9,7 @@ publish = false
 description = "The worktree manager's inventory and cleanup: what each worktree holds, whether it is safe to remove, and the removal"
 
 [dependencies]
+vorn-spawn = { path = "../spawn" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

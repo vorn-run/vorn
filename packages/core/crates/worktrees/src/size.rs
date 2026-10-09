@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -279,7 +279,7 @@ fn run(
     env: &[(String, String)],
     timeout: Duration,
 ) -> Result<String, String> {
-    let mut cmd = Command::new(program);
+    let mut cmd = vorn_spawn::command(program);
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

@@ -262,7 +262,7 @@ fn discover_and_heal(dir: &DataDir) -> PortFile {
 }
 
 fn run_quietly(program: &str, args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new(program)
+    let output = vorn_spawn::command(program)
         .args(args)
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

@@ -321,7 +321,8 @@ async function spawnServer(): Promise<number> {
     const child = spawn(spec.exec, spec.args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: spec.cwd,
-      env: { ...process.env, ...spec.env }
+      env: { ...process.env, ...spec.env },
+      windowsHide: true
     })
     // Tracked before anything is awaited, so a timeout still leaves it killable.
     serverProcess = child
@@ -337,7 +338,8 @@ async function spawnServer(): Promise<number> {
       stdio: ['ignore', logFd, logFd],
       detached: true,
       cwd: spec.cwd,
-      env: { ...process.env, ...spec.env }
+      env: { ...process.env, ...spec.env },
+      windowsHide: true
     })
     closeSync(logFd)
     serverProcess = child

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{ChildStdin, Command};
+use tokio::process::ChildStdin;
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{info, warn};
 
@@ -214,7 +214,7 @@ fn lock(state: &Mutex<State>) -> std::sync::MutexGuard<'_, State> {
 impl Child {
     /// Starts `launch`; `name` is how its messages and logs name it.
     pub fn start(launch: &Launch, name: String) -> Result<Child, String> {
-        let mut command = Command::new(&launch.program);
+        let mut command = vorn_spawn::tokio_command(&launch.program);
         command
             .args(&launch.args)
             .current_dir(&launch.cwd)
@@ -224,8 +224,6 @@ impl Child {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(false);
-        #[cfg(windows)]
-        command.creation_flags(0x0800_0000);
         let mut child = command.spawn().map_err(|err| {
             format!(
                 "{name} could not start {}: {}",

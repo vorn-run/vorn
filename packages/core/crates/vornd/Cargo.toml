@@ -18,6 +18,7 @@ default = ["engine"]
 engine = ["dep:vorn-engine"]
 
 [dependencies]
+vorn-spawn = { path = "../spawn", features = ["tokio"] }
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

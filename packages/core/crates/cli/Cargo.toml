@@ -12,6 +12,7 @@ name = "vorn"
 path = "src/main.rs"
 
 [dependencies]
+vorn-spawn = { path = "../spawn", features = ["tokio"] }
 bytes = "1"
 data-encoding = "2"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

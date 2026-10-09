@@ -4,7 +4,7 @@
 //! file and options.
 
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -101,7 +101,7 @@ pub fn run_with(
     input: Option<&[u8]>,
     timeout: Duration,
 ) -> std::io::Result<Output> {
-    let mut child = Command::new(ssh)
+    let mut child = vorn_spawn::command(ssh)
         .args(args)
         .env_clear()
         .envs(env.iter().map(|(k, v)| (k, v)))

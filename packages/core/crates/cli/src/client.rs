@@ -189,8 +189,6 @@ fn detach(command: &mut std::process::Command) {
 
 #[cfg(windows)]
 fn detach(command: &mut std::process::Command) {
-    use std::os::windows::process::CommandExt;
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    use vorn_spawn::{Hidden, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS};
+    command.hidden_with(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
 }

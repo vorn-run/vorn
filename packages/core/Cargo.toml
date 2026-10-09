@@ -30,6 +30,7 @@ members = [
   "crates/remote",
   "crates/hooks",
   "crates/logfile",
+  "crates/spawn",
   "bench/scale",
 ]
 exclude = ["vendor"]

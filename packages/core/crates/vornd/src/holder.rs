@@ -432,7 +432,7 @@ fn live(w: &Welcome) -> usize {
 
 /// What `bundled --version` prints.
 async fn version_of(bundled: &Path) -> io::Result<String> {
-    let out = tokio::process::Command::new(bundled)
+    let out = vorn_spawn::tokio_command(bundled)
         .arg("--version")
         .stdin(std::process::Stdio::null())
         .output()

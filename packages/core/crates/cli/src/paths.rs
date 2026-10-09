@@ -63,7 +63,7 @@ pub fn normalize(p: &str) -> String {
 /// --show-toplevel` says it; `None` outside one, or when git does not answer
 /// within three seconds.
 pub async fn repo_root(cwd: &Path) -> Option<String> {
-    let run = tokio::process::Command::new("git")
+    let run = vorn_spawn::tokio_command("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(cwd)
         .stdin(std::process::Stdio::null())

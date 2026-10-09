@@ -9,6 +9,7 @@ publish = false
 description = "Git for Vorn's server, off its event loop: gix for what it answers exactly as git would, git itself for the rest"
 
 [dependencies]
+vorn-spawn = { path = "../spawn" }
 gix = { version = "0.88", default-features = false, features = ["sha1"] }
 # Worktree ids and generated names, from a random UUID as the server takes them.
 uuid = { version = "1", features = ["v4"] }

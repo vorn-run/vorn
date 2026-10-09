@@ -12,7 +12,7 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -318,7 +318,7 @@ fn read_version(family: Family, shell: &str) -> Option<String> {
     } else {
         Duration::from_secs(2)
     };
-    let mut child = Command::new(shell)
+    let mut child = vorn_spawn::command(shell)
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

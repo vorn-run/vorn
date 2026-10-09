@@ -453,7 +453,7 @@ fn detached(binary: &Path, home: &Path) -> Command {
 /// at the launcher's terminal.
 #[cfg(target_os = "linux")]
 fn scope(runner: impl AsRef<std::ffi::OsStr>, binary: &Path, home: &Path) -> Command {
-    let mut cmd = Command::new(runner);
+    let mut cmd = vorn_spawn::command(runner);
     cmd.args(["--user", "--scope", "--quiet", "--collect"])
         .arg(format!("--unit={}", unit_name()))
         .arg(binary)
@@ -471,7 +471,7 @@ fn unit_name() -> String {
 
 #[cfg(target_os = "linux")]
 fn systemd_scope_available() -> bool {
-    Command::new("systemd-run")
+    vorn_spawn::command("systemd-run")
         .args(["--user", "--scope", "--quiet", "--collect", "true"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -487,7 +487,7 @@ fn detached(binary: &Path, home: &Path) -> Command {
 
 #[cfg(unix)]
 fn setsid(binary: &Path, home: &Path) -> Command {
-    let mut cmd = Command::new(binary);
+    let mut cmd = vorn_spawn::command(binary);
     cmd.arg("--home").arg(home);
     new_session(&mut cmd);
     cmd
@@ -516,17 +516,16 @@ fn detached(binary: &Path, home: &Path) -> Command {
 
 #[cfg(windows)]
 fn detached_flags(binary: &Path, home: &Path, breakaway: bool) -> Command {
-    use std::os::windows::process::CommandExt;
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-    let mut cmd = Command::new(binary);
+    use vorn_spawn::{
+        Hidden, CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS,
+    };
+    let mut cmd = vorn_spawn::command(binary);
     cmd.arg("--home").arg(home);
     let mut flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
     if breakaway {
         flags |= CREATE_BREAKAWAY_FROM_JOB;
     }
-    cmd.creation_flags(flags);
+    cmd.hidden_with(flags);
     cmd
 }
 

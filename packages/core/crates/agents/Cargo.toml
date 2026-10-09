@@ -9,6 +9,7 @@ publish = false
 description = "What Vorn reads about the coding agents without starting one: which are installed, their past sessions and their models"
 
 [dependencies]
+vorn-spawn = { path = "../spawn" }
 # Local time for the dates an agent records without an offset, as `new Date` reads them.
 jiff = "0.2"
 # The agents keep their sessions in SQLite files of their own, read here read-only.

@@ -1,0 +1,16 @@
+[package]
+name = "vorn-spawn"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Helper processes without a console window on Windows, for every crate that starts one"
+
+[features]
+# The same extension for tokio's Command, for crates that spawn from async code.
+tokio = ["dep:tokio"]
+
+[dependencies]
+tokio = { version = "1", default-features = false, features = ["process"], optional = true }

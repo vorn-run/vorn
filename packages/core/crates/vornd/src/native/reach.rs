@@ -6,7 +6,7 @@
 
 use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
@@ -157,7 +157,7 @@ fn run(
     env: &Arc<SafeEnv>,
     timeout: Duration,
 ) -> Option<String> {
-    let mut child = Command::new(program)
+    let mut child = vorn_spawn::command(program)
         .args(args)
         .env_clear()
         .envs(env.get())

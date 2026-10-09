@@ -151,13 +151,8 @@ async fn start(
 ) -> Result<RunningService<RoleClient, ClientConfig>, String> {
     let env = spawn_env(base, &launch.env);
     let program = resolve(&launch.command, &env);
-    let mut command = tokio::process::Command::new(&program);
+    let mut command = vorn_spawn::tokio_command(&program);
     command.args(&launch.args).env_clear().envs(env);
-    #[cfg(windows)]
-    {
-        // `windowsHide`: no console window for the child.
-        command.creation_flags(0x0800_0000);
-    }
     let (transport, _) = TokioChildProcess::builder(command)
         .stderr(Stdio::inherit())
         .spawn()
