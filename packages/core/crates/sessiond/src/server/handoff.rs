@@ -263,8 +263,9 @@ impl Sessiond {
     pub(super) fn adopt(
         &self,
         from: &str,
-        on_written: impl Fn(&str, Written) + Send + Clone + 'static,
+        on_written: impl Fn(&str, Written) + Send + Sync + 'static,
     ) -> io::Result<Vec<SessionId>> {
+        let on_written: crate::session::OnWritten = Arc::new(on_written);
         if from == self.endpoint() {
             return Err(io::Error::other("a sessiond cannot adopt its own sessions"));
         }

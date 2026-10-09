@@ -427,7 +427,7 @@ impl Conn {
     }
 
     /// Reports each write the kernel took to whichever vornd is connected.
-    fn on_written(&self) -> impl Fn(&str, crate::session::Written) + Send + Clone + 'static {
+    fn on_written(&self) -> impl Fn(&str, crate::session::Written) + Send + Sync + Clone + 'static {
         let d = Arc::downgrade(&self.d);
         move |session: &str, w: crate::session::Written| {
             if let Some(d) = d.upgrade() {
