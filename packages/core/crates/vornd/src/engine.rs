@@ -1512,6 +1512,10 @@ impl crate::native::sessions::Host for EngineHost {
     fn forget(&self, id: &str) {
         self.engine.streams.forget(id);
     }
+
+    fn opened_by(&self, id: &str, conn: u64) {
+        self.engine.sizes.opened_by(id, conn);
+    }
 }
 
 /// Logs remote terminal `id` in, its shell's prompt drawn: types the ssh line, the password when asked

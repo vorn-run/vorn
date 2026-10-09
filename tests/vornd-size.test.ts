@@ -77,4 +77,37 @@ describe.runIf(vorndSessionsAvailable)('the size of a session vornd holds', () =
     expect(desktop.resized).toHaveLength(1)
     await until('both at the new size', () => desktop.term.cols === 120 && phone.term.cols === 120)
   }, 20_000)
+
+  it('fits a new terminal to the pane that opened it on first draw', async () => {
+    const desktop = await client(TOKEN)
+    const phone = await client(await vornd.deviceToken('phone'))
+    const { id } = await desktop.call<{ id: string }>('shell:create', dir.dir)
+    // As the renderer shows it: attach, report the pane, and again when told
+    // to, for a pane that attached while the session started.
+    const views = new Map<BytesClient, { view: object; resyncs: number }>([
+      [phone, { view: { cols: 50, rows: 30 }, resyncs: -1 }],
+      [desktop, { view: { pane: 1, cols: 200, rows: 50 }, resyncs: -1 }]
+    ])
+    const show = async (): Promise<void> => {
+      for (const [c, v] of views) {
+        if (c.resyncs.length === v.resyncs) continue
+        v.resyncs = c.resyncs.length
+        await c.attach(id)
+        c.notify('terminal:viewport', { id, ...v.view })
+      }
+    }
+    await show()
+
+    await until('the pane size', async () => {
+      await show()
+      return desktop.resized.length > 0
+    })
+    await pause(600)
+    expect(desktop.resized.map((r) => [r.cols, r.rows, r.owner, r.reason])).toEqual([
+      [200, 50, `${desktop.name}:1`, 'launch']
+    ])
+    await until('both at the pane size', () => desktop.term.cols === 200 && phone.term.cols === 200)
+    await desktop.call('terminal:kill', id)
+    await until('the shell to exit', () => desktop.exits.length > 0)
+  }, 20_000)
 })
