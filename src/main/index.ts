@@ -541,9 +541,7 @@ app.whenReady().then(async () => {
     return
   }
 
-  // After an update this is the previous build's server, still holding every
-  // terminal. Not awaited: a handoff pauses the panes for a moment, and every
-  // failure path leaves the incumbent serving exactly what it was serving.
+  // After an update this may be the previous build's server; not awaited, and a failure leaves it serving.
   void upgradeServerInPlace().then((outcome) => {
     if (outcome.kind === 'handed-over') {
       log.info(`[main] the server moved to this build with ${outcome.sessions} terminal(s) running`)

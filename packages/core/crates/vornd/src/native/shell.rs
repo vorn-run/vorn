@@ -2,8 +2,8 @@
 //! programs on PATH, for the intent bar to complete a command with
 //! (`listShellExecutables`), and the shells installed, with what each can
 //! report as command blocks (`listInstalledShells`). Also what a local
-//! shell session is launched with ([`Shells::setup`]), from the shim files
-//! the server writes.
+//! shell session is launched with ([`Shells::setup`]), with the shim files
+//! it sources written first.
 //!
 //! Both are kept as the server keeps them: the programs for a minute, the
 //! shells for as long as vornd runs. Finding the shells runs each one's
@@ -65,8 +65,8 @@ impl Shells {
     /// What a local shell session runs and is launched with
     /// (`getShellIntegration`): `shell`, else the default shell, with its
     /// integration's environment and arguments over the safe environment.
-    /// An error means the server's shims are not a version this build
-    /// knows, or not written yet, and the launch is the server's to make.
+    /// An error means the shims could not be written where only this user
+    /// can change them.
     pub fn setup(
         &self,
         env: &Arc<SafeEnv>,

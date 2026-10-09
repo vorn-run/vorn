@@ -1,7 +1,7 @@
 //! What every command that talks to a server shares: its arguments, its
 //! output, the client, and a server to talk to, started if there is none.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::args::ClientArgs;
@@ -139,6 +139,8 @@ impl From<CallError> for CommandError {
 enum StartError {
     Io(std::io::Error),
     NotFound(crate::launch::NotFound),
+    /// A debug build kept off the default data directory.
+    Refused(String),
 }
 
 impl std::fmt::Display for StartError {
@@ -146,14 +148,17 @@ impl std::fmt::Display for StartError {
         match self {
             StartError::Io(err) => write!(f, "could not start a server: {err}"),
             StartError::NotFound(err) => write!(f, "{err}"),
+            StartError::Refused(why) => f.write_str(why),
         }
     }
 }
 
-/// Starts `vorn server serve` detached, so it outlives this command, with its
+/// Starts vornd as the server detached, so it outlives this command, with its
 /// output appended to the server log. A rival started by a second `vorn` at
 /// the same moment stands down by itself, so no lock is held here.
 fn start_detached(dir: &Path, log: &Path, data_dir_flag: Option<&str>) -> Result<(), StartError> {
+    let data_dir = data_dir_flag.map_or_else(|| dir.to_owned(), PathBuf::from);
+    crate::launch::refuse_default(&data_dir).map_err(StartError::Refused)?;
     std::fs::create_dir_all(dir).map_err(StartError::Io)?;
     let out = std::fs::OpenOptions::new()
         .create(true)
@@ -163,12 +168,7 @@ fn start_detached(dir: &Path, log: &Path, data_dir_flag: Option<&str>) -> Result
     let err = out.try_clone().map_err(StartError::Io)?;
 
     let server = crate::launch::locate().map_err(StartError::NotFound)?;
-    let mut args = vec!["server".to_owned(), "serve".to_owned()];
-    if let Some(flag) = data_dir_flag {
-        args.push("--data-dir".into());
-        args.push(flag.to_owned());
-    }
-    let mut command = server.command(&args);
+    let mut command = server.command(&data_dir, None, None);
     command
         .stdin(std::process::Stdio::null())
         .stdout(out)

@@ -7,10 +7,11 @@ import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '../../packages/shared/src/p
 import type { RunDirs } from './sessions-parity'
 
 /**
- * A real server started as a child, with the vornd it keeps in front of it.
- * The server runs on directories of its own under the temporary root: its
- * home, its data directory and a work directory for projects; a second
- * server started on the same directories is what a restart is.
+ * A real server started as a child: vornd, serving a data directory, with
+ * no other process behind it. It runs on directories of its own under the
+ * temporary root: its home, its data directory and a work directory for
+ * projects; a second server started on the same directories is what a
+ * restart is.
  */
 
 export const TEST_CREDENTIAL = 'native-server-sessions-credential'
@@ -129,28 +130,25 @@ export async function startRealServer(
   fs.rmSync(path.join(dirs.data, WS_PORT_FILENAME), { force: true })
   const log: string[] = []
   const child = spawn(
-    process.execPath,
+    vornd!,
     [
-      '--import',
-      'tsx',
-      path.join(__dirname, '..', '..', 'packages', 'server', 'src', 'index.ts'),
       '--data-dir',
       dirs.data,
       '--port',
-      '0'
+      '0',
+      '--sessiond',
+      path.join(path.dirname(vornd!), 'vorn-sessiond')
     ],
     {
-      cwd: path.join(__dirname, '..', '..'),
+      cwd: dirs.data,
       env: {
         ...process.env,
         HOME: dirs.home,
         [BOOTSTRAP_ENV_VAR]: TEST_CREDENTIAL,
-        VORN_VORND_PATH: vornd!,
         VORND_GROUPS: '',
         // Secrets go to a private file in the data directory, never this machine's keychain.
         VORND_KEYCHAIN: '0',
-        NODE_ENV: 'test',
-        VITEST: ''
+        VORND_LOG: process.env.VORND_LOG ?? 'info'
       },
       stdio: ['ignore', 'pipe', 'pipe']
     }
@@ -168,18 +166,10 @@ export async function startRealServer(
     }
     return server.port > 0
   })
-  const direct = await Watcher.open(server.port)
-  await until('vornd to start', async () => {
-    const s = await direct.result<{ state: string; port?: number }>('server:vornd')
-    if (s.state !== 'on' || !s.port) return false
-    server.vornd = s.port
-    return true
-  })
-  if (options.early) {
-    direct.close()
-    return server
-  }
-  await until('the session holder, and the copy deciding', async () => {
+  // vornd is the server: one port for every client.
+  server.vornd = server.port
+  if (options.early) return server
+  await until('the session holder, and the records read', async () => {
     const res = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
     const health = (await res.json()) as {
       sessiond?: { current?: { pid?: number } }
@@ -188,7 +178,6 @@ export async function startRealServer(
     if (!health.sessiond?.current?.pid) return false
     return health.registry?.fed === true && health.registry.decides === true
   })
-  direct.close()
   return server
 }
 
@@ -251,12 +240,12 @@ export async function stopHolder(pid: number | undefined): Promise<void> {
 }
 
 /** @param keepHolder Leaves the session holder and its sessions running, for a server to start again on. */
-/** Stops it, and fails if its vornd handed the server a call it should have answered. */
+/** Stops it, and fails if vornd left a call to a server that is not there. */
 export async function stopRealServer(server: RealServer, keepHolder = false): Promise<void> {
   const unexpected = await unexpectedForwards(server.vornd)
   await stopServerChild(server.child, server.vornd, server.dirs.data, keepHolder)
   if (Object.keys(unexpected).length > 0) {
-    throw new Error(`vornd handed the server calls it should answer: ${JSON.stringify(unexpected)}`)
+    throw new Error(`vornd left calls unanswered: ${JSON.stringify(unexpected)}`)
   }
 }
 
@@ -274,7 +263,7 @@ export async function unexpectedForwards(port: number): Promise<Record<string, n
 }
 
 /**
- * Stops a server started as a child on `dataDir`, its vornd on `vorndPort`
+ * Stops vornd, started as a child on `dataDir` and listening on `vorndPort`,
  * and, unless kept, its session holder, and waits for each to exit.
  */
 export async function stopServerChild(

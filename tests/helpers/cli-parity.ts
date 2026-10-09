@@ -8,6 +8,7 @@
  */
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 /** What one command left behind. */
@@ -26,11 +27,30 @@ export const vornBinary: string | undefined = [
   path.resolve(__dirname, `../../packages/core/target/release/vorn${EXE}`)
 ].find((p): p is string => !!p && fs.existsSync(p) && fs.statSync(p).isFile())
 
+/** A home of the tests' own: no command a test runs reaches this machine's user. */
+const testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-cli-home-'))
+
+/**
+ * The environment a command runs with: this process's, with a home of its own,
+ * no data directory named, and no vornd to start.
+ */
+export function safeEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: testHome,
+    USERPROFILE: testHome,
+    VORN_VORND_PATH: path.join(testHome, 'no-vornd'),
+    ...extra
+  }
+  if (!('VORN_DATA_DIR' in extra)) delete env.VORN_DATA_DIR
+  return env
+}
+
 /**
  * Runs the binary without blocking the event loop, which a server in this
  * process has to keep answering on.
  */
-export function runBinary(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<Ran> {
+export function runBinary(args: string[], env: NodeJS.ProcessEnv = safeEnv()): Promise<Ran> {
   return runProgram(vornBinary!, args, env)
 }
 
@@ -43,7 +63,7 @@ const CLI_SOURCE = path.resolve(__dirname, '../../packages/server/src/cli.ts')
  * `runCli` in this process would, holds on to SQLite's view of a WAL index the
  * Rust process removes when it closes the file last.
  */
-export function runTypeScript(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<Ran> {
+export function runTypeScript(args: string[], env: NodeJS.ProcessEnv = safeEnv()): Promise<Ran> {
   return runProgram(process.execPath, ['--import', 'tsx', CLI_SOURCE, ...args], env)
 }
 

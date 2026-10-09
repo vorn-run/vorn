@@ -73,9 +73,9 @@
 //! A subscribed connection is also sent what vornd asks of the server
 //! ([`crate::applink`]): `vornd:broadcast {method, params}`, a notification
 //! for every client; `vornd:tokenRevoked {tokenId}`, after which the server
-//! closes the sockets that authenticated with that token; and
-//! `vornd:cleanupOffer {id, projectPath, worktreePath}`, the offer to clean
-//! up a worktree whose last terminal vornd closed, for every client; and
+//! closes the sockets that authenticated with that token;
+//! `vornd:live {sessions, headless}`, how many sessions run, which keeps the
+//! server from stopping as idle (also in the subscription's answer); and
 //! `vornd:worktreesCleaned {paths}`, the worktrees a cleanup vornd ran
 //! removed or emptied, whose sizes the server forgets.
 
@@ -428,9 +428,6 @@ fn call(app: App<'_>, text: &str) {
             "restores": link.restores() && engine.registry().owns(),
         })),
         "vornd:subscribe" => {
-            if let Some(at) = params.get("bootTime").and_then(Value::as_i64) {
-                engine.registry().set_boot_time(at);
-            }
             let state = state(engine);
             subscribed.store(true, Ordering::Release);
             if asks.is_none() {
@@ -453,31 +450,7 @@ fn call(app: App<'_>, text: &str) {
             .get("terminals")
             .map(Vec::<TerminalSession>::deserialize)
         {
-            Some(Ok(terminals)) => {
-                let carried = engine
-                    .registry()
-                    .carry_once(terminals, crate::registry::now_ms());
-                // What the holder runs from that run is live again, not offered.
-                for h in engine.journal().held() {
-                    if h.kind != crate::journal::Kind::Pty {
-                        continue;
-                    }
-                    let epoch = engine
-                        .head_stamp(&h.session)
-                        .and_then(|s| u32::try_from(s.epoch).ok())
-                        .unwrap_or(0);
-                    engine.registry().adopt(&crate::registry::Held {
-                        id: h.session.clone(),
-                        kind: crate::registry::Kind::Terminal,
-                        pid: h.pid,
-                        epoch,
-                    });
-                }
-                for id in engine.registry().restored_ids() {
-                    engine.streams().expect(&id);
-                }
-                Ok(json!({ "carried": carried }))
-            }
+            Some(Ok(terminals)) => Ok(json!({ "carried": engine.carry_old(terminals) })),
             Some(Err(e)) => Err(format!("vornd:carry: {e}")),
             None => Err("vornd:carry needs terminals".to_owned()),
         },
@@ -679,6 +652,7 @@ fn state(engine: &Engine) -> Value {
         "sessions": journal.held().iter().map(held_json).collect::<Vec<_>>(),
         "ended": journal.ended().iter().map(held_json).collect::<Vec<_>>(),
         "notices": notices,
+        "live": engine.registry().live(),
     });
     // Only to a server asked for its records: one that was not sees the
     // answer it always had.
@@ -1155,9 +1129,9 @@ mod tests {
         );
         // When the machine came up decides which offers a reboot ended.
         let now = crate::registry::now_ms();
-        let (state, _) = app
-            .call("vornd:subscribe", json!({ "bootTime": now }))
-            .await;
+        engine.registry().set_boot_time(now);
+        let (state, _) = app.call("vornd:subscribe", Value::Null).await;
+        assert_eq!(state["live"], json!({ "sessions": 0, "headless": 0 }));
         assert!(state["registry"].get("restored").is_none());
         let mut old = shell("a", "Shell 1");
         old["savedAt"] = json!(now - 1_000);

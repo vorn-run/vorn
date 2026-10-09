@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import WebSocket from 'ws'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { TerminalSession } from '../packages/shared/src/types'
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import {
@@ -32,11 +32,6 @@ import {
   until,
   type RealServer
 } from './helpers/real-server'
-
-vi.mock('../packages/server/src/tailscale', () => ({
-  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
-  clearBinaryCache: vi.fn()
-}))
 
 spawnsRealServers()
 
@@ -291,6 +286,10 @@ async function scenario(): Promise<Run> {
     const argv: string[][] = []
     const panes: PaneSeen[] = []
     for (const id of ids) {
+      // Read once vornd has its holder again, which an early start may not yet.
+      await until(`${id} to be read again`, async () => {
+        return (await argvLines(bridge!, id)).length > 0
+      }).catch(() => undefined)
       argv.push(await argvLines(bridge!, id))
       panes.push(await attachPane(second.vornd, id, `warm-${id.slice(0, 6)}`))
     }

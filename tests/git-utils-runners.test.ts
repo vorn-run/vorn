@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import type { ProjectConfig, RemoteHost } from '../packages/shared/src/types'
+import type { RemoteHost } from '../packages/shared/src/types'
 import * as git from '../packages/server/src/git-utils'
 import {
   nativeRunner,
@@ -21,11 +21,6 @@ import {
   type GitRunner
 } from '../packages/server/src/git-runner'
 import type { NativeGitRequest } from '../packages/server/src/native-core'
-import {
-  pruneOrphanDirs,
-  reclaimArtifacts,
-  removeWorktrees
-} from '../packages/server/src/worktree-inventory'
 
 function sh(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -302,51 +297,5 @@ describe('a worktree being made or removed', () => {
     await commit
     await expect(removal).rejects.toThrow(/has a session/)
     expect(log.some((c) => c.startsWith('worktree remove'))).toBe(false)
-  })
-})
-
-describe('worktree actions re-check for sessions just before deleting', () => {
-  const busy = (): void => {
-    throw new Error('has a session starting — close it first')
-  }
-
-  it('leaves a worktree that became busy while git ran', async () => {
-    const wt = path.join(root, '.vorn-worktrees', 'repo', 'busy')
-    sh(repo, 'worktree', 'add', '-q', '-b', 'busy', wt)
-    const projects = [{ name: 'repo', path: repo }] as ProjectConfig[]
-
-    const removed = await removeWorktrees(
-      [{ projectPath: repo, worktreePath: wt }],
-      () => 0,
-      projects,
-      () => undefined,
-      busy
-    )
-    expect(removed.failed[0].error).toMatch(/session starting/)
-    expect(fs.existsSync(wt)).toBe(true)
-
-    fs.mkdirSync(path.join(wt, 'node_modules'))
-    const reclaimed = await reclaimArtifacts(
-      [wt],
-      ['node_modules'],
-      projects,
-      () => undefined,
-      busy
-    )
-    expect(reclaimed.failed[0].error).toMatch(/session starting/)
-    expect(fs.existsSync(path.join(wt, 'node_modules'))).toBe(true)
-  })
-
-  it('leaves an orphan directory that became busy', async () => {
-    const orphan = path.join(root, '.vorn-worktrees', 'repo', 'orphan')
-    fs.mkdirSync(orphan, { recursive: true })
-    const pruned = await pruneOrphanDirs(
-      [orphan],
-      () => 0,
-      () => undefined,
-      busy
-    )
-    expect(pruned.failed[0].error).toMatch(/session starting/)
-    expect(fs.existsSync(orphan)).toBe(true)
   })
 })

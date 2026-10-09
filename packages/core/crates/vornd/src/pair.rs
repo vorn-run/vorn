@@ -58,6 +58,10 @@ pub async fn answer(
         "pairing:poll"
     };
     let body = plain_json(&parts.headers, &bytes);
+    if body.is_none() && !daemon.has_upstream() {
+        daemon.groups().count(method, Counted::Native);
+        return unreadable(&parts.headers);
+    }
     let Some(body) = body else {
         daemon.groups().count(method, Counted::Forwarded);
         parts
@@ -84,6 +88,23 @@ pub async fn answer(
     });
     daemon.groups().count(method, Counted::Native);
     json_response(status, &body)
+}
+
+/// What the server answered a body it would not read: one that is not JSON
+/// at all, or JSON that does not parse.
+fn unreadable(headers: &HeaderMap) -> Response<Body> {
+    let json_typed = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.to_ascii_lowercase().contains("application/json"));
+    if json_typed {
+        json_response(
+            400,
+            &json!({ "statusCode": 400, "error": "Bad Request", "message": "Body is not valid JSON" }),
+        )
+    } else {
+        json_response(415, &json!({ "error": "Expected application/json" }))
+    }
 }
 
 /// The body, when the server's parser would read it as this JSON: an

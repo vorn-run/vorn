@@ -898,6 +898,8 @@ impl Vornd {
         .arg(sessiond)
         .arg("--home")
         .arg(home)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
         .arg("--log-file")
         .arg(&log)
         .env_remove("VORND_GROUPS")

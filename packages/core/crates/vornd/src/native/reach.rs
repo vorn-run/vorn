@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
+use tracing::debug;
 use vorn_protocol::NewDeviceToken;
 use vorn_reach::origin::TrustedHosts;
 use vorn_reach::pairing::{Pairing, Poll};
@@ -45,6 +46,14 @@ pub struct Reach {
     trusted: RwLock<TrustedHosts>,
     /// The server's port, which the URLs a browser uses name.
     server_port: OnceLock<u16>,
+}
+
+/// Who a credential authenticates as.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Authenticated {
+    pub user_id: String,
+    /// The device token, which is closed out when revoked; `None` for this machine's credential.
+    pub token_id: Option<String>,
 }
 
 /// What vornd makes of a credential.
@@ -386,8 +395,12 @@ impl Native {
         match tokens.revoke(id, &now_iso()) {
             Ok(revoked) => {
                 // The sockets holding it are closed by whoever holds them.
-                if let (true, Some(link)) = (revoked, self.link()) {
-                    link.tell("vornd:tokenRevoked", json!({ "tokenId": id }));
+                if revoked {
+                    if let Some(clients) = self.clients() {
+                        clients.disconnect_token(id);
+                    } else if let Some(link) = self.link() {
+                        link.tell("vornd:tokenRevoked", json!({ "tokenId": id }));
+                    }
                 }
                 Answer::Result(json!({ "revoked": revoked }))
             }
@@ -453,7 +466,7 @@ impl Native {
         }
     }
 
-    pub(super) fn link(&self) -> Option<&Arc<AppLink>> {
+    pub(crate) fn link(&self) -> Option<&Arc<AppLink>> {
         self.link.get()
     }
 
@@ -462,6 +475,41 @@ impl Native {
     pub fn verify_credential(&self, raw: &str) -> Verdict {
         let desktop = self.desktop.get().map(Vec::as_slice);
         self.reach.verify(raw, desktop, self.db.get())
+    }
+
+    /// Who `raw` authenticates as: the owner for this machine's credential,
+    /// a device token's user otherwise, whose last use is recorded. `None`
+    /// when it is refused, or the database cannot say.
+    pub fn authenticate(&self, raw: &str) -> Option<Authenticated> {
+        let db = self.db.get()?;
+        let tokens = DeviceTokens::open(db).ok()??;
+        let desktop = self.desktop.get().map(Vec::as_slice);
+        let local = desktop.is_some_and(|d| token::constant_time_eq(raw.as_bytes(), d))
+            || local_token(Some(db)).is_some_and(|t| token::constant_time_eq(raw.as_bytes(), &t));
+        if local {
+            let owner = tokens.owner().ok()??;
+            return Some(Authenticated {
+                user_id: owner.id,
+                token_id: None,
+            });
+        }
+        let parsed = token::parse(raw)?;
+        let row = tokens.secret(parsed.id).ok()??;
+        if row.revoked_at.is_some() || !token::secret_matches(parsed.secret, &row.token_hash) {
+            return None;
+        }
+        if let Err(err) = tokens.touch(&row.id, &vorn_store::now_iso()) {
+            debug!(%err, "could not record a device token's use");
+        }
+        Some(Authenticated {
+            user_id: row.user_id,
+            token_id: Some(row.id),
+        })
+    }
+
+    /// How many pairing requests wait on a person.
+    pub fn pending_pairings(&self) -> usize {
+        self.pairing().pending(now_ms()).len()
     }
 
     /// Who presents `raw`, for the settings kept per viewer.

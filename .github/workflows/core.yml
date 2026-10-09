@@ -20,18 +20,8 @@ on:
       - 'tests/fixtures/js-reference/**'
       - 'tests/helpers/screen-view.ts'
       - 'tests/helpers/screen-parity.ts'
-      - 'tests/helpers/front-door.ts'
-      - 'tests/server-integration.test.ts'
-      - 'tests/task-write-methods.test.ts'
       - 'tests/native-server-workflows.test.ts'
-      - 'packages/server/src/workflow-triggers.ts'
-      - 'packages/server/src/vornd-routes.ts'
       - 'scripts/conformance.mjs'
-      - 'packages/server/src/vornd-channel.ts'
-      - 'packages/server/src/vornd-sessions.ts'
-      - 'packages/server/src/vornd-process.ts'
-      - 'tests/vornd-app-channel.test.ts'
-      - 'tests/vornd-app-sessions.test.ts'
       - 'tests/vornd-app-platforms.test.ts'
       - 'tests/helpers/vornd-sessions.ts'
       - 'packages/server/src/database.ts'
@@ -278,8 +268,8 @@ jobs:
         if: ${{ !inputs.quick }}
         run: yarn vitest run tests/store-reference.test.ts
 
-      # The server driving its sessions through the real vornd and session
-      # holder, on each platform: a named pipe and ConPTY on Windows. The
+      # A client's sessions through the real vornd and session holder, on
+      # each platform: a named pipe and ConPTY on Windows. The
       # screen against the recorded reference runs where its programs (POSIX
       # shell) do.
       - name: Sessions through vornd

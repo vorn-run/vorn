@@ -291,6 +291,34 @@ impl Engine {
         runtime.spawn(follow_statuses(Arc::clone(self), self.subscribe()));
     }
 
+    /// Takes the server's records of an earlier run once
+    /// ([`SessionRegistry::carry_once`]): what the holder still runs from
+    /// them is live again, the rest offered. Answers how many are offered.
+    pub fn carry_old(&self, terminals: Vec<crate::registry::TerminalSession>) -> usize {
+        let carried = self
+            .registry()
+            .carry_once(terminals, crate::registry::now_ms());
+        for h in self.journal().held() {
+            if h.kind != Kind::Pty {
+                continue;
+            }
+            let epoch = self
+                .head_stamp(&h.session)
+                .and_then(|s| u32::try_from(s.epoch).ok())
+                .unwrap_or(0);
+            self.registry().adopt(&crate::registry::Held {
+                id: h.session.clone(),
+                kind: crate::registry::Kind::Terminal,
+                pid: h.pid,
+                epoch,
+            });
+        }
+        for id in self.registry().restored_ids() {
+            self.streams().expect(&id);
+        }
+        carried
+    }
+
     /// The stamp of a state told for `session` now ([`Stamp::at_head`]).
     pub fn head_stamp(&self, session: &str) -> Option<Stamp> {
         self.streams.head(session).map(|c| Stamp::at_head(&c))
@@ -611,7 +639,11 @@ impl Engine {
             .keep_only(welcome.sessions.iter().map(|i| i.session.as_str()));
         for info in &welcome.sessions {
             let id = self.names().public(&info.session).to_owned();
-            self.streams.opened(&id, info.epoch);
+            // Typed while it started, before the holder went: written now it holds it.
+            let early = self.streams.opened(&id, info.epoch);
+            if !early.is_empty() {
+                let _ = self.write(&id, early);
+            }
             let open = Open::from_info(info);
             if open.pty {
                 self.sizes.opened(&id, size_of(open.size));
@@ -969,7 +1001,7 @@ impl Driver<'_> {
                     if let Some(tap) = p.tap {
                         self.engine.taps().insert(id.clone(), tap);
                     }
-                    self.engine.streams.opened(&id, s.start.epoch);
+                    let early = self.engine.streams.opened(&id, s.start.epoch);
                     if let Some(size) = p.size {
                         self.engine.sizes.opened(&id, size_of(size));
                     }
@@ -980,6 +1012,10 @@ impl Driver<'_> {
                     };
                     self.engine.journal().opened(&id, kind, s.pid);
                     self.pool.open(&id, Open::spawned(s.start, p.size));
+                    // What was typed while it started goes in after it opens.
+                    if !early.is_empty() {
+                        let _ = self.engine.write(&id, early);
+                    }
                     let _ = p.reply.send(Ok(Spawned {
                         id,
                         pid: s.pid,
@@ -1469,6 +1505,10 @@ impl crate::native::sessions::Host for EngineHost {
 
     fn expect(&self, id: &str) {
         self.engine.streams.expect(id);
+    }
+
+    fn expect_start(&self, id: &str) {
+        self.engine.streams.expect_start(id);
     }
 
     fn forget(&self, id: &str) {

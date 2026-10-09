@@ -59,36 +59,21 @@ jobs:
       - name: Format check
         run: yarn format:check
 
-      - name: Verify server CJS bundle
+      - name: Verify CLI CJS bundle
         run: |
           yarn workspace @vornrun/server build
           # Fail if import.meta snuck into CJS bundle (causes runtime crash in Electron)
-          if grep -q 'import_meta' packages/server/dist/index.cjs; then
+          if grep -q 'import_meta' packages/server/dist/cli.cjs; then
             echo "ERROR: import_meta found in CJS bundle — will crash at runtime"
             exit 1
           fi
-          # Smoke-test: require the bundle — fails immediately if module-level code crashes
-          node -e "
-            process.on('uncaughtException', (e) => {
-              if (e.code === 'ERR_INVALID_ARG_TYPE' || e.code === 'ERR_INVALID_URL') {
-                console.error('Server bundle crash:', e.message);
-                process.exit(1);
-              }
-              // Ignore other async errors (missing workers, etc.)
-            });
-            try { require('./packages/server/dist/index.cjs'); } catch(e) {
-              if (e.code === 'ERR_INVALID_ARG_TYPE' || e.code === 'ERR_INVALID_URL') {
-                console.error('Server bundle crash:', e.message);
-                process.exit(1);
-              }
-            }
-            setTimeout(() => process.exit(0), 2000);
-          "
+          # Smoke-test: the bundle loads and answers --help
+          node packages/server/dist/cli.cjs --help > /dev/null
 
       - name: Verify production build
         # Catches renderer/main/preload build regressions (e.g. Vite 8 rolldown
         # rejecting object-form manualChunks) that the unit tests don't exercise.
-        # The server bundle is already built in the step above.
+        # The CLI bundle is already built in the step above.
         run: |
           yarn build:web
           yarn electron-vite build

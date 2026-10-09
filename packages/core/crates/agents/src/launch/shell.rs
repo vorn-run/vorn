@@ -2,20 +2,19 @@
 //! (`shell-integration`): the environment and arguments for bash, zsh, fish,
 //! PowerShell and cmd, and which shell a session runs when none is chosen.
 //!
-//! bash, zsh and fish read init files ("shims") the server writes into a
-//! directory of its own under the temporary directory. Those files stay the
-//! server's: this reads them, and answers only when they are exactly a
-//! version this build knows, by the SHA-256 of their contents. Anything else
-//! (not written yet, written by another version, or a directory somebody
-//! else could change) is a [`ShimError`], and the host leaves the launch to
-//! the server. PowerShell and cmd need no files: their integration rides the
-//! command line and the `PROMPT` variable, built here.
+//! bash, zsh and fish read init files ("shims") written into a directory of
+//! their own under the temporary directory ([`shim_root`]). Every shell
+//! sources them, so they are written only into a directory this user alone
+//! can change, and each file is replaced whole by a rename: a shell starting
+//! meanwhile reads the old file or the new one, never half of one. A file
+//! already as this build writes it is left alone. PowerShell and cmd need no
+//! files: their integration rides the command line and the `PROMPT`
+//! variable, built here.
 
 use std::fmt;
 use std::path::Path;
 
-use data_encoding::{BASE64, HEXLOWER};
-use sha2::{Digest, Sha256};
+use data_encoding::BASE64;
 
 use super::env::lookup;
 use super::Platform;
@@ -58,33 +57,39 @@ impl ShellFamily {
         }
     }
 
-    /// The files the server writes for it, relative to its shim directory,
-    /// and the SHA-256 of each version of them this build was written
-    /// against (see [`shim_digest`]). Each family has one version per
-    /// minimal-prompt setting where the script depends on it.
-    fn shim(self) -> Option<(&'static [&'static str], &'static [&'static str])> {
-        match self {
-            ShellFamily::Zsh => Some((&[".zshenv", ".zprofile", ".zshrc"], ZSH_SHIMS)),
-            ShellFamily::Bash => Some((&["vorn-bashrc"], BASH_SHIMS)),
-            ShellFamily::Fish => Some((&["fish/vendor_conf.d/vorn.fish"], FISH_SHIMS)),
-            ShellFamily::PowerShell | ShellFamily::Cmd => None,
+    /// The files written for it, relative to its shim directory, with their
+    /// contents; `None` for a family that needs none. bash and fish draw the
+    /// prompt differently with the minimal prompt.
+    fn shim(self, minimal_prompt: bool) -> Option<&'static [(&'static str, &'static str)]> {
+        match (self, minimal_prompt) {
+            (ShellFamily::Zsh, _) => Some(ZSH_SHIM),
+            (ShellFamily::Bash, true) => Some(&[(
+                "vorn-bashrc",
+                include_str!("../../shims/bash/minimal.bashrc"),
+            )]),
+            (ShellFamily::Bash, false) => {
+                Some(&[("vorn-bashrc", include_str!("../../shims/bash/own.bashrc"))])
+            }
+            (ShellFamily::Fish, true) => {
+                Some(&[(FISH_FILE, include_str!("../../shims/fish/minimal.fish"))])
+            }
+            (ShellFamily::Fish, false) => {
+                Some(&[(FISH_FILE, include_str!("../../shims/fish/own.fish"))])
+            }
+            (ShellFamily::PowerShell | ShellFamily::Cmd, _) => None,
         }
     }
 }
 
-// The versions of the server's shim files this build answers for, minimal
-// prompt first where the script depends on it. A change to a shim in
-// `packages/server/src/shell-integration` fails the launch parity test with
-// the new digest until it is added here.
-const ZSH_SHIMS: &[&str] = &["2b134ab77ca78b34c72a666059948c30b7c1326334d41b077e3df6e7cde74470"];
-const BASH_SHIMS: &[&str] = &[
-    "6f280e8e47fc35ce63af67cd177c59fb770d7f6b0abdf35fef0939a90738bb64",
-    "85f7e687049046a51313e2ae0751e141314b7efb03538c2cf972b8c10013a2c2",
+/// zsh reads its startup files from `ZDOTDIR`, and each of these hands on to the person's own.
+const ZSH_SHIM: &[(&str, &str)] = &[
+    (".zshenv", include_str!("../../shims/zsh/.zshenv")),
+    (".zprofile", include_str!("../../shims/zsh/.zprofile")),
+    (".zshrc", include_str!("../../shims/zsh/.zshrc")),
 ];
-const FISH_SHIMS: &[&str] = &[
-    "3cd25184386f51024f8377607acd46f6943ea9760ec6839406944d98d38545df",
-    "3ad0e51310ded684c526c5c52bd16da196368098e44b25c2f6ff93369177b65d",
-];
+
+/// fish reads vendor configuration from every directory on `XDG_DATA_DIRS`.
+const FISH_FILE: &str = "fish/vendor_conf.d/vorn.fish";
 
 /// How to launch a shell with its integration (`ShellSetup`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -106,33 +111,26 @@ pub struct ShellContext<'a> {
     pub env: &'a [(String, String)],
     /// The home directory, the user's zsh directory when `ZDOTDIR` is unset.
     pub home: &'a str,
-    /// Where the server writes its shims ([`shim_root`]).
+    /// Where the shims are written ([`shim_root`]).
     pub shim_root: &'a str,
 }
 
-/// Why the shims cannot be used, so the launch is left to the server.
+/// Why the shims cannot be written.
 #[derive(Debug)]
 pub enum ShimError {
-    /// A file is missing or unreadable: not written yet, most likely.
-    Unreadable { path: String, error: std::io::Error },
+    /// A file or directory could not be written.
+    Unwritable { path: String, error: std::io::Error },
     /// The directory is not one only this user can change.
     NotOwned(String),
-    /// The files are not a version this build knows.
-    Unknown { family: ShellFamily, digest: String },
 }
 
 impl fmt::Display for ShimError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ShimError::Unreadable { path, error } => write!(f, "cannot read shim {path}: {error}"),
+            ShimError::Unwritable { path, error } => write!(f, "cannot write shim {path}: {error}"),
             ShimError::NotOwned(dir) => write!(
                 f,
                 "refusing to use shim directory not exclusively owned by this user: {dir}"
-            ),
-            ShimError::Unknown { family, digest } => write!(
-                f,
-                "the {} shim is not a version this build knows ({digest})",
-                family.id()
             ),
         }
     }
@@ -151,7 +149,7 @@ pub fn shell_setup(shell: &str, cx: &ShellContext<'_>) -> Result<ShellSetup, Shi
     let pair = |k: &str, v: &str| (k.to_owned(), v.to_owned());
     let setup = match family {
         ShellFamily::Zsh => {
-            let dir = checked_shim(family, cx.shim_root)?;
+            let dir = write_shim(family, cx)?;
             let user = lookup(cx.env, "ZDOTDIR").unwrap_or(cx.home);
             ShellSetup {
                 env: vec![
@@ -165,7 +163,7 @@ pub fn shell_setup(shell: &str, cx: &ShellContext<'_>) -> Result<ShellSetup, Shi
             }
         }
         ShellFamily::Bash => {
-            let dir = checked_shim(family, cx.shim_root)?;
+            let dir = write_shim(family, cx)?;
             ShellSetup {
                 env: vec![pair("VORN_MINIMAL_PROMPT", minimal)],
                 // Long options first: bash 3.2 rejects `-i --rcfile`.
@@ -177,7 +175,7 @@ pub fn shell_setup(shell: &str, cx: &ShellContext<'_>) -> Result<ShellSetup, Shi
             }
         }
         ShellFamily::Fish => {
-            let dir = checked_shim(family, cx.shim_root)?;
+            let dir = write_shim(family, cx)?;
             // Prepended, never replacing: other vendors' files stay visible.
             let data_dirs = match lookup(cx.env, "XDG_DATA_DIRS").unwrap_or("") {
                 "" => format!("{dir}:/usr/local/share:/usr/share"),
@@ -223,54 +221,87 @@ pub fn shell_setup(shell: &str, cx: &ShellContext<'_>) -> Result<ShellSetup, Shi
     Ok(setup)
 }
 
-/// The family's shim directory, once its files are a known version in a
-/// directory only this user can change.
-fn checked_shim(family: ShellFamily, root: &str) -> Result<String, ShimError> {
-    let (files, known) = family.shim().expect("only families with shim files");
-    let dir = paths::join(root, family.id());
+/// The family's shim directory, with its files as this build writes them,
+/// in a directory only this user can change.
+fn write_shim(family: ShellFamily, cx: &ShellContext<'_>) -> Result<String, ShimError> {
+    let files = family
+        .shim(cx.minimal_prompt)
+        .expect("only families with shim files");
+    let dir = paths::join(cx.shim_root, family.id());
+    private_dir(&dir)?;
     if !exclusively_owned(Path::new(&dir)) {
         return Err(ShimError::NotOwned(dir));
     }
-    let mut contents = Vec::with_capacity(files.len());
-    for file in files {
-        let path = paths::join(&dir, file);
-        // Read through no link: the server writes plain files.
-        let read = std::fs::symlink_metadata(&path).and_then(|m| {
-            if m.is_file() {
-                std::fs::read(&path)
-            } else {
-                Err(std::io::Error::other("not a file"))
-            }
-        });
-        match read {
-            Ok(bytes) => contents.push((*file, bytes)),
-            Err(error) => return Err(ShimError::Unreadable { path, error }),
-        }
-    }
-    let digest = shim_digest(contents.iter().map(|(f, b)| (*f, b.as_slice())));
-    if known.contains(&digest.as_str()) {
-        Ok(dir)
-    } else {
-        Err(ShimError::Unknown { family, digest })
-    }
-}
-
-/// The version of a set of shim files: the SHA-256, in lowercase hex, of
-/// each file's relative name and contents, each followed by a NUL, in the
-/// order the family lists them.
-pub fn shim_digest<'a>(files: impl IntoIterator<Item = (&'a str, &'a [u8])>) -> String {
-    let mut hash = Sha256::new();
     for (name, contents) in files {
-        hash.update(name.as_bytes());
-        hash.update([0]);
-        hash.update(contents);
-        hash.update([0]);
+        let path = paths::join(&dir, name);
+        // Read through no link: a link here is not a file this build wrote.
+        let current = std::fs::symlink_metadata(&path)
+            .ok()
+            .filter(std::fs::Metadata::is_file)
+            .and_then(|_| std::fs::read(&path).ok());
+        if current.as_deref() == Some(contents.as_bytes()) {
+            continue;
+        }
+        if let Some(parent) = Path::new(&path).parent() {
+            private_dir(&parent.to_string_lossy())?;
+        }
+        replace(&path, contents.as_bytes()).map_err(|error| ShimError::Unwritable {
+            path: path.clone(),
+            error,
+        })?;
     }
-    HEXLOWER.encode(&hash.finalize())
+    Ok(dir)
 }
 
-/// The server's own check before it writes: a directory, owned by this
-/// user, writable by nobody else.
+/// Makes `dir` and its parents, readable and writable by this user only.
+fn private_dir(dir: &str) -> Result<(), ShimError> {
+    let made = {
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder.create(dir)
+    };
+    // The mode is masked by the umask, and ignored for a directory there already.
+    #[cfg(unix)]
+    let made = made.and_then(|()| {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = std::fs::symlink_metadata(dir)?;
+        if meta.is_dir()
+            && meta.permissions().mode() & 0o077 != 0
+            && exclusively_owned(Path::new(dir))
+        {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+        Ok(())
+    });
+    made.map_err(|error| ShimError::Unwritable {
+        path: dir.to_owned(),
+        error,
+    })
+}
+
+/// Writes `contents` beside `path` and renames it over: the entry is
+/// replaced, never followed, and a reader sees one whole file or the other.
+fn replace(path: &str, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let fresh = format!("{path}.{}.tmp", std::process::id());
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let _ = std::fs::remove_file(&fresh);
+    let written = options
+        .open(&fresh)
+        .and_then(|mut f| f.write_all(contents).and_then(|()| f.sync_all()))
+        .and_then(|()| std::fs::rename(&fresh, path));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&fresh);
+    }
+    written
+}
+
+/// Whether `dir` is a directory, owned by this user, writable by nobody else.
 #[cfg(unix)]
 fn exclusively_owned(dir: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
@@ -287,8 +318,8 @@ fn exclusively_owned(dir: &Path) -> bool {
     std::fs::symlink_metadata(dir).is_ok_and(|m| m.is_dir())
 }
 
-/// Where the server writes its shims: `vorn-shell-integration` in Node's
-/// `os.tmpdir()`, read from the server's own environment through `var`.
+/// Where the shims are written: `vorn-shell-integration` in the temporary
+/// directory Node's `os.tmpdir()` names, read from the environment through `var`.
 pub fn shim_root(platform: Platform, var: impl Fn(&str) -> Option<String>) -> String {
     let set = |name: &str| var(name).filter(|v| !v.is_empty());
     let tmp = match platform {
@@ -502,33 +533,128 @@ mod tests {
     }
 
     #[test]
-    fn refuses_shims_it_does_not_know() {
+    fn writes_each_shim_once_and_whole() {
         let root = tempfile::tempdir().unwrap();
         let root_str = root.path().to_str().unwrap();
         let e = env(&[]);
+        let setup = shell_setup("bash", &cx(&e, true, root_str)).unwrap();
+        let rc = root.path().join("bash").join("vorn-bashrc");
+        assert_eq!(setup.args.unwrap()[1], rc.to_str().unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&rc).unwrap(),
+            include_str!("../../shims/bash/minimal.bashrc")
+        );
+        // Another prompt setting is another file; a changed one is put back.
+        shell_setup("bash", &cx(&e, false, root_str)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&rc).unwrap(),
+            include_str!("../../shims/bash/own.bashrc")
+        );
+        std::fs::write(&rc, "echo changed\n").unwrap();
+        shell_setup("bash", &cx(&e, false, root_str)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&rc).unwrap(),
+            include_str!("../../shims/bash/own.bashrc")
+        );
+        shell_setup("fish", &cx(&e, true, root_str)).unwrap();
+        assert!(root.path().join("fish").join(FISH_FILE).is_file());
+        // Nothing left beside them.
+        let left: Vec<_> = std::fs::read_dir(root.path().join("bash"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["vorn-bashrc"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaces_a_link_rather_than_writing_through_it() {
+        let root = tempfile::tempdir().unwrap();
+        let root_str = root.path().to_str().unwrap();
+        let elsewhere = root.path().join("elsewhere");
+        std::fs::write(&elsewhere, "mine\n").unwrap();
+        let e = env(&[]);
+        shell_setup("bash", &cx(&e, true, root_str)).unwrap();
+        let rc = root.path().join("bash").join("vorn-bashrc");
+        std::fs::remove_file(&rc).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &rc).unwrap();
+        shell_setup("bash", &cx(&e, true, root_str)).unwrap();
+        assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "mine\n");
+        assert!(std::fs::symlink_metadata(&rc).unwrap().is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_shim_directory_somebody_else_can_change() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let root_str = root.path().to_str().unwrap();
+        let dir = root.path().join("zsh");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let e = env(&[]);
         assert!(matches!(
-            shell_setup("bash", &cx(&e, true, root_str)),
+            shell_setup("zsh", &cx(&e, true, root_str)),
             Err(ShimError::NotOwned(_))
         ));
-        let dir = root.path().join("bash");
-        std::fs::create_dir(&dir).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(!dir.join(".zshrc").exists());
+    }
+
+    /// The SHA-256 of each file's name and contents, each followed by a NUL.
+    fn digest(files: &[(&str, &str)]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        for (name, contents) in files {
+            hash.update(name.as_bytes());
+            hash.update([0]);
+            hash.update(contents.as_bytes());
+            hash.update([0]);
         }
-        assert!(matches!(
-            shell_setup("bash", &cx(&e, true, root_str)),
-            Err(ShimError::Unreadable { .. })
-        ));
-        std::fs::write(dir.join("vorn-bashrc"), "echo changed\n").unwrap();
-        assert!(matches!(
-            shell_setup("bash", &cx(&e, true, root_str)),
-            Err(ShimError::Unknown {
-                family: ShellFamily::Bash,
-                ..
-            })
-        ));
+        data_encoding::HEXLOWER.encode(&hash.finalize())
+    }
+
+    #[test]
+    fn writes_the_shims_the_server_wrote_byte_for_byte() {
+        // The digests of the files `packages/server/src/shell-integration` wrote, minimal prompt first.
+        let known = [
+            (
+                ShellFamily::Zsh,
+                true,
+                "2b134ab77ca78b34c72a666059948c30b7c1326334d41b077e3df6e7cde74470",
+            ),
+            (
+                ShellFamily::Zsh,
+                false,
+                "2b134ab77ca78b34c72a666059948c30b7c1326334d41b077e3df6e7cde74470",
+            ),
+            (
+                ShellFamily::Bash,
+                true,
+                "6f280e8e47fc35ce63af67cd177c59fb770d7f6b0abdf35fef0939a90738bb64",
+            ),
+            (
+                ShellFamily::Bash,
+                false,
+                "85f7e687049046a51313e2ae0751e141314b7efb03538c2cf972b8c10013a2c2",
+            ),
+            (
+                ShellFamily::Fish,
+                true,
+                "3cd25184386f51024f8377607acd46f6943ea9760ec6839406944d98d38545df",
+            ),
+            (
+                ShellFamily::Fish,
+                false,
+                "3ad0e51310ded684c526c5c52bd16da196368098e44b25c2f6ff93369177b65d",
+            ),
+        ];
+        for (family, minimal, want) in known {
+            assert_eq!(
+                digest(family.shim(minimal).unwrap()),
+                want,
+                "{family:?} {minimal}"
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -542,17 +668,6 @@ mod tests {
         assert!(!exclusively_owned(&dir));
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert!(exclusively_owned(&dir));
-    }
-
-    #[test]
-    fn digests_names_and_contents() {
-        let a = shim_digest([("a", &b"x"[..])]);
-        assert_ne!(a, shim_digest([("a", &b"y"[..])]));
-        assert_ne!(a, shim_digest([("b", &b"x"[..])]));
-        assert_ne!(
-            shim_digest([("a", &b"bc"[..])]),
-            shim_digest([("ab", &b"c"[..])])
-        );
     }
 
     fn root_with(platform: Platform, vars: &'static [(&'static str, &'static str)]) -> String {

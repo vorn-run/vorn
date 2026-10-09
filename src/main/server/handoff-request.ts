@@ -1,16 +1,9 @@
 import path from 'node:path'
-import {
-  HANDOFF_PROTOCOL_VERSION,
-  type HandoffRequest,
-  type ServerIdentity
-} from '@vornrun/shared/protocol'
+import type { ServerIdentity } from '@vornrun/shared/protocol'
 
 /**
- * Whether the running server should be replaced without stopping it.
- *
- * An update leaves the old server holding every terminal, which is what keeps
- * agents alive and also what would strand them on last month's build. Killing it
- * is never the answer; handing the PTYs over is.
+ * Whether the running server should be replaced by this build. Its terminals
+ * live in the session holder, which the replacement takes over.
  */
 export type HandoffVerdict = { ask: true; why: string } | { ask: false; why: string }
 
@@ -20,8 +13,6 @@ export function updateEndsSessions(platform: NodeJS.Platform, ownsServer: boolea
 }
 
 export function decideHandoff(input: {
-  /** The server refuses this over TCP; asked here so the app declines quietly. */
-  target: string
   platform: NodeJS.Platform
   incumbent: Pick<ServerIdentity, 'appVersion' | 'buildChannel'>
   self: { appVersion: string; buildChannel: 'dev' | 'packaged' }
@@ -31,9 +22,6 @@ export function decideHandoff(input: {
   if (input.platform === 'win32') {
     // No way to inherit a console pseudoterminal, and no local endpoint either.
     return { ask: false, why: 'this platform cannot pass a terminal between processes' }
-  }
-  if (!input.target.startsWith('ws+unix://')) {
-    return { ask: false, why: 'the running server was reached by port rather than by name' }
   }
   if (input.incumbent.buildChannel !== input.self.buildChannel) {
     // `judgeAdoption` refuses first; stated anyway because the failure would be baffling.
@@ -53,22 +41,23 @@ export function decideHandoff(input: {
   }
 }
 
-/** The incumbent cannot derive this: its bundle was replaced. See `serverProcessSpec`. */
-export function buildHandoffRequest(spec: {
-  exec: string
-  args: string[]
-  env: Record<string, string>
-  cwd: string
-  appVersion: string
-}): HandoffRequest {
-  return {
-    handoffVersion: HANDOFF_PROTOCOL_VERSION,
-    exec: spec.exec,
-    args: spec.args,
-    env: spec.env,
-    cwd: spec.cwd,
-    appVersion: spec.appVersion
-  }
+/**
+ * Whether a running server this app could adopt is an older build to replace
+ * with its own. Its terminals live in the session holder, which the new
+ * server takes over, so stopping it ends none of them. Only between packaged
+ * builds that both say which they are: a dev build has one version across
+ * every edit.
+ */
+export function replacesIncumbent(
+  incumbent: Pick<ServerIdentity, 'appVersion' | 'buildChannel'>,
+  self: { appVersion: string; buildChannel: 'dev' | 'packaged' }
+): boolean {
+  return (
+    incumbent.buildChannel === 'packaged' &&
+    self.buildChannel === 'packaged' &&
+    incumbent.appVersion !== 'unknown' &&
+    incumbent.appVersion !== self.appVersion
+  )
 }
 
 /** Where a dev checkout's server entry sits, relative to the built main process. */

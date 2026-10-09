@@ -106,49 +106,12 @@ import type {
  */
 export const RUNTIME_PROTOCOL_VERSION = 1
 
-/**
- * Frozen on purpose: this is the channel used when the runtime protocol has
- * already disagreed, so nothing here may ever change shape or meaning.
- */
-export const HANDOFF_PROTOCOL_VERSION = 1
-
-/** A file rather than a command line: ARG_MAX is not a limit to find by having many terminals. */
-export const HANDOFF_MANIFEST_VERSION = 1
-
-/**
- * A request to stand down in favour of a named replacement.
- *
- * The caller supplies the command line because only it knows one: the incumbent
- * was started from a bundle an update has since replaced. That makes this an exec
- * of a caller-supplied path, so it is accepted only over the unix endpoint.
- */
-export interface HandoffRequest {
-  /** Refused rather than guessed at. */
-  handoffVersion: number
-  /** In production the Electron binary of the new bundle. */
-  exec: string
-  /** Its arguments, ending in the new server's entry point. */
-  args: string[]
-  /** Environment for the replacement. Merged over the incumbent's own. */
-  env: Record<string, string>
-  /** Working directory for the replacement. */
-  cwd: string
-  /** The version the caller expects to be running afterwards, for the log. */
-  appVersion: string
-}
-
-export type HandoffResult =
-  /** The replacement is serving; reconnect rather than wait on this socket. */
-  | { kind: 'handed-over'; sessions: number; pid: number }
-  /** Nothing was disturbed: every terminal is still here, under this server. */
-  | { kind: 'declined'; because: string }
-
 export interface ServerHello {
   protocolVersion: number
   /**
    * What this server can do, as name → version. A client sends a new message
-   * kind only after seeing it here, because `ws-handler` drops unknown methods
-   * silently: an unnegotiated feature appears to hang rather than to fail.
+   * kind only after seeing it here, because an older server may not answer
+   * it: an unnegotiated feature appears to hang rather than to fail.
    *
    * `auth: 1` means the server refuses every method until a credential is
    * presented — either as `Authorization: Bearer` on the upgrade, or as an
@@ -892,7 +855,6 @@ export interface RequestMethods {
   }
   'server:shutdown': { params: void; result: void }
   /** Hand every running terminal to the replacement described, and exit. Unix endpoint only. */
-  'server:handoff': { params: HandoffRequest; result: HandoffResult }
   /** Where clients reach this server through vornd, or why they cannot; waits for a start in flight. */
   'server:vornd': { params: void; result: VorndStatus }
 

@@ -162,6 +162,11 @@ impl DeviceTokens {
         list(&self.conn)
     }
 
+    /// Records that token `id` was just used.
+    pub fn touch(&self, id: &str, seen_at: &str) -> Result<()> {
+        touch(&self.conn, id, seen_at)
+    }
+
     /// False when `id` is unknown or was already revoked.
     pub fn revoke(&self, id: &str, revoked_at: &str) -> Result<bool> {
         revoke(&self.conn, id, revoked_at)

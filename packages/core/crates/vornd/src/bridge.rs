@@ -10,6 +10,10 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+/// The protocol's calls that only vornd makes, of the desktop; no client
+/// sends them, so no group answers them.
+pub const ASKED_OF_DESKTOP: &[&str] = &["session:fetch", "session:check", "session:forget"];
+
 /// What a request to the desktop comes to.
 pub type Answer<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
 

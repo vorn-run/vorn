@@ -3,13 +3,7 @@ import { defineConfig } from 'tsup'
 
 const { version } = JSON.parse(readFileSync('./package.json', 'utf-8'))
 
-// Prepended to both entries. `cli.cjs` is what both bins point at -- `vorn` and
-// the `vorn-server` alias -- and Yarn links a bin as a plain symlink: without
-// this the shell runs it as sh and it dies partway through the bundle with a
-// syntax error. It has to live in the
-// banner rather than at the top of `src/cli.ts`, because the banner is emitted
-// first and a shebang is only honoured on line 1. Node ignores it in
-// `index.cjs`, which is required rather than executed.
+// The bins are plain symlinks, so the bundle needs a shebang on line 1, which only the banner can put there.
 const SHEBANG = '#!/usr/bin/env node'
 
 // Node keeps the bundle's compiled form on disk, so a warm start skips half its load.
@@ -47,11 +41,8 @@ const NATIVE_MODULE_PATCH = `
 `
 
 export default defineConfig({
-  // Two entries: `index` is what Electron's utilityProcess spawns, `cli` is the
-  // `vorn` binary the installers put on PATH. They are bundled independently
-  // rather than code-split, because each runs as its own process and a shared
-  // chunk would only add a require() hop.
-  entry: ['src/index.ts', 'src/cli.ts'],
+  // The `vorn` binary the installers put on PATH.
+  entry: ['src/cli.ts'],
   format: ['cjs'],
   target: 'node22',
   clean: true,

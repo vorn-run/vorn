@@ -1,11 +1,6 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { vi } from 'vitest'
-import {
-  buildAgentLaunchLine,
-  buildHeadlessSpawnArgs
-} from '../../packages/server/src/agent-launch'
 import type { AgentCommandConfig, AiAgentType, CreateTerminalPayload } from '@vornrun/shared/types'
 
 /**
@@ -140,33 +135,6 @@ export function hostOf(c: LaunchCase): LaunchHost {
   return { platform: c.platform === 'win32' ? 'win32' : 'linux', shell: c.shell ?? '/bin/zsh' }
 }
 
-/**
- * Runs `fn` with the TypeScript seeing the case's machine. On Windows its
- * default shell is COMSPEC once PATH holds no `pwsh.exe` and SystemRoot no
- * Windows PowerShell, which an empty directory and a missing one guarantee.
- */
-export function asMachine<T>(host: LaunchHost, empty: string, fn: () => T): T {
-  if (host.platform !== 'win32') return fn()
-  const saved = {
-    PATH: process.env.PATH,
-    SystemRoot: process.env.SystemRoot,
-    COMSPEC: process.env.COMSPEC
-  }
-  const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
-  process.env.PATH = empty
-  process.env.SystemRoot = path.join(empty, 'no-windows')
-  process.env.COMSPEC = host.shell
-  try {
-    return fn()
-  } finally {
-    platform.mockRestore()
-    for (const [key, value] of Object.entries(saved)) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
-  }
-}
-
 export function outcome<T>(fn: () => T): Outcome<T> {
   try {
     return fn()
@@ -188,20 +156,6 @@ export function plainHeadless(h: Outcome<Headless>): Outcome<Headless> {
  * for the rest, as the server does for an agent with no configuration.
  */
 const commandsOf = (c: LaunchCase) => (c.commands ?? {}) as Record<AiAgentType, AgentCommandConfig>
-
-/** The TypeScript's answers for a filled case. */
-export function viaTypeScript(
-  c: LaunchCase,
-  empty: string
-): { line: Outcome<string>; headless: Outcome<Headless> } {
-  const host = hostOf(c)
-  const payload = c.payload as CreateTerminalPayload
-  const env = launchEnv(c)
-  return asMachine(host, empty, () => ({
-    line: outcome(() => buildAgentLaunchLine(payload, commandsOf(c), env)),
-    headless: plainHeadless(outcome(() => buildHeadlessSpawnArgs(payload, commandsOf(c), env)))
-  }))
-}
 
 /** The native answers for a filled case. */
 export function viaNative(
@@ -226,4 +180,88 @@ export function seeded(seed: number): () => number {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
+}
+
+const FRAGMENTS = [
+  'claude',
+  'codex',
+  'npx',
+  '--resume',
+  '--resume=',
+  '-r',
+  '-rold',
+  '-ir',
+  '--continue',
+  '-c',
+  '--session-id',
+  '--session',
+  '-s',
+  'resume',
+  '--last',
+  '--',
+  '--model',
+  '-m',
+  '-mx',
+  'model=x',
+  'x',
+  'old',
+  "'a b'",
+  "'",
+  '"',
+  '"q $x"',
+  '"a\\"b"',
+  '\\',
+  '\\ ',
+  '$(',
+  '$',
+  ')',
+  '(',
+  '`',
+  '|',
+  '&&',
+  ';',
+  '>',
+  '<',
+  '\n',
+  '\r',
+  '\t',
+  'é',
+  '😀',
+  '\u00a0',
+  '$HOME',
+  '~/bin'
+]
+const SEPARATORS = [' ', ' ', ' ', '', '\t', '  ']
+const AGENTS = ['claude', 'copilot', 'codex', 'opencode', 'gemini'] as const
+
+/** The seeded random launch cases: command lines that pin what each side declines to read. */
+export function randomCases(count: number): { c: LaunchCase; line: string }[] {
+  const cases: { c: LaunchCase; line: string }[] = []
+  const rand = seeded(0x5eed1)
+  const pick = <T>(list: readonly T[]): T => list[Math.floor(rand() * list.length)]!
+  const maybe = <T>(list: readonly T[]): T | undefined => (rand() < 0.5 ? undefined : pick(list))
+  for (let i = 0; i < count; i++) {
+    let line = ''
+    const words = 1 + Math.floor(rand() * 7)
+    for (let w = 0; w < words; w++) line += (w ? pick(SEPARATORS) : '') + pick(FRAGMENTS)
+    if (rand() < 0.1) line += pick(SEPARATORS)
+    const agentType = pick(AGENTS)
+    const c: LaunchCase = {
+      name: `random ${i}`,
+      platform: rand() < 0.7 ? 'posix' : 'win32',
+      shell: pick(['cmd.exe', 'C:\\pwsh.exe']),
+      payload: {
+        agentType,
+        resumeSessionId: maybe(['new', '', 'a b', "it's"]),
+        sessionId: maybe(['pin', '', '50%']),
+        model: rand() < 0.15 ? pick(['m', '-bad', 'a b']) : undefined,
+        initialPrompt: maybe(['p', '', 'it\'s "x"', 'a\nb']),
+        remoteHostId: rand() < 0.1 ? 'host' : undefined,
+        args: rand() < 0.3 ? [pick(FRAGMENTS), pick(FRAGMENTS)] : undefined
+      },
+      commands: { [agentType]: { command: line, args: rand() < 0.5 ? [] : [pick(FRAGMENTS)] } }
+    }
+    cases.push({ c, line })
+  }
+  return cases
 }

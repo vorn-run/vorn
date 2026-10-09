@@ -1,10 +1,9 @@
 //! The terminal calls vornd answers itself, for the sessions it holds.
 //!
-//! Routing is per session, not per group: `terminal:attach`, `write`,
-//! `resize`, `readScrollback` and `readOutput` naming a session the engine
-//! holds never reach the Node server; the same calls for any other session
-//! (Node's own PTYs) are forwarded as they always were. What answers them is
-//! in [`crate::streams`]; this module only reads the calls.
+//! `terminal:attach`, `write`, `resize`, `readScrollback` and `readOutput`
+//! are answered here whatever session they name: one the engine holds from
+//! [`crate::streams`], any other as the server answered a session it had no
+//! program for (nothing to read, nothing to write to).
 //!
 //! The size of a held session is the size rule's ([`crate::size`]). A
 //! client reports `terminal:viewport {id, cols, rows}` and
@@ -121,7 +120,16 @@ fn route(
             }
             return true;
         }
-        return unheld(engine, reply, rpc, method, session);
+        // Typed into a session being started: written once its program runs.
+        if method == "terminal:write" {
+            let data = params.get("data").and_then(Value::as_str).unwrap_or("");
+            if streams.hold_input(session, data.as_bytes()) {
+                settle(reply, rpc, Ok(()));
+                return true;
+            }
+        }
+        unheld(engine, reply, rpc, method, session);
+        return true;
     }
     let sizes = engine.sizes();
     // The app's calls leave the size rule alone.
@@ -162,6 +170,10 @@ fn route(
                     // reports do not.
                     if counted && vorn_size::typed(data.as_bytes()) {
                         sizes.on(session, who, Ev::Input, now);
+                    }
+                    // A person's input wakes an idle or waiting agent, before what it makes the program print.
+                    if counted {
+                        let _ = engine.registry().input(session, engine.head_stamp(session));
                     }
                     engine.write(session, data.as_bytes().to_vec())
                 }
@@ -218,15 +230,9 @@ fn route(
 }
 
 /// Answers a call that was sent as a request; a notification gets nothing.
-/// The reads of a session nothing holds, as the server answered them: no
-/// screen, no output, not live. Whether vornd answered.
-fn unheld(
-    engine: &Engine,
-    reply: &Forwarder,
-    rpc: Option<Value>,
-    method: &str,
-    session: &str,
-) -> bool {
+/// A session nothing holds, as the server answered it: no screen, no output,
+/// not live, and nothing to write to or size.
+fn unheld(engine: &Engine, reply: &Forwarder, rpc: Option<Value>, method: &str, session: &str) {
     let answered = match method {
         "terminal:attach" => Ok(json!({ "data": "", "seq": 0, "live": false })),
         "terminal:readScrollback" => Ok(json!({ "data": "" })),
@@ -235,11 +241,10 @@ fn unheld(
             match known {
                 Some(true) => Ok(json!([])),
                 Some(false) => Err(format!("Session not found: {session}")),
-                // No copy of the records yet: the server says.
-                None => return false,
+                None => Err("vornd has not read the sessions yet".to_owned()),
             }
         }
-        _ => return false,
+        _ => Ok(Value::Null),
     };
     if let Some(rpc) = rpc {
         match answered {
@@ -247,7 +252,6 @@ fn unheld(
             Err(e) => reply.send_now(&refuse(&rpc, &e)),
         }
     }
-    true
 }
 
 fn settle(reply: &Forwarder, rpc: Option<Value>, done: Result<(), String>) {

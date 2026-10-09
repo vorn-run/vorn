@@ -49,9 +49,9 @@ else
   printf "   Install once with: \033[1mpipx install diff_cover\033[0m\n"
 fi
 
-step "Verify server CJS bundle"
+step "Verify CLI CJS bundle"
 yarn workspace @vornrun/server build
-if grep -q 'import_meta' packages/server/dist/index.cjs; then
+if grep -q 'import_meta' packages/server/dist/cli.cjs; then
   echo "ERROR: import_meta found in CJS bundle — will crash at runtime"
   exit 1
 fi

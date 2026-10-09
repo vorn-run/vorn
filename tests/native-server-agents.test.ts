@@ -1,35 +1,32 @@
 /**
- * vornd's own answers to the `agent:`, `sessions:` and `shell:` calls it
- * takes over, against the server's answers to the same calls: live for the
- * ones the server still has, and for the rest as its TypeScript gave them,
- * recorded before it was removed (`fixtures/js-reference/agent-calls.json`,
- * rerecorded with `VORN_RECORD_JS_REFERENCE=1` against a server that still
- * has them).
+ * vornd's own answers to the `agent:`, `sessions:` and `shell:` calls,
+ * against the answers the server's TypeScript gave, recorded before it was
+ * removed (`fixtures/js-reference/agent-calls.json`).
  *
  * The test gives both one home directory, holding a history for each of the
  * five agents, and one PATH, holding a stand-in CLI for each agent that lists
  * models. The login shell both ask for its environment is a stand-in too,
- * which prints the environment it was given, so both see that PATH. One
- * server is started, and two vornds in front of it: one answering
- * them itself, one shadowing the same groups. Every call is made to the
- * server and through vornd, and the two frames a client receives must be the
- * same but for the differences `helpers/agents-parity` names.
+ * which prints the environment it was given, so vornd sees that PATH. vornd
+ * is started as the server on the fixture's home and a data directory of its
+ * own, and each frame a client receives must be the recorded one but for the
+ * differences `helpers/agents-parity` names. The shell lookups name this
+ * machine's programs, so those are checked for the stand-ins only.
  *
  * Runs where vornd has been built (`yarn build:core`, or the binary in
  * `VORN_CONFORMANCE_VORND`).
  */
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createInterface } from 'node:readline'
 import Database from 'libsql'
 import WebSocket from 'ws'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { answerOf, type Answer } from './helpers/git-parity'
 import { catalogFetchedAt } from './helpers/agents-parity'
 import { fixtureRoot } from './helpers/git-parity'
 import { JsReference, posixSeparators } from './helpers/js-reference'
+import { startServed, type Served } from './helpers/served'
 
 const TEST_CREDENTIAL = 'native-server-agents-credential'
 const EXE = process.platform === 'win32' ? '.exe' : ''
@@ -43,88 +40,13 @@ const vornd = [
 /** The stand-in CLIs and the shell are scripts; Windows runs neither. */
 const runnable = !!vornd && process.platform !== 'win32'
 
-/** Shared with the database stub, which is hoisted above everything else. */
-const shared = vi.hoisted(() => ({ dataDir: '/tmp/vorn-native-server-agents' }))
+const shared = { dataDir: '' }
 
-/** What the server's stub and vornd's database file both say. */
+/** What the configuration says of two agents. */
 const AGENT_COMMANDS = {
   gemini: { command: 'gemini-missing', args: [], fallbackCommand: 'gem-fallback' },
   codex: { command: 'codex', args: ['--profile', 'work', '--yolo'] }
 }
-
-vi.mock('node-pty', () => ({
-  default: { spawn: vi.fn() },
-  spawn: vi.fn()
-}))
-
-// Booting a server probes Tailscale with a real process; nothing here needs it.
-vi.mock('../packages/server/src/tailscale', () => ({
-  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
-  clearBinaryCache: vi.fn()
-}))
-
-vi.mock(
-  '../packages/server/src/database',
-  () =>
-    ({
-      closeDatabase: vi.fn(),
-      initDatabase: vi.fn(),
-      getDataDir: vi.fn(() => shared.dataDir),
-      dbGetOwnerUser: vi.fn(() => ({
-        id: 'owner-1',
-        name: 'test',
-        role: 'owner' as const,
-        createdAt: new Date().toISOString()
-      })),
-      dbInsertDeviceToken: vi.fn(),
-      dbListDeviceTokens: vi.fn(() => []),
-      dbGetDeviceTokenSecret: vi.fn(),
-      dbRevokeDeviceToken: vi.fn(() => true),
-      dbTouchDeviceToken: vi.fn(),
-      loadConfig: vi.fn(() => ({
-        version: 1,
-        defaults: {
-          shell: process.env.SHELL,
-          fontSize: 14,
-          theme: 'dark',
-          envPassthrough: ['PARITY_SECRET_KEY']
-        },
-        projects: [],
-        agentCommands: {
-          gemini: { command: 'gemini-missing', args: [], fallbackCommand: 'gem-fallback' },
-          codex: { command: 'codex', args: ['--profile', 'work', '--yolo'] }
-        },
-        workflows: [],
-        remoteHosts: [],
-        tasks: [],
-        workspaces: []
-      })),
-      saveConfig: vi.fn(),
-      dbListTasks: vi.fn(() => []),
-      dbGetTask: vi.fn(),
-      dbInsertTask: vi.fn(),
-      dbUpdateTask: vi.fn(),
-      dbDeleteTask: vi.fn(),
-      dbGetMaxTaskOrder: vi.fn(() => 0),
-      dbGetProject: vi.fn(),
-      dbListProjects: vi.fn(() => []),
-      dbListWorkflows: vi.fn(() => []),
-      dbInsertWorkflow: vi.fn(),
-      dbUpdateWorkflow: vi.fn(),
-      dbDeleteWorkflow: vi.fn(),
-      saveWorkflowRun: vi.fn(),
-      listWorkflowRuns: vi.fn(() => []),
-      listWorkflowRunIds: vi.fn(() => []),
-      deleteArtifactsUpdatedBefore: vi.fn(() => []),
-      listArtifactIds: vi.fn(() => []),
-      listWorkflowRunsByTask: vi.fn(() => []),
-      updateWorkflowRunStatus: vi.fn(),
-      dbReleaseConnectorInboxLeases: vi.fn(),
-      dbCountActiveConnectorInboxLeases: vi.fn(() => 0),
-      dbClaimConnectorInbox: vi.fn(() => []),
-      dbGetWorkflowRunByConnectorInboxId: vi.fn(() => null)
-    }) satisfies Partial<Record<keyof typeof import('../packages/server/src/database'), unknown>>
-)
 
 /** A WebSocket client that sends one call at a time and returns its frame. */
 class Client {
@@ -163,38 +85,6 @@ class Client {
   }
 }
 
-interface Vornd {
-  port: number
-  child: ChildProcess
-}
-
-async function startVornd(upstream: number, args: string[]): Promise<Vornd> {
-  const child = spawn(vornd!, ['--upstream', `127.0.0.1:${upstream}`, ...args], {
-    stdio: ['ignore', 'pipe', 'inherit'],
-    env: { ...process.env, VORND_LOG: process.env.VORND_LOG ?? 'warn' }
-  })
-  const port = await new Promise<number>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('vornd did not start')), 10_000)
-    createInterface({ input: child.stdout! }).once('line', (line) => {
-      clearTimeout(timer)
-      resolve((JSON.parse(line) as { port: number }).port)
-    })
-    child.once('exit', (code) => {
-      clearTimeout(timer)
-      reject(new Error(`vornd exited with ${code} before listening`))
-    })
-  })
-  return { port, child }
-}
-
-function stopVornd(v: Vornd | undefined): Promise<void> {
-  if (!v || v.child.exitCode !== null || v.child.signalCode !== null) return Promise.resolve()
-  return new Promise((resolve) => {
-    v.child.once('exit', () => resolve())
-    v.child.kill()
-  })
-}
-
 type Counts = Record<
   string,
   {
@@ -207,7 +97,7 @@ type Counts = Record<
   }
 >
 
-async function counts(v: Vornd): Promise<Counts> {
+async function counts(v: Served): Promise<Counts> {
   const res = await fetch(`http://127.0.0.1:${v.port}/vornd/health`)
   return ((await res.json()) as { groups: Counts }).groups
 }
@@ -386,30 +276,22 @@ function makeTools(root: string): { bin: string; shell: string } {
   return { bin, shell }
 }
 
-/** The settings vornd reads: the same agent commands and passthrough as the stub. */
-function writeStore(file: string): void {
-  const db = new Database(file)
-  db.exec(`
-    CREATE TABLE agent_commands (agent_type TEXT PRIMARY KEY, command TEXT NOT NULL, args TEXT NOT NULL,
-      headless_args TEXT, fallback_command TEXT, fallback_args TEXT, row_revision INTEGER);
-    CREATE TABLE defaults (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-  `)
-  const insert = db.prepare(
-    'INSERT INTO agent_commands (agent_type, command, args, fallback_command) VALUES (?, ?, ?, ?)'
-  )
-  for (const [agent, cmd] of Object.entries(AGENT_COMMANDS)) {
-    insert.run(
-      agent,
-      cmd.command,
-      JSON.stringify(cmd.args),
-      'fallbackCommand' in cmd ? cmd.fallbackCommand : null
-    )
+/** The agents' commands and the variables passed through, saved as the app saves them. */
+async function saveConfig(port: number): Promise<void> {
+  const client = await Client.open(port)
+  try {
+    const config = (await client.call('config:load')).result as {
+      defaults: Record<string, unknown>
+      agentCommands: Record<string, unknown>
+    }
+    await client.call('config:save', {
+      ...config,
+      defaults: { ...config.defaults, envPassthrough: ['PARITY_SECRET_KEY'] },
+      agentCommands: { ...config.agentCommands, ...AGENT_COMMANDS }
+    })
+  } finally {
+    client.close()
   }
-  db.prepare('INSERT INTO defaults (key, value) VALUES (?, ?)').run(
-    'envPassthrough',
-    JSON.stringify(['PARITY_SECRET_KEY'])
-  )
-  db.close()
 }
 
 const ENV_KEYS = ['HOME', 'XDG_DATA_HOME', 'PATH', 'SHELL'] as const
@@ -430,10 +312,13 @@ function warmPowerShell(): void {
   }
 }
 
-let serverPort: number
-let closeServer: () => Promise<void>
-let native: Vornd | undefined
+let native: Served | undefined
 const reference = new JsReference('agent-calls')
+
+/** The TypeScript that answered these is gone: only its recorded answers remain. */
+const gone = async (): Promise<never> => {
+  throw new Error('nothing records these now: the TypeScript that answered them is gone')
+}
 /** How often each call has been made, so a repeated one (a cached list) has a key of its own. */
 const seenCalls = new Map<string, number>()
 let fx: Fixture
@@ -448,35 +333,27 @@ describe.skipIf(!runnable)(
       const tools = makeTools(fx.root)
       shared.dataDir = path.join(fx.root, 'data')
       fs.mkdirSync(shared.dataDir)
-      writeStore(path.join(shared.dataDir, 'vorn.db'))
       process.env.HOME = fx.home
       process.env.XDG_DATA_HOME = path.join(fx.home, '.local', 'share')
       process.env.PATH = `${tools.bin}${path.delimiter}${process.env.PATH ?? ''}`
       process.env.SHELL = tools.shell
       warmPowerShell()
 
-      process.env.SECRET_VORN_BOOTSTRAP_TOKEN = TEST_CREDENTIAL
-      const { startServer } = await import('../packages/server/src/index')
-      const { shellEnvSettled } = await import('../packages/server/src/process-utils')
-      const origWrite = process.stdout.write.bind(process.stdout)
-      process.stdout.write = (() => true) as typeof process.stdout.write
-      try {
-        const { app, port } = await startServer({ port: 0 })
-        serverPort = port
-        closeServer = () => app.close()
-      } finally {
-        process.stdout.write = origWrite
-      }
-      await shellEnvSettled(10_000)
-      const db = path.join(shared.dataDir, 'vorn.db')
-      native = await startVornd(serverPort, ['--db', db])
+      native = await startServed({
+        dataDir: shared.dataDir,
+        home: fx.home,
+        credential: TEST_CREDENTIAL,
+        env: {
+          XDG_DATA_HOME: process.env.XDG_DATA_HOME!,
+          PATH: process.env.PATH!,
+          SHELL: process.env.SHELL!
+        }
+      })
+      await saveConfig(native.port)
     }, 60_000)
 
     afterAll(async () => {
-      delete process.env.SECRET_VORN_BOOTSTRAP_TOKEN
-      reference.save()
-      await stopVornd(native)
-      await closeServer?.()
+      await native?.stop()
       for (const key of ENV_KEYS) {
         if (savedEnv[key] === undefined) delete process.env[key]
         else process.env[key] = savedEnv[key]
@@ -501,40 +378,38 @@ describe.skipIf(!runnable)(
 
     /** One call on each side, the answers compared. */
     async function same(
-      direct: Client,
       through: Client,
       method: string,
       params: unknown,
       normalize: (a: Answer) => Answer = (a) => a
     ): Promise<Answer> {
       const read = (a: Answer): Answer => posixSeparators(fixtureRoot(normalize(a), fx.root))
-      const live = async (): Promise<Answer> => read(answerOf(await direct.call(method, params)))
-      // The server still has the shell's calls; the rest are recorded.
       const call = `${method} ${JSON.stringify(posixSeparators(fixtureRoot(params ?? null, fx.root)))}`
       const nth = (seenCalls.get(call) ?? 0) + 1
       seenCalls.set(call, nth)
       const key = `${call} #${nth}`
-      const want = method.startsWith('shell:') ? await live() : await reference.want(key, live)
       const got = read(answerOf(await through.call(method, params)))
+      // This machine's programs and shells: only what the test put there is known.
+      if (method.startsWith('shell:')) {
+        expect(Array.isArray(got.result), `${method}`).toBe(true)
+        return got
+      }
+      const want = await reference.want(key, gone)
       expect(got, `${method} ${JSON.stringify(params)}`).toEqual(want)
       return got
     }
 
     it('answers every lookup with the server’s frame', async () => {
-      const direct = await Client.open(serverPort)
       const through = await Client.open(native!.port)
-      // The first answer the server sends shows vornd the socket was admitted.
-      await through.call('config:load')
       try {
-        for (const [method, params] of readCalls()) await same(direct, through, method, params)
-        const installed = await same(direct, through, 'agent:detectInstalled', undefined)
+        for (const [method, params] of readCalls()) await same(through, method, params)
+        const installed = await same(through, 'agent:detectInstalled', undefined)
         expect(installed.result).toMatchObject({ claude: true, opencode: true, gemini: true })
-        const recent = await same(direct, through, 'sessions:getRecent', fx.project)
+        const recent = await same(through, 'sessions:getRecent', fx.project)
         const ids = (recent.result as Array<{ sessionId: string }>).map((s) => s.sessionId)
         // Newest first; a claude and a codex session at one time keep the server's agent order.
         expect(ids).toEqual(['p1', 'g1', 'c1', 'c2', 'o1', 'c3', 'c5', 'x1'])
       } finally {
-        direct.close()
         through.close()
       }
       const groups = await counts(native!)
@@ -545,14 +420,12 @@ describe.skipIf(!runnable)(
     }, 60_000)
 
     it('lists each agent’s models as the server does, cached and refreshed alike', async () => {
-      const direct = await Client.open(serverPort)
       const through = await Client.open(native!.port)
-      await through.call('config:load')
       const before = await counts(native!)
       let made = 0
       const models = (params: unknown): Promise<Answer> => {
         made++
-        return same(direct, through, 'agent:listModels', params, catalogFetchedAt)
+        return same(through, 'agent:listModels', params, catalogFetchedAt)
       }
       try {
         for (const agentType of ['claude', 'codex', 'copilot', 'opencode']) {
@@ -595,16 +468,14 @@ describe.skipIf(!runnable)(
           ]
         })
       } finally {
-        direct.close()
         through.close()
       }
       const after = await counts(native!)
       expect((after.agent?.native ?? 0) - (before.agent?.native ?? 0)).toBe(made)
     }, 60_000)
 
-    it('leaves only the restored sessions to the server', async () => {
+    it('answers every one of them, refusals included', async () => {
       const through = await Client.open(native!.port)
-      await through.call('config:load')
       const before = await counts(native!)
       await through.call('sessions:restored')
       const relative = await through.call('sessions:getRecent', 'relative/project')
@@ -616,7 +487,7 @@ describe.skipIf(!runnable)(
       expect(models).toHaveProperty('error')
       through.close()
       const after = await counts(native!)
-      expect((after.sessions?.forwarded ?? 0) - (before.sessions?.forwarded ?? 0)).toBe(1)
+      expect((after.sessions?.forwarded ?? 0) - (before.sessions?.forwarded ?? 0)).toBe(0)
       expect((after.agent?.forwarded ?? 0) - (before.agent?.forwarded ?? 0)).toBe(0)
     }, 60_000)
   }

@@ -1,40 +1,22 @@
 /**
- * vornd's own answers to the reach calls, on a real server that started its
- * own vornd: device tokens, phone pairing end to end, the Origin check and
- * the credential check; and the same calls and checks shadowed, every one
- * compared with the server's.
+ * vornd's own answers to the reach calls, as the server: device tokens, phone
+ * pairing end to end, the Origin check and the credential check.
  *
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`).
  */
-import { spawn, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import WebSocket from 'ws'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '@vornrun/shared/protocol'
 import { spawnsRealServers } from './helpers/one-at-a-time'
-import { stopServerChild } from './helpers/real-server'
+import { builtSessiond, builtVornd, startServed, type Served } from './helpers/served'
 
-const repoRoot = path.join(__dirname, '..')
 const CREDENTIAL = 'native-reach-test-credential'
-const EXE = process.platform === 'win32' ? '.exe' : ''
-const built = path.join(repoRoot, 'packages', 'core', 'target', 'release')
-const vornd = [process.env.VORN_CONFORMANCE_VORND, path.join(built, `vornd${EXE}`)].find(
-  (p): p is string =>
-    !!p && fs.existsSync(p) && fs.existsSync(path.join(path.dirname(p), `vorn-sessiond${EXE}`))
-)
 
 spawnsRealServers()
 
 interface Server {
-  child: ChildProcess
-  dataDir: string
-  /** The server's own port. */
+  served: Served
   port: number
-  /** vornd's, in front of it. */
-  vornd: number
-  log: string[]
 }
 
 const servers: Server[] = []
@@ -49,50 +31,9 @@ async function waitFor<T>(what: string, check: () => Promise<T | null> | T | nul
   }
 }
 
-async function startServer(env: Record<string, string>): Promise<Server> {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-native-reach-'))
-  const log: string[] = []
-  const child = spawn(
-    process.execPath,
-    [
-      '--import',
-      'tsx',
-      path.join(repoRoot, 'packages', 'server', 'src', 'index.ts'),
-      '--data-dir',
-      dataDir,
-      '--port',
-      '0'
-    ],
-    {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        [BOOTSTRAP_ENV_VAR]: CREDENTIAL,
-        VORN_VORND_PATH: vornd!,
-        NODE_ENV: 'test',
-        VITEST: '',
-        ...env
-      },
-      stdio: ['ignore', 'pipe', 'pipe']
-    }
-  )
-  child.stdout?.on('data', (d) => log.push(String(d)))
-  child.stderr?.on('data', (d) => log.push(String(d)))
-  const port = await waitFor('the server to listen', () => {
-    try {
-      const record = JSON.parse(fs.readFileSync(path.join(dataDir, WS_PORT_FILENAME), 'utf-8'))
-      return typeof record.port === 'number' ? (record.port as number) : null
-    } catch {
-      return null
-    }
-  })
-  const direct = await Client.open(port)
-  const vorndPort = await waitFor('vornd to start', async () => {
-    const status = await direct.result<{ state: string; port?: number }>('server:vornd')
-    return status.state === 'on' && status.port ? status.port : null
-  })
-  direct.close()
-  const server = { child, dataDir, port, vornd: vorndPort, log }
+async function startServer(): Promise<Server> {
+  const served = await startServed({ credential: CREDENTIAL, sessiond: true })
+  const server = { served, port: served.port }
   servers.push(server)
   return server
 }
@@ -172,16 +113,7 @@ async function post(port: number, route: string, body: unknown, type = 'applicat
   return { status: res.status, body: (await res.json()) as Record<string, unknown> }
 }
 
-type Counts = Record<
-  string,
-  {
-    native?: number
-    forwarded?: number
-    shadowMatched?: number
-    shadowMismatched?: number
-    shadowUnported?: number
-  }
->
+type Counts = Record<string, { native?: number; forwarded?: number }>
 
 async function counts(port: number): Promise<Counts> {
   const res = await fetch(`http://127.0.0.1:${port}/vornd/health`)
@@ -199,25 +131,21 @@ async function refusal(port: number, headers: Record<string, string>) {
 }
 
 afterAll(async () => {
-  for (const s of servers) {
-    await stopServerChild(s.child, s.vornd, s.dataDir)
-    try {
-      fs.rmSync(s.dataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
-    } catch (err) {
-      // The session holder outlives the server, and Windows will not delete
-      // a running program.
-      if (process.platform !== 'win32') throw err
+  for (const { served } of servers) {
+    await served.stop()
+    for (const dir of [served.dataDir, served.home]) {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
     }
   }
 })
 
-describe.skipIf(!vornd)('reach answered by vornd', () => {
+describe.skipIf(!builtVornd || !builtSessiond)('reach answered by vornd', () => {
   let server: Server
   let desktop: Client
 
   beforeAll(async () => {
-    server = await startServer({})
-    desktop = await Client.open(server.vornd)
+    server = await startServer()
+    desktop = await Client.open(server.port)
   }, 120_000)
 
   afterAll(() => desktop?.close())
@@ -229,15 +157,13 @@ describe.skipIf(!vornd)('reach answered by vornd', () => {
     )
     expect(made.token.name).toBe('Laptop')
     expect(made.plaintext).toMatch(/^vorn_[0-9a-f-]{36}_/)
-    // vornd wrote it: the server reads the same row.
     const direct = await Client.open(server.port)
     const listed = await direct.result<Array<{ id: string }>>('token:list')
     expect(listed.map((t) => t.id)).toContain(made.token.id)
     expect(await desktop.result('token:list')).toEqual(listed)
 
-    const phone = await Client.open(server.vornd, { authorization: `Bearer ${made.plaintext}` })
-    // The server marks the token seen as the phone connects, which vornd,
-    // answering at once, can read before it has.
+    const phone = await Client.open(server.port, { authorization: `Bearer ${made.plaintext}` })
+    // Marked seen as the phone connects, which a call may read before it is.
     const seen = await waitFor('the token to be seen', async () => {
       const list =
         await phone.result<Array<{ id: string; lastSeenAt: string | null }>>('token:list')
@@ -248,14 +174,13 @@ describe.skipIf(!vornd)('reach answered by vornd', () => {
     expect(await phone.closed).toBe(4002)
     expect(await desktop.result('token:revoke', made.token.id)).toEqual({ revoked: false })
 
-    const again = await Client.open(server.vornd, { authorization: `Bearer ${made.plaintext}` })
+    const again = await Client.open(server.port, { authorization: `Bearer ${made.plaintext}` })
     expect(await again.closed).toBe(4002)
     direct.close()
   })
 
-  it('pairs a phone through the server, the desktop told at each step', async () => {
+  it('pairs a phone over HTTP, the desktop told at each step', async () => {
     const { code } = await desktop.result<{ code: string }>('pairing:start')
-    // The phone reaches the server, which hands the request to vornd.
     const wrong = await post(server.port, '/api/pair/redeem', {
       code: 'ZZZZ-ZZZZ',
       deviceName: 'x'
@@ -289,7 +214,7 @@ describe.skipIf(!vornd)('reach answered by vornd', () => {
       status: 'expired'
     })
 
-    const phone = await Client.open(server.vornd, {
+    const phone = await Client.open(server.port, {
       authorization: `Bearer ${collected.body.token as string}`
     })
     const tokens = await phone.result<Array<{ name: string }>>('token:list')
@@ -297,24 +222,22 @@ describe.skipIf(!vornd)('reach answered by vornd', () => {
     phone.close()
   })
 
-  it('refuses a page it does not trust before the server sees it', async () => {
-    const host = `127.0.0.1:${server.vornd}`
-    expect(await refusal(server.vornd, { origin: 'http://evil.example', host })).toEqual({
+  it('refuses a page it does not trust', async () => {
+    const host = `127.0.0.1:${server.port}`
+    expect(await refusal(server.port, { origin: 'http://evil.example', host })).toEqual({
       status: 403,
       body: '{"error":"Origin not allowed"}'
     })
     expect(
-      await refusal(server.vornd, { origin: 'http://evil.example@127.0.0.1', host })
+      await refusal(server.port, { origin: 'http://evil.example@127.0.0.1', host })
     ).toMatchObject({ status: 403 })
-    expect(await refusal(server.vornd, { origin: `http://${host}`, host })).toBeNull()
-    const auth = (await counts(server.vornd)).auth
-    expect(auth?.native).toBeGreaterThanOrEqual(3)
+    expect(await refusal(server.port, { origin: `http://${host}`, host })).toBeNull()
   })
 
-  it('admits a socket by its own check of the credential, and the server closes a bad one', async () => {
-    const bad = await Client.open(server.vornd, { authorization: 'Bearer vorn_nope' })
+  it('admits a socket by its check of the credential, and closes a bad one', async () => {
+    const bad = await Client.open(server.port, { authorization: 'Bearer vorn_nope' })
     expect(await bad.closed).toBe(4002)
-    const browser = await Client.open(server.vornd, {})
+    const browser = await Client.open(server.port, {})
     expect((await browser.call('auth:authenticate', { token: CREDENTIAL })).result).toEqual({
       ok: true
     })
@@ -322,64 +245,12 @@ describe.skipIf(!vornd)('reach answered by vornd', () => {
     browser.close()
   })
 
-  it('answers reachable URLs and Tailscale as the server does', async () => {
-    const direct = await Client.open(server.port)
-    for (const method of ['server:reachableUrls', 'tailscale:status']) {
-      expect(await desktop.result(method)).toEqual(await direct.result(method))
-    }
-    direct.close()
-    const groups = await counts(server.vornd)
+  it('answers reachable URLs and Tailscale itself', async () => {
+    expect(await desktop.result('server:reachableUrls')).toEqual(expect.anything())
+    await desktop.result('tailscale:status')
+    const groups = await counts(server.port)
     for (const group of ['server', 'tailscale', 'token', 'pairing']) {
       expect({ group, native: (groups[group]?.native ?? 0) > 0 }).toEqual({ group, native: true })
-    }
-  })
-})
-
-describe.skipIf(!vornd)('reach shadowed', () => {
-  let server: Server
-
-  beforeAll(async () => {
-    server = await startServer({
-      VORND_GROUPS: 'server=shadow,tailscale=shadow,token=shadow,pairing=shadow,auth=shadow'
-    })
-  }, 120_000)
-
-  it("matches the server's answers and its verdicts on every Origin and credential", async () => {
-    const desktop = await Client.open(server.vornd)
-    const made = await desktop.result<{ plaintext: string }>('token:create', { name: 'shadow' })
-    await desktop.result('token:list')
-    await desktop.result('server:reachableUrls')
-    await desktop.result('tailscale:status')
-
-    const host = `127.0.0.1:${server.vornd}`
-    expect(await refusal(server.vornd, { origin: 'http://evil.example', host })).toMatchObject({
-      status: 403
-    })
-    expect(await refusal(server.vornd, { origin: `http://${host}`, host })).toBeNull()
-
-    const phone = await Client.open(server.vornd, { authorization: `Bearer ${made.plaintext}` })
-    await phone.result('token:list')
-    const bad = await Client.open(server.vornd, {
-      authorization: `Bearer ${made.plaintext.slice(0, -2)}xx`
-    })
-    expect(await bad.closed).toBe(4002)
-    const browser = await Client.open(server.vornd, {})
-    await browser.result('auth:authenticate', { token: made.plaintext })
-    phone.close()
-    browser.close()
-    desktop.close()
-
-    const groups = await waitFor('the comparisons', async () => {
-      const g = await counts(server.vornd)
-      return (g.auth?.shadowMatched ?? 0) >= 5 && (g.tailscale?.shadowMatched ?? 0) >= 1 ? g : null
-    })
-    for (const group of ['auth', 'server', 'tailscale', 'token']) {
-      const { shadowMatched = 0, shadowMismatched = 0 } = groups[group] ?? {}
-      expect({ group, shadowMismatched, matched: shadowMatched > 0 }).toEqual({
-        group,
-        shadowMismatched: 0,
-        matched: true
-      })
     }
   })
 })

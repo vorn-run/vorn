@@ -1,4 +1,5 @@
 import type { ClientArgs } from '../client-args'
+import type { findVornd, runVornd } from '../vornd-binary'
 import { ensureServer } from './autostart'
 import { isPlain } from './output'
 import { socketTransport, type RpcTransport } from './transport'
@@ -14,6 +15,10 @@ export interface CliDeps {
   ensureServer?: typeof ensureServer
   /** Defaults to whether stdout is a terminal. */
   isTty?: boolean
+  /** Defaults to the vornd this install ships. A test passes its own. */
+  findVornd?: typeof findVornd
+  /** Defaults to running vornd in the foreground. A test passes a stub. */
+  runVornd?: typeof runVornd
 }
 
 /** Everything a client command needs, with the production wiring already chosen. */

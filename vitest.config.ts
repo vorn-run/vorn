@@ -23,14 +23,7 @@ export default defineConfig({
         'src/renderer/components/**/*.tsx'
       ],
       exclude: [
-        // Process entry point: starts the stdio server, nothing to assert.
-        'packages/server/src/index.ts',
-        'packages/server/src/register-methods.ts',
         'packages/server/src/logger.ts',
-        'packages/server/src/hook-server.ts',
-        'packages/server/src/hook-installer.ts',
-        'packages/server/src/copilot-hook-installer.ts',
-        'packages/server/src/task-images.ts',
         'src/renderer/lib/terminal-registry.ts',
         'src/renderer/lib/workflow-execution.ts',
         'src/renderer/lib/workflow-triggers.ts',

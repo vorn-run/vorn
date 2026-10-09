@@ -1,0 +1,97 @@
+[
+  {
+    "flag": "hasSeededDefaultTaskWorkflow",
+    "workflow": {
+      "id": "system:default-task-workflow",
+      "name": "Default Task Workflow",
+      "icon": "Play",
+      "iconColor": "#10b981",
+      "enabled": true,
+      "workspaceId": "personal",
+      "nodes": [
+        {
+          "id": "trigger-1",
+          "type": "trigger",
+          "label": "When task moves to In Progress",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "taskStatusChanged",
+            "fromStatus": "todo",
+            "toStatus": "in_progress"
+          }
+        },
+        {
+          "id": "launch-1",
+          "type": "launchAgent",
+          "label": "Launch task agent",
+          "position": {
+            "x": 0,
+            "y": 120
+          },
+          "config": {
+            "agentType": "fromTask",
+            "projectName": "",
+            "projectPath": "",
+            "headless": true
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "trigger-1",
+          "target": "launch-1"
+        }
+      ]
+    }
+  },
+  {
+    "flag": "hasSeededDevServerWorkflow",
+    "workflow": {
+      "id": "system:dev-server-on-restore",
+      "name": "Bring the dev server back",
+      "icon": "RotateCcw",
+      "iconColor": "#c9972a",
+      "enabled": false,
+      "workspaceId": "personal",
+      "nodes": [
+        {
+          "id": "trigger-1",
+          "type": "trigger",
+          "label": "When a session is restored",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "config": {
+            "triggerType": "sessionRestored"
+          }
+        },
+        {
+          "id": "script-1",
+          "type": "script",
+          "label": "Start the dev server",
+          "position": {
+            "x": 0,
+            "y": 120
+          },
+          "config": {
+            "scriptType": "bash",
+            "scriptContent": "yarn dev",
+            "cwd": "{{context.projectPath}}"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "source": "trigger-1",
+          "target": "script-1"
+        }
+      ]
+    }
+  }
+]

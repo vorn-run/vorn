@@ -4076,6 +4076,7 @@ dependencies = [
  "vorn-work",
  "vorn-workflow",
  "vorn-worktrees",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

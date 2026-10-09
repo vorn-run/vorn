@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { dataDir } from '../rpc-client'
+import { findVornd, findWebClient, refusesDefault, serveArgs } from '../vornd-binary'
 import type { RpcTransport } from './transport'
 
 /** The name the desktop app already writes its server output to. */
@@ -12,13 +13,14 @@ const POLL_MS = 150
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-/** How this binary re-invokes itself. Dev runs from TypeScript, which needs a loader. */
-function serveCommand(dataDirFlag?: string): { command: string; args: string[] } {
-  const entry = process.argv[1] ?? ''
-  const serve = ['server', 'serve', ...(dataDirFlag ? ['--data-dir', dataDirFlag] : [])]
-  return entry.endsWith('.ts')
-    ? { command: 'npx', args: ['tsx', entry, ...serve] }
-    : { command: process.execPath, args: [entry, ...serve] }
+/** vornd as the server for `dir`; null when this install has none. */
+function serveCommand(dir: string): { command: string; args: string[] } | null {
+  const binaries = findVornd()
+  if (!binaries) return null
+  return {
+    command: binaries.vornd,
+    args: serveArgs(binaries, { dataDir: dir, web: findWebClient() })
+  }
 }
 
 /**
@@ -41,13 +43,24 @@ export async function ensureServer(
   // The flag wins over what discovery resolved, so the log this names and the
   // directory the server is told to use cannot disagree with each other.
   const dir = dataDirFlag ?? dataDir()
+  const refused = refusesDefault(path.resolve(dir))
+  if (refused) {
+    writeErr(`${refused}\n`)
+    return false
+  }
   fs.mkdirSync(dir, { recursive: true })
   // A file descriptor rather than a pipe: the parent exits in a moment, and a
   // pipe dying under the server takes the server with it on its next log line.
   const logFd = fs.openSync(path.join(dir, SERVER_LOG_FILENAME), 'a')
 
+  const serve = serveCommand(path.resolve(dir))
+  if (!serve) {
+    fs.closeSync(logFd)
+    writeErr('This install has no vornd to start a server with.\n')
+    return false
+  }
   try {
-    const { command, args } = serveCommand(dataDirFlag)
+    const { command, args } = serve
     const child = spawn(command, args, {
       stdio: ['ignore', logFd, logFd],
       detached: true,

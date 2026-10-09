@@ -4,23 +4,20 @@
  * was removed (`fixtures/js-reference/git-calls.json`, rerecorded with
  * `VORN_RECORD_JS_REFERENCE=1` against a server that still has them).
  *
- * One server is started, and two vornds in front of it: one answering the
- * calls itself, and one with the desktop's launch token as well. The frames a
- * client receives must equal the recorded ones but for the differences
- * `helpers/git-parity` names. A call that changes a repository is made on a
- * copy of the fixture of its own.
+ * vornd is started as the server, on a data directory and home of its own.
+ * The frames a client receives must equal the recorded ones but for the
+ * differences `helpers/git-parity` names. A call that changes a repository
+ * is made on a copy of the fixture of its own.
  *
  * Runs where vornd has been built (`yarn build:core`, or the binary in
  * `VORN_CONFORMANCE_VORND`).
  */
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createInterface } from 'node:readline'
-import Database from 'libsql'
 import WebSocket from 'ws'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { JsReference, posixSeparators } from './helpers/js-reference'
 import {
   answerOf,
@@ -31,6 +28,7 @@ import {
   worktreeMadeUp,
   type Answer
 } from './helpers/git-parity'
+import { startServed, type Served } from './helpers/served'
 
 const TEST_CREDENTIAL = 'native-server-test-credential'
 const EXE = process.platform === 'win32' ? '.exe' : ''
@@ -40,73 +38,6 @@ const vornd = [
   path.resolve(__dirname, `../packages/core/vornd${EXE}`),
   path.resolve(__dirname, `../packages/core/target/release/vornd${EXE}`)
 ].find((p): p is string => !!p && fs.existsSync(p))
-
-vi.mock('node-pty', () => ({
-  default: { spawn: vi.fn() },
-  spawn: vi.fn()
-}))
-
-// Booting a server probes Tailscale with a real process; nothing here needs it.
-vi.mock('../packages/server/src/tailscale', () => ({
-  getTailscaleStatus: vi.fn(async () => ({ running: false, selfIP: '', selfDNSName: '' })),
-  clearBinaryCache: vi.fn()
-}))
-
-// The server's store is stubbed with no projects, so every path is local to
-// it. vornd reads its own copy of the rows from the file the test writes.
-vi.mock(
-  '../packages/server/src/database',
-  () =>
-    ({
-      closeDatabase: vi.fn(),
-      initDatabase: vi.fn(),
-      getDataDir: vi.fn(() => '/tmp/vorn-native-server-test'),
-      dbGetOwnerUser: vi.fn(() => ({
-        id: 'owner-1',
-        name: 'test',
-        role: 'owner' as const,
-        createdAt: new Date().toISOString()
-      })),
-      dbInsertDeviceToken: vi.fn(),
-      dbListDeviceTokens: vi.fn(() => []),
-      dbGetDeviceTokenSecret: vi.fn(),
-      dbRevokeDeviceToken: vi.fn(() => true),
-      dbTouchDeviceToken: vi.fn(),
-      loadConfig: vi.fn(() => ({
-        version: 1,
-        defaults: { shell: '/bin/zsh', fontSize: 14, theme: 'dark' },
-        projects: [],
-        workflows: [],
-        remoteHosts: [],
-        tasks: [],
-        workspaces: []
-      })),
-      saveConfig: vi.fn(),
-      dbListTasks: vi.fn(() => []),
-      dbGetTask: vi.fn(),
-      dbInsertTask: vi.fn(),
-      dbUpdateTask: vi.fn(),
-      dbDeleteTask: vi.fn(),
-      dbGetMaxTaskOrder: vi.fn(() => 0),
-      dbGetProject: vi.fn(),
-      dbListProjects: vi.fn(() => []),
-      dbListWorkflows: vi.fn(() => []),
-      dbInsertWorkflow: vi.fn(),
-      dbUpdateWorkflow: vi.fn(),
-      dbDeleteWorkflow: vi.fn(),
-      saveWorkflowRun: vi.fn(),
-      listWorkflowRuns: vi.fn(() => []),
-      listWorkflowRunIds: vi.fn(() => []),
-      deleteArtifactsUpdatedBefore: vi.fn(() => []),
-      listArtifactIds: vi.fn(() => []),
-      listWorkflowRunsByTask: vi.fn(() => []),
-      updateWorkflowRunStatus: vi.fn(),
-      dbReleaseConnectorInboxLeases: vi.fn(),
-      dbCountActiveConnectorInboxLeases: vi.fn(() => 0),
-      dbClaimConnectorInbox: vi.fn(() => []),
-      dbGetWorkflowRunByConnectorInboxId: vi.fn(() => null)
-    }) satisfies Partial<Record<keyof typeof import('../packages/server/src/database'), unknown>>
-)
 
 /** A WebSocket client that sends one call at a time and returns its frame. */
 class Client {
@@ -146,42 +77,6 @@ class Client {
   }
 }
 
-interface Vornd {
-  port: number
-  child: ChildProcess
-}
-
-async function startVornd(
-  upstream: number,
-  args: string[],
-  env: Record<string, string> = {}
-): Promise<Vornd> {
-  const child = spawn(vornd!, ['--upstream', `127.0.0.1:${upstream}`, ...args], {
-    stdio: ['ignore', 'pipe', 'inherit'],
-    env: { ...process.env, VORND_LOG: process.env.VORND_LOG ?? 'warn', ...env }
-  })
-  const port = await new Promise<number>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('vornd did not start')), 10_000)
-    createInterface({ input: child.stdout! }).once('line', (line) => {
-      clearTimeout(timer)
-      resolve((JSON.parse(line) as { port: number }).port)
-    })
-    child.once('exit', (code) => {
-      clearTimeout(timer)
-      reject(new Error(`vornd exited with ${code} before listening`))
-    })
-  })
-  return { port, child }
-}
-
-function stopVornd(v: Vornd | undefined): Promise<void> {
-  if (!v || v.child.exitCode !== null || v.child.signalCode !== null) return Promise.resolve()
-  return new Promise((resolve) => {
-    v.child.once('exit', () => resolve())
-    v.child.kill()
-  })
-}
-
 type Counts = Record<
   string,
   {
@@ -194,7 +89,7 @@ type Counts = Record<
   }
 >
 
-async function counts(v: Vornd): Promise<Counts> {
+async function counts(v: Served): Promise<Counts> {
   const res = await fetch(`http://127.0.0.1:${v.port}/vornd/health`)
   return ((await res.json()) as { groups: Counts }).groups
 }
@@ -272,66 +167,46 @@ function makeFixture(): Fixture {
   return { root, repo, worktree, plain }
 }
 
-/**
- * The store file vornd reads: one project on a remote host, whose calls are
- * the server's, and one local project.
- */
-function writeStore(file: string, localProject: string): void {
-  const db = new Database(file)
-  db.exec(`
-    CREATE TABLE projects (path TEXT NOT NULL, host_ids TEXT);
-    CREATE TABLE remote_hosts (id TEXT PRIMARY KEY);
-    INSERT INTO remote_hosts (id) VALUES ('host-1');
-  `)
-  db.prepare('INSERT INTO projects (path, host_ids) VALUES (?, ?)').run(
-    '/srv/remote-project',
-    JSON.stringify(['host-1'])
-  )
-  db.prepare('INSERT INTO projects (path, host_ids) VALUES (?, ?)').run(localProject, null)
-  db.close()
+/** Projects as the app keeps them: one on this machine, one on a host the store does not have. */
+async function saveProjects(port: number, localProject: string): Promise<void> {
+  const client = await Client.open(port)
+  try {
+    const config = (await client.call('config:load')).result as Record<string, unknown>
+    await client.call('config:save', {
+      ...config,
+      projects: [
+        { name: 'remote-project', path: '/srv/remote-project', hostIds: ['host-1'] },
+        { name: 'repo', path: localProject }
+      ]
+    })
+  } finally {
+    client.close()
+  }
 }
 
-let serverPort: number
-let closeServer: () => Promise<void>
-let native: Vornd | undefined
-let desktop: Vornd | undefined
+let native: Served | undefined
 const reference = new JsReference('git-calls')
 let reads: Fixture
-let mine: Fixture
 let theirs: Fixture
 let storeDir: string
 
+/** The TypeScript that answered these is gone: only its recorded answers remain. */
+const gone = async (): Promise<never> => {
+  throw new Error('nothing records these now: the TypeScript that answered them is gone')
+}
+
 describe.skipIf(!vornd)('the native server answers as the server does', () => {
   beforeAll(async () => {
-    process.env.SECRET_VORN_BOOTSTRAP_TOKEN = TEST_CREDENTIAL
-    const { startServer } = await import('../packages/server/src/index')
-    const origWrite = process.stdout.write.bind(process.stdout)
-    process.stdout.write = (() => true) as typeof process.stdout.write
-    try {
-      const { app, port } = await startServer({ port: 0 })
-      serverPort = port
-      closeServer = () => app.close()
-    } finally {
-      process.stdout.write = origWrite
-    }
     reads = makeFixture()
-    mine = makeFixture()
     theirs = makeFixture()
     storeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-native-server-store-'))
-    const db = path.join(storeDir, 'vorn.db')
-    writeStore(db, reads.repo)
-    native = await startVornd(serverPort, ['--db', db])
-    desktop = await startVornd(serverPort, ['--db', db], {
-      VORND_DESKTOP_TOKEN: TEST_CREDENTIAL
-    })
+    native = await startServed({ dataDir: storeDir, credential: TEST_CREDENTIAL })
+    await saveProjects(native.port, reads.repo)
   }, 60_000)
 
   afterAll(async () => {
-    delete process.env.SECRET_VORN_BOOTSTRAP_TOKEN
-    reference.save()
-    await Promise.all([stopVornd(native), stopVornd(desktop)])
-    await closeServer?.()
-    for (const dir of [reads?.root, mine?.root, theirs?.root, storeDir]) {
+    await native?.stop()
+    for (const dir of [reads?.root, theirs?.root, storeDir, native?.home]) {
       if (dir) fs.rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -376,7 +251,6 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
   ]
 
   it('answers every call that changes nothing with the server’s frame', async () => {
-    const direct = await Client.open(serverPort)
     const through = await Client.open(native!.port)
     // A socket that opened with the bearer header is admitted silently; the
     // first answer the server sends it shows vornd it was.
@@ -394,21 +268,14 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
           expect(Array.isArray(got.result), `${key}`).toBe(true)
           continue
         }
-        const want = await reference.want(key, async () =>
-          read(answerOf(await direct.call(method, params)))
-        )
+        const want = await reference.want(key, gone)
         expect(got, `${key}`).toEqual(want)
       }
       const open = { ideId: 'no-such-editor', projectPath: reads.repo }
       const opened = answerOf(await through.call('ide:open', open))
-      expect(opened).toEqual(
-        await reference.want('ide:open no-such-editor', async () =>
-          answerOf(await direct.call('ide:open', open))
-        )
-      )
+      expect(opened).toEqual(await reference.want('ide:open no-such-editor', gone))
       expect(opened).not.toHaveProperty('result')
     } finally {
-      direct.close()
       through.close()
     }
     const groups = await counts(native!)
@@ -426,7 +293,6 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
       made: string[]
       worktrees: string[]
     }
-    const server: Side = { client: await Client.open(serverPort), f: mine, made: [], worktrees: [] }
     const through: Side = {
       client: await Client.open(native!.port),
       f: theirs,
@@ -453,7 +319,7 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
         return extra(posixSeparators(worktreeMadeUp(fixtureRoot(answer, side.f.root), side.made)))
       }
       const key = `change ${++steps} ${method}`
-      const want = await reference.want(key, () => run(server))
+      const want = await reference.want(key, gone)
       expect(await run(through), `${key}`).toEqual(want)
     }
 
@@ -528,16 +394,11 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
       }))
       await step('file:writeContent', (s) => ({ filePath: s.f.repo, content: 'x' }))
     } finally {
-      server.client.close()
       through.client.close()
     }
-    expect(sh(theirs.repo, 'log', '--format=%s')).toBe(
-      await reference.want('change log', async () => sh(mine.repo, 'log', '--format=%s'))
-    )
+    expect(sh(theirs.repo, 'log', '--format=%s')).toBe(await reference.want('change log', gone))
     expect(sh(path.join(theirs.root, 'origin.git'), 'log', '--format=%s', 'main')).toBe(
-      await reference.want('change pushed', async () =>
-        sh(path.join(mine.root, 'origin.git'), 'log', '--format=%s', 'main')
-      )
+      await reference.want('change pushed', gone)
     )
   })
 
@@ -560,31 +421,28 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
     for (const group of ['git', 'file', 'ide']) expect(after[group]?.forwarded ?? 0).toBe(0)
   })
 
-  it('answers only once the server has admitted the socket', async () => {
+  it('answers only once the socket is admitted', async () => {
     const through = await Client.open(native!.port, false)
-    let before = await counts(native!)
     const refused = await through.call('git:getBranch', reads.repo)
-    expect(refused.error).toBeDefined()
-    let after = await counts(native!)
-    expect((after.git?.forwarded ?? 0) - (before.git?.forwarded ?? 0)).toBe(1)
+    expect((refused.error as { code?: number } | undefined)?.code).toBe(-32001)
     through.close()
 
     const authed = await Client.open(native!.port, false)
     await authed.call('auth:authenticate', { token: TEST_CREDENTIAL })
-    before = await counts(native!)
+    const before = await counts(native!)
     const answered = await authed.call('git:getBranch', reads.repo)
     expect(answered.result).toBe('main')
-    after = await counts(native!)
+    const after = await counts(native!)
     expect((after.git?.native ?? 0) - (before.git?.native ?? 0)).toBe(1)
     authed.close()
   })
 
   it('answers the desktop’s socket from its first call', async () => {
-    const through = await Client.open(desktop!.port)
-    const before = await counts(desktop!)
+    const through = await Client.open(native!.port)
+    const before = await counts(native!)
     const answered = await through.call('git:getBranch', reads.repo)
     expect(answered.result).toBe('main')
-    const after = await counts(desktop!)
+    const after = await counts(native!)
     expect((after.git?.native ?? 0) - (before.git?.native ?? 0)).toBe(1)
     through.close()
   })

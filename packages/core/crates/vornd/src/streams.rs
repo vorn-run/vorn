@@ -228,6 +228,11 @@ impl Forwarder {
         self.outbox.text(v);
     }
 
+    /// Queues `msg` without waiting: a notification for every client, or a close.
+    pub fn send_message_now(&self, msg: Message) {
+        self.outbox.push(msg, None);
+    }
+
     /// Whether the connection's writer has gone, so nothing queued arrives.
     pub fn is_closed(&self) -> bool {
         self.outbox.tx.is_closed()
@@ -418,7 +423,14 @@ struct Expected {
     watchers: HashSet<u64>,
     /// Attaches waiting for the holder to say whether it holds it.
     pending: Vec<Asked>,
+    /// A session being started, rather than one carried from the last run.
+    starting: bool,
+    /// What was typed while it was being started, written once it runs.
+    input: Vec<u8>,
 }
+
+/// The most input kept for a session still being started.
+const EARLY_INPUT: usize = 64 * 1024;
 
 /// How long an attach waits for the session holder to say what it holds.
 const HOLDER_WAIT: Duration = Duration::from_secs(10);
@@ -600,7 +612,8 @@ impl Streams {
     /// was expected ([`Streams::expect`]) runs now: the attaches that waited
     /// for the holder wait for it to be live instead, and the clients that
     /// attached while it ran nowhere are told to attach again.
-    pub fn opened(&self, session: &str, epoch: u32) {
+    /// Answers what was typed while it was being started, to write now.
+    pub fn opened(&self, session: &str, epoch: u32) -> Vec<u8> {
         let mut inner = self.inner();
         let expected = inner.expected.remove(session);
         let s = inner
@@ -615,7 +628,7 @@ impl Streams {
             };
         }
         let Some(e) = expected else {
-            return;
+            return Vec::new();
         };
         s.early.extend(e.pending);
         let v = note(
@@ -627,6 +640,7 @@ impl Streams {
                 out.text(&v);
             }
         }
+        e.input
     }
 
     /// The engine's connection to sessiond ended: every session waits for
@@ -651,6 +665,32 @@ impl Streams {
             return;
         }
         inner.expected.entry(session.to_owned()).or_default();
+    }
+
+    /// [`Streams::expect`] for a session being started now: what is typed
+    /// before its program runs is kept for it ([`Streams::hold_input`]).
+    pub fn expect_start(&self, session: &str) {
+        let mut inner = self.inner();
+        if inner.sessions.contains_key(session) {
+            return;
+        }
+        inner
+            .expected
+            .entry(session.to_owned())
+            .or_default()
+            .starting = true;
+    }
+
+    /// Keeps `bytes` for a session being started, up to [`EARLY_INPUT`];
+    /// false for any other session, whose input is not kept.
+    pub fn hold_input(&self, session: &str, bytes: &[u8]) -> bool {
+        let mut inner = self.inner();
+        let Some(e) = inner.expected.get_mut(session).filter(|e| e.starting) else {
+            return false;
+        };
+        let room = EARLY_INPUT.saturating_sub(e.input.len());
+        e.input.extend_from_slice(&bytes[..bytes.len().min(room)]);
+        true
     }
 
     /// Whether `session` is expected and runs nowhere.
@@ -1688,5 +1728,23 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("no such session"));
+    }
+
+    #[test]
+    fn keeps_what_is_typed_while_a_session_starts_and_nothing_for_a_carried_one() {
+        let streams = Streams::new();
+        streams.expect("carried");
+        assert!(!streams.hold_input("carried", b"ls\r"));
+        assert!(streams.opened("carried", 1).is_empty());
+        streams.expect_start("new");
+        assert!(streams.hold_input("new", b"echo "));
+        assert!(streams.hold_input("new", b"hi\r"));
+        assert_eq!(streams.opened("new", 1), b"echo hi\r");
+        // Running now: its input is the engine's to write, not kept.
+        assert!(!streams.hold_input("new", b"x"));
+        // Kept up to a bound, so a stalled start cannot grow it for ever.
+        streams.expect_start("big");
+        assert!(streams.hold_input("big", &vec![b'a'; EARLY_INPUT + 10]));
+        assert_eq!(streams.opened("big", 1).len(), EARLY_INPUT);
     }
 }

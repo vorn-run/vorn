@@ -13,6 +13,8 @@ async fn vorn(port: u16, args: &[&str]) -> (i32, String, String) {
         .args(args)
         .arg("--data-dir")
         .arg(dir.path())
+        .env("HOME", dir.path())
+        .env("VORN_VORND_PATH", dir.path().join("no-vornd"))
         .env_remove("NO_COLOR")
         .output()
         .await
@@ -162,87 +164,74 @@ async fn sends_input_with_enter_and_kills_by_prefix() {
     assert_eq!((code, err.as_str()), (0, "Sent to c3f1a2e8.\n"));
 }
 
-/// `node`, which the server entry runs with; these tests skip without it.
-fn node() -> Option<std::path::PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|dir| dir.join(if cfg!(windows) { "node.exe" } else { "node" }))
-        .find(|candidate| candidate.is_file())
-}
-
-/// A stand-in for the server's `cli.cjs`: prints its arguments, then
-/// announces the server on `port` in the data directory it was given, as
-/// `vorn server serve` would.
-fn fake_entry(dir: &std::path::Path, port: u16, exit_code: i32) -> std::path::PathBuf {
-    let script = dir.join("cli.cjs");
+/// A stand-in for vornd: prints its arguments, then announces the server on
+/// `port` in the data directory it was given, as vornd would, and exits with
+/// `exit_code`.
+#[cfg(unix)]
+fn fake_vornd(dir: &std::path::Path, port: u16, exit_code: i32) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let script = dir.join("vornd");
     std::fs::write(
         &script,
         format!(
-            r#"const fs = require('fs'), path = require('path')
-const args = process.argv.slice(2)
-console.log(JSON.stringify(args))
-const at = args.indexOf('--data-dir')
-if (at >= 0) {{
-  const dir = args[at + 1]
-  fs.writeFileSync(path.join(dir, 'argv.json'), JSON.stringify(args))
-  fs.writeFileSync(path.join(dir, 'ws-port'), JSON.stringify({{ port: {port} }}))
-  fs.writeFileSync(path.join(dir, 'local-token'), '{credential}')
-}}
-process.exit({exit_code})
+            r#"#!/bin/sh
+printf '%s\n' "$*"
+dir=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--data-dir" ]; then dir="$a"; fi
+  prev="$a"
+done
+if [ -n "$dir" ]; then
+  printf '%s' "$*" > "$dir/argv.txt"
+  printf '{{"port":{port}}}' > "$dir/ws-port"
+  printf '{credential}' > "$dir/local-token"
+fi
+exit {exit_code}
 "#,
             credential = common::CREDENTIAL
         ),
     )
     .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     script
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn starts_a_server_when_none_is_running() {
-    if node().is_none() {
-        eprintln!("skipped: no node on PATH to run the server entry with");
-        return;
-    }
     let port = ws_server(|_, _| Answer::Result(json!([]))).await;
     let scripts = tempfile::tempdir().unwrap();
-    let entry = fake_entry(scripts.path(), port, 0);
-    let data = tempfile::tempdir().unwrap();
+    let vornd = fake_vornd(scripts.path(), port, 0);
+    let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
 
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_vorn"))
         .args(["workflow", "list", "--data-dir"])
         .arg(data.path())
-        .env("VORN_SERVER_ENTRY", &entry)
+        .env("VORN_VORND_PATH", &vornd)
+        .env("HOME", home.path())
         .output()
         .await
         .unwrap();
     let err = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(0), "{err}");
     assert_eq!(err, "No server running, starting one.\nNo workflows.\n");
-    let argv: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(data.path().join("argv.json")).unwrap())
-            .unwrap();
-    assert_eq!(
-        argv,
-        [
-            "server",
-            "serve",
-            "--data-dir",
-            &data.path().to_string_lossy()
-        ]
-    );
+    let argv = std::fs::read_to_string(data.path().join("argv.txt")).unwrap();
+    assert_eq!(argv, format!("--data-dir {}", data.path().display()));
     // What the server printed went to its log, not to this command's output.
     assert!(output.stdout.is_empty());
     let log = std::fs::read_to_string(data.path().join("server.log")).unwrap();
-    assert!(log.contains("\"serve\""), "{log}");
+    assert!(log.contains("--data-dir"), "{log}");
 }
 
 #[tokio::test]
 async fn says_why_it_cannot_start_a_server() {
-    let data = tempfile::tempdir().unwrap();
+    let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_vorn"))
         .args(["session", "list", "--data-dir"])
         .arg(data.path())
-        .env("VORN_SERVER_ENTRY", data.path().join("missing.cjs"))
+        .env("VORN_VORND_PATH", data.path().join("missing"))
+        .env("HOME", home.path())
         .output()
         .await
         .unwrap();
@@ -254,26 +243,62 @@ async fn says_why_it_cannot_start_a_server() {
         ),
         "{err}"
     );
-    assert!(err.contains("missing.cjs"), "{err}");
+    assert!(err.contains("missing"), "{err}");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn serve_runs_the_server_and_passes_its_exit_code_through() {
-    if node().is_none() {
-        eprintln!("skipped: no node on PATH to run the server entry with");
-        return;
-    }
     let scripts = tempfile::tempdir().unwrap();
-    let entry = fake_entry(scripts.path(), 1, 3);
+    let vornd = fake_vornd(scripts.path(), 1, 3);
+    let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_vorn"))
-        .args(["server", "serve", "--port", "4100", "--host", "127.0.0.1"])
-        .env("VORN_SERVER_ENTRY", &entry)
+        .args([
+            "server",
+            "serve",
+            "--port",
+            "4100",
+            "--host",
+            "127.0.0.1",
+            "--data-dir",
+        ])
+        .arg(data.path())
+        .env("VORN_VORND_PATH", &vornd)
+        .env("HOME", home.path())
         .output()
         .await
         .unwrap();
     assert_eq!(output.status.code(), Some(3));
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
-        "[\"serve\",\"--port\",\"4100\",\"--host\",\"127.0.0.1\"]\n"
+    let out = String::from_utf8_lossy(&output.stdout);
+    let dir = data.path().display();
+    assert!(
+        out.contains(&format!("Starting the Vorn server for {dir}\n")),
+        "{out}"
     );
+    assert!(
+        out.ends_with(&format!("--data-dir {dir} --port 4100 --host 127.0.0.1\n")),
+        "{out}"
+    );
+    // Not a terminal, so no token is shown: one is to be minted on purpose.
+    assert!(out.contains("No device tokens exist."), "{out}");
+}
+
+#[tokio::test]
+async fn a_debug_build_will_not_serve_the_default_data_directory() {
+    let home = tempfile::tempdir().unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_vorn"))
+        .args(["server", "serve"])
+        .env("HOME", home.path())
+        .env("USERPROFILE", home.path())
+        .env("VORN_VORND_PATH", home.path().join("never-run"))
+        .env_remove("VORN_ALLOW_DEFAULT_DATA_DIR")
+        .output()
+        .await
+        .unwrap();
+    let err = String::from_utf8_lossy(&output.stderr);
+    if cfg!(debug_assertions) {
+        assert_eq!(output.status.code(), Some(1), "{err}");
+        assert!(err.contains("default data directory"), "{err}");
+        assert!(!home.path().join(".vorn").exists());
+    }
 }
