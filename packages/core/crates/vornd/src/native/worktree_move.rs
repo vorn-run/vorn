@@ -37,9 +37,8 @@ impl<'a> Asked<'a> {
         if method == "git:checkoutBranch" {
             let worktree = absolute_str(params.get("cwd")?)?;
             let branch = text("branch")?;
-            return native
-                .local_path(worktree)
-                .then_some(Asked::Checkout { worktree, branch });
+            let _ = native;
+            return Some(Asked::Checkout { worktree, branch });
         }
         let worktree = absolute_str(params.get("worktreePath")?)?;
         let asked = match method {
@@ -53,7 +52,15 @@ impl<'a> Asked<'a> {
             },
             _ => return None,
         };
-        native.local_path(worktree).then_some(asked)
+        Some(asked)
+    }
+
+    fn worktree(&self) -> &'a str {
+        match self {
+            Asked::Branch { worktree, .. }
+            | Asked::Move { worktree, .. }
+            | Asked::Checkout { worktree, .. } => worktree,
+        }
     }
 }
 
@@ -61,6 +68,7 @@ fn git(native: &Native) -> Git {
     Git {
         bin: native.env.git_bin(),
         env: native.env.get(),
+        ssh: None,
     }
 }
 
@@ -83,18 +91,18 @@ fn holds_records(native: &Native) -> bool {
 
 /// Answers `method`, renaming or moving the worktree and its sessions.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
-    if !holds_records(native) {
-        return Answer::Forward;
-    }
     let Some(asked) = Asked::read(native, method, params) else {
-        return Answer::Forward;
+        return super::bad_params(method);
     };
-    let git = git(native);
+    // A worktree of a project on a remote host is changed over ssh.
+    let place = native.path_place(asked.worktree());
+    let git = place.git(native);
+    let turn = place.turn(asked.worktree());
     let (worktree, answer, moved) = match asked {
         Asked::Branch { worktree, branch } => {
-            let done = native.turns.take(Path::new(worktree), || {
-                git.rename_branch(Path::new(worktree), branch)
-            });
+            let done = native
+                .turns
+                .take(&turn, || git.rename_branch(Path::new(worktree), branch));
             (
                 worktree,
                 json!(done),
@@ -104,7 +112,7 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
         Asked::Move { worktree, name } => {
             let done = native
                 .turns
-                .take(Path::new(worktree), || git.move_worktree(worktree, name));
+                .take(&turn, || git.move_worktree(worktree, name));
             let moved = done.as_ref().map(|m| WorktreeMove::Path {
                 path: m.path.clone(),
                 name: m.name.clone(),
@@ -112,9 +120,9 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
             (worktree, moved_json(done), moved)
         }
         Asked::Checkout { worktree, branch } => {
-            let done = native.turns.take(Path::new(worktree), || {
-                git.checkout(Path::new(worktree), branch)
-            });
+            let done = native
+                .turns
+                .take(&turn, || git.checkout(Path::new(worktree), branch));
             match done {
                 Done::Ok => (
                     worktree,
@@ -125,7 +133,10 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
             }
         }
     };
-    if let (Some(moved), Some(registry)) = (moved, native.registry.get()) {
+    // The sessions in the worktree move with it, when vornd holds their records.
+    if let (Some(moved), true, Some(registry)) =
+        (moved, holds_records(native), native.registry.get())
+    {
         registry.change(|r| ((), r.move_worktree(worktree, &moved).unwrap_or_default()));
     }
     Answer::Result(answer)
@@ -136,8 +147,13 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
 /// `None` when the server's answer is its own: a remote worktree, params of
 /// another shape, or a branch name vornd cannot judge without git.
 pub fn foresee(native: &Native, method: &str, params: &Value) -> Option<Answer> {
+    let asked = Asked::read(native, method, params)?;
+    // A remote worktree's answer is git's there.
+    if !native.local_path(asked.worktree()) {
+        return None;
+    }
     let git = git(native);
-    let answer = match Asked::read(native, method, params)? {
+    let answer = match asked {
         Asked::Branch { worktree, branch } => {
             json!(git.foresee_branch_rename(Path::new(worktree), branch)?)
         }
@@ -330,13 +346,13 @@ mod tests {
     }
 
     #[test]
-    fn leaves_the_call_to_the_server_while_it_holds_the_records() {
+    fn renames_but_moves_no_record_it_does_not_hold() {
         let (_dir, wt) = repo();
         let (native, registry) = holding(&wt, false);
         let rename = json!({ "worktreePath": wt, "newBranch": "renamed" });
         assert_eq!(
             call(&native, "git:renameWorktreeBranch", &rename),
-            Answer::Forward
+            Answer::Result(json!(true))
         );
         assert_eq!(terminal(&registry).0.as_deref(), Some("feature"));
         // Foreseen all the same: the server answers what vornd would.
@@ -344,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn leaves_params_of_another_shape_to_the_server() {
+    fn refuses_params_of_another_shape() {
         let (_dir, wt) = repo();
         let (native, _registry) = holding(&wt, true);
         for (method, params) in [
@@ -359,7 +375,11 @@ mod tests {
             ),
             ("git:renameWorktree", json!(wt)),
         ] {
-            assert_eq!(call(&native, method, &params), Answer::Forward, "{params}");
+            assert_eq!(
+                call(&native, method, &params),
+                super::super::bad_params(method),
+                "{params}"
+            );
             assert_eq!(foresee(&native, method, &params), None, "{params}");
         }
         // Without the database vornd cannot tell a remote worktree.

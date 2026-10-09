@@ -120,13 +120,9 @@ pub const STILL_FORWARDED: &[(&str, StillForwarded)] = &[
     ("session", StillForwarded::NotYetNative),
     ("server", StillForwarded::NotYetNative),
     ("terminal", StillForwarded::NotYetNative),
-    ("git", StillForwarded::NotYetNative),
-    ("file", StillForwarded::NotYetNative),
-    ("worktree", StillForwarded::NotYetNative),
     ("headless", StillForwarded::NotYetNative),
     ("sessions", StillForwarded::NotYetNative),
     ("shell", StillForwarded::NotYetNative),
-    ("agent", StillForwarded::NotYetNative),
 ];
 
 /// Whether neither vornd nor the server has `method`: no native group, and
@@ -375,7 +371,7 @@ mod tests {
     #[test]
     fn reports_a_forward_the_list_does_not_allow() {
         let groups = Groups::new(None).unwrap();
-        groups.count("agent:detect", Counted::Forwarded);
+        groups.count("shell:create", Counted::Forwarded);
         groups.count("config:save", Counted::Forwarded);
         groups.count("config:save", Counted::Forwarded);
         groups.count("config:load", Counted::Native);
@@ -384,7 +380,7 @@ mod tests {
             BTreeMap::from([("config:save".to_owned(), 2)])
         );
         assert_eq!(
-            still_forwarded("agent:detect"),
+            still_forwarded("shell:create"),
             Some(StillForwarded::NotYetNative)
         );
         assert_eq!(still_forwarded("config:load"), None);
@@ -393,7 +389,7 @@ mod tests {
         assert_eq!(groups.unexpected_forwards().len(), 1);
         assert!(unknown("nonexistent:method"));
         assert!(!unknown("config:save"));
-        assert!(!unknown("agent:detect"));
+        assert!(!unknown("shell:create"));
     }
 
     /// Every call a client can make, from the protocol's request map, is

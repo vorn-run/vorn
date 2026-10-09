@@ -20,14 +20,18 @@ mod scan;
 mod size;
 mod verdict;
 
-pub use guard::{assert_inside_worktree, assert_removable_path};
+pub use guard::{
+    assert_inside_remote_worktree, assert_inside_worktree, assert_removable_path,
+    assert_removable_remote_path,
+};
 pub use remove::{
     prune_orphan_dirs, reclaim_artifacts, remove_worktrees, ActionResult, Cleanup, Failure, Guard,
     RemoveItem,
 };
 pub use scan::{
-    collect_stale_branches, iso_millis, list_orphan_dirs, scan, BranchInfo, Entry, Inventory,
-    Project, ProjectInventory, Retention, Scan, StaleBranch,
+    collect_stale_branches, iso_millis, list_orphan_dirs, list_orphan_dirs_remote, remote_base_dir,
+    scan, BranchInfo, Entry, Inventory, Project, ProjectInventory, Remote, Retention, Scan,
+    StaleBranch,
 };
 pub use size::{find_artifact_dirs, Size, Sizes};
 pub use verdict::{verdict, Kind, Level, Verdict, VerdictInput};

@@ -6,9 +6,7 @@
 //! server relays these two requests here with the phone's address in
 //! `x-vorn-peer`. What the server would refuse before its handler ran (a
 //! body that is not plain JSON, or one its parser rejects) goes to the
-//! server as it is, marked so it does not relay it back, and so does every
-//! request while the server is not listening on the app's channel, when
-//! pairing is the server's ([`Native::holds_pairing`]).
+//! server as it is, marked so it does not relay it back.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -59,7 +57,7 @@ pub async fn answer(
     } else {
         "pairing:poll"
     };
-    let body = plain_json(&parts.headers, &bytes).filter(|_| native.holds_pairing());
+    let body = plain_json(&parts.headers, &bytes);
     let Some(body) = body else {
         daemon.groups().count(method, Counted::Forwarded);
         parts

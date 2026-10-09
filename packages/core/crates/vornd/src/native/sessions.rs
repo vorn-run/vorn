@@ -666,6 +666,7 @@ fn transcript_scope(native: &Native, session: &TerminalSession) -> Option<Projec
     let git = Git {
         bin: native.env.git_bin(),
         env: native.env.get(),
+        ssh: None,
     };
     let project = Path::new(&session.project_path);
     let worktrees: Vec<String> = git
@@ -776,6 +777,7 @@ pub fn verify_restored(native: &Native) {
     let git = Git {
         bin: native.env.git_bin(),
         env: native.env.get(),
+        ssh: None,
     };
     let mut answers: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
     for one in offered {
@@ -1367,6 +1369,7 @@ pub(super) fn workspace(
     let git = Git {
         bin: native.env.git_bin(),
         env: native.env.get(),
+        ssh: None,
     };
     let project = req.project_path.as_str();
     let mut out = Workspace {
@@ -1418,6 +1421,7 @@ pub(super) fn head_of(native: &Native, dir: &str) -> Option<String> {
     let git = Git {
         bin: native.env.git_bin(),
         env: native.env.get(),
+        ssh: None,
     };
     git.head(Path::new(dir))
 }

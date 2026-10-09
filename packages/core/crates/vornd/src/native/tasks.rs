@@ -49,6 +49,7 @@ fn text(params: &Value, key: &str) -> String {
 /// Answers `method`.
 pub async fn answer(native: &Arc<Native>, method: &str, params: Value) -> Answer {
     if native.database().is_none() {
+        // Only a test starts vornd without one; its server answers then.
         return Answer::Forward;
     }
     if method.starts_with("task:image") {
@@ -142,7 +143,7 @@ fn call(
 
 fn images(native: &Native, method: &str, params: &Value) -> Answer {
     let Some(dir) = native.database().and_then(std::path::Path::parent) else {
-        return Answer::Forward;
+        return super::no_database();
     };
     let images = TaskImages::new(dir);
     let task = text(params, "taskId");

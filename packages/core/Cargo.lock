@@ -3784,6 +3784,7 @@ dependencies = [
  "gix",
  "tempfile",
  "uuid",
+ "vorn-remote",
 ]
 
 [[package]]
@@ -4018,6 +4019,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vorn-git",
+ "vorn-remote",
 ]
 
 [[package]]

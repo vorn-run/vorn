@@ -90,14 +90,37 @@ pub fn run(
     env: &[(String, String)],
     timeout: Duration,
 ) -> std::io::Result<Output> {
+    run_with(ssh, args, env, None, timeout)
+}
+
+/// [`run`], writing `input` to the program's stdin first.
+pub fn run_with(
+    ssh: &str,
+    args: &[String],
+    env: &[(String, String)],
+    input: Option<&[u8]>,
+    timeout: Duration,
+) -> std::io::Result<Output> {
     let mut child = Command::new(ssh)
         .args(args)
         .env_clear()
         .envs(env.iter().map(|(k, v)| (k, v)))
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+    if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
+        let bytes = bytes.to_vec();
+        // Written beside the readers, so a program that answers before it reads all never blocks.
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = stdin.write_all(&bytes);
+        });
+    }
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {
             let mut text = Vec::new();
@@ -136,6 +159,63 @@ pub fn run(
         stdout: out.join().unwrap_or_default(),
         stderr: err.join().unwrap_or_default(),
     })
+}
+
+/// `text` as one word to a POSIX shell (`shellEscape(text, 'posix')`).
+pub fn quote(text: &str) -> String {
+    let plain = !text.is_empty()
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_-./:=@+,%".contains(&b));
+    if plain {
+        return text.to_owned();
+    }
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+/// How a host is logged in to for one command (`sshExec`): ssh's arguments
+/// through `user@host`, and the environment ssh runs with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Login {
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+impl Login {
+    /// The login `buildSshArgs` makes for `host`.
+    pub fn new(host: &Host, env: Vec<(String, String)>) -> Login {
+        Login {
+            args: args(host, 10, multiplex_dir().as_deref()),
+            env,
+        }
+    }
+
+    /// Runs `command` in a shell on the host: its output, or why it failed in
+    /// the words a failed `execFile` has (`Command failed: ...`).
+    pub fn exec(
+        &self,
+        command: &str,
+        input: Option<&[u8]>,
+        timeout: Duration,
+    ) -> Result<String, String> {
+        let mut argv = self.args.clone();
+        argv.push(command.to_owned());
+        let out = run_with("ssh", &argv, &self.env, input, timeout)
+            .map_err(|e| format!("spawn ssh {e}"))?;
+        match out.code {
+            Some(0) => Ok(out.stdout),
+            code => {
+                let line = format!("ssh {}", argv.join(" "));
+                let why = match code {
+                    Some(_) => out.stderr.trim_end().to_owned(),
+                    None => "timed out".to_owned(),
+                };
+                Err(format!("Command failed: {line}\n{why}")
+                    .trim_end()
+                    .to_owned())
+            }
+        }
+    }
 }
 
 /// `ssh:testConnection`'s answer (`SshTestResult`).
@@ -271,6 +351,29 @@ mod tests {
             (missing.success, missing.message.as_str()),
             (false, "spawn ssh ENOENT")
         );
+    }
+
+    #[test]
+    fn quotes_a_word_for_a_posix_shell() {
+        assert_eq!(quote("/srv/app-1"), "/srv/app-1");
+        assert_eq!(quote("it's here"), "'it'\\''s here'");
+        assert_eq!(quote(""), "''");
+        assert_eq!(quote("$HOME"), "'$HOME'");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hands_a_program_its_input() {
+        let env: Vec<(String, String)> = std::env::vars().collect();
+        let done = run_with(
+            "sh",
+            &["-c".into(), "cat".into()],
+            &env,
+            Some(b"in"),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert_eq!(done.stdout, "in");
     }
 
     #[cfg(unix)]

@@ -3,11 +3,7 @@ import crypto from 'node:crypto'
 import { registerMethod, registerNotification } from './ws-handler'
 import { ptyManager } from './pty-manager'
 import { headlessManager } from './headless-manager'
-import { configManager } from './config-manager'
 import { sessionManager } from './session-persistence'
-import { getRecentSessions } from './agent-history'
-import { detectIDEs, openInIDE } from './ide-detector'
-import { detectInstalledAgents } from './agent-detector'
 import { clientRegistry } from './broadcast'
 import {
   restoredRecords,
@@ -30,40 +26,17 @@ import {
   releaseSpawningTranscript,
   releaseSpawningTranscriptsFor
 } from './transcript-claims'
-import { IPC, SessionEventType, RemoteHost, getProjectRemoteHostId } from '@vornrun/shared/types'
-import type { ProjectConfig, TerminalSession, WorktreeRetentionConfig } from '@vornrun/shared/types'
-import { DEFAULT_ARTIFACT_DIRS } from '@vornrun/shared/types'
-import * as gitUtils from './git-utils'
-import {
-  scanWorktreeInventory,
-  reclaimArtifacts,
-  removeWorktrees,
-  pruneOrphanDirs,
-  deleteStaleBranches,
-  measureWorktree,
-  invalidateSizeCache
-} from './worktree-inventory'
-import { fileStamp, listDir, readFileContent, writeFileContent } from './file-utils'
+import { IPC, SessionEventType } from '@vornrun/shared/types'
+import type { TerminalSession } from '@vornrun/shared/types'
 import { listShellExecutables } from './shell-integration'
 import { listInstalledShells } from './shell-integration/installed'
 import { insertSessionEvent } from './database'
-import { getTailscaleStatus, clearBinaryCache } from './tailscale'
+import { getTailscaleStatus } from './tailscale'
 import { reachableUrls } from './reachable-urls'
-import { listTokens, mintOwnerToken, revokeToken } from './token-manager'
-import {
-  approveRequest,
-  cancelPairing,
-  denyRequest,
-  pendingRequests,
-  startPairing
-} from './pairing'
-import { disconnectToken } from './ws-handler'
-import { listAgentModels } from './agent-model-catalog'
 import log from './logger'
 import { vorndSessions } from './vornd-sessions'
 import { wireVorndRestore } from './vornd-restore'
 import { onePerKey } from './one-per-key'
-import { isWorkspaceHeld } from './workspace-holds'
 
 function logSessionEvent(
   sessionId: string,
@@ -410,228 +383,6 @@ export function registerAllMethods(): void {
       }
     }
   })
-  registerMethod('sessions:getRecent', (projectPath) => getRecentSessions(projectPath))
-
-  // Resolve remote host by ID
-  function resolveRemoteHostById(hostId: string): RemoteHost | undefined {
-    const cfg = configManager.loadConfig()
-    return cfg.remoteHosts?.find((h) => h.id === hostId)
-  }
-
-  // Git — resolve remote host for project or worktree paths
-  function resolveRemoteHost(projectPath: string): RemoteHost | undefined {
-    const cfg = configManager.loadConfig()
-    const project = cfg.projects.find((p) => p.path === projectPath)
-    if (!project) return undefined
-    const remoteId = getProjectRemoteHostId(project)
-    if (!remoteId) return undefined
-    return cfg.remoteHosts?.find((h) => h.id === remoteId)
-  }
-
-  /** Resolve remote host from any path (project root or worktree subdirectory). */
-  function resolveRemoteHostByPath(anyPath: string): RemoteHost | undefined {
-    const cfg = configManager.loadConfig()
-    for (const project of cfg.projects) {
-      if (anyPath === project.path || anyPath.startsWith(project.path + '/')) {
-        const remoteId = getProjectRemoteHostId(project)
-        if (!remoteId) return undefined
-        return cfg.remoteHosts?.find((h) => h.id === remoteId)
-      }
-      const parentDir = project.path.replace(/\/[^/]+$/, '')
-      if (anyPath.startsWith(parentDir + '/.vorn-worktrees/')) {
-        const remoteId = getProjectRemoteHostId(project)
-        if (!remoteId) return undefined
-        return cfg.remoteHosts?.find((h) => h.id === remoteId)
-      }
-    }
-    return undefined
-  }
-
-  registerMethod('git:isGitRepo', (projectPath) => gitUtils.isGitRepo(projectPath))
-  registerMethod('git:listBranches', async (projectPath) => {
-    const remote = resolveRemoteHost(projectPath)
-    const isRepo = remote || (await gitUtils.isGitRepo(projectPath))
-    return {
-      local: isRepo ? await gitUtils.listBranches(projectPath, remote) : [],
-      current: isRepo ? await gitUtils.getGitBranch(projectPath, remote) : null,
-      isGitRepo: !!isRepo
-    }
-  })
-  registerMethod('git:listRemoteBranches', (projectPath) => {
-    const remote = resolveRemoteHost(projectPath)
-    return gitUtils.listRemoteBranches(projectPath, remote)
-  })
-  registerMethod('git:createWorktree', ({ projectPath, branch, worktreeName }) => {
-    const remote = resolveRemoteHost(projectPath)
-    return gitUtils.createWorktree(projectPath, branch, worktreeName, remote)
-  })
-  registerMethod('git:removeWorktree', ({ projectPath, worktreePath, force, deleteBranch }) => {
-    const remote = resolveRemoteHost(projectPath)
-    invalidateSizeCache(worktreePath)
-    return gitUtils.removeWorktree(projectPath, worktreePath, force, remote, deleteBranch)
-  })
-  registerMethod('git:checkoutBranch', async ({ cwd, branch }) => {
-    const remote = resolveRemoteHostByPath(cwd)
-    const result = await gitUtils.checkoutBranch(cwd, branch, remote)
-    if (result.ok) {
-      ptyManager.updateSessionsForWorktree(cwd, { branch })
-      headlessManager.updateSessionsForWorktree(cwd, { branch })
-    }
-    return result
-  })
-  registerMethod('git:getWorktreeBranch', (worktreePath) => {
-    const remote = resolveRemoteHostByPath(worktreePath)
-    return gitUtils.getGitBranch(worktreePath, remote)
-  })
-  registerMethod('git:renameWorktreeBranch', async ({ worktreePath, newBranch }) => {
-    const remote = resolveRemoteHostByPath(worktreePath)
-    const result = await gitUtils.renameWorktreeBranch(worktreePath, newBranch, remote)
-    if (result) {
-      ptyManager.updateSessionsForWorktree(worktreePath, { branch: newBranch })
-      headlessManager.updateSessionsForWorktree(worktreePath, { branch: newBranch })
-    }
-    return result
-  })
-  registerMethod('git:renameWorktree', async ({ worktreePath, newName }) => {
-    const remote = resolveRemoteHostByPath(worktreePath)
-    const result = await gitUtils.renameWorktree(worktreePath, newName, remote)
-    if (result) {
-      ptyManager.updateSessionsForWorktree(worktreePath, {
-        worktreePath: result.newPath,
-        worktreeName: result.name
-      })
-      headlessManager.updateSessionsForWorktree(worktreePath, {
-        worktreePath: result.newPath,
-        worktreeName: result.name
-      })
-    }
-    return result
-  })
-  registerMethod('git:worktreeDirty', (worktreePath) => {
-    const remote = resolveRemoteHostByPath(worktreePath)
-    return gitUtils.isWorktreeDirty(worktreePath, remote)
-  })
-  registerMethod('git:listWorktrees', (projectPath) => {
-    const remote = resolveRemoteHost(projectPath)
-    return gitUtils.listWorktrees(projectPath, remote)
-  })
-
-  registerMethod('worktree:activeSessions', (worktreePath: string) => {
-    const pty = ptyManager.getActiveSessionsForWorktree(worktreePath)
-    const headless = headlessManager.getActiveSessionsForWorktree(worktreePath)
-    return {
-      count: pty.count + headless.count,
-      sessionIds: [...pty.sessionIds, ...headless.sessionIds]
-    }
-  })
-
-  // ─── Worktree manager ──────────────────────────────────────────
-
-  function activeSessionIds(worktreePath: string): string[] {
-    return [
-      ...ptyManager.getActiveSessionsForWorktree(worktreePath).sessionIds,
-      ...headlessManager.getActiveSessionsForWorktree(worktreePath).sessionIds
-    ]
-  }
-
-  function retentionConfig(): WorktreeRetentionConfig {
-    return configManager.loadConfig().defaults.worktreeRetention ?? {}
-  }
-
-  function artifactDirNames(): string[] {
-    const configured = retentionConfig().artifactDirs
-    return configured?.length ? configured : DEFAULT_ARTIFACT_DIRS
-  }
-
-  /** Cached size for a path — measured during the scan that preceded the action. */
-  function cachedSizeOf(worktreePath: string): number {
-    const remote = resolveRemoteHostByPath(worktreePath)
-    return measureWorktree(worktreePath, artifactDirNames(), remote).sizeBytes
-  }
-
-  /**
-   * Refuse to act on a worktree that has a live session. Checked immediately
-   * before the action rather than read off the scan, because a session can
-   * start while the panel is open.
-   */
-  function assertNoActiveSessions(paths: string[]): void {
-    for (const p of paths) assertIdle(p)
-  }
-
-  /**
-   * Checked up front, and again by the action just before it deletes: the git
-   * in between lets a session start, or finish preparing, in the same path.
-   */
-  function assertIdle(p: string): void {
-    const count = activeSessionIds(p).length
-    if (count > 0) {
-      throw new Error(`${p} has ${count} active session${count > 1 ? 's' : ''} — close them first`)
-    }
-    if (isWorkspaceHeld(p)) throw new Error(`${p} has a session starting — close it first`)
-  }
-
-  /** Resolve a project to its remote host, or undefined when it is local. */
-  function remoteForProject(project: ProjectConfig): RemoteHost | undefined {
-    const remoteId = getProjectRemoteHostId(project)
-    if (!remoteId) return undefined
-    return configManager.loadConfig().remoteHosts?.find((h) => h.id === remoteId)
-  }
-
-  registerMethod('worktree:inventory', (params) => {
-    const cfg = configManager.loadConfig()
-    return scanWorktreeInventory({
-      projects: cfg.projects,
-      projectPaths: params?.projectPaths,
-      refresh: params?.refresh,
-      retention: cfg.defaults.worktreeRetention,
-      resolveRemote: remoteForProject,
-      getActiveSessions: activeSessionIds
-    })
-  })
-
-  registerMethod('worktree:reclaimArtifacts', ({ paths }) => {
-    assertNoActiveSessions(paths)
-    const cfg = configManager.loadConfig()
-    return reclaimArtifacts(paths, artifactDirNames(), cfg.projects, remoteForProject, assertIdle)
-  })
-
-  registerMethod('worktree:removeMany', ({ items }) => {
-    assertNoActiveSessions(items.map((i) => i.worktreePath))
-    const cfg = configManager.loadConfig()
-    return removeWorktrees(items, cachedSizeOf, cfg.projects, remoteForProject, assertIdle)
-  })
-
-  registerMethod('worktree:pruneOrphans', ({ paths }) => {
-    assertNoActiveSessions(paths)
-    return pruneOrphanDirs(paths, cachedSizeOf, resolveRemoteHostByPath, assertIdle)
-  })
-
-  registerMethod('git:deleteBranches', ({ projectPath, branches, force }) => {
-    const remote = resolveRemoteHost(projectPath)
-    return deleteStaleBranches(projectPath, branches, force ?? false, remote)
-  })
-  registerMethod('git:getBranch', (cwd) => {
-    const remote = resolveRemoteHostByPath(cwd)
-    return gitUtils.getGitBranch(cwd, remote)
-  })
-  registerMethod('git:diffStat', (cwd) => {
-    const remote = resolveRemoteHostByPath(cwd)
-    return gitUtils.getGitDiffStat(cwd, remote)
-  })
-  registerMethod('git:diffFull', (req) => {
-    const cwd = typeof req === 'string' ? req : req.cwd
-    const remote = resolveRemoteHostByPath(cwd)
-    const range = typeof req === 'string' ? undefined : { from: req.from, to: req.to }
-    return gitUtils.getGitDiffFull(cwd, remote, range)
-  })
-  registerMethod('git:commit', ({ cwd, message, includeUnstaged }) => {
-    const remote = resolveRemoteHostByPath(cwd)
-    return gitUtils.gitCommit(cwd, message, includeUnstaged, remote)
-  })
-  registerMethod('git:push', (cwd) => {
-    const remote = resolveRemoteHostByPath(cwd)
-    return gitUtils.gitPush(cwd, remote)
-  })
 
   // Headless
   registerMethod('headless:create', async (payload) => {
@@ -647,12 +398,6 @@ export function registerAllMethods(): void {
   registerMethod('headless:kill', (id) => headlessManager.killHeadless(id))
   registerMethod('headless:list', () => headlessManager.getActiveSessions())
 
-  // Agent/IDE detection
-  registerMethod('agent:detectInstalled', () => detectInstalledAgents())
-  registerMethod('agent:listModels', (request) => listAgentModels(request))
-  registerMethod('ide:detect', () => detectIDEs())
-  registerMethod('ide:open', ({ ideId, projectPath }) => openInIDE(ideId, projectPath))
-
   // Where a browser can reach this server. Asked separately from Tailscale status
   // because it has to answer even when Tailscale is absent — that is the case the
   // old UI could not express at all.
@@ -665,69 +410,6 @@ export function registerAllMethods(): void {
       // Not installed or not answering; LAN addresses still stand.
     }
     return reachableUrls(serverPort, tailscaleIps)
-  })
-
-  // Tailscale network access. Informational only now: it supplies an address and
-  // a QR code, and no longer decides whether the server binds wide.
-  registerMethod('tailscale:status', async () => {
-    clearBinaryCache() // Always re-detect in case user just installed
-    // Deliberately does not rebind. Reading status used to have that side effect,
-    // because Tailscale could start after boot and change the answer. Nothing
-    // about the bind depends on it now, and rebinding drops every connection —
-    // so it happens when the setting changes, and at no other time.
-    return getTailscaleStatus(serverPort)
-  })
-
-  // Device tokens. Until now these existed only behind `vorn-server token`, so
-  // pairing a phone meant finding a terminal on the machine running the server.
-  registerMethod('token:list', () => listTokens())
-  registerMethod('token:create', ({ name }) => {
-    // Coerced rather than trusted: a malformed param would otherwise fail inside
-    // `.trim()` with a TypeError that reaches the client verbatim, saying nothing
-    // about what was wrong.
-    const label = typeof name === 'string' ? name.trim() : ''
-    // The plaintext is returned exactly once and never stored — only its hash
-    // reaches the database — so the caller has to show it and then drop it.
-    const minted = mintOwnerToken(label || 'Device')
-    return { token: minted.token, plaintext: minted.plaintext }
-  })
-  // Pairing a phone. These four are the desktop's half: it asks for a code,
-  // sees who offered it, and decides. The phone's half is two HTTP routes in
-  // `index.ts`, because a phone that has not paired yet has no credential and
-  // the socket admits exactly one method before authenticating.
-  registerMethod('pairing:start', () => startPairing())
-  registerMethod('pairing:pending', () => pendingRequests())
-  registerMethod('pairing:approve', ({ requestId }) => ({ ok: approveRequest(requestId) }))
-  registerMethod('pairing:deny', ({ requestId }) => ({ ok: denyRequest(requestId) }))
-  registerMethod('pairing:cancel', () => {
-    cancelPairing()
-    return { ok: true }
-  })
-
-  registerMethod('token:revoke', (id) => {
-    const revoked = revokeToken(id)
-    // Revoking has to reach a socket already holding the token, or a lost phone
-    // keeps working until it happens to reconnect.
-    if (revoked) disconnectToken(id)
-    return { revoked }
-  })
-
-  // File explorer
-  registerMethod('file:listDir', ({ dirPath, remoteHostId }) => {
-    const remote = remoteHostId ? resolveRemoteHostById(remoteHostId) : undefined
-    return listDir(dirPath, remote)
-  })
-  registerMethod('file:readContent', ({ filePath, maxBytes, remoteHostId }) => {
-    const remote = remoteHostId ? resolveRemoteHostById(remoteHostId) : undefined
-    return readFileContent(filePath, maxBytes, remote)
-  })
-  registerMethod('file:stamp', ({ filePath, remoteHostId }) => {
-    const remote = remoteHostId ? resolveRemoteHostById(remoteHostId) : undefined
-    return fileStamp(filePath, remote)
-  })
-  registerMethod('file:writeContent', ({ filePath, content, remoteHostId }) => {
-    const remote = remoteHostId ? resolveRemoteHostById(remoteHostId) : undefined
-    return writeFileContent(filePath, content, remote)
   })
 
   // Intent bar completions

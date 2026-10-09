@@ -1,0 +1,515 @@
+{
+  "git:isGitRepo \"<root>/repo\"": {
+    "jsonrpc": "2.0",
+    "result": true
+  },
+  "git:isGitRepo \"<root>/plain\"": {
+    "jsonrpc": "2.0",
+    "result": false
+  },
+  "git:isGitRepo \"<root>/missing\"": {
+    "jsonrpc": "2.0",
+    "result": false
+  },
+  "git:isGitRepo \"repo\"": {
+    "jsonrpc": "2.0",
+    "result": false
+  },
+  "git:listBranches \"<root>/repo\"": {
+    "jsonrpc": "2.0",
+    "result": {
+      "local": ["feature/a", "main", "merged", "wt-branch"],
+      "current": "main",
+      "isGitRepo": true
+    }
+  },
+  "git:listBranches \"<root>/plain\"": {
+    "jsonrpc": "2.0",
+    "result": {
+      "local": [],
+      "current": null,
+      "isGitRepo": false
+    }
+  },
+  "git:listRemoteBranches \"<root>/repo\"": {
+    "jsonrpc": "2.0",
+    "result": ["origin", "feature/a", "main", "merged"]
+  },
+  "git:listWorktrees \"<root>/repo\"": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "path": "<root>/repo",
+        "branch": "main",
+        "isMain": true,
+        "name": "repo"
+      },
+      {
+        "path": "<root>/.vorn-worktrees/repo/existing",
+        "branch": "wt-branch",
+        "isMain": false,
+        "name": "existing"
+      }
+    ]
+  },
+  "git:listWorktrees \"<root>/plain\"": {
+    "jsonrpc": "2.0",
+    "result": []
+  },
+  "git:getBranch \"<root>/repo\"": {
+    "jsonrpc": "2.0",
+    "result": "main"
+  },
+  "git:getBranch \"<root>/.vorn-worktrees/repo/existing\"": {
+    "jsonrpc": "2.0",
+    "result": "wt-branch"
+  },
+  "git:getBranch \"<root>/plain\"": {
+    "jsonrpc": "2.0",
+    "result": null
+  },
+  "git:getWorktreeBranch \"<root>/.vorn-worktrees/repo/existing\"": {
+    "jsonrpc": "2.0",
+    "result": "wt-branch"
+  },
+  "git:worktreeDirty \"<root>/repo\"": {
+    "jsonrpc": "2.0",
+    "result": true
+  },
+  "git:worktreeDirty \"<root>/.vorn-worktrees/repo/existing\"": {
+    "jsonrpc": "2.0",
+    "result": true
+  },
+  "git:diffStat \"<root>/repo\"": {
+    "jsonrpc": "2.0",
+    "result": {
+      "filesChanged": 3,
+      "insertions": 20,
+      "deletions": 21
+    }
+  },
+  "git:diffStat \"<root>/.vorn-worktrees/repo/existing\"": {
+    "jsonrpc": "2.0",
+    "result": {
+      "filesChanged": 0,
+      "insertions": 0,
+      "deletions": 0
+    }
+  },
+  "git:diffStat \"<root>/plain\"": {
+    "jsonrpc": "2.0",
+    "result": null
+  },
+  "git:diffFull \"<root>/repo\"": {
+    "jsonrpc": "2.0",
+    "result": {
+      "stat": {
+        "filesChanged": 3,
+        "insertions": 20,
+        "deletions": 21
+      },
+      "files": [
+        {
+          "filePath": "README.md",
+          "status": "deleted",
+          "insertions": 0,
+          "deletions": 1,
+          "diff": "diff --git a/README.md b/README.md\ndeleted file mode 100644\nindex 9741694..0000000\n--- a/README.md\n+++ /dev/null\n@@ -1 +0,0 @@\n-# fixture\n"
+        },
+        {
+          "filePath": "src/a.ts",
+          "status": "modified",
+          "insertions": 19,
+          "deletions": 20,
+          "diff": "diff --git a/src/a.ts b/src/a.ts\nindex f0ba3b2..73408ef 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,20 +1,19 @@\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n-export const a = 1\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n+export const a = 2\n"
+        },
+        {
+          "filePath": "src/staged.ts",
+          "status": "added",
+          "insertions": 1,
+          "deletions": 0,
+          "diff": "diff --git a/src/staged.ts b/src/staged.ts\nnew file mode 100644\nindex 0000000..19d9cc8\n--- /dev/null\n+++ b/src/staged.ts\n@@ -0,0 +1 @@\n+staged"
+        }
+      ]
+    }
+  },
+  "git:diffFull \"<root>/plain\"": {
+    "jsonrpc": "2.0",
+    "result": null
+  },
+  "git:diffFull {\"cwd\":\"<root>/repo\",\"from\":\"merged\",\"to\":\"feature/a\"}": {
+    "jsonrpc": "2.0",
+    "result": {
+      "stat": {
+        "filesChanged": 1,
+        "insertions": 1,
+        "deletions": 0
+      },
+      "files": [
+        {
+          "filePath": "src/feature.ts",
+          "status": "added",
+          "insertions": 1,
+          "deletions": 0,
+          "diff": "diff --git a/src/feature.ts b/src/feature.ts\nnew file mode 100644\nindex 0000000..f185c51\n--- /dev/null\n+++ b/src/feature.ts\n@@ -0,0 +1 @@\n+export const feature = true"
+        }
+      ]
+    }
+  },
+  "git:diffFull {\"cwd\":\"<root>/repo\",\"from\":\"nope\",\"to\":\"feature/a\"}": {
+    "jsonrpc": "2.0",
+    "result": null
+  },
+  "git:diffFull {\"cwd\":\"<root>/repo\"}": {
+    "jsonrpc": "2.0",
+    "result": null
+  },
+  "file:listDir {\"dirPath\":\"<root>/repo\"}": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "name": ".github",
+        "path": "<root>/repo/.github",
+        "isDirectory": true
+      },
+      {
+        "name": "alpha",
+        "path": "<root>/repo/alpha",
+        "isDirectory": true
+      },
+      {
+        "name": "src",
+        "path": "<root>/repo/src",
+        "isDirectory": true
+      },
+      {
+        "name": "Zeta",
+        "path": "<root>/repo/Zeta",
+        "isDirectory": true
+      },
+      {
+        "name": "bin.dat",
+        "path": "<root>/repo/bin.dat",
+        "isDirectory": false
+      }
+    ]
+  },
+  "file:listDir {\"dirPath\":\"<root>/repo/src\"}": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "name": "_under.ts",
+        "path": "<root>/repo/src/_under.ts",
+        "isDirectory": false
+      },
+      {
+        "name": "10-ten.md",
+        "path": "<root>/repo/src/10-ten.md",
+        "isDirectory": false
+      },
+      {
+        "name": "2-two.md",
+        "path": "<root>/repo/src/2-two.md",
+        "isDirectory": false
+      },
+      {
+        "name": "a.ts",
+        "path": "<root>/repo/src/a.ts",
+        "isDirectory": false
+      },
+      {
+        "name": "Beta.ts",
+        "path": "<root>/repo/src/Beta.ts",
+        "isDirectory": false
+      },
+      {
+        "name": "cafe.txt",
+        "path": "<root>/repo/src/cafe.txt",
+        "isDirectory": false
+      },
+      {
+        "name": "café.txt",
+        "path": "<root>/repo/src/café.txt",
+        "isDirectory": false
+      },
+      {
+        "name": "staged.ts",
+        "path": "<root>/repo/src/staged.ts",
+        "isDirectory": false
+      },
+      {
+        "name": "untracked.ts",
+        "path": "<root>/repo/src/untracked.ts",
+        "isDirectory": false
+      }
+    ]
+  },
+  "file:listDir {\"dirPath\":\"<root>/plain\"}": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "name": "notes.txt",
+        "path": "<root>/plain/notes.txt",
+        "isDirectory": false
+      }
+    ]
+  },
+  "file:listDir {\"dirPath\":\"<root>/missing\"}": {
+    "jsonrpc": "2.0",
+    "result": []
+  },
+  "file:readContent {\"filePath\":\"<root>/repo/src/a.ts\"}": {
+    "jsonrpc": "2.0",
+    "result": "export const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\nexport const a = 2\n"
+  },
+  "file:readContent {\"filePath\":\"<root>/repo/src/a.ts\",\"maxBytes\":25}": {
+    "jsonrpc": "2.0",
+    "result": "export const a = 2\nexport\n\n--- truncated (361 bytes total) ---"
+  },
+  "file:readContent {\"filePath\":\"<root>/repo/bin.dat\"}": {
+    "jsonrpc": "2.0",
+    "result": null
+  },
+  "file:readContent {\"filePath\":\"<root>/repo/missing.txt\"}": {
+    "jsonrpc": "2.0",
+    "result": null
+  },
+  "file:readContent {\"filePath\":\"<root>/repo/src\"}": {
+    "jsonrpc": "2.0",
+    "result": null
+  },
+  "file:stamp {\"filePath\":\"<root>/repo/src/Beta.ts\"}": {
+    "jsonrpc": "2.0",
+    "result": {
+      "size": 19,
+      "mtimeMs": "<mtime>"
+    }
+  },
+  "file:stamp {\"filePath\":\"<root>/repo/missing.txt\"}": {
+    "jsonrpc": "2.0",
+    "result": null
+  },
+  "ide:open no-such-editor": {
+    "jsonrpc": "2.0"
+  },
+  "change 1 git:commit": {
+    "jsonrpc": "2.0",
+    "result": {
+      "success": true
+    }
+  },
+  "change 2 git:commit": {
+    "jsonrpc": "2.0",
+    "result": {
+      "success": true
+    }
+  },
+  "change 3 git:commit": {
+    "jsonrpc": "2.0",
+    "result": {
+      "success": false,
+      "error": "Command failed: /usr/bin/git commit -m none"
+    }
+  },
+  "change 4 git:push": {
+    "jsonrpc": "2.0",
+    "result": {
+      "success": true
+    }
+  },
+  "change 5 git:push": {
+    "jsonrpc": "2.0",
+    "result": {
+      "success": false,
+      "error": "Command failed: /usr/bin/git push\nfatal: not a git repository (or any of the parent directories): .git\n"
+    }
+  },
+  "change 6 git:createWorktree": {
+    "jsonrpc": "2.0",
+    "result": {
+      "worktreePath": "<root>/.vorn-worktrees/repo/named-<made up 1>",
+      "branch": "made",
+      "name": "named"
+    }
+  },
+  "change 7 git:createWorktree": {
+    "jsonrpc": "2.0",
+    "result": {
+      "worktreePath": "<root>/.vorn-worktrees/repo/<made up 3>-<made up 2>",
+      "branch": "feature/a",
+      "name": "<made up 3>"
+    }
+  },
+  "change 8 git:createWorktree": {
+    "jsonrpc": "2.0",
+    "result": {
+      "worktreePath": "<root>/.vorn-worktrees/repo/merged-<made up 4>",
+      "branch": "merged-<made up 4>",
+      "name": "merged"
+    }
+  },
+  "change 9 git:createWorktree": {
+    "jsonrpc": "2.0",
+    "error": {
+      "code": -32000,
+      "message": "Command failed: /usr/bin/git worktree add -b -bad name <root>/.vorn-worktrees/repo/bad-<made up 5>\nPreparing worktree (new branch '-bad name')\nerror: unknown switch `b'\nusage: git branch [<options>] [-r | -a] [--merged] [--no-merged]\n   or: git branch [<options>] [-f] [--recurse-submodules] <branch-name> [<start-point>]\n   or: git branch [<options>] [-l] [<pattern>...]\n   or: git branch [<options>] [-r] (-d | -D) <branch-name>...\n   or: git branch [<options>] (-m | -M) [<old-branch>] <new-branch>\n   or: git branch [<options>] (-c | -C) [<old-branch>] <new-branch>\n   or: git branch [<options>] [-r | -a] [--points-at]\n   or: git branch [<options>] [-r | -a] [--format]\n\nGeneric options\n    -v, --[no-]verbose    show hash and subject, give twice for upstream branch\n    -q, --[no-]quiet      suppress informational messages\n    -t, --[no-]track[=(direct|inherit)]\n                          set branch tracking configuration\n    -u, --[no-]set-upstream-to <upstream>\n                          change the upstream info\n    --[no-]unset-upstream unset the upstream info\n    --[no-]color[=<when>] use colored output\n    -r, --remotes         act on remote-tracking branches\n    --contains <commit>   print only branches that contain the commit\n    --no-contains <commit>\n                          print only branches that don't contain the commit\n    --[no-]abbrev[=<n>]   use <n> digits to display object names\n\nSpecific git-branch actions:\n    -a, --all             list both remote-tracking and local branches\n    -d, --[no-]delete     delete fully merged branch\n    -D                    delete branch (even if not merged)\n    -m, --[no-]move       move/rename a branch and its reflog\n    -M                    move/rename a branch, even if target exists\n    --[no-]omit-empty     do not output a newline after empty formatted refs\n    -c, --[no-]copy       copy a branch and its reflog\n    -C                    copy a branch, even if target exists\n    -l, --[no-]list       list branch names\n    --[no-]show-current   show current branch name\n    --[no-]create-reflog  create the branch's reflog\n    --[no-]edit-description\n                          edit the description for the branch\n    -f, --[no-]force      force creation, move/rename, deletion\n    --merged <commit>     print only branches that are merged\n    --no-merged <commit>  print only branches that are not merged\n    --[no-]column[=<style>]\n                          list branches in columns\n    --[no-]sort <key>     field name to sort on\n    --[no-]points-at <object>\n                          print only branches of the object\n    -i, --[no-]ignore-case\n                          sorting and filtering are case insensitive\n    --[no-]recurse-submodules\n                          recurse through submodules\n    --[no-]format <format>\n                          format to use for the output\n\n"
+    }
+  },
+  "change 10 git:listWorktrees": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "path": "<root>/repo",
+        "branch": "main",
+        "isMain": true,
+        "name": "repo"
+      },
+      {
+        "path": "<root>/.vorn-worktrees/repo/<made up 3>-<made up 2>",
+        "branch": "feature/a",
+        "isMain": false,
+        "name": "<made up 3>"
+      },
+      {
+        "path": "<root>/.vorn-worktrees/repo/existing",
+        "branch": "wt-branch",
+        "isMain": false,
+        "name": "existing"
+      },
+      {
+        "path": "<root>/.vorn-worktrees/repo/merged-<made up 4>",
+        "branch": "merged-<made up 4>",
+        "isMain": false,
+        "name": "merged"
+      },
+      {
+        "path": "<root>/.vorn-worktrees/repo/named-<made up 1>",
+        "branch": "made",
+        "isMain": false,
+        "name": "named"
+      }
+    ]
+  },
+  "change 11 git:listBranches": {
+    "jsonrpc": "2.0",
+    "result": {
+      "local": ["feature/a", "made", "main", "merged", "merged-<made up 4>", "wt-branch"],
+      "current": "main",
+      "isGitRepo": true
+    }
+  },
+  "change 12 git:worktreeDirty": {
+    "jsonrpc": "2.0",
+    "result": false
+  },
+  "change 13 git:checkoutBranch": {
+    "jsonrpc": "2.0",
+    "result": {
+      "ok": true
+    }
+  },
+  "change 14 git:removeWorktree": {
+    "jsonrpc": "2.0",
+    "result": true
+  },
+  "change 15 git:removeWorktree": {
+    "jsonrpc": "2.0",
+    "result": false
+  },
+  "change 16 git:removeWorktree": {
+    "jsonrpc": "2.0",
+    "result": true
+  },
+  "change 17 git:deleteBranches": {
+    "jsonrpc": "2.0",
+    "result": {
+      "deleted": ["made"],
+      "failed": [
+        {
+          "branch": "feature/a",
+          "error": "Command failed: /usr/bin/git branch -d feature/a\nerror: cannot delete branch 'feature/a' used by worktree at '<root>/.vorn-worktrees/repo/<made up 3>-<made up 2>'\n"
+        },
+        {
+          "branch": "no-such-branch",
+          "error": "Command failed: /usr/bin/git branch -d no-such-branch\nerror: branch 'no-such-branch' not found\n"
+        }
+      ]
+    }
+  },
+  "change 18 git:deleteBranches": {
+    "jsonrpc": "2.0",
+    "result": {
+      "deleted": [],
+      "failed": [
+        {
+          "branch": "wt-branch",
+          "error": "Command failed: /usr/bin/git branch -D wt-branch\nerror: branch 'wt-branch' not found\n"
+        }
+      ]
+    }
+  },
+  "change 19 git:listWorktrees": {
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "path": "<root>/repo",
+        "branch": "main",
+        "isMain": true,
+        "name": "repo"
+      },
+      {
+        "path": "<root>/.vorn-worktrees/repo/<made up 3>-<made up 2>",
+        "branch": "feature/a",
+        "isMain": false,
+        "name": "<made up 3>"
+      },
+      {
+        "path": "<root>/.vorn-worktrees/repo/merged-<made up 4>",
+        "branch": "merged-<made up 4>",
+        "isMain": false,
+        "name": "merged"
+      }
+    ]
+  },
+  "change 20 git:listBranches": {
+    "jsonrpc": "2.0",
+    "result": {
+      "local": ["feature/a", "main", "merged-<made up 4>"],
+      "current": "main",
+      "isGitRepo": true
+    }
+  },
+  "change 21 file:writeContent": {
+    "jsonrpc": "2.0",
+    "result": {
+      "success": true
+    }
+  },
+  "change 22 file:stamp": {
+    "jsonrpc": "2.0",
+    "result": {
+      "size": 7,
+      "mtimeMs": "<mtime>"
+    }
+  },
+  "change 23 file:readContent": {
+    "jsonrpc": "2.0",
+    "result": "héllo\n"
+  },
+  "change 24 file:writeContent": {
+    "jsonrpc": "2.0",
+    "result": {
+      "success": false,
+      "error": "ENOENT: no such file or directory, open '<root>/repo/no/such/dir.txt'"
+    }
+  },
+  "change 25 file:writeContent": {
+    "jsonrpc": "2.0",
+    "result": {
+      "success": false,
+      "error": "EISDIR: illegal operation on a directory, open '<root>/repo'"
+    }
+  },
+  "change log": "two\none\nbase\n",
+  "change pushed": "two\none\nbase\n"
+}

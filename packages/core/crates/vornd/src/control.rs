@@ -545,9 +545,12 @@ fn call(app: App<'_>, text: &str) {
             (None, _) => Err("vornd does not run workflows".to_owned()),
             (_, None) => Err("vornd:signedIn needs a connectionId".to_owned()),
         },
-        "vornd:work" => match link.work() {
-            Some(work) => {
-                let (work, fwd) = (Arc::clone(work), fwd.clone());
+        "vornd:work" => {
+            let (work, native) = (link.work().cloned(), link.native());
+            if work.is_none() && native.is_none() {
+                Err("vornd does not run workflows".to_owned())
+            } else {
+                let fwd = fwd.clone();
                 let method = params
                     .get("method")
                     .and_then(Value::as_str)
@@ -555,7 +558,20 @@ fn call(app: App<'_>, text: &str) {
                     .to_owned();
                 let inner = params.get("params").cloned().unwrap_or(Value::Null);
                 tokio::spawn(async move {
-                    let answered = work.relayed(method.clone(), inner).await;
+                    let answered = match (work, native) {
+                        (Some(work), _) => work.relayed(method.clone(), inner).await,
+                        // A vornd with no database runs no work model; its own calls still answer.
+                        (None, Some(native)) => {
+                            native
+                                .answer(
+                                    method.clone(),
+                                    inner,
+                                    &crate::native::config::Viewer::Local,
+                                )
+                                .await
+                        }
+                        (None, None) => crate::native::Answer::Forward,
+                    };
                     if let Some(rpc) = rpc {
                         match answered {
                             crate::native::Answer::Result(v) => {
@@ -572,8 +588,7 @@ fn call(app: App<'_>, text: &str) {
                 });
                 return;
             }
-            None => Err("vornd does not run workflows".to_owned()),
-        },
+        }
         "vornd:configChanged" => {
             if let Some(work) = link.work() {
                 work.workflows_changed_elsewhere();

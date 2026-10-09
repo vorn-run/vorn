@@ -227,6 +227,11 @@ fn run(
         .then(|| String::from_utf8_lossy(&out).trim().to_owned())
 }
 
+/// The error while there is no database of device tokens.
+fn no_tokens() -> Answer {
+    Answer::Error("vornd has no database of device tokens".to_owned())
+}
+
 impl Native {
     pub(super) fn reach_call(&self, method: &str, params: &Value) -> Answer {
         match method {
@@ -238,36 +243,31 @@ impl Native {
                     .tailscale
                     .lock()
                     .unwrap_or_else(|e| e.into_inner()) = None;
-                let Some(port) = self.reach.server_port() else {
-                    return Answer::Forward;
-                };
-                let status = self.reach.tailscale_status(&self.env, Some(port));
+                // Asked without a port until vornd knows the one clients reach.
+                let port = self.reach.server_port();
+                let status = self.reach.tailscale_status(&self.env, port);
                 self.reach.trust(&status);
                 Answer::Result(status)
             }
             "token:list" => match self.tokens() {
                 Some(t) => match t.list() {
                     Ok(list) => Answer::Result(json!(list)),
-                    Err(_) => Answer::Forward,
+                    Err(e) => Answer::Error(e.to_string()),
                 },
-                None => Answer::Forward,
+                None => no_tokens(),
             },
             "token:create" => self.token_create(params),
             "token:revoke" => self.token_revoke(params),
-            // Pairing is held here only while the server is there to
-            // announce it: with no one to tell the desktop a phone is
-            // asking, the server holds it.
-            m if m.starts_with("pairing:") && !self.holds_pairing() => Answer::Forward,
             "pairing:start" => match self.pairing().start(now_ms()) {
                 Ok(code) => Answer::Result(code),
-                Err(_) => Answer::Forward,
+                Err(e) => Answer::Error(e.to_string()),
             },
             "pairing:pending" => Answer::Result(Value::Array(self.pairing().pending(now_ms()))),
             "pairing:approve" | "pairing:deny" => {
                 // The server's handler destructures its params: anything
                 // but an object throws there, and is its to answer.
                 let Some(id) = params.as_object().map(|o| o.get("requestId")) else {
-                    return Answer::Forward;
+                    return super::bad_params(method);
                 };
                 let id = id.cloned().unwrap_or(Value::Null);
                 let mut pairing = self.pairing();
@@ -299,7 +299,7 @@ impl Native {
             self.link().and_then(|l| l.server_host()),
             self.reach.server_port(),
         ) else {
-            return Answer::Forward;
+            return Answer::Error("vornd does not know where clients reach it yet".to_owned());
         };
         let remote = host == "0.0.0.0";
         let mut tailscale_ips = Vec::new();
@@ -359,7 +359,7 @@ impl Native {
 
     fn token_create(&self, params: &Value) -> Answer {
         let Some(fields) = params.as_object() else {
-            return Answer::Forward;
+            return super::bad_params("token:create");
         };
         let label = fields
             .get("name")
@@ -368,7 +368,7 @@ impl Native {
             .filter(|s| !s.is_empty())
             .unwrap_or("Device");
         if self.tokens().is_none() {
-            return Answer::Forward;
+            return no_tokens();
         }
         match self.mint(label) {
             Ok(v) => Answer::Result(v),
@@ -378,24 +378,20 @@ impl Native {
 
     fn token_revoke(&self, params: &Value) -> Answer {
         let Some(id) = params.as_str() else {
-            return Answer::Forward;
-        };
-        // The sockets holding it are closed by the server, which has to be
-        // there to be told.
-        let Some(link) = self.link().filter(|l| l.listening()) else {
-            return Answer::Forward;
+            return super::bad_params("token:revoke");
         };
         let Some(tokens) = self.tokens() else {
-            return Answer::Forward;
+            return no_tokens();
         };
         match tokens.revoke(id, &now_iso()) {
             Ok(revoked) => {
-                if revoked {
+                // The sockets holding it are closed by whoever holds them.
+                if let (true, Some(link)) = (revoked, self.link()) {
                     link.tell("vornd:tokenRevoked", json!({ "tokenId": id }));
                 }
                 Answer::Result(json!({ "revoked": revoked }))
             }
-            Err(_) => Answer::Forward,
+            Err(e) => Answer::Error(e.to_string()),
         }
     }
 
@@ -455,12 +451,6 @@ impl Native {
                 )
             }
         }
-    }
-
-    /// Whether pairing is held here: the server is listening on the app's
-    /// channel, to announce a phone asking and collecting.
-    pub fn holds_pairing(&self) -> bool {
-        self.link().is_some_and(|l| l.listening())
     }
 
     pub(super) fn link(&self) -> Option<&Arc<AppLink>> {

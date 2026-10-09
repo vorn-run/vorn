@@ -2,10 +2,8 @@
 //! to remove, and the removal itself, read from its copy of the session
 //! records ([`crate::registry`]) and the repositories ([`vorn_worktrees`]).
 //!
-//! A call is forwarded instead when vornd's copy of the records is not fed
-//! yet, when it touches a project on a remote host (the server reaches those
-//! over SSH), when vornd cannot read the projects, and when its params are
-//! not the shape the server's handler reads. After a change it tells the
+//! A project on a remote host is reached over ssh, as the server reaches it
+//! ([`super::remote`]). After a change it tells the
 //! server which worktrees it cleaned (`vornd:worktreesCleaned`), so the
 //! server forgets their sizes as it does after its own.
 
@@ -17,7 +15,7 @@ use vorn_git::repo::Git;
 use vorn_store::{Placement, WorktreeSettings};
 use vorn_worktrees::{Cleanup, Guard, Project, RemoveItem, Retention, Scan};
 
-use super::{absolute_str, Answer, Native};
+use super::{absolute_str, bad_params, Answer, Native};
 use crate::registry::Registry;
 
 /// The note that names the worktrees a change cleaned.
@@ -32,24 +30,27 @@ const ACTIONS: &[&str] = &[
 
 /// Answers `method` with `params`.
 pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
-    if native.registry.get().and_then(|r| r.read(|_| ())).is_none() {
-        return Answer::Forward;
+    // Removing one worktree asks nothing of the sessions, as the server's handler asks nothing.
+    let fed = native.registry.get().and_then(|r| r.read(|_| ())).is_some();
+    if !fed && method != "git:removeWorktree" {
+        return Answer::Error("vornd has not read the sessions yet".to_owned());
+    }
+    if method == "git:removeWorktree" {
+        return remove_one(native, method, params);
     }
     let Some(settings) = settings(native) else {
-        return Answer::Forward;
+        return Answer::Error("vornd could not read the projects".to_owned());
     };
     let git = Git {
         bin: native.env.git_bin(),
         env: native.env.get(),
+        ssh: None,
     };
     match method {
-        "worktree:inventory" => inventory(native, &settings, &git, params),
-        "git:removeWorktree" => remove_one(native, &settings, &git, params),
+        "worktree:inventory" => inventory(native, &settings, &git, method, params),
         _ => match Asked::read(method, params) {
-            Some(asked) if all_local(&settings, &asked.paths()) => {
-                act(native, &settings, &git, &asked)
-            }
-            _ => Answer::Forward,
+            Some(asked) => act(native, &settings, &git, &asked),
+            None => bad_params(method),
         },
     }
 }
@@ -125,8 +126,8 @@ fn settings(native: &Native) -> Option<WorktreeSettings> {
 }
 
 /// The projects as the scan reads them, with the hosts the server would
-/// read for each.
-fn projects(settings: &WorktreeSettings) -> Vec<Project> {
+/// read for each and how to reach the remote one.
+fn projects(native: &Native, settings: &WorktreeSettings) -> Vec<Project> {
     settings
         .names
         .iter()
@@ -138,18 +139,19 @@ fn projects(settings: &WorktreeSettings) -> Vec<Project> {
                 Some(ids) if !ids.is_empty() => ids.clone(),
                 _ => vec!["local".to_owned()],
             },
+            remote: remote_of(native, settings.hosts.placement(p)),
         })
         .collect()
 }
 
-/// The projects on this machine: the ones a local path can belong to.
-fn local_projects(settings: &WorktreeSettings) -> Vec<Project> {
-    projects(settings)
-        .into_iter()
-        .zip(&settings.hosts.projects)
-        .filter(|(_, p)| settings.hosts.placement(p) == Placement::Local)
-        .map(|(p, _)| p)
-        .collect()
+/// The remote host a placement names, when vornd can log in to it.
+fn remote_of(native: &Native, placement: Placement) -> Option<vorn_worktrees::Remote> {
+    match placement {
+        Placement::Remote(id) => native
+            .login(&id)
+            .map(|login| vorn_worktrees::Remote { id, login }),
+        Placement::Local => None,
+    }
 }
 
 fn all_local(settings: &WorktreeSettings, paths: &[&str]) -> bool {
@@ -159,7 +161,13 @@ fn all_local(settings: &WorktreeSettings, paths: &[&str]) -> bool {
 }
 
 /// `worktree:inventory`: `null`, or `{projectPaths?, refresh?}`.
-fn inventory(native: &Native, settings: &WorktreeSettings, git: &Git, params: &Value) -> Answer {
+fn inventory(
+    native: &Native,
+    settings: &WorktreeSettings,
+    git: &Git,
+    method: &str,
+    params: &Value,
+) -> Answer {
     let (wanted, refresh) = match params {
         Value::Null => (Vec::new(), false),
         Value::Object(_) => {
@@ -171,31 +179,21 @@ fn inventory(native: &Native, settings: &WorktreeSettings, git: &Git, params: &V
                         .map(|p| p.as_str().map(str::to_owned))
                         .collect::<Option<Vec<_>>>()
                     else {
-                        return Answer::Forward;
+                        return bad_params(method);
                     };
                     list
                 }
-                Some(_) => return Answer::Forward,
+                Some(_) => return bad_params(method),
             };
             let Some(refresh) = flag(params, "refresh") else {
-                return Answer::Forward;
+                return bad_params(method);
             };
             (wanted, refresh)
         }
-        _ => return Answer::Forward,
+        _ => return bad_params(method),
     };
-    let in_scope = |p: &&vorn_store::ProjectHost| wanted.is_empty() || wanted.contains(&p.path);
-    let remote = settings
-        .hosts
-        .projects
-        .iter()
-        .filter(in_scope)
-        .any(|p| settings.hosts.placement(p) != Placement::Local);
-    if remote {
-        return Answer::Forward;
-    }
     let Some(registry) = native.registry.get() else {
-        return Answer::Forward;
+        return Answer::Error("vornd has not read the sessions yet".to_owned());
     };
     let active = |path: &str| {
         registry
@@ -209,7 +207,7 @@ fn inventory(native: &Native, settings: &WorktreeSettings, git: &Git, params: &V
     };
     let retention = Retention::from_config(settings.retention.as_ref());
     let inventory = vorn_worktrees::scan(
-        &projects(settings),
+        &projects(native, settings),
         &wanted,
         &Scan {
             git,
@@ -225,22 +223,21 @@ fn inventory(native: &Native, settings: &WorktreeSettings, git: &Git, params: &V
 
 /// `git:removeWorktree`, which the server answers without asking about
 /// sessions: a card closing its own session removes the worktree after it.
-fn remove_one(native: &Native, settings: &WorktreeSettings, git: &Git, params: &Value) -> Answer {
+fn remove_one(native: &Native, method: &str, params: &Value) -> Answer {
     let (Some(project), Some(worktree)) = (
         params.get("projectPath").and_then(absolute_str),
         params.get("worktreePath").and_then(absolute_str),
     ) else {
-        return Answer::Forward;
+        return bad_params(method);
     };
     let (Some(force), Some(delete_branch)) = (flag(params, "force"), flag(params, "deleteBranch"))
     else {
-        return Answer::Forward;
+        return bad_params(method);
     };
-    if settings.hosts.for_project(project) != Placement::Local {
-        return Answer::Forward;
-    }
+    let place = native.project_place(project);
+    let git = place.git(native);
     native.sizes.invalidate(worktree);
-    let removed = native.turns.take(Path::new(project), || {
+    let removed = native.turns.take(&place.turn(project), || {
         git.remove_worktree(Path::new(project), worktree, force, delete_branch)
     });
     tell_cleaned(native, &[worktree.to_owned()]);
@@ -302,13 +299,15 @@ fn act(native: &Native, settings: &WorktreeSettings, git: &Git, asked: &Asked) -
         return Answer::Error(refusal);
     }
     let retention = Retention::from_config(settings.retention.as_ref());
-    let projects = local_projects(settings);
+    let projects = projects(native, settings);
+    let remote_by_path = |path: &str| remote_of(native, settings.hosts.for_path(path));
     let ctx = Cleanup {
         git,
         sizes: &native.sizes,
         artifact_dirs: &retention.artifact_dirs,
         projects: &projects,
         guard: &live,
+        remote_of: &remote_by_path,
     };
     let result = match asked {
         Asked::Remove(items) => vorn_worktrees::remove_worktrees(items, &ctx),
@@ -343,7 +342,10 @@ impl Guard for Live<'_> {
         project: &Path,
         f: &mut dyn FnMut() -> Result<(), String>,
     ) -> Result<(), String> {
-        self.0.turns.take(project, f)
+        // A remote project's repository takes turns under its host, as its other changes do.
+        let project = project.to_string_lossy();
+        let place = self.0.project_place(&project);
+        self.0.turns.take(&place.turn(&project), f)
     }
 }
 
@@ -594,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn forwards_what_the_server_answers() {
+    fn refuses_params_the_server_s_handler_cannot_read() {
         let f = fixture();
         let calls = [
             ("worktree:inventory", json!({ "projectPaths": "no" })),
@@ -607,8 +609,9 @@ mod tests {
             ("git:removeWorktree", json!({ "projectPath": f.project })),
         ];
         for (method, params) in calls {
-            assert!(
-                matches!(call(&f.native, method, &params), Answer::Forward),
+            assert_eq!(
+                call(&f.native, method, &params),
+                bad_params(method),
                 "{method} {params}"
             );
         }
@@ -616,14 +619,14 @@ mod tests {
 
         let unfed = Native::new();
         unfed.set_registry(SessionRegistry::new());
-        assert!(matches!(
+        assert_eq!(
             call(&unfed, "worktree:inventory", &Value::Null),
-            Answer::Forward
-        ));
+            Answer::Error("vornd has not read the sessions yet".to_owned())
+        );
     }
 
     #[test]
-    fn forwards_a_project_on_a_remote_host() {
+    fn places_each_project_on_its_host() {
         let settings = WorktreeSettings {
             names: vec!["r".into(), "l".into()],
             hosts: vorn_store::ProjectHosts {
@@ -643,8 +646,12 @@ mod tests {
         };
         assert!(!all_local(&settings, &["/r/x"]));
         assert!(all_local(&settings, &["/l/x"]));
-        assert_eq!(local_projects(&settings)[0].path, "/l");
-        assert_eq!(projects(&settings)[1].host_ids, ["local"]);
+        // A host vornd cannot read is reached as this machine, as the server reaches it.
+        let listed = projects(&Native::new(), &settings);
+        assert_eq!(
+            (listed[0].remote.clone(), listed[1].host_ids.clone()),
+            (None, vec!["local".to_owned()])
+        );
     }
 
     #[test]

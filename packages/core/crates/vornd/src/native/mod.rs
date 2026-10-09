@@ -49,6 +49,7 @@ pub mod hooks;
 pub mod ide;
 pub mod mcp;
 pub mod reach;
+pub mod remote;
 pub mod script;
 pub mod secrets;
 pub mod sessions;
@@ -595,7 +596,7 @@ impl Native {
                 "shell:listExecutables" => Answer::Result(self.shells.executables(&self.env)),
                 "shell:listInstalled" => Answer::Result(self.shells.installed()),
                 "shell:create" => sessions::call(self, method, params),
-                _ => Answer::Forward,
+                _ => not_answered(method),
             },
             _ => Answer::Forward,
         }
@@ -657,7 +658,7 @@ impl Native {
             )
         {
             let Some(work) = self.work.get().cloned() else {
-                return Answer::Forward;
+                return Answer::Error("vornd does not run workflows".to_owned());
             };
             let m = method.clone();
             let running = tokio::spawn(async move { work.answer(&m, &params).await });
@@ -667,6 +668,7 @@ impl Native {
             });
         }
         if connectors::METHODS.contains(&method.as_str()) {
+            // Only a vornd with no database starts none; its server answers then.
             let Some(connectors) = self.connectors.get().cloned() else {
                 return Answer::Forward;
             };
@@ -678,15 +680,15 @@ impl Native {
             });
         }
         let Ok(_slot) = self.slots.acquire().await else {
-            return Answer::Forward;
+            return Answer::Error(format!("{method} failed in vornd: it is stopping"));
         };
         let native = Arc::clone(self);
         let m = method.clone();
         match tokio::task::spawn_blocking(move || native.call(&m, &params)).await {
             Ok(answer) => answer,
             Err(err) => {
-                warn!(%method, %err, "a native call failed; the server answers it");
-                Answer::Forward
+                warn!(%method, %err, "a native call failed");
+                Answer::Error(format!("{method} failed in vornd"))
             }
         }
     }
@@ -719,22 +721,34 @@ impl Native {
     }
 
     fn file(&self, method: &str, params: &Value) -> Answer {
-        // A remote host's files are the server's to reach.
-        match params.get("remoteHostId") {
-            None | Some(Value::Null) => {}
-            Some(Value::String(s)) if s.is_empty() => {}
-            Some(_) => return Answer::Forward,
-        }
-        let path_of = |key| params.get(key).and_then(absolute_str);
+        let host = match params.get("remoteHostId") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) if s.is_empty() => None,
+            Some(Value::String(s)) => Some(s.as_str()),
+            Some(_) => return bad_params(method),
+        };
+        let place = host.map_or(remote::Place::Local, |id| self.host_place(id));
+        // A remote host's paths are POSIX whatever this machine is.
+        let path_of = |key: &str| {
+            let p = params.get(key)?;
+            match place.login() {
+                Some(_) => p.as_str().filter(|p| p.starts_with('/')),
+                None => absolute_str(p),
+            }
+        };
+        let login = place.login();
         match method {
             "file:listDir" => match path_of("dirPath") {
-                Some(dir) => Answer::Result(Value::Array(
-                    file::list_dir(dir, &self.env, &self.ignored)
-                        .iter()
-                        .map(file::FileEntry::to_json)
-                        .collect(),
-                )),
-                None => Answer::Forward,
+                Some(dir) => {
+                    let entries = match login {
+                        Some(login) => file::remote::list_dir(login, dir),
+                        None => file::list_dir(dir, &self.env, &self.ignored),
+                    };
+                    Answer::Result(Value::Array(
+                        entries.iter().map(file::FileEntry::to_json).collect(),
+                    ))
+                }
+                None => bad_params(method),
             },
             "file:readContent" => {
                 let max = match params.get("maxBytes") {
@@ -742,23 +756,33 @@ impl Native {
                     Some(v) => v.as_u64(),
                 };
                 match (path_of("filePath"), max) {
-                    (Some(path), Some(max)) => Answer::Result(json!(file::read_content(path, max))),
-                    _ => Answer::Forward,
+                    (Some(path), Some(max)) => Answer::Result(json!(match login {
+                        Some(login) => file::remote::read_content(login, path, max),
+                        None => file::read_content(path, max),
+                    })),
+                    _ => bad_params(method),
                 }
             }
             "file:stamp" => match path_of("filePath") {
-                Some(path) => Answer::Result(file::stamp(path).unwrap_or(Value::Null)),
-                None => Answer::Forward,
+                Some(path) => Answer::Result(
+                    match login {
+                        Some(login) => file::remote::stamp(login, path),
+                        None => file::stamp(path),
+                    }
+                    .unwrap_or(Value::Null),
+                ),
+                None => bad_params(method),
             },
             "file:writeContent" => {
                 match (
                     path_of("filePath"),
                     params.get("content").and_then(Value::as_str),
                 ) {
-                    (Some(path), Some(content)) => {
-                        Answer::Result(file::write_content(path, content))
-                    }
-                    _ => Answer::Forward,
+                    (Some(path), Some(content)) => Answer::Result(match login {
+                        Some(login) => file::remote::write_content(login, path, content),
+                        None => file::write_content(path, content),
+                    }),
+                    _ => bad_params(method),
                 }
             }
             _ => Answer::Forward,
@@ -806,8 +830,16 @@ impl Native {
     /// The calls that read the server's session registry, from vornd's copy
     /// of it. Forwarded while there is no copy to trust.
     fn sessions(&self, method: &str, params: &Value) -> Answer {
+        // Without a copy of the records, the server still holds the terminals and agents.
+        let unread = || {
+            if method == "worktree:activeSessions" {
+                not_ready()
+            } else {
+                Answer::Forward
+            }
+        };
         let Some(registry) = self.registry.get() else {
-            return Answer::Forward;
+            return unread();
         };
         let records = |list: Vec<Value>| Answer::Result(Value::Array(list));
         registry
@@ -819,11 +851,11 @@ impl Native {
                         let ids = r.active_in_worktree(path);
                         Answer::Result(json!({ "count": ids.len(), "sessionIds": ids }))
                     }
-                    None => Answer::Forward,
+                    None => bad_params(method),
                 },
-                _ => Answer::Forward,
+                _ => not_answered(method),
             })
-            .unwrap_or(Answer::Forward)
+            .unwrap_or_else(unread)
     }
 
     fn ide(&self, method: &str, params: &Value) -> Answer {
@@ -837,10 +869,10 @@ impl Native {
                         self.ides.open(id, project, &self.env);
                         Answer::Void
                     }
-                    _ => Answer::Forward,
+                    _ => bad_params(method),
                 }
             }
-            _ => Answer::Forward,
+            _ => not_answered(method),
         }
     }
 
@@ -857,12 +889,6 @@ impl Native {
         }
     }
 
-    /// Whether the project at `path` is known to be on this machine.
-    fn local_project(&self, path: &str) -> bool {
-        self.hosts()
-            .is_some_and(|h| h.for_project(path) == Placement::Local)
-    }
-
     /// Whether `path` is known to be in no project on a remote host.
     fn local_path(&self, path: &str) -> bool {
         self.hosts()
@@ -876,10 +902,32 @@ fn json_of<T: serde::Serialize>(record: T) -> Value {
     serde_json::to_value(record).unwrap_or(Value::Null)
 }
 
+/// The error while vornd has no database, which only a test's vornd lacks.
+/// The error for a call in one of vornd's groups that it has no answer for.
+pub(crate) fn not_answered(method: &str) -> Answer {
+    Answer::Error(format!("vornd does not answer {method}"))
+}
+
+/// The error while vornd's copy of the session records is not fed yet.
+pub(crate) fn not_ready() -> Answer {
+    Answer::Error("vornd has not read the sessions yet".to_owned())
+}
+
+pub(crate) fn no_database() -> Answer {
+    Answer::Error("vornd has no database".to_owned())
+}
+
+/// The error for params of a shape `method`'s handler cannot read.
+pub(crate) fn bad_params(method: &str) -> Answer {
+    Answer::Error(format!("{method} cannot read the params it was given"))
+}
+
 /// A string param that is an absolute path. A relative one would resolve
 /// against vornd's working directory rather than the server's.
 fn absolute_str(v: &Value) -> Option<&str> {
-    v.as_str().filter(|p| Path::new(p).is_absolute())
+    // A POSIX path is absolute anywhere: a remote host's paths are POSIX.
+    v.as_str()
+        .filter(|p| p.starts_with('/') || Path::new(p).is_absolute())
 }
 
 /// Requests out to the server and to vornd at once, in shadow mode.
@@ -1564,35 +1612,39 @@ mod tests {
             native.call("worktree:activeSessions", &json!("/w")),
             Answer::Result(json!({ "count": 1, "sessionIds": ["t"] }))
         );
-        // Params the server's handler would not expect: the server says so.
+        // Params the server's handler would not expect.
         assert_eq!(
             native.call("worktree:activeSessions", &json!({ "path": "/w" })),
-            Answer::Forward
+            bad_params("worktree:activeSessions")
         );
         assert_eq!(native.call("terminal:create", &json!({})), Answer::Forward);
     }
 
     #[test]
-    fn a_call_without_a_database_goes_to_the_server() {
+    fn a_call_without_a_database_is_answered_as_on_this_machine() {
         let native = Native::new();
+        let outside = std::env::temp_dir().join("vornd-no-such-repo");
         assert_eq!(
-            native.call("git:getBranch", &json!("/tmp")),
-            Answer::Forward
+            native.call("git:getBranch", &json!(outside)),
+            Answer::Result(Value::Null)
+        );
+        // A relative path is read from where vornd runs, as the server read it from where it ran.
+        assert_eq!(
+            native.call("git:isGitRepo", &json!("vornd-no-such-dir")),
+            Answer::Result(json!(false))
         );
         assert_eq!(
-            native.call("git:checkoutBranch", &json!({})),
-            Answer::Forward
+            native.call("git:isGitRepo", &json!(3)),
+            bad_params("git:isGitRepo")
         );
-        // Relative paths resolve against the server's directory, not vornd's.
-        assert_eq!(native.call("git:isGitRepo", &json!("rel")), Answer::Forward);
+        // A host vornd cannot read is reached as this machine, as the server reaches it.
         assert_eq!(
             native.call(
                 "file:stamp",
-                &json!({ "filePath": "/x", "remoteHostId": "h" })
+                &json!({ "filePath": "/vornd-no-such-file", "remoteHostId": "h" })
             ),
-            Answer::Forward
+            Answer::Result(Value::Null)
         );
-        // An absolute path on this platform, which is answered here.
         let missing = std::env::temp_dir().join("vornd-no-such-file");
         assert_eq!(
             native.call("file:stamp", &json!({ "filePath": missing })),

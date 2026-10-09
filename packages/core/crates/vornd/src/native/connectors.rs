@@ -2063,6 +2063,7 @@ impl Connectors {
         let git = vorn_git::repo::Git {
             bin: native.env.git_bin(),
             env: native.env.get(),
+            ssh: None,
         };
         git.github_origin(Path::new(dir))
             .map_or(Value::Null, |r| json!({ "owner": r.owner, "repo": r.repo }))

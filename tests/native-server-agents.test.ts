@@ -1,6 +1,10 @@
 /**
  * vornd's own answers to the `agent:`, `sessions:` and `shell:` calls it
- * takes over, against the server's answers to the same calls.
+ * takes over, against the server's answers to the same calls: live for the
+ * ones the server still has, and for the rest as its TypeScript gave them,
+ * recorded before it was removed (`fixtures/js-reference/agent-calls.json`,
+ * rerecorded with `VORN_RECORD_JS_REFERENCE=1` against a server that still
+ * has them).
  *
  * The test gives both one home directory, holding a history for each of the
  * five agents, and one PATH, holding a stand-in CLI for each agent that lists
@@ -24,6 +28,8 @@ import WebSocket from 'ws'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { answerOf, type Answer } from './helpers/git-parity'
 import { catalogFetchedAt } from './helpers/agents-parity'
+import { fixtureRoot } from './helpers/git-parity'
+import { JsReference, posixSeparators } from './helpers/js-reference'
 
 const TEST_CREDENTIAL = 'native-server-agents-credential'
 const EXE = process.platform === 'win32' ? '.exe' : ''
@@ -427,7 +433,9 @@ function warmPowerShell(): void {
 let serverPort: number
 let closeServer: () => Promise<void>
 let native: Vornd | undefined
-let shadow: Vornd | undefined
+const reference = new JsReference('agent-calls')
+/** How often each call has been made, so a repeated one (a cached list) has a key of its own. */
+const seenCalls = new Map<string, number>()
 let fx: Fixture
 let savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string>>
 
@@ -462,17 +470,12 @@ describe.skipIf(!runnable)(
       await shellEnvSettled(10_000)
       const db = path.join(shared.dataDir, 'vorn.db')
       native = await startVornd(serverPort, ['--db', db])
-      shadow = await startVornd(serverPort, [
-        '--groups',
-        'agent=shadow,sessions=shadow,shell=shadow',
-        '--db',
-        db
-      ])
     }, 60_000)
 
     afterAll(async () => {
       delete process.env.SECRET_VORN_BOOTSTRAP_TOKEN
-      await Promise.all([stopVornd(native), stopVornd(shadow)])
+      reference.save()
+      await stopVornd(native)
       await closeServer?.()
       for (const key of ENV_KEYS) {
         if (savedEnv[key] === undefined) delete process.env[key]
@@ -504,8 +507,15 @@ describe.skipIf(!runnable)(
       params: unknown,
       normalize: (a: Answer) => Answer = (a) => a
     ): Promise<Answer> {
-      const want = normalize(answerOf(await direct.call(method, params)))
-      const got = normalize(answerOf(await through.call(method, params)))
+      const read = (a: Answer): Answer => posixSeparators(fixtureRoot(normalize(a), fx.root))
+      const live = async (): Promise<Answer> => read(answerOf(await direct.call(method, params)))
+      // The server still has the shell's calls; the rest are recorded.
+      const call = `${method} ${JSON.stringify(posixSeparators(fixtureRoot(params ?? null, fx.root)))}`
+      const nth = (seenCalls.get(call) ?? 0) + 1
+      seenCalls.set(call, nth)
+      const key = `${call} #${nth}`
+      const want = method.startsWith('shell:') ? await live() : await reference.want(key, live)
+      const got = read(answerOf(await through.call(method, params)))
       expect(got, `${method} ${JSON.stringify(params)}`).toEqual(want)
       return got
     }
@@ -592,45 +602,22 @@ describe.skipIf(!runnable)(
       expect((after.agent?.native ?? 0) - (before.agent?.native ?? 0)).toBe(made)
     }, 60_000)
 
-    it('leaves the calls only the server can answer to the server', async () => {
+    it('leaves only the restored sessions to the server', async () => {
       const through = await Client.open(native!.port)
       await through.call('config:load')
       const before = await counts(native!)
       await through.call('sessions:restored')
-      await through.call('sessions:getRecent', 'relative/project')
-      await through.call('agent:listModels', { agentType: 'claude', projectPath: 'relative' })
+      const relative = await through.call('sessions:getRecent', 'relative/project')
+      expect(relative).toHaveProperty('error')
+      const models = await through.call('agent:listModels', {
+        agentType: 'claude',
+        projectPath: 'relative'
+      })
+      expect(models).toHaveProperty('error')
       through.close()
       const after = await counts(native!)
-      expect((after.sessions?.forwarded ?? 0) - (before.sessions?.forwarded ?? 0)).toBe(2)
-      expect((after.agent?.forwarded ?? 0) - (before.agent?.forwarded ?? 0)).toBe(1)
-      expect(after.sessions?.native ?? 0).toBe(before.sessions?.native ?? 0)
-    }, 60_000)
-
-    it('shadows every lookup and finds no difference', async () => {
-      const direct = await Client.open(serverPort)
-      const through = await Client.open(shadow!.port)
-      await through.call('config:load')
-      try {
-        for (const [method, params] of readCalls()) await same(direct, through, method, params)
-      } finally {
-        direct.close()
-        through.close()
-      }
-      // Shadow answers settle after the server's; wait for the counts to stop moving.
-      let groups = await counts(shadow!)
-      for (let tries = 0; tries < 50; tries++) {
-        await new Promise((r) => setTimeout(r, 100))
-        const next = await counts(shadow!)
-        const settled = JSON.stringify(next) === JSON.stringify(groups)
-        groups = next
-        if (settled && tries > 2) break
-      }
-      for (const group of ['agent', 'sessions', 'shell']) {
-        expect(groups[group]?.mode).toBe('shadow')
-        expect(groups[group]?.native ?? 0).toBe(0)
-        expect(groups[group]?.shadowMismatched ?? 0).toBe(0)
-        expect(groups[group]?.shadowMatched ?? 0).toBeGreaterThan(0)
-      }
+      expect((after.sessions?.forwarded ?? 0) - (before.sessions?.forwarded ?? 0)).toBe(1)
+      expect((after.agent?.forwarded ?? 0) - (before.agent?.forwarded ?? 0)).toBe(0)
     }, 60_000)
   }
 )

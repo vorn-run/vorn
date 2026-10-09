@@ -354,6 +354,7 @@ impl Daemon {
             return;
         };
         native.set_link(Arc::clone(&link));
+        link.set_native(native);
         native.set_server_port(self.upstream.port());
         if self.groups.mode("terminal") == Mode::Native {
             link.set_creates_terminals();

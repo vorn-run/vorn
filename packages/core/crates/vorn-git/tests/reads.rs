@@ -18,6 +18,7 @@ fn tool() -> Git {
     Git {
         bin: "git".into(),
         env: std::env::vars().collect(),
+        ssh: None,
     }
 }
 

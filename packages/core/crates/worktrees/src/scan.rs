@@ -24,6 +24,32 @@ pub struct Project {
     /// The hosts it is on, `["local"]` when none are named
     /// (`getProjectHostIds`).
     pub host_ids: Vec<String>,
+    /// The remote host it is on, reached over ssh; `None` on this machine.
+    pub remote: Option<Remote>,
+}
+
+/// A remote host a project is on, and how to log in to it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Remote {
+    pub id: String,
+    pub login: vorn_remote::Login,
+}
+
+impl Remote {
+    /// `cmd` in a shell there, its output trimmed (`runShell`).
+    pub(crate) fn shell(&self, cmd: &str, timeout: std::time::Duration) -> Result<String, String> {
+        self.login
+            .exec(cmd, None, timeout)
+            .map(|out| out.trim().to_owned())
+    }
+}
+
+/// `base` run on `remote`, when the project is on one.
+pub(crate) fn git_on(base: &Git, remote: Option<&Remote>) -> Git {
+    Git {
+        ssh: remote.map(|r| r.login.clone()),
+        ..base.clone()
+    }
 }
 
 /// The person's retention preferences, defaults filled in.
@@ -171,9 +197,13 @@ fn scan_project(project: &Project, ctx: &Scan<'_>) -> ProjectInventory {
         stale_branches: Vec::new(),
         error: None,
     };
-    let git = ctx.git;
+    let remote = project.remote.as_ref();
+    out.remote_host_id = remote.map(|r| r.id.clone());
+    let owned = git_on(ctx.git, remote);
+    let git = &owned;
     let dir = Path::new(&project.path);
-    if !git.is_git_repo(dir) {
+    // A remote project is taken to be a repository, as the server takes it.
+    if remote.is_none() && !git.is_git_repo(dir) {
         out.error = Some("not a git repository".into());
         return out;
     }
@@ -228,6 +258,7 @@ fn scan_project(project: &Project, ctx: &Scan<'_>) -> ProjectInventory {
             &ctx.retention.artifact_dirs,
             ctx.refresh,
             &git.env,
+            remote,
         );
         let branch = (wt.branch != "detached").then(|| wt.branch.clone());
         let info = branch.as_ref().and_then(|b| branches.get(b));
@@ -235,7 +266,7 @@ fn scan_project(project: &Project, ctx: &Scan<'_>) -> ProjectInventory {
         let last_commit_at = info
             .and_then(|i| i.committer_date.clone())
             .or_else(|| git.last_commit_date(wt_dir, "HEAD"));
-        let last_touched_at = index_mtime(git, wt_dir);
+        let last_touched_at = index_mtime(git, wt_dir, remote);
         let active = (ctx.active)(&wt.path);
         let is_dirty = git.is_worktree_dirty(wt_dir);
         let is_merged = branch.as_ref().is_some_and(|b| merged.contains(b));
@@ -274,10 +305,18 @@ fn scan_project(project: &Project, ctx: &Scan<'_>) -> ProjectInventory {
         });
     }
 
-    for orphan in list_orphan_dirs(&project.path, &registered) {
-        let size = ctx
-            .sizes
-            .measure(&orphan, &ctx.retention.artifact_dirs, ctx.refresh, &git.env);
+    let orphans = match remote {
+        Some(r) => list_orphan_dirs_remote(&project.path, &registered, r),
+        None => list_orphan_dirs(&project.path, &registered),
+    };
+    for orphan in orphans {
+        let size = ctx.sizes.measure(
+            &orphan,
+            &ctx.retention.artifact_dirs,
+            ctx.refresh,
+            &git.env,
+            remote,
+        );
         let active = (ctx.active)(&orphan);
         let input = VerdictInput {
             is_main: false,
@@ -292,7 +331,10 @@ fn scan_project(project: &Project, ctx: &Scan<'_>) -> ProjectInventory {
             idle_days: None,
         };
         out.entries.push(Entry {
-            name: vorn_git::repo::node_basename(&orphan).to_owned(),
+            name: match remote {
+                Some(_) => orphan.rsplit('/').next().unwrap_or(&orphan).to_owned(),
+                None => vorn_git::repo::node_basename(&orphan).to_owned(),
+            },
             project_path: project.path.clone(),
             project_name: project.name.clone(),
             kind: Kind::OrphanDir,
@@ -357,8 +399,17 @@ fn branch_info(git: &Git, project: &Path) -> HashMap<String, BranchInfo> {
 
 /// When git last wrote the worktree's index, which any git an agent runs
 /// does and an unrelated `yarn install` does not.
-fn index_mtime(git: &Git, worktree: &Path) -> Option<String> {
+fn index_mtime(git: &Git, worktree: &Path, remote: Option<&Remote>) -> Option<String> {
     let dir = git.absolute_git_dir(worktree)?;
+    if let Some(r) = remote {
+        let cmd = format!("stat -c %Y {}", vorn_remote::quote(&format!("{dir}/index")));
+        let secs: i64 = r
+            .shell(&cmd, std::time::Duration::from_secs(10))
+            .ok()?
+            .parse()
+            .ok()?;
+        return Some(iso_millis(DateTime::from_timestamp(secs, 0)?));
+    }
     let modified = std::fs::metadata(Path::new(&dir).join("index"))
         .and_then(|m| m.modified())
         .ok()?;
@@ -426,6 +477,35 @@ pub fn list_orphan_dirs(project: &str, registered: &HashSet<String>) -> Vec<Stri
         .filter(|full| std::fs::canonicalize(full).map_or(true, |real| !known.contains(&real)))
         .map(|full| full.to_string_lossy().into_owned())
         .collect()
+}
+
+/// [`list_orphan_dirs`] for a project on a remote host, from `ls` there.
+pub fn list_orphan_dirs_remote(
+    project: &str,
+    registered: &HashSet<String>,
+    remote: &Remote,
+) -> Vec<String> {
+    let base = remote_base_dir(project);
+    let cmd = format!("ls -1 {} 2>/dev/null || true", vorn_remote::quote(&base));
+    let Ok(out) = remote.shell(&cmd, std::time::Duration::from_secs(10)) else {
+        return Vec::new();
+    };
+    out.lines()
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && !n.starts_with('.'))
+        .map(|n| format!("{base}/{n}"))
+        .filter(|full| !registered.contains(full))
+        .collect()
+}
+
+/// `<parent>/.vorn-worktrees/<project>` for a POSIX project path.
+pub fn remote_base_dir(project: &str) -> String {
+    let parent = project.rsplit_once('/').map_or("", |(p, _)| p);
+    let name = project
+        .split('/')
+        .rfind(|s| !s.is_empty())
+        .unwrap_or(project);
+    format!("{parent}/{}/{name}", crate::WORKTREE_ROOT_SEGMENT)
 }
 
 /// Branches left by removed worktrees: vorn's own generated names only, so

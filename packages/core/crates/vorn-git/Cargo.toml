@@ -12,6 +12,8 @@ description = "Git for Vorn's server, off its event loop: gix for what it answer
 gix = { version = "0.88", default-features = false, features = ["sha1"] }
 # Worktree ids and generated names, from a random UUID as the server takes them.
 uuid = { version = "1", features = ["v4"] }
+# Git on a remote host runs over ssh, as the server runs it there.
+vorn-remote = { path = "../remote" }
 
 [dev-dependencies]
 tempfile = "3"
