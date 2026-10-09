@@ -92,7 +92,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # A night with no new commits on main skips the run.
+  # A night with no new commits to the core, the server or the tests skips the run.
   changed:
     runs-on: ubuntu-latest
     outputs:
@@ -103,7 +103,7 @@ jobs:
           fetch-depth: 0
       - id: check
         run: |
-          if [ "${{ github.event_name }}" != schedule ] || [ -n "$(git log --since='25 hours ago' --format=%H -1)" ]; then
+          if [ "${{ github.event_name }}" != schedule ] || [ -n "$(git log --since='25 hours ago' --format=%H -1 -- packages/core packages/server tests package.json yarn.lock .github/workflows/core.yml)" ]; then
             echo run=true >> "$GITHUB_OUTPUT"
           else
             echo run=false >> "$GITHUB_OUTPUT"
