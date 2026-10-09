@@ -1,13 +1,13 @@
-//! `tools/tasks.ts`: tasks, kept in the config blob.
+//! `tools/tasks.ts`: tasks, read from the config blob and written through
+//! the `task:*` methods, which apply the board's rules: where a new task
+//! sits, and the dates a status change stamps or clears.
 
 use serde_json::{json, Map, Value};
 
-use super::data::{self, Update};
-use super::workspaces::js_max;
+use super::data;
 use super::{failed, object, pretty, text, Args, Cx, Outcome};
 use crate::json;
 use crate::rpc::Rpc;
-use crate::time::now_iso;
 
 /// `isTerminalTaskStatus`.
 fn terminal(status: Option<&Value>) -> bool {
@@ -92,58 +92,25 @@ pub async fn list_tasks<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
 }
 
 pub async fn create_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
-    let project_name = args.str("project_name").unwrap_or_default();
-    if data::find(cx, "projects", "name", project_name)
-        .await?
-        .is_none()
-    {
-        return Ok(failed(format!(
-            "Error: project \"{project_name}\" not found"
-        )));
+    let params = object(
+        [
+            ("projectName", "project_name"),
+            ("title", "title"),
+            ("description", "description"),
+            ("status", "status"),
+            ("branch", "branch"),
+            ("useWorktree", "use_worktree"),
+            ("assignedAgent", "assigned_agent"),
+        ]
+        .map(|(key, arg)| (key, args.get(arg).cloned())),
+    );
+    match data::write(cx, "task:create", params).await? {
+        Some(answer) => Ok(pretty(answer.get("task").unwrap_or(&Value::Null))),
+        None => Ok(failed(format!(
+            "Error: project \"{}\" not found",
+            args.str("project_name").unwrap_or_default()
+        ))),
     }
-    // dbGetMaxTaskOrder: `Math.max(max, t.order ?? 0)`.
-    let max = data::tasks(cx, Some(project_name), None)
-        .await?
-        .iter()
-        .fold(0.0, |max, t| {
-            let order = match t.get("order") {
-                None | Some(Value::Null) => 0.0,
-                other => json::to_number(other),
-            };
-            js_max(max, order)
-        });
-    let now = now_iso();
-    let status = args.str("status").unwrap_or("todo").to_owned();
-    let done = status == "done" || status == "cancelled";
-    let task = object([
-        ("id", Some(Value::from(uuid::Uuid::new_v4().to_string()))),
-        ("projectName", args.get("project_name").cloned()),
-        ("title", args.get("title").cloned()),
-        (
-            "description",
-            Some(
-                args.get("description")
-                    .cloned()
-                    .unwrap_or_else(|| json!("")),
-            ),
-        ),
-        ("status", Some(Value::from(status))),
-        ("order", Some(json::num(max + 1.0))),
-        ("createdAt", Some(Value::from(now.clone()))),
-        ("updatedAt", Some(Value::from(now.clone()))),
-        ("branch", args.nonempty("branch").map(Value::from)),
-        (
-            "useWorktree",
-            args.truthy("use_worktree").then(|| Value::Bool(true)),
-        ),
-        (
-            "assignedAgent",
-            args.nonempty("assigned_agent").map(Value::from),
-        ),
-        ("completedAt", done.then(|| Value::from(now))),
-    ]);
-    data::insert(cx, "tasks", task.clone()).await?;
-    Ok(pretty(&task))
 }
 
 pub async fn get_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
@@ -156,37 +123,49 @@ pub async fn get_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
 
 pub async fn update_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     let id = args.str("id").unwrap_or_default();
-    let Some(task) = data::find(cx, "tasks", "id", id).await? else {
+    let params = object(
+        [
+            ("id", "id"),
+            ("title", "title"),
+            ("description", "description"),
+            ("status", "status"),
+            ("branch", "branch"),
+            ("useWorktree", "use_worktree"),
+            ("assignedAgent", "assigned_agent"),
+        ]
+        .map(|(key, arg)| (key, args.get(arg).cloned())),
+    );
+    let Some(answer) = data::write(cx, "task:update", params).await? else {
         return Ok(not_found(id));
     };
-    let mut updates: Update = vec![("updatedAt", Some(Value::from(now_iso())))];
-    for (arg, key) in [
-        ("title", "title"),
-        ("description", "description"),
-        ("branch", "branch"),
-        ("use_worktree", "useWorktree"),
-        ("assigned_agent", "assignedAgent"),
-        ("order", "order"),
-    ] {
-        if let Some(value) = args.get(arg) {
-            updates.push((key, Some(value.clone())));
-        }
+    let task = answer.get("task").cloned().unwrap_or(Value::Null);
+    match args.get("order").and_then(Value::as_f64) {
+        Some(order) => place(cx, &task, order).await,
+        None => Ok(pretty(&task)),
     }
-    if let Some(status) = args.get("status") {
-        let was_done = terminal(task.get("status"));
-        let is_done = terminal(Some(status));
-        updates.push(("status", Some(status.clone())));
-        if is_done && !was_done {
-            updates.push(("completedAt", Some(Value::from(now_iso()))));
-        }
-        if !is_done && was_done {
-            updates.push(("completedAt", None));
-            updates.push(("archivedAt", None));
-        }
+}
+
+/// `task:update` ignores `order`, so a requested order becomes a place on the
+/// board: before the first other task ordered after it, applied by
+/// `task:reorder`, which permutes the slots the project's tasks already hold.
+async fn place<R: Rpc>(cx: &Cx<'_, R>, task: &Value, order: f64) -> Outcome {
+    let id = task.get("id").and_then(Value::as_str).unwrap_or_default();
+    let order_of = |t: &Value| t.get("order").and_then(Value::as_f64).unwrap_or(0.0);
+    let project = task.get("projectName").and_then(Value::as_str);
+    let mut board = data::tasks(cx, project, None).await?;
+    board.retain(|t| t.get("id").and_then(Value::as_str) != Some(id));
+    board.sort_by(|a, b| order_of(a).total_cmp(&order_of(b)));
+    let at = board.partition_point(|t| order_of(t) <= order);
+    let mut ids: Vec<Value> = board.iter().filter_map(|t| t.get("id").cloned()).collect();
+    ids.insert(at, Value::from(id));
+    if data::write(cx, "task:reorder", json!({ "ids": ids }))
+        .await?
+        .is_none()
+    {
+        return Ok(not_found(id));
     }
-    data::update(cx, "tasks", "id", id, &updates).await?;
-    let updated = data::find(cx, "tasks", "id", id).await?;
-    Ok(pretty(&updated.unwrap_or(Value::Null)))
+    let placed = data::find(cx, "tasks", "id", id).await?;
+    Ok(pretty(&placed.unwrap_or(Value::Null)))
 }
 
 pub async fn delete_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
@@ -194,11 +173,26 @@ pub async fn delete_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     let Some(task) = data::find(cx, "tasks", "id", id).await? else {
         return Ok(not_found(id));
     };
-    data::delete(cx, "tasks", "id", id).await?;
+    if data::write(cx, "task:delete", json!({ "id": id }))
+        .await?
+        .is_none()
+    {
+        return Ok(not_found(id));
+    }
     Ok(text(format!(
         "Deleted task: {}",
         json::display(task.get("title"))
     )))
+}
+
+/// `task:archive`, then the task as it is stored now.
+async fn set_archived<R: Rpc>(cx: &Cx<'_, R>, id: &str, archived: bool) -> Outcome {
+    let params = json!({ "id": id, "archived": archived });
+    if data::write(cx, "task:archive", params).await?.is_none() {
+        return Ok(not_found(id));
+    }
+    let updated = data::find(cx, "tasks", "id", id).await?;
+    Ok(pretty(&updated.unwrap_or(Value::Null)))
 }
 
 pub async fn archive_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
@@ -212,11 +206,7 @@ pub async fn archive_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
             json::display(task.get("status"))
         )));
     }
-    let now = Value::from(now_iso());
-    let updates: Update = vec![("archivedAt", Some(now.clone())), ("updatedAt", Some(now))];
-    data::update(cx, "tasks", "id", id, &updates).await?;
-    let updated = data::find(cx, "tasks", "id", id).await?;
-    Ok(pretty(&updated.unwrap_or(Value::Null)))
+    set_archived(cx, id, true).await
 }
 
 pub async fn unarchive_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
@@ -224,13 +214,7 @@ pub async fn unarchive_task<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     if data::find(cx, "tasks", "id", id).await?.is_none() {
         return Ok(not_found(id));
     }
-    let updates: Update = vec![
-        ("archivedAt", None),
-        ("updatedAt", Some(Value::from(now_iso()))),
-    ];
-    data::update(cx, "tasks", "id", id, &updates).await?;
-    let updated = data::find(cx, "tasks", "id", id).await?;
-    Ok(pretty(&updated.unwrap_or(Value::Null)))
+    set_archived(cx, id, false).await
 }
 
 pub async fn get_my_context<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
