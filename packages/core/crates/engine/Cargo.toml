@@ -24,3 +24,6 @@ vorn-grid-client = { path = "../grid-client" }
 vorn-recovery = { path = "../recovery" }
 vorn-sessiond = { path = "../sessiond" }
 vorn-term-mirror = { path = "../term-mirror" }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"

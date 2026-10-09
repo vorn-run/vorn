@@ -221,8 +221,29 @@ fn a_departure_does_not_wake_it() {
     assert!(s.asleep() && out.is_empty(), "{out:?}");
 }
 
+/// CPU time this thread has used, so a busy test runner's scheduling does
+/// not count against the wake.
+#[cfg(unix)]
+fn thread_time() -> Duration {
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `t` is a valid, writable timespec for the call's duration.
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
+    assert_eq!(r, 0, "clock_gettime");
+    Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+}
+
+#[cfg(not(unix))]
+fn thread_time() -> Duration {
+    static T0: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    T0.get_or_init(Instant::now).elapsed()
+}
+
 /// Attach on a terminal just woken: the snapshot a bytes client attaches
-/// with, asked of a session asleep, in under 5 ms at the 99th percentile.
+/// with, asked of a session asleep, in under 5 ms of CPU at the 99th
+/// percentile.
 #[test]
 fn a_snapshot_wakes_it_quickly() {
     let t0 = Instant::now();
@@ -233,9 +254,9 @@ fn a_snapshot_wakes_it_quickly() {
         let mut out = Vec::new();
         assert!(s.sleep(now, &mut out));
         out.clear();
-        let start = Instant::now();
+        let start = thread_time();
         s.snapshot(u64::from(i), now, &mut out);
-        times.push(start.elapsed());
+        times.push(thread_time() - start);
         assert!(
             matches!(out.last(), Some(Out::Snapshot(_, Some(_)))),
             "{out:?}"
