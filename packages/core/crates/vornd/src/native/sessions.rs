@@ -144,6 +144,12 @@ pub trait Host: Send + Sync + fmt::Debug {
     fn forget(&self, id: &str) {
         let _ = id;
     }
+
+    /// Client connection `conn` asked for session `id`: its panes fit the
+    /// session until someone types into it ([`crate::size::Sizes::opened_by`]).
+    fn opened_by(&self, id: &str, conn: u64) {
+        let _ = (id, conn);
+    }
 }
 
 /// The shortest wait before an agent's launch line is typed: the shell

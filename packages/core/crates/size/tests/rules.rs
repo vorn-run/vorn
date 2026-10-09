@@ -91,6 +91,7 @@ impl Sim {
         self.on(Event::Attach {
             client,
             desktop,
+            opener: false,
             viewport: Some(Size::new(cols, rows)),
             presence: Presence::Watching,
         });
@@ -339,12 +340,14 @@ fn hour_of_use(seed: u64) -> Vec<Step> {
     t.push(ev(Event::Attach {
         client: DESKTOP,
         desktop: true,
+        opener: false,
         viewport: Some(Size::new(120, 40)),
         presence: Presence::Watching,
     }));
     t.push(ev(Event::Attach {
         client: PHONE,
         desktop: false,
+        opener: false,
         viewport: Some(Size::new(50, 30)),
         presence: Presence::Away,
     }));
@@ -585,4 +588,115 @@ fn t9e_viewers_fit_in_every_state() {
     ] {
         scenario();
     }
+}
+
+impl Sim {
+    /// The client that asked for the session attaches, as the desktop's pane
+    /// does: no viewport at first, then what fits in its box.
+    fn open(&mut self, client: u8, desktop: bool, cols: u16, rows: u16) {
+        self.on(Event::Attach {
+            client,
+            desktop,
+            opener: true,
+            viewport: None,
+            presence: Presence::Watching,
+        });
+        self.view(client, cols, rows);
+    }
+}
+
+/// A new terminal fits its pane on first draw: launched at the default
+/// 80x24, it takes the viewport of the pane that opened it once, before
+/// anyone types, and follows that pane's box from there. Others looking at
+/// it still resize nothing, and it never goes home to them.
+#[test]
+fn a_new_terminal_fits_its_pane_on_first_draw() {
+    let mut s = Sim::new(Size::new(80, 24));
+    s.open(DESKTOP, true, 200, 50);
+    s.wait(1_000);
+    assert_eq!(s.sizes(), [(200, 50)]);
+    assert_eq!(
+        (s.resizes[0].owner, s.resizes[0].reason),
+        (Some(DESKTOP), Reason::Launch)
+    );
+    assert!(!s.p.typed());
+
+    // A phone looks: nothing.
+    s.attach(PHONE, false, 50, 30);
+    s.presence(PHONE, Presence::Active);
+    s.write(PHONE, b"\x1b[I\x1b[<64;1;1M");
+    s.wait(5_000);
+    // The pane's window is dragged wider: the session follows it.
+    s.view(DESKTOP, 220, 50);
+    s.wait(1_000);
+    assert_eq!(s.sizes(), [(200, 50), (220, 50)]);
+
+    // The pane hides, then closes: the size stays where it is.
+    s.presence(DESKTOP, Presence::Away);
+    s.wait(30_000);
+    s.on(Event::Detach { client: DESKTOP });
+    s.wait(30_000);
+    assert_eq!(s.sizes(), [(200, 50), (220, 50)]);
+
+    // Typing is what takes it from here.
+    s.type_key(PHONE);
+    s.wait(1_000);
+    assert_eq!(s.sizes(), [(200, 50), (220, 50), (50, 30)]);
+    assert_eq!(s.resizes[2].reason, Reason::Input);
+}
+
+/// The opener's first fit waits for its pane to be on screen, and its own
+/// typing makes it an ordinary owner.
+#[test]
+fn the_opener_fits_once_shown_and_owns_by_input_once_it_types() {
+    let mut s = Sim::new(Size::new(80, 24));
+    s.on(Event::Attach {
+        client: DESKTOP,
+        desktop: true,
+        opener: true,
+        viewport: Some(Size::new(150, 45)),
+        presence: Presence::Away,
+    });
+    s.views.insert(DESKTOP, Size::new(150, 45));
+    s.wait(5_000);
+    assert!(s.resizes.is_empty(), "a hidden pane has no box to fit");
+    s.presence(DESKTOP, Presence::Watching);
+    s.wait(1_000);
+    assert_eq!(s.sizes(), [(150, 45)]);
+    s.type_key(DESKTOP);
+    s.wait(1_000);
+    s.view(DESKTOP, 160, 45);
+    s.wait(1_000);
+    assert_eq!(s.resizes[1].reason, Reason::Input);
+    // Owned by input now: away past the grace period, it goes home to a watcher.
+    s.attach(WEB, true, 100, 30);
+    s.presence(DESKTOP, Presence::Away);
+    s.wait(11_000);
+    assert_eq!(s.sizes(), [(150, 45), (160, 45), (100, 30)]);
+}
+
+/// The opener takes nothing from a session someone has typed into, nor from
+/// a lock another client holds.
+#[test]
+fn the_opener_never_takes_an_established_or_locked_size() {
+    let mut s = Sim::new(Size::new(80, 24));
+    s.attach(PHONE, false, 50, 30);
+    s.on(Event::LockSize {
+        client: PHONE,
+        locked: true,
+    });
+    s.wait(1_000);
+    s.open(DESKTOP, true, 200, 50);
+    s.wait(5_000);
+    assert_eq!(s.sizes(), [(50, 30)]);
+    assert_eq!(s.p.owner(), Some(PHONE));
+
+    let mut s = Sim::new(Size::new(80, 24));
+    s.attach(WEB, false, 90, 25);
+    s.type_key(WEB);
+    s.wait(1_000);
+    s.open(DESKTOP, true, 200, 50);
+    s.wait(30_000);
+    assert_eq!(s.sizes(), [(90, 25)]);
+    assert_eq!(s.p.owner(), Some(WEB));
 }

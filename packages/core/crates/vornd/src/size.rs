@@ -12,7 +12,8 @@
 //! bytes connection is the desktop's only when it opened with the desktop's
 //! launch token ([`Sizes::desktop`],
 //! [`crate::endpoint::is_desktop_credential`]). A phone over the tunnel cannot claim
-//! it.
+//! it. So is who opened a session: the connection whose `terminal:create`
+//! (or `shell:create`, `sessions:resume`) answered with it ([`Sizes::opened_by`]).
 //!
 //! The policy decides; the engine's driver sends. It asks [`Sizes::due`]
 //! when to look again and [`Sizes::poll`] for the resizes to send, and each
@@ -79,9 +80,17 @@ pub enum Ev {
 /// owner, which costs nothing but the name.
 const SENT_KEPT: usize = 16;
 
+/// Sessions asked for and not open yet, with the connection that asked.
+/// Past this the oldest is forgotten: a start that failed never opens, and
+/// a forgotten opener only means its pane waits for a key to fit.
+const OPENERS_KEPT: usize = 64;
+
 #[derive(Debug)]
 struct Held {
     policy: Policy<Who>,
+    /// The bytes connection that asked for the session: its panes take the
+    /// size until someone types ([`vorn_size::Event::Attach`]'s `opener`).
+    opener: Option<u64>,
     /// Resizes sent to sessiond, oldest first, for the records that answer
     /// them.
     sent: VecDeque<Decision<Who>>,
@@ -94,12 +103,20 @@ struct Inner {
     sessions: HashMap<String, Held>,
     /// Bytes connections that opened with the desktop's launch token.
     desktops: HashSet<u64>,
+    /// Who asked for each session not open yet, oldest first.
+    openers: VecDeque<(String, u64)>,
     /// Every session with something due, by when: the driver asks after
     /// every message, so this must not look at every session.
     due: BTreeSet<(Instant, String)>,
 }
 
 impl Inner {
+    /// Takes the connection that asked for `session` before it opened.
+    fn opener(&mut self, session: &str) -> Option<u64> {
+        let at = self.openers.iter().position(|(id, _)| id == session)?;
+        self.openers.remove(at).map(|(_, conn)| conn)
+    }
+
     /// Files `session` under its policy's due time again, after the policy
     /// changed.
     fn refile(&mut self, session: &str) {
@@ -141,6 +158,7 @@ impl Sizes {
     /// history of input, and learns its size.
     pub fn opened(&self, session: &str, size: Size) {
         let mut inner = self.inner();
+        let opener = inner.opener(session);
         match inner.sessions.get_mut(session) {
             Some(h) => h.policy.applied(size),
             None => {
@@ -148,6 +166,7 @@ impl Sizes {
                     session.to_owned(),
                     Held {
                         policy: Policy::new(size),
+                        opener,
                         sent: VecDeque::new(),
                         due: None,
                     },
@@ -157,9 +176,30 @@ impl Sizes {
         inner.refile(session);
     }
 
+    /// Bytes connection `conn` asked for `session`, which it may not hold
+    /// yet: its panes fit the session until someone types into it. A
+    /// session already open is only given an opener while nobody is
+    /// attached to it or has typed into it, so asking for one that runs
+    /// takes nothing from the clients showing it.
+    pub fn opened_by(&self, session: &str, conn: u64) {
+        let mut inner = self.inner();
+        if let Some(h) = inner.sessions.get_mut(session) {
+            if !h.policy.typed() && h.policy.clients().next().is_none() {
+                h.opener = Some(conn);
+            }
+            return;
+        }
+        inner.opener(session);
+        if inner.openers.len() == OPENERS_KEPT {
+            inner.openers.pop_front();
+        }
+        inner.openers.push_back((session.to_owned(), conn));
+    }
+
     /// The session ended.
     pub fn closed(&self, session: &str) {
         let mut inner = self.inner();
+        inner.opener(session);
         if let Some(at) = inner.sessions.remove(session).and_then(|h| h.due) {
             inner.due.remove(&(at, session.to_owned()));
         }
@@ -183,6 +223,7 @@ impl Sizes {
             let Some(h) = inner.sessions.get_mut(session) else {
                 return;
             };
+            let opener = matches!(who, Who::Bytes { conn, .. } if h.opener == Some(conn));
             let p = &mut h.policy;
             if ev == Ev::Detach {
                 p.on(Event::Detach { client: who }, now);
@@ -197,6 +238,7 @@ impl Sizes {
                         Event::Attach {
                             client: who,
                             desktop,
+                            opener,
                             viewport,
                             presence,
                         },
@@ -490,6 +532,50 @@ mod tests {
         assert_eq!(sizes.state(S).unwrap().1, Some(phone));
         assert_eq!(sizes.lock(S, phone, false, at(23_000)), Ok(()));
         assert_eq!(sizes.lock(S, a, true, at(24_000)), Ok(()));
+    }
+
+    /// The connection that asked for a session before it started fits it
+    /// to its pane without typing; another connection, or asking for a
+    /// session already shown, does not.
+    #[test]
+    fn the_connection_that_opened_a_session_fits_it_to_its_pane() {
+        let sizes = Sizes::new();
+        sizes.desktop(1);
+        sizes.opened_by(S, 1);
+        sizes.opened(S, Size::new(80, 24));
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        let view = |cols, rows| Ev::Attach {
+            viewport: Some(Size::new(cols, rows)),
+            presence: Presence::Watching,
+        };
+        let (pane, other) = (
+            Who::Bytes { conn: 1, pane: 7 },
+            Who::Bytes { conn: 2, pane: 0 },
+        );
+        sizes.on(S, other, view(50, 30), t0);
+        sizes.on(S, pane, view(200, 50), t0);
+        let sent = sizes.poll(at(2_000));
+        assert_eq!(sent.len(), 1);
+        let d = &sent[0].1;
+        assert_eq!(
+            (d.size, d.owner, d.reason),
+            (Size::new(200, 50), Some(pane), Reason::Launch)
+        );
+
+        // A second session, shown by connection 2 before connection 1 asks.
+        let s2 = "s2";
+        sizes.opened(s2, Size::new(80, 24));
+        sizes.on(s2, other, view(50, 30), at(3_000));
+        sizes.opened_by(s2, 1);
+        sizes.on(s2, pane, view(200, 50), at(3_000));
+        assert!(sizes.poll(at(5_000)).iter().all(|(s, _)| s != s2));
+        assert_eq!(sizes.state(s2).unwrap(), (Size::new(80, 24), None));
+
+        // An opener for a session that never opened is forgotten with it.
+        sizes.opened_by("s3", 1);
+        sizes.closed("s3");
+        assert!(sizes.inner().openers.is_empty());
     }
 
     #[test]

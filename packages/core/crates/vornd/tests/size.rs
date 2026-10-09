@@ -685,3 +685,50 @@ async fn panes_on_one_connection_are_separate_and_locks_are_not_taken_over() {
     assert_eq!(rig.engine_view(&id).await.0, PHONE);
     rig.task.abort();
 }
+
+/// A new terminal fits the pane that opened it on first draw: the desktop
+/// connection asked for the session, so its pane's viewport sizes the PTY
+/// without anyone typing; a phone looking does not take it back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_new_terminal_fits_its_pane_on_first_draw() {
+    let rig = Rig::start().await;
+    let id = rig.spawn().await;
+    let mut desk = rig.phone();
+    rig.engine.sizes().desktop(desk.conn.id());
+    rig.engine.sizes().opened_by(&id, desk.conn.id());
+    let mut phone = rig.phone();
+    phone.attach(&id).await;
+    phone.call(
+        "terminal:viewport",
+        json!({ "id": id, "cols": PHONE.0, "rows": PHONE.1 }),
+    );
+    desk.attach(&id).await;
+    desk.call(
+        "terminal:viewport",
+        json!({ "id": id, "pane": 1, "cols": DESKTOP.0, "rows": DESKTOP.1 }),
+    );
+    tokio::time::sleep(SETTLED).await;
+    assert_eq!(rig.engine_view(&id).await.0, DESKTOP, "the pane's size");
+    desk.read_for(Duration::from_millis(100)).await;
+    assert_eq!(desk.resized.len(), 1);
+    assert_eq!(desk.resized[0]["reason"], "launch");
+    assert_eq!(desk.resized[0]["owner"], json!(format!("{}:1", desk.name)));
+    assert_eq!(desk.grid().0, DESKTOP);
+
+    // Another connection asking for a session already shown takes nothing.
+    let other = rig.spawn().await;
+    desk.attach(&other).await;
+    desk.call(
+        "terminal:viewport",
+        json!({ "id": other, "pane": 1, "cols": DESKTOP.0, "rows": DESKTOP.1 }),
+    );
+    rig.engine.sizes().opened_by(&other, phone.conn.id());
+    phone.attach(&other).await;
+    phone.call(
+        "terminal:viewport",
+        json!({ "id": other, "cols": PHONE.0, "rows": PHONE.1 }),
+    );
+    tokio::time::sleep(SETTLED).await;
+    assert_eq!(rig.engine_view(&other).await.0, LAUNCH);
+    rig.task.abort();
+}

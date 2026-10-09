@@ -948,6 +948,26 @@ impl Conn {
         self.native.main.release(self.id);
     }
 
+    /// A session this connection asked for is told so, before the answer
+    /// that lets its pane attach: the pane then fits it without a key.
+    fn opened(&self, method: &str, answer: &Answer) {
+        if !matches!(
+            method,
+            "terminal:create" | "shell:create" | "sessions:resume"
+        ) {
+            return;
+        }
+        let Answer::Result(record) = answer else {
+            return;
+        };
+        if let (Some(id), Some(host)) = (
+            record.get("id").and_then(Value::as_str),
+            self.native.host.get(),
+        ) {
+            host.opened_by(id, self.id);
+        }
+    }
+
     /// Runs the call off this task and answers it.
     fn answer(self: &Arc<Self>, method: String, id: Value, params: Value) {
         let conn = Arc::clone(self);
@@ -958,6 +978,7 @@ impl Conn {
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
             let answer = conn.native.answer(method.clone(), params, &viewer).await;
+            conn.opened(&method, &answer);
             let frame = answer.frame(&id).unwrap_or_else(|| {
                 json!({
                     "jsonrpc": "2.0",

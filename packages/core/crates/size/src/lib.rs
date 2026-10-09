@@ -19,7 +19,9 @@
 //!   current size is a near miss and resizes nothing: the owner scales its
 //!   font instead;
 //! - a new size is applied once it has stood for [`Rules::settle`];
-//! - a session nobody has typed into keeps the size it was launched with;
+//! - a session nobody has typed into keeps the size it was launched with,
+//!   except that the client that opened it fits it to its viewport the first
+//!   time it shows it, so a new terminal fills the pane it was opened in;
 //! - any client can take the size explicitly or lock it to its own viewport,
 //!   until it releases the lock or detaches.
 //!
@@ -97,8 +99,8 @@ pub enum Reason {
     Explicit,
     /// A client locked it to its own viewport.
     Locked,
-    /// The size the session was launched with. The policy never decides it;
-    /// it names the size a session has before anyone has typed into it.
+    /// The size the session was launched with, or the viewport of the client
+    /// that opened it, before anyone has typed into it.
     Launch,
 }
 
@@ -157,10 +159,13 @@ impl Default for Rules {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event<C> {
     /// A client attached. `desktop` is decided by the host from the
-    /// connection, never from what the client says about itself.
+    /// connection, never from what the client says about itself; so is
+    /// `opener`, whether it is the client that asked for the session, whose
+    /// viewport the session takes until someone types into it.
     Attach {
         client: C,
         desktop: bool,
+        opener: bool,
         viewport: Option<Size>,
         presence: Presence,
     },
@@ -201,6 +206,7 @@ pub enum Event<C> {
 #[derive(Debug, Clone, Copy)]
 struct Client {
     desktop: bool,
+    opener: bool,
     viewport: Option<Size>,
     presence: Presence,
     /// Since when it has been away, while it is.
@@ -305,6 +311,7 @@ impl<C: Copy + Ord + Debug> Policy<C> {
             Event::Attach {
                 client,
                 desktop,
+                opener,
                 viewport,
                 presence,
             } => {
@@ -312,12 +319,14 @@ impl<C: Copy + Ord + Debug> Policy<C> {
                     client,
                     Client {
                         desktop,
+                        opener,
                         viewport: viewport.and_then(Size::usable),
                         presence,
                         away_since: (presence == Presence::Away).then_some(now),
                         last_input: None,
                     },
                 );
+                self.fit_opener(client, now);
             }
             Event::Viewport { client, size } => {
                 let Some(c) = self.clients.get_mut(&client) else {
@@ -332,6 +341,8 @@ impl<C: Copy + Ord + Debug> Policy<C> {
                 // size, and not while it is away, when its box means nothing.
                 if self.owner == Some(client) && !away {
                     self.want(size, self.owner_reason, now);
+                } else {
+                    self.fit_opener(client, now);
                 }
             }
             Event::Presence { client, state } => {
@@ -343,6 +354,7 @@ impl<C: Copy + Ord + Debug> Policy<C> {
                     _ => None,
                 };
                 c.presence = state;
+                self.fit_opener(client, now);
             }
             Event::Input { client } => self.input(client, now),
             Event::TakeSize { client, size } => {
@@ -459,7 +471,7 @@ impl<C: Copy + Ord + Debug> Policy<C> {
         if !self.may_take(client, now) {
             return;
         }
-        if self.owner != Some(client) {
+        if self.owner != Some(client) || self.owner_reason == Reason::Launch {
             self.own(client, Reason::Input);
         }
         if let Some(v) = viewport {
@@ -492,10 +504,32 @@ impl<C: Copy + Ord + Debug> Policy<C> {
         self.orphaned = None;
     }
 
+    /// The client that opened the session takes the size the first time it
+    /// shows it, while nobody has typed into it or owns it: a new terminal
+    /// fills the pane it was opened in rather than waiting for a key.
+    /// Anyone else looking at it still resizes nothing.
+    fn fit_opener(&mut self, client: C, now: Instant) {
+        if self.typed || self.owner.is_some() || self.lock.is_some() {
+            return;
+        }
+        let Some(c) = self.clients.get(&client) else {
+            return;
+        };
+        if !c.opener || c.presence == Presence::Away {
+            return;
+        }
+        let Some(viewport) = c.viewport else {
+            return;
+        };
+        self.own(client, Reason::Launch);
+        self.want(viewport, Reason::Launch, now);
+    }
+
     /// Since when the size has had nobody using it: its owner away or gone.
-    /// Never while it is locked.
+    /// Never while it is locked, nor while it is the opener's launch size:
+    /// a session nobody has typed into keeps that.
     fn orphaned_since(&self) -> Option<Instant> {
-        if self.lock.is_some() {
+        if self.lock.is_some() || self.owner_reason == Reason::Launch {
             return None;
         }
         match self.owner {
@@ -566,6 +600,7 @@ mod tests {
             Event::Attach {
                 client: c,
                 desktop,
+                opener: false,
                 viewport: Some(v),
                 presence: Presence::Watching,
             },
