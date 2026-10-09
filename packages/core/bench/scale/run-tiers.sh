@@ -5,6 +5,7 @@
 #
 #   run-tiers.sh OUT_DIR [TIER...]     (default tiers: 100 1000 10000)
 #   PHASES=holder,stack picks the phases (default both).
+#   TESTS=1 first runs the holder's, vornd's and the engine's tests into tests.log.
 set -euo pipefail
 
 out=${1:?usage: run-tiers.sh OUT_DIR [TIER...]}
@@ -22,6 +23,12 @@ if ! cargo build --release --locked -p vornd -p vorn-sessiond -p vorn-scale-benc
   exit 1
 fi
 bin="$core/target/release"
+
+if [ -n "${TESTS:-}" ]; then
+  cargo test --release --locked -p vorn-sessiond -p vorn-engine -p vornd >"$out/tests.log" 2>&1 ||
+    echo "tests failed" >>"$out/tests.log"
+  grep -E '^test result|FAILED|panicked|tests failed' "$out/tests.log" || true
+fi
 
 ulimit -n 1048576
 ulimit -u unlimited

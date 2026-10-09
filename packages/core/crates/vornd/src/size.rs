@@ -20,7 +20,7 @@
 //! resize when the Resize record comes back, never on the request
 //! ([`Sizes::applied`] names who asked for it, for `Resized`).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
@@ -85,6 +85,8 @@ struct Held {
     /// Resizes sent to sessiond, oldest first, for the records that answer
     /// them.
     sent: VecDeque<Decision<Who>>,
+    /// Its policy's [`Policy::due`], as filed in [`Inner::due`].
+    due: Option<Instant>,
 }
 
 #[derive(Debug, Default)]
@@ -92,6 +94,29 @@ struct Inner {
     sessions: HashMap<String, Held>,
     /// Bytes connections that opened with the desktop's launch token.
     desktops: HashSet<u64>,
+    /// Every session with something due, by when: the driver asks after
+    /// every message, so this must not look at every session.
+    due: BTreeSet<(Instant, String)>,
+}
+
+impl Inner {
+    /// Files `session` under its policy's due time again, after the policy
+    /// changed.
+    fn refile(&mut self, session: &str) {
+        let Some(h) = self.sessions.get_mut(session) else {
+            return;
+        };
+        let due = h.policy.due();
+        if due == h.due {
+            return;
+        }
+        if let Some(at) = std::mem::replace(&mut h.due, due) {
+            self.due.remove(&(at, session.to_owned()));
+        }
+        if let Some(at) = due {
+            self.due.insert((at, session.to_owned()));
+        }
+    }
 }
 
 /// Every session's size rule.
@@ -124,15 +149,20 @@ impl Sizes {
                     Held {
                         policy: Policy::new(size),
                         sent: VecDeque::new(),
+                        due: None,
                     },
                 );
             }
         }
+        inner.refile(session);
     }
 
     /// The session ended.
     pub fn closed(&self, session: &str) {
-        self.inner().sessions.remove(session);
+        let mut inner = self.inner();
+        if let Some(at) = inner.sessions.remove(session).and_then(|h| h.due) {
+            inner.due.remove(&(at, session.to_owned()));
+        }
     }
 
     /// Bytes connection `conn` opened with the desktop's launch token.
@@ -191,6 +221,7 @@ impl Sizes {
                     p.on(e, now);
                 }
             }
+            inner.refile(session);
         }
         self.wake.notify_one();
     }
@@ -230,11 +261,18 @@ impl Sizes {
     fn gone(&self, which: impl Fn(Who) -> bool, now: Instant) {
         {
             let mut inner = self.inner();
-            for h in inner.sessions.values_mut() {
+            let mut left = Vec::new();
+            for (id, h) in &mut inner.sessions {
                 let leaving: Vec<Who> = h.policy.clients().filter(|&w| which(w)).collect();
+                if !leaving.is_empty() {
+                    left.push(id.clone());
+                }
                 for client in leaving {
                     h.policy.on(Event::Detach { client }, now);
                 }
+            }
+            for id in left {
+                inner.refile(&id);
             }
         }
         self.wake.notify_one();
@@ -248,18 +286,23 @@ impl Sizes {
 
     /// When some session next has a resize to send, without a new event.
     pub fn due(&self) -> Option<Instant> {
-        self.inner()
-            .sessions
-            .values()
-            .filter_map(|h| h.policy.due())
-            .min()
+        self.inner().due.first().map(|(at, _)| *at)
     }
 
     /// The resizes to send now, each to its session. Each is remembered for
     /// the record that will answer it.
     pub fn poll(&self, now: Instant) -> Vec<(String, Decision<Who>)> {
         let mut out = Vec::new();
-        for (id, h) in &mut self.inner().sessions {
+        let mut inner = self.inner();
+        let mut ready = Vec::new();
+        while inner.due.first().is_some_and(|(at, _)| *at <= now) {
+            ready.extend(inner.due.pop_first().map(|(_, id)| id));
+        }
+        for id in ready {
+            let Some(h) = inner.sessions.get_mut(&id) else {
+                continue;
+            };
+            h.due = None;
             if let Some(d) = h.policy.poll(now) {
                 if h.sent.len() == SENT_KEPT {
                     h.sent.pop_front();
@@ -267,6 +310,7 @@ impl Sizes {
                 h.sent.push_back(d);
                 out.push((id.clone(), d));
             }
+            inner.refile(&id);
         }
         out
     }
@@ -288,6 +332,7 @@ impl Sizes {
         if h.sent.is_empty() {
             h.policy.applied(size);
         }
+        inner.refile(session);
         decision
     }
 
@@ -457,6 +502,47 @@ mod tests {
             Instant::now(),
         );
         assert_eq!(sizes.state("piped"), None);
+        assert_eq!(sizes.due(), None);
+    }
+
+    /// The earliest of many sessions' resizes is the one due, only due
+    /// sessions are polled, and a closed session leaves nothing due.
+    #[test]
+    fn the_earliest_due_session_comes_first_and_a_closed_one_drops_out() {
+        let sizes = Sizes::new();
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        let ask = |id: &str, ms| {
+            let g = peer(1, ms as u32);
+            sizes.on(
+                id,
+                g,
+                Ev::Attach {
+                    viewport: Some(Size::new(120, 40)),
+                    presence: Presence::Watching,
+                },
+                at(ms),
+            );
+            sizes.on(id, g, Ev::Input, at(ms));
+        };
+        for id in ["a", "b", "c"] {
+            sizes.opened(id, Size::new(80, 24));
+        }
+        assert_eq!(sizes.due(), None);
+        ask("b", 50);
+        ask("a", 0);
+        ask("c", 100);
+        let first = sizes.due().unwrap();
+        assert!(first <= at(150));
+        let sent: Vec<String> = sizes.poll(first).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(sent, vec!["a".to_owned()]);
+        sizes.closed("b");
+        let sent: Vec<String> = sizes
+            .poll(at(10_000))
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(sent, vec!["c".to_owned()]);
         assert_eq!(sizes.due(), None);
     }
 }

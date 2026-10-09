@@ -6,8 +6,12 @@
 //! with it, without waiting for the hung peer to send anything.
 //!
 //! Each attached session has a pump that sends new records as they are
-//! appended, up to 4 MiB past what vornd acked; past that the session keeps
-//! reading into its log and the pump waits.
+//! appended, up to 4 MiB past what vornd acked, and all of a connection's
+//! pumps together up to 64 MiB; past that the session keeps reading into its
+//! log and the pump waits.
+//!
+//! Replies and input acks go out on their own lane, ahead of queued records,
+//! so a keystroke's answer never waits behind other sessions' output.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -31,8 +35,21 @@ pub use handoff::{Fault, Step};
 
 /// How far the pump may run ahead of vornd's acks.
 pub const WINDOW_BYTES: u64 = 4 << 20;
-/// Data per Entries frame, well under the frame cap.
-const BATCH_BYTES: u64 = 1 << 20;
+/// How far all of one connection's pumps together may run ahead of its acks,
+/// so a client that reads slowly holds this much, not a window per session.
+pub const CONN_WINDOW_BYTES: u64 = 64 << 20;
+/// Data per Entries frame: small, so one session's backlog delays another's
+/// next frame by little.
+const BATCH_BYTES: u64 = 256 << 10;
+/// Queued record frames per connection; with [`BATCH_BYTES`], what a frame
+/// sent now may wait behind.
+const BULK_FRAMES: usize = 64;
+/// Queued replies and input acks per connection. Replies wait for room;
+/// input acks from session threads are dropped past it, by a peer that does
+/// not read.
+const CONTROL_FRAMES: usize = 4096;
+/// Bytes the writer gathers into one write.
+const WRITE_CHUNK: usize = 256 << 10;
 
 pub struct Config {
     /// `$VORN_HOME`: the socket goes in `run/`, spools in `spool/`.
@@ -207,18 +224,15 @@ impl Sessiond {
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
         *self.idle_since.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        let (mut rd, mut wr) = tokio::io::split(stream);
-        let (tx, mut rx) = mpsc::channel::<ToVornd>(256);
-        let writer = tokio::spawn(async move {
-            while let Some(msg) = rx.recv().await {
-                if wr.write_all(&msg.encode()).await.is_err() {
-                    break;
-                }
-            }
-        });
+        let (mut rd, wr) = tokio::io::split(stream);
+        let (tx, ctl) = mpsc::channel::<ToVornd>(CONTROL_FRAMES);
+        let (bulk, records) = mpsc::channel::<ToVornd>(BULK_FRAMES);
+        let writer = tokio::spawn(write_out(wr, ctl, records));
         let mut conn = Conn {
             d: Arc::clone(&self),
             tx,
+            bulk,
+            window: Arc::new(Window::default()),
             generation: None,
             pumps: HashMap::new(),
         };
@@ -291,15 +305,169 @@ impl Sessiond {
     }
 }
 
+/// Writes a connection's frames, replies first, gathering what is queued
+/// into few writes.
+async fn write_out<W: AsyncWrite + Unpin>(
+    mut wr: W,
+    mut ctl: mpsc::Receiver<ToVornd>,
+    mut bulk: mpsc::Receiver<ToVornd>,
+) {
+    let mut buf = Vec::with_capacity(WRITE_CHUNK);
+    loop {
+        let first = tokio::select! {
+            biased;
+            Some(m) = ctl.recv() => m,
+            Some(m) = bulk.recv() => m,
+            else => return,
+        };
+        buf.clear();
+        buf.extend_from_slice(&first.encode());
+        while buf.len() < WRITE_CHUNK {
+            let Ok(m) = ctl.try_recv().or_else(|_| bulk.try_recv()) else {
+                break;
+            };
+            buf.extend_from_slice(&m.encode());
+        }
+        if wr.write_all(&buf).await.is_err() {
+            return;
+        }
+        if buf.capacity() > 4 * WRITE_CHUNK {
+            buf = Vec::with_capacity(WRITE_CHUNK);
+        }
+    }
+}
+
+/// The bytes all of one connection's pumps have sent and vornd has not
+/// acked, against [`CONN_WINDOW_BYTES`].
+#[derive(Default)]
+struct Window {
+    used: AtomicU64,
+    freed: Notify,
+}
+
+impl Window {
+    fn take(&self, n: u64) {
+        self.used.fetch_add(n, Ordering::SeqCst);
+    }
+
+    fn give(&self, n: u64) {
+        if n == 0 {
+            return;
+        }
+        let before = self.used.fetch_sub(n, Ordering::SeqCst);
+        if before >= CONN_WINDOW_BYTES && before - n < CONN_WINDOW_BYTES {
+            self.freed.notify_waiters();
+        }
+    }
+
+    fn room(&self) -> u64 {
+        CONN_WINDOW_BYTES.saturating_sub(self.used.load(Ordering::SeqCst))
+    }
+}
+
+/// One pump's place in its connection's [`Window`]: the offsets it sent
+/// past `from` and vornd acked. What is still unacked goes back to the
+/// window when the pump ends, however it ends.
+struct Flow {
+    window: Arc<Window>,
+    state: Mutex<FlowState>,
+    acked_note: Notify,
+}
+
+struct FlowState {
+    /// Where the pump began; records before it were sent by the attach and
+    /// are not in the window.
+    from: u64,
+    sent: u64,
+    acked: u64,
+    ended: bool,
+}
+
+impl Flow {
+    fn new(window: Arc<Window>, from: u64, sent: u64) -> Self {
+        Flow {
+            window,
+            state: Mutex::new(FlowState {
+                from: sent,
+                sent,
+                acked: from,
+                ended: false,
+            }),
+            acked_note: Notify::new(),
+        }
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, FlowState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// How far past vornd's ack this pump is.
+    fn in_flight(&self, next: u64) -> u64 {
+        next.saturating_sub(self.state().acked)
+    }
+
+    /// The pump is about to send up to offset `next`.
+    fn sending(&self, next: u64) {
+        let mut st = self.state();
+        if next > st.sent {
+            self.window.take(next - st.sent);
+            st.sent = next;
+        }
+    }
+
+    /// vornd acked up to offset `upto`.
+    fn ack(&self, upto: u64) {
+        let freed = {
+            let mut st = self.state();
+            if upto <= st.acked {
+                return;
+            }
+            let clamp = |x: u64| x.clamp(st.from, st.sent);
+            let freed = clamp(upto) - clamp(st.acked);
+            st.acked = upto;
+            if st.ended {
+                0
+            } else {
+                freed
+            }
+        };
+        self.window.give(freed);
+        self.acked_note.notify_waiters();
+    }
+
+    fn end(&self) {
+        let unacked = {
+            let mut st = self.state();
+            if std::mem::replace(&mut st.ended, true) {
+                return;
+            }
+            st.sent - st.acked.clamp(st.from, st.sent)
+        };
+        self.window.give(unacked);
+    }
+}
+
+/// Ends a pump's [`Flow`] when its task ends or is aborted.
+struct Ending(Arc<Flow>);
+
+impl Drop for Ending {
+    fn drop(&mut self) {
+        self.0.end();
+    }
+}
+
 struct Pump {
-    acked: Arc<AtomicU64>,
-    acked_note: Arc<Notify>,
+    flow: Arc<Flow>,
     task: JoinHandle<()>,
 }
 
 struct Conn {
     d: Arc<Sessiond>,
+    /// Replies and input acks, written ahead of `bulk`.
     tx: mpsc::Sender<ToVornd>,
+    /// Records and what answers an attach, in order.
+    bulk: mpsc::Sender<ToVornd>,
+    window: Arc<Window>,
     generation: Option<u64>,
     pumps: HashMap<String, Pump>,
 }
@@ -318,6 +486,11 @@ impl Conn {
 
     async fn send(&self, msg: ToVornd) -> bool {
         self.tx.send(msg).await.is_ok()
+    }
+
+    /// Sends on the record lane, behind the session's earlier records.
+    async fn send_bulk(&self, msg: ToVornd) -> bool {
+        self.bulk.send(msg).await.is_ok()
     }
 
     /// Handle one message; false closes the connection.
@@ -396,8 +569,7 @@ impl Conn {
                     s.with_log(|l| l.ack(a.delivered));
                 }
                 if let Some(p) = self.pumps.get(&a.session) {
-                    p.acked.fetch_max(a.delivered.next_offset, Ordering::SeqCst);
-                    p.acked_note.notify_waiters();
+                    p.flow.ack(a.delivered.next_offset);
                 }
             }
             ToSessiond::PutCheckpoint(cp) => {
@@ -515,7 +687,7 @@ impl Conn {
     async fn attach(&mut self, a: Attach) -> bool {
         let Some(s) = self.d.session(&a.session) else {
             return self
-                .send(ToVornd::Refused(Refused {
+                .send_bulk(ToVornd::Refused(Refused {
                     session: a.session,
                     why: AttachRefusal::NoSuchSession,
                 }))
@@ -533,7 +705,7 @@ impl Conn {
             Ok(v) => v,
             Err(why) => {
                 return self
-                    .send(ToVornd::Refused(Refused {
+                    .send_bulk(ToVornd::Refused(Refused {
                         session: a.session,
                         why,
                     }))
@@ -542,14 +714,14 @@ impl Conn {
         };
         let from = cp.as_ref().map_or(start, |c| c.resume);
         if let Some(cp) = cp {
-            if !self.send(ToVornd::CheckpointIs(cp)).await {
+            if !self.send_bulk(ToVornd::CheckpointIs(cp)).await {
                 return false;
             }
         }
         let mut next = from;
         for batch in batches(entries) {
             next = batch.last().expect("non-empty").after();
-            if !self.send(entries_msg(&s.id, batch)).await || self.replaced() {
+            if !self.send_bulk(entries_msg(&s.id, batch)).await || self.replaced() {
                 return false;
             }
             s.with_log(|l| l.mark_sent(next));
@@ -557,24 +729,19 @@ impl Conn {
         let Some(mine) = self.generation else {
             return false;
         };
-        let acked = Arc::new(AtomicU64::new(from.next_offset));
-        let acked_note = Arc::new(Notify::new());
+        let flow = Arc::new(Flow::new(
+            Arc::clone(&self.window),
+            from.next_offset,
+            next.next_offset,
+        ));
         let task = tokio::spawn(pump(
             Arc::clone(&s),
             next,
-            Arc::clone(&acked),
-            Arc::clone(&acked_note),
-            self.tx.clone(),
+            Arc::clone(&flow),
+            self.bulk.clone(),
             (self.d.generation.subscribe(), mine),
         ));
-        self.pumps.insert(
-            a.session,
-            Pump {
-                acked,
-                acked_note,
-                task,
-            },
-        );
+        self.pumps.insert(a.session, Pump { flow, task });
         true
     }
 }
@@ -618,24 +785,27 @@ async fn replaced(generation: &mut watch::Receiver<u64>, mine: Option<u64>) {
 async fn pump(
     s: Arc<Session>,
     mut next: Cursor,
-    acked: Arc<AtomicU64>,
-    acked_note: Arc<Notify>,
+    flow: Arc<Flow>,
     tx: mpsc::Sender<ToVornd>,
     (mut generation, mine): (watch::Receiver<u64>, u64),
 ) {
+    let _ending = Ending(Arc::clone(&flow));
     loop {
         let changed = s.changed.notified();
-        let ack = acked_note.notified();
-        tokio::pin!(changed, ack);
+        let ack = flow.acked_note.notified();
+        let freed = flow.window.freed.notified();
+        tokio::pin!(changed, ack, freed);
         changed.as_mut().enable();
         ack.as_mut().enable();
-        let in_flight = next
-            .next_offset
-            .saturating_sub(acked.load(Ordering::SeqCst));
-        let batch = if in_flight >= WINDOW_BYTES {
+        freed.as_mut().enable();
+        let in_flight = flow.in_flight(next.next_offset);
+        let room = WINDOW_BYTES
+            .saturating_sub(in_flight)
+            .min(flow.window.room())
+            .min(BATCH_BYTES);
+        let batch = if room == 0 {
             Vec::new()
         } else {
-            let room = (WINDOW_BYTES - in_flight).min(BATCH_BYTES);
             match s.with_log(|l| l.read_batch(next, room)) {
                 Ok(b) => b,
                 // The records this connection needs are gone; vornd must
@@ -647,6 +817,7 @@ async fn pump(
             tokio::select! {
                 _ = &mut changed => {}
                 _ = &mut ack => {}
+                _ = &mut freed => {}
                 // A missed wakeup costs at most this.
                 _ = tokio::time::sleep(Duration::from_millis(250)) => {}
                 _ = replaced(&mut generation, Some(mine)) => return,
@@ -655,6 +826,7 @@ async fn pump(
         }
         let exit = matches!(batch.last().map(|e| &e.rec), Some(Record::Exit { .. }));
         next = batch.last().expect("non-empty").after();
+        flow.sending(next.next_offset);
         // A peer that stopped reading backs the outbox up; a newer Hello
         // must still end this pump, and nothing it queues after that counts
         // as sent.
@@ -781,5 +953,62 @@ async fn first_frame(d: Arc<Sessiond>, mut stream: crate::os::Stream) {
         handoff::serve(d, stream, head).await;
     } else {
         d.serve_read(stream, &head).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_flow_returns_to_the_window_what_vornd_did_not_ack() {
+        let window = Arc::new(Window::default());
+        // The attach sent up to 100 itself; the pump starts there.
+        let a = Flow::new(Arc::clone(&window), 40, 100);
+        let b = Flow::new(Arc::clone(&window), 0, 0);
+        a.sending(300);
+        b.sending(CONN_WINDOW_BYTES);
+        assert_eq!(window.room(), 0);
+        // Acks of what the attach sent free nothing; of what the pump sent, that.
+        a.ack(100);
+        a.ack(250);
+        assert_eq!(window.used.load(Ordering::SeqCst), CONN_WINDOW_BYTES + 50);
+        assert_eq!(a.in_flight(300), 50);
+        b.end();
+        assert_eq!(window.room(), CONN_WINDOW_BYTES - 50);
+        // An ack after the end, or a second end, counts nothing twice.
+        b.ack(CONN_WINDOW_BYTES);
+        b.end();
+        a.end();
+        a.ack(300);
+        assert_eq!(window.used.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn replies_go_out_ahead_of_queued_records() {
+        let (ctl_tx, ctl) = mpsc::channel(8);
+        let (bulk_tx, bulk) = mpsc::channel(8);
+        for n in 0..3 {
+            bulk_tx
+                .send(entries_msg(&format!("s{n}"), Vec::new()))
+                .await
+                .unwrap();
+        }
+        ctl_tx
+            .send(ToVornd::Pong(Nonce { nonce: 7 }))
+            .await
+            .unwrap();
+        drop((ctl_tx, bulk_tx));
+        let mut out = Vec::new();
+        write_out(&mut out, ctl, bulk).await;
+        let mut frames = FrameReader::default();
+        frames.push(&out);
+        let first = frames.read::<ToVornd>().unwrap().unwrap();
+        assert!(matches!(first, ToVornd::Pong(Nonce { nonce: 7 })));
+        let mut rest = 0;
+        while let Some(ToVornd::Entries(_)) = frames.read::<ToVornd>().unwrap() {
+            rest += 1;
+        }
+        assert_eq!(rest, 3);
     }
 }

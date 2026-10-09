@@ -74,8 +74,7 @@ enum Job {
 /// What the pool and its workers share.
 #[derive(Default)]
 struct Shared {
-    /// Which worker each session is on.
-    placed: Mutex<HashMap<String, usize>>,
+    placed: Mutex<Placed>,
     briefs: Mutex<HashMap<String, Brief>>,
     /// Set when the pool is dropped: workers stop before their next job
     /// rather than working through their queues.
@@ -83,7 +82,7 @@ struct Shared {
 }
 
 impl Shared {
-    fn placed(&self) -> MutexGuard<'_, HashMap<String, usize>> {
+    fn placed(&self) -> MutexGuard<'_, Placed> {
         self.placed.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -94,6 +93,39 @@ impl Shared {
     fn forget(&self, id: &str) {
         self.placed().remove(id);
         self.briefs().remove(id);
+    }
+}
+
+/// Which worker each session is on, and how many each has, so placing one
+/// does not count them all.
+#[derive(Default)]
+struct Placed {
+    at: HashMap<String, usize>,
+    load: Vec<usize>,
+}
+
+impl Placed {
+    fn get(&self, id: &str) -> Option<&usize> {
+        self.at.get(id)
+    }
+
+    fn len(&self) -> usize {
+        self.at.len()
+    }
+
+    /// Places `id` on the least loaded of `workers`.
+    fn place(&mut self, id: &str, workers: usize) -> usize {
+        self.load.resize(workers.max(self.load.len()), 0);
+        let w = (0..workers).min_by_key(|&w| self.load[w]).unwrap_or(0);
+        self.load[w] += 1;
+        self.at.insert(id.to_owned(), w);
+        w
+    }
+
+    fn remove(&mut self, id: &str) {
+        if let Some(w) = self.at.remove(id) {
+            self.load[w] -= 1;
+        }
     }
 }
 
@@ -153,16 +185,9 @@ impl Pool {
     pub fn open(&self, id: &str, open: Open) {
         let w = {
             let mut placed = self.shared.placed();
-            if let Some(&w) = placed.get(id) {
-                w
-            } else {
-                let mut load = vec![0usize; self.workers.len()];
-                for &w in placed.values() {
-                    load[w] += 1;
-                }
-                let w = (0..load.len()).min_by_key(|&w| load[w]).unwrap_or(0);
-                placed.insert(id.to_owned(), w);
-                w
+            match placed.get(id) {
+                Some(&w) => w,
+                None => placed.place(id, self.workers.len()),
             }
         };
         let _ = self.workers[w].0.send(Job::Open {
