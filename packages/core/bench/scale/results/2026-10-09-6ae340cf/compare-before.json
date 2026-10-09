@@ -1,0 +1,133 @@
+{
+  "host": {
+    "cpus": 16,
+    "mem_total": 67416621056,
+    "kernel": "7.0.0-1011-gcp",
+    "limits": {
+      "pty_max": 65536,
+      "pid_max": 4194304,
+      "threads_max": 4194304,
+      "max_map_count": 1048576,
+      "nofile": 1048576,
+      "nproc": null
+    }
+  },
+  "memory": [
+    {
+      "shell": "bash",
+      "terminals": 1000,
+      "live": 812220416,
+      "idle": 812277760,
+      "idle_after_secs": 65.069866818,
+      "quiet": true,
+      "processes": 1002,
+      "live_parts": {
+        "vornd": 180617216,
+        "holder": 40886272,
+        "programs": 590716928
+      },
+      "idle_parts": {
+        "vornd": 180674560,
+        "holder": 40886272,
+        "programs": 590716928
+      },
+      "asleep": 0
+    },
+    {
+      "shell": "dash",
+      "terminals": 1000,
+      "live": 313831424,
+      "idle": 313905152,
+      "idle_after_secs": 65.069701817,
+      "quiet": true,
+      "processes": 1002,
+      "live_parts": {
+        "vornd": 175591424,
+        "holder": 35803136,
+        "programs": 102436864
+      },
+      "idle_parts": {
+        "vornd": 175665152,
+        "holder": 35803136,
+        "programs": 102436864
+      },
+      "asleep": 0
+    },
+    {
+      "shell": "dash",
+      "terminals": 3000,
+      "live": 921751552,
+      "idle": 921825280,
+      "idle_after_secs": 65.192586717,
+      "quiet": true,
+      "processes": 3002,
+      "live_parts": {
+        "vornd": 506650624,
+        "holder": 108048384,
+        "programs": 307052544
+      },
+      "idle_parts": {
+        "vornd": 506724352,
+        "holder": 108048384,
+        "programs": 307052544
+      },
+      "asleep": 0
+    },
+    {
+      "shell": "dash",
+      "terminals": 10000,
+      "live": 3129524224,
+      "idle": 3129561088,
+      "idle_after_secs": 65.625415809,
+      "quiet": true,
+      "processes": 10002,
+      "live_parts": {
+        "vornd": 1716191232,
+        "holder": 388780032,
+        "programs": 1024552960
+      },
+      "idle_parts": {
+        "vornd": 1716228096,
+        "holder": 388780032,
+        "programs": 1024552960
+      },
+      "asleep": 0
+    }
+  ],
+  "response": [
+    {
+      "terminals": 1000,
+      "busy": 0,
+      "latency": {
+        "n": 200,
+        "p50_ms": 0.60997,
+        "p99_ms": 8.779784000000001,
+        "max_ms": 8.824359000000001
+      },
+      "cpu": 0.7358636715724245
+    },
+    {
+      "terminals": 1000,
+      "busy": 10,
+      "latency": {
+        "n": 200,
+        "p50_ms": 8.532628,
+        "p99_ms": 8.783037,
+        "max_ms": 8.802658
+      },
+      "cpu": 1.4369536582445217
+    },
+    {
+      "terminals": 1000,
+      "busy": 100,
+      "latency": {
+        "n": 200,
+        "p50_ms": 0.8012269999999999,
+        "p99_ms": 8.925409,
+        "max_ms": 9.494966
+      },
+      "cpu": 10.05924463095532
+    }
+  ],
+  "limits": []
+}
