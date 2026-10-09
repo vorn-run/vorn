@@ -3819,7 +3819,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-logfile"
-version = "0.8.0-beta.5"
+version = "0.8.0-beta.6"
 dependencies = [
  "tempfile",
 ]
@@ -3896,7 +3896,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-scale-bench"
-version = "0.8.0-beta.5"
+version = "0.8.0-beta.6"
 dependencies = [
  "libc",
  "serde",
@@ -3976,7 +3976,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-vault"
-version = "0.8.0-beta.5"
+version = "0.8.0-beta.6"
 dependencies = [
  "apple-native-keyring-store",
  "keyring-core",
