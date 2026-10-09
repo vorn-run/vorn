@@ -59,7 +59,22 @@ if [ -f "$LOCK_FILE" ]; then
     const fs = require('fs');
     const lock = fs.readFileSync('$LOCK_FILE', 'utf8');
     let next = lock;
-    for (const name of ['vorn-core', 'vorn-cli', 'vorn-sessiond', 'vornd']) {
+    const path = require('path');
+    const core = path.dirname('$LOCK_FILE');
+    // Every workspace crate that inherits the workspace version, found from its manifest.
+    const manifests = [path.join(core, 'Cargo.toml')];
+    for (const dir of ['crates', 'bench']) {
+      const base = path.join(core, dir);
+      if (!fs.existsSync(base)) continue;
+      for (const d of fs.readdirSync(base)) manifests.push(path.join(base, d, 'Cargo.toml'));
+    }
+    const names = manifests
+      .filter((m) => fs.existsSync(m))
+      .map((m) => fs.readFileSync(m, 'utf8'))
+      .filter((t) => /^version\\.workspace\\s*=\\s*true/m.test(t) || /^version\\s*=\\s*\\{\\s*workspace/m.test(t))
+      .map((t) => (t.match(/^name\\s*=\\s*\"([^\"]+)\"/m) || [])[1])
+      .filter(Boolean);
+    for (const name of names) {
       next = next.replace(new RegExp('(name = \"' + name + '\"\\r?\\nversion = )\".*\"'), '\$1\"$ROOT_VERSION\"');
     }
     if (next !== lock) { fs.writeFileSync('$LOCK_FILE', next); console.log('yes'); }

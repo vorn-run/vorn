@@ -59,14 +59,18 @@ describe('the versions the native binaries report', () => {
     expect(notInheriting).toEqual([])
   })
 
-  it('locks every one of them at the app version, and the sync script keeps them there', () => {
+  it('locks every one of them at the app version', () => {
     const lock = readFileSync(path.join(core, 'Cargo.lock'), 'utf8')
-    const script = readFileSync(path.join(root, 'scripts/sync-versions.sh'), 'utf8')
     const locked = crates.map(({ name }) => ({
       name,
-      version: new RegExp(`name = "${name}"\\r?\\nversion = "([^"]+)"`).exec(lock)?.[1],
-      synced: script.includes(`'${name}'`)
+      version: new RegExp(`name = "${name}"\\r?\\nversion = "([^"]+)"`).exec(lock)?.[1]
     }))
-    expect(locked).toEqual(crates.map(({ name }) => ({ name, version: appVersion, synced: true })))
+    expect(locked).toEqual(crates.map(({ name }) => ({ name, version: appVersion })))
+  })
+
+  it('has the sync script find inheriting crates from their manifests, not a list', () => {
+    const script = readFileSync(path.join(root, 'scripts/sync-versions.sh'), 'utf8')
+    expect(script).toContain('readdirSync(base)')
+    expect(script).not.toMatch(/for \(const name of \['vorn-core'/)
   })
 })
