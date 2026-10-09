@@ -844,7 +844,8 @@ async fn pump(
     }
 }
 
-/// The endpoint for an instance under `home`.
+/// The endpoint for an instance under `home`. Distinct homes never share one,
+/// on Windows too, where pipe names are global rather than under `home`.
 pub fn endpoint(home: &Path, instance: u128) -> String {
     #[cfg(unix)]
     {
@@ -858,9 +859,10 @@ pub fn endpoint(home: &Path, instance: u128) -> String {
     }
     #[cfg(windows)]
     {
-        let _ = home;
+        // Only the binder derives it; clients read it from the announcement.
+        let home = crc32fast::hash(home.as_os_str().as_encoded_bytes());
         format!(
-            r"\\.\pipe\vorn-sessiond-{}-{instance:x}",
+            r"\\.\pipe\vorn-sessiond-{}-{home:08x}-{instance:x}",
             crate::os::user_sid().unwrap_or_else(|_| "user".into())
         )
     }
@@ -959,6 +961,14 @@ async fn first_frame(d: Arc<Sessiond>, mut stream: crate::os::Stream) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn two_homes_never_share_an_endpoint() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        assert_eq!(endpoint(a.path(), 0xfeed), endpoint(a.path(), 0xfeed));
+        assert_ne!(endpoint(a.path(), 0xfeed), endpoint(b.path(), 0xfeed));
+        assert_ne!(endpoint(a.path(), 0xfeed), endpoint(a.path(), 0xbeef));
+    }
 
     #[test]
     fn a_flow_returns_to_the_window_what_vornd_did_not_ack() {
