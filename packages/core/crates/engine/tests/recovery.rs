@@ -363,13 +363,8 @@ fn invalid_restore_bases() {
         ..good.clone()
     };
     let truncated = reseal(good.clone(), |b| b.truncate(b.len() - 9));
-    let wrong_screen = reseal(good.clone(), |b| {
-        let at = b
-            .windows(5)
-            .position(|w| w == b"hello")
-            .expect("the text is in the blob");
-        b[at] = b'j';
-    });
+    // The screen part's digest, after the fidelity, status, carry and length.
+    let wrong_screen = reseal(good.clone(), |b| b[10] ^= 1);
     let restored = Session::restored("s", config(0), &wrong_screen);
     assert_eq!(restored.err(), Some(vorn_engine::Rejected::RestoreCheck));
 
@@ -490,7 +485,7 @@ fn a_clean_stop_covers_records_without_output() {
 fn exact_only_when_earned() {
     let (good, entries) = checkpoint_of("one\r\ntwo\r\n");
     let unreadable = Checkpoint {
-        format: 2,
+        format: vorn_engine::FORMAT + 1,
         ..good.clone()
     };
 

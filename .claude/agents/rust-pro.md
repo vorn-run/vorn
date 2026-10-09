@@ -43,7 +43,7 @@ write it down in the PR, and keep going.
    (`tests/helpers/screen-parity.ts` is the model). Use seeded random input
    (property tests) where the spec names one.
 4. **Build and test locally before every push.** No iterating through GitHub
-   Actions. Ghostty needs Zig **0.15.2** exactly. The `vorn-wp-builder` skill
+   Actions. Ghostty needs Zig **0.16.0** exactly. The `vorn-wp-builder` skill
    has the full checklist and the sandbox workarounds.
 5. **Never block Node's event loop.** Batch bytes per flush, not one call per
    chunk; anything heavier runs on a Rust thread as a napi async task.

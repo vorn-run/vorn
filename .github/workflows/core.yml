@@ -92,7 +92,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-15, not latest: Zig 0.15.2 cannot read the newer macOS SDK's
+        # macos-15, not latest: Zig 0.15.2 could not read the newer macOS SDK's
         # libSystem and fails to link even its own build runner there.
         os: ${{ github.event_name == 'schedule' && fromJSON('["ubuntu-latest", "macos-15", "windows-2022"]') || github.event_name != 'workflow_dispatch' && fromJSON('["ubuntu-latest"]') || inputs.os == 'ubuntu' && fromJSON('["ubuntu-latest"]') || inputs.os == 'macos' && fromJSON('["macos-15"]') || inputs.os == 'windows' && fromJSON('["windows-2022"]') || fromJSON('["ubuntu-latest", "macos-15", "windows-2022"]') }}
     runs-on: ${{ matrix.os }}
@@ -115,10 +115,10 @@ jobs:
         run: corepack enable
 
       # libghostty-vt-sys builds Ghostty's VT library from source with Zig. The
-      # Ghostty commit it pins refuses any Zig but 0.15.2.
+      # Ghostty commit it pins refuses any Zig but 0.16.0.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       # The version comes from packages/core/rust-toolchain.toml.
       - name: Rust toolchain

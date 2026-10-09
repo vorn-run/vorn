@@ -2133,9 +2133,8 @@ checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
 name = "libghostty-vt"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16c7287a8dc35c3436224b39358af81ab9ea54bafa0f7ea2e068bd2a47bdcb2d"
+version = "0.2.1"
+source = "git+https://github.com/uzaaft/libghostty-rs?rev=3ddcb1027cdfad14991242d501cf4604cbb20c71#3ddcb1027cdfad14991242d501cf4604cbb20c71"
 dependencies = [
  "bitflags 2.13.2",
  "int-enum",
@@ -2144,9 +2143,7 @@ dependencies = [
 
 [[package]]
 name = "libghostty-vt-sys"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df233d9b287cded4bbebba3463c6df7a8bdb516c0341ed984e870ef5594c2e6f"
+version = "0.2.1"
 
 [[package]]
 name = "libsqlite3-sys"
@@ -3799,6 +3796,8 @@ dependencies = [
  "criterion",
  "libghostty-vt",
  "memchr",
+ "vorn-recovery",
+ "vorn-term-proto",
 ]
 
 [[package]]

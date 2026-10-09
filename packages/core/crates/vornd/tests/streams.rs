@@ -640,6 +640,18 @@ fn same_text(got: &str, want: &str, what: &str) {
     );
 }
 
+/// Accepted difference: carried on from a checkpoint, history sits in new pages and keeps other oldest lines.
+#[track_caller]
+fn same_tail(got: &str, want: &str, what: &str) {
+    let (g, w): (Vec<_>, Vec<_>) = (got.lines().collect(), want.lines().collect());
+    let n = g.len().min(w.len());
+    same_text(
+        &g[g.len() - n..].join("\n"),
+        &w[w.len() - n..].join("\n"),
+        what,
+    );
+}
+
 /// A terminal fed the records before `upto` directly: what every client
 /// must show at that cursor.
 fn reference(size: (u16, u16), log: &[Entry], upto: Cursor) -> Emulator {
@@ -929,10 +941,10 @@ async fn the_reconnect_matrix_for_raw_clients() {
             if case != Case::Gap {
                 let log = fake.held().log.clone();
                 let size = fake.held().size;
-                same_text(
+                same_tail(
                     &c.text(),
                     &text(&reference(size, &log, fake.head())),
-                    "{case:?}",
+                    &format!("{case:?} restarted {restarted}"),
                 );
             }
             v.kill().await;

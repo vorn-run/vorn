@@ -1012,9 +1012,7 @@ fn m_line(rig: &Rig, y: usize) -> u64 {
     rig.mirror(1, 1).rows()[y].line
 }
 
-/// TP-T25 through vornd: clusters of 62, 63, 64, 255 and 4,096 bytes reach
-/// the mirror as the terminal holds them, and the row decoder never
-/// desyncs on the cells after them.
+/// TP-T25 through vornd: clusters of 62 to 4,097 bytes reach the mirror as the terminal holds them.
 #[test]
 fn t25_long_graphemes_through_the_grid() {
     let mut rig = Rig::new((20, 4), 0);
@@ -1030,15 +1028,13 @@ fn t25_long_graphemes_through_the_grid() {
     for (n, e) in entries.iter().enumerate() {
         rig.feed(std::slice::from_ref(e));
         rig.settle();
-        if n < entries.len() - 1 {
-            assert_same(rig.em(), rig.mirror(1, 1), &format!("cluster {n}"));
-        }
+        assert_same(rig.em(), rig.mirror(1, 1), &format!("cluster {n}"));
     }
-    // One of 4,097 bytes arrives as U+FFFD, and the cell after it intact.
+    // Ghostty caps how many marks a cluster keeps; the cell after it is intact.
     let cols = mirror_cols(rig.mirror(1, 1));
     let last = &cols[cols.len() - 2];
     assert!(
-        matches!(&last[0], Col::Cell { text, .. } if text == "\u{fffd}"),
+        matches!(&last[0], Col::Cell { text, .. } if text.starts_with("a\u{301}")),
         "{:?}",
         &last[..2]
     );

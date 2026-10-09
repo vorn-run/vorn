@@ -1118,8 +1118,7 @@ impl Run {
         {
             return;
         }
-        // The cheap reasons first: inside a sequence is retried at the next
-        // record boundary.
+        // Only a sequence too long to carry declines; it is retried at the next record.
         if let Some(why) = self.term.em.uncuttable() {
             *uncut = Some(why);
             return;
@@ -1201,7 +1200,7 @@ fn answer_snapshots(
     now: Option<Instant>,
     out: &mut Vec<Out>,
 ) {
-    let cuttable = run.term.em.uncuttable().is_none();
+    let cuttable = run.term.em.at_ground();
     let mut cut: Option<VtSnapshot> = None;
     waiting.retain(|&(token, asked)| {
         let overdue = now.is_some_and(|n| n.duration_since(asked) >= crate::snapshot::HOLD);

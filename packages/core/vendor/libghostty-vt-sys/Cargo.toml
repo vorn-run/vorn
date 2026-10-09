@@ -1,0 +1,25 @@
+# libghostty-rs 3ddcb10's sys crate without its bindings' doc comments; build.rs pins Ghostty a60e9e2 for its fix to wide characters split by a resize.
+[package]
+name = "libghostty-vt-sys"
+description = "Raw FFI bindings for libghostty-vt, the Ghostty terminal emulation library"
+version = "0.2.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/uzaaft/libghostty-rs"
+rust-version = "1.90"
+links = "ghostty-vt"
+build = "build.rs"
+publish = false
+
+[lib]
+doctest = false
+
+[features]
+default = ["vendored"]
+vendored = []
+pkg-config = ["dep:pkg-config"]
+link-dynamic = []
+kitty-graphics = []
+
+[build-dependencies]
+pkg-config = { version = "0.3", optional = true }

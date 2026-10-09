@@ -12,7 +12,7 @@ use vorn_screen::{Checkpoint, Effect, Emulator, Uncut};
 
 /// The checkpoint format this engine writes and the only one it reads. A
 /// checkpoint in any other format is not a restore base.
-pub const FORMAT: u16 = 1;
+pub const FORMAT: u16 = 2;
 
 /// Whether a session's terminal is what a vornd that never died would have.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

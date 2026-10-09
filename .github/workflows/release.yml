@@ -50,7 +50,7 @@ jobs:
 
   build-macos:
     needs: create-release
-    # macos-15, not latest: Zig 0.15.2 cannot link against the newer macOS SDK.
+    # macos-15, not latest: Zig 0.15.2 could not link against the newer macOS SDK.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -69,10 +69,10 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      # vornd, vorn-sessiond and vorn ship in every build; libghostty-vt needs Zig 0.15.2.
+      # vornd, vorn-sessiond and vorn ship in every build; libghostty-vt needs Zig 0.16.0.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       # The version comes from packages/core/rust-toolchain.toml.
       - name: Rust toolchain
@@ -199,10 +199,10 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      # vornd, vorn-sessiond and vorn ship in every build; libghostty-vt needs Zig 0.15.2.
+      # vornd, vorn-sessiond and vorn ship in every build; libghostty-vt needs Zig 0.16.0.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       # The version comes from packages/core/rust-toolchain.toml.
       - name: Rust toolchain
@@ -302,10 +302,10 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      # vornd, vorn-sessiond and vorn ship in every build; libghostty-vt needs Zig 0.15.2.
+      # vornd, vorn-sessiond and vorn ship in every build; libghostty-vt needs Zig 0.16.0.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       # The version comes from packages/core/rust-toolchain.toml.
       - name: Rust toolchain

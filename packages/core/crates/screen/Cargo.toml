@@ -9,12 +9,18 @@ description = "A terminal's screen on libghostty-vt: feed bytes, read title and 
 
 [dependencies]
 crc32fast = "1"
-libghostty-vt = { version = "0.2.2", default-features = false }
+libghostty-vt.workspace = true
 memchr = "2"
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false }
+vorn-recovery = { path = "../recovery" }
+vorn-term-proto = { path = "../term-proto" }
 
 [[bench]]
 name = "screen"
+harness = false
+
+[[bench]]
+name = "corpora"
 harness = false

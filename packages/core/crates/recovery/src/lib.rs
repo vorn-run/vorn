@@ -4,7 +4,6 @@
 //!   UTF-8 and sequences split across records, unterminated sequences.
 //! - [`transcript`]: recorded programs (vim, htop, an agent CLI) as logs.
 //! - [`log`]: record logs with sessiond's headers, and their digest.
-//! - [`scan`]: whether a record boundary is a safe checkpoint point.
 //! - [`compare`]: the recovery contract's state equivalence.
 //! - [`engine`]: the engine trait vornd's session engine implements, and a
 //!   reference engine that stands in for it until then.
@@ -42,7 +41,6 @@ mod error;
 pub mod gen;
 pub mod log;
 mod rng;
-pub mod scan;
 pub mod transcript;
 
 pub use child::ChildProcess;
@@ -53,4 +51,3 @@ pub use error::Error;
 pub use gen::{Generator, Mix, Profile, Until};
 pub use log::{Digest, Log, LogBuilder, Size};
 pub use rng::Rng;
-pub use scan::{Scanner, VtState};

@@ -119,10 +119,10 @@ jobs:
       - name: Electron binary
         run: node node_modules/electron/install.js
 
-      # The tests start vornd, vorn-sessiond and vorn, built here with Zig 0.15.2 for libghostty-vt.
+      # The tests start vornd, vorn-sessiond and vorn, built here with Zig 0.16.0 for libghostty-vt.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       # The version comes from packages/core/rust-toolchain.toml.
       - name: Rust toolchain

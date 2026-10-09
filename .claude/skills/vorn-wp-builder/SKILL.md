@@ -106,8 +106,8 @@ lint cannot turn clippy red on its own, so a clippy failure is yours.
 
 ### Sandbox notes
 
-- **Zig 0.15.2 exactly** for libghostty-vt (0.16 fails):
-  `pip install ziglang==0.15.2` and a `zig` shim that runs
+- **Zig 0.16.0 exactly** for libghostty-vt:
+  `pip install ziglang==0.16.0` and a `zig` shim that runs
   `python3 -m ziglang "$@"`, first on `PATH`.
 - Zig's own HTTP client fails through the agent proxy. Prefetch each `.url` in
   Ghostty's `build.zig.zon` files with curl and `zig fetch <file>`; for

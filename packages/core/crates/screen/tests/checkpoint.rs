@@ -275,12 +275,7 @@ fn apply(em: &mut Emulator, ops: &[Op], effects: &mut Vec<vorn_screen::Effect>) 
     }
 }
 
-/// Both terminals fed `ops`; before each resize, each carries on from its
-/// own rebuild where it can cut one. A resize can reflow by row flags
-/// Ghostty keeps in page memory the screen does not show, which differs
-/// between a terminal and its rebuild (see `Emulator::checkpoint`); a
-/// rebuild of each puts that memory in the same state, and what the two
-/// rebuild from is still each one's own state.
+/// Both fed `ops`, each carrying on from its own rebuild before a resize, which reflows by unsaved page memory.
 fn apply_both(
     a: &mut Emulator,
     b: &mut Emulator,
@@ -306,7 +301,16 @@ fn run(cols: u16, rows: u16, a: &[Op], b: &[Op]) -> Option<Result<(), (String, S
     let mut live = Emulator::new(u32::from(cols), u32::from(rows)).unwrap();
     let mut sink = Vec::new();
     apply(&mut live, a, &mut sink);
-    let (cp, _) = live.cut().ok()?;
+    let (cp, _) = match live.cut() {
+        Ok(cut) => cut,
+        Err(why) => {
+            assert!(
+                why == "restore check" && pending_wrap_off_the_edge(&live),
+                "{why}: {a:?}"
+            );
+            return None;
+        }
+    };
     let bytes = cp.encode();
     let cp = Checkpoint::decode(&bytes).expect("decodes what it encoded");
     let mut rebuilt = Emulator::restore(&cp).unwrap();
@@ -319,6 +323,12 @@ fn run(cols: u16, rows: u16, a: &[Op], b: &[Op]) -> Option<Result<(), (String, S
     } else {
         Some(Err((format!("{f1}\n{e1:?}"), format!("{f2}\n{e2:?}"))))
     }
+}
+
+/// The one state Ghostty's snapshot drops: a pending wrap off the last column (a right margin, a back tab).
+fn pending_wrap_off_the_edge(em: &Emulator) -> bool {
+    let t = em.terminal();
+    t.is_cursor_pending_wrap().unwrap() && t.cursor_x().unwrap() + 1 != t.cols().unwrap()
 }
 
 fn fails(cols: u16, rows: u16, a: &[Op], b: &[Op]) -> bool {
@@ -406,7 +416,7 @@ fn mixed_streams_carry_on() {
     let all: Vec<u64> = (0..FAMILIES).collect();
     let (cut, tried) = check(0..3000, &all, 40, 30);
     eprintln!("cut {cut} of {tried}");
-    assert!(cut * 4 > tried, "too few checkpoints: {cut} of {tried}");
+    assert!(tried - cut <= tried / 100, "cut {cut} of {tried}");
 }
 
 #[test]
