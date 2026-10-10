@@ -1,0 +1,690 @@
+{
+  "grid": {
+    "nodes": 13,
+    "roles": {
+      "Button": 5,
+      "Tab": 3,
+      "TabList": 1,
+      "Terminal": 2,
+      "Toolbar": 1,
+      "Window": 1
+    },
+    "tree": {
+      "focus": 0,
+      "nodes": [
+        [
+          0,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 0.0,
+                "x1": 2880.0,
+                "y0": 0.0,
+                "y1": 1800.0
+              },
+              "children": [
+                10,
+                11,
+                12
+              ],
+              "label": "Vorn"
+            },
+            "role": "window"
+          }
+        ],
+        [
+          1,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 24.0,
+                "x1": 72.0,
+                "y0": 16.0,
+                "y1": 64.0
+              },
+              "label": "Toggle sidebar"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          2,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 98.0,
+                "x1": 166.0,
+                "y0": 18.0,
+                "y1": 62.0
+              },
+              "label": "Terminals",
+              "selected": true
+            },
+            "role": "tab"
+          }
+        ],
+        [
+          3,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 170.0,
+                "x1": 238.0,
+                "y0": 18.0,
+                "y1": 62.0
+              },
+              "label": "Tasks"
+            },
+            "role": "tab"
+          }
+        ],
+        [
+          4,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 242.0,
+                "x1": 310.0,
+                "y0": 18.0,
+                "y1": 62.0
+              },
+              "label": "Workflows"
+            },
+            "role": "tab"
+          }
+        ],
+        [
+          5,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 94.0,
+                "x1": 314.0,
+                "y0": 14.0,
+                "y1": 66.0
+              },
+              "children": [
+                2,
+                3,
+                4
+              ],
+              "label": "Main view"
+            },
+            "role": "tabList"
+          }
+        ],
+        [
+          6,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 330.0,
+                "x1": 412.0,
+                "y0": 14.0,
+                "y1": 66.0
+              },
+              "label": "3 sessions"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          7,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 2682.0,
+                "x1": 2730.0,
+                "y0": 16.0,
+                "y1": 64.0
+              },
+              "label": "Grid options"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          8,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 2752.0,
+                "x1": 2800.0,
+                "y0": 16.0,
+                "y1": 64.0
+              },
+              "label": "Recent sessions"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          9,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 2808.0,
+                "x1": 2856.0,
+                "y0": 16.0,
+                "y1": 64.0
+              },
+              "label": "New session"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          10,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 0.0,
+                "x1": 2880.0,
+                "y0": 0.0,
+                "y1": 78.0
+              },
+              "children": [
+                1,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "label": "Toolbar"
+            },
+            "role": "toolbar"
+          }
+        ],
+        [
+          11,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 0.0,
+                "x1": 1438.0,
+                "y0": 80.0,
+                "y1": 1800.0
+              },
+              "label": "pane-0",
+              "value": "   Compiling vorn-module-4 v0.4.2 (packages/core/crates/m4)\n   Compiling vorn-module-5 v0.5.9 (packages/core/crates/m5)\n   Compiling vorn-module-6 v0.6.3 (packages/core/crates/m6)\n   Compiling vorn-module-7 v0.7.10 (packages/core/crates/m7)\n   Compiling vorn-module-8 v0.8.4 (packages/core/crates/m8)\n   Compiling vorn-module-9 v0.0.11 (packages/core/crates/m9)\n   Compiling vorn-module-10 v0.1.5 (packages/core/crates/m10)\n   Compiling vorn-module-11 v0.2.12 (packages/core/crates/m11)\n   Compiling vorn-module-12 v0.3.6 (packages/core/crates/m12)\n   Compiling vorn-module-13 v0.4.0 (packages/core/crates/m13)\n   Compiling vorn-module-14 v0.5.7 (packages/core/crates/m14)\n   Compiling vorn-module-15 v0.6.1 (packages/core/crates/m15)\n   Compiling vorn-module-16 v0.7.8 (packages/core/crates/m16)\n   Compiling vorn-module-17 v0.8.2 (packages/core/crates/m17)\n   Compiling vorn-module-18 v0.0.9 (packages/core/crates/m18)\n   Compiling vorn-module-19 v0.1.3 (packages/core/crates/m19)\n   Compiling vorn-module-20 v0.2.10 (packages/core/crates/m20)\n   Compiling vorn-module-21 v0.3.4 (packages/core/crates/m21)\n   Compiling vorn-module-22 v0.4.11 (packages/core/crates/m22)\n   Compiling vorn-module-23 v0.5.5 (packages/core/crates/m23)\n   Compiling vorn-module-24 v0.6.12 (packages/core/crates/m24)\n   Compiling vorn-module-25 v0.7.6 (packages/core/crates/m25)\n   Compiling vorn-module-26 v0.8.0 (packages/core/crates/m26)\n   Compiling vorn-module-27 v0.0.7 (packages/core/crates/m27)\n   Compiling vorn-module-28 v0.1.1 (packages/core/crates/m28)\n   Compiling vorn-module-29 v0.2.8 (packages/core/crates/m29)\n   Compiling vorn-module-30 v0.3.2 (packages/core/crates/m30)\n   Compiling vorn-module-31 v0.4.9 (packages/core/crates/m31)\n   Compiling vorn-module-32 v0.5.3 (packages/core/crates/m32)\n   Compiling vorn-module-33 v0.6.10 (packages/core/crates/m33)\n   Compiling vorn-module-34 v0.7.4 (packages/core/crates/m34)\n   Compiling vorn-module-35 v0.8.11 (packages/core/crates/m35)\n   Compiling vorn-module-36 v0.0.5 (packages/core/crates/m36)\n   Compiling vorn-module-37 v0.1.12 (packages/core/crates/m37)\n   Compiling vorn-module-38 v0.2.6 (packages/core/crates/m38)\n   Compiling vorn-module-39 v0.3.0 (packages/core/crates/m39)\n   Compiling vorn-module-40 v0.4.7 (packages/core/crates/m40)\n   Compiling vorn-module-41 v0.5.1 (packages/core/crates/m41)\n   Compiling vorn-module-42 v0.6.8 (packages/core/crates/m42)\n   Compiling vorn-module-43 v0.7.2 (packages/core/crates/m43)\n   Compiling vorn-module-44 v0.8.9 (packages/core/crates/m44)\n   Compiling vorn-module-45 v0.0.3 (packages/core/crates/m45)\n   Compiling vorn-module-46 v0.1.10 (packages/core/crates/m46)\n   Compiling vorn-module-47 v0.2.4 (packages/core/crates/m47)\n   Compiling vorn-module-48 v0.3.11 (packages/core/crates/m48)\n   Compiling vorn-module-49 v0.4.5 (packages/core/crates/m49)\n   Compiling vorn-module-50 v0.5.12 (packages/core/crates/m50)\n   Compiling vorn-module-51 v0.6.6 (packages/core/crates/m51)\n   Compiling vorn-module-52 v0.7.0 (packages/core/crates/m52)\n   Compiling vorn-module-53 v0.8.7 (packages/core/crates/m53)\n   Compiling vorn-module-54 v0.0.1 (packages/core/crates/m54)\n   Compiling vorn-module-55 v0.1.8 (packages/core/crates/m55)\n   Compiling vorn-module-56 v0.2.2 (packages/core/crates/m56)\n   Compiling vorn-module-57 v0.3.9 (packages/core/crates/m57)\n   Compiling vorn-module-58 v0.4.3 (packages/core/crates/m58)\n   Compiling vorn-module-59 v0.5.10 (packages/core/crates/m59)\nwarning: unused variable `cols` → 日本語 ✓\n    Finished `release` profile in 41.7s\n$"
+            },
+            "role": "terminal"
+          }
+        ],
+        [
+          12,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 1442.0,
+                "x1": 2880.0,
+                "y0": 80.0,
+                "y1": 1800.0
+              },
+              "label": "pane-1",
+              "value": "   Compiling vorn-module-4 v0.4.2 (packages/core/crates/m4)\n   Compiling vorn-module-5 v0.5.9 (packages/core/crates/m5)\n   Compiling vorn-module-6 v0.6.3 (packages/core/crates/m6)\n   Compiling vorn-module-7 v0.7.10 (packages/core/crates/m7)\n   Compiling vorn-module-8 v0.8.4 (packages/core/crates/m8)\n   Compiling vorn-module-9 v0.0.11 (packages/core/crates/m9)\n   Compiling vorn-module-10 v0.1.5 (packages/core/crates/m10)\n   Compiling vorn-module-11 v0.2.12 (packages/core/crates/m11)\n   Compiling vorn-module-12 v0.3.6 (packages/core/crates/m12)\n   Compiling vorn-module-13 v0.4.0 (packages/core/crates/m13)\n   Compiling vorn-module-14 v0.5.7 (packages/core/crates/m14)\n   Compiling vorn-module-15 v0.6.1 (packages/core/crates/m15)\n   Compiling vorn-module-16 v0.7.8 (packages/core/crates/m16)\n   Compiling vorn-module-17 v0.8.2 (packages/core/crates/m17)\n   Compiling vorn-module-18 v0.0.9 (packages/core/crates/m18)\n   Compiling vorn-module-19 v0.1.3 (packages/core/crates/m19)\n   Compiling vorn-module-20 v0.2.10 (packages/core/crates/m20)\n   Compiling vorn-module-21 v0.3.4 (packages/core/crates/m21)\n   Compiling vorn-module-22 v0.4.11 (packages/core/crates/m22)\n   Compiling vorn-module-23 v0.5.5 (packages/core/crates/m23)\n   Compiling vorn-module-24 v0.6.12 (packages/core/crates/m24)\n   Compiling vorn-module-25 v0.7.6 (packages/core/crates/m25)\n   Compiling vorn-module-26 v0.8.0 (packages/core/crates/m26)\n   Compiling vorn-module-27 v0.0.7 (packages/core/crates/m27)\n   Compiling vorn-module-28 v0.1.1 (packages/core/crates/m28)\n   Compiling vorn-module-29 v0.2.8 (packages/core/crates/m29)\n   Compiling vorn-module-30 v0.3.2 (packages/core/crates/m30)\n   Compiling vorn-module-31 v0.4.9 (packages/core/crates/m31)\n   Compiling vorn-module-32 v0.5.3 (packages/core/crates/m32)\n   Compiling vorn-module-33 v0.6.10 (packages/core/crates/m33)\n   Compiling vorn-module-34 v0.7.4 (packages/core/crates/m34)\n   Compiling vorn-module-35 v0.8.11 (packages/core/crates/m35)\n   Compiling vorn-module-36 v0.0.5 (packages/core/crates/m36)\n   Compiling vorn-module-37 v0.1.12 (packages/core/crates/m37)\n   Compiling vorn-module-38 v0.2.6 (packages/core/crates/m38)\n   Compiling vorn-module-39 v0.3.0 (packages/core/crates/m39)\n   Compiling vorn-module-40 v0.4.7 (packages/core/crates/m40)\n   Compiling vorn-module-41 v0.5.1 (packages/core/crates/m41)\n   Compiling vorn-module-42 v0.6.8 (packages/core/crates/m42)\n   Compiling vorn-module-43 v0.7.2 (packages/core/crates/m43)\n   Compiling vorn-module-44 v0.8.9 (packages/core/crates/m44)\n   Compiling vorn-module-45 v0.0.3 (packages/core/crates/m45)\n   Compiling vorn-module-46 v0.1.10 (packages/core/crates/m46)\n   Compiling vorn-module-47 v0.2.4 (packages/core/crates/m47)\n   Compiling vorn-module-48 v0.3.11 (packages/core/crates/m48)\n   Compiling vorn-module-49 v0.4.5 (packages/core/crates/m49)\n   Compiling vorn-module-50 v0.5.12 (packages/core/crates/m50)\n   Compiling vorn-module-51 v0.6.6 (packages/core/crates/m51)\n   Compiling vorn-module-52 v0.7.0 (packages/core/crates/m52)\n   Compiling vorn-module-53 v0.8.7 (packages/core/crates/m53)\n   Compiling vorn-module-54 v0.0.1 (packages/core/crates/m54)\n   Compiling vorn-module-55 v0.1.8 (packages/core/crates/m55)\n   Compiling vorn-module-56 v0.2.2 (packages/core/crates/m56)\n   Compiling vorn-module-57 v0.3.9 (packages/core/crates/m57)\n   Compiling vorn-module-58 v0.4.3 (packages/core/crates/m58)\n   Compiling vorn-module-59 v0.5.10 (packages/core/crates/m59)\nwarning: unused variable `cols` → 日本語 ✓\n    Finished `release` profile in 41.7s\n$"
+            },
+            "role": "terminal"
+          }
+        ]
+      ],
+      "tree": {
+        "root": 0,
+        "toolkitName": null,
+        "toolkitVersion": null
+      },
+      "treeId": "00000000-0000-0000-0000-000000000000"
+    }
+  },
+  "main": {
+    "nodes": 20,
+    "roles": {
+      "Button": 11,
+      "Image": 1,
+      "Label": 1,
+      "MultilineTextInput": 1,
+      "Tab": 3,
+      "TabList": 1,
+      "Toolbar": 1,
+      "Window": 1
+    },
+    "tree": {
+      "focus": 0,
+      "nodes": [
+        [
+          0,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 0.0,
+                "x1": 2880.0,
+                "y0": 0.0,
+                "y1": 1800.0
+              },
+              "children": [
+                10,
+                11,
+                12,
+                13,
+                14,
+                15,
+                16,
+                17,
+                18,
+                19
+              ],
+              "label": "Vorn"
+            },
+            "role": "window"
+          }
+        ],
+        [
+          1,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 24.0,
+                "x1": 72.0,
+                "y0": 16.0,
+                "y1": 64.0
+              },
+              "label": "Toggle sidebar"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          2,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 98.0,
+                "x1": 166.0,
+                "y0": 18.0,
+                "y1": 62.0
+              },
+              "label": "Terminals",
+              "selected": true
+            },
+            "role": "tab"
+          }
+        ],
+        [
+          3,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 170.0,
+                "x1": 238.0,
+                "y0": 18.0,
+                "y1": 62.0
+              },
+              "label": "Tasks"
+            },
+            "role": "tab"
+          }
+        ],
+        [
+          4,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 242.0,
+                "x1": 310.0,
+                "y0": 18.0,
+                "y1": 62.0
+              },
+              "label": "Workflows"
+            },
+            "role": "tab"
+          }
+        ],
+        [
+          5,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 94.0,
+                "x1": 314.0,
+                "y0": 14.0,
+                "y1": 66.0
+              },
+              "children": [
+                2,
+                3,
+                4
+              ],
+              "label": "Main view"
+            },
+            "role": "tabList"
+          }
+        ],
+        [
+          6,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 330.0,
+                "x1": 412.0,
+                "y0": 14.0,
+                "y1": 66.0
+              },
+              "label": "3 sessions"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          7,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 2682.0,
+                "x1": 2730.0,
+                "y0": 16.0,
+                "y1": 64.0
+              },
+              "label": "Grid options"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          8,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 2752.0,
+                "x1": 2800.0,
+                "y0": 16.0,
+                "y1": 64.0
+              },
+              "label": "Recent sessions"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          9,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 2808.0,
+                "x1": 2856.0,
+                "y0": 16.0,
+                "y1": 64.0
+              },
+              "label": "New session"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          10,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 0.0,
+                "x1": 2880.0,
+                "y0": 0.0,
+                "y1": 78.0
+              },
+              "children": [
+                1,
+                5,
+                6,
+                7,
+                8,
+                9
+              ],
+              "label": "Toolbar"
+            },
+            "role": "toolbar"
+          }
+        ],
+        [
+          11,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 1370.0,
+                "x1": 1510.0,
+                "y0": 732.0,
+                "y1": 796.0
+              },
+              "label": "Vorn"
+            },
+            "role": "image"
+          }
+        ],
+        [
+          12,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 642.0,
+                "x1": 2238.0,
+                "y0": 846.0,
+                "y1": 1012.0
+              },
+              "label": "Describe your task"
+            },
+            "role": "multilineTextInput"
+          }
+        ],
+        [
+          13,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 666.0,
+                "x1": 916.0,
+                "y0": 1032.0,
+                "y1": 1080.0
+              },
+              "label": "Select project"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          14,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 924.0,
+                "x1": 1092.0,
+                "y0": 1032.0,
+                "y1": 1080.0
+              },
+              "label": "Agent"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          15,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 1100.0,
+                "x1": 1350.0,
+                "y0": 1032.0,
+                "y1": 1080.0
+              },
+              "label": "Default model"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          16,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 1358.0,
+                "x1": 1448.0,
+                "y0": 1036.0,
+                "y1": 1078.0
+              },
+              "label": "Worktree"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          17,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 1456.0,
+                "x1": 1608.0,
+                "y0": 1032.0,
+                "y1": 1080.0
+              },
+              "label": "main"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          18,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 2162.0,
+                "x1": 2214.0,
+                "y0": 1030.0,
+                "y1": 1082.0
+              },
+              "label": "Launch"
+            },
+            "role": "button"
+          }
+        ],
+        [
+          19,
+          {
+            "actions": 0,
+            "childActions": 0,
+            "flags": 0,
+            "properties": {
+              "bounds": {
+                "x0": 1294.0,
+                "x1": 1586.0,
+                "y0": 1116.0,
+                "y1": 1148.0
+              },
+              "label": "Select a project to get started"
+            },
+            "role": "label"
+          }
+        ]
+      ],
+      "tree": {
+        "root": 0,
+        "toolkitName": null,
+        "toolkitVersion": null
+      },
+      "treeId": "00000000-0000-0000-0000-000000000000"
+    }
+  },
+  "proto": "vornui"
+}

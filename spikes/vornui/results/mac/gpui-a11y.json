@@ -1,0 +1,339 @@
+{
+  "proto": "gpui",
+  "main": {
+    "nodes": 19,
+    "roles": {
+      "TabList": 1,
+      "Button": 11,
+      "MultilineTextInput": 1,
+      "Window": 1,
+      "Toolbar": 1,
+      "Image": 1,
+      "Tab": 3
+    },
+    "tree": {
+      "root": "s",
+      "gpui_focus": null,
+      "active_descendant_focus": null,
+      "frame": {
+        "rendered_at": "2026-10-09T19:26:26.176-06:00",
+        "frame_number": 6,
+        "window_title": null,
+        "node_count": 19,
+        "tab_stop_count": 0,
+        "viewport_size": {
+          "width": 1440.0,
+          "height": 900.0
+        },
+        "scale_factor": 2.0
+      },
+      "nodes": {
+        "a": {
+          "accesskit_id": "5331634103095214766",
+          "aria": {
+            "role": "Button",
+            "label": "Toggle sidebar"
+          }
+        },
+        "b": {
+          "accesskit_id": "11620721680770072267",
+          "aria": {
+            "role": "Tab",
+            "label": "Terminals",
+            "selected": true
+          }
+        },
+        "c": {
+          "accesskit_id": "17460747062774236395",
+          "aria": {
+            "role": "Tab",
+            "label": "Tasks",
+            "selected": false
+          }
+        },
+        "d": {
+          "accesskit_id": "11288391438371380709",
+          "aria": {
+            "role": "Tab",
+            "label": "Workflows",
+            "selected": false
+          }
+        },
+        "e": {
+          "accesskit_id": "8961220370524412377",
+          "children": [
+            "b",
+            "c",
+            "d"
+          ],
+          "aria": {
+            "role": "TabList",
+            "label": "Main view"
+          }
+        },
+        "f": {
+          "accesskit_id": "5524558130868100701",
+          "aria": {
+            "role": "Button",
+            "label": "3 sessions"
+          }
+        },
+        "g": {
+          "accesskit_id": "12636436237875732198",
+          "aria": {
+            "role": "Button",
+            "label": "Grid options"
+          }
+        },
+        "h": {
+          "accesskit_id": "1481935166655242924",
+          "aria": {
+            "role": "Button",
+            "label": "Recent sessions"
+          }
+        },
+        "i": {
+          "accesskit_id": "5700124035577594575",
+          "aria": {
+            "role": "Button",
+            "label": "New session"
+          }
+        },
+        "j": {
+          "accesskit_id": "1048750607453272155",
+          "children": [
+            "a",
+            "e",
+            "f",
+            "g",
+            "h",
+            "i"
+          ],
+          "aria": {
+            "role": "Toolbar",
+            "label": "Toolbar"
+          }
+        },
+        "k": {
+          "accesskit_id": "5160848345690692194",
+          "aria": {
+            "role": "Image",
+            "label": "Vorn"
+          }
+        },
+        "l": {
+          "accesskit_id": "9192464210148720141",
+          "aria": {
+            "role": "MultilineTextInput",
+            "label": "Describe your task"
+          }
+        },
+        "m": {
+          "accesskit_id": "10506639768655388721",
+          "aria": {
+            "role": "Button",
+            "label": "Select project"
+          }
+        },
+        "n": {
+          "accesskit_id": "4502296561717833295",
+          "aria": {
+            "role": "Button",
+            "label": "Agent"
+          }
+        },
+        "o": {
+          "accesskit_id": "12753942645490236610",
+          "aria": {
+            "role": "Button",
+            "label": "Default model"
+          }
+        },
+        "p": {
+          "accesskit_id": "3975354223900966470",
+          "aria": {
+            "role": "Button",
+            "label": "Worktree"
+          }
+        },
+        "q": {
+          "accesskit_id": "12023679733161529153",
+          "aria": {
+            "role": "Button",
+            "label": "main"
+          }
+        },
+        "r": {
+          "accesskit_id": "7522455427796070337",
+          "aria": {
+            "role": "Button",
+            "label": "Launch"
+          }
+        },
+        "s": {
+          "accesskit_id": "0",
+          "children": [
+            "j",
+            "k",
+            "l",
+            "m",
+            "n",
+            "o",
+            "p",
+            "q",
+            "r"
+          ],
+          "aria": {
+            "role": "Window"
+          }
+        }
+      }
+    }
+  },
+  "grid": {
+    "nodes": 13,
+    "roles": {
+      "Tab": 3,
+      "Button": 5,
+      "Window": 1,
+      "Terminal": 2,
+      "TabList": 1,
+      "Toolbar": 1
+    },
+    "tree": {
+      "root": "m",
+      "gpui_focus": "k",
+      "active_descendant_focus": null,
+      "frame": {
+        "rendered_at": "2026-10-09T19:26:29.083-06:00",
+        "frame_number": 5,
+        "window_title": null,
+        "node_count": 13,
+        "tab_stop_count": 0,
+        "viewport_size": {
+          "width": 1440.0,
+          "height": 900.0
+        },
+        "scale_factor": 2.0
+      },
+      "nodes": {
+        "a": {
+          "accesskit_id": "5331634103095214766",
+          "aria": {
+            "role": "Button",
+            "label": "Toggle sidebar"
+          }
+        },
+        "b": {
+          "accesskit_id": "11620721680770072267",
+          "aria": {
+            "role": "Tab",
+            "label": "Terminals",
+            "selected": true
+          }
+        },
+        "c": {
+          "accesskit_id": "17460747062774236395",
+          "aria": {
+            "role": "Tab",
+            "label": "Tasks",
+            "selected": false
+          }
+        },
+        "d": {
+          "accesskit_id": "11288391438371380709",
+          "aria": {
+            "role": "Tab",
+            "label": "Workflows",
+            "selected": false
+          }
+        },
+        "e": {
+          "accesskit_id": "8961220370524412377",
+          "children": [
+            "b",
+            "c",
+            "d"
+          ],
+          "aria": {
+            "role": "TabList",
+            "label": "Main view"
+          }
+        },
+        "f": {
+          "accesskit_id": "5524558130868100701",
+          "aria": {
+            "role": "Button",
+            "label": "3 sessions"
+          }
+        },
+        "g": {
+          "accesskit_id": "12636436237875732198",
+          "aria": {
+            "role": "Button",
+            "label": "Grid options"
+          }
+        },
+        "h": {
+          "accesskit_id": "1481935166655242924",
+          "aria": {
+            "role": "Button",
+            "label": "Recent sessions"
+          }
+        },
+        "i": {
+          "accesskit_id": "5700124035577594575",
+          "aria": {
+            "role": "Button",
+            "label": "New session"
+          }
+        },
+        "j": {
+          "accesskit_id": "1048750607453272155",
+          "children": [
+            "a",
+            "e",
+            "f",
+            "g",
+            "h",
+            "i"
+          ],
+          "aria": {
+            "role": "Toolbar",
+            "label": "Toolbar"
+          }
+        },
+        "k": {
+          "accesskit_id": "7336207007414811164",
+          "aria": {
+            "role": "Terminal",
+            "on_action": [
+              "Focus"
+            ],
+            "label": "pane-0",
+            "value": "   Compiling vorn-module-4 v0.4.2 (packages/core/crates/m4)\n   Compiling vorn-module-5 v0.5.9 (packages/core/crates/m5)\n   Compiling vorn-module-6 v0.6.3 (packages/core/crates/m6)\n   Compiling vorn-module-7 v0.7.10 (packages/core/crates/m7)\n   Compiling vorn-module-8 v0.8.4 (packages/core/crates/m8)\n   Compiling vorn-module-9 v0.0.11 (packages/core/crates/m9)\n   Compiling vorn-module-10 v0.1.5 (packages/core/crates/m10)\n   Compiling vorn-module-11 v0.2.12 (packages/core/crates/m11)\n   Compiling vorn-module-12 v0.3.6 (packages/core/crates/m12)\n   Compiling vorn-module-13 v0.4.0 (packages/core/crates/m13)\n   Compiling vorn-module-14 v0.5.7 (packages/core/crates/m14)\n   Compiling vorn-module-15 v0.6.1 (packages/core/crates/m15)\n   Compiling vorn-module-16 v0.7.8 (packages/core/crates/m16)\n   Compiling vorn-module-17 v0.8.2 (packages/core/crates/m17)\n   Compiling vorn-module-18 v0.0.9 (packages/core/crates/m18)\n   Compiling vorn-module-19 v0.1.3 (packages/core/crates/m19)\n   Compiling vorn-module-20 v0.2.10 (packages/core/crates/m20)\n   Compiling vorn-module-21 v0.3.4 (packages/core/crates/m21)\n   Compiling vorn-module-22 v0.4.11 (packages/core/crates/m22)\n   Compiling vorn-module-23 v0.5.5 (packages/core/crates/m23)\n   Compiling vorn-module-24 v0.6.12 (packages/core/crates/m24)\n   Compiling vorn-module-25 v0.7.6 (packages/core/crates/m25)\n   Compiling vorn-module-26 v0.8.0 (packages/core/crates/m26)\n   Compiling vorn-module-27 v0.0.7 (packages/core/crates/m27)\n   Compiling vorn-module-28 v0.1.1 (packages/core/crates/m28)\n   Compiling vorn-module-29 v0.2.8 (packages/core/crates/m29)\n   Compiling vorn-module-30 v0.3.2 (packages/core/crates/m30)\n   Compiling vorn-module-31 v0.4.9 (packages/core/crates/m31)\n   Compiling vorn-module-32 v0.5.3 (packages/core/crates/m32)\n   Compiling vorn-module-33 v0.6.10 (packages/core/crates/m33)\n   Compiling vorn-module-34 v0.7.4 (packages/core/crates/m34)\n   Compiling vorn-module-35 v0.8.11 (packages/core/crates/m35)\n   Compiling vorn-module-36 v0.0.5 (packages/core/crates/m36)\n   Compiling vorn-module-37 v0.1.12 (packages/core/crates/m37)\n   Compiling vorn-module-38 v0.2.6 (packages/core/crates/m38)\n   Compiling vorn-module-39 v0.3.0 (packages/core/crates/m39)\n   Compiling vorn-module-40 v0.4.7 (packages/core/crates/m40)\n   Compiling vorn-module-41 v0.5.1 (packages/core/crates/m41)\n   Compiling vorn-module-42 v0.6.8 (packages/core/crates/m42)\n   Compiling vorn-module-43 v0.7.2 (packages/core/crates/m43)\n   Compiling vorn-module-44 v0.8.9 (packages/core/crates/m44)\n   Compiling vorn-module-45 v0.0.3 (packages/core/crates/m45)\n   Compiling vorn-module-46 v0.1.10 (packages/core/crates/m46)\n   Compiling vorn-module-47 v0.2.4 (packages/core/crates/m47)\n   Compiling vorn-module-48 v0.3.11 (packages/core/crates/m48)\n   Compiling vorn-module-49 v0.4.5 (packages/core/crates/m49)\n   Compiling vorn-module-50 v0.5.12 (packages/core/crates/m50)\n   Compiling vorn-module-51 v0.6.6 (packages/core/crates/m51)\n   Compiling vorn-module-52 v0.7.0 (packages/core/crates/m52)\n   Compiling vorn-module-53 v0.8.7 (packages/core/crates/m53)\n   Compiling vorn-module-54 v0.0.1 (packages/core/crates/m54)\n   Compiling vorn-module-55 v0.1.8 (packages/core/crates/m55)\n   Compiling vorn-module-56 v0.2.2 (packages/core/crates/m56)\n   Compiling vorn-module-57 v0.3.9 (packages/core/crates/m57)\n   Compiling vorn-module-58 v0.4.3 (packages/core/crates/m58)\n   Compiling vorn-module-59 v0.5.10 (packages/core/crates/m59)\nwarning: unused variable `cols` → 日本語 ✓\n    Finished `release` profile in 41.7s\n$"
+          }
+        },
+        "l": {
+          "accesskit_id": "1047364052964462600",
+          "aria": {
+            "role": "Terminal",
+            "label": "pane-1",
+            "value": "   Compiling vorn-module-4 v0.4.2 (packages/core/crates/m4)\n   Compiling vorn-module-5 v0.5.9 (packages/core/crates/m5)\n   Compiling vorn-module-6 v0.6.3 (packages/core/crates/m6)\n   Compiling vorn-module-7 v0.7.10 (packages/core/crates/m7)\n   Compiling vorn-module-8 v0.8.4 (packages/core/crates/m8)\n   Compiling vorn-module-9 v0.0.11 (packages/core/crates/m9)\n   Compiling vorn-module-10 v0.1.5 (packages/core/crates/m10)\n   Compiling vorn-module-11 v0.2.12 (packages/core/crates/m11)\n   Compiling vorn-module-12 v0.3.6 (packages/core/crates/m12)\n   Compiling vorn-module-13 v0.4.0 (packages/core/crates/m13)\n   Compiling vorn-module-14 v0.5.7 (packages/core/crates/m14)\n   Compiling vorn-module-15 v0.6.1 (packages/core/crates/m15)\n   Compiling vorn-module-16 v0.7.8 (packages/core/crates/m16)\n   Compiling vorn-module-17 v0.8.2 (packages/core/crates/m17)\n   Compiling vorn-module-18 v0.0.9 (packages/core/crates/m18)\n   Compiling vorn-module-19 v0.1.3 (packages/core/crates/m19)\n   Compiling vorn-module-20 v0.2.10 (packages/core/crates/m20)\n   Compiling vorn-module-21 v0.3.4 (packages/core/crates/m21)\n   Compiling vorn-module-22 v0.4.11 (packages/core/crates/m22)\n   Compiling vorn-module-23 v0.5.5 (packages/core/crates/m23)\n   Compiling vorn-module-24 v0.6.12 (packages/core/crates/m24)\n   Compiling vorn-module-25 v0.7.6 (packages/core/crates/m25)\n   Compiling vorn-module-26 v0.8.0 (packages/core/crates/m26)\n   Compiling vorn-module-27 v0.0.7 (packages/core/crates/m27)\n   Compiling vorn-module-28 v0.1.1 (packages/core/crates/m28)\n   Compiling vorn-module-29 v0.2.8 (packages/core/crates/m29)\n   Compiling vorn-module-30 v0.3.2 (packages/core/crates/m30)\n   Compiling vorn-module-31 v0.4.9 (packages/core/crates/m31)\n   Compiling vorn-module-32 v0.5.3 (packages/core/crates/m32)\n   Compiling vorn-module-33 v0.6.10 (packages/core/crates/m33)\n   Compiling vorn-module-34 v0.7.4 (packages/core/crates/m34)\n   Compiling vorn-module-35 v0.8.11 (packages/core/crates/m35)\n   Compiling vorn-module-36 v0.0.5 (packages/core/crates/m36)\n   Compiling vorn-module-37 v0.1.12 (packages/core/crates/m37)\n   Compiling vorn-module-38 v0.2.6 (packages/core/crates/m38)\n   Compiling vorn-module-39 v0.3.0 (packages/core/crates/m39)\n   Compiling vorn-module-40 v0.4.7 (packages/core/crates/m40)\n   Compiling vorn-module-41 v0.5.1 (packages/core/crates/m41)\n   Compiling vorn-module-42 v0.6.8 (packages/core/crates/m42)\n   Compiling vorn-module-43 v0.7.2 (packages/core/crates/m43)\n   Compiling vorn-module-44 v0.8.9 (packages/core/crates/m44)\n   Compiling vorn-module-45 v0.0.3 (packages/core/crates/m45)\n   Compiling vorn-module-46 v0.1.10 (packages/core/crates/m46)\n   Compiling vorn-module-47 v0.2.4 (packages/core/crates/m47)\n   Compiling vorn-module-48 v0.3.11 (packages/core/crates/m48)\n   Compiling vorn-module-49 v0.4.5 (packages/core/crates/m49)\n   Compiling vorn-module-50 v0.5.12 (packages/core/crates/m50)\n   Compiling vorn-module-51 v0.6.6 (packages/core/crates/m51)\n   Compiling vorn-module-52 v0.7.0 (packages/core/crates/m52)\n   Compiling vorn-module-53 v0.8.7 (packages/core/crates/m53)\n   Compiling vorn-module-54 v0.0.1 (packages/core/crates/m54)\n   Compiling vorn-module-55 v0.1.8 (packages/core/crates/m55)\n   Compiling vorn-module-56 v0.2.2 (packages/core/crates/m56)\n   Compiling vorn-module-57 v0.3.9 (packages/core/crates/m57)\n   Compiling vorn-module-58 v0.4.3 (packages/core/crates/m58)\n   Compiling vorn-module-59 v0.5.10 (packages/core/crates/m59)\nwarning: unused variable `cols` → 日本語 ✓\n    Finished `release` profile in 41.7s\n$"
+          }
+        },
+        "m": {
+          "accesskit_id": "0",
+          "children": [
+            "j",
+            "k",
+            "l"
+          ],
+          "aria": {
+            "role": "Window"
+          }
+        }
+      }
+    }
+  }
+}

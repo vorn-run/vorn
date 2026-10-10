@@ -1,0 +1,29 @@
+{
+  "adapter": "Apple M2 Pro (Metal)",
+  "cpu_pct": 23.207903500768897,
+  "errors": [],
+  "footprint_mb": 81.34443664550781,
+  "fps": 104.6547409688587,
+  "frame_ms": {
+    "max": 38.056,
+    "mean": 1.209,
+    "n": 2094,
+    "p50": 1.059,
+    "p95": 2.123,
+    "p99": 3.021
+  },
+  "frames": 2094,
+  "latency_ms": {
+    "max": 30.466,
+    "mean": 9.89,
+    "n": 142,
+    "p50": 9.558,
+    "p95": 10.75,
+    "p99": 29.304
+  },
+  "lost_probes": 0,
+  "panes": 8,
+  "peak_rss_mb": 30.4375,
+  "proto": "vornui",
+  "seconds": 20.008649208
+}

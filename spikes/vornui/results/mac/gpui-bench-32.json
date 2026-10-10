@@ -1,0 +1,29 @@
+{
+  "panes": 32,
+  "seconds": 20.006204666,
+  "frames": 2189,
+  "fps": 109.4160554960305,
+  "frame_ms": {
+    "n": 2189,
+    "p50": 3.32,
+    "p95": 3.782,
+    "p99": 6.116,
+    "max": 19.075,
+    "mean": 3.409
+  },
+  "latency_ms": {
+    "n": 113,
+    "p50": 8.327,
+    "p95": 9.107,
+    "p99": 9.404,
+    "max": 11.531,
+    "mean": 8.356
+  },
+  "lost_probes": 4,
+  "cpu_pct": 46.45319867088079,
+  "peak_rss_mb": 43.390625,
+  "footprint_mb": 58.281959533691406,
+  "errors": [],
+  "adapter": "gpui metal headless",
+  "proto": "gpui"
+}
