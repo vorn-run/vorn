@@ -83,6 +83,7 @@ export function scrub(text: string, dirs: Record<string, string>): string {
     .replace(/127\.0\.0\.1:\d+/g, '127.0.0.1:<port>')
     .replace(/vorn_[0-9a-f-]{36}_[A-Za-z0-9_-]{43}/g, '<token>')
     .replace(/^\d+\.\d+\.\d+\S*\n$/, '<version>\n')
+    .replace(/\b\d+d ago\b/g, '<n>d ago')
 }
 
 /** A token's id, which is random, in what a token command printed. */

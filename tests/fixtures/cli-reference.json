@@ -257,7 +257,7 @@
   ],
   "scripted [\"session\",\"list\",\"--recent\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 0,
-    "out": "ID          AGENT   PROJECT  WHEN       ACTIVITY\nf00dfeed    claude  website  2474d ago  12 turns\nnot-a-uuid  codex   vorn     2474d ago  idle\n",
+    "out": "ID          AGENT   PROJECT  WHEN       ACTIVITY\nf00dfeed    claude  website  <n>d ago  12 turns\nnot-a-uuid  codex   vorn     <n>d ago  idle\n",
     "err": ""
   },
   "scripted calls [\"session\",\"list\",\"--recent\"]": ["{\"method\":\"sessions:getRecent\"}"],
@@ -271,7 +271,7 @@
   ],
   "scripted [\"session\",\"list\",\"--recent\",\"--project\",\"website\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 0,
-    "out": "ID        AGENT   PROJECT  WHEN       ACTIVITY\nf00dfeed  claude  website  2474d ago  12 turns\n",
+    "out": "ID        AGENT   PROJECT  WHEN       ACTIVITY\nf00dfeed  claude  website  <n>d ago  12 turns\n",
     "err": ""
   },
   "scripted calls [\"session\",\"list\",\"--recent\",\"--project\",\"website\"]": [
@@ -288,7 +288,7 @@
   ],
   "scripted [\"session\",\"list\",\"--recent\",\"--path\",\"/work/./vorn/\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 0,
-    "out": "ID        AGENT   PROJECT  WHEN       ACTIVITY\nf00dfeed  claude  website  2474d ago  12 turns\n",
+    "out": "ID        AGENT   PROJECT  WHEN       ACTIVITY\nf00dfeed  claude  website  <n>d ago  12 turns\n",
     "err": ""
   },
   "scripted calls [\"session\",\"list\",\"--recent\",\"--path\",\"/work/./vorn/\"]": [
@@ -480,7 +480,7 @@
   ],
   "scripted [\"workflow\",\"list\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 0,
-    "out": "ID                            NAME                   TRIGGER  ENABLED  LAST RUN  WHEN\nsystem:default-task-workflow  Default Task Workflow  manual   yes      -         -\n0f1e2d3c                      Nightly build          cron     no       error     2474d ago\nimport:alpha                  Twin                   manual   yes      ran       2474d ago\nimport:beta                   twin                   none     yes      -         -\nnever-starts                  Never starts           none     yes      -         -\n",
+    "out": "ID                            NAME                   TRIGGER  ENABLED  LAST RUN  WHEN\nsystem:default-task-workflow  Default Task Workflow  manual   yes      -         -\n0f1e2d3c                      Nightly build          cron     no       error     <n>d ago\nimport:alpha                  Twin                   manual   yes      ran       <n>d ago\nimport:beta                   twin                   none     yes      -         -\nnever-starts                  Never starts           none     yes      -         -\n",
     "err": ""
   },
   "scripted calls [\"workflow\",\"list\"]": ["{\"method\":\"workflow:list\"}"],
@@ -577,7 +577,7 @@
   "scripted calls [\"workflow\",\"stop\"]": [],
   "scripted [\"workflow\",\"runs\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 0,
-    "out": "RUN       WORKFLOW       STATUS   STARTED\n5a5a5a5a  Nightly build  running  2474d ago\n5a5b0000  gone-workflow  success  2474d ago\n",
+    "out": "RUN       WORKFLOW       STATUS   STARTED\n5a5a5a5a  Nightly build  running  <n>d ago\n5a5b0000  gone-workflow  success  <n>d ago\n",
     "err": ""
   },
   "scripted calls [\"workflow\",\"runs\"]": [
@@ -595,7 +595,7 @@
   ],
   "scripted [\"workflow\",\"runs\",\"--workflow\",\"nightly build\",\"--data-dir\",\"<data-dir>\"]": {
     "code": 0,
-    "out": "RUN       WORKFLOW       STATUS   STARTED\n5a5a5a5a  Nightly build  running  2474d ago\n",
+    "out": "RUN       WORKFLOW       STATUS   STARTED\n5a5a5a5a  Nightly build  running  <n>d ago\n",
     "err": ""
   },
   "scripted calls [\"workflow\",\"runs\",\"--workflow\",\"nightly build\"]": [
