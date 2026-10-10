@@ -1,7 +1,6 @@
 //! A session's terminal: libghostty-vt fed one write per flush, its labels and counters, and its effects.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use libghostty_vt::terminal::{
@@ -78,8 +77,6 @@ pub struct Emulator {
     changed: Rc<Cell<u8>>,
     /// Codepoints the last feed printed that may have joined a cell.
     joins: Vec<u32>,
-    /// Whether Ghostty gives each codepoint asked about no width, so it joins the cell before.
-    zero_width: HashMap<u32, bool>,
     /// Output bytes handed to Ghostty by [`Emulator::feed`].
     pub(crate) parsed: u64,
     /// Feeds that printed a zero-width codepoint (see [`Emulator::joiners_printed`]).
@@ -176,7 +173,6 @@ impl Emulator {
             scan: Scan::default(),
             changed,
             joins: Vec::new(),
-            zero_width: HashMap::new(),
             parsed: 0,
             joiners: 0,
         })
@@ -275,7 +271,7 @@ impl Emulator {
                 self.cwd = path;
             }
         }
-        if joins.drain(..).any(|cp| self.zero_width(cp)) {
+        if joins.drain(..).any(zero_width) {
             self.joiners += 1;
         }
         self.joins = joins;
@@ -296,14 +292,6 @@ impl Emulator {
         Ok(())
     }
 
-    /// Whether Ghostty gives `cp` no width, asked of its own tables once.
-    fn zero_width(&mut self, cp: u32) -> bool {
-        *self
-            .zero_width
-            .entry(cp)
-            .or_insert_with(|| probe_zero_width(cp).unwrap_or(true))
-    }
-
     /// The counters that follow the output, which a checkpoint does not carry.
     pub fn counters(&self) -> Counters {
         Counters {
@@ -320,12 +308,9 @@ impl Emulator {
         self.scan.clears = c.clears;
     }
 
-    /// Takes the counters and caches that follow the output from the terminal this replaces.
-    pub(crate) fn carry_counters(&mut self, from: &mut Emulator) {
-        self.parsed = from.parsed;
-        self.joiners = from.joiners;
-        self.scan.clears = from.scan.clears;
-        self.zero_width = std::mem::take(&mut from.zero_width);
+    /// Takes the counters that follow the output from the terminal this replaces.
+    pub(crate) fn carry_counters(&mut self, from: &Emulator) {
+        self.set_counters(from.counters());
     }
 }
 
@@ -349,15 +334,9 @@ fn url_path(raw: &str) -> Option<String> {
     (!path.is_empty()).then(|| clip_units(&percent_decode(path).unwrap_or_else(|| path.to_owned())))
 }
 
-/// Prints `cp` after a narrow character: the cursor stays in column 1 only if it joined it.
-fn probe_zero_width(cp: u32) -> Option<bool> {
-    let ch = char::from_u32(cp)?;
-    let mut t = Terminal::new(16, 1).ok()?;
-    let mut bytes = b"a".to_vec();
-    let mut buf = [0; 4];
-    bytes.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
-    t.vt_write(&bytes);
-    Some(t.cursor_x().ok()? == 1)
+/// Whether Ghostty's print gives `cp` no width, so it joins the cell before: the same table it prints with.
+fn zero_width(cp: u32) -> bool {
+    char::from_u32(cp).is_none_or(|c| libghostty_vt::unicode::codepoint_width(c) == 0)
 }
 
 #[cfg(test)]
@@ -394,6 +373,34 @@ mod tests {
         assert_eq!(em.joiners_printed(), 1);
         em.feed("👍\u{1f3fd} a\u{200d}".as_bytes(), &mut fx);
         assert_eq!(em.joiners_printed(), 2);
+    }
+
+    /// The width table agrees with what printing after a narrow character does.
+    #[test]
+    fn zero_width_is_what_ghosttys_print_joins() {
+        let mut t = Terminal::new(16, 1).unwrap();
+        let joined = |t: &mut Terminal<'static, 'static>, c: char| {
+            let mut bytes = b"\x1b[Ha".to_vec();
+            bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+            t.vt_write(&bytes);
+            t.cursor_x().unwrap() == 1
+        };
+        let sample = (0x300..0x3000).chain((0x3000..0x11_0000).step_by(7));
+        let mut zero = 0;
+        for c in sample
+            .filter(|&cp| crate::scan::may_join(cp))
+            .filter_map(char::from_u32)
+        {
+            assert_eq!(
+                zero_width(u32::from(c)),
+                joined(&mut t, c),
+                "U+{:04X}",
+                u32::from(c)
+            );
+            zero += usize::from(zero_width(u32::from(c)));
+        }
+        assert!(zero > 100, "{zero}");
+        assert!(zero_width(0xd800), "not a character");
     }
 
     #[test]
