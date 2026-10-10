@@ -1,0 +1,55 @@
+# Runs the desktop app's tests on Windows against a test vornd it builds, and
+# uploads the offscreen renders. Pull requests test Linux in core.yml; this
+# covers the Windows-specific paths (ConPTY shells, the window backend).
+name: vorn-app windows
+
+# Dispatch only works once this file is on the default branch, so a push to
+# the app's branch that touches this file also runs it.
+on:
+  workflow_dispatch:
+  push:
+    branches: [vornui-client]
+    paths: ['.github/workflows/vorn-app.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+        working-directory: packages/core
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+
+      # libghostty-vt-sys builds Ghostty's VT library from source with Zig.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Rust
+        run: rustup toolchain install
+
+      - name: Build
+        run: cargo build --profile ci --locked -p vornd -p vorn-sessiond -p vorn-app --bins
+
+      # vornd installs sessiond with the ConPTY that sits beside it.
+      - name: ConPTY
+        run: node scripts/fetch-conpty.mjs --out target/ci
+
+      - name: Test
+        run: |
+          mkdir -p shots
+          VORN_APP_SHOT="$PWD/shots/windows" cargo test --profile ci --locked -p vorn-app
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vorn-app-windows
+          path: packages/core/shots
+          if-no-files-found: warn

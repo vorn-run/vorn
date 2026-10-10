@@ -5382,6 +5382,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-app"
+version = "0.8.0-beta.7"
+dependencies = [
+ "futures-util",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "vorn-grid-client",
+ "vorn-protocol",
+ "vorn-term-mirror",
+ "vorn-term-proto",
+ "vornui",
+ "windows-sys 0.61.2",
+ "winit",
+]
+
+[[package]]
 name = "vorn-cli"
 version = "0.8.0-beta.7"
 dependencies = [

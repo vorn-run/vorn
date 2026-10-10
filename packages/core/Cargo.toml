@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/screen",
+  "crates/vorn-app",
   "crates/analysis",
   "crates/pipeline",
   "crates/term-proto",
