@@ -3,12 +3,12 @@
   "main": {
     "nodes": 19,
     "roles": {
-      "Tab": 3,
-      "Button": 11,
+      "Toolbar": 1,
       "Image": 1,
       "MultilineTextInput": 1,
       "Window": 1,
-      "Toolbar": 1,
+      "Button": 11,
+      "Tab": 3,
       "TabList": 1
     },
     "tree": {
@@ -16,7 +16,7 @@
       "gpui_focus": null,
       "active_descendant_focus": null,
       "frame": {
-        "rendered_at": "2026-10-10T03:22:05.300+00:00",
+        "rendered_at": "2026-10-10T13:27:28.668+00:00",
         "frame_number": 6,
         "window_title": null,
         "node_count": 19,
@@ -193,19 +193,19 @@
   "grid": {
     "nodes": 13,
     "roles": {
-      "Terminal": 2,
-      "Tab": 3,
-      "TabList": 1,
       "Button": 5,
+      "Terminal": 2,
       "Toolbar": 1,
-      "Window": 1
+      "Window": 1,
+      "TabList": 1,
+      "Tab": 3
     },
     "tree": {
       "root": "m",
       "gpui_focus": "k",
       "active_descendant_focus": null,
       "frame": {
-        "rendered_at": "2026-10-10T03:22:06.641+00:00",
+        "rendered_at": "2026-10-10T13:27:29.857+00:00",
         "frame_number": 5,
         "window_title": null,
         "node_count": 13,

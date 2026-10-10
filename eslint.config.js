@@ -18,7 +18,8 @@ export default tseslint.config(
       'packages/core/scripts/',
       'apps/macos/scripts/',
       'packages/core/target/',
-      'website/scripts/'
+      'website/scripts/',
+      'spikes/'
     ]
   },
 
