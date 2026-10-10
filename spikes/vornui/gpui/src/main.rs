@@ -57,7 +57,8 @@ impl AssetSource for Icons {
 }
 
 fn text_system() -> Arc<dyn PlatformTextSystem> {
-    gpui_platform::current_platform(true).text_system()
+    // GPUI's headless Windows platform has a no-op text system; the windowed one has DirectWrite.
+    gpui_platform::current_platform(!cfg!(windows)).text_system()
 }
 
 fn renderer() -> anyhow::Result<Option<Box<dyn PlatformHeadlessRenderer>>> {
