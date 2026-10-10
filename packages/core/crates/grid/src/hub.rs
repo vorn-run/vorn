@@ -21,7 +21,6 @@
 
 use std::time::{Duration, Instant};
 
-use libghostty_vt::terminal::Mode;
 use vorn_screen::Emulator;
 use vorn_term_proto::msg::{
     Attach, Attached, CopyFormat, EventId, EventKind, Fidelity, GridPoint, GridResume, InputEvent,
@@ -182,8 +181,8 @@ pub struct Hub {
     last_render: Option<Instant>,
     /// Records applied since the last render update.
     pending: bool,
-    /// When synchronized output began, while it lasts.
-    sync_since: Option<Instant>,
+    /// The synchronized output hold under way and when it began, while it lasts.
+    sync: Option<(u64, Instant)>,
     /// Whether the session was live at the last call: nothing renders
     /// before, so no frame is due either.
     live: bool,
@@ -212,6 +211,7 @@ impl Hub {
     /// Records were applied: render if a frame is due.
     pub fn records(&mut self, ctx: &Ctx<'_>, now: Instant, out: &mut Vec<HubOut>) {
         self.live = ctx.live;
+        self.note_hold(ctx.em, now);
         if !self.pending {
             self.pending = true;
             self.pending_at = Some(now);
@@ -227,7 +227,7 @@ impl Hub {
             return None;
         }
         let mut at = self.last_render.map(|t| t + self.cfg.frame);
-        if let Some(since) = self.sync_since {
+        if let Some((_, since)) = self.sync {
             let end = since + self.cfg.sync_hold;
             at = Some(at.map_or(end, |a| a.max(end)));
         }
@@ -482,21 +482,28 @@ impl Hub {
         if !ctx.live {
             return;
         }
-        let t = ctx.em.terminal();
-        if t.mode(Mode::SYNC_OUTPUT).unwrap_or(false) {
-            let since = *self.sync_since.get_or_insert(now);
+        self.note_hold(ctx.em, now);
+        if let Some((_, since)) = self.sync {
             if now.duration_since(since) < self.cfg.sync_hold {
                 // What clients hold is still a whole frame; new attachments
                 // get it too.
                 self.pump(ctx, out);
                 return;
             }
-        } else {
-            self.sync_since = None;
         }
         if self.update(ctx, now) {
             self.pump(ctx, out);
         }
+    }
+
+    /// Follows synchronized output: a hold that ended frees the next frame at once, and one
+    /// begun since the last look waits its own `sync_hold`, even when the previous ended and
+    /// this one started between two looks.
+    fn note_hold(&mut self, em: &Emulator, now: Instant) {
+        self.sync = em.render_hold().map(|n| match self.sync {
+            Some((m, since)) if m == n => (n, since),
+            _ => (n, now),
+        });
     }
 
     /// The program ended and the session is about to leave: every visible
@@ -795,5 +802,53 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    /// A hold begun after another ended between two looks waits its own
+    /// `sync_hold`, and the hold ending sends the frame at the clock.
+    #[test]
+    fn each_synchronized_update_waits_from_its_own_start() {
+        let mut em = Emulator::new(20, 4).unwrap();
+        let mut hub = Hub::new(HubConfig::default());
+        let hold = HubConfig::default().sync_hold;
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut out = Vec::new();
+        let attach = Attach {
+            session: "s".into(),
+            mode: AttachMode::Grid,
+            view: Size::default(),
+            visible: true,
+            resume: None,
+            history_tail: 0,
+        };
+        let peer = Peer { conn: 1, sid: 1 };
+        hub.handle(
+            GridIn::Attach { peer, attach },
+            &ctx(&em, true),
+            t0,
+            &mut out,
+        );
+        let feed = |em: &mut Emulator, bytes: &[u8]| em.feed(bytes, &mut Vec::new());
+
+        feed(&mut em, b"\x1b[?2026hone");
+        hub.records(&ctx(&em, true), ms(10), &mut out);
+        assert_eq!(hub.due(), Some(ms(10) + hold));
+
+        feed(&mut em, b"\x1b[?2026l\x1b[?2026htw");
+        hub.records(&ctx(&em, true), ms(100), &mut out);
+        assert_eq!(hub.due(), Some(ms(100) + hold));
+        hub.tick(&ctx(&em, true), ms(10) + hold, &mut out);
+        assert_eq!(
+            hub.due(),
+            Some(ms(100) + hold),
+            "the second hold is not cut short"
+        );
+
+        feed(&mut em, b"o\x1b[?2026l");
+        out.clear();
+        hub.records(&ctx(&em, true), ms(120), &mut out);
+        assert_eq!(hub.due(), None, "released at once");
+        assert!(out.iter().any(|o| matches!(o, HubOut::Send { .. })));
     }
 }

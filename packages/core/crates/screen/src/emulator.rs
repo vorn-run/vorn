@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use libghostty_vt::style::RgbColor;
 use libghostty_vt::terminal::{
-    ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType,
+    ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode,
     PrimaryDeviceAttributes, SecondaryDeviceAttributes, SizeReportSize, Terminal,
     TertiaryDeviceAttributes,
 };
@@ -119,6 +119,8 @@ pub struct Emulator {
     pub(crate) parsed: u64,
     /// Feeds that printed a zero-width codepoint (see [`Emulator::joiners_printed`]).
     pub(crate) joiners: u64,
+    /// Synchronized output holds started, counted by Ghostty's render hold callback.
+    holds: Rc<Cell<u64>>,
 }
 
 impl Emulator {
@@ -225,6 +227,13 @@ impl Emulator {
         term.on_title_changed(move |_| flag.set(flag.get() | TITLE))?;
         let flag = Rc::clone(&changed);
         term.on_pwd_changed(move |_| flag.set(flag.get() | PWD))?;
+        let holds = Rc::new(Cell::new(0));
+        let count = Rc::clone(&holds);
+        term.on_render_hold(move |_, held| {
+            if held {
+                count.set(count.get() + 1);
+            }
+        })?;
         Ok(Self {
             term,
             effects,
@@ -237,6 +246,7 @@ impl Emulator {
             joins: Vec::new(),
             parsed: 0,
             joiners: 0,
+            holds,
         })
     }
 
@@ -280,6 +290,17 @@ impl Emulator {
     /// Feeds that printed a joining codepoint, whose row Ghostty does not mark dirty outside mode 2027.
     pub fn joiners_printed(&self) -> u64 {
         self.joiners
+    }
+
+    /// While synchronized output (mode 2026) holds the screen, which hold this is: holds are
+    /// counted as they start, so a renderer that polls can tell a new hold begun since it last
+    /// looked from the one it already waited on.
+    pub fn render_hold(&self) -> Option<u64> {
+        // The mode says whether a hold is on: a rebuilt terminal restores it without calling back.
+        self.term
+            .mode(Mode::SYNC_OUTPUT)
+            .unwrap_or(false)
+            .then(|| self.holds.get())
     }
 
     /// Scrollback clears (ED 3) and resets (RIS): history line numbers start again when this moves.
@@ -401,6 +422,7 @@ impl Emulator {
     /// Takes the counters that follow the output from the terminal this replaces.
     pub(crate) fn carry_counters(&mut self, from: &Emulator) {
         self.set_counters(from.counters());
+        self.holds.set(from.holds.get());
     }
 }
 
@@ -569,6 +591,23 @@ mod tests {
             ]
         );
         assert_eq!((em.title(), em.cwd()), ("t", "/srv"));
+    }
+
+    #[test]
+    fn render_holds_are_numbered_and_survive_a_cut() {
+        let mut em = Emulator::with_scrollback(20, 4, 1 << 16).unwrap();
+        let mut fx = Vec::new();
+        assert_eq!(em.render_hold(), None);
+        em.feed(b"\x1b[?2026ha\x1b[?2026h", &mut fx);
+        assert_eq!(em.render_hold(), Some(1));
+        em.feed(b"\x1b[?2026l\x1b[?2026hb", &mut fx);
+        assert_eq!(em.render_hold(), Some(2));
+        em.checkpoint().unwrap();
+        assert_eq!(em.render_hold(), Some(2));
+        em.feed(b"\x1b[?2026l", &mut fx);
+        assert_eq!(em.render_hold(), None);
+        em.feed(b"\x1b[?2026h", &mut fx);
+        assert_eq!(em.render_hold(), Some(3));
     }
 
     #[test]
