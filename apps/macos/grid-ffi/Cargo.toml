@@ -1,0 +1,26 @@
+[package]
+name = "vorn-grid-ffi"
+version = "0.7.5"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "A C ABI over vornd's grid mode for the native macOS app: one connection, live panes, resolved views"
+
+# Its own workspace: the app builds it apart from packages/core.
+[workspace]
+
+[lib]
+name = "vorn_grid_ffi"
+crate-type = ["staticlib"]
+
+[dependencies]
+vorn-grid-client = { path = "../../../packages/core/crates/grid-client" }
+vorn-term-mirror = { path = "../../../packages/core/crates/term-mirror" }
+vorn-term-proto = { path = "../../../packages/core/crates/term-proto" }
+
+[profile.release]
+# Unwinding stays on: every entry point catches panics at the boundary.
+panic = "unwind"
+codegen-units = 1
+lto = "thin"

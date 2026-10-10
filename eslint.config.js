@@ -16,6 +16,7 @@ export default tseslint.config(
       '**/*.config.cjs',
       'scripts/',
       'packages/core/scripts/',
+      'apps/macos/scripts/',
       'packages/core/target/',
       'website/scripts/'
     ]
