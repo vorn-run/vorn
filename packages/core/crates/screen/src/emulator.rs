@@ -68,13 +68,11 @@ const PRIMARY_DA: PrimaryDeviceAttributes = PrimaryDeviceAttributes::new(
     &[DeviceAttributeFeature::ANSI_COLOR],
 );
 
-/// What [`Emulator::parsed_bytes`], [`Emulator::joiners_printed`] and
-/// [`Emulator::history_clears`] stand at: kept beside a checkpoint by a host
+/// What [`Emulator::parsed_bytes`] and [`Emulator::history_clears`] stand at: kept beside a checkpoint by a host
 /// that drops a terminal and rebuilds it later.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Counters {
     parsed: u64,
-    joiners: u64,
     clears: u64,
 }
 
@@ -113,12 +111,8 @@ pub struct Emulator {
     pub(crate) scan: Scan,
     /// Which of Ghostty's title and pwd the last write changed.
     changed: Rc<Cell<u8>>,
-    /// Codepoints the last feed printed that may have joined a cell.
-    joins: Vec<u32>,
     /// Output bytes handed to Ghostty by [`Emulator::feed`].
     pub(crate) parsed: u64,
-    /// Feeds that printed a zero-width codepoint (see [`Emulator::joiners_printed`]).
-    pub(crate) joiners: u64,
     /// Synchronized output holds started, counted by Ghostty's render hold callback.
     holds: Rc<Cell<u64>>,
 }
@@ -243,9 +237,7 @@ impl Emulator {
             cwd: String::new(),
             scan: Scan::default(),
             changed,
-            joins: Vec::new(),
             parsed: 0,
-            joiners: 0,
             holds,
         })
     }
@@ -285,11 +277,6 @@ impl Emulator {
     /// Output bytes [`Emulator::feed`] passed to Ghostty, across cuts: the one-parse counter (TP-T1).
     pub fn parsed_bytes(&self) -> u64 {
         self.parsed
-    }
-
-    /// Feeds that printed a joining codepoint, whose row Ghostty does not mark dirty outside mode 2027.
-    pub fn joiners_printed(&self) -> u64 {
-        self.joiners
     }
 
     /// While synchronized output (mode 2026) holds the screen, which hold this is: holds are
@@ -340,17 +327,12 @@ impl Emulator {
     pub fn feed(&mut self, bytes: &[u8], out: &mut Vec<Effect>) {
         self.parsed += bytes.len() as u64;
         self.term.vt_write(bytes);
-        let mut joins = std::mem::take(&mut self.joins);
         let (cwd, effects) = (&mut self.cwd, &self.effects);
-        self.scan.feed(
-            bytes,
-            |payload| {
-                if let Some(moved) = private_cwd(cwd, payload) {
-                    effects.borrow_mut().push(Effect::Cwd(moved));
-                }
-            },
-            &mut joins,
-        );
+        self.scan.feed(bytes, |payload| {
+            if let Some(moved) = private_cwd(cwd, payload) {
+                effects.borrow_mut().push(Effect::Cwd(moved));
+            }
+        });
         // After the OSC 5522 reports, so one in the same feed is not hidden.
         let changed = self.changed.replace(0);
         if changed & TITLE != 0 {
@@ -363,10 +345,6 @@ impl Emulator {
                 self.cwd = path;
             }
         }
-        if joins.drain(..).any(zero_width) {
-            self.joiners += 1;
-        }
-        self.joins = joins;
         out.append(&mut self.effects.borrow_mut());
     }
 
@@ -407,7 +385,6 @@ impl Emulator {
     pub fn counters(&self) -> Counters {
         Counters {
             parsed: self.parsed,
-            joiners: self.joiners,
             clears: self.scan.clears,
         }
     }
@@ -415,7 +392,6 @@ impl Emulator {
     /// Takes up `c`, as a terminal rebuilt in place of the one they were read from.
     pub fn set_counters(&mut self, c: Counters) {
         self.parsed = c.parsed;
-        self.joiners = c.joiners;
         self.scan.clears = c.clears;
     }
 
@@ -459,11 +435,6 @@ fn cell_px(t: &Terminal<'_, '_>) -> Option<(u32, u32)> {
     Some((w, h))
 }
 
-/// Whether Ghostty's print gives `cp` no width, so it joins the cell before: the same table it prints with.
-fn zero_width(cp: u32) -> bool {
-    char::from_u32(cp).is_none_or(|c| libghostty_vt::unicode::codepoint_width(c) == 0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -483,21 +454,6 @@ mod tests {
             em.feed(bytes, &mut fx);
             assert_eq!(em.history_clears(), want, "{bytes:?}");
         }
-    }
-
-    #[test]
-    fn joiners_are_counted_per_feed_by_ghosttys_widths() {
-        let mut em = Emulator::new(20, 3).unwrap();
-        let mut fx = Vec::new();
-        em.feed("é ─ ✓ 日本".as_bytes(), &mut fx);
-        assert_eq!(em.joiners_printed(), 0);
-        em.feed("e\u{301}".as_bytes(), &mut fx);
-        assert_eq!(em.joiners_printed(), 1);
-        // Greek takes a cell of its own, though the filter lets it through.
-        em.feed("αβγ".as_bytes(), &mut fx);
-        assert_eq!(em.joiners_printed(), 1);
-        em.feed("👍\u{1f3fd} a\u{200d}".as_bytes(), &mut fx);
-        assert_eq!(em.joiners_printed(), 2);
     }
 
     fn replies(fx: Vec<Effect>) -> Vec<String> {
@@ -537,34 +493,6 @@ mod tests {
         assert_eq!(fx.len(), 1);
         em.resize_px(100, 30, 1200, 600, &mut fx).unwrap();
         assert_eq!(fx.len(), 1);
-    }
-
-    /// The width table agrees with what printing after a narrow character does.
-    #[test]
-    fn zero_width_is_what_ghosttys_print_joins() {
-        let mut t = Terminal::new(16, 1).unwrap();
-        let joined = |t: &mut Terminal<'static, 'static>, c: char| {
-            let mut bytes = b"\x1b[Ha".to_vec();
-            bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
-            t.vt_write(&bytes);
-            t.cursor_x().unwrap() == 1
-        };
-        let sample = (0x300..0x3000).chain((0x3000..0x11_0000).step_by(7));
-        let mut zero = 0;
-        for c in sample
-            .filter(|&cp| crate::scan::may_join(cp))
-            .filter_map(char::from_u32)
-        {
-            assert_eq!(
-                zero_width(u32::from(c)),
-                joined(&mut t, c),
-                "U+{:04X}",
-                u32::from(c)
-            );
-            zero += usize::from(zero_width(u32::from(c)));
-        }
-        assert!(zero > 100, "{zero}");
-        assert!(zero_width(0xd800), "not a character");
     }
 
     #[test]

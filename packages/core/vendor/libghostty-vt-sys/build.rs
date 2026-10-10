@@ -6,6 +6,13 @@ use std::process::Command;
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
 const GHOSTTY_COMMIT: &str = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0";
 
+/// Fixes applied to the fetched commit until upstream has them, in order. A
+/// `GHOSTTY_SOURCE_DIR` or pkg-config build uses its source as it is.
+const PATCHES: &[(&str, &str)] = &[(
+    "0001-mark-zero-width-joins-dirty.patch",
+    include_str!("patches/0001-mark-zero-width-joins-dirty.patch"),
+)];
+
 /// File name of the static archive on Windows. Ghostty installs it under this
 /// name for every Windows ABI so it does not collide with `ghostty-vt.lib`,
 /// the import library for `ghostty-vt.dll`. Validation and link emission must
@@ -95,6 +102,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=DEBUG");
     println!("cargo:rerun-if-env-changed=OPT_LEVEL");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=patches");
 
     // An explicit source override should stay authoritative even when the
     // pkg-config feature is enabled, so local Ghostty checkouts remain easy to
@@ -417,11 +425,15 @@ fn zig_optimize_mode() -> &'static str {
 fn fetch_ghostty(out_dir: &Path) -> PathBuf {
     let src_dir = out_dir.join("ghostty-src");
     let stamp = src_dir.join(".ghostty-commit");
+    let want = std::iter::once(GHOSTTY_COMMIT)
+        .chain(PATCHES.iter().map(|(name, _)| *name))
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    // Skip fetch if we already have the right commit.
+    // Skip fetch if we already have the right commit with the same patches.
     if stamp.exists()
         && let Ok(existing) = std::fs::read_to_string(&stamp)
-        && existing.trim() == GHOSTTY_COMMIT
+        && existing.trim() == want
     {
         return src_dir;
     }
@@ -454,7 +466,15 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
         .current_dir(&src_dir);
     run(checkout, "git checkout ghostty commit");
 
-    std::fs::write(&stamp, GHOSTTY_COMMIT).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
+    for (name, patch) in PATCHES {
+        let path = out_dir.join(name);
+        std::fs::write(&path, patch).unwrap_or_else(|e| panic!("failed to write {name}: {e}"));
+        let mut apply = Command::new("git");
+        apply.arg("apply").arg(&path).current_dir(&src_dir);
+        run(apply, &format!("git apply {name}"));
+    }
+
+    std::fs::write(&stamp, want).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
 
     src_dir
 }

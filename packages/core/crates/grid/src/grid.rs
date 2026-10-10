@@ -111,9 +111,6 @@ pub struct Grid {
     /// bits cannot be trusted (another reader consumed them, the terminal
     /// was swapped, the tables were compacted).
     full: bool,
-    /// The emulator's count of codepoints that may have joined a cell, at
-    /// the last update: Ghostty marks no row dirty for those.
-    joiners: u64,
     /// The emulator's count of scrollback clears and resets at the last
     /// update. History can be cleared and refilled between two counts of
     /// scrolled lines, so a clear starts a new epoch whatever the count.
@@ -173,7 +170,6 @@ impl Grid {
             palette_revs: Box::new([0; 256]),
             lines: Lines::default(),
             full: true,
-            joiners: 0,
             clears: None,
             writer: RowWriter::new(),
             columns: Columns::default(),
@@ -283,14 +279,6 @@ impl Grid {
         if self.tables.over_limit() {
             self.tables.compact();
             self.full = true;
-        }
-        let joiners = em.joiners_printed();
-        if joiners != self.joiners {
-            // A combining mark or joiner may have changed a cell on a row
-            // Ghostty did not mark dirty, which the render state therefore
-            // did not copy: start it again so it copies every row.
-            self.joiners = joiners;
-            self.distrust_dirty();
         }
 
         let top_line = self.lines.top_line();
@@ -885,6 +873,30 @@ mod tests {
         let delta = grid.delta(&held).unwrap();
         assert_eq!(delta.rows.iter().map(|r| r.y).collect::<Vec<_>>(), [1, 4]);
 
+        let mut fresh = Grid::new().unwrap();
+        fresh.update(&em, AT).unwrap();
+        assert_eq!(
+            grid.snapshot(Vec::new()).rows,
+            fresh.snapshot(Vec::new()).rows
+        );
+    }
+
+    /// A zero-width codepoint joins the cell before it, on a row nothing
+    /// else touched since the last update: Ghostty marks that row dirty.
+    #[test]
+    fn a_combining_mark_marks_its_row_dirty() {
+        let mut em = Emulator::new(20, 4).unwrap();
+        let mut fx = Vec::new();
+        em.feed(b"\x1b[2;1He", &mut fx);
+        let mut grid = Grid::new().unwrap();
+        grid.update(&em, AT).unwrap();
+        for mark in ["\u{301}", "\u{200d}", "\u{308}"] {
+            let held = grid.held();
+            em.feed(mark.as_bytes(), &mut fx);
+            assert!(grid.update(&em, AT).unwrap(), "{mark:?}");
+            let delta = grid.delta(&held).unwrap();
+            assert_eq!(delta.rows.iter().map(|r| r.y).collect::<Vec<_>>(), [1]);
+        }
         let mut fresh = Grid::new().unwrap();
         fresh.update(&em, AT).unwrap();
         assert_eq!(
