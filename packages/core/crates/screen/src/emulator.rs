@@ -3,6 +3,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use libghostty_vt::style::RgbColor;
 use libghostty_vt::terminal::{
     ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType,
     PrimaryDeviceAttributes, SecondaryDeviceAttributes, SizeReportSize, Terminal,
@@ -60,6 +61,29 @@ pub struct Counters {
     parsed: u64,
     joiners: u64,
     clears: u64,
+}
+
+/// A theme's colours, as RGB: what OSC 4 and 10 to 12 queries are answered with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Theme {
+    pub fg: [u8; 3],
+    pub bg: [u8; 3],
+    /// `None` draws the cursor in the cell's colours.
+    pub cursor: Option<[u8; 3]>,
+    /// The sixteen ANSI colours; the other 240 palette entries keep Ghostty's.
+    pub ansi: Option<[[u8; 3]; 16]>,
+}
+
+impl Theme {
+    /// Foreground and background only.
+    pub const fn new(fg: [u8; 3], bg: [u8; 3]) -> Self {
+        Theme {
+            fg,
+            bg,
+            cursor: None,
+            ansi: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -223,17 +247,26 @@ impl Emulator {
         self.scan.clears
     }
 
-    /// The `(fg, bg)` defaults OSC 10 and 11 queries are answered with; `None` unsets them.
-    pub fn set_default_colors(&mut self, colors: Option<([u8; 3], [u8; 3])>) -> Result<()> {
-        let rgb = |c: [u8; 3]| libghostty_vt::style::RgbColor {
+    /// The theme colour queries are answered with and renderers draw defaults in; `None` unsets it.
+    pub fn set_theme(&mut self, theme: Option<&Theme>) -> Result<()> {
+        let rgb = |c: [u8; 3]| RgbColor {
             r: c[0],
             g: c[1],
             b: c[2],
         };
+        self.term.set_default_fg_color(theme.map(|t| rgb(t.fg)))?;
+        self.term.set_default_bg_color(theme.map(|t| rgb(t.bg)))?;
         self.term
-            .set_default_fg_color(colors.map(|(fg, _)| rgb(fg)))?;
-        self.term
-            .set_default_bg_color(colors.map(|(_, bg)| rgb(bg)))?;
+            .set_default_cursor_color(theme.and_then(|t| t.cursor).map(rgb))?;
+        // Ghostty's own palette first, so the entries past the theme's are its own.
+        self.term.set_default_color_palette(None)?;
+        if let Some(ansi) = theme.and_then(|t| t.ansi) {
+            let mut palette = self.term.default_color_palette()?;
+            for (slot, c) in palette.0.iter_mut().zip(ansi) {
+                *slot = rgb(c);
+            }
+            self.term.set_default_color_palette(Some(palette))?;
+        }
         Ok(())
     }
 

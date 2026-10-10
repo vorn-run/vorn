@@ -92,10 +92,10 @@ pub struct Config {
     /// Hand each batch of records back once applied ([`Out::Applied`]), for
     /// a host that streams them to bytes clients.
     pub stream: bool,
-    /// Default foreground and background, as RGB: what OSC 10 and 11
-    /// queries are answered with. None leaves them unset, and those queries
-    /// unanswered.
-    pub colors: Option<([u8; 3], [u8; 3])>,
+    /// The theme: what OSC 4 and 10 to 12 queries are answered with, and
+    /// the defaults grid clients draw in. None leaves Ghostty's, and OSC 10
+    /// and 11 queries unanswered.
+    pub colors: Option<vorn_screen::Theme>,
     /// How long a live session goes with no output, request or viewer
     /// before its terminal is put away as a checkpoint ([`Session::sleep`]).
     /// None keeps every terminal live.

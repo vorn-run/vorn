@@ -193,8 +193,12 @@ mod tests {
             b"\x1b[31mred\x1b[0m\r\nline2\r\nline3\r\nline4\r\nline5\r\n\xe4\xb8\xad\xe6\x96\x87 \xe2\x82\xac\x1b[2;5r\x1b[3;7H",
         );
         let mut src = src;
-        src.set_default_colors(Some(([1, 2, 3], [4, 5, 6])))
-            .unwrap();
+        src.set_theme(Some(&vorn_screen::Theme {
+            cursor: Some([7, 8, 9]),
+            ansi: Some([[10, 11, 12]; 16]),
+            ..vorn_screen::Theme::new([1, 2, 3], [4, 5, 6])
+        }))
+        .unwrap();
         let s = cut(&src, Cursor::start(0), false);
         assert!(!contains(&s.vt, b"\x1b]4;"), "no palette");
         assert!(!contains(&s.vt, b"\x1b]1"), "no default colours");
