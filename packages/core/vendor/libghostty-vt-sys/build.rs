@@ -453,6 +453,9 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
         .arg("clone")
         .arg("--config")
         .arg("core.longpaths=true")
+        // Keep upstream's LF endings so the patches apply on Windows too.
+        .arg("--config")
+        .arg("core.autocrlf=false")
         .arg("--filter=blob:none")
         .arg("--no-checkout")
         .arg(GHOSTTY_REPO)
@@ -468,6 +471,8 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
 
     for (name, patch) in PATCHES {
         let path = out_dir.join(name);
+        // A Windows checkout of this crate may have given the patch CRLF endings.
+        let patch = patch.replace("\r\n", "\n");
         std::fs::write(&path, patch).unwrap_or_else(|e| panic!("failed to write {name}: {e}"));
         let mut apply = Command::new("git");
         apply.arg("apply").arg(&path).current_dir(&src_dir);
