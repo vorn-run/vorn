@@ -1,0 +1,12 @@
+[package]
+name = "vornui-proto"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Vorn's main screen and terminal grid drawn with vornui, with the spike's bench modes"
+
+[dependencies]
+spike-shared = { workspace = true }
+vornui = { workspace = true }
+accesskit = { version = "0.25", features = ["serde"] }
+serde_json = "1"

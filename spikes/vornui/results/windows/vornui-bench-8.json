@@ -1,0 +1,29 @@
+{
+  "adapter": "cpu raster (present: Microsoft Basic Render Driver (Dx12, Cpu))",
+  "cpu_pct": 93.74635240045988,
+  "errors": [],
+  "footprint_mb": 313.6953125,
+  "fps": 43.861740500305096,
+  "frame_ms": {
+    "max": 240.396,
+    "mean": 22.783,
+    "n": 878,
+    "p50": 22.465,
+    "p95": 27.513,
+    "p99": 33.198
+  },
+  "frames": 878,
+  "latency_ms": {
+    "max": 80.475,
+    "mean": 55.222,
+    "n": 132,
+    "p50": 54.283,
+    "p95": 70.64,
+    "p99": 80.215
+  },
+  "lost_probes": 0,
+  "panes": 8,
+  "peak_rss_mb": 115.140625,
+  "proto": "vornui",
+  "seconds": 20.0174455
+}

@@ -1,0 +1,29 @@
+{
+  "adapter": "Apple M2 Pro (Metal, IntegratedGpu)",
+  "cpu_pct": 17.05526524227919,
+  "errors": [],
+  "footprint_mb": 81.56318664550781,
+  "fps": 112.04717664084536,
+  "frame_ms": {
+    "max": 3.023,
+    "mean": 0.763,
+    "n": 2241,
+    "p50": 0.654,
+    "p95": 1.686,
+    "p99": 2.895
+  },
+  "frames": 2241,
+  "latency_ms": {
+    "max": 4.78,
+    "mean": 3.055,
+    "n": 114,
+    "p50": 3.155,
+    "p95": 4.638,
+    "p99": 4.752
+  },
+  "lost_probes": 4,
+  "panes": 32,
+  "peak_rss_mb": 28.265625,
+  "proto": "vornui",
+  "seconds": 20.000503959
+}

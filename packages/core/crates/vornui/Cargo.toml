@@ -1,0 +1,36 @@
+[package]
+name = "vornui"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Vorn's thin UI layer: winit windows, wgpu or CPU drawing, cosmic-text and swash text, taffy layout, AccessKit accessibility, and the widgets the app is built from"
+
+[dependencies]
+wgpu = { version = "29", default-features = false, features = ["wgsl", "metal", "dx12", "vulkan", "std"] }
+winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
+accesskit = "0.25"
+accesskit_winit = { version = "0.34", default-features = false, features = ["rwh_06"] }
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash", "fontconfig"] }
+taffy = { version = "0.10", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
+etagere = "0.2"
+resvg = { version = "0.48", default-features = false }
+png = "0.18"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"
+arboard = { version = "3", default-features = false }
+unicode-segmentation = "1"
+
+# Linux has no single window system: X11 and Wayland are both loaded at run
+# time, and the screen reader is reached over D-Bus.
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
+accesskit_winit = { version = "0.34", default-features = false, features = ["rwh_06", "accesskit_unix", "async-io"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "raster"
+harness = false
