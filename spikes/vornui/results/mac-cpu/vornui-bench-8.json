@@ -1,0 +1,29 @@
+{
+  "adapter": "cpu raster (present: no adapter)",
+  "cpu_pct": 100.63804519393818,
+  "errors": [],
+  "footprint_mb": 27.406753540039062,
+  "fps": 117.46964098034834,
+  "frame_ms": {
+    "max": 7.817,
+    "mean": 2.733,
+    "n": 2351,
+    "p50": 2.841,
+    "p95": 3.896,
+    "p99": 5.227
+  },
+  "frames": 2351,
+  "latency_ms": {
+    "max": 6.704,
+    "mean": 2.553,
+    "n": 142,
+    "p50": 2.62,
+    "p95": 4.241,
+    "p99": 5.397
+  },
+  "lost_probes": 0,
+  "panes": 8,
+  "peak_rss_mb": 37.796875,
+  "proto": "vornui",
+  "seconds": 20.013681666
+}

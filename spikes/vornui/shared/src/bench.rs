@@ -33,6 +33,11 @@ pub trait Proto {
     fn enter(&mut self);
     /// Pulls the changed panes, rebuilds what they show and submits a frame.
     fn frame(&mut self) -> Frame;
+    /// Whether a change now should be drawn at once instead of on the next
+    /// display slot (the echo of a keystroke).
+    fn urgent(&self) -> bool {
+        false
+    }
 }
 
 pub struct Config {
@@ -40,7 +45,8 @@ pub struct Config {
     pub measure: Duration,
 }
 
-const PERIOD: Duration = Duration::from_nanos(8_333_333);
+/// The display period the driver paces to (120 Hz).
+pub const PERIOD: Duration = Duration::from_nanos(8_333_333);
 
 /// Runs the bench and answers its numbers.
 pub fn run(grid: &Grid, p: &mut dyn Proto, cfg: &Config) -> Value {
@@ -103,7 +109,7 @@ pub fn run(grid: &Grid, p: &mut dyn Proto, cfg: &Config) -> Value {
                 continue;
             }
         }
-        if let Some(slot) = last_frame.map(|l| l + PERIOD) {
+        if let Some(slot) = last_frame.map(|l| l + PERIOD).filter(|_| !p.urgent()) {
             if let Some(d) = slot.checked_duration_since(Instant::now()) {
                 std::thread::sleep(d);
             }

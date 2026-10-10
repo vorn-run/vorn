@@ -63,8 +63,7 @@ pub fn paint_pane(ui: &mut Ui, v: &PaneView, r: Rect, preedit: &str) {
             let (x, y) = at(run.col, run.row);
             ui.text.draw_cell(
                 &mut ui.scene,
-                &mut ui.renderer,
-                &ui.gpu.queue,
+                &mut ui.atlases,
                 text,
                 style,
                 (x, y),
@@ -82,8 +81,7 @@ pub fn paint_pane(ui: &mut Ui, v: &PaneView, r: Rect, preedit: &str) {
             let s = std::str::from_utf8(std::slice::from_ref(&b)).unwrap_or("?");
             ui.text.draw_cell(
                 &mut ui.scene,
-                &mut ui.renderer,
-                &ui.gpu.queue,
+                &mut ui.atlases,
                 s,
                 style,
                 (x, y),
@@ -113,8 +111,7 @@ fn draw_preedit(ui: &mut Ui, v: &PaneView, origin: (f32, f32), s: &str) {
             .quad(Rect::new(x, y, w, cell.h), Rgba::hex(v.bg), 0.0, None);
         ui.text.draw_cell(
             &mut ui.scene,
-            &mut ui.renderer,
-            &ui.gpu.queue,
+            &mut ui.atlases,
             ch.encode_utf8(&mut buf),
             0,
             (x, y),

@@ -23,7 +23,7 @@ use spike_shared::{look, Args, Grid, Load, PaneView, Rig};
 use vornui::accesskit::{Role, TreeUpdate};
 use vornui::input::from_ime;
 use vornui::winit::event::Ime;
-use vornui::{Gpu, Input, Offscreen, Rgba, Ui, UiConfig};
+use vornui::{El, Input, Laid, Offscreen, Pacer, Rect, RenderMode, Rgba, Ui, UiConfig, Waker};
 
 fn config(scale: f32) -> UiConfig {
     UiConfig {
@@ -44,6 +44,8 @@ struct App {
     /// Put each pane's text in the accessibility tree (costly; a11y mode).
     a11y_text: bool,
     probe_hit: bool,
+    /// The typed-into pane (0) changed in the frame being built.
+    changed: bool,
 }
 
 impl App {
@@ -64,6 +66,7 @@ impl App {
             logo,
             a11y_text: false,
             probe_hit: false,
+            changed: false,
         })
     }
 
@@ -82,13 +85,14 @@ impl App {
         }
     }
 
-    /// Pulls changed panes and paints the frame into `ui.scene`.
-    fn paint(&mut self, ui: &mut Ui, size: (f32, f32)) -> TreeUpdate {
-        ui.begin(Rgba::hex(look::SURFACE_BASE));
+    /// Pulls changed panes and builds the frame's elements.
+    fn view(&mut self, ui: &mut Ui) -> El {
+        self.changed = false;
         let Some(g) = self.grid.clone() else {
-            return ui.layout(screen::main_screen(self.logo), size).tree;
+            return screen::main_screen(self.logo);
         };
         for i in g.take_dirty() {
+            self.changed |= i == 0;
             if let Some(v) = g.view(i) {
                 self.probe_hit |= v.probe_hit;
                 self.views[i] = Some(v);
@@ -99,7 +103,11 @@ impl App {
                 }
             }
         }
-        let laid = ui.layout(screen::grid_screen(self.views.len()), size);
+        screen::grid_screen(self.views.len())
+    }
+
+    /// Paints the panes into their laid-out boxes.
+    fn paint_panes(&self, ui: &mut Ui, laid: &Laid) {
         for (id, r) in &laid.customs {
             let i = *id as usize;
             if let Some(Some(v)) = self.views.get(i) {
@@ -107,7 +115,15 @@ impl App {
                 term::paint_pane(ui, v, *r, pre);
             }
         }
-        laid.tree
+    }
+
+    /// Pulls changed panes and paints the frame into `ui.scene`.
+    fn paint(&mut self, ui: &mut Ui, size: (f32, f32)) -> Laid {
+        ui.begin(Rgba::hex(look::SURFACE_BASE));
+        let root = self.view(ui);
+        let laid = ui.layout(root, size);
+        self.paint_panes(ui, &laid);
+        laid
     }
 
     fn complete(&self) -> bool {
@@ -115,18 +131,24 @@ impl App {
     }
 }
 
-/// The app drawn offscreen, for the benches and screenshots.
+/// The app drawn offscreen, for the benches and screenshots, paced as the
+/// window paces it.
 struct Headless {
     ui: Ui,
     target: Offscreen,
     app: App,
+    pacer: Pacer,
+}
+
+/// `VORNUI_RENDERER=cpu|gpu` picks the renderer; by default the GPU unless
+/// the adapter is a software one.
+fn headless_ui(scale: f32) -> Ui {
+    Ui::headless(RenderMode::from_env(), &config(scale))
 }
 
 impl Headless {
     fn new(scale: f32, grid: Option<Arc<Grid>>) -> Result<Headless, String> {
-        let gpu = Gpu::headless()?;
-        let ui = Ui::new(gpu, vornui::gpu::OFFSCREEN_FORMAT, &config(scale));
-        Headless::with_ui(ui, grid)
+        Headless::with_ui(headless_ui(scale), grid)
     }
 
     fn with_ui(mut ui: Ui, grid: Option<Arc<Grid>>) -> Result<Headless, String> {
@@ -135,24 +157,39 @@ impl Headless {
             (look::WINDOW.0 * k).round() as u32,
             (look::WINDOW.1 * k).round() as u32,
         );
-        let target = Offscreen::new(&ui.gpu, px);
+        let target = ui.offscreen(px);
         let app = App::new(&mut ui, grid)?;
-        Ok(Headless { ui, target, app })
+        Ok(Headless {
+            ui,
+            target,
+            app,
+            pacer: Pacer::new(bench::PERIOD),
+        })
     }
 
     fn draw(&mut self) -> TreeUpdate {
-        let tree = self.app.paint(&mut self.ui, look::WINDOW);
-        self.ui.render(&self.target.view, self.target.size);
-        tree
+        // A full atlas empties itself; the second pass fits one frame.
+        let mut laid = self.app.paint(&mut self.ui, look::WINDOW);
+        if !self.ui.render_offscreen(&self.target) {
+            laid = self.app.paint(&mut self.ui, look::WINDOW);
+            self.ui.render_offscreen(&self.target);
+        }
+        laid.tree
+    }
+
+    fn save_png(&mut self, out: &str) -> Result<(), String> {
+        self.ui.save_png(&self.target, out)
     }
 }
 
 impl bench::Proto for Headless {
     fn key(&mut self, ch: char) {
+        self.pacer.input(Instant::now());
         self.app.handle(Input::char(ch));
     }
 
     fn enter(&mut self) {
+        self.pacer.input(Instant::now());
         self.app.handle(Input::Key {
             code: "Enter".into(),
             mods: 0,
@@ -160,9 +197,15 @@ impl bench::Proto for Headless {
         });
     }
 
+    fn urgent(&self) -> bool {
+        self.pacer.urgent(Instant::now())
+    }
+
     fn frame(&mut self) -> Frame {
+        let now = Instant::now();
         self.app.probe_hit = false;
         self.draw();
+        self.pacer.frame(now, self.app.changed);
         Frame {
             drawn: true,
             probe_hit: self.app.probe_hit,
@@ -216,7 +259,7 @@ fn shot(args: &Args) -> Result<Value, String> {
         p.draw();
         times.push(ms(t.elapsed()));
     }
-    p.target.save_png(&p.ui.gpu, &out)?;
+    p.save_png(&out)?;
     let (quads, sprites) = p.ui.scene.counts();
     Ok(json!({
         "proto": "vornui",
@@ -224,7 +267,7 @@ fn shot(args: &Args) -> Result<Value, String> {
         "panes": if grid_screen { panes } else { 0 },
         "scale": scale,
         "png": out,
-        "adapter": p.ui.gpu.adapter_name(),
+        "adapter": p.ui.renderer_name(),
         "quads": quads,
         "sprites": sprites,
         "redraw_ms": bench::summary(&mut times),
@@ -236,15 +279,14 @@ fn run_bench(args: &Args) -> Result<Value, String> {
     let (_rig, grid) = rig(panes, Load::Busy, cell(look::SCALE))?;
     let mut p = Headless::new(look::SCALE, Some(grid.clone()))?;
     let mut v = bench::run(&grid, &mut p, &spike_shared::bench_config(args));
-    v["adapter"] = json!(p.ui.gpu.adapter_name());
+    v["adapter"] = json!(p.ui.renderer_name());
     v["proto"] = json!("vornui");
     Ok(v)
 }
 
 /// A fresh process to its first complete frame: GPU, fonts, grid, draw.
 fn cold_child() -> Result<(), String> {
-    let gpu = Gpu::headless()?;
-    let ui = Ui::new(gpu, vornui::gpu::OFFSCREEN_FORMAT, &config(look::SCALE));
+    let ui = headless_ui(look::SCALE);
     let grid = spike_shared::cold_child_grid(ui.text.cell_logical())?;
     let mut p = Headless::with_ui(ui, Some(grid.clone()))?;
     bench::first_frame(&grid, &mut p, Duration::from_secs(20)).ok_or("no first frame")?;
@@ -266,7 +308,7 @@ fn ime(args: &Args) -> Result<Value, String> {
     }
     p.draw();
     let png_pre = out.replace(".json", "-preedit.png");
-    p.target.save_png(&p.ui.gpu, &png_pre)?;
+    p.save_png(&png_pre)?;
     let preedit_drawn = p.app.preedit == "にほんご";
     if let Some(i) = from_ime(&Ime::Commit("日本語".into())) {
         p.app.handle(i);
@@ -275,7 +317,7 @@ fn ime(args: &Args) -> Result<Value, String> {
     std::thread::sleep(Duration::from_millis(100));
     p.draw();
     let png = out.replace(".json", ".png");
-    p.target.save_png(&p.ui.gpu, &png)?;
+    p.save_png(&png)?;
     Ok(json!({
         "proto": "vornui",
         "path": "winit Ime::Preedit/Commit -> vornui Input -> grid text",
@@ -315,16 +357,71 @@ fn a11y() -> Result<Value, String> {
     }))
 }
 
-struct Win(App);
+struct Win {
+    app: App,
+    /// Pane 0's box from the last layout (logical pixels), for the IME.
+    pane0: Option<Rect>,
+    /// The terminal cell in logical pixels, from the live text system.
+    cell: (f32, f32),
+}
 
-impl vornui::window::App for Win {
-    fn frame(&mut self, ui: &mut Ui, size: (f32, f32)) -> TreeUpdate {
-        self.0.paint(ui, size)
+impl vornui::App for Win {
+    fn view(&mut self, ui: &mut Ui) -> El {
+        self.app.view(ui)
     }
 
-    fn input(&mut self, input: Input) {
-        self.0.handle(input);
+    fn paint(&mut self, ui: &mut Ui, laid: &Laid) {
+        let k = ui.scale();
+        self.cell = ui.text.cell_logical();
+        self.pane0 = laid
+            .customs
+            .iter()
+            .find(|(id, _)| *id == 0)
+            .map(|(_, r)| Rect::new(r.x / k, r.y / k, r.w / k, r.h / k));
+        self.app.paint_panes(ui, laid);
     }
+
+    fn input(&mut self, _: &mut Ui, input: Input) {
+        self.app.handle(input);
+    }
+
+    fn echoed(&mut self) -> bool {
+        self.app.changed
+    }
+
+    fn wants_ime(&self) -> bool {
+        self.app.grid.is_some()
+    }
+
+    fn ime_area(&self) -> Option<Rect> {
+        let v = self.app.views.first()?.as_ref()?;
+        let r = self.pane0?;
+        let (cw, ch) = self.cell;
+        Some(Rect::new(
+            r.x + f32::from(v.cursor_x) * cw,
+            r.y + f32::from(v.cursor_y) * ch,
+            cw,
+            ch,
+        ))
+    }
+
+    fn background(&self) -> Rgba {
+        Rgba::hex(look::SURFACE_BASE)
+    }
+}
+
+/// Wakes the window whenever the grid changes.
+fn watch(grid: Arc<Grid>, waker: Waker) {
+    std::thread::spawn(move || {
+        let mut seen = 0;
+        while !grid.closed() {
+            let now = grid.wait(seen, Instant::now() + Duration::from_secs(1));
+            if now != seen {
+                seen = now;
+                waker.wake();
+            }
+        }
+    });
 }
 
 /// A real window over a test vornd, for trying it by hand.
@@ -332,18 +429,8 @@ fn window(args: &Args) -> Result<Value, String> {
     let panes = args.num("panes", 4) as usize;
     let (_rig, grid) = rig(panes, Load::Busy, cell(look::SCALE))?;
     let mut err = None;
-    vornui::window::run("Vorn", look::WINDOW, config(1.0), |ui, waker| {
-        let g = grid.clone();
-        std::thread::spawn(move || {
-            let mut seen = 0;
-            while !g.closed() {
-                let now = g.wait(seen, Instant::now() + Duration::from_secs(1));
-                if now != seen {
-                    seen = now;
-                    waker.wake();
-                }
-            }
-        });
+    vornui::run("Vorn", look::WINDOW, config(1.0), |ui, waker| {
+        watch(grid.clone(), waker);
         let app = App::new(ui, Some(grid.clone())).unwrap_or_else(|e| {
             err = Some(e);
             App {
@@ -353,9 +440,14 @@ fn window(args: &Args) -> Result<Value, String> {
                 logo: 0,
                 a11y_text: false,
                 probe_hit: false,
+                changed: false,
             }
         });
-        Win(app)
+        Win {
+            app,
+            pane0: None,
+            cell: ui.text.cell_logical(),
+        }
     })?;
     err.map_or(Ok(json!({})), Err)
 }
