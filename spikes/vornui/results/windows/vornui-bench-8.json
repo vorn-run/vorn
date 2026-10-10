@@ -1,29 +1,55 @@
 {
-  "adapter": "cpu raster (present: Microsoft Basic Render Driver (Dx12, Cpu))",
-  "cpu_pct": 93.74635240045988,
+  "adapter": "cpu raster (adapter not used: Microsoft Basic Render Driver (Dx12, Cpu))",
+  "cpu_pct": 59.05948412744303,
   "errors": [],
-  "footprint_mb": 313.6953125,
-  "fps": 43.861740500305096,
+  "footprint_mb": 77.19921875,
+  "fps": 185.39053303243068,
   "frame_ms": {
-    "max": 240.396,
-    "mean": 22.783,
-    "n": 878,
-    "p50": 22.465,
-    "p95": 27.513,
-    "p99": 33.198
+    "max": 7.136,
+    "mean": 3.581,
+    "n": 3708,
+    "p50": 3.296,
+    "p95": 5.825,
+    "p99": 6.261
   },
-  "frames": 878,
+  "frames": 3708,
   "latency_ms": {
-    "max": 80.475,
-    "mean": 55.222,
-    "n": 132,
-    "p50": 54.283,
-    "p95": 70.64,
-    "p99": 80.215
+    "max": 83.561,
+    "mean": 43.235,
+    "n": 141,
+    "p50": 42.998,
+    "p95": 57.37,
+    "p99": 78.007
   },
   "lost_probes": 0,
   "panes": 8,
-  "peak_rss_mb": 115.140625,
+  "peak_rss_mb": 54.96875,
+  "phases_ms": {
+    "build": {
+      "max": 38.104,
+      "mean": 0.878,
+      "n": 3935,
+      "p50": 0.814,
+      "p95": 1.272,
+      "p99": 1.376
+    },
+    "draw": {
+      "max": 7.716,
+      "mean": 1.63,
+      "n": 3935,
+      "p50": 1.503,
+      "p95": 2.946,
+      "p99": 3.328
+    },
+    "present_copy": {
+      "max": 3.892,
+      "mean": 1.175,
+      "n": 3935,
+      "p50": 0.978,
+      "p95": 1.799,
+      "p99": 1.908
+    }
+  },
   "proto": "vornui",
-  "seconds": 20.0174455
+  "seconds": 20.0010213
 }

@@ -23,8 +23,8 @@ layout values, metrics and the bench loop. Only the UI layer differs.
 with two conditions taken on as the first work:
 
 1. a GPU-less (software adapter) rendering path that is not much slower
-   than GPUI's. On Windows' software adapter today, vornui renders the
-   8-pane grid at about 3 fps against GPUI's 27 (see Windows below);
+   than GPUI's. On Windows' software adapter the spike's vornui rendered
+   the 8-pane grid at about 3 fps against GPUI's 27 (see Windows below);
 2. latency pacing that matches GPUI's tight tail.
 
 Both are now met by `packages/core/crates/vornui`, the layer promoted out of
@@ -50,8 +50,8 @@ GPUI wins on things that are real but fixable on our side:
   Mac);
 - in the spike, a far faster software-rendering path on the Windows
   runner: 27 fps against 3 fps at 8 panes, with a keystroke-to-pixel p50
-  of 119 ms against 674 ms (the promoted crate now draws 44 fps there,
-  with a 54 ms p50; see Windows below). Its memory there is the cost:
+  of 119 ms against 674 ms (the promoted crate now draws 185 fps there,
+  with a 43 ms p50; see Windows below). Its memory there is the cost:
   574 MB peak RSS against 85 MB, and a 5.8 s cold start against 0.47 s;
 - a widget and focus model we would otherwise have to write.
 
@@ -131,47 +131,51 @@ platform.
 
 ### Windows: windows-2022 runner, Hyper-V, no GPU (WARP)
 
-vornui's column is the promoted crate, which picks its CPU rasterizer on
-this software adapter and presents through WARP. Both columns are from the
-same run.
+vornui's column is the promoted crate. On this software adapter it opens no
+device: it draws with its CPU rasterizer and copies the changed rows into
+the window's pixel buffer. Both columns are from the same run.
 
 |                                                       | vornui                | GPUI                    |
 | ----------------------------------------------------- | --------------------- | ----------------------- |
-| **8 busy panes**, frame p50 / p95 / p99               | 22.5 / 27.5 / 33.2 ms | 10.0 / 13.3 / 31.3 ms ¹ |
-| keystroke-to-pixel p50 / p95 / p99                    | 54 / 71 / 80 ms       | 260 / 487 / 496 ms      |
-| fps, lost probes                                      | 43.9, 0               | 29.5, 1                 |
-| CPU                                                   | 94%                   | 343%                    |
-| peak RSS / private bytes                              | 115 / 314 MB          | 580 / 957 MB            |
-| **32 busy panes**, frame p50 / p95 / p99              | 132 / 168 / 174 ms    | 12.8 / 45.5 / 154 ms ¹  |
-| keystroke-to-pixel p50 / p95 / p99                    | 282 / 403 / 414 ms    | 765 / 964 / 965 ms      |
-| fps, lost probes                                      | 8.0, 2                | 30.5, 1                 |
-| CPU                                                   | 25%                   | 291%                    |
-| peak RSS / private bytes                              | 126 / 314 MB          | 727 / 1,092 MB          |
-| static redraw, main 1× / 1.5× / 2× p50                | 0.19 / 0.19 / 0.19 ms | 1.6 / 1.6 / 1.7 ms ¹    |
-| static redraw, grid 8 p50 / p99                       | 0.43 / 0.79 ms        | 10.6 / 138 ms ¹         |
-| static redraw, grid 32 p50 / p99                      | 0.53 / 0.79 ms        | 13.2 / 168 ms ¹         |
-| cold start to first frame of 8 panes, p50 of 5        | 774 ms (740–1,259)    | 3,720 ms (3,557–4,229)  |
+| **8 busy panes**, frame p50 / p95 / p99               | 3.3 / 5.8 / 6.3 ms    | 15.0 / 40.2 / 47.6 ms ¹ |
+| keystroke-to-pixel p50 / p95 / p99                    | 43 / 57 / 78 ms       | 106 / 700 / 709 ms      |
+| fps, lost probes                                      | 185.4, 0              | 25.0, 1                 |
+| CPU                                                   | 59%                   | 306%                    |
+| peak RSS / private bytes                              | 55 / 77 MB            | 519 / 852 MB            |
+| **32 busy panes**, frame p50 / p95 / p99              | 1.7 / 3.4 / 3.9 ms    | 13.9 / 61.2 / 106 ms ¹  |
+| keystroke-to-pixel p50 / p95 / p99                    | 392 / 442 / 458 ms    | 656 / 1,097 / 1,097 ms  |
+| fps, lost probes                                      | 306.5, 2              | 27.3, 12                |
+| CPU                                                   | 78%                   | 239%                    |
+| peak RSS / private bytes                              | 56 / 78 MB            | 690 / 1,047 MB          |
+| static redraw, main 1× / 1.5× / 2× p50                | 0.36 / 0.36 / 0.28 ms | 1.9 / 2.0 / 1.9 ms ¹    |
+| static redraw, grid 8 p50 / p99                       | 0.57 / 0.70 ms        | 12.2 / 169 ms ¹         |
+| static redraw, grid 32 p50 / p99                      | 0.66 / 0.90 ms        | 15.0 / 202 ms ¹         |
+| cold start to first frame of 8 panes, p50 of 5        | 187 ms (180–367)      | 4,785 ms (4,512–5,094)  |
 | IME (Japanese): preedit drawn, commit reaches the pty | yes, `$ 日本語`       | yes, `$ 日本語`         |
 | a11y tree (main / grid)                               | 20 / 13 nodes         | 19 / 13 nodes           |
-| release exe                                           | 12.2 MB               | 19.8 MB ²               |
+| release exe                                           | 12.4 MB               | 19.8 MB ²               |
 
 ¹ GPUI queues GPU work without waiting, so its frame and redraw times are
 CPU-only; its backlog shows up in latency and memory instead. vornui's
-frame time covers the raster, the upload and the wait for the previous
-present. ² as in the macOS table.
+frame time covers the raster and the copy into the window's buffer.
+² as in the macOS table.
 
-The runner has no GPU, so both prototypes draw through Windows' software
-DX12 adapter (WARP). These are numbers for a GPU-less machine (a VM or a
-remote session), not for a desktop with a graphics card. Keystroke-to-pixel
+The runner has no GPU, so GPUI draws through Windows' software DX12 adapter
+(WARP). These are numbers for a GPU-less machine (a VM or a remote
+session), not for a desktop with a graphics card. Keystroke-to-pixel
 latency, fps, memory and cold start are comparable across the two.
 
-At 8 panes vornui now draws 1.5× GPUI's frames, with a fifth of its median
-latency and a sixth of its p99, at under a third of its CPU and a fifth of
-its RSS. The spike's vornui managed 2.95 fps and 674 ms here. At 32 panes
-vornui's latency is still lower than GPUI's, but it draws 8 fps against 30:
-its frames spend most of their time waiting, at 25% CPU, rather than
-rasterizing, so the time goes to the upload and present through WARP and
-not to drawing. That is the next thing to look at on this adapter.
+vornui now draws 7× GPUI's frames at 8 panes and 11× at 32, with lower
+latency at every percentile, a fifth to a third of its CPU and a tenth of
+its RSS. The
+spike's vornui managed 2.95 fps here, and the first promoted build 43.9 fps
+at 8 panes and 8.0 at 32. That build's 32-pane frames spent 180 ms drawing
+at 15% CPU: it spawned its raster threads every frame, and on a runner the
+31 busy panes saturate, each new thread waited for a time slice before it
+could start while the frame waited on it. The raster now keeps a pool of
+threads for its lifetime, above normal priority on Windows. The 32-pane
+latency is in the echo's path through the pty and vornd on that saturated
+runner, not in drawing: the frame takes under 2 ms.
 
 ## After the spike
 
@@ -181,10 +185,11 @@ builds on it. The two conditions:
 1. **Software rendering.** When the adapter is a software one (WARP,
    llvmpipe), vornui draws on the CPU instead: a tiled rasterizer on a few
    threads that redraws only the tiles whose content changed, keeps glyph
-   and icon masks in the same atlases, and uploads only the damaged rows to
-   the GPU to present. A frame where nothing changed costs a scene compare.
-   On the Windows runner's WARP adapter the 8-pane grid went from 2.95 to
-   43.9 fps (GPUI: 29.5) and its keystroke-to-pixel p50 from 674 to 54 ms.
+   and icon masks in the same atlases, and presents by copying only the
+   damaged rows into the window's pixel buffer, with no GPU device at all.
+   A frame where nothing changed costs a scene compare. On the Windows
+   runner's WARP adapter the 8-pane grid went from 2.95 to 185 fps (GPUI: 25) and its keystroke-to-pixel p50 from 674 to 43 ms; the 32-pane grid
+   draws 307 fps (GPUI: 27).
    On the Mac it runs the 8-pane bench at 117 fps with a 2.8 ms frame p50;
    the crate's `raster` bench draws the 8-pane grid at 2880×1800 in 1.18 ms
    when every pixel changes, 0.36 ms when one pane does and 0.19 ms when none
@@ -259,8 +264,6 @@ Caveats:
 - Terminal: selection, scrollback scrolling, links, and wide and combining
   glyphs beyond what the spike draws.
 - Rendering:
-  - the 32-pane grid on WARP (8 fps against GPUI's 30; the frames wait on
-    upload and present, not on the raster);
   - an atlas eviction policy;
   - color emoji;
   - subpixel positioning checks against today's text.
