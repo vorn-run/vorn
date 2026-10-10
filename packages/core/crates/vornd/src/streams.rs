@@ -421,7 +421,8 @@ struct Expected {
     /// Connections that attached while it ran nowhere, told to attach again
     /// once it runs.
     watchers: HashSet<u64>,
-    /// Attaches waiting for the holder to say whether it holds it.
+    /// Attaches waiting for the holder to say whether it holds it, or for
+    /// a session being started to be up.
     pending: Vec<Asked>,
     /// A session being started, rather than one carried from the last run.
     starting: bool,
@@ -742,7 +743,7 @@ impl Streams {
         let Inner {
             conns, expected, ..
         } = &mut *inner;
-        for e in expected.values_mut() {
+        for e in expected.values_mut().filter(|e| !e.starting) {
             for a in e.pending.drain(..) {
                 if let Some(out) = conns.get(&a.conn) {
                     out.text(&answer(&a.rpc, cold_answer()));
@@ -1192,7 +1193,8 @@ impl Inner {
             if let Some(e) = self.ended.iter().find(|e| e.session == session) {
                 out.text(&answer(&a.rpc, ended_answer(e)));
             } else if let Some(e) = self.expected.get_mut(session) {
-                if self.holder_up {
+                // A session being started runs as soon as it is up: its attach waits for that.
+                if self.holder_up && !e.starting {
                     out.text(&answer(&a.rpc, cold_answer()));
                     e.watchers.insert(a.conn);
                 } else {
@@ -1733,6 +1735,36 @@ mod tests {
         // Live: answered with a snapshot, asked of the engine.
         let actions = streams.live("y", Cursor::start(1));
         assert!(matches!(actions.as_slice(), [Action::Snapshot { session, .. }] if session == "y"));
+    }
+
+    #[tokio::test]
+    async fn an_attach_to_a_session_being_started_waits_for_it_to_be_live() {
+        let streams = Streams::new();
+        let mut c = streams.connect();
+        streams.holder_up();
+        // A card attaches as soon as create answers, before the program is up.
+        streams.expect_start("new");
+        assert!(streams.attach(c.id(), "new", json!(6), None).is_empty());
+        streams.holder_up();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), c.next())
+                .await
+                .is_err(),
+            "a session being started is not answered as one that runs nowhere"
+        );
+        streams.opened("new", 1);
+        assert!(tokio::time::timeout(Duration::from_millis(50), c.next())
+            .await
+            .is_err());
+        let actions = streams.live("new", Cursor::start(1));
+        assert!(
+            matches!(actions.as_slice(), [Action::Snapshot { session, .. }] if session == "new")
+        );
+        // One that never starts is let go of, and what waited is answered.
+        streams.expect_start("failed");
+        streams.attach(c.id(), "failed", json!(7), None);
+        streams.forget("failed");
+        assert_eq!(text(&mut c).await["result"]["live"], false);
     }
 
     #[tokio::test]

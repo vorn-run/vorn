@@ -295,6 +295,8 @@ export interface TerminalsSlice {
   addTerminal: (session: TerminalSession, ended?: EndedSession) => void
   removeTerminal: (id: string) => void
   markEnded: (id: string, ended: EndedSession) => void
+  /** Something is running behind the pane after all. */
+  clearEnded: (id: string) => void
   /**
    * Swap a resumed session in where the old one sat.
    *
