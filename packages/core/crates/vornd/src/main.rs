@@ -181,6 +181,7 @@ async fn shutdown_signal() {
 
 #[cfg(feature = "engine")]
 fn new_holder(cfg: &HolderConfig) -> Holder {
+    info!(libghostty = %vorn_engine::ghostty_build(), "terminal engine");
     Holder::with_engine(vornd::engine::Engine::new(vorn_engine::Config {
         history: Some(cfg.home.join("vornd").join("history")),
         build: env!("CARGO_PKG_VERSION").into(),

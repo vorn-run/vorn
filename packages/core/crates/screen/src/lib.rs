@@ -223,6 +223,19 @@ impl Screen {
     }
 }
 
+/// How the linked libghostty-vt was built, for the log: a debug or non-SIMD build shipped by
+/// mistake shows here.
+pub fn ghostty_build() -> String {
+    use libghostty_vt::build_info as b;
+    format!(
+        "{} {:?} simd={} kitty_graphics={}",
+        b::version_string().unwrap_or("unknown"),
+        b::optimize_mode().ok(),
+        b::supports_simd().unwrap_or(false),
+        b::supports_kitty_graphics().unwrap_or(false),
+    )
+}
+
 /// A terminal whose history is bounded by `max_scrollback` bytes of pages alone, with no line limit.
 pub(crate) fn new_terminal(
     cols: u32,
@@ -467,6 +480,17 @@ mod tests {
         assert_eq!((snap.title.as_str(), snap.cwd.as_str()), ("htop", "/home"));
         assert!(snap.screen.contains("hi"), "{:?}", snap.screen);
         assert!(snap.screen.contains("there"), "{:?}", snap.screen);
+    }
+
+    #[test]
+    fn the_build_names_its_version_and_mode() {
+        let build = ghostty_build();
+        let version = libghostty_vt::build_info::version_string().unwrap();
+        assert!(build.starts_with(version), "{build}");
+        assert!(
+            build.contains("Some(Release"),
+            "an optimized build: {build}"
+        );
     }
 
     #[test]
