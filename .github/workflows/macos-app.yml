@@ -65,7 +65,12 @@ jobs:
 
       - name: Build the app and its tests
         working-directory: apps/macos
-        run: swift build -c release --build-tests -Xswiftc -enable-testing
+        run: |
+          # The Swift steps use the newest Xcode: the default one's compiler crashes on this package.
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          swift --version
+          swift build -c release --build-tests -Xswiftc -enable-testing
 
       - name: Swift tests
         working-directory: apps/macos
