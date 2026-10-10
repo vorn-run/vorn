@@ -1,0 +1,18 @@
+{
+  "adapter": "cpu raster (adapter not used: Microsoft Basic Render Driver (Dx12, Cpu))",
+  "panes": 0,
+  "png": "results/windows/vornui-main-1.5x.png",
+  "proto": "vornui",
+  "quads": 11,
+  "redraw_ms": {
+    "max": 0.644,
+    "mean": 0.345,
+    "n": 120,
+    "p50": 0.362,
+    "p95": 0.41,
+    "p99": 0.497
+  },
+  "scale": 1.5,
+  "screen": "main",
+  "sprites": 100
+}

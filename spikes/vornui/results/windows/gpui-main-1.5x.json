@@ -1,0 +1,16 @@
+{
+  "proto": "gpui",
+  "screen": "main",
+  "panes": 0,
+  "scale": 1.5,
+  "png": "results/windows/gpui-main-1.5x.png",
+  "adapter": "gpui wgpu headless",
+  "redraw_ms": {
+    "n": 120,
+    "p50": 1.987,
+    "p95": 2.196,
+    "p99": 32.924,
+    "max": 109.832,
+    "mean": 3.195
+  }
+}

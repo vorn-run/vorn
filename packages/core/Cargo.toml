@@ -16,6 +16,7 @@ members = [
   "crates/grid",
   "crates/grid-client",
   "crates/size",
+  "crates/vornui",
   "crates/protocol",
   "crates/store",
   "crates/agents",

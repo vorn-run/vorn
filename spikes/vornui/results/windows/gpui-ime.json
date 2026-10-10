@@ -1,0 +1,10 @@
+{
+  "proto": "gpui",
+  "path": "PlatformInputHandler marked text/commit -> EntityInputHandler -> grid text",
+  "preedit_drawn": true,
+  "commit_reached_pty": true,
+  "screen_line": "$ 日本語",
+  "png_preedit": "results/windows/gpui-ime-preedit.png",
+  "png_commit": "results/windows/gpui-ime.png",
+  "simulated": "the input handler is called as the OS IME client would; no OS IME window is driven"
+}

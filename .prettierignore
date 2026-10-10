@@ -21,3 +21,6 @@ website/google21afb44e7186463c.html
 
 # Rust core build output
 packages/core/target/
+
+# Measurement output written by spikes/vornui/scripts/measure.sh.
+spikes/vornui/results/
