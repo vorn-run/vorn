@@ -43,6 +43,8 @@ public final class AppModel {
     /// Bumped to pull keyboard focus into a session's terminal.
     public var focusRequests: [String: Int] = [:]
     public var lastError: String?
+    /// The composer tip an offscreen render shows; a live window picks one at random.
+    public var launcherTip = 1
 
     public static let mainWorktree = "__main__"
 

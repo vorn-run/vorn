@@ -98,7 +98,7 @@ struct WindowConfigurator: NSViewRepresentable {
 }
 
 /// Renders the main screen offscreen with live data from vornd (read-only),
-/// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`.
+/// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`, `--tip N`.
 @MainActor
 func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 {
     func value(_ flag: String) -> String? {
@@ -114,6 +114,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     let engines = EngineHolder()
     model.sidebarOpen = !args.contains("--no-sidebar")
     model.activeProject = value("--project")
+    if let tip = value("--tip").flatMap(Int.init) { model.launcherTip = tip }
     store.start()
     let deadline = Date().addingTimeInterval(8)
     while store.phase != .connected && Date() < deadline { try? await Task.sleep(for: .milliseconds(50)) }

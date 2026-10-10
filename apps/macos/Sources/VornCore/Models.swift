@@ -10,6 +10,9 @@ public enum AgentType: Codable, Hashable, Sendable, CaseIterable {
     /// The AI agents, in the order today's pickers list them.
     public static let agents: [AgentType] = [.claude, .copilot, .codex, .opencode, .gemini]
 
+    /// Whether the agent takes a model choice (agent-models.ts).
+    public var choosesModel: Bool { [.claude, .copilot, .opencode, .codex].contains(self) }
+
     public init(rawValue: String) {
         switch rawValue {
         case "claude": self = .claude

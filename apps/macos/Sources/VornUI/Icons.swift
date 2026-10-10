@@ -240,8 +240,18 @@ public struct VornLogo: View {
 
     public init(height: CGFloat = 32) { self.height = height }
 
+    // Loaded from the file, so offscreen renders draw it too.
+    private static let image: Image = {
+        guard let url = Bundle.module.url(forResource: "vorn-logo", withExtension: "png") else { return Image(systemName: "questionmark") }
+        #if canImport(AppKit)
+        return NSImage(contentsOf: url).map(Image.init(nsImage:)) ?? Image(systemName: "questionmark")
+        #else
+        return UIImage(contentsOfFile: url.path).map(Image.init(uiImage:)) ?? Image(systemName: "questionmark")
+        #endif
+    }()
+
     public var body: some View {
-        Image("vorn-logo", bundle: .module)
+        Self.image
             .resizable().interpolation(.high).aspectRatio(contentMode: .fit).frame(height: height)
     }
 }

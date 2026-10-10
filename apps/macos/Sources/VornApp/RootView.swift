@@ -70,7 +70,8 @@ public struct RootView: View {
                 PromptLauncher(projects: store.projects.filter { $0.workspace == model.activeWorkspace },
                                activeProject: model.activeProject, defaultAgent: actions.defaultAgent,
                                branchFor: { p in store.worktrees[p.path]?.first { $0.isMain }?.branch },
-                               isGitRepo: { p in store.gitRepos[p.path] == true }) { payload in
+                               isGitRepo: { p in store.gitRepos[p.path] == true },
+                               tip: model.launcherTip) { payload in
                     let s = try await store.createSession(payload)
                     model.focus(s.id)
                 }
