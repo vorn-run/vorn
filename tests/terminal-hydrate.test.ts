@@ -87,7 +87,8 @@ Object.defineProperty(window, 'api', {
     attachTerminal,
     writeTerminal: vi.fn(),
     resizeTerminal: vi.fn(),
-    openExternal: vi.fn()
+    openExternal: vi.fn(),
+    notifyWidgetStatus: vi.fn()
   },
   writable: true
 })
@@ -98,9 +99,14 @@ import {
   hydrateTerminal,
   resyncTerminal,
   initGlobalDataListener,
-  disposeGlobalDataListener
+  disposeGlobalDataListener,
+  setLiveReporter,
+  setNotLiveReporter
 } from '../src/renderer/lib/terminal-registry'
 import { captureBlock, getBlockLog } from '../src/renderer/lib/block-log'
+import { markPaneEnded, markPaneLive } from '../src/renderer/lib/session-resume'
+import { useAppStore } from '../src/renderer/stores'
+import type { TerminalSession } from '../packages/shared/src/types'
 
 /**
  * Seeding a pane with a terminal it did not create.
@@ -418,5 +424,54 @@ describe('a resync', () => {
   it('does nothing for a terminal this window does not show', async () => {
     await resyncTerminal('not-here')
     expect(attachTerminal).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * A card attaches the moment its terminal is created, which can be before the
+ * program is up. An answer that it is not running yet ends the pane; the
+ * session going live under the id must bring it back, or a working terminal
+ * sits behind "the server stopped unexpectedly".
+ */
+describe('a pane attached before its terminal was up', () => {
+  beforeEach(() => {
+    setNotLiveReporter(markPaneEnded)
+    setLiveReporter(markPaneLive)
+    useAppStore.getState().addTerminal({
+      id: ID,
+      agentType: 'shell',
+      projectName: 'p',
+      projectPath: '/p',
+      status: 'idle',
+      createdAt: 1,
+      pid: 0
+    } as TerminalSession)
+  })
+
+  afterEach(() => {
+    setNotLiveReporter(null)
+    setLiveReporter(null)
+    useAppStore.getState().removeTerminal(ID)
+  })
+
+  it('is live again once the session runs', async () => {
+    attachTerminal.mockResolvedValueOnce({ data: '', seq: 0, live: false, continued: false })
+    await open()
+    expect(useAppStore.getState().terminals.get(ID)?.ended?.reason).toBe('server-stopped')
+
+    // vornd's `terminal:resync` once the session runs under the id.
+    attachTerminal.mockResolvedValueOnce({ data: '$ ', seq: 1, live: true })
+    await resyncTerminal(ID)
+
+    expect(useAppStore.getState().terminals.get(ID)?.ended).toBeUndefined()
+    expect(writes()).toEqual(['$ '])
+  })
+
+  it('stays ended when the session is still not running', async () => {
+    attachTerminal.mockResolvedValueOnce({ data: '', seq: 0, live: false })
+    await open()
+    attachTerminal.mockResolvedValueOnce({ data: '', seq: 0, live: false })
+    await resyncTerminal(ID)
+    expect(useAppStore.getState().terminals.get(ID)?.ended?.reason).toBe('server-stopped')
   })
 })

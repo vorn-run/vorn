@@ -77,7 +77,7 @@ import {
   sendProgramNotification
 } from './lib/notifications'
 import { restoreDevicePanes } from './lib/device-restore'
-import { markPaneEnded } from './lib/session-resume'
+import { markPaneEnded, markPaneLive } from './lib/session-resume'
 import { staleRev, takesCreated } from './lib/session-rev'
 
 export function App() {
@@ -152,7 +152,10 @@ export function App() {
     // terminal learns it is looking at a photograph. Start-up reconciliation
     // cannot tell it: the session was not there when this client started.
     setNotLiveReporter(markPaneEnded)
-    setLiveReporter(reportWarmAttach)
+    setLiveReporter((terminalId) => {
+      markPaneLive(terminalId)
+      reportWarmAttach(terminalId)
+    })
     // The capture path has to know before any command finishes, so it is read
     // from config rather than passed down through the view tree.
     setDomBlockRendering(useAppStore.getState().config?.defaults.domBlockRendering ?? true)

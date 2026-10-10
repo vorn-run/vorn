@@ -86,6 +86,14 @@ export async function resumeEndedSession(
 }
 
 /**
+ * An attach found the session running: a pane marked ended by an earlier
+ * attach -- one that came before the session was up -- shows it again.
+ */
+export function markPaneLive(terminalId: string): void {
+  useAppStore.getState().clearEnded(terminalId)
+}
+
+/**
  * Say what a pane should do when an attach finds nothing behind it.
  *
  * Wired once at start-up. A window opened onto a terminal that died while it was
