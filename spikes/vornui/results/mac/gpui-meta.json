@@ -1,8 +1,8 @@
 {
  "binary_bytes": 10674304,
  "loc_ui_layer": 0,
- "loc_patches_to_gpui": 75,
- "loc_app": 1014,
+ "loc_patches_to_gpui": 83,
+ "loc_app": 1012,
  "loc_shared_harness": 1763,
  "dep_crates": 328
 }

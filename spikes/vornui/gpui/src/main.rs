@@ -25,8 +25,8 @@ use gpui::{
     canvas, div, font, point, prelude::*, px, size, AnyElement, AnyWindowHandle, AssetSource,
     Bounds, Context, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
     HeadlessAppContext, Image, ImageFormat, KeyDownEvent, Keystroke, Pixels,
-    PlatformHeadlessRenderer, PlatformTextSystem, Role, SharedString, UTF16Selection, Window,
-    WindowHandle,
+    PlatformHeadlessRenderer, PlatformTextSystem, Role, SharedString, TextRenderingMode,
+    UTF16Selection, Window, WindowHandle,
 };
 use serde_json::{json, Value};
 use spike_shared::bench::{self, Frame};
@@ -321,7 +321,11 @@ impl Headless {
         // The test window reads its scale when it opens (patch_zed.py).
         std::env::set_var("VORN_SPIKE_SCALE", scale.to_string());
         let mut cx = HeadlessAppContext::with_platform(text_system(), Arc::new(Icons), renderer);
-        let m = cx.update(|cx| metrics(cx.text_system(), scale));
+        // Grayscale like vornui; the wgpu renderer drops subpixel glyphs on adapters without dual-source blending.
+        let m = cx.update(|cx| {
+            cx.set_text_rendering_mode(TextRenderingMode::Grayscale);
+            metrics(cx.text_system(), scale)
+        });
         let win = cx
             .open_window(
                 size(px(look::WINDOW.0), px(look::WINDOW.1)),
@@ -437,6 +441,9 @@ fn shot(args: &Args) -> Result<Value, String> {
     }
     let mut p = Headless::new(scale, rig.as_ref().map(|r| r.1.clone()))?;
     p.draw();
+    // Read back before the timed redraws, which queue without waiting; a
+    // software adapter is still working through them otherwise.
+    p.save_png(&out)?;
     // Redraws of the whole screen, every element rebuilt, nothing changed.
     let mut times = Vec::new();
     for _ in 0..120 {
@@ -444,7 +451,6 @@ fn shot(args: &Args) -> Result<Value, String> {
         p.draw();
         times.push(ms(t.elapsed()));
     }
-    p.save_png(&out)?;
     Ok(json!({
         "proto": PROTO,
         "screen": if grid_screen { "grid" } else { "main" },
