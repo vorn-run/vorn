@@ -12,9 +12,10 @@
 //! share of the parse budget. Three inputs: the generator's shell output
 //! (prompts, colour, links, progress bars, and combining marks in nearly
 //! every frame), everything the generator makes (full-screen redraws, the
-//! alternate screen, resizes and the rest), and a build log with a spinner
+//! alternate screen, resizes and the rest), a build log with a spinner
 //! redrawn in place, as `vorn-screen`'s parse bench feeds, the way agents
-//! and build tools print.
+//! and build tools print, and a status screen that redraws three of its
+//! rows in place under a full static screen, the way monitors and TUIs do.
 
 use std::hint::black_box;
 use std::time::{Duration, Instant};
@@ -56,15 +57,50 @@ fn build_log(t: usize) -> Log {
     b.build()
 }
 
+/// A full screen drawn once, then three status rows redrawn in place with
+/// cursor addressing, `PER_TERMINAL` bytes in all.
+fn status(t: usize) -> Log {
+    let mut b = vorn_recovery::LogBuilder::new(Size::new(200, 50));
+    let screen: String = (0..50)
+        .map(|y| format!("\x1b[{};1H{:<199}", y + 1, format!("pid {y} worker {t}")))
+        .collect();
+    let mut total = screen.len() as u64;
+    b.data(screen);
+    let mut i = 0u32;
+    while total < PER_TERMINAL {
+        let mut chunk = String::new();
+        while chunk.len() < 4096 {
+            i += 1;
+            let y = 3 + i % 3;
+            chunk.push_str(&format!(
+                "\x1b[{y};1H\x1b[2K\x1b[1mcpu\x1b[22m {}% mem {} MB load {}",
+                i % 100,
+                i % 4096,
+                i % 7
+            ));
+        }
+        total += chunk.len() as u64;
+        b.data(chunk);
+    }
+    b.build()
+}
+
+enum Input {
+    BuildLog,
+    Status,
+    Generated(Profile),
+}
+
 /// Each terminal's output, cut into what arrives between two frames.
-fn frames(profile: Option<Profile>) -> (Vec<Vec<Vec<Record>>>, u64) {
-    let logs: Vec<Log> = match profile {
-        Some(p) => Generator::sessions(
+fn frames(input: Input) -> (Vec<Vec<Vec<Record>>>, u64) {
+    let logs: Vec<Log> = match input {
+        Input::Generated(p) => Generator::sessions(
             42,
             TERMINALS,
             p.size(Size::new(200, 50)).bytes(PER_TERMINAL),
         ),
-        None => (0..TERMINALS).map(build_log).collect(),
+        Input::BuildLog => (0..TERMINALS).map(build_log).collect(),
+        Input::Status => (0..TERMINALS).map(status).collect(),
     };
     let mut total = 0;
     let per = logs
@@ -135,12 +171,13 @@ fn run(per: &[Vec<Vec<Record>>], encode: bool) -> (Duration, Duration) {
 }
 
 fn bench(c: &mut Criterion) {
-    for (name, profile) in [
-        ("build-log", None),
-        ("shell", Some(Profile::shell())),
-        ("mixed", Some(Profile::mixed())),
+    for (name, input) in [
+        ("build-log", Input::BuildLog),
+        ("status", Input::Status),
+        ("shell", Input::Generated(Profile::shell())),
+        ("mixed", Input::Generated(Profile::mixed())),
     ] {
-        let (per, total) = frames(profile);
+        let (per, total) = frames(input);
         let mut g = c.benchmark_group(format!("grid/32x200x50/{name}"));
         g.throughput(Throughput::Bytes(total));
         g.sample_size(10);

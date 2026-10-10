@@ -9,7 +9,7 @@
 //! each as a u32 length and its bytes. All integers little-endian.
 
 use vorn_analysis::Analyzer;
-use vorn_screen::{Checkpoint, Counters, Effect, Emulator, Uncut};
+use vorn_screen::{Checkpoint, Counters, Effect, Emulator, Theme, Uncut};
 
 /// The checkpoint format this engine writes and the only one it reads. A
 /// checkpoint in any other format is not a restore base.
@@ -61,8 +61,8 @@ pub(crate) struct Term {
     /// The agent status last reported, so only changes are.
     pub(crate) status: u32,
     pub(crate) fidelity: Fidelity,
-    /// The default colours queries are answered with, kept across a reset.
-    colors: Option<([u8; 3], [u8; 3])>,
+    /// The theme colour queries are answered with, kept across a reset.
+    colors: Option<Theme>,
 }
 
 impl Term {
@@ -77,13 +77,13 @@ impl Term {
         })
     }
 
-    /// Sets the default colours, which OSC 10 and 11 queries are answered
+    /// Sets the theme, which OSC 4 and 10 to 12 queries are answered
     /// with. Not part of a checkpoint: each vornd sets its own.
-    pub(crate) fn set_colors(&mut self, colors: Option<([u8; 3], [u8; 3])>) {
+    pub(crate) fn set_colors(&mut self, colors: Option<Theme>) {
         self.colors = colors;
         if colors.is_some() {
-            // A terminal that refuses them answers no colour query, as before.
-            let _ = self.em.set_default_colors(colors);
+            // A terminal that refuses it answers with Ghostty's colours, as before.
+            let _ = self.em.set_theme(colors.as_ref());
         }
     }
 
@@ -160,7 +160,7 @@ impl Term {
         // Cut without them, so the restore check compares like with like:
         // a rebuild has Ghostty's defaults until its vornd sets its own.
         if self.colors.is_some() {
-            let _ = self.em.set_default_colors(None);
+            let _ = self.em.set_theme(None);
         }
         let cut = self.em.checkpoint();
         self.set_colors(self.colors);
@@ -242,7 +242,7 @@ pub(crate) struct Packed {
     pub(crate) rows: u16,
     pub(crate) fidelity: Fidelity,
     counters: Counters,
-    colors: Option<([u8; 3], [u8; 3])>,
+    colors: Option<Theme>,
 }
 
 impl Packed {
@@ -339,9 +339,19 @@ mod tests {
     #[test]
     fn default_colours_answer_queries_and_survive_a_checkpoint() {
         let mut t = Term::fresh(20, 4, 0).unwrap();
-        t.set_colors(Some(([0xd4, 0xd4, 0xd8], [0x14, 0x14, 0x16])));
+        let mut ansi = [[0; 3]; 16];
+        ansi[1] = [0xef, 0x44, 0x44];
+        t.set_colors(Some(Theme {
+            cursor: Some([0xd4, 0xd4, 0xd8]),
+            ansi: Some(ansi),
+            ..Theme::new([0xd4, 0xd4, 0xd8], [0x14, 0x14, 0x16])
+        }));
         let mut fx = Vec::new();
-        t.feed(b"hi\x1b]11;?\x1b\\", true, &mut fx);
+        t.feed(
+            b"hi\x1b]11;?\x1b\\\x1b]12;?\x1b\\\x1b]4;1;?\x1b\\\x1b]4;16;?\x1b\\",
+            true,
+            &mut fx,
+        );
         let replies: Vec<_> = fx
             .iter()
             .filter_map(|f| match f {
@@ -349,8 +359,20 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(replies.len(), 1, "{replies:?}");
+        assert_eq!(replies.len(), 4, "{replies:?}");
         assert!(replies[0].contains("1414/1414/1616"), "{replies:?}");
+        assert!(
+            replies[1].contains("d4d4/d4d4/d8d8"),
+            "the cursor: {replies:?}"
+        );
+        assert!(
+            replies[2].contains("efef/4444/4444"),
+            "the theme's red: {replies:?}"
+        );
+        assert!(
+            replies[3].contains("0000/0000/0000"),
+            "Ghostty's cube: {replies:?}"
+        );
         let blob = t.save().expect("a checkpoint with default colours set");
         assert!(Term::load(&blob).is_ok());
         fx.clear();
@@ -361,7 +383,7 @@ mod tests {
     #[test]
     fn a_packed_term_wakes_as_the_one_put_away_and_carries_on_alike() {
         let mut a = fed(&[b"\x1b[31mone\r\ntwo\x1b[3J \xe2\x82", b"\xac\r\n$ \x1b]0;t"]);
-        a.set_colors(Some(([1, 2, 3], [4, 5, 6])));
+        a.set_colors(Some(Theme::new([1, 2, 3], [4, 5, 6])));
         let packed = a.pack().unwrap();
         let mut b = packed.wake().unwrap();
         assert_eq!(a.em.fingerprint(), b.em.fingerprint());

@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 use libghostty_vt::fmt::{Format, Formatter, FormatterOptions};
 use vorn_grid::{Ctx as GridCtx, GridIn, Hub, HubConfig, HubOut};
 use vorn_pipeline::history::History;
-use vorn_screen::{ClipboardTarget, Emulator};
+use vorn_screen::{ClipboardTarget, Emulator, ProgressState};
 use vorn_sessiond_wire::{AttachFrom, AttachRefusal, Checkpoint, Kind, SessionInfo};
 use vorn_term_proto::msg::{self, EventId as WireEventId, EventKind};
 use vorn_term_proto::{Cursor, Entry, Record, RecordHeader};
@@ -92,10 +92,10 @@ pub struct Config {
     /// Hand each batch of records back once applied ([`Out::Applied`]), for
     /// a host that streams them to bytes clients.
     pub stream: bool,
-    /// Default foreground and background, as RGB: what OSC 10 and 11
-    /// queries are answered with. None leaves them unset, and those queries
-    /// unanswered.
-    pub colors: Option<([u8; 3], [u8; 3])>,
+    /// The theme: what OSC 4 and 10 to 12 queries are answered with, and
+    /// the defaults grid clients draw in. None leaves Ghostty's, and OSC 10
+    /// and 11 queries unanswered.
+    pub colors: Option<vorn_screen::Theme>,
     /// How long a live session goes with no output, request or viewer
     /// before its terminal is put away as a checkpoint ([`Session::sleep`]).
     /// None keeps every terminal live.
@@ -263,6 +263,11 @@ pub enum Effect {
     /// A state: the agent status from here on, one of
     /// `vorn_analysis::STATUS_*`.
     Status(u32),
+    /// A state: the program's OSC 9;4 progress from here on.
+    Progress {
+        state: ProgressState,
+        percent: Option<u8>,
+    },
     /// A state: the program ended.
     Exit {
         code: Option<i32>,
@@ -1219,7 +1224,13 @@ impl Run {
                 self.since_cut += bytes.len() as u64;
                 self.last_output = now;
             }
-            &Record::Resize { cols, rows, .. } => {
+            &Record::Resize {
+                cols,
+                rows,
+                px_w,
+                px_h,
+                ..
+            } => {
                 if !self.size_known {
                     // The output before this was parsed at a size that may
                     // not have been the spawn size.
@@ -1230,7 +1241,13 @@ impl Run {
                 if self
                     .term
                     .em
-                    .resize(u32::from(cols), u32::from(rows), fx)
+                    .resize_px(
+                        u32::from(cols),
+                        u32::from(rows),
+                        u32::from(px_w),
+                        u32::from(px_h),
+                        fx,
+                    )
                     .is_err()
                 {
                     self.term.fidelity = Fidelity::Approximate;
@@ -1258,6 +1275,9 @@ impl Run {
                 }
                 vorn_screen::Effect::Notify { title, body } => Effect::Notify { title, body },
                 vorn_screen::Effect::Cwd(c) => Effect::Cwd(c),
+                vorn_screen::Effect::Progress { state, percent } => {
+                    Effect::Progress { state, percent }
+                }
             };
             self.emit(ctx, &e.hdr, &mut index, effect, out);
         }
@@ -1410,7 +1430,8 @@ fn event_kind(effect: &Effect) -> Option<EventKind> {
             code: *code,
             signal: *signal,
         },
-        Effect::Cwd(_) => return None,
+        // The grid protocol has no progress event yet.
+        Effect::Cwd(_) | Effect::Progress { .. } => return None,
     })
 }
 

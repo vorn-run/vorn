@@ -1,0 +1,15 @@
+Mark the row dirty when a zero-width codepoint joins a cell outside mode 2027,
+as the mode 2027 path already does, so renderers see the cell change.
+
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 387c5a21b..6cbf36a2e 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -1564,6 +1564,7 @@ pub fn print(self: *Terminal, c: u21) !void {
+             if (!emoji) return;
+         }
+ 
++        self.screens.active.cursorMarkDirty();
+         try self.screens.active.appendGrapheme(prev, c);
+         return;
+     }

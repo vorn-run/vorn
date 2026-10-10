@@ -111,9 +111,6 @@ pub struct Grid {
     /// bits cannot be trusted (another reader consumed them, the terminal
     /// was swapped, the tables were compacted).
     full: bool,
-    /// The emulator's count of codepoints that may have joined a cell, at
-    /// the last update: Ghostty marks no row dirty for those.
-    joiners: u64,
     /// The emulator's count of scrollback clears and resets at the last
     /// update. History can be cleared and refilled between two counts of
     /// scrolled lines, so a clear starts a new epoch whatever the count.
@@ -173,7 +170,6 @@ impl Grid {
             palette_revs: Box::new([0; 256]),
             lines: Lines::default(),
             full: true,
-            joiners: 0,
             clears: None,
             writer: RowWriter::new(),
             columns: Columns::default(),
@@ -284,14 +280,6 @@ impl Grid {
             self.tables.compact();
             self.full = true;
         }
-        let joiners = em.joiners_printed();
-        if joiners != self.joiners {
-            // A combining mark or joiner may have changed a cell on a row
-            // Ghostty did not mark dirty, which the render state therefore
-            // did not copy: start it again so it copies every row.
-            self.joiners = joiners;
-            self.distrust_dirty();
-        }
 
         let top_line = self.lines.top_line();
         let Grid {
@@ -312,16 +300,28 @@ impl Grid {
         let snap = rs.update(t)?;
         let all = *full || snap.dirty()? == Dirty::Full;
         {
+            let line_of = |y: u16| match screen {
+                Screen::Primary => top_line + u64::from(y),
+                Screen::Alternate => 0,
+            };
+            // With every cached row still at its line, only the rows Ghostty
+            // marked dirty can differ: visit just those.
+            let only_dirty = !all && rows.iter().zip(0u16..).all(|(c, y)| c.line == line_of(y));
             let mut it = rows_it.update(&snap)?;
-            let mut y: u16 = 0;
-            while let Some(row) = it.next() {
+            let mut visited: u16 = 0;
+            loop {
+                let (y, row) = if only_dirty {
+                    let Some(at) = it.next_dirty() else { break };
+                    at
+                } else {
+                    let Some(row) = it.next() else { break };
+                    visited += 1;
+                    (visited - 1, row)
+                };
                 let Some(cached) = rows.get_mut(usize::from(y)) else {
                     break;
                 };
-                let line = match screen {
-                    Screen::Primary => top_line + u64::from(y),
-                    Screen::Alternate => 0,
-                };
+                let line = line_of(y);
                 if all || row.dirty()? || cached.line != line {
                     let raw = row.raw_row()?;
                     let flags = row_flags_of(raw)?;
@@ -421,7 +421,6 @@ impl Grid {
                     }
                     row.set_dirty(false)?;
                 }
-                y += 1;
             }
         }
         let cursor = cursor_of(&snap)?;
@@ -848,4 +847,61 @@ fn mouse_of(t: &Term) -> Result<MouseMode, Error> {
     } else {
         MouseMode::None
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const AT: Cursor = Cursor {
+        epoch: 0,
+        next_rseq: 0,
+        next_offset: 0,
+    };
+
+    #[test]
+    fn a_partial_update_resends_only_the_dirty_rows_and_matches_a_full_one() {
+        let mut em = Emulator::new(20, 6).unwrap();
+        let mut fx = Vec::new();
+        em.feed(b"one\r\ntwo\r\nthree\r\nfour", &mut fx);
+        let mut grid = Grid::new().unwrap();
+        grid.update(&em, AT).unwrap();
+        let held = grid.held();
+
+        em.feed(b"\x1b[2;1HTWO\x1b[5;3Hfive", &mut fx);
+        assert!(grid.update(&em, AT).unwrap());
+        let delta = grid.delta(&held).unwrap();
+        assert_eq!(delta.rows.iter().map(|r| r.y).collect::<Vec<_>>(), [1, 4]);
+
+        let mut fresh = Grid::new().unwrap();
+        fresh.update(&em, AT).unwrap();
+        assert_eq!(
+            grid.snapshot(Vec::new()).rows,
+            fresh.snapshot(Vec::new()).rows
+        );
+    }
+
+    /// A zero-width codepoint joins the cell before it, on a row nothing
+    /// else touched since the last update: Ghostty marks that row dirty.
+    #[test]
+    fn a_combining_mark_marks_its_row_dirty() {
+        let mut em = Emulator::new(20, 4).unwrap();
+        let mut fx = Vec::new();
+        em.feed(b"\x1b[2;1He", &mut fx);
+        let mut grid = Grid::new().unwrap();
+        grid.update(&em, AT).unwrap();
+        for mark in ["\u{301}", "\u{200d}", "\u{308}"] {
+            let held = grid.held();
+            em.feed(mark.as_bytes(), &mut fx);
+            assert!(grid.update(&em, AT).unwrap(), "{mark:?}");
+            let delta = grid.delta(&held).unwrap();
+            assert_eq!(delta.rows.iter().map(|r| r.y).collect::<Vec<_>>(), [1]);
+        }
+        let mut fresh = Grid::new().unwrap();
+        fresh.update(&em, AT).unwrap();
+        assert_eq!(
+            grid.snapshot(Vec::new()).rows,
+            fresh.snapshot(Vec::new()).rows
+        );
+    }
 }

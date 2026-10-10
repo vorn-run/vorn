@@ -1,11 +1,11 @@
 //! A session's terminal: libghostty-vt fed one write per flush, its labels and counters, and its effects.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 
+use libghostty_vt::style::RgbColor;
 use libghostty_vt::terminal::{
-    ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType,
+    ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode,
     PrimaryDeviceAttributes, SecondaryDeviceAttributes, SizeReportSize, Terminal,
     TertiaryDeviceAttributes,
 };
@@ -34,6 +34,21 @@ pub enum Effect {
     },
     /// The cwd an OSC 5522 moved to, once per move.
     Cwd(String),
+    /// An OSC 9;4 progress report: a percentage from 0 to 100 when given.
+    Progress {
+        state: ProgressState,
+        percent: Option<u8>,
+    },
+}
+
+/// What an OSC 9;4 progress report shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgressState {
+    Remove,
+    Set,
+    Error,
+    Indeterminate,
+    Pause,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,21 +68,41 @@ const PRIMARY_DA: PrimaryDeviceAttributes = PrimaryDeviceAttributes::new(
     &[DeviceAttributeFeature::ANSI_COLOR],
 );
 
-/// What [`Emulator::parsed_bytes`], [`Emulator::joiners_printed`] and
-/// [`Emulator::history_clears`] stand at: kept beside a checkpoint by a host
+/// What [`Emulator::parsed_bytes`] and [`Emulator::history_clears`] stand at: kept beside a checkpoint by a host
 /// that drops a terminal and rebuilds it later.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Counters {
     parsed: u64,
-    joiners: u64,
     clears: u64,
+}
+
+/// A theme's colours, as RGB: what OSC 4 and 10 to 12 queries are answered with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Theme {
+    pub fg: [u8; 3],
+    pub bg: [u8; 3],
+    /// `None` draws the cursor in the cell's colours.
+    pub cursor: Option<[u8; 3]>,
+    /// The sixteen ANSI colours; the other 240 palette entries keep Ghostty's.
+    pub ansi: Option<[[u8; 3]; 16]>,
+}
+
+impl Theme {
+    /// Foreground and background only.
+    pub const fn new(fg: [u8; 3], bg: [u8; 3]) -> Self {
+        Theme {
+            fg,
+            bg,
+            cursor: None,
+            ansi: None,
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct Emulator {
     pub(crate) term: Terminal<'static, 'static>,
     effects: Rc<RefCell<Vec<Effect>>>,
-    size: Rc<Cell<(u16, u16)>>,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
     /// Title and cwd as the session record keeps them (see [`crate::Screen`]).
@@ -76,14 +111,10 @@ pub struct Emulator {
     pub(crate) scan: Scan,
     /// Which of Ghostty's title and pwd the last write changed.
     changed: Rc<Cell<u8>>,
-    /// Codepoints the last feed printed that may have joined a cell.
-    joins: Vec<u32>,
-    /// Whether Ghostty gives each codepoint asked about no width, so it joins the cell before.
-    zero_width: HashMap<u32, bool>,
     /// Output bytes handed to Ghostty by [`Emulator::feed`].
     pub(crate) parsed: u64,
-    /// Feeds that printed a zero-width codepoint (see [`Emulator::joiners_printed`]).
-    pub(crate) joiners: u64,
+    /// Synchronized output holds started, counted by Ghostty's render hold callback.
+    holds: Rc<Cell<u64>>,
 }
 
 impl Emulator {
@@ -104,7 +135,6 @@ impl Emulator {
     pub(crate) fn wrap(mut term: Terminal<'static, 'static>) -> Result<Self> {
         let (cols, rows) = (term.cols()?, term.rows()?);
         let effects = Rc::new(RefCell::new(Vec::new()));
-        let size = Rc::new(Cell::new((cols, rows)));
         let sink = Rc::clone(&effects);
         term.on_pty_write(move |_, bytes| sink.borrow_mut().push(Effect::Reply(bytes.to_vec())))?;
         let sink = Rc::clone(&effects);
@@ -149,36 +179,66 @@ impl Emulator {
                 tertiary: TertiaryDeviceAttributes { unit_id: 0 },
             })
         })?;
-        let dims = Rc::clone(&size);
-        term.on_size(move |_| {
-            let (columns, rows) = dims.get();
+        // Read from the terminal, so a report raised by a resize carries the new size.
+        term.on_size(|t| {
+            let (columns, rows) = (t.cols().ok()?, t.rows().ok()?);
+            let (cell_width, cell_height) = cell_px(t)?;
             Some(SizeReportSize {
                 rows,
                 columns,
-                cell_width: 1,
-                cell_height: 1,
+                cell_width,
+                cell_height,
             })
         })?;
         term.on_xtversion(|_| Some("vorn"))?;
+        // CSI ? 996 n: dark when the theme's background is darker than its text; unanswered
+        // without a theme.
+        term.on_color_scheme(|t| {
+            let fg = t.default_fg_color().ok()??;
+            let bg = t.default_bg_color().ok()??;
+            Some(if luma(bg) < luma(fg) {
+                ColorScheme::Dark
+            } else {
+                ColorScheme::Light
+            })
+        })?;
+        let sink = Rc::clone(&effects);
+        term.on_progress_report(move |_, report| {
+            use libghostty_vt::terminal::ProgressState as P;
+            let state = match report.state() {
+                Ok(P::Remove) => ProgressState::Remove,
+                Ok(P::Set) => ProgressState::Set,
+                Ok(P::Error) => ProgressState::Error,
+                Ok(P::Indeterminate) => ProgressState::Indeterminate,
+                Ok(P::Pause) => ProgressState::Pause,
+                _ => return,
+            };
+            let percent = report.progress().map(|p| p.min(100));
+            sink.borrow_mut().push(Effect::Progress { state, percent });
+        })?;
         let changed = Rc::new(Cell::new(0));
         let flag = Rc::clone(&changed);
         term.on_title_changed(move |_| flag.set(flag.get() | TITLE))?;
         let flag = Rc::clone(&changed);
         term.on_pwd_changed(move |_| flag.set(flag.get() | PWD))?;
+        let holds = Rc::new(Cell::new(0));
+        let count = Rc::clone(&holds);
+        term.on_render_hold(move |_, held| {
+            if held {
+                count.set(count.get() + 1);
+            }
+        })?;
         Ok(Self {
             term,
             effects,
-            size,
             cols,
             rows,
             title: String::new(),
             cwd: String::new(),
             scan: Scan::default(),
             changed,
-            joins: Vec::new(),
-            zero_width: HashMap::new(),
             parsed: 0,
-            joiners: 0,
+            holds,
         })
     }
 
@@ -219,9 +279,15 @@ impl Emulator {
         self.parsed
     }
 
-    /// Feeds that printed a joining codepoint, whose row Ghostty does not mark dirty outside mode 2027.
-    pub fn joiners_printed(&self) -> u64 {
-        self.joiners
+    /// While synchronized output (mode 2026) holds the screen, which hold this is: holds are
+    /// counted as they start, so a renderer that polls can tell a new hold begun since it last
+    /// looked from the one it already waited on.
+    pub fn render_hold(&self) -> Option<u64> {
+        // The mode says whether a hold is on: a rebuilt terminal restores it without calling back.
+        self.term
+            .mode(Mode::SYNC_OUTPUT)
+            .unwrap_or(false)
+            .then(|| self.holds.get())
     }
 
     /// Scrollback clears (ED 3) and resets (RIS): history line numbers start again when this moves.
@@ -229,17 +295,26 @@ impl Emulator {
         self.scan.clears
     }
 
-    /// The `(fg, bg)` defaults OSC 10 and 11 queries are answered with; `None` unsets them.
-    pub fn set_default_colors(&mut self, colors: Option<([u8; 3], [u8; 3])>) -> Result<()> {
-        let rgb = |c: [u8; 3]| libghostty_vt::style::RgbColor {
+    /// The theme colour queries are answered with and renderers draw defaults in; `None` unsets it.
+    pub fn set_theme(&mut self, theme: Option<&Theme>) -> Result<()> {
+        let rgb = |c: [u8; 3]| RgbColor {
             r: c[0],
             g: c[1],
             b: c[2],
         };
+        self.term.set_default_fg_color(theme.map(|t| rgb(t.fg)))?;
+        self.term.set_default_bg_color(theme.map(|t| rgb(t.bg)))?;
         self.term
-            .set_default_fg_color(colors.map(|(fg, _)| rgb(fg)))?;
-        self.term
-            .set_default_bg_color(colors.map(|(_, bg)| rgb(bg)))?;
+            .set_default_cursor_color(theme.and_then(|t| t.cursor).map(rgb))?;
+        // Ghostty's own palette first, so the entries past the theme's are its own.
+        self.term.set_default_color_palette(None)?;
+        if let Some(ansi) = theme.and_then(|t| t.ansi) {
+            let mut palette = self.term.default_color_palette()?;
+            for (slot, c) in palette.0.iter_mut().zip(ansi) {
+                *slot = rgb(c);
+            }
+            self.term.set_default_color_palette(Some(palette))?;
+        }
         Ok(())
     }
 
@@ -252,17 +327,12 @@ impl Emulator {
     pub fn feed(&mut self, bytes: &[u8], out: &mut Vec<Effect>) {
         self.parsed += bytes.len() as u64;
         self.term.vt_write(bytes);
-        let mut joins = std::mem::take(&mut self.joins);
         let (cwd, effects) = (&mut self.cwd, &self.effects);
-        self.scan.feed(
-            bytes,
-            |payload| {
-                if let Some(moved) = private_cwd(cwd, payload) {
-                    effects.borrow_mut().push(Effect::Cwd(moved));
-                }
-            },
-            &mut joins,
-        );
+        self.scan.feed(bytes, |payload| {
+            if let Some(moved) = private_cwd(cwd, payload) {
+                effects.borrow_mut().push(Effect::Cwd(moved));
+            }
+        });
         // After the OSC 5522 reports, so one in the same feed is not hidden.
         let changed = self.changed.replace(0);
         if changed & TITLE != 0 {
@@ -275,40 +345,46 @@ impl Emulator {
                 self.cwd = path;
             }
         }
-        if joins.drain(..).any(|cp| self.zero_width(cp)) {
-            self.joiners += 1;
-        }
-        self.joins = joins;
         out.append(&mut self.effects.borrow_mut());
     }
 
-    /// Resizes, appending any in-band size report to `out`.
+    /// Resizes with cells of unknown pixel size, appending any in-band size report to `out`.
     pub fn resize(&mut self, cols: u32, rows: u32, out: &mut Vec<Effect>) -> Result<()> {
+        self.resize_px(cols, rows, 0, 0, out)
+    }
+
+    /// Resizes to a window of `px_w`×`px_h` pixels, as the PTY is told (0 when unknown), so size
+    /// reports and pixel mouse reports carry the real cell size.
+    pub fn resize_px(
+        &mut self,
+        cols: u32,
+        rows: u32,
+        px_w: u32,
+        px_h: u32,
+        out: &mut Vec<Effect>,
+    ) -> Result<()> {
         let (c, r) = (dimension(cols)?, dimension(rows)?);
-        if (c, r) == (self.cols, self.rows) {
+        // An unknown size keeps one pixel a cell, so the encoders still count in cells.
+        let cell = ((px_w / cols).max(1), (px_h / rows).max(1));
+        if (c, r) == (self.cols, self.rows) && Some(cell) == cell_px(&self.term) {
             return Ok(());
         }
-        self.term.resize(c, r, 1, 1)?;
+        self.term.resize(c, r, cell.0, cell.1)?;
         self.cols = c;
         self.rows = r;
-        self.size.set((c, r));
         out.append(&mut self.effects.borrow_mut());
         Ok(())
     }
 
-    /// Whether Ghostty gives `cp` no width, asked of its own tables once.
-    fn zero_width(&mut self, cp: u32) -> bool {
-        *self
-            .zero_width
-            .entry(cp)
-            .or_insert_with(|| probe_zero_width(cp).unwrap_or(true))
+    /// The pixel size of one cell, one pixel when the window's size is unknown.
+    pub fn cell_px(&self) -> (u32, u32) {
+        cell_px(&self.term).unwrap_or((1, 1))
     }
 
     /// The counters that follow the output, which a checkpoint does not carry.
     pub fn counters(&self) -> Counters {
         Counters {
             parsed: self.parsed,
-            joiners: self.joiners,
             clears: self.scan.clears,
         }
     }
@@ -316,16 +392,13 @@ impl Emulator {
     /// Takes up `c`, as a terminal rebuilt in place of the one they were read from.
     pub fn set_counters(&mut self, c: Counters) {
         self.parsed = c.parsed;
-        self.joiners = c.joiners;
         self.scan.clears = c.clears;
     }
 
-    /// Takes the counters and caches that follow the output from the terminal this replaces.
-    pub(crate) fn carry_counters(&mut self, from: &mut Emulator) {
-        self.parsed = from.parsed;
-        self.joiners = from.joiners;
-        self.scan.clears = from.scan.clears;
-        self.zero_width = std::mem::take(&mut from.zero_width);
+    /// Takes the counters that follow the output from the terminal this replaces.
+    pub(crate) fn carry_counters(&mut self, from: &Emulator) {
+        self.set_counters(from.counters());
+        self.holds.set(from.holds.get());
     }
 }
 
@@ -349,15 +422,17 @@ fn url_path(raw: &str) -> Option<String> {
     (!path.is_empty()).then(|| clip_units(&percent_decode(path).unwrap_or_else(|| path.to_owned())))
 }
 
-/// Prints `cp` after a narrow character: the cursor stays in column 1 only if it joined it.
-fn probe_zero_width(cp: u32) -> Option<bool> {
-    let ch = char::from_u32(cp)?;
-    let mut t = Terminal::new(16, 1).ok()?;
-    let mut bytes = b"a".to_vec();
-    let mut buf = [0; 4];
-    bytes.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
-    t.vt_write(&bytes);
-    Some(t.cursor_x().ok()? == 1)
+/// Relative luminance, enough to tell a light colour from a dark one.
+fn luma(c: RgbColor) -> u32 {
+    2126 * u32::from(c.r) + 7152 * u32::from(c.g) + 722 * u32::from(c.b)
+}
+
+/// The cell size the last resize gave `t`, one pixel when it was not told one.
+fn cell_px(t: &Terminal<'_, '_>) -> Option<(u32, u32)> {
+    let (cols, rows) = (u32::from(t.cols().ok()?), u32::from(t.rows().ok()?));
+    let w = t.width_px().ok()?.checked_div(cols)?.max(1);
+    let h = t.height_px().ok()?.checked_div(rows)?.max(1);
+    Some((w, h))
 }
 
 #[cfg(test)]
@@ -381,19 +456,43 @@ mod tests {
         }
     }
 
+    fn replies(fx: Vec<Effect>) -> Vec<String> {
+        fx.into_iter()
+            .filter_map(|f| match f {
+                Effect::Reply(b) => Some(String::from_utf8(b).unwrap()),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[test]
-    fn joiners_are_counted_per_feed_by_ghosttys_widths() {
-        let mut em = Emulator::new(20, 3).unwrap();
+    fn size_reports_carry_the_cell_pixels_and_the_new_size() {
+        let mut em = Emulator::new(80, 24).unwrap();
         let mut fx = Vec::new();
-        em.feed("é ─ ✓ 日本".as_bytes(), &mut fx);
-        assert_eq!(em.joiners_printed(), 0);
-        em.feed("e\u{301}".as_bytes(), &mut fx);
-        assert_eq!(em.joiners_printed(), 1);
-        // Greek takes a cell of its own, though the filter lets it through.
-        em.feed("αβγ".as_bytes(), &mut fx);
-        assert_eq!(em.joiners_printed(), 1);
-        em.feed("👍\u{1f3fd} a\u{200d}".as_bytes(), &mut fx);
-        assert_eq!(em.joiners_printed(), 2);
+        em.feed(b"\x1b[14t\x1b[16t", &mut fx);
+        assert_eq!(
+            replies(std::mem::take(&mut fx)),
+            ["\x1b[4;24;80t", "\x1b[6;1;1t"]
+        );
+        em.feed(b"\x1b[?2048h", &mut fx);
+        fx.clear();
+        em.resize_px(100, 30, 1000, 600, &mut fx).unwrap();
+        assert_eq!(em.cell_px(), (10, 20));
+        assert_eq!(
+            replies(std::mem::take(&mut fx)),
+            ["\x1b[48;30;100;600;1000t"]
+        );
+        em.feed(b"\x1b[14t\x1b[16t", &mut fx);
+        assert_eq!(
+            replies(std::mem::take(&mut fx)),
+            ["\x1b[4;600;1000t", "\x1b[6;20;10t"]
+        );
+        // A new pixel size alone is a resize too; the same one is not.
+        em.resize_px(100, 30, 1200, 600, &mut fx).unwrap();
+        assert_eq!(em.cell_px(), (12, 20));
+        assert_eq!(fx.len(), 1);
+        em.resize_px(100, 30, 1200, 600, &mut fx).unwrap();
+        assert_eq!(fx.len(), 1);
     }
 
     #[test]
@@ -420,5 +519,48 @@ mod tests {
             ]
         );
         assert_eq!((em.title(), em.cwd()), ("t", "/srv"));
+    }
+
+    #[test]
+    fn render_holds_are_numbered_and_survive_a_cut() {
+        let mut em = Emulator::with_scrollback(20, 4, 1 << 16).unwrap();
+        let mut fx = Vec::new();
+        assert_eq!(em.render_hold(), None);
+        em.feed(b"\x1b[?2026ha\x1b[?2026h", &mut fx);
+        assert_eq!(em.render_hold(), Some(1));
+        em.feed(b"\x1b[?2026l\x1b[?2026hb", &mut fx);
+        assert_eq!(em.render_hold(), Some(2));
+        em.checkpoint().unwrap();
+        assert_eq!(em.render_hold(), Some(2));
+        em.feed(b"\x1b[?2026l", &mut fx);
+        assert_eq!(em.render_hold(), None);
+        em.feed(b"\x1b[?2026h", &mut fx);
+        assert_eq!(em.render_hold(), Some(3));
+    }
+
+    #[test]
+    fn progress_reports_are_effects_and_the_theme_answers_the_scheme_query() {
+        let mut em = Emulator::new(20, 3).unwrap();
+        let mut fx = Vec::new();
+        em.feed(b"\x1b]9;4;1;42\x07\x1b]9;4;3\x07\x1b]9;4;0\x07", &mut fx);
+        let progress = |state, percent| Effect::Progress { state, percent };
+        assert_eq!(
+            fx,
+            [
+                progress(ProgressState::Set, Some(42)),
+                progress(ProgressState::Indeterminate, None),
+                progress(ProgressState::Remove, None),
+            ]
+        );
+        fx.clear();
+        em.feed(b"\x1b[?996n", &mut fx);
+        assert!(fx.is_empty(), "no theme, no answer: {fx:?}");
+        em.set_theme(Some(&Theme::new([0xd4; 3], [0x14; 3])))
+            .unwrap();
+        em.feed(b"\x1b[?996n", &mut fx);
+        em.set_theme(Some(&Theme::new([0x14; 3], [0xfa; 3])))
+            .unwrap();
+        em.feed(b"\x1b[?996n", &mut fx);
+        assert_eq!(replies(fx), ["\x1b[?997;1n", "\x1b[?997;2n"]);
     }
 }

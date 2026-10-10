@@ -31,3 +31,4 @@ pub use session::{
 pub use snapshot::VtSnapshot;
 pub use term::{Fidelity, Rejected, FORMAT};
 pub use vorn_grid::{GridIn, HubConfig, HubOut, Peer};
+pub use vorn_screen::{ghostty_build, ProgressState, Theme};
