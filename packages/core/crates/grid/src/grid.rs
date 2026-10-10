@@ -312,16 +312,28 @@ impl Grid {
         let snap = rs.update(t)?;
         let all = *full || snap.dirty()? == Dirty::Full;
         {
+            let line_of = |y: u16| match screen {
+                Screen::Primary => top_line + u64::from(y),
+                Screen::Alternate => 0,
+            };
+            // With every cached row still at its line, only the rows Ghostty
+            // marked dirty can differ: visit just those.
+            let only_dirty = !all && rows.iter().zip(0u16..).all(|(c, y)| c.line == line_of(y));
             let mut it = rows_it.update(&snap)?;
-            let mut y: u16 = 0;
-            while let Some(row) = it.next() {
+            let mut visited: u16 = 0;
+            loop {
+                let (y, row) = if only_dirty {
+                    let Some(at) = it.next_dirty() else { break };
+                    at
+                } else {
+                    let Some(row) = it.next() else { break };
+                    visited += 1;
+                    (visited - 1, row)
+                };
                 let Some(cached) = rows.get_mut(usize::from(y)) else {
                     break;
                 };
-                let line = match screen {
-                    Screen::Primary => top_line + u64::from(y),
-                    Screen::Alternate => 0,
-                };
+                let line = line_of(y);
                 if all || row.dirty()? || cached.line != line {
                     let raw = row.raw_row()?;
                     let flags = row_flags_of(raw)?;
@@ -421,7 +433,6 @@ impl Grid {
                     }
                     row.set_dirty(false)?;
                 }
-                y += 1;
             }
         }
         let cursor = cursor_of(&snap)?;
@@ -848,4 +859,37 @@ fn mouse_of(t: &Term) -> Result<MouseMode, Error> {
     } else {
         MouseMode::None
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const AT: Cursor = Cursor {
+        epoch: 0,
+        next_rseq: 0,
+        next_offset: 0,
+    };
+
+    #[test]
+    fn a_partial_update_resends_only_the_dirty_rows_and_matches_a_full_one() {
+        let mut em = Emulator::new(20, 6).unwrap();
+        let mut fx = Vec::new();
+        em.feed(b"one\r\ntwo\r\nthree\r\nfour", &mut fx);
+        let mut grid = Grid::new().unwrap();
+        grid.update(&em, AT).unwrap();
+        let held = grid.held();
+
+        em.feed(b"\x1b[2;1HTWO\x1b[5;3Hfive", &mut fx);
+        assert!(grid.update(&em, AT).unwrap());
+        let delta = grid.delta(&held).unwrap();
+        assert_eq!(delta.rows.iter().map(|r| r.y).collect::<Vec<_>>(), [1, 4]);
+
+        let mut fresh = Grid::new().unwrap();
+        fresh.update(&em, AT).unwrap();
+        assert_eq!(
+            grid.snapshot(Vec::new()).rows,
+            fresh.snapshot(Vec::new()).rows
+        );
+    }
 }
