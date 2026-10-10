@@ -13,9 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use vorn_app::client::{data_dir, Endpoint};
-use vorn_app::ui::{
-    run_window, Gpu, Input, Offscreen, TreeUpdate, Ui, Waker, WindowApp, OFFSCREEN_FORMAT,
-};
+use vorn_app::ui::{run_window, El, Input, Laid, Rect, RenderMode, Rgba, Ui, Waker, WindowApp};
 use vorn_app::{look, ui_config, App};
 
 struct Args {
@@ -76,12 +74,12 @@ fn shot(args: &Args) -> Result<(), String> {
     if let Some(n) = args.get("select").and_then(|n| n.parse::<usize>().ok()) {
         app.input(jump(n));
     }
-    let mut ui = Ui::new(Gpu::headless()?, OFFSCREEN_FORMAT, &ui_config(scale));
+    let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(scale));
     let px = (
         (size.0 * scale).round() as u32,
         (size.1 * scale).round() as u32,
     );
-    let target = Offscreen::new(&ui.gpu, px);
+    let target = ui.offscreen(px);
     // The first frame attaches the cards; draw until each has its screen.
     let until = Instant::now() + Duration::from_secs(10);
     loop {
@@ -97,9 +95,13 @@ fn shot(args: &Args) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(50));
     }
     std::thread::sleep(Duration::from_millis(300));
+    // A full atlas empties itself; the second pass fits one frame.
     app.frame(&mut ui, size);
-    ui.render(&target.view, target.size);
-    target.save_png(&ui.gpu, out)?;
+    if !ui.render_offscreen(&target) {
+        app.frame(&mut ui, size);
+        ui.render_offscreen(&target);
+    }
+    ui.save_png(&target, out)?;
     println!("{out}");
     Ok(())
 }
@@ -121,12 +123,30 @@ fn jump(n: usize) -> Input {
 struct Win(App);
 
 impl WindowApp for Win {
-    fn frame(&mut self, ui: &mut Ui, size: (f32, f32)) -> TreeUpdate {
-        self.0.frame(ui, size)
+    fn view(&mut self, ui: &mut Ui) -> El {
+        let size = ui.viewport();
+        self.0.view(ui, size)
     }
 
-    fn input(&mut self, input: Input) {
+    fn paint(&mut self, ui: &mut Ui, laid: &Laid) {
+        self.0.paint(ui, laid);
+    }
+
+    fn input(&mut self, _ui: &mut Ui, input: Input) {
         self.0.input(input);
+    }
+
+    fn background(&self) -> Rgba {
+        Rgba::hex(look::SURFACE_BASE)
+    }
+
+    // Terminals take composed text.
+    fn wants_ime(&self) -> bool {
+        true
+    }
+
+    fn ime_area(&self) -> Option<Rect> {
+        None
     }
 }
 

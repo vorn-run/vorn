@@ -12,9 +12,8 @@ name = "vorn-app"
 path = "src/main.rs"
 
 [dependencies]
-# The UI layer, reached only through `src/ui.rs`; repointing it at its own
-# crate is this line.
-vornui = { path = "../../../../spikes/vornui/vornui" }
+# The UI layer, reached only through `src/ui.rs`.
+vornui = { path = "../vornui" }
 vorn-protocol = { path = "../protocol" }
 vorn-grid-client = { path = "../grid-client" }
 vorn-term-mirror = { path = "../term-mirror" }

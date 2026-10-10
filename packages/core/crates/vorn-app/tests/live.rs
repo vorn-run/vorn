@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use support::{wait_for, TestVornd};
 use vorn_app::client::Endpoint;
-use vorn_app::ui::{mods, Gpu, Input, Offscreen, Ui, OFFSCREEN_FORMAT};
+use vorn_app::ui::{mods, Input, Offscreen, RenderMode, Ui};
 use vorn_app::{look, ui_config, App};
 
 fn key(code: &str, m: u16, text: Option<&str>) -> Input {
@@ -38,31 +38,34 @@ fn connect(v: &TestVornd) -> App {
     app
 }
 
-/// An offscreen 1440x900 frame, when there is a GPU to draw it.
+/// An offscreen 1440x900 frame, on the GPU or the CPU.
 struct Shot {
     ui: Ui,
     target: Offscreen,
 }
 
 impl Shot {
-    fn new() -> Option<Shot> {
-        let gpu = Gpu::headless().map_err(|e| eprintln!("no GPU: {e}")).ok()?;
-        let ui = Ui::new(gpu, OFFSCREEN_FORMAT, &ui_config(1.0));
+    fn new() -> Shot {
+        let ui = Ui::headless(RenderMode::Auto, &ui_config(1.0));
         let px = (look::WINDOW.0 as u32, look::WINDOW.1 as u32);
-        let target = Offscreen::new(&ui.gpu, px);
-        Some(Shot { ui, target })
+        let target = ui.offscreen(px);
+        Shot { ui, target }
     }
 
     fn draw(&mut self, app: &mut App) {
+        // A full atlas empties itself; the second pass fits one frame.
         app.frame(&mut self.ui, look::WINDOW);
-        self.ui.render(&self.target.view, self.target.size);
+        if !self.ui.render_offscreen(&self.target) {
+            app.frame(&mut self.ui, look::WINDOW);
+            self.ui.render_offscreen(&self.target);
+        }
     }
 
     /// Saves the frame as `$VORN_APP_SHOT-<name>.png`, when that is set.
-    fn save(&self, name: &str) {
+    fn save(&mut self, name: &str) {
         if let Some(base) = std::env::var_os("VORN_APP_SHOT") {
             let path = format!("{}-{name}.png", base.to_string_lossy());
-            self.target.save_png(&self.ui.gpu, &path).expect("png");
+            self.ui.save_png(&self.target, &path).expect("png");
         }
     }
 }
@@ -76,10 +79,8 @@ fn a_shell_opens_from_the_keyboard_and_takes_typing() {
     assert!(app.store.sessions.is_empty());
     assert!(app.composing(), "an empty grid shows the composer");
     let mut shot = Shot::new();
-    if let Some(s) = &mut shot {
-        s.draw(&mut app);
-        s.save("composer");
-    }
+    shot.draw(&mut app);
+    shot.save("composer");
 
     app.input(key("Backquote", mods::CTRL, Some("`")));
     let id = wait_for("the shell's card", || {
@@ -89,11 +90,8 @@ fn a_shell_opens_from_the_keyboard_and_takes_typing() {
     assert!(app.store.session(&id).is_some_and(|s| s.is_shell()));
     assert!(!app.composing(), "a card replaces the composer");
 
-    match &mut shot {
-        // The frame attaches the card's terminal at the size of its box.
-        Some(s) => s.draw(&mut app),
-        None => app.grid().expect("grid").attach(&id, 80, 24),
-    }
+    // The frame attaches the card's terminal at the size of its box.
+    shot.draw(&mut app);
     wait_for("the shell's first screen", || {
         app.pump();
         app.pane(&id).map(|_| ())
@@ -108,10 +106,8 @@ fn a_shell_opens_from_the_keyboard_and_takes_typing() {
     });
     assert!(screen.contains("echo vorn-42"), "{screen}");
 
-    if let Some(s) = &mut shot {
-        s.draw(&mut app);
-        s.save("shell");
-    }
+    shot.draw(&mut app);
+    shot.save("shell");
 }
 
 #[cfg(unix)]
@@ -167,14 +163,13 @@ fn the_composer_starts_the_default_agent_in_the_chosen_project() {
     });
     let path = &app.store.session(&shell).expect("card").info.project_path;
     assert_eq!(std::path::Path::new(path), project);
-    if let Some(mut s) = Shot::new() {
-        s.draw(&mut app);
-        wait_for("both screens", || {
-            app.pump();
-            (app.pane(&id).is_some() && app.pane(&shell).is_some()).then_some(())
-        });
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        s.draw(&mut app);
-        s.save("grid");
-    }
+    let mut shot = Shot::new();
+    shot.draw(&mut app);
+    wait_for("both screens", || {
+        app.pump();
+        (app.pane(&id).is_some() && app.pane(&shell).is_some()).then_some(())
+    });
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    shot.draw(&mut app);
+    shot.save("grid");
 }

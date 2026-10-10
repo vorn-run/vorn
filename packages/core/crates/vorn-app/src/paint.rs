@@ -63,8 +63,7 @@ pub fn pane(ui: &mut Ui, v: &PaneView, r: Rect, focused: bool, preedit: &str) {
             let (x, y) = at(run.col, run.row);
             ui.text.draw_cell(
                 &mut ui.scene,
-                &mut ui.renderer,
-                &ui.gpu.queue,
+                &mut ui.atlases,
                 text,
                 style,
                 (x, y),
@@ -81,8 +80,7 @@ pub fn pane(ui: &mut Ui, v: &PaneView, r: Rect, focused: bool, preedit: &str) {
             let (x, y) = at(col, run.row);
             ui.text.draw_cell(
                 &mut ui.scene,
-                &mut ui.renderer,
-                &ui.gpu.queue,
+                &mut ui.atlases,
                 &text[i..i + ch.len_utf8()],
                 style,
                 (x, y),
@@ -112,8 +110,7 @@ fn draw_preedit(ui: &mut Ui, v: &PaneView, origin: (f32, f32), s: &str) {
             .quad(Rect::new(x, y, w, cell.h), Rgba::hex(v.bg), 0.0, None);
         ui.text.draw_cell(
             &mut ui.scene,
-            &mut ui.renderer,
-            &ui.gpu.queue,
+            &mut ui.atlases,
             ch.encode_utf8(&mut buf),
             0,
             (x, y),

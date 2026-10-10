@@ -15,7 +15,7 @@ use crate::grid::Grid;
 use crate::look;
 use crate::paint;
 use crate::screen::{card_index, Composer, MainView, Screen};
-use crate::ui::{decode_png, mods, Input, Rgba, Role, TreeUpdate, Ui};
+use crate::ui::{decode_png, mods, El, Input, Laid, Rgba, Role, TreeUpdate, Ui};
 use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
 
@@ -373,6 +373,16 @@ impl App {
     /// Builds, lays out and paints a frame into `ui.scene`, attaching and
     /// sizing each card's terminal to the box it got.
     pub fn frame(&mut self, ui: &mut Ui, size: (f32, f32)) -> TreeUpdate {
+        ui.begin(Rgba::hex(look::SURFACE_BASE));
+        let root = self.view(ui, size);
+        let laid = ui.layout(root, size);
+        self.paint(ui, &laid);
+        laid.tree
+    }
+
+    /// The frame's element tree for a `size` window, after taking in what
+    /// vornd sent.
+    pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
         self.pump();
         if self.logo.is_none() {
             // A logo that does not decode costs only the logo.
@@ -380,7 +390,6 @@ impl App {
                 .ok()
                 .and_then(|(w, h, rgba)| ui.image(w, h, &rgba));
         }
-        ui.begin(Rgba::hex(look::SURFACE_BASE));
         let root = Screen {
             store: &self.store,
             view: self.view,
@@ -397,7 +406,12 @@ impl App {
             ui.custom_a11y
                 .insert(id, (Role::Terminal, s.title(), String::new()));
         }
-        let laid = ui.layout(root, size);
+        root
+    }
+
+    /// Paints each card's terminal into the box it got, attaching and
+    /// sizing the terminal to it.
+    pub fn paint(&mut self, ui: &mut Ui, laid: &Laid) {
         let cell = ui.text.cell();
         for (id, r) in &laid.customs {
             let Some(session) = card_index(*id).and_then(|i| self.store.sessions.get(i)) else {
@@ -417,7 +431,6 @@ impl App {
                 paint::pane(ui, v, *r, focused, pre);
             }
         }
-        laid.tree
     }
 }
 
