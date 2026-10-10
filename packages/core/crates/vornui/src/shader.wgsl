@@ -1,5 +1,7 @@
 // Quads: rounded rectangles with an optional inside border, antialiased by
 // a signed distance. Sprites: atlas regions, tinted masks or color images.
+// Both drop fragments whose pixel centre falls outside their clip. The CPU
+// renderer (cpu.rs) reproduces this file's arithmetic; change both together.
 
 struct Globals {
     viewport: vec2<f32>,
@@ -22,6 +24,10 @@ fn to_clip(p: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(n.x, -n.y, 0.0, 1.0);
 }
 
+fn clipped(p: vec4<f32>, clip: vec4<f32>) -> bool {
+    return p.x < clip.x || p.y < clip.y || p.x >= clip.z || p.y >= clip.w;
+}
+
 struct QuadOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) local: vec2<f32>,
@@ -29,6 +35,7 @@ struct QuadOut {
     @location(2) color: vec4<f32>,
     @location(3) border_color: vec4<f32>,
     @location(4) params: vec4<f32>,
+    @location(5) clip: vec4<f32>,
 };
 
 @vertex
@@ -38,6 +45,7 @@ fn quad_vs(
     @location(1) color: vec4<f32>,
     @location(2) border_color: vec4<f32>,
     @location(3) params: vec4<f32>,
+    @location(4) clip: vec4<f32>,
 ) -> QuadOut {
     let c = corner(vi);
     var o: QuadOut;
@@ -47,6 +55,7 @@ fn quad_vs(
     o.color = color;
     o.border_color = border_color;
     o.params = params;
+    o.clip = clip;
     return o;
 }
 
@@ -57,6 +66,9 @@ fn rounded_box(p: vec2<f32>, half_size: vec2<f32>, r: f32) -> f32 {
 
 @fragment
 fn quad_fs(i: QuadOut) -> @location(0) vec4<f32> {
+    if (clipped(i.pos, i.clip)) {
+        discard;
+    }
     let r = min(i.params.x, min(i.half_size.x, i.half_size.y));
     let d = rounded_box(i.local, i.half_size, r);
     let outer = clamp(0.5 - d, 0.0, 1.0);
@@ -79,6 +91,7 @@ struct SpriteOut {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) kind: f32,
+    @location(3) clip: vec4<f32>,
 };
 
 @vertex
@@ -88,6 +101,7 @@ fn sprite_vs(
     @location(1) uv: vec4<f32>,
     @location(2) color: vec4<f32>,
     @location(3) kind: vec4<f32>,
+    @location(4) clip: vec4<f32>,
 ) -> SpriteOut {
     let c = corner(vi);
     var o: SpriteOut;
@@ -99,17 +113,21 @@ fn sprite_vs(
     o.uv = (uv.xy + c * uv.zw) / size;
     o.color = color;
     o.kind = kind.x;
+    o.clip = clip;
     return o;
 }
 
 @fragment
 fn sprite_fs(i: SpriteOut) -> @location(0) vec4<f32> {
+    if (clipped(i.pos, i.clip)) {
+        discard;
+    }
     if (i.kind > 0.5) {
-        let t = textureSample(color_tex, samp, i.uv);
+        let t = textureSampleLevel(color_tex, samp, i.uv, 0.0);
         let a = t.a * i.color.a;
         return vec4<f32>(t.rgb * a, a);
     }
-    let m = textureSample(mask_tex, samp, i.uv).r;
+    let m = textureSampleLevel(mask_tex, samp, i.uv, 0.0).r;
     let a = m * i.color.a;
     return vec4<f32>(i.color.rgb * a, a);
 }

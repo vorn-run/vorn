@@ -27,6 +27,9 @@ with two conditions taken on as the first work:
    8-pane grid at about 3 fps against GPUI's 27 (see Windows below);
 2. latency pacing that matches GPUI's tight tail.
 
+Both are now met by `packages/core/crates/vornui`, the layer promoted out of
+this spike (see "After the spike" below).
+
 Why vornui:
 
 - **Cheaper at the same frame rate.** On the Mac it uses about half of
@@ -87,28 +90,31 @@ is consistent within its own layout.
 
 ### macOS: Apple M2 Pro, Metal, 1440×900 at 2×
 
-| | vornui | GPUI |
-|---|---|---|
-| **8 busy panes**, frame p50 / p95 / p99 | 1.05 / 1.87 / 2.39 ms | 3.40 / 4.04 / 4.18 ms |
-| keystroke-to-pixel p50 / p95 / p99 | 9.66 / 10.40 / 11.32 ms | 8.24 / 9.22 / 10.25 ms |
-| fps, lost probes | 104.7, 0 | 108.7, 0 |
-| CPU | 23.7% | 44.5% |
-| peak RSS / phys footprint | 27.6 / 78.8 MB | 39.3 / 52.4 MB |
-| **32 busy panes**, frame p50 / p95 / p99 | 0.57 / 0.71 / 0.89 ms | 3.28 / 3.53 / 3.69 ms |
-| keystroke-to-pixel p50 / p95 / p99 | 9.68 / 10.21 / 10.32 ms | 8.28 / 9.08 / 9.42 ms |
-| fps, lost probes | 104.0, 4 | 109.4, 4 |
-| CPU | 15.1% | 45.4% |
-| peak RSS / phys footprint | 28.9 / 78.1 MB | 43.1 / 53.7 MB |
-| static redraw, main 2× p50 / p99 | 1.43 / 1.76 ms ¹ | 0.21 / 0.40 ms |
-| static redraw, grid 8 p50 / p99 | 1.56 / 1.75 ms ¹ | 1.19 / 1.43 ms |
-| static redraw, grid 32 p50 / p99 | 1.54 / 2.88 ms ¹ | 1.83 / 2.05 ms |
-| cold start to first frame of 8 panes, p50 of 5 | 236 ms | 95 ms |
-| IME (Japanese): preedit drawn, commit reaches the pty | yes, `$ 日本語` | yes, `$ 日本語` |
-| a11y tree (main / grid) | 20 / 13 nodes, terminals carry screen text | 19 / 13 nodes, terminals carry screen text |
-| HiDPI 1× / 1.5× / 2× | yes | yes |
-| release binary | 9.1 MB | 10.7 MB ² |
-| lines we own: UI layer / app | 2,154 / 767 | 83 lines of patches / 1,012 |
-| dependency crates | 175 (layer alone 145) | 328 |
+vornui's columns are the promoted crate: on Metal, and with the CPU
+rasterizer forced (`VORNUI_RENDERER=cpu`). GPUI's are from the spike run.
+
+| | vornui | vornui, CPU raster | GPUI |
+|---|---|---|---|
+| **8 busy panes**, frame p50 / p95 / p99 | 1.10 / 2.21 / 3.16 ms | 2.84 / 3.90 / 5.23 ms | 3.40 / 4.04 / 4.18 ms |
+| keystroke-to-pixel p50 / p95 / p99 | 3.43 / 4.92 / 5.25 ms | 2.62 / 4.24 / 5.40 ms | 8.24 / 9.22 / 10.25 ms |
+| fps, lost probes | 115.0, 0 | 117.5, 0 | 108.7, 0 |
+| CPU | 23.3% | 101% | 44.5% |
+| peak RSS / phys footprint | 27.8 / 80.2 MB | 37.8 / 27.4 MB | 39.3 / 52.4 MB |
+| **32 busy panes**, frame p50 / p95 / p99 | 0.65 / 1.69 / 2.90 ms | 1.85 / 2.11 / 3.11 ms | 3.28 / 3.53 / 3.69 ms |
+| keystroke-to-pixel p50 / p95 / p99 | 3.16 / 4.64 / 4.75 ms | 1.23 / 1.97 / 6.27 ms | 8.28 / 9.08 / 9.42 ms |
+| fps, lost probes | 112.0, 4 | 116.5, 4 | 109.4, 4 |
+| CPU | 17.1% | 66% | 45.4% |
+| peak RSS / phys footprint | 28.3 / 81.6 MB | 37.2 / 28.1 MB | 43.1 / 53.7 MB |
+| static redraw, main 2× p50 / p99 | 1.28 / 1.69 ms ¹ | 0.12 / 0.15 ms | 0.21 / 0.40 ms |
+| static redraw, grid 8 p50 / p99 | 1.69 / 2.10 ms ¹ | 0.32 / 0.45 ms | 1.19 / 1.43 ms |
+| static redraw, grid 32 p50 / p99 | 1.86 / 2.93 ms ¹ | 0.41 / 0.66 ms | 1.83 / 2.05 ms |
+| cold start to first frame of 8 panes, p50 of 5 | 252 ms | | 95 ms |
+| IME (Japanese): preedit drawn, commit reaches the pty | yes, `$ 日本語` | | yes, `$ 日本語` |
+| a11y tree (main / grid) | 20 / 13 nodes, terminals carry screen text | | 19 / 13 nodes, terminals carry screen text |
+| HiDPI 1× / 1.5× / 2× | yes | | yes |
+| release binary | 9.3 MB | | 10.7 MB ² |
+| lines we own: UI layer / app | 7,422 (with widgets, window, CPU raster) / 856 | | 83 lines of patches / 1,012 |
+| dependency crates | 178 (layer alone 148) | | 328 |
 
 ¹ vornui's redraw loop waits for the previous frame's GPU work, as a
 swapchain would, so the number is GPU throughput for the 2880×1800 target.
@@ -161,6 +167,33 @@ creates the windowed DirectWrite platform and compiles its wgpu pipelines on
 WARP. GPUI on Windows draws offscreen with its wgpu renderer, not the DX11
 renderer it uses for real windows.
 
+## After the spike
+
+The layer now lives in `packages/core/crates/vornui`; this spike's app
+builds on it. The two conditions:
+
+1. **Software rendering.** When the adapter is a software one (WARP,
+   llvmpipe), vornui draws on the CPU instead: a tiled rasterizer on a few
+   threads that redraws only the tiles whose content changed, keeps glyph
+   and icon masks in the same atlases, and uploads only the damaged rows to
+   the GPU to present. A frame where nothing changed costs a scene compare.
+   On the Mac it runs the 8-pane bench at 117 fps with a 2.8 ms frame p50;
+   the crate's `raster` bench draws the 8-pane grid at 2880×1800 in 1.18 ms
+   when every pixel changes, 0.36 ms when one pane does and 0.19 ms when none
+   does. A GPU and CPU parity test checks that both draw the same widgets.
+2. **Pacing.** A `Pacer` remembers a keystroke waiting for its echo; the
+   first frame after the typed-into pane changes is drawn at once instead of
+   on the next display slot. On the Mac the keystroke-to-pixel p50 went from
+   9.66 ms to 3.43 ms at 8 panes, and the p99 from 11.3 to 5.2 ms, below
+   GPUI's 8.24 / 10.25 ms. The bench driver skips its 120 Hz slot only while
+   the prototype says it is waiting for an echo.
+
+The crate also has the app's widgets (buttons, icon buttons with tooltips,
+pills, pickers with dropdown menus, text input and composer with IME and
+clipboard, lists, split panes, scroll views and tabs), each with AccessKit
+nodes and keyboard focus, and a window runner (winit surface, IME cursor
+area, AccessKit adapter and actions, system clipboard).
+
 ## How it was measured
 
 - `scripts/measure.sh <binary> <name> <out>` runs every mode for one
@@ -211,26 +244,13 @@ Caveats:
 
 ## What vornui still needs to be complete
 
-- Real OS windows on all three platforms:
-  - surface presentation and the event loop;
-  - the system IME window position (`set_ime_cursor_area`);
-  - the AccessKit adapter wired to the window, with actions (focus, press,
-    set value) as well as the tree.
-- Software-adapter performance. On WARP, a grid frame takes about 235 ms
-  of GPU work, and even the main screen takes 21 ms at 2×. GPUI's CPU-side
-  redraws there are 2–11 ms. Profile the fragment work per pixel (rounded
-  quads and linear sampling of the mask atlas) and the sprite path, and
-  batch glyph runs.
-- Latency pacing: present right after input instead of on the next slot.
-  Today the tail is good once frames are bounded, but the p50 is about
-  1.4 ms behind GPUI's.
-- Widgets: text input with selection and clipboard, scrolling, lists,
-  menus and popovers, tooltips, focus and tab order, hover and press
-  states, and animation.
+- Real OS windows checked by hand on all three platforms; the runner
+  exists but tests only draw offscreen.
+- Widgets: undo in text fields, horizontal scrolling in the tab strip, and
+  tooltip fades.
 - Terminal: selection, scrollback scrolling, links, and wide and combining
   glyphs beyond what the spike draws.
 - Rendering:
-  - damage tracking, so only dirty panes are re-encoded;
   - an atlas eviction policy;
   - color emoji;
   - subpixel positioning checks against today's text.

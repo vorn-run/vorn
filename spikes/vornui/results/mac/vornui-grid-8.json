@@ -1,16 +1,16 @@
 {
-  "adapter": "Apple M2 Pro (Metal)",
+  "adapter": "Apple M2 Pro (Metal, IntegratedGpu)",
   "panes": 8,
   "png": "results/mac/vornui-grid-8.png",
   "proto": "vornui",
   "quads": 25,
   "redraw_ms": {
-    "max": 15.635,
-    "mean": 1.094,
+    "max": 16.753,
+    "mean": 1.326,
     "n": 120,
-    "p50": 1.555,
-    "p95": 1.628,
-    "p99": 1.752
+    "p50": 1.692,
+    "p95": 1.847,
+    "p99": 2.096
   },
   "scale": 2.0,
   "screen": "grid",

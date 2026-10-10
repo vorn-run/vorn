@@ -3,7 +3,7 @@
 # touches this lockfile.
 [workspace]
 resolver = "2"
-members = ["shared", "vornui", "app"]
+members = ["shared", "app"]
 exclude = ["gpui"]
 
 [workspace.package]
@@ -15,7 +15,7 @@ vorn-term-proto = { path = "../../packages/core/crates/term-proto" }
 vorn-term-mirror = { path = "../../packages/core/crates/term-mirror" }
 vorn-grid-client = { path = "../../packages/core/crates/grid-client" }
 spike-shared = { path = "shared" }
-vornui = { path = "vornui" }
+vornui = { path = "../../packages/core/crates/vornui" }
 
 [profile.release]
 opt-level = 3

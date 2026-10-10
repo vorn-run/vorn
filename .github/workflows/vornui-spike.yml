@@ -1,6 +1,7 @@
 # Measures the vornui and GPUI prototypes on Windows: builds both, runs their
 # offscreen shots and benches against a test vornd, and uploads the numbers
-# and renders. Started by hand; see spikes/vornui/REPORT.md.
+# and renders. vornui is packages/core/crates/vornui. See
+# spikes/vornui/REPORT.md.
 name: vornui spike
 
 # Dispatch only works once this file is on the default branch, so a push to
@@ -8,8 +9,11 @@ name: vornui spike
 on:
   workflow_dispatch:
   push:
-    branches: [vornui-spike]
-    paths: ['spikes/vornui/**', '.github/workflows/vornui-spike.yml']
+    branches: [vornui-spike, vornui-core]
+    paths:
+      - 'spikes/vornui/**'
+      - 'packages/core/crates/vornui/**'
+      - '.github/workflows/vornui-spike.yml'
 
 permissions:
   contents: read
@@ -67,7 +71,14 @@ jobs:
 
       - name: Test vornui
         continue-on-error: true
-        run: cargo test --release -p vornui -p spike-shared
+        working-directory: packages/core
+        run: |
+          rustup toolchain install
+          cargo test --release -p vornui
+
+      - name: Test the harness
+        continue-on-error: true
+        run: cargo test --release -p spike-shared
 
       - name: Measure vornui
         continue-on-error: true
