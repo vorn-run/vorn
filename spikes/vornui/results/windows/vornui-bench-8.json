@@ -1,29 +1,29 @@
 {
-  "adapter": "Microsoft Basic Render Driver (Dx12)",
-  "cpu_pct": 214.29995184907077,
+  "adapter": "cpu raster (present: Microsoft Basic Render Driver (Dx12, Cpu))",
+  "cpu_pct": 93.74635240045988,
   "errors": [],
-  "footprint_mb": 268.54296875,
-  "fps": 2.954800054220581,
+  "footprint_mb": 313.6953125,
+  "fps": 43.861740500305096,
   "frame_ms": {
-    "max": 404.829,
-    "mean": 338.363,
-    "n": 60,
-    "p50": 339.06,
-    "p95": 370.148,
-    "p99": 388.093
+    "max": 240.396,
+    "mean": 22.783,
+    "n": 878,
+    "p50": 22.465,
+    "p95": 27.513,
+    "p99": 33.198
   },
-  "frames": 60,
+  "frames": 878,
   "latency_ms": {
-    "max": 744.713,
-    "mean": 676.859,
-    "n": 30,
-    "p50": 674.176,
-    "p95": 727.185,
-    "p99": 744.713
+    "max": 80.475,
+    "mean": 55.222,
+    "n": 132,
+    "p50": 54.283,
+    "p95": 70.64,
+    "p99": 80.215
   },
   "lost_probes": 0,
   "panes": 8,
-  "peak_rss_mb": 84.671875,
+  "peak_rss_mb": 115.140625,
   "proto": "vornui",
-  "seconds": 20.3059425
+  "seconds": 20.0174455
 }

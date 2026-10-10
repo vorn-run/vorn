@@ -1,16 +1,16 @@
 {
-  "adapter": "Microsoft Basic Render Driver (Dx12)",
+  "adapter": "cpu raster (present: Microsoft Basic Render Driver (Dx12, Cpu))",
   "panes": 8,
   "png": "results/windows/vornui-grid-8.png",
   "proto": "vornui",
   "quads": 25,
   "redraw_ms": {
-    "max": 271.256,
-    "mean": 236.388,
+    "max": 8.93,
+    "mean": 0.526,
     "n": 120,
-    "p50": 235.474,
-    "p95": 254.645,
-    "p99": 255.786
+    "p50": 0.428,
+    "p95": 0.623,
+    "p99": 0.794
   },
   "scale": 2.0,
   "screen": "grid",

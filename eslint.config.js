@@ -17,7 +17,8 @@ export default tseslint.config(
       'scripts/',
       'packages/core/scripts/',
       'packages/core/target/',
-      'website/scripts/'
+      'website/scripts/',
+      'spikes/'
     ]
   },
 
