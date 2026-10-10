@@ -4,12 +4,15 @@
 name: vorn-app windows
 
 # Dispatch only works once this file is on the default branch, so a push to
-# the app's branch that touches this file also runs it.
+# the app's branch that touches this file, or the terminal library's Windows
+# build, also runs it.
 on:
   workflow_dispatch:
   push:
     branches: [vornui-client]
-    paths: ['.github/workflows/vorn-app.yml']
+    paths:
+      - '.github/workflows/vorn-app.yml'
+      - 'packages/core/vendor/libghostty-vt-sys/**'
 
 permissions:
   contents: read
