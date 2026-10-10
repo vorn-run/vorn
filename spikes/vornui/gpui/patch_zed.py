@@ -1,6 +1,7 @@
 """Applies the spike's test-support hooks to the pinned GPUI checkout: present
 without the profiler, the input handler for IME, an active accessibility
-tree, and the test window's scale factor from VORN_SPIKE_SCALE.
+tree, the test window's scale factor from VORN_SPIKE_SCALE, and DX12 for the
+headless renderer so it runs on Windows.
 
 Idempotent; run by fetch_zed.sh after checkout.
 """
@@ -60,6 +61,22 @@ EDITS = [
     }
 
     fn draw(&self, scene: &Scene) {""",
+    ),
+    (
+        "crates/gpui_wgpu/src/wgpu_context.rs",
+        """    fn create_headless() -> anyhow::Result<(Self, wgpu::TextureFormat)> {
+        let instance = Self::instance(None);
+""",
+        """    fn create_headless() -> anyhow::Result<(Self, wgpu::TextureFormat)> {
+        // A GPU-less Windows host has no Vulkan or GL, only DX12's software adapter.
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL | wgpu::Backends::DX12,
+            flags: wgpu::InstanceFlags::default(),
+            backend_options: wgpu::BackendOptions::default(),
+            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+            display: None,
+        });
+""",
     ),
 ]
 
