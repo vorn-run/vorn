@@ -5,7 +5,8 @@
 //!
 //! libghostty-vt's encoders take their options from the terminal (cursor
 //! and keypad modes, Kitty flags, modifyOtherKeys, mouse tracking and
-//! format), so the only state kept here is the encoders themselves. A paste
+//! format), so the state kept here is the encoders, the buttons held and the
+//! cell last reported. A paste
 //! that would run a command without bracketed paste is held for the client
 //! to confirm.
 
@@ -37,6 +38,11 @@ pub struct InputEncoder {
     key_event: key::Event<'static>,
     mouse: mouse::Encoder<'static>,
     mouse_event: mouse::Event<'static>,
+    /// Buttons pressed and not yet released, one bit each, so drags out of the pane still report.
+    held: u16,
+    /// The cell of the last mouse report. Kept here because Ghostty's own copy is cleared by
+    /// every options or size update, which each event needs.
+    last_cell: Option<(u32, u32)>,
 }
 
 impl std::fmt::Debug for InputEncoder {
@@ -52,6 +58,8 @@ impl InputEncoder {
             key_event: key::Event::new()?,
             mouse: mouse::Encoder::new()?,
             mouse_event: mouse::Event::new()?,
+            held: 0,
+            last_cell: None,
         })
     }
 
@@ -103,9 +111,19 @@ impl InputEncoder {
                 x,
                 y,
             } => {
+                let bit = button
+                    .filter(|b| !WHEEL.contains(b))
+                    .map_or(0, |b| 1u16 << (b & 15));
                 let action = match action {
-                    MouseAction::Press => mouse::Action::Press,
-                    MouseAction::Release => mouse::Action::Release,
+                    MouseAction::Press => {
+                        self.held |= bit;
+                        mouse::Action::Press
+                    }
+                    MouseAction::Release => {
+                        // A release without a button lets go of all of them.
+                        self.held &= if bit == 0 { 0 } else { !bit };
+                        mouse::Action::Release
+                    }
                     MouseAction::Motion => mouse::Action::Motion,
                 };
                 self.mouse_at(
@@ -159,8 +177,8 @@ impl InputEncoder {
         })
     }
 
-    /// A mouse event at cell `(x, y)`: positions arrive in cells, so the
-    /// encoder is told each cell is one pixel.
+    /// A mouse event at cell `(x, y)`: positions arrive in cells and are
+    /// scaled by the cell's pixel size, which pixel reports (mode 1016) carry.
     #[allow(clippy::too_many_arguments)]
     fn mouse_at(
         &mut self,
@@ -172,26 +190,50 @@ impl InputEncoder {
         y: f32,
         out: &mut Vec<u8>,
     ) -> Result<(), Error> {
+        let (cols, rows) = (u32::from(t.cols()?), u32::from(t.rows()?));
+        let cell_width = (t.width_px()? / cols.max(1)).max(1);
+        let cell_height = (t.height_px()? / rows.max(1)).max(1);
+        // Ghostty's rule: motion is reported once per cell unless it counts pixels.
+        let cell = (clamp_cell(x, cols), clamp_cell(y, rows));
+        if action == mouse::Action::Motion
+            && self.last_cell == Some(cell)
+            && !t.mode(Mode::SGR_PIXELS_MOUSE)?
+        {
+            return Ok(());
+        }
         self.mouse_event
             .set_action(action)
             .set_button(button)
             .set_mods(ghostty_mods(mods))
-            .set_position(Position { x, y });
+            .set_position(Position {
+                x: x * cell_width as f32,
+                y: y * cell_height as f32,
+            });
         self.mouse
             .set_options_from_terminal(t)
+            .set_any_button_pressed(self.held != 0)
             .set_size(EncoderSize {
-                screen_width: u32::from(t.cols()?),
-                screen_height: u32::from(t.rows()?),
-                cell_width: 1,
-                cell_height: 1,
+                screen_width: cols * cell_width,
+                screen_height: rows * cell_height,
+                cell_width,
+                cell_height,
                 padding_top: 0,
                 padding_bottom: 0,
                 padding_right: 0,
                 padding_left: 0,
             });
+        let before = out.len();
         self.mouse.encode_to_vec(&self.mouse_event, out)?;
+        if out.len() > before {
+            self.last_cell = Some(cell);
+        }
         Ok(())
     }
+}
+
+/// The cell a position in cells falls in, held inside the pane as Ghostty holds it.
+fn clamp_cell(at: f32, n: u32) -> u32 {
+    (at.max(0.0) as u32).min(n.saturating_sub(1))
 }
 
 /// The wire's key code as Ghostty's: both follow the W3C UI Events order,
@@ -199,6 +241,9 @@ impl InputEncoder {
 pub fn ghostty_key(code: KeyCode) -> key::Key {
     key::Key::try_from(i32::from(code.0)).unwrap_or(key::Key::Unidentified)
 }
+
+/// The wire's wheel buttons, which are never held.
+const WHEEL: [u8; 4] = [4, 5, 6, 7];
 
 fn ghostty_mods(m: u16) -> Mods {
     let mut out = Mods::empty();
@@ -269,6 +314,39 @@ mod tests {
             Encoded::Bytes(b) => b,
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn pixel_reports_use_the_cell_size_and_drags_report_outside_the_pane() {
+        let mut t = Term::new(20, 5).unwrap();
+        t.resize(20, 5, 10, 20).unwrap();
+        let mut enc = InputEncoder::new().unwrap();
+        let mouse = |action, button, x, y| InputEvent::Mouse {
+            action,
+            button,
+            mods: 0,
+            x,
+            y,
+        };
+        // Button-event tracking with SGR pixel coordinates.
+        t.vt_write(b"\x1b[?1002h\x1b[?1016h");
+        let press = mouse(MouseAction::Press, Some(1), 2.5, 1.0);
+        assert_eq!(bytes(enc.encode(&t, &press).unwrap()), b"\x1b[<0;25;20M");
+        // A drag past the right edge still reports while the button is held.
+        let out = mouse(MouseAction::Motion, Some(1), 25.0, 1.0);
+        assert_eq!(bytes(enc.encode(&t, &out).unwrap()), b"\x1b[<32;250;20M");
+        let release = mouse(MouseAction::Release, Some(1), 25.0, 1.0);
+        assert_eq!(bytes(enc.encode(&t, &release).unwrap()), b"\x1b[<0;250;20m");
+        let out = mouse(MouseAction::Motion, None, 26.0, 1.0);
+        assert_eq!(enc.encode(&t, &out).unwrap(), Encoded::Nothing);
+        // In cell coordinates, motion within the cell last reported is dropped.
+        t.vt_write(b"\x1b[?1016l\x1b[?1006h");
+        let press = mouse(MouseAction::Press, Some(1), 3.0, 1.0);
+        assert_eq!(bytes(enc.encode(&t, &press).unwrap()), b"\x1b[<0;4;2M");
+        let same = mouse(MouseAction::Motion, Some(1), 3.5, 1.2);
+        assert_eq!(enc.encode(&t, &same).unwrap(), Encoded::Nothing);
+        let next = mouse(MouseAction::Motion, Some(1), 4.0, 1.0);
+        assert_eq!(bytes(enc.encode(&t, &next).unwrap()), b"\x1b[<32;5;2M");
     }
 
     #[test]

@@ -1219,7 +1219,13 @@ impl Run {
                 self.since_cut += bytes.len() as u64;
                 self.last_output = now;
             }
-            &Record::Resize { cols, rows, .. } => {
+            &Record::Resize {
+                cols,
+                rows,
+                px_w,
+                px_h,
+                ..
+            } => {
                 if !self.size_known {
                     // The output before this was parsed at a size that may
                     // not have been the spawn size.
@@ -1230,7 +1236,13 @@ impl Run {
                 if self
                     .term
                     .em
-                    .resize(u32::from(cols), u32::from(rows), fx)
+                    .resize_px(
+                        u32::from(cols),
+                        u32::from(rows),
+                        u32::from(px_w),
+                        u32::from(px_h),
+                        fx,
+                    )
                     .is_err()
                 {
                     self.term.fidelity = Fidelity::Approximate;

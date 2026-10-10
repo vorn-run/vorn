@@ -66,7 +66,6 @@ pub struct Counters {
 pub struct Emulator {
     pub(crate) term: Terminal<'static, 'static>,
     effects: Rc<RefCell<Vec<Effect>>>,
-    size: Rc<Cell<(u16, u16)>>,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
     /// Title and cwd as the session record keeps them (see [`crate::Screen`]).
@@ -101,7 +100,6 @@ impl Emulator {
     pub(crate) fn wrap(mut term: Terminal<'static, 'static>) -> Result<Self> {
         let (cols, rows) = (term.cols()?, term.rows()?);
         let effects = Rc::new(RefCell::new(Vec::new()));
-        let size = Rc::new(Cell::new((cols, rows)));
         let sink = Rc::clone(&effects);
         term.on_pty_write(move |_, bytes| sink.borrow_mut().push(Effect::Reply(bytes.to_vec())))?;
         let sink = Rc::clone(&effects);
@@ -146,14 +144,15 @@ impl Emulator {
                 tertiary: TertiaryDeviceAttributes { unit_id: 0 },
             })
         })?;
-        let dims = Rc::clone(&size);
-        term.on_size(move |_| {
-            let (columns, rows) = dims.get();
+        // Read from the terminal, so a report raised by a resize carries the new size.
+        term.on_size(|t| {
+            let (columns, rows) = (t.cols().ok()?, t.rows().ok()?);
+            let (cell_width, cell_height) = cell_px(t)?;
             Some(SizeReportSize {
                 rows,
                 columns,
-                cell_width: 1,
-                cell_height: 1,
+                cell_width,
+                cell_height,
             })
         })?;
         term.on_xtversion(|_| Some("vorn"))?;
@@ -165,7 +164,6 @@ impl Emulator {
         Ok(Self {
             term,
             effects,
-            size,
             cols,
             rows,
             title: String::new(),
@@ -278,18 +276,37 @@ impl Emulator {
         out.append(&mut self.effects.borrow_mut());
     }
 
-    /// Resizes, appending any in-band size report to `out`.
+    /// Resizes with cells of unknown pixel size, appending any in-band size report to `out`.
     pub fn resize(&mut self, cols: u32, rows: u32, out: &mut Vec<Effect>) -> Result<()> {
+        self.resize_px(cols, rows, 0, 0, out)
+    }
+
+    /// Resizes to a window of `px_w`×`px_h` pixels, as the PTY is told (0 when unknown), so size
+    /// reports and pixel mouse reports carry the real cell size.
+    pub fn resize_px(
+        &mut self,
+        cols: u32,
+        rows: u32,
+        px_w: u32,
+        px_h: u32,
+        out: &mut Vec<Effect>,
+    ) -> Result<()> {
         let (c, r) = (dimension(cols)?, dimension(rows)?);
-        if (c, r) == (self.cols, self.rows) {
+        // An unknown size keeps one pixel a cell, so the encoders still count in cells.
+        let cell = ((px_w / cols).max(1), (px_h / rows).max(1));
+        if (c, r) == (self.cols, self.rows) && Some(cell) == cell_px(&self.term) {
             return Ok(());
         }
-        self.term.resize(c, r, 1, 1)?;
+        self.term.resize(c, r, cell.0, cell.1)?;
         self.cols = c;
         self.rows = r;
-        self.size.set((c, r));
         out.append(&mut self.effects.borrow_mut());
         Ok(())
+    }
+
+    /// The pixel size of one cell, one pixel when the window's size is unknown.
+    pub fn cell_px(&self) -> (u32, u32) {
+        cell_px(&self.term).unwrap_or((1, 1))
     }
 
     /// The counters that follow the output, which a checkpoint does not carry.
@@ -334,6 +351,14 @@ fn url_path(raw: &str) -> Option<String> {
     (!path.is_empty()).then(|| clip_units(&percent_decode(path).unwrap_or_else(|| path.to_owned())))
 }
 
+/// The cell size the last resize gave `t`, one pixel when it was not told one.
+fn cell_px(t: &Terminal<'_, '_>) -> Option<(u32, u32)> {
+    let (cols, rows) = (u32::from(t.cols().ok()?), u32::from(t.rows().ok()?));
+    let w = t.width_px().ok()?.checked_div(cols)?.max(1);
+    let h = t.height_px().ok()?.checked_div(rows)?.max(1);
+    Some((w, h))
+}
+
 /// Whether Ghostty's print gives `cp` no width, so it joins the cell before: the same table it prints with.
 fn zero_width(cp: u32) -> bool {
     char::from_u32(cp).is_none_or(|c| libghostty_vt::unicode::codepoint_width(c) == 0)
@@ -373,6 +398,45 @@ mod tests {
         assert_eq!(em.joiners_printed(), 1);
         em.feed("👍\u{1f3fd} a\u{200d}".as_bytes(), &mut fx);
         assert_eq!(em.joiners_printed(), 2);
+    }
+
+    fn replies(fx: Vec<Effect>) -> Vec<String> {
+        fx.into_iter()
+            .filter_map(|f| match f {
+                Effect::Reply(b) => Some(String::from_utf8(b).unwrap()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn size_reports_carry_the_cell_pixels_and_the_new_size() {
+        let mut em = Emulator::new(80, 24).unwrap();
+        let mut fx = Vec::new();
+        em.feed(b"\x1b[14t\x1b[16t", &mut fx);
+        assert_eq!(
+            replies(std::mem::take(&mut fx)),
+            ["\x1b[4;24;80t", "\x1b[6;1;1t"]
+        );
+        em.feed(b"\x1b[?2048h", &mut fx);
+        fx.clear();
+        em.resize_px(100, 30, 1000, 600, &mut fx).unwrap();
+        assert_eq!(em.cell_px(), (10, 20));
+        assert_eq!(
+            replies(std::mem::take(&mut fx)),
+            ["\x1b[48;30;100;600;1000t"]
+        );
+        em.feed(b"\x1b[14t\x1b[16t", &mut fx);
+        assert_eq!(
+            replies(std::mem::take(&mut fx)),
+            ["\x1b[4;600;1000t", "\x1b[6;20;10t"]
+        );
+        // A new pixel size alone is a resize too; the same one is not.
+        em.resize_px(100, 30, 1200, 600, &mut fx).unwrap();
+        assert_eq!(em.cell_px(), (12, 20));
+        assert_eq!(fx.len(), 1);
+        em.resize_px(100, 30, 1200, 600, &mut fx).unwrap();
+        assert_eq!(fx.len(), 1);
     }
 
     /// The width table agrees with what printing after a narrow character does.
