@@ -1,0 +1,403 @@
+[
+  {
+    "edges": [
+      {
+        "id": "e1",
+        "source": "trigger-1",
+        "target": "launch-1"
+      }
+    ],
+    "enabled": true,
+    "icon": "Play",
+    "iconColor": "#10b981",
+    "id": "system:default-task-workflow",
+    "name": "Default Task Workflow",
+    "nodes": [
+      {
+        "id": "trigger-1",
+        "type": "trigger",
+        "label": "When task moves to In Progress",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "config": {
+          "triggerType": "taskStatusChanged",
+          "fromStatus": "todo",
+          "toStatus": "in_progress"
+        }
+      },
+      {
+        "id": "launch-1",
+        "type": "launchAgent",
+        "label": "Launch task agent",
+        "position": {
+          "x": 0,
+          "y": 120
+        },
+        "config": {
+          "agentType": "fromTask",
+          "projectName": "",
+          "projectPath": "",
+          "headless": true
+        }
+      }
+    ],
+    "workspaceId": "personal"
+  },
+  {
+    "edges": [
+      {
+        "id": "e1",
+        "source": "trigger-1",
+        "target": "script-1"
+      }
+    ],
+    "enabled": false,
+    "icon": "RotateCcw",
+    "iconColor": "#c9972a",
+    "id": "system:dev-server-on-restore",
+    "name": "Bring the dev server back",
+    "nodes": [
+      {
+        "id": "trigger-1",
+        "type": "trigger",
+        "label": "When a session is restored",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "config": {
+          "triggerType": "sessionRestored"
+        }
+      },
+      {
+        "id": "script-1",
+        "type": "script",
+        "label": "Start the dev server",
+        "position": {
+          "x": 0,
+          "y": 120
+        },
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "yarn dev",
+          "cwd": "{{context.projectPath}}"
+        }
+      }
+    ],
+    "workspaceId": "personal"
+  },
+  {
+    "edges": [
+      {
+        "id": "e0",
+        "source": "trigger",
+        "target": "build"
+      },
+      {
+        "id": "e1",
+        "source": "build",
+        "target": "gate"
+      },
+      {
+        "id": "e2",
+        "source": "gate",
+        "target": "publish"
+      }
+    ],
+    "enabled": true,
+    "icon": "Rocket",
+    "iconColor": "#c9972a",
+    "id": "wf-release",
+    "name": "Release checklist",
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "trigger",
+        "label": "Trigger",
+        "config": {
+          "triggerType": "manual"
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "build",
+        "type": "script",
+        "label": "Build",
+        "slug": "build",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "echo building; sleep 0.4; echo done",
+          "cwd": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T",
+          "projectPath": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T"
+        },
+        "position": {
+          "x": 0,
+          "y": 120
+        }
+      },
+      {
+        "id": "gate",
+        "type": "approval",
+        "label": "Sign off",
+        "slug": "gate",
+        "config": {
+          "message": "Build is green. Ship version 0.9 to the beta channel?"
+        },
+        "position": {
+          "x": 0,
+          "y": 240
+        }
+      },
+      {
+        "id": "publish",
+        "type": "script",
+        "label": "Publish",
+        "slug": "publish",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "echo published",
+          "cwd": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T",
+          "projectPath": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T"
+        },
+        "position": {
+          "x": 0,
+          "y": 360
+        }
+      }
+    ],
+    "workspaceId": "personal"
+  },
+  {
+    "edges": [
+      {
+        "id": "e0",
+        "source": "trigger",
+        "target": "lint"
+      },
+      {
+        "id": "e1",
+        "source": "lint",
+        "target": "report"
+      }
+    ],
+    "enabled": true,
+    "icon": "Code",
+    "iconColor": "#6f8faf",
+    "id": "wf-lint",
+    "lastRunAt": "2026-10-10T00:14:05.190Z",
+    "lastRunStatus": "success",
+    "name": "Lint the repo",
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "trigger",
+        "label": "Trigger",
+        "config": {
+          "triggerType": "manual"
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "lint",
+        "type": "script",
+        "label": "Run lint",
+        "slug": "lint",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "echo \"3 files checked\"; sleep 0.3",
+          "cwd": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T",
+          "projectPath": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T"
+        },
+        "position": {
+          "x": 0,
+          "y": 120
+        }
+      },
+      {
+        "id": "report",
+        "type": "script",
+        "label": "Report",
+        "slug": "report",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "echo all clean",
+          "cwd": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T",
+          "projectPath": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T"
+        },
+        "position": {
+          "x": 0,
+          "y": 240
+        }
+      }
+    ],
+    "workspaceId": "personal"
+  },
+  {
+    "edges": [
+      {
+        "id": "e0",
+        "source": "trigger",
+        "target": "setup"
+      },
+      {
+        "id": "e1",
+        "source": "setup",
+        "target": "tests"
+      }
+    ],
+    "enabled": true,
+    "icon": "FlaskConical",
+    "iconColor": "#d4623f",
+    "id": "wf-flaky",
+    "lastRunAt": "2026-10-10T00:14:02.486Z",
+    "lastRunStatus": "error",
+    "name": "Flaky integration",
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "trigger",
+        "label": "Trigger",
+        "config": {
+          "triggerType": "manual"
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "setup",
+        "type": "script",
+        "label": "Set up fixtures",
+        "slug": "setup",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "echo ready",
+          "cwd": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T",
+          "projectPath": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T"
+        },
+        "position": {
+          "x": 0,
+          "y": 120
+        }
+      },
+      {
+        "id": "tests",
+        "type": "script",
+        "label": "Integration tests",
+        "slug": "tests",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "echo \"running 42 tests\"; echo \"1 failed\" >&2; exit 1",
+          "cwd": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T",
+          "projectPath": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T"
+        },
+        "position": {
+          "x": 0,
+          "y": 240
+        }
+      }
+    ],
+    "workspaceId": "personal"
+  },
+  {
+    "edges": [
+      {
+        "id": "e0",
+        "source": "trigger",
+        "target": "digest"
+      }
+    ],
+    "enabled": true,
+    "icon": "Zap",
+    "iconColor": "#7d9471",
+    "id": "wf-nightly",
+    "name": "Nightly digest",
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "trigger",
+        "label": "Trigger",
+        "config": {
+          "triggerType": "recurring",
+          "cron": "0 3 * * *"
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "digest",
+        "type": "script",
+        "label": "Write digest",
+        "slug": "digest",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "echo digest",
+          "cwd": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T",
+          "projectPath": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T"
+        },
+        "position": {
+          "x": 0,
+          "y": 120
+        }
+      }
+    ],
+    "workspaceId": "personal"
+  },
+  {
+    "edges": [
+      {
+        "id": "e0",
+        "source": "trigger",
+        "target": "clean"
+      }
+    ],
+    "enabled": false,
+    "icon": "Database",
+    "iconColor": "#7d8590",
+    "id": "wf-weekly",
+    "name": "Weekly cleanup",
+    "nodes": [
+      {
+        "id": "trigger",
+        "type": "trigger",
+        "label": "Trigger",
+        "config": {
+          "triggerType": "recurring",
+          "cron": "0 9 * * 1"
+        },
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": "clean",
+        "type": "script",
+        "label": "Prune",
+        "slug": "clean",
+        "config": {
+          "scriptType": "bash",
+          "scriptContent": "echo pruned",
+          "cwd": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T",
+          "projectPath": "/var/folders/8s/vqxr822j5hl57sn45ch7hb4c0000gn/T"
+        },
+        "position": {
+          "x": 0,
+          "y": 120
+        }
+      }
+    ],
+    "workspaceId": "personal"
+  }
+]
