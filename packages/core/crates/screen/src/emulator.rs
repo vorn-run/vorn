@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use libghostty_vt::style::RgbColor;
 use libghostty_vt::terminal::{
-    ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType,
+    ColorScheme, ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType,
     PrimaryDeviceAttributes, SecondaryDeviceAttributes, SizeReportSize, Terminal,
     TertiaryDeviceAttributes,
 };
@@ -34,6 +34,21 @@ pub enum Effect {
     },
     /// The cwd an OSC 5522 moved to, once per move.
     Cwd(String),
+    /// An OSC 9;4 progress report: a percentage from 0 to 100 when given.
+    Progress {
+        state: ProgressState,
+        percent: Option<u8>,
+    },
+}
+
+/// What an OSC 9;4 progress report shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgressState {
+    Remove,
+    Set,
+    Error,
+    Indeterminate,
+    Pause,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +195,31 @@ impl Emulator {
             })
         })?;
         term.on_xtversion(|_| Some("vorn"))?;
+        // CSI ? 996 n: dark when the theme's background is darker than its text; unanswered
+        // without a theme.
+        term.on_color_scheme(|t| {
+            let fg = t.default_fg_color().ok()??;
+            let bg = t.default_bg_color().ok()??;
+            Some(if luma(bg) < luma(fg) {
+                ColorScheme::Dark
+            } else {
+                ColorScheme::Light
+            })
+        })?;
+        let sink = Rc::clone(&effects);
+        term.on_progress_report(move |_, report| {
+            use libghostty_vt::terminal::ProgressState as P;
+            let state = match report.state() {
+                Ok(P::Remove) => ProgressState::Remove,
+                Ok(P::Set) => ProgressState::Set,
+                Ok(P::Error) => ProgressState::Error,
+                Ok(P::Indeterminate) => ProgressState::Indeterminate,
+                Ok(P::Pause) => ProgressState::Pause,
+                _ => return,
+            };
+            let percent = report.progress().map(|p| p.min(100));
+            sink.borrow_mut().push(Effect::Progress { state, percent });
+        })?;
         let changed = Rc::new(Cell::new(0));
         let flag = Rc::clone(&changed);
         term.on_title_changed(move |_| flag.set(flag.get() | TITLE))?;
@@ -384,6 +424,11 @@ fn url_path(raw: &str) -> Option<String> {
     (!path.is_empty()).then(|| clip_units(&percent_decode(path).unwrap_or_else(|| path.to_owned())))
 }
 
+/// Relative luminance, enough to tell a light colour from a dark one.
+fn luma(c: RgbColor) -> u32 {
+    2126 * u32::from(c.r) + 7152 * u32::from(c.g) + 722 * u32::from(c.b)
+}
+
 /// The cell size the last resize gave `t`, one pixel when it was not told one.
 fn cell_px(t: &Terminal<'_, '_>) -> Option<(u32, u32)> {
     let (cols, rows) = (u32::from(t.cols().ok()?), u32::from(t.rows().ok()?));
@@ -524,5 +569,31 @@ mod tests {
             ]
         );
         assert_eq!((em.title(), em.cwd()), ("t", "/srv"));
+    }
+
+    #[test]
+    fn progress_reports_are_effects_and_the_theme_answers_the_scheme_query() {
+        let mut em = Emulator::new(20, 3).unwrap();
+        let mut fx = Vec::new();
+        em.feed(b"\x1b]9;4;1;42\x07\x1b]9;4;3\x07\x1b]9;4;0\x07", &mut fx);
+        let progress = |state, percent| Effect::Progress { state, percent };
+        assert_eq!(
+            fx,
+            [
+                progress(ProgressState::Set, Some(42)),
+                progress(ProgressState::Indeterminate, None),
+                progress(ProgressState::Remove, None),
+            ]
+        );
+        fx.clear();
+        em.feed(b"\x1b[?996n", &mut fx);
+        assert!(fx.is_empty(), "no theme, no answer: {fx:?}");
+        em.set_theme(Some(&Theme::new([0xd4; 3], [0x14; 3])))
+            .unwrap();
+        em.feed(b"\x1b[?996n", &mut fx);
+        em.set_theme(Some(&Theme::new([0x14; 3], [0xfa; 3])))
+            .unwrap();
+        em.feed(b"\x1b[?996n", &mut fx);
+        assert_eq!(replies(fx), ["\x1b[?997;1n", "\x1b[?997;2n"]);
     }
 }

@@ -15,7 +15,7 @@ pub mod emulator;
 mod scan;
 
 pub use checkpoint::{Checkpoint, Uncut};
-pub use emulator::{ClipboardTarget, Counters, Effect, Emulator, Theme};
+pub use emulator::{ClipboardTarget, Counters, Effect, Emulator, ProgressState, Theme};
 
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};

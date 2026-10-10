@@ -123,7 +123,8 @@ impl Journal {
                     set(&mut h.exit, (*code, *signal), id);
                 }
             }
-            Effect::Bell | Effect::Clipboard { .. } => {}
+            // No client shows progress yet, so none is held for one.
+            Effect::Bell | Effect::Clipboard { .. } | Effect::Progress { .. } => {}
         }
     }
 
