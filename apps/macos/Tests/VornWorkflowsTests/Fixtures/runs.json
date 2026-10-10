@@ -1,0 +1,125 @@
+[
+  {
+    "runId": "4915c3ea-cadf-44f7-8f8e-2f1499cbb842",
+    "workflowId": "wf-lint",
+    "startedAt": "2026-10-10T00:14:04.787Z",
+    "completedAt": "2026-10-10T00:14:05.190Z",
+    "status": "success",
+    "workflowName": "Lint the repo",
+    "nodeStates": [
+      {
+        "nodeId": "trigger",
+        "status": "success"
+      },
+      {
+        "nodeId": "lint",
+        "status": "success",
+        "startedAt": "2026-10-10T00:14:04.787Z",
+        "completedAt": "2026-10-10T00:14:05.145Z",
+        "logs": "3 files checked\n",
+        "output": "3 files checked\n"
+      },
+      {
+        "nodeId": "report",
+        "status": "success",
+        "startedAt": "2026-10-10T00:14:05.146Z",
+        "completedAt": "2026-10-10T00:14:05.190Z",
+        "logs": "all clean\n",
+        "output": "all clean\n"
+      }
+    ]
+  },
+  {
+    "runId": "81648288-1b75-4d9a-ae62-bf635fbaa831",
+    "workflowId": "wf-release",
+    "startedAt": "2026-10-10T00:14:03.583Z",
+    "status": "running",
+    "workflowName": "Release checklist",
+    "nodeStates": [
+      {
+        "nodeId": "trigger",
+        "status": "success"
+      },
+      {
+        "nodeId": "build",
+        "status": "success",
+        "startedAt": "2026-10-10T00:14:03.584Z",
+        "completedAt": "2026-10-10T00:14:04.044Z",
+        "logs": "building\ndone\n",
+        "output": "building\ndone\n"
+      },
+      {
+        "nodeId": "gate",
+        "status": "waiting",
+        "startedAt": "2026-10-10T00:14:04.044Z",
+        "message": "Build is green. Ship version 0.9 to the beta channel?",
+        "round": 1
+      },
+      {
+        "nodeId": "publish",
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "runId": "9362cb69-d203-4909-9581-ed7503cea424",
+    "workflowId": "wf-flaky",
+    "startedAt": "2026-10-10T00:14:02.378Z",
+    "completedAt": "2026-10-10T00:14:02.486Z",
+    "status": "error",
+    "workflowName": "Flaky integration",
+    "nodeStates": [
+      {
+        "nodeId": "trigger",
+        "status": "success"
+      },
+      {
+        "nodeId": "setup",
+        "status": "success",
+        "startedAt": "2026-10-10T00:14:02.379Z",
+        "completedAt": "2026-10-10T00:14:02.442Z",
+        "logs": "ready\n",
+        "output": "ready\n"
+      },
+      {
+        "nodeId": "tests",
+        "status": "error",
+        "startedAt": "2026-10-10T00:14:02.442Z",
+        "completedAt": "2026-10-10T00:14:02.486Z",
+        "error": "running 42 tests\n1 failed\n",
+        "logs": "running 42 tests\n1 failed\n",
+        "output": "running 42 tests\n1 failed\n"
+      }
+    ]
+  },
+  {
+    "runId": "5077d2ab-6f66-41b6-891b-c7f4bc085a90",
+    "workflowId": "wf-lint",
+    "startedAt": "2026-10-10T00:14:01.175Z",
+    "completedAt": "2026-10-10T00:14:01.574Z",
+    "status": "success",
+    "workflowName": "Lint the repo",
+    "nodeStates": [
+      {
+        "nodeId": "trigger",
+        "status": "success"
+      },
+      {
+        "nodeId": "lint",
+        "status": "success",
+        "startedAt": "2026-10-10T00:14:01.175Z",
+        "completedAt": "2026-10-10T00:14:01.529Z",
+        "logs": "3 files checked\n",
+        "output": "3 files checked\n"
+      },
+      {
+        "nodeId": "report",
+        "status": "success",
+        "startedAt": "2026-10-10T00:14:01.529Z",
+        "completedAt": "2026-10-10T00:14:01.573Z",
+        "logs": "all clean\n",
+        "output": "all clean\n"
+      }
+    ]
+  }
+]

@@ -1,0 +1,86 @@
+name: macOS app
+
+# Builds the native app in apps/macos, runs its tests (the end-to-end one on a
+# throwaway vornd) and renders every screen offscreen; the PNGs are uploaded.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/macos/**'
+      - '.github/workflows/macos-app.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    # macos-15: Zig, which builds vornd's terminal library, cannot read newer SDKs.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Rust toolchains
+        run: |
+          (cd packages/core && rustup toolchain install)
+          (cd apps/macos/grid-ffi && rustup toolchain install && rustup target add aarch64-apple-darwin)
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/core/target
+            apps/macos/grid-ffi/target
+          key: macos-app-v1-${{ hashFiles('packages/core/Cargo.lock', 'apps/macos/grid-ffi/Cargo.lock', 'packages/core/rust-toolchain.toml') }}
+          restore-keys: |
+            macos-app-v1-
+            core-v2-macOS-
+
+      - name: Build vornd and vorn-sessiond
+        working-directory: packages/core
+        run: cargo build --profile ci -p vornd -p vorn-sessiond
+
+      - name: Build the grid client
+        run: apps/macos/grid-ffi/build.sh
+
+      - name: Check the grid client
+        working-directory: apps/macos/grid-ffi
+        run: |
+          cargo fmt --check
+          cargo clippy --release --target aarch64-apple-darwin -- -D warnings
+          cargo test --release --target aarch64-apple-darwin
+
+      - name: Build the app and its tests
+        working-directory: apps/macos
+        run: swift build -c release --build-tests -Xswiftc -enable-testing
+
+      - name: Swift tests
+        working-directory: apps/macos
+        env:
+          VORND_BIN: ${{ github.workspace }}/packages/core/target/ci/vornd
+          VORN_SESSIOND_BIN: ${{ github.workspace }}/packages/core/target/ci/vorn-sessiond
+          VORN_E2E_REQUIRED: '1'
+        run: swift test -c release -Xswiftc -enable-testing --skip-build
+
+      - name: Offscreen renders
+        run: apps/macos/scripts/render-all.sh "$RUNNER_TEMP/renders"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: macos-app-renders
+          path: ${{ runner.temp }}/renders/*.png
+          if-no-files-found: warn
