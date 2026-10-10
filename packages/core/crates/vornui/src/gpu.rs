@@ -24,12 +24,26 @@ impl Gpu {
         instance: wgpu::Instance,
         surface: Option<&wgpu::Surface<'_>>,
     ) -> Result<Gpu, String> {
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        let adapter = Gpu::adapter(&instance, surface)?;
+        Gpu::open(instance, adapter)
+    }
+
+    /// The adapter a device would be opened on, so a software one can be
+    /// turned down before paying for its device.
+    pub fn adapter(
+        instance: &wgpu::Instance,
+        surface: Option<&wgpu::Surface<'_>>,
+    ) -> Result<wgpu::Adapter, String> {
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: surface,
             force_fallback_adapter: false,
         }))
-        .map_err(|e| format!("no GPU adapter: {e}"))?;
+        .map_err(|e| format!("no GPU adapter: {e}"))
+    }
+
+    /// Opens a device on `adapter`.
+    pub fn open(instance: wgpu::Instance, adapter: wgpu::Adapter) -> Result<Gpu, String> {
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vornui"),
             required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
@@ -50,14 +64,22 @@ impl Gpu {
     }
 
     pub fn adapter_name(&self) -> String {
-        let i = self.adapter.get_info();
-        format!("{} ({:?}, {:?})", i.name, i.backend, i.device_type)
+        adapter_name(&self.adapter)
     }
 
     /// The adapter rasterizes on the CPU (WARP, llvmpipe, SwiftShader).
     pub fn is_software(&self) -> bool {
-        self.adapter.get_info().device_type == wgpu::DeviceType::Cpu
+        is_software(&self.adapter)
     }
+}
+
+pub(crate) fn adapter_name(a: &wgpu::Adapter) -> String {
+    let i = a.get_info();
+    format!("{} ({:?}, {:?})", i.name, i.backend, i.device_type)
+}
+
+pub(crate) fn is_software(a: &wgpu::Adapter) -> bool {
+    a.get_info().device_type == wgpu::DeviceType::Cpu
 }
 
 pub fn instance_desc() -> wgpu::InstanceDescriptor {
@@ -318,7 +340,7 @@ impl GpuRenderer {
 }
 
 /// Records `submitted` as in flight and waits for the one before it.
-pub(crate) fn settle(
+fn settle(
     gpu: &Gpu,
     in_flight: &mut Option<wgpu::SubmissionIndex>,
     submitted: wgpu::SubmissionIndex,

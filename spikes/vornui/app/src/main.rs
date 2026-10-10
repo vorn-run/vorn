@@ -138,6 +138,11 @@ struct Headless {
     target: Offscreen,
     app: App,
     pacer: Pacer,
+    /// What a window's buffer would hold: the CPU frame's changed rows are
+    /// copied here each frame, as a window presents them.
+    front: Vec<u32>,
+    /// Per frame, ms: build and lay out, draw, copy to `front`.
+    phases: [Vec<f64>; 3],
 }
 
 /// `VORNUI_RENDERER=cpu|gpu` picks the renderer; by default the GPU unless
@@ -164,15 +169,25 @@ impl Headless {
             target,
             app,
             pacer: Pacer::new(bench::PERIOD),
+            front: vec![0; px.0 as usize * px.1 as usize],
+            phases: Default::default(),
         })
     }
 
     fn draw(&mut self) -> TreeUpdate {
         // A full atlas empties itself; the second pass fits one frame.
+        let t0 = Instant::now();
         let mut laid = self.app.paint(&mut self.ui, look::WINDOW);
+        let t1 = Instant::now();
         if !self.ui.render_offscreen(&self.target) {
             laid = self.app.paint(&mut self.ui, look::WINDOW);
             self.ui.render_offscreen(&self.target);
+        }
+        let t2 = Instant::now();
+        self.ui.copy_cpu_frame(&mut self.front, false);
+        let t3 = Instant::now();
+        for (v, d) in self.phases.iter_mut().zip([t1 - t0, t2 - t1, t3 - t2]) {
+            v.push(ms(d));
         }
         laid.tree
     }
@@ -281,6 +296,12 @@ fn run_bench(args: &Args) -> Result<Value, String> {
     let mut v = bench::run(&grid, &mut p, &spike_shared::bench_config(args));
     v["adapter"] = json!(p.ui.renderer_name());
     v["proto"] = json!("vornui");
+    let [build, draw, copy] = &mut p.phases;
+    v["phases_ms"] = json!({
+        "build": bench::summary(build),
+        "draw": bench::summary(draw),
+        "present_copy": bench::summary(copy),
+    });
     Ok(v)
 }
 

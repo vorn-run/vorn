@@ -2,14 +2,14 @@
 //!
 //! A [`Ui`](crate::Ui) draws with the GPU renderer when it has a hardware
 //! adapter and with the CPU renderer when the only adapter is a software
-//! rasterizer or there is none. Either way the frame ends in a texture (an
-//! [`Offscreen`] target or a window's surface texture) when there is a
-//! device, so presenting is the same; the CPU renderer only uploads the rows
-//! that changed into a target that keeps its contents.
+//! rasterizer or there is none. The CPU renderer opens no device at all:
+//! a software adapter would only copy its frame through another set of
+//! threads the frame then waits on, so the frame stays in memory and a
+//! window presents its changed rows itself.
 
 use crate::atlas::Atlases;
 use crate::cpu::CpuRaster;
-use crate::gpu::{settle, Gpu, GpuRenderer};
+use crate::gpu::{is_software, Gpu, GpuRenderer};
 use crate::scene::{Rgba, Scene};
 
 /// How a [`Ui`](crate::Ui) chooses its renderer.
@@ -40,6 +40,15 @@ impl RenderMode {
             (RenderMode::Auto, Some(g)) => g.is_software(),
         }
     }
+
+    /// Whether this mode wants a device opened on `adapter`.
+    pub(crate) fn wants_device(self, adapter: &wgpu::Adapter) -> bool {
+        match self {
+            RenderMode::Cpu => false,
+            RenderMode::Gpu => true,
+            RenderMode::Auto => !is_software(adapter),
+        }
+    }
 }
 
 /// The format offscreen targets use, and screenshots are read in.
@@ -47,10 +56,7 @@ pub const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unor
 
 pub(crate) enum Renderer {
     Gpu(GpuRenderer),
-    Cpu {
-        raster: CpuRaster,
-        in_flight: Option<wgpu::SubmissionIndex>,
-    },
+    Cpu(CpuRaster),
 }
 
 impl Renderer {
@@ -71,66 +77,45 @@ impl Renderer {
             }
         }
         let raster = CpuRaster::new(cpu_format.unwrap_or(false));
-        (
-            Renderer::Cpu {
-                raster,
-                in_flight: None,
-            },
-            Atlases::cpu(4096, 2048),
-        )
+        (Renderer::Cpu(raster), Atlases::cpu(4096, 2048))
     }
 
     pub fn is_cpu(&self) -> bool {
-        matches!(self, Renderer::Cpu { .. })
+        matches!(self, Renderer::Cpu(_))
     }
 
-    /// Draws `scene` into `target` (`size` physical pixels). `keeps` says
-    /// the target still holds the last frame, so the CPU renderer may
-    /// upload only what changed.
-    #[allow(clippy::too_many_arguments)]
+    /// Draws `scene` into `target` (`size` physical pixels); the CPU
+    /// renderer draws into its own frame and ignores `target`.
     pub fn draw(
         &mut self,
         gpu: Option<&Gpu>,
         scene: &Scene,
         atlases: &Atlases,
         clear: Rgba,
-        target: Option<(&wgpu::Texture, &wgpu::TextureView)>,
+        target: Option<&wgpu::TextureView>,
         size: (u32, u32),
-        keeps: bool,
     ) {
         match self {
             Renderer::Gpu(r) => {
-                if let (Some(g), Some((_, view))) = (gpu, target) {
+                if let (Some(g), Some(view)) = (gpu, target) {
                     r.render(g, scene, atlases, clear, view, size);
                 }
             }
-            Renderer::Cpu { raster, in_flight } => {
-                raster.render(scene, atlases, clear, size);
-                let (Some(g), Some((texture, _))) = (gpu, target) else {
-                    return;
-                };
-                let whole = [(0, size.1)];
-                let rows = if keeps { raster.damage() } else { &whole };
-                for &(y0, y1) in rows {
-                    upload_rows(g, texture, raster, y0, y1);
-                }
-                let submitted = g.queue.submit(None);
-                settle(g, in_flight, submitted);
-            }
+            Renderer::Cpu(raster) => raster.render(scene, atlases, clear, size),
         }
     }
 
     /// The CPU renderer's last frame, if this is the CPU renderer.
     pub fn cpu_frame(&self) -> Option<&CpuRaster> {
         match self {
-            Renderer::Cpu { raster, .. } => Some(raster),
+            Renderer::Cpu(raster) => Some(raster),
             Renderer::Gpu(_) => None,
         }
     }
 
     /// Makes the next CPU frame whole (after the target lost its contents).
     pub fn invalidate(&mut self) {
-        if let Renderer::Cpu { raster, .. } = self {
+        if let Renderer::Cpu(raster) = self {
             raster.invalidate();
         }
     }
@@ -143,31 +128,6 @@ fn cpu_bgra(format: wgpu::TextureFormat) -> Option<bool> {
         wgpu::TextureFormat::Bgra8Unorm => Some(true),
         _ => None,
     }
-}
-
-fn upload_rows(gpu: &Gpu, texture: &wgpu::Texture, raster: &CpuRaster, y0: u32, y1: u32) {
-    let w = raster.size().0;
-    let row = w as usize * 4;
-    let bytes = &raster.bytes()[y0 as usize * row..y1 as usize * row];
-    gpu.queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d { x: 0, y: y0, z: 0 },
-            aspect: wgpu::TextureAspect::All,
-        },
-        bytes,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(w * 4),
-            rows_per_image: Some(y1 - y0),
-        },
-        wgpu::Extent3d {
-            width: w,
-            height: y1 - y0,
-            depth_or_array_layers: 1,
-        },
-    );
 }
 
 /// A target that is not a window: what benches draw into and screenshots
@@ -202,8 +162,8 @@ impl Offscreen {
         Offscreen { size, texture }
     }
 
-    pub(crate) fn target(&self) -> Option<(&wgpu::Texture, &wgpu::TextureView)> {
-        self.texture.as_ref().map(|(t, v)| (t, v))
+    pub(crate) fn view(&self) -> Option<&wgpu::TextureView> {
+        self.texture.as_ref().map(|(_, v)| v)
     }
 }
 

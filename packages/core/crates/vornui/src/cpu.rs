@@ -33,7 +33,7 @@ const PARALLEL_MIN_PX: usize = 128 * 1024;
 const MAX_THREADS: usize = 4;
 
 /// A frame in memory: RGBA8 (or BGRA8) pixels, one `u32` each in memory
-/// order, so the buffer uploads as-is to a texture of that format.
+/// order; BGRA is what a window's pixel buffer takes once alpha is cleared.
 pub struct CpuRaster {
     size: (u32, u32),
     pixels: Vec<u32>,
@@ -84,8 +84,32 @@ impl CpuRaster {
     }
 
     /// Row ranges `[y0, y1)` the last [`CpuRaster::render`] changed.
+    #[cfg(test)]
     pub fn damage(&self) -> &[(u32, u32)] {
         &self.damage
+    }
+
+    /// Copies the frame into `dst` as `0x00RRGGBB` pixels (a BGRA frame
+    /// with its alpha byte cleared): the damaged rows, or all of them when
+    /// `whole`. Answers the damage, or `None` when the sizes differ or the
+    /// frame is RGBA.
+    pub fn copy_xrgb(&self, dst: &mut [u32], whole: bool) -> Option<&[(u32, u32)]> {
+        if !self.bgra || dst.len() != self.pixels.len() {
+            return None;
+        }
+        let w = self.size.0 as usize;
+        let mut copy = |y0: u32, y1: u32| {
+            let rows = y0 as usize * w..y1 as usize * w;
+            for (d, s) in dst[rows.clone()].iter_mut().zip(&self.pixels[rows]) {
+                *d = s & 0x00ff_ffff;
+            }
+        };
+        if whole {
+            copy(0, self.size.1);
+        } else {
+            self.damage.iter().for_each(|&(y0, y1)| copy(y0, y1));
+        }
+        Some(&self.damage)
     }
 
     pub fn is_bgra(&self) -> bool {
@@ -651,6 +675,37 @@ mod tests {
         assert_eq!(r.damage(), &[(64, 128)], "one band of tiles");
         assert_eq!(px(&r, 105, 75), [0, 255, 0, 255]);
         assert_eq!(px(&r, 5, 5), [0, 0, 255, 255], "untouched tile kept");
+    }
+
+    #[test]
+    fn copies_only_damaged_rows_as_xrgb() {
+        let a = Atlases::cpu(4, 4);
+        let mut r = CpuRaster::new(true);
+        let mut s = Scene::default();
+        s.quad(
+            Rect::new(0.0, 0.0, 10.0, 10.0),
+            Rgba::hex(0x112233),
+            0.0,
+            None,
+        );
+        s.quad(
+            Rect::new(0.0, 70.0, 10.0, 10.0),
+            Rgba::hex(0x445566),
+            0.0,
+            None,
+        );
+        r.render(&s, &a, Rgba::hex(0), (100, 100));
+        let mut dst = vec![7u32; 100 * 100];
+        assert_eq!(r.copy_xrgb(&mut dst, true), Some(&[(0, 100)][..]));
+        assert_eq!(dst[0], 0x112233, "alpha cleared");
+        s.layers[0].quads[1].color = Rgba::hex(0x778899).0;
+        r.render(&s, &a, Rgba::hex(0), (100, 100));
+        dst[0] = 7;
+        assert_eq!(r.copy_xrgb(&mut dst, false), Some(&[(64, 100)][..]));
+        assert_eq!(dst[0], 7, "undamaged rows left alone");
+        assert_eq!(dst[75 * 100 + 5], 0x778899);
+        assert_eq!(r.copy_xrgb(&mut dst[1..], true), None, "size mismatch");
+        assert_eq!(CpuRaster::new(false).copy_xrgb(&mut [], true), None);
     }
 
     #[test]

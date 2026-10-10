@@ -1,4 +1,5 @@
-//! A real window: winit's event loop, a wgpu surface, IME, the system
+//! A real window: winit's event loop, a wgpu surface (or, when the CPU
+//! draws, a plain pixel buffer the system presents), IME, the system
 //! clipboard and the AccessKit adapter, around one [`Ui`] and an [`App`].
 //! Tests and benches never open one (they draw offscreen through the same
 //! [`Ui`]); this is what an app built on vornui runs.
@@ -7,6 +8,7 @@
 //! drawn at once, and so is the first change after a keystroke (its echo
 //! from a terminal); everything else waits for the display's next beat.
 
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -21,7 +23,7 @@ use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::edit::Clipboard;
 use crate::element::{Cursor, El};
-use crate::gpu::{instance_desc, Gpu};
+use crate::gpu::{adapter_name, instance_desc, Gpu};
 use crate::input::{from_winit, mods_of, Input};
 use crate::interact::Event;
 use crate::pace::Pacer;
@@ -99,24 +101,27 @@ impl Clipboard for System {
     }
 }
 
-/// Where the CPU renderer's frame lives between presents: surface
-/// textures do not keep their contents, so damage is uploaded here and
-/// the whole frame copied over on the GPU.
-struct Back {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    size: (u32, u32),
+/// How frames reach the window.
+enum Present {
+    Gpu {
+        surface: wgpu::Surface<'static>,
+        config: wgpu::SurfaceConfiguration,
+    },
+    /// The CPU renderer's changed rows, copied into a buffer the system
+    /// presents: no device, so no software adapter's threads to wait on.
+    Soft {
+        surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
+        size: (u32, u32),
+    },
 }
 
 struct Live<A> {
     window: Arc<Window>,
-    surface: wgpu::Surface<'static>,
-    config: wgpu::SurfaceConfiguration,
+    present: Present,
     ui: Ui,
     app: A,
     access: accesskit_winit::Adapter,
     tree: Option<TreeUpdate>,
-    back: Option<Back>,
     pacer: Pacer,
     /// A frame the app asked for that waits for the beat.
     pending: Option<Instant>,
@@ -167,51 +172,38 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         let window = Arc::new(el.create_window(attrs).map_err(|e| e.to_string())?);
         let access =
             accesskit_winit::Adapter::with_event_loop_proxy(el, &window, self.proxy.clone());
+        let mut cfg = self.cfg;
+        cfg.scale = window.scale_factor() as f32;
         let instance = wgpu::Instance::new(instance_desc());
         let surface = instance
             .create_surface(window.clone())
             .map_err(|e| e.to_string())?;
-        let gpu = Gpu::new(instance, Some(&surface))?;
-        let caps = surface.get_capabilities(&gpu.adapter);
-        // A non-sRGB target blends in sRGB space, as CSS colors do.
-        let format = caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| !f.is_srgb())
-            .or(caps.formats.first().copied())
-            .ok_or("surface has no formats")?;
-        let mut mode = RenderMode::from_env();
-        let copyable = caps.usages.contains(wgpu::TextureUsages::COPY_DST);
-        if mode.uses_cpu(Some(&gpu)) && !copyable {
-            mode = RenderMode::Gpu;
-        }
-        // Mailbox replaces a queued frame instead of waiting a beat for it.
-        let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
-            wgpu::PresentMode::Mailbox
-        } else {
-            wgpu::PresentMode::Fifo
+        let mode = RenderMode::from_env();
+        let adapter = Gpu::adapter(&instance, Some(&surface)).ok();
+        let (present, mut ui) = match adapter {
+            Some(a) if mode.wants_device(&a) => {
+                let gpu = Gpu::open(instance, a)?;
+                let (surface, config) = configure(&gpu, surface, &window)?;
+                let ui = Ui::new(Some(gpu), RenderMode::Gpu, config.format, &cfg);
+                (Present::Gpu { surface, config }, ui)
+            }
+            a => {
+                drop(surface);
+                let ctx = softbuffer::Context::new(window.clone()).map_err(|e| e.to_string())?;
+                let surface =
+                    softbuffer::Surface::new(&ctx, window.clone()).map_err(|e| e.to_string())?;
+                let name = a.as_ref().map(adapter_name);
+                let format = wgpu::TextureFormat::Bgra8Unorm;
+                let ui = Ui::build(None, name, RenderMode::Cpu, format, &cfg);
+                (
+                    Present::Soft {
+                        surface,
+                        size: (0, 0),
+                    },
+                    ui,
+                )
+            }
         };
-        let px = window.inner_size();
-        let mut config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            width: px.width.max(1),
-            height: px.height.max(1),
-            present_mode,
-            desired_maximum_frame_latency: 1,
-            alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
-        };
-        let mut cfg = self.cfg;
-        cfg.scale = window.scale_factor() as f32;
-        let mut ui = Ui::new(Some(gpu), mode, format, &cfg);
-        if ui.is_cpu() {
-            config.usage |= wgpu::TextureUsages::COPY_DST;
-        }
-        if let Some(g) = &ui.gpu {
-            surface.configure(&g.device, &config);
-        }
         if let Ok(c) = arboard::Clipboard::new() {
             ui.set_clipboard(Box::new(System(c)));
         }
@@ -227,13 +219,11 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         window.set_visible(true);
         Ok(Live {
             window,
-            surface,
-            config,
+            present,
             ui,
             app,
             access,
             tree: None,
-            back: None,
             pacer: Pacer::new(period),
             pending: None,
         })
@@ -307,10 +297,10 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::ModifiersChanged(m) => self.mods = *m,
             WindowEvent::Resized(px) => {
-                l.config.width = px.width.max(1);
-                l.config.height = px.height.max(1);
-                if let Some(g) = &l.ui.gpu {
-                    l.surface.configure(&g.device, &l.config);
+                if let (Present::Gpu { surface, config }, Some(g)) = (&mut l.present, &l.ui.gpu) {
+                    config.width = px.width.max(1);
+                    config.height = px.height.max(1);
+                    surface.configure(&g.device, config);
                 }
                 l.window.request_redraw();
             }
@@ -407,85 +397,74 @@ impl<A: App> Live<A> {
     }
 
     fn redraw(&mut self) -> Result<(), String> {
-        let Some(gpu) = &self.ui.gpu else {
-            return Err("window without a device".into());
-        };
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&gpu.device, &self.config);
-                self.window.request_redraw();
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                return Ok(())
-            }
-            other => return Err(format!("surface: {other:?}")),
-        };
-        let px = (self.config.width, self.config.height);
-        if self.ui.is_cpu() && self.back.as_ref().is_none_or(|b| b.size != px) {
-            let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("cpu frame"),
-                size: wgpu::Extent3d {
-                    width: px.0,
-                    height: px.1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: self.config.format,
-                usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
-            let view = texture.create_view(&Default::default());
-            self.back = Some(Back {
-                texture,
-                view,
-                size: px,
-            });
-            self.ui.renderer.invalidate();
-        }
         let now = Instant::now();
-        let k = self.ui.scale();
-        let size = (px.0 as f32 / k, px.1 as f32 / k);
-        let view = frame.texture.create_view(&Default::default());
-        // A full atlas empties itself and asks for the frame again; twice
-        // means one frame's glyphs do not fit, and it is drawn as is.
-        let mut laid;
-        let mut tries = 0;
-        loop {
-            self.ui.begin_at(self.app.background(), now);
-            let root = self.app.view(&mut self.ui);
-            laid = self.ui.layout(root, size);
-            self.app.paint(&mut self.ui, &laid);
-            tries += 1;
-            let target = match &self.back {
-                Some(b) if self.ui.is_cpu() => (&b.texture, &b.view),
-                _ => (&frame.texture, &view),
-            };
-            if self.ui.render_target(Some(target), px, true) || tries == 2 {
-                break;
+        let laid = match &mut self.present {
+            Present::Gpu { surface, config } => {
+                let Some(gpu) = &self.ui.gpu else {
+                    return Err("window without a device".into());
+                };
+                let frame = match surface.get_current_texture() {
+                    wgpu::CurrentSurfaceTexture::Success(t)
+                    | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+                    wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                        surface.configure(&gpu.device, config);
+                        self.window.request_redraw();
+                        return Ok(());
+                    }
+                    wgpu::CurrentSurfaceTexture::Timeout
+                    | wgpu::CurrentSurfaceTexture::Occluded => return Ok(()),
+                    other => return Err(format!("surface: {other:?}")),
+                };
+                let px = (config.width, config.height);
+                let view = frame.texture.create_view(&Default::default());
+                let laid = draw(&mut self.ui, &mut self.app, now, px, Some(&view));
+                self.window.pre_present_notify();
+                frame.present();
+                laid
             }
-        }
-        if let (Some(b), Some(g)) = (&self.back, &self.ui.gpu) {
-            if self.ui.is_cpu() {
-                let mut enc = g.device.create_command_encoder(&Default::default());
-                enc.copy_texture_to_texture(
-                    b.texture.as_image_copy(),
-                    frame.texture.as_image_copy(),
-                    wgpu::Extent3d {
-                        width: px.0,
-                        height: px.1,
-                        depth_or_array_layers: 1,
-                    },
-                );
-                g.queue.submit([enc.finish()]);
+            Present::Soft { surface, size } => {
+                let px = self.window.inner_size();
+                let (Some(w), Some(h)) = (NonZeroU32::new(px.width), NonZeroU32::new(px.height))
+                else {
+                    return Ok(());
+                };
+                if *size != (w.get(), h.get()) {
+                    surface.resize(w, h).map_err(|e| e.to_string())?;
+                    *size = (w.get(), h.get());
+                }
+                let laid = draw(&mut self.ui, &mut self.app, now, *size, None);
+                let mut buf = surface.buffer_mut().map_err(|e| e.to_string())?;
+                // Age 1: the buffer still holds the last frame shown.
+                let whole = buf.age() != 1;
+                let damage = self
+                    .ui
+                    .copy_cpu_frame(&mut buf, whole)
+                    .ok_or("cpu frame does not fit the window")?;
+                let mut rects: Vec<softbuffer::Rect> = damage
+                    .iter()
+                    .filter_map(|&(y0, y1)| {
+                        Some(softbuffer::Rect {
+                            x: 0,
+                            y: y0,
+                            width: w,
+                            height: NonZeroU32::new(y1 - y0)?,
+                        })
+                    })
+                    .collect();
+                // No change means a system repaint, which wants every pixel.
+                if whole || rects.is_empty() {
+                    rects = vec![softbuffer::Rect {
+                        x: 0,
+                        y: 0,
+                        width: w,
+                        height: h,
+                    }];
+                }
+                self.window.pre_present_notify();
+                buf.present_with_damage(&rects).map_err(|e| e.to_string())?;
+                laid
             }
-        }
-        self.window.pre_present_notify();
-        frame.present();
+        };
         let echoed = self.app.echoed();
         self.pacer.frame(now, echoed);
         let ime = self.ui.wants_ime() || self.app.wants_ime();
@@ -498,5 +477,67 @@ impl<A: App> Live<A> {
         self.access.update_if_active(|| tree.clone());
         self.tree = Some(tree);
         Ok(())
+    }
+}
+
+/// Picks the surface's format and mode for `gpu` and configures it.
+fn configure(
+    gpu: &Gpu,
+    surface: wgpu::Surface<'static>,
+    window: &Window,
+) -> Result<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration), String> {
+    let caps = surface.get_capabilities(&gpu.adapter);
+    // A non-sRGB target blends in sRGB space, as CSS colors do.
+    let format = caps
+        .formats
+        .iter()
+        .copied()
+        .find(|f| !f.is_srgb())
+        .or(caps.formats.first().copied())
+        .ok_or("surface has no formats")?;
+    // Mailbox replaces a queued frame instead of waiting a beat for it.
+    let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+        wgpu::PresentMode::Mailbox
+    } else {
+        wgpu::PresentMode::Fifo
+    };
+    let px = window.inner_size();
+    let config = wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format,
+        width: px.width.max(1),
+        height: px.height.max(1),
+        present_mode,
+        desired_maximum_frame_latency: 1,
+        alpha_mode: caps.alpha_modes[0],
+        view_formats: vec![],
+    };
+    surface.configure(&gpu.device, &config);
+    Ok((surface, config))
+}
+
+/// Builds, lays out, paints and draws one frame of `app` at `px` physical
+/// pixels into `target` (ignored by the CPU renderer).
+fn draw<A: App>(
+    ui: &mut Ui,
+    app: &mut A,
+    now: Instant,
+    px: (u32, u32),
+    target: Option<&wgpu::TextureView>,
+) -> Laid {
+    let k = ui.scale();
+    let size = (px.0 as f32 / k, px.1 as f32 / k);
+    // A full atlas empties itself and asks for the frame again; twice
+    // means one frame's glyphs do not fit, and it is drawn as is.
+    let mut tries = 0;
+    loop {
+        ui.begin_at(app.background(), now);
+        let root = app.view(ui);
+        let laid = ui.layout(root, size);
+        app.paint(ui, &laid);
+        tries += 1;
+        if ui.render_target(target, px) || tries == 2 {
+            return laid;
+        }
     }
 }

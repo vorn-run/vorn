@@ -13,7 +13,7 @@ use taffy::{NodeId as LayoutNode, Overflow, Point};
 use crate::atlas::Atlases;
 use crate::edit::{Clipboard, MemoryClipboard, TextEdit};
 use crate::element::{Action, Content, EditLook, El, Id, Overlay, Place, Sense};
-use crate::gpu::Gpu;
+use crate::gpu::{adapter_name, instance_desc, Gpu};
 use crate::interact::{EditGeom, Hit, State};
 use crate::render::{read_texture, Offscreen, RenderMode, Renderer, OFFSCREEN_FORMAT};
 use crate::scene::{Rect, Rgba, Scene};
@@ -71,9 +71,11 @@ struct Image {
 }
 
 pub struct Ui {
-    /// `None` when there is no adapter at all: frames are CPU-only and can
-    /// only be read back, not shown.
+    /// `None` when the CPU draws: frames stay in memory, to be read back
+    /// or presented by a window without a device.
     pub gpu: Option<Gpu>,
+    /// The adapter found, for reports, even when no device was opened on it.
+    adapter: Option<String>,
     pub atlases: Atlases,
     pub text: TextSystem,
     pub scene: Scene,
@@ -119,10 +121,23 @@ impl Ui {
         format: wgpu::TextureFormat,
         cfg: &UiConfig,
     ) -> Ui {
+        let adapter = gpu.as_ref().map(Gpu::adapter_name);
+        Ui::build(gpu, adapter, mode, format, cfg)
+    }
+
+    pub(crate) fn build(
+        gpu: Option<Gpu>,
+        adapter: Option<String>,
+        mode: RenderMode,
+        format: wgpu::TextureFormat,
+        cfg: &UiConfig,
+    ) -> Ui {
         let (renderer, atlases) = Renderer::new(mode, gpu.as_ref(), format);
+        let gpu = gpu.filter(|_| !renderer.is_cpu());
         let now = Instant::now();
         Ui {
             gpu,
+            adapter,
             atlases,
             text: TextSystem::new(cfg.scale, cfg.ui_font, cfg.mono_font, cfg.term_size),
             scene: Scene::default(),
@@ -137,14 +152,26 @@ impl Ui {
         }
     }
 
-    /// A UI for offscreen frames: a headless adapter unless `mode` is CPU
-    /// or there is none.
+    /// A UI for offscreen frames: a headless device unless `mode` is CPU,
+    /// the adapter is a software one (with `Auto`), or there is none. CPU
+    /// frames are BGRA, as a window's buffer takes them.
     pub fn headless(mode: RenderMode, cfg: &UiConfig) -> Ui {
-        let gpu = match mode {
-            RenderMode::Cpu => None,
-            RenderMode::Auto | RenderMode::Gpu => Gpu::headless().ok(),
+        let cpu = |name| Ui::build(None, name, mode, wgpu::TextureFormat::Bgra8Unorm, cfg);
+        if mode == RenderMode::Cpu {
+            return cpu(None);
+        }
+        let instance = wgpu::Instance::new(instance_desc());
+        let Ok(adapter) = Gpu::adapter(&instance, None) else {
+            return cpu(None);
         };
-        Ui::new(gpu, mode, OFFSCREEN_FORMAT, cfg)
+        let name = Some(adapter_name(&adapter));
+        if !mode.wants_device(&adapter) {
+            return cpu(name);
+        }
+        match Gpu::open(instance, adapter) {
+            Ok(gpu) => Ui::build(Some(gpu), name, mode, OFFSCREEN_FORMAT, cfg),
+            Err(_) => cpu(name),
+        }
     }
 
     pub fn scale(&self) -> f32 {
@@ -163,14 +190,11 @@ impl Ui {
 
     /// What draws the frames, for logs and reports.
     pub fn renderer_name(&self) -> String {
-        let adapter = self
-            .gpu
-            .as_ref()
-            .map_or_else(|| "no adapter".to_owned(), Gpu::adapter_name);
+        let adapter = self.adapter.as_deref().unwrap_or("no adapter");
         if self.is_cpu() {
-            format!("cpu raster (present: {adapter})")
+            format!("cpu raster (adapter not used: {adapter})")
         } else {
-            adapter
+            adapter.to_owned()
         }
     }
 
@@ -919,14 +943,13 @@ impl Ui {
     /// not drawn because the atlases filled up and were emptied: build and
     /// lay the frame out again.
     pub fn render_offscreen(&mut self, target: &Offscreen) -> bool {
-        self.render_target(target.target(), target.size, true)
+        self.render_target(target.view(), target.size)
     }
 
     pub(crate) fn render_target(
         &mut self,
-        target: Option<(&wgpu::Texture, &wgpu::TextureView)>,
+        target: Option<&wgpu::TextureView>,
         size: (u32, u32),
-        keeps: bool,
     ) -> bool {
         if self.atlases.full {
             self.reset_atlases();
@@ -939,10 +962,18 @@ impl Ui {
             self.clear,
             target,
             size,
-            keeps,
         );
         self.text.trim();
         true
+    }
+
+    /// Copies the CPU renderer's last frame into `dst`, a window's buffer
+    /// of the same size with one `0x00RRGGBB` pixel each: only the rows
+    /// that changed, unless `whole` (the buffer does not hold the frame
+    /// before). Answers the rows that changed, or `None` when the GPU draws
+    /// or the sizes differ.
+    pub fn copy_cpu_frame(&self, dst: &mut [u32], whole: bool) -> Option<&[(u32, u32)]> {
+        self.renderer.cpu_frame()?.copy_xrgb(dst, whole)
     }
 
     /// The pixels of the last frame drawn into `target`, as RGBA rows.
@@ -956,7 +987,7 @@ impl Ui {
                 return Ok(px);
             }
         }
-        match (self.gpu.as_ref(), target.target()) {
+        match (self.gpu.as_ref(), target.texture.as_ref()) {
             (Some(g), Some((t, _))) => read_texture(g, t, target.size),
             _ => Err("nothing drawn".into()),
         }
