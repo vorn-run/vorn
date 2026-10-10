@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned so a new stable lint cannot turn `clippy -D warnings` red on its own.
+channel = "1.97.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

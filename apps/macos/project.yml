@@ -1,0 +1,39 @@
+name: Vorn
+options:
+  bundleIdPrefix: run.vorn
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+packages:
+  Vorn:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Vorn:
+    type: application
+    platform: macOS
+    sources:
+      - App
+    dependencies:
+      - package: Vorn
+        product: VornApp
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Vorn
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHighResolutionCapable: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: run.vorn.native
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+    preBuildScripts:
+      - name: Build grid client
+        script: |
+          [ -f "$SRCROOT/grid-ffi/target/aarch64-apple-darwin/release/libvorn_grid_ffi.a" ] || "$SRCROOT/grid-ffi/build.sh"
+        basedOnDependencyAnalysis: false
