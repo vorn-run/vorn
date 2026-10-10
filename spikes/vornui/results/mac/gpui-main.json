@@ -1,0 +1,16 @@
+{
+  "proto": "gpui",
+  "screen": "main",
+  "panes": 0,
+  "scale": 2.0,
+  "png": "results/mac/gpui-main.png",
+  "adapter": "gpui metal headless",
+  "redraw_ms": {
+    "n": 120,
+    "p50": 0.215,
+    "p95": 0.344,
+    "p99": 0.546,
+    "max": 0.598,
+    "mean": 0.238
+  }
+}

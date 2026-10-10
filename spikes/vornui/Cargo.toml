@@ -1,0 +1,24 @@
+# The vornui prototype and the harness both prototypes share. The GPUI
+# prototype is its own workspace (gpui/) so its pinned framework tree never
+# touches this lockfile.
+[workspace]
+resolver = "2"
+members = ["shared", "vornui", "app"]
+exclude = ["gpui"]
+
+[workspace.package]
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+vorn-term-proto = { path = "../../packages/core/crates/term-proto" }
+vorn-term-mirror = { path = "../../packages/core/crates/term-mirror" }
+vorn-grid-client = { path = "../../packages/core/crates/grid-client" }
+spike-shared = { path = "shared" }
+vornui = { path = "vornui" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = "symbols"
