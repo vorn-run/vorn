@@ -194,6 +194,8 @@ pub struct Renderer {
     pub color: Atlas,
     /// Background of every frame.
     pub clear: Rgba,
+    /// The last frame submitted, waited on before the next is queued.
+    in_flight: Option<wgpu::SubmissionIndex>,
 }
 
 const SHADER: &str = include_str!("shader.wgsl");
@@ -344,11 +346,13 @@ impl Renderer {
             mask,
             color,
             clear: Rgba::hex(0),
+            in_flight: None,
         }
     }
 
     /// Encodes `scene` into `view` (`size` physical pixels) and submits it.
-    /// Returns without waiting for the GPU, as a presented frame would.
+    /// Keeps at most two frames queued, as a swapchain would; without that a
+    /// software adapter falls ever further behind until wgpu gives up.
     pub fn render(&mut self, gpu: &Gpu, scene: &Scene, view: &wgpu::TextureView, size: (u32, u32)) {
         let g = Globals {
             viewport: [size.0 as f32, size.1 as f32],
@@ -418,9 +422,15 @@ impl Renderer {
                 s0 += ns;
             }
         }
-        gpu.queue.submit(Some(enc.finish()));
-        // Retires finished frames' resources without waiting on the GPU.
-        let _ = gpu.device.poll(wgpu::PollType::Poll);
+        let submitted = gpu.queue.submit(Some(enc.finish()));
+        let poll = match self.in_flight.replace(submitted) {
+            Some(prev) => wgpu::PollType::Wait {
+                submission_index: Some(prev),
+                timeout: None,
+            },
+            None => wgpu::PollType::Poll,
+        };
+        let _ = gpu.device.poll(poll);
     }
 }
 
