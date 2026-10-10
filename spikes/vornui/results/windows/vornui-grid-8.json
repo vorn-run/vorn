@@ -1,0 +1,18 @@
+{
+  "adapter": "Microsoft Basic Render Driver (Dx12)",
+  "panes": 8,
+  "png": "results/windows/vornui-grid-8.png",
+  "proto": "vornui",
+  "quads": 25,
+  "redraw_ms": {
+    "max": 271.256,
+    "mean": 236.388,
+    "n": 120,
+    "p50": 235.474,
+    "p95": 254.645,
+    "p99": 255.786
+  },
+  "scale": 2.0,
+  "screen": "grid",
+  "sprites": 6273
+}
