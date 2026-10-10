@@ -1,0 +1,29 @@
+{
+  "adapter": "Microsoft Basic Render Driver (Dx12)",
+  "cpu_pct": 135.99893808045653,
+  "errors": [],
+  "footprint_mb": 266.5625,
+  "fps": 1.941952800050455,
+  "frame_ms": {
+    "max": 604.019,
+    "mean": 514.901,
+    "n": 39,
+    "p50": 513.24,
+    "p95": 579.558,
+    "p99": 604.019
+  },
+  "frames": 39,
+  "latency_ms": {
+    "max": 1151.966,
+    "mean": 1033.037,
+    "n": 19,
+    "p50": 1034.329,
+    "p95": 1109.113,
+    "p99": 1151.966
+  },
+  "lost_probes": 0,
+  "panes": 32,
+  "peak_rss_mb": 86.1953125,
+  "proto": "vornui",
+  "seconds": 20.0828774
+}

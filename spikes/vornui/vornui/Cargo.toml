@@ -1,0 +1,19 @@
+[package]
+name = "vornui"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "A thin UI layer from general crates: winit windows, wgpu drawing, cosmic-text and swash text, taffy layout, AccessKit accessibility"
+
+[dependencies]
+wgpu = { version = "29", default-features = false, features = ["wgsl", "metal", "dx12", "vulkan", "std"] }
+winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
+accesskit = { version = "0.25", features = ["serde"] }
+accesskit_winit = { version = "0.34", default-features = false, features = ["rwh_06"] }
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash", "fontconfig"] }
+taffy = { version = "0.10", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }
+etagere = "0.2"
+resvg = { version = "0.48", default-features = false }
+png = "0.18"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"

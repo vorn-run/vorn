@@ -1,0 +1,10 @@
+{
+  "commit_reached_pty": true,
+  "path": "winit Ime::Preedit/Commit -> vornui Input -> grid text",
+  "png_commit": "results/mac/vornui-ime.png",
+  "png_preedit": "results/mac/vornui-ime-preedit.png",
+  "preedit_drawn": true,
+  "proto": "vornui",
+  "screen_line": "$ 日本語",
+  "simulated": "composition events are injected; no OS IME window is driven"
+}

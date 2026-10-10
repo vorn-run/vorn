@@ -1,0 +1,16 @@
+{
+  "proto": "gpui",
+  "screen": "grid",
+  "panes": 8,
+  "scale": 2.0,
+  "png": "results/mac/gpui-grid-8.png",
+  "adapter": "gpui metal headless",
+  "redraw_ms": {
+    "n": 120,
+    "p50": 1.19,
+    "p95": 1.264,
+    "p99": 1.434,
+    "max": 1.612,
+    "mean": 1.203
+  }
+}

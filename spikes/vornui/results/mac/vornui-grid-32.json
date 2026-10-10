@@ -1,0 +1,18 @@
+{
+  "adapter": "Apple M2 Pro (Metal)",
+  "panes": 32,
+  "png": "results/mac/vornui-grid-32.png",
+  "proto": "vornui",
+  "quads": 73,
+  "redraw_ms": {
+    "max": 49.612,
+    "mean": 1.463,
+    "n": 120,
+    "p50": 1.539,
+    "p95": 1.782,
+    "p99": 2.881
+  },
+  "scale": 2.0,
+  "screen": "grid",
+  "sprites": 7401
+}

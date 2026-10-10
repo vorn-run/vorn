@@ -1,0 +1,101 @@
+# Measures the vornui and GPUI prototypes on Windows: builds both, runs their
+# offscreen shots and benches against a test vornd, and uploads the numbers
+# and renders. Started by hand; see spikes/vornui/REPORT.md.
+name: vornui spike
+
+# Dispatch only works once this file is on the default branch, so a push to
+# the spike branch that touches the spike also runs it.
+on:
+  workflow_dispatch:
+  push:
+    branches: [vornui-spike]
+    paths: ['spikes/vornui/**', '.github/workflows/vornui-spike.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+        working-directory: spikes/vornui
+    env:
+      CARGO_TERM_COLOR: never
+      PYTHON: python
+    steps:
+      - name: Keep line endings as committed
+        working-directory: .
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - name: Fetch the released vornd
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eux
+          d="$RUNNER_TEMP/vorn"
+          gh release download v0.8.0-beta.7 -R "$GITHUB_REPOSITORY" -p 'Vorn-Setup-0.8.0-beta.7.exe' -D "$d"
+          cd "$d"
+          7z x -y -oinstaller Vorn-Setup-0.8.0-beta.7.exe > /dev/null
+          7z x -y -oapp "installer/\$PLUGINSDIR/app-64.7z" > /dev/null
+          find app -iname 'vorn*.exe' | grep -iv uninstall
+          mkdir -p "$GITHUB_WORKSPACE/spikes/vornui/.deps/bin"
+          for exe in vornd.exe vorn-sessiond.exe; do
+            cp "$(find app -iname "$exe" | head -1)" "$GITHUB_WORKSPACE/spikes/vornui/.deps/bin/"
+          done
+          ls -la "$GITHUB_WORKSPACE/spikes/vornui/.deps/bin"
+
+      - name: Machine
+        run: |
+          systeminfo | grep -E 'OS Name|OS Version|Processor|Total Physical Memory' || true
+          powershell -NoProfile -Command "Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion | Format-List" || true
+
+      - name: Rust
+        run: rustup toolchain install
+
+      - name: Build vornui
+        run: |
+          rustup show active-toolchain
+          cargo build --release -p vornui-proto
+          ls -la target/release/vornui-proto.exe
+
+      - name: Test vornui
+        continue-on-error: true
+        run: cargo test --release -p vornui -p spike-shared
+
+      - name: Measure vornui
+        continue-on-error: true
+        run: scripts/measure.sh target/release/vornui-proto.exe vornui results/windows
+
+      - name: Fetch GPUI
+        run: sh gpui/fetch_zed.sh
+
+      - name: Build GPUI
+        working-directory: spikes/vornui/gpui
+        run: |
+          cargo build --release
+          ls -la target/release/gpui-proto.exe
+
+      - name: Measure GPUI
+        continue-on-error: true
+        run: scripts/measure.sh gpui/target/release/gpui-proto.exe gpui results/windows
+
+      - name: Sizes
+        if: always()
+        run: |
+          for f in target/release/vornui-proto.exe gpui/target/release/gpui-proto.exe; do
+            [ -f "$f" ] && echo "$f $(stat -c %s "$f")"
+          done | tee results/windows/sizes.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vornui-spike-windows
+          path: spikes/vornui/results/windows
+          if-no-files-found: warn

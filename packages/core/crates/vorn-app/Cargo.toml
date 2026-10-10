@@ -1,0 +1,37 @@
+[package]
+name = "vorn-app"
+version.workspace = true
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Vorn's desktop app for Windows and Linux: today's main screen on vornui, live from vornd"
+
+[[bin]]
+name = "vorn-app"
+path = "src/main.rs"
+
+[dependencies]
+# The UI layer, reached only through `src/ui.rs`; repointing it at its own
+# crate is this line.
+vornui = { path = "../../../../spikes/vornui/vornui" }
+vorn-protocol = { path = "../protocol" }
+vorn-grid-client = { path = "../grid-client" }
+vorn-term-mirror = { path = "../term-mirror" }
+vorn-term-proto = { path = "../term-proto" }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "sync", "macros", "time"] }
+tokio-tungstenite = "0.28"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
+
+# The UI layer turns winit's defaults off; a Linux window needs a display
+# server, so the app asks for both.
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
