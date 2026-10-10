@@ -13,17 +13,18 @@
 //! - **Fast paths.** Glyphs and icons sit on whole pixels at their atlas
 //!   size, so they are copied texel for texel; quad interiors are filled as
 //!   spans; only antialiased edges run the full distance-field math.
-//! - **Threads.** Dirty bands of tiles are shared among up to four scoped
-//!   threads. On Windows they run above normal priority: the terminals the
-//!   frame shows can flood every core with output, and at normal priority
-//!   the raster is preempted mid-frame and the window falls to a few fps.
+//! - **Threads.** Dirty bands of tiles are shared among a pool of up to four
+//!   threads that live as long as the renderer. On Windows they run above
+//!   normal priority: the terminals the frame shows can flood every core
+//!   with output, and threads spawned per frame at normal priority waited
+//!   their turn to start while the frame waited on them.
 //!
 //! It is its own small rasterizer rather than a general one (tiny-skia)
 //! because the scene has two primitives and must match the shader's
 //! distance field and sampling exactly; a path rasterizer would need both
 //! re-expressed as paths and would still differ at the edges.
 
-use std::sync::Mutex;
+use rayon::prelude::*;
 
 use crate::atlas::Atlases;
 use crate::scene::{Quad, Rgba, Scene, Sprite};
@@ -40,7 +41,9 @@ pub struct CpuRaster {
     size: (u32, u32),
     pixels: Vec<u32>,
     bgra: bool,
-    threads: usize,
+    /// Draws the bands of large frames; `None` on a single core or if the
+    /// threads could not be started.
+    pool: Option<rayon::ThreadPool>,
     /// Per tile: the hash of what it showed last frame.
     hashes: Vec<u64>,
     /// Per tile: the primitives touching it this frame, in draw order.
@@ -64,11 +67,21 @@ impl CpuRaster {
         let threads = std::thread::available_parallelism()
             .map_or(1, |n| n.get())
             .min(MAX_THREADS);
+        let pool = (threads > 1)
+            .then(|| {
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .thread_name(|i| format!("vornui-raster-{i}"))
+                    .start_handler(|_| raise_priority())
+                    .build()
+                    .ok()
+            })
+            .flatten();
         CpuRaster {
             size: (0, 0),
             pixels: Vec::new(),
             bgra,
-            threads,
+            pool,
             hashes: Vec::new(),
             bins: Vec::new(),
             dirty: Vec::new(),
@@ -221,29 +234,22 @@ impl CpuRaster {
             clear: clear_px,
             bgra: self.bgra,
         };
-        if self.threads <= 1 || dirty_px < PARALLEL_MIN_PX || bands.len() < 2 {
-            for (b, rows) in bands {
-                job.band(b, rows);
-            }
-            return;
-        }
-        // Bands are taken one at a time so a busy band does not hold up an
-        // idle thread.
-        let queue = Mutex::new(bands.into_iter());
-        let next = || queue.lock().ok().and_then(|mut q| q.next());
-        std::thread::scope(|s| {
-            for _ in 1..self.threads {
-                s.spawn(|| {
-                    raise_priority();
-                    while let Some((b, rows)) = next() {
-                        job.band(b, rows);
-                    }
+        match &self.pool {
+            Some(pool) if dirty_px >= PARALLEL_MIN_PX && bands.len() >= 2 => {
+                // One band per task so a busy band does not hold up an idle thread.
+                pool.install(|| {
+                    bands
+                        .into_par_iter()
+                        .with_max_len(1)
+                        .for_each(|(b, rows)| job.band(b, rows));
                 });
             }
-            while let Some((b, rows)) = next() {
-                job.band(b, rows);
+            _ => {
+                for (b, rows) in bands {
+                    job.band(b, rows);
+                }
             }
-        });
+        }
     }
 }
 
@@ -751,10 +757,11 @@ mod tests {
             );
         }
         let mut one = CpuRaster::new(false);
-        one.threads = 1;
+        one.pool = None;
         one.render(&s, &a, Rgba::hex(0x101012), (640, 480));
         let mut many = CpuRaster::new(false);
-        many.threads = 4;
+        many.pool = rayon::ThreadPoolBuilder::new().num_threads(4).build().ok();
+        assert!(many.pool.is_some());
         many.render(&s, &a, Rgba::hex(0x101012), (640, 480));
         assert!(one.pixels == many.pixels);
     }
