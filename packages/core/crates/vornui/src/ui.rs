@@ -85,6 +85,8 @@ pub struct Ui {
     pub(crate) st: State,
     pub(crate) clipboard: Box<dyn Clipboard>,
     clear: Rgba,
+    /// See [`Ui::viewport`].
+    pub(crate) viewport: (f32, f32),
     icons: HashMap<(u64, u32), Option<[f32; 4]>>,
     images: Vec<Image>,
     anon: u64,
@@ -146,6 +148,7 @@ impl Ui {
             st: State::new(now),
             clipboard: Box::new(MemoryClipboard::default()),
             clear: Rgba::TRANSPARENT,
+            viewport: (0.0, 0.0),
             icons: HashMap::new(),
             images: Vec::new(),
             anon: 0,
@@ -230,11 +233,19 @@ impl Ui {
         self.clear = clear;
     }
 
+    /// The logical size the frame is for: the window's while a window
+    /// builds it, else the last [`Ui::layout`]'s. Views that lay out by
+    /// the window's size (how many cards fit) read it.
+    pub fn viewport(&self) -> (f32, f32) {
+        self.viewport
+    }
+
     /// Lays `root` out in a `size` (logical pixels) window and paints it.
     /// Overlays (menus, tooltips) go in layers above; afterwards the scene
     /// records into the window's layer again, so what the app paints into
     /// its custom boxes stays under them.
     pub fn layout(&mut self, root: El, size: (f32, f32)) -> Laid {
+        self.viewport = size;
         let mut cx = Cx {
             taffy: TaffyTree::new(),
             overlays: Vec::new(),

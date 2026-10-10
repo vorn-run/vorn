@@ -14,7 +14,9 @@
 //!   size, so they are copied texel for texel; quad interiors are filled as
 //!   spans; only antialiased edges run the full distance-field math.
 //! - **Threads.** Dirty bands of tiles are shared among up to four scoped
-//!   threads.
+//!   threads. On Windows they run above normal priority: the terminals the
+//!   frame shows can flood every core with output, and at normal priority
+//!   the raster is preempted mid-frame and the window falls to a few fps.
 //!
 //! It is its own small rasterizer rather than a general one (tiny-skia)
 //! because the scene has two primitives and must match the shader's
@@ -124,6 +126,11 @@ impl CpuRaster {
     /// Draws `scene` into a `size` frame, redrawing only tiles whose
     /// content changed since the last call.
     pub fn render(&mut self, scene: &Scene, atlases: &Atlases, clear: Rgba, size: (u32, u32)) {
+        RAISED.with(|r| {
+            if !r.replace(true) {
+                raise_priority();
+            }
+        });
         let (w, h) = (size.0 as usize, size.1 as usize);
         let tiles_x = w.div_ceil(TILE);
         let tiles_y = h.div_ceil(TILE);
@@ -227,6 +234,7 @@ impl CpuRaster {
         std::thread::scope(|s| {
             for _ in 1..self.threads {
                 s.spawn(|| {
+                    raise_priority();
                     while let Some((b, rows)) = next() {
                         job.band(b, rows);
                     }
@@ -236,6 +244,27 @@ impl CpuRaster {
                 job.band(b, rows);
             }
         });
+    }
+}
+
+thread_local! {
+    /// Whether this thread's priority was already raised for rendering.
+    static RAISED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Lets the calling thread preempt normal-priority work, so a frame is not
+/// stalled behind the processes whose output it shows. Windows only: elsewhere
+/// raising a thread's priority needs privileges the app does not have.
+fn raise_priority() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL,
+        };
+        // SAFETY: the pseudo-handle names the calling thread and needs no closing.
+        unsafe {
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+        }
     }
 }
 

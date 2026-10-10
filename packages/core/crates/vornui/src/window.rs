@@ -530,6 +530,7 @@ fn draw<A: App>(
     // A full atlas empties itself and asks for the frame again; twice
     // means one frame's glyphs do not fit, and it is drawn as is.
     let mut tries = 0;
+    ui.viewport = size;
     loop {
         ui.begin_at(app.background(), now);
         let root = app.view(ui);
