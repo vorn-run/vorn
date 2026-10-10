@@ -1,0 +1,4 @@
+.build/
+.swiftpm/
+*.png
+!Sources/**/*.png
