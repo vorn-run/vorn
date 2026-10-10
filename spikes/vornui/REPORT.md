@@ -67,16 +67,16 @@ sessions so no sessions chip, agent chip relabelled "Agent"):
 
 ![today](results/mac/today.png)
 
-| vornui (macOS) | GPUI (macOS) |
-|---|---|
-| ![vornui main](results/mac/vornui-main.png) | ![gpui main](results/mac/gpui-main.png) |
-| ![vornui grid 8](results/mac/vornui-grid-8.png) | ![gpui grid 8](results/mac/gpui-grid-8.png) |
-| ![vornui grid 32](results/mac/vornui-grid-32.png) | ![gpui grid 32](results/mac/gpui-grid-32.png) |
+| vornui (macOS)                                            | GPUI (macOS)                                          |
+| --------------------------------------------------------- | ----------------------------------------------------- |
+| ![vornui main](results/mac/vornui-main.png)               | ![gpui main](results/mac/gpui-main.png)               |
+| ![vornui grid 8](results/mac/vornui-grid-8.png)           | ![gpui grid 8](results/mac/gpui-grid-8.png)           |
+| ![vornui grid 32](results/mac/vornui-grid-32.png)         | ![gpui grid 32](results/mac/gpui-grid-32.png)         |
 | ![vornui ime preedit](results/mac/vornui-ime-preedit.png) | ![gpui ime preedit](results/mac/gpui-ime-preedit.png) |
 
-| vornui (Windows) | GPUI (Windows) |
-|---|---|
-| ![vornui main win](results/windows/vornui-main.png) | ![gpui main win](results/windows/gpui-main.png) |
+| vornui (Windows)                                        | GPUI (Windows)                                      |
+| ------------------------------------------------------- | --------------------------------------------------- |
+| ![vornui main win](results/windows/vornui-main.png)     | ![gpui main win](results/windows/gpui-main.png)     |
 | ![vornui grid 8 win](results/windows/vornui-grid-8.png) | ![gpui grid 8 win](results/windows/gpui-grid-8.png) |
 
 HiDPI shots at 1× and 1.5× are in `results/*/*-main-1x.png` and
@@ -94,28 +94,28 @@ is consistent within its own layout.
 vornui's columns are the promoted crate: on Metal, and with the CPU
 rasterizer forced (`VORNUI_RENDERER=cpu`). GPUI's are from the spike run.
 
-| | vornui | vornui, CPU raster | GPUI |
-|---|---|---|---|
-| **8 busy panes**, frame p50 / p95 / p99 | 1.10 / 2.21 / 3.16 ms | 2.84 / 3.90 / 5.23 ms | 3.40 / 4.04 / 4.18 ms |
-| keystroke-to-pixel p50 / p95 / p99 | 3.43 / 4.92 / 5.25 ms | 2.62 / 4.24 / 5.40 ms | 8.24 / 9.22 / 10.25 ms |
-| fps, lost probes | 115.0, 0 | 117.5, 0 | 108.7, 0 |
-| CPU | 23.3% | 101% | 44.5% |
-| peak RSS / phys footprint | 27.8 / 80.2 MB | 37.8 / 27.4 MB | 39.3 / 52.4 MB |
-| **32 busy panes**, frame p50 / p95 / p99 | 0.65 / 1.69 / 2.90 ms | 1.85 / 2.11 / 3.11 ms | 3.28 / 3.53 / 3.69 ms |
-| keystroke-to-pixel p50 / p95 / p99 | 3.16 / 4.64 / 4.75 ms | 1.23 / 1.97 / 6.27 ms | 8.28 / 9.08 / 9.42 ms |
-| fps, lost probes | 112.0, 4 | 116.5, 4 | 109.4, 4 |
-| CPU | 17.1% | 66% | 45.4% |
-| peak RSS / phys footprint | 28.3 / 81.6 MB | 37.2 / 28.1 MB | 43.1 / 53.7 MB |
-| static redraw, main 2× p50 / p99 | 1.28 / 1.69 ms ¹ | 0.12 / 0.15 ms | 0.21 / 0.40 ms |
-| static redraw, grid 8 p50 / p99 | 1.69 / 2.10 ms ¹ | 0.32 / 0.45 ms | 1.19 / 1.43 ms |
-| static redraw, grid 32 p50 / p99 | 1.86 / 2.93 ms ¹ | 0.41 / 0.66 ms | 1.83 / 2.05 ms |
-| cold start to first frame of 8 panes, p50 of 5 | 252 ms | | 95 ms |
-| IME (Japanese): preedit drawn, commit reaches the pty | yes, `$ 日本語` | | yes, `$ 日本語` |
-| a11y tree (main / grid) | 20 / 13 nodes, terminals carry screen text | | 19 / 13 nodes, terminals carry screen text |
-| HiDPI 1× / 1.5× / 2× | yes | | yes |
-| release binary | 9.3 MB | | 10.7 MB ² |
-| lines we own: UI layer / app | 7,422 (with widgets, window, CPU raster) / 856 | | 83 lines of patches / 1,012 |
-| dependency crates | 178 (layer alone 148) | | 328 |
+|                                                       | vornui                                         | vornui, CPU raster    | GPUI                                       |
+| ----------------------------------------------------- | ---------------------------------------------- | --------------------- | ------------------------------------------ |
+| **8 busy panes**, frame p50 / p95 / p99               | 1.10 / 2.21 / 3.16 ms                          | 2.84 / 3.90 / 5.23 ms | 3.40 / 4.04 / 4.18 ms                      |
+| keystroke-to-pixel p50 / p95 / p99                    | 3.43 / 4.92 / 5.25 ms                          | 2.62 / 4.24 / 5.40 ms | 8.24 / 9.22 / 10.25 ms                     |
+| fps, lost probes                                      | 115.0, 0                                       | 117.5, 0              | 108.7, 0                                   |
+| CPU                                                   | 23.3%                                          | 101%                  | 44.5%                                      |
+| peak RSS / phys footprint                             | 27.8 / 80.2 MB                                 | 37.8 / 27.4 MB        | 39.3 / 52.4 MB                             |
+| **32 busy panes**, frame p50 / p95 / p99              | 0.65 / 1.69 / 2.90 ms                          | 1.85 / 2.11 / 3.11 ms | 3.28 / 3.53 / 3.69 ms                      |
+| keystroke-to-pixel p50 / p95 / p99                    | 3.16 / 4.64 / 4.75 ms                          | 1.23 / 1.97 / 6.27 ms | 8.28 / 9.08 / 9.42 ms                      |
+| fps, lost probes                                      | 112.0, 4                                       | 116.5, 4              | 109.4, 4                                   |
+| CPU                                                   | 17.1%                                          | 66%                   | 45.4%                                      |
+| peak RSS / phys footprint                             | 28.3 / 81.6 MB                                 | 37.2 / 28.1 MB        | 43.1 / 53.7 MB                             |
+| static redraw, main 2× p50 / p99                      | 1.28 / 1.69 ms ¹                               | 0.12 / 0.15 ms        | 0.21 / 0.40 ms                             |
+| static redraw, grid 8 p50 / p99                       | 1.69 / 2.10 ms ¹                               | 0.32 / 0.45 ms        | 1.19 / 1.43 ms                             |
+| static redraw, grid 32 p50 / p99                      | 1.86 / 2.93 ms ¹                               | 0.41 / 0.66 ms        | 1.83 / 2.05 ms                             |
+| cold start to first frame of 8 panes, p50 of 5        | 252 ms                                         |                       | 95 ms                                      |
+| IME (Japanese): preedit drawn, commit reaches the pty | yes, `$ 日本語`                                |                       | yes, `$ 日本語`                            |
+| a11y tree (main / grid)                               | 20 / 13 nodes, terminals carry screen text     |                       | 19 / 13 nodes, terminals carry screen text |
+| HiDPI 1× / 1.5× / 2×                                  | yes                                            |                       | yes                                        |
+| release binary                                        | 9.3 MB                                         |                       | 10.7 MB ²                                  |
+| lines we own: UI layer / app                          | 7,422 (with widgets, window, CPU raster) / 856 |                       | 83 lines of patches / 1,012                |
+| dependency crates                                     | 178 (layer alone 148)                          |                       | 328                                        |
 
 ¹ vornui's redraw loop waits for the previous frame's GPU work, as a
 swapchain would, so the number is GPU throughput for the 2880×1800 target.
@@ -135,25 +135,25 @@ vornui's column is the promoted crate, which picks its CPU rasterizer on
 this software adapter and presents through WARP. Both columns are from the
 same run.
 
-| | vornui | GPUI |
-|---|---|---|
-| **8 busy panes**, frame p50 / p95 / p99 | 22.5 / 27.5 / 33.2 ms | 10.0 / 13.3 / 31.3 ms ¹ |
-| keystroke-to-pixel p50 / p95 / p99 | 54 / 71 / 80 ms | 260 / 487 / 496 ms |
-| fps, lost probes | 43.9, 0 | 29.5, 1 |
-| CPU | 94% | 343% |
-| peak RSS / private bytes | 115 / 314 MB | 580 / 957 MB |
-| **32 busy panes**, frame p50 / p95 / p99 | 132 / 168 / 174 ms | 12.8 / 45.5 / 154 ms ¹ |
-| keystroke-to-pixel p50 / p95 / p99 | 282 / 403 / 414 ms | 765 / 964 / 965 ms |
-| fps, lost probes | 8.0, 2 | 30.5, 1 |
-| CPU | 25% | 291% |
-| peak RSS / private bytes | 126 / 314 MB | 727 / 1,092 MB |
-| static redraw, main 1× / 1.5× / 2× p50 | 0.19 / 0.19 / 0.19 ms | 1.6 / 1.6 / 1.7 ms ¹ |
-| static redraw, grid 8 p50 / p99 | 0.43 / 0.79 ms | 10.6 / 138 ms ¹ |
-| static redraw, grid 32 p50 / p99 | 0.53 / 0.79 ms | 13.2 / 168 ms ¹ |
-| cold start to first frame of 8 panes, p50 of 5 | 774 ms (740–1,259) | 3,720 ms (3,557–4,229) |
-| IME (Japanese): preedit drawn, commit reaches the pty | yes, `$ 日本語` | yes, `$ 日本語` |
-| a11y tree (main / grid) | 20 / 13 nodes | 19 / 13 nodes |
-| release exe | 12.2 MB | 19.8 MB ² |
+|                                                       | vornui                | GPUI                    |
+| ----------------------------------------------------- | --------------------- | ----------------------- |
+| **8 busy panes**, frame p50 / p95 / p99               | 22.5 / 27.5 / 33.2 ms | 10.0 / 13.3 / 31.3 ms ¹ |
+| keystroke-to-pixel p50 / p95 / p99                    | 54 / 71 / 80 ms       | 260 / 487 / 496 ms      |
+| fps, lost probes                                      | 43.9, 0               | 29.5, 1                 |
+| CPU                                                   | 94%                   | 343%                    |
+| peak RSS / private bytes                              | 115 / 314 MB          | 580 / 957 MB            |
+| **32 busy panes**, frame p50 / p95 / p99              | 132 / 168 / 174 ms    | 12.8 / 45.5 / 154 ms ¹  |
+| keystroke-to-pixel p50 / p95 / p99                    | 282 / 403 / 414 ms    | 765 / 964 / 965 ms      |
+| fps, lost probes                                      | 8.0, 2                | 30.5, 1                 |
+| CPU                                                   | 25%                   | 291%                    |
+| peak RSS / private bytes                              | 126 / 314 MB          | 727 / 1,092 MB          |
+| static redraw, main 1× / 1.5× / 2× p50                | 0.19 / 0.19 / 0.19 ms | 1.6 / 1.6 / 1.7 ms ¹    |
+| static redraw, grid 8 p50 / p99                       | 0.43 / 0.79 ms        | 10.6 / 138 ms ¹         |
+| static redraw, grid 32 p50 / p99                      | 0.53 / 0.79 ms        | 13.2 / 168 ms ¹         |
+| cold start to first frame of 8 panes, p50 of 5        | 774 ms (740–1,259)    | 3,720 ms (3,557–4,229)  |
+| IME (Japanese): preedit drawn, commit reaches the pty | yes, `$ 日本語`       | yes, `$ 日本語`         |
+| a11y tree (main / grid)                               | 20 / 13 nodes         | 19 / 13 nodes           |
+| release exe                                           | 12.2 MB               | 19.8 MB ²               |
 
 ¹ GPUI queues GPU work without waiting, so its frame and redraw times are
 CPU-only; its backlog shows up in latency and memory instead. vornui's
