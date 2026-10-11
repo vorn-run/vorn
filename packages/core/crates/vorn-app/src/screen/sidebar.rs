@@ -499,6 +499,80 @@ fn projects(s: &Screen<'_>) -> El {
     col
 }
 
+/// SidebarSectionHeader with a fold: a chevron and an uppercase title.
+pub(super) fn toggle_section(s: &Screen<'_>, title: &str, open: bool, act: Act) -> El {
+    let id = s.acts.on("sidebar-section", act);
+    let hot = s.ui.hover(id);
+    let chevron = if open {
+        "chevron-down"
+    } else {
+        "chevron-right"
+    };
+    div().row().items_center().pt(12.0).pb(6.0).child(
+        div()
+            .id(id)
+            .on(Action::Click)
+            .row()
+            .items_center()
+            .gap(6.0)
+            .role(Role::Button, title)
+            .expanded(open)
+            .child(ico(chevron, 10.0, 2.0, c(look::GRAY_600)))
+            .child(
+                text(
+                    title.to_uppercase(),
+                    11.0,
+                    c(look::GRAY_500).mix(c(look::GRAY_300), hot),
+                )
+                .weight(500)
+                .line_height(14.0)
+                .silent(),
+            ),
+    )
+}
+
+/// TasksProjectsSection: All Projects and each project, under a fold.
+fn tasks_projects(s: &Screen<'_>) -> El {
+    let open = !s.st.tasks.projects_folded;
+    let mut col = div().col().gap(2.0).child(toggle_section(
+        s,
+        "Projects",
+        open,
+        Act::Task(crate::tasks::TaskAct::ToggleProjects),
+    ));
+    if !open {
+        return col;
+    }
+    col = col.child(nav_item(
+        s,
+        Act::Project(None),
+        ico("layers", 14.0, 1.5, c(look::GRAY_400)),
+        "All Projects",
+        None,
+        s.st.project.is_none(),
+    ));
+    if s.store.projects.is_empty() {
+        col = col.child(
+            div().px(10.0).py(4.0).child(
+                text("No projects", 13.0, c(look::GRAY_600))
+                    .line_height(18.0)
+                    .role(Role::Label, "No projects"),
+            ),
+        );
+    }
+    for p in &s.store.projects {
+        col = col.child(nav_item(
+            s,
+            Act::Project(Some(p.name.clone())),
+            project_icon(p, 14.0),
+            &p.name,
+            None,
+            s.st.project.as_deref() == Some(p.name.as_str()),
+        ));
+    }
+    col
+}
+
 fn workflows(s: &Screen<'_>) -> El {
     let mut col = div()
         .col()
@@ -575,6 +649,7 @@ fn footer(s: &Screen<'_>) -> El {
 pub(super) fn sidebar(s: &Screen<'_>) -> El {
     let body = match s.st.view {
         MainView::Workflows => workflows(s),
+        MainView::Tasks => tasks_projects(s),
         _ => projects(s),
     };
     let scroll = div()

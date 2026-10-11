@@ -8,7 +8,9 @@ mod chrome;
 mod composer;
 mod dialogs;
 pub mod menus;
+pub mod runs;
 mod sidebar;
+pub mod tasks;
 
 use std::collections::HashMap;
 
@@ -81,6 +83,10 @@ impl Screen<'_> {
             .h_full()
             .bg(c(look::SURFACE_BASE))
             .child(row.child(main));
+        if self.st.view == MainView::Tasks {
+            root = root.child_if(tasks::ghost(self));
+        }
+        root = root.child_if(dialogs::dialog(self));
         if let Some(menu) = &self.st.menu {
             let w = menus::width(&menu.kind);
             let panel = match menu.kind {
@@ -109,7 +115,7 @@ impl Screen<'_> {
         if self.st.composer_overlay(self.store) {
             root = root.child_if(composer::overlay(self));
         }
-        root = root.child_if(dialogs::dialog(self));
+        root = root.child_if(tasks::overlay(self));
         root.child_if(chrome::toasts(self))
     }
 
@@ -120,11 +126,7 @@ impl Screen<'_> {
         let body = match st.view {
             MainView::Sessions if self.store.sessions.is_empty() => composer::empty_state(self),
             MainView::Sessions => cards::grid(self),
-            MainView::Tasks => list(
-                "Tasks",
-                self.store.tasks.iter().map(|t| t.title.as_str()),
-                "No tasks yet",
-            ),
+            MainView::Tasks => tasks::view(self),
             MainView::Workflows => list(
                 "Workflows",
                 self.store.workflows.iter().map(|w| w.name.as_str()),

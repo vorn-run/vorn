@@ -176,7 +176,7 @@ fn shortcuts(s: &Screen<'_>) -> El {
     backdrop(s, 0.4).child(panel.absolute(x, s.size.1 * 0.15))
 }
 
-fn backdrop(s: &Screen<'_>, alpha: f32) -> El {
+pub(super) fn backdrop(s: &Screen<'_>, alpha: f32) -> El {
     let id = s.acts.on("dialog-backdrop", Act::CloseDialog);
     div()
         .id(id)
@@ -314,6 +314,9 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
     Some(match s.st.dialog.as_ref()? {
         Dialog::Shortcuts => shortcuts(s),
         Dialog::Project(editing) => project(s, editing.as_deref()),
+        Dialog::AddTask => super::tasks::add_task(s),
+        Dialog::Commit => super::tasks::commit(s),
+        Dialog::Output => super::tasks::output(s),
     })
 }
 

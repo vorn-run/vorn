@@ -35,7 +35,7 @@ pub use element::{
 };
 pub use gpu::Gpu;
 pub use input::Input;
-pub use interact::{Event, WindowRequest, BLINK, MENU_IN, MIN_SPLIT, TOOLTIP_DELAY};
+pub use interact::{Event, WindowRequest, BLINK, MENU_IN, MIN_SPLIT, MOVE_SLOP, TOOLTIP_DELAY};
 pub use pace::Pacer;
 pub use render::{Offscreen, RenderMode, OFFSCREEN_FORMAT};
 pub use scene::{Rect, Rgba, Scene};

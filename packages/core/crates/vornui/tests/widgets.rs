@@ -661,3 +661,44 @@ fn a_layered_box_covers_text_painted_before_it() {
     assert!(white(&mut rig, false) > 0);
     assert_eq!(white(&mut rig, true), 0);
 }
+
+#[test]
+fn moving_presses_report_moves_and_a_drop_and_still_presses_click() {
+    use vornui::{Action, Sense, MOVE_SLOP};
+    let card = Id::new("movable");
+    let mut rig = Rig::new();
+    let build = |_: &Ui| {
+        div()
+            .id(card)
+            .size(80.0, 40.0)
+            .sense(Sense::MOVE)
+            .on(Action::Click)
+            .role(Role::Button, "card")
+    };
+    rig.frame(&build);
+    let (x, y) = rig.center(card);
+    rig.ui.pointer_move(x, y);
+    rig.ui.pointer_down();
+    rig.ui.pointer_up();
+    assert_eq!(rig.ui.take_events(), vec![Event::Click(card)]);
+
+    rig.ui.pointer_down();
+    rig.ui.pointer_move(x + 1.0, y);
+    assert!(rig.ui.take_events().is_empty(), "within the slop");
+    assert_eq!(rig.ui.moving(), None);
+    rig.ui.pointer_move(x + MOVE_SLOP + 10.0, y + 5.0);
+    assert_eq!(rig.ui.moving(), Some((card, MOVE_SLOP + 10.0, 5.0)));
+    let events = rig.ui.take_events();
+    assert!(
+        matches!(events.as_slice(), [Event::Move { id, dy, .. }] if *id == card && *dy == 5.0),
+        "{events:?}"
+    );
+    rig.ui.pointer_move(x + 200.0, y + 100.0);
+    rig.ui.pointer_up();
+    let events = rig.ui.take_events();
+    assert!(
+        matches!(events.as_slice(), [Event::Move { .. }, Event::Drop { id, dx, .. }] if *id == card && *dx == 200.0),
+        "{events:?}"
+    );
+    assert_eq!(rig.ui.moving(), None);
+}

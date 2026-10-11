@@ -121,6 +121,14 @@ pub enum MenuKind {
     LaunchAgent,
     LaunchWorktree,
     LaunchBranch,
+    /// The Tasks toolbar's view options.
+    TaskOptions,
+    /// A task's More menu (kanban card or list row).
+    TaskCard(String),
+    /// The task form pickers.
+    TaskStatus(crate::tasks::Form),
+    TaskProject(crate::tasks::Form),
+    TaskAgent(crate::tasks::Form),
 }
 
 impl MenuKind {
@@ -150,6 +158,12 @@ pub enum Dialog {
     Shortcuts,
     /// The add-project dialog, or editing the project with this name.
     Project(Option<String>),
+    /// AddTaskDialog.
+    AddTask,
+    /// The task panel's CommitDialog.
+    Commit,
+    /// LogReplayModal: a workflow step's full output.
+    Output,
 }
 
 /// A toast in the bottom right.
@@ -320,6 +334,8 @@ pub struct State {
     pub locked: HashSet<String>,
     /// Sidebar projects folded shut.
     pub collapsed: HashSet<String>,
+    pub tasks: crate::tasks::Tasks,
+    pub runs: crate::runs::RunView,
 }
 
 impl State {

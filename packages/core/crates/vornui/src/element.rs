@@ -83,6 +83,10 @@ impl Sense {
     /// A second press soon after reports
     /// [`Event::DoubleClick`](crate::Event::DoubleClick).
     pub const DOUBLE: Sense = Sense(512);
+    /// A press that travels reports [`Event::Move`](crate::Event::Move) and
+    /// then [`Event::Drop`](crate::Event::Drop) instead of a click (cards
+    /// dragged between columns, nodes on a canvas).
+    pub const MOVE: Sense = Sense(1024 | 1);
 
     pub fn has(self, s: Sense) -> bool {
         self.0 & s.0 == s.0
@@ -221,7 +225,8 @@ pub struct El {
     pub(crate) overlays: Vec<Overlay>,
     /// Hovering it long enough shows its tooltip overlay.
     pub(crate) tip: bool,
-    pub(crate) top_rule: Option<(f32, Rgba)>,
+    /// One-sided borders: top, right, bottom, left.
+    pub(crate) rules: [Option<(f32, Rgba)>; 4],
     pub(crate) slop: (f32, f32),
     /// Painted, and hit-tested, above everything in the window drawn before it.
     pub(crate) layered: bool,
@@ -247,7 +252,7 @@ pub fn div() -> El {
         ring: None,
         overlays: Vec::new(),
         tip: false,
-        top_rule: None,
+        rules: [None; 4],
         slop: (0.0, 0.0),
         layered: false,
     }
@@ -495,7 +500,25 @@ impl El {
     /// A top border only (`border-t`).
     pub fn border_top(mut self, w: f32, c: Rgba) -> El {
         self.style.border.top = length(w);
-        self.top_rule = Some((w, c));
+        self.rules[0] = Some((w, c));
+        self
+    }
+    /// A right border only (`border-r`).
+    pub fn border_right(mut self, w: f32, c: Rgba) -> El {
+        self.style.border.right = length(w);
+        self.rules[1] = Some((w, c));
+        self
+    }
+    /// A bottom border only (`border-b`).
+    pub fn border_bottom(mut self, w: f32, c: Rgba) -> El {
+        self.style.border.bottom = length(w);
+        self.rules[2] = Some((w, c));
+        self
+    }
+    /// A left border only (`border-l`).
+    pub fn border_left(mut self, w: f32, c: Rgba) -> El {
+        self.style.border.left = length(w);
+        self.rules[3] = Some((w, c));
         self
     }
     /// Widens the pointer target past the box by `dx` each side horizontally

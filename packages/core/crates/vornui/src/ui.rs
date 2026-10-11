@@ -484,9 +484,15 @@ impl Ui {
             let border = el.border.map(|(w, c)| (w * k, c));
             self.scene.quad(r, fill, radius * k, border);
         }
-        if let Some((w, c)) = el.top_rule {
-            self.scene
-                .quad(Rect::new(x, y, rl.w, w).scaled(k), c, 0.0, None);
+        for (side, rule) in el.rules.iter().enumerate() {
+            let Some((w, c)) = *rule else { continue };
+            let line = match side {
+                0 => Rect::new(x, y, rl.w, w),
+                1 => Rect::new(x + rl.w - w, y, w, rl.h),
+                2 => Rect::new(x, y + rl.h - w, rl.w, w),
+                _ => Rect::new(x, y, w, rl.h),
+            };
+            self.scene.quad(line.scaled(k), c, 0.0, None);
         }
         if let Some(id) = el.id {
             if el.sense != Sense::NONE || el.action.is_some() || el.tip {

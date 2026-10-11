@@ -484,6 +484,21 @@ pub(super) fn window_controls(s: &Screen<'_>) -> Option<El> {
 /// new session and the window controls. The tab strip ends with the same.
 pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
     let mut right = div().row().items_center().gap(4.0);
+    if s.st.view == MainView::Tasks {
+        return right
+            .child(task_options(s))
+            .child(tool(
+                s,
+                "toolbar",
+                Act::Task(crate::tasks::TaskAct::New("todo".into())),
+                "plus",
+                2.0,
+                "Add task",
+                None,
+                false,
+            ))
+            .child_if(window_controls(s));
+    }
     if s.st.view == MainView::Sessions {
         let open = menu_open(s, &MenuKind::ViewOptions);
         let mut opts = tool(
@@ -532,6 +547,43 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
     right.child_if(window_controls(s))
 }
 
+/// TaskToolbar's trigger: ink-secondary, white with a dot while a filter is on.
+fn task_options(s: &Screen<'_>) -> El {
+    let open = menu_open(s, &MenuKind::TaskOptions);
+    let changed = s.st.tasks.options_changed();
+    let id = s.acts.on("toolbar", Act::Open(MenuKind::TaskOptions));
+    let hot = s.ui.hover(id);
+    let secondary = crate::ui::Rgba::hexa(look::INK, look::INK_SECONDARY);
+    let (fg, bg) = if open {
+        (c(look::WHITE), white(0.10))
+    } else if changed {
+        (c(look::WHITE), white(0.08).mix(white(0.12), hot))
+    } else {
+        (
+            secondary.mix(c(look::WHITE), hot),
+            white(0.0).mix(white(0.06), hot),
+        )
+    };
+    let mut b = div()
+        .id(id)
+        .on(Action::Click)
+        .p(4.0)
+        .rounded(6.0)
+        .bg(bg)
+        .role(Role::Button, "View options")
+        .child(ico("sliders-horizontal", 16.0, 1.5, fg));
+    if changed && !open {
+        b = b.child(
+            div()
+                .size(6.0, 6.0)
+                .rounded(3.0)
+                .bg(secondary)
+                .absolute_right(2.0, 2.0),
+        );
+    }
+    tooltip(s.ui, b, id, "View options", Some(&format!("{MOD_LABEL}J")))
+}
+
 /// The left of the toolbar after the nav cluster: the dock and the
 /// headless badge.
 pub(super) fn left_extras(s: &Screen<'_>) -> El {
@@ -557,7 +609,9 @@ pub(super) fn top_bar(s: &Screen<'_>) -> El {
     if !s.st.sidebar {
         left = left.child(nav_cluster(s));
     }
-    left = left.child(left_extras(s));
+    if s.st.view == MainView::Sessions {
+        left = left.child(left_extras(s));
+    }
     let crumb = s.st.project.as_deref().map(|p| {
         text(truncate(p, 40), 12.0, c(look::GRAY_400))
             .line_height(16.0)

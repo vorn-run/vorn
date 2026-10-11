@@ -491,6 +491,16 @@ pub fn field(id: Id, name: &str, placeholder: &str, style: TextStyle, color: Rgb
         .role(Role::TextInput, name)
 }
 
+/// A bare multiline text field in `style`; Enter reports `Event::Submit`,
+/// Shift+Enter starts a new line. It is as tall as the caller sizes it.
+pub fn area(id: Id, name: &str, placeholder: &str, style: TextStyle, color: Rgba) -> El {
+    div()
+        .id(id)
+        .sense(Sense::TEXT)
+        .content(edit_look(style, color, placeholder, true))
+        .role(Role::MultilineTextInput, name)
+}
+
 /// A one-line text field in the bordered-chip style: 12px text, the
 /// outline brightening on hover or focus. Typing reports `Event::Changed`,
 /// Enter `Event::Submit`; IME composition shows underlined in place.
