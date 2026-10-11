@@ -48,6 +48,7 @@ public final class VornStore {
     @ObservationIgnored private let ownsClient: Bool
     @ObservationIgnored private var runTask: Task<Void, Never>?
     @ObservationIgnored private var closing: Set<String> = []
+    @ObservationIgnored private var gitLoads: [String: Int] = [:]
 
     /// The notification topics this app listens to.
     public static let topics = [
@@ -177,7 +178,18 @@ public final class VornStore {
         guard case .notification(let method, let params) = event else { return }
         switch method {
         case "session:created", "session:updated":
-            guard let s = try? params.decode(TerminalSession.self) else { return }
+            guard var s = try? params.decode(TerminalSession.self) else { return }
+            // As the renderer does, a broadcast keeps the project and worktree this app filed a shell under.
+            if let held = session(s.id) {
+                s.projectName = held.projectName
+                s.projectPath = held.projectPath
+                if s.worktreePath == nil {
+                    s.worktreePath = held.worktreePath
+                    s.isWorktree = held.isWorktree
+                }
+                s.worktreeName = s.worktreeName ?? held.worktreeName
+                s.branch = s.branch ?? held.branch
+            }
             upsert(s)
         case "session:reordered":
             guard let ids = try? params.decode([String].self) else { return }
@@ -459,12 +471,15 @@ public final class VornStore {
 
     /// Learns whether `path` is a git repository and, if so, its worktrees.
     public func loadGitInfo(_ path: String) async {
+        gitLoads[path, default: 0] += 1
+        let load = gitLoads[path]
         let isRepo = (try? await client.call("git:isGitRepo", .string(path)).decode(Bool.self)) ?? false
+        guard gitLoads[path] == load else { return }
         gitRepos[path] = isRepo
         guard isRepo else { return }
-        if let wts = try? await client.call("git:listWorktrees", .string(path)).decode([Worktree].self) {
-            worktrees[path] = wts
-        }
+        let wts = try? await client.call("git:listWorktrees", .string(path)).decode([Worktree].self)
+        // A newer load for the same path wins, so a slow stale answer cannot bring back a removed worktree.
+        if let wts, gitLoads[path] == load { worktrees[path] = wts }
     }
 
     /// Fixture state for renders and tests that have no server to ask.

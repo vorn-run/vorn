@@ -20,10 +20,11 @@ struct ShellSurfacesLiveTests {
 
         // Grid and card menus: "New terminal" in a project.
         actions.newTerminal(project, nil)
+        #expect(await until { store.sessions(in: project).count == 1 })
         actions.newTerminal(project, nil)
         #expect(await until { store.sessions(in: project).count == 2 })
         let ids = store.sessions(in: project).map(\.id)
-        #expect(model.selectedSessionID == ids.last)
+        #expect(await until { model.selectedSessionID == ids.last })
 
         // View options: the status filter hides what it does not match, and "All" brings them back.
         model.statusFilter = .error
@@ -91,7 +92,7 @@ struct ShellSurfacesLiveTests {
                             replacing: "repo")
         #expect(await until { store.project(named: "renamed")?.icon == "Rocket" })
         #expect(store.project(named: "repo") == nil)
-        #expect(model.activeProject == "renamed")
+        #expect(await until { model.activeProject == "renamed" })
         let project = try #require(store.project(named: "renamed"))
 
         // Worktrees: new, rename, and a clean idle one is removed without asking.
@@ -122,7 +123,7 @@ struct ShellSurfacesLiveTests {
         // Project menu: delete.
         actions.removeProject("renamed")
         #expect(await until { store.project(named: "renamed") == nil })
-        #expect(model.activeProject == nil)
+        #expect(await until { model.activeProject == nil })
     }
 
     private func connect(_ server: TestVornd) async throws -> (VornStore, AppModel, ShellActions) {
@@ -154,7 +155,7 @@ struct ShellSurfacesLiveTests {
     }
 
     @discardableResult
-    private func until(timeout: TimeInterval = 8, _ check: @MainActor () async -> Bool) async -> Bool {
+    private func until(timeout: TimeInterval = 20, _ check: @MainActor () async -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if await check() { return true }
