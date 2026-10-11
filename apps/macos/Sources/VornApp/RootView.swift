@@ -58,6 +58,8 @@ public struct RootView: View {
         }
         .onChange(of: features.scope(model, store), initial: true) { _, scope in features.tasks.scope = scope }
         .onChange(of: model.activeWorkspace, initial: true) { _, id in features.workflows.workspaceId = id }
+        .onChange(of: store.projects, initial: true) { _, list in features.workflows.projects = list }
+        .onChange(of: model.activeProject, initial: true) { _, p in features.workflows.activeProjectName = p }
         .onAppear { features.bind(store: store, model: model) }
         .task(id: diffPaths) {
             // Uncommitted changes have no event; the status bars poll while their trees are on screen.

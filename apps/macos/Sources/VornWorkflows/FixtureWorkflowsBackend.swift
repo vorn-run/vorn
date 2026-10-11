@@ -68,4 +68,14 @@ public actor FixtureWorkflowsBackend: WorkflowsBackend {
     public func events() async throws -> AsyncStream<WorkflowEvent> {
         AsyncStream { _ in }
     }
+
+    /// Canned answers for `rpc`, by method; an unknown method answers null.
+    public private(set) var rpcResults: [String: JSONValue] = [:]
+
+    public func setRPCResult(_ method: String, _ result: JSONValue) { rpcResults[method] = result }
+
+    public func rpc(_ method: String, _ params: JSONValue?) async throws -> JSONValue {
+        writes.append("rpc \(method)")
+        return rpcResults[method] ?? .null
+    }
 }

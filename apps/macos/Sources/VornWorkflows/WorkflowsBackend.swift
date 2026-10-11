@@ -17,6 +17,14 @@ public protocol WorkflowsBackend: Sendable {
         -> GateResolution
     /// Pushes until the caller stops listening.
     func events() async throws -> AsyncStream<WorkflowEvent>
+    /// Any other vornd method, for surfaces that need more than the calls above.
+    func rpc(_ method: String, _ params: JSONValue?) async throws -> JSONValue
+}
+
+extension WorkflowsBackend {
+    public func rpc<R: Decodable>(_ method: String, _ params: JSONValue?, as: R.Type) async throws -> R {
+        try await rpc(method, params).decode(R.self)
+    }
 }
 
 /// The backend over a vornd connection.
@@ -69,6 +77,10 @@ public struct LiveWorkflowsBackend: WorkflowsBackend {
     ) async throws -> GateResolution {
         try await client.resolveGate(
             runId: runId, nodeId: nodeId, decision: decision, comment: comment, edited: edited)
+    }
+
+    public func rpc(_ method: String, _ params: JSONValue?) async throws -> JSONValue {
+        try await client.call(method, params)
     }
 
     public func events() async throws -> AsyncStream<WorkflowEvent> {

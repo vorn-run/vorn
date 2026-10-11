@@ -38,8 +38,11 @@ public final class WorkflowsStore {
     public var menu: WorkflowsMenu?
     public var sidebarSectionOpen = true
     public private(set) var connectionError: String?
+    /// The shell's projects and the sidebar's active one, for forms that pick a project.
+    public var projects: [Project] = []
+    public var activeProjectName: String?
 
-    @ObservationIgnored private let backend: WorkflowsBackend
+    @ObservationIgnored let backend: WorkflowsBackend
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
     @ObservationIgnored private var reloadTask: Task<Void, Never>?
 
