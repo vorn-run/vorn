@@ -128,7 +128,11 @@ if (!process.argv.includes('--no-runs')) {
 const shellAt = process.argv.indexOf('--shell')
 const shellsAt = process.argv.indexOf('--shells')
 const shellCount = shellsAt > 0 ? Number(process.argv[shellsAt + 1]) : 1
-if (shellAt > 0) for (let i = 0; i < shellCount; i++) await call('shell:create', process.argv[shellAt + 1])
+if (shellAt > 0) {
+  for (let i = 0; i < shellCount; i++) {
+    await call('shell:create', process.argv[shellAt + 1])
+  }
+}
 const runs = await call('workflowRun:listAll', { workspaceId: 'personal', limit: 50 })
 console.log(
   runs
