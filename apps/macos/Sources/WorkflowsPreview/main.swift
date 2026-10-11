@@ -91,6 +91,7 @@ struct PreviewShell: View {
         }
         .background(Theme.surfaceBase)
         .workflowsMenuHost(store)
+        .runSurfacesHost(store)
         .environment(\.colorScheme, .dark)
     }
 }
@@ -149,7 +150,7 @@ func stage(_ store: WorkflowsStore, scene: String) async {
             store.menu = WorkflowsMenu(kind: .workflow(wf.id), anchor: CGRect(x: 200, y: 160, width: 20, height: 20), edge: .leading)
         }
     default:
-        break
+        _ = await stageRunSurface(store, scene: scene)
     }
 }
 
@@ -173,7 +174,9 @@ func render(_ options: Options, to path: String) async -> Int32 {
     let renderer = ImageRenderer(content: content)
     renderer.scale = 2
     renderer.isOpaque = false
-    guard let image = renderer.cgImage,
+    let drawn = runSurfaceScenes.contains(options.scene)
+        ? await hostedImage(of: content, size: options.size) : renderer.cgImage
+    guard let image = drawn,
           let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
     else {
         FileHandle.standardError.write(Data("render failed\n".utf8))

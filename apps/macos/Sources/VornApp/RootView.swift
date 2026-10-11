@@ -46,6 +46,7 @@ public struct RootView: View {
         }
         .overlay(alignment: .bottom) { ErrorToast(model: model) }
         .workflowsMenuHost(features.workflows)
+        .runSurfacesHost(features.workflows)
         .environment(\.colorScheme, .dark)
         .onChange(of: store.endpoint, initial: true) { _, ep in
             engines.update(socket: ep?.gridSocket, readOnly: store.readOnly)

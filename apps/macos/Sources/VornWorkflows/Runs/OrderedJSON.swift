@@ -104,15 +104,37 @@ extension OJSON {
     /// A number as JavaScript prints it.
     static func format(_ n: Double) -> String {
         guard n.isFinite else { return "null" }
-        if n == n.rounded(), abs(n) < 1e21 { return String(Int64(n)) }
-        var s = "\(n)"
-        if let e = s.firstIndex(where: { $0 == "e" || $0 == "E" }) {
-            var exp = String(s[s.index(after: e)...])
-            let sign = exp.hasPrefix("-") ? "-" : "+"
-            exp = String(exp.drop { $0 == "-" || $0 == "+" || $0 == "0" })
-            s = String(s[..<e]) + "e" + sign + (exp.isEmpty ? "0" : exp)
+        if n == 0 { return "0" }
+        // Number#toString: the shortest round-trip digits, placed by the decimal exponent.
+        let text = "\(abs(n))"
+        let parts = text.split(whereSeparator: { $0 == "e" || $0 == "E" })
+        let mantissa = parts[0]
+        let exp = parts.count > 1 ? Int(parts[1]) ?? 0 : 0
+        let dot = mantissa.firstIndex(of: ".")
+        let intPart = dot.map { mantissa[..<$0] } ?? mantissa
+        let fracPart = dot.map { mantissa[mantissa.index(after: $0)...] } ?? ""
+        var digits = Array(intPart + fracPart)
+        var point = intPart.count + exp
+        while digits.first == "0" {
+            digits.removeFirst()
+            point -= 1
         }
-        return s
+        while digits.last == "0" { digits.removeLast() }
+        let k = digits.count
+        let d = String(digits)
+        let body: String
+        if k <= point && point <= 21 {
+            body = d + String(repeating: "0", count: point - k)
+        } else if 0 < point && point <= 21 {
+            body = String(digits[..<point]) + "." + String(digits[point...])
+        } else if -6 < point && point <= 0 {
+            body = "0." + String(repeating: "0", count: -point) + d
+        } else {
+            let e = point - 1
+            let head = k == 1 ? d : String(digits[0]) + "." + String(digits[1...])
+            body = head + "e" + (e < 0 ? "-" : "+") + String(abs(e))
+        }
+        return (n < 0 ? "-" : "") + body
     }
 
     static func quote(_ s: String) -> String {

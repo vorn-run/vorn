@@ -57,4 +57,5 @@ for scene in landing review failed page toast menu; do
   "$bin/WorkflowsPreview" --fixtures "$fixtures" --render "$out/workflows-$scene.png" --scene "$scene"
 done
 "$bin/WorkflowsPreview" --data-dir "$data" --render "$out/workflows-vornd.png"
+"$bin/WorkflowsPreview" --fixtures "$fixtures" --render "$out/workflows-run-prompt.png" --scene run-prompt --size 1280x1000
 ls "$out"

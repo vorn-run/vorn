@@ -1,0 +1,136 @@
+import Foundation
+import Testing
+@testable import VornCore
+@testable import VornWorkflows
+
+private func workflow(trigger: JSONValue, steps: [WorkflowNode] = []) -> WorkflowDefinition {
+    WorkflowDefinition(
+        id: "wf", name: "WF", nodes: [WorkflowNode(id: "t", type: .trigger, label: "Trigger", config: trigger)] + steps)
+}
+
+private let alpha = Project(name: "alpha", path: "/p/alpha")
+private let beta = Project(name: "beta", path: "/p/beta")
+
+@Suite struct RunInputsTests {
+    @Test func needsPromptForInputsOrAContextualRunWithoutSource() {
+        let plain = workflow(trigger: ["triggerType": "manual"])
+        #expect(!RunInputs.needsPrompt(plain))
+        let withInputs = workflow(trigger: ["triggerType": "manual", "inputs": [["key": "goal"]]])
+        #expect(RunInputs.needsPrompt(withInputs))
+        let contextual = workflow(trigger: ["triggerType": "manual", "contextual": true])
+        #expect(RunInputs.needsPrompt(contextual))
+        #expect(!RunInputs.needsPrompt(contextual, context: ManualRunContext(source: ["id": "s"])))
+        // Inputs on a non-manual trigger and keys a template cannot reference do not count.
+        #expect(!RunInputs.needsPrompt(workflow(trigger: ["triggerType": "recurring", "inputs": [["key": "a"]]])))
+        #expect(!RunInputs.needsPrompt(workflow(trigger: ["triggerType": "manual", "inputs": [["key": "a-b"]]])))
+    }
+
+    @Test func parsesEveryKindAndItsInitialValue() {
+        let wf = workflow(trigger: ["triggerType": "manual", "inputs": [
+            ["key": "t", "label": "Title", "required": true],
+            ["key": "n", "type": "number", "defaultValue": "2.5"],
+            ["key": "b", "type": "boolean", "defaultValue": "true"],
+            ["key": "s", "type": "select", "options": [["value": "x", "label": "X"], ["value": "y"]]],
+            ["key": "p", "type": "project"], ["key": "br", "type": "branch"], ["key": "ta", "type": "textarea"],
+            ["key": "odd", "type": "mystery"],
+        ]])
+        let defs = RunInputs.inputs(wf)
+        #expect(defs.map(\.type) == [.text, .number, .boolean, .select, .project, .branch, .textarea, .text])
+        #expect(defs[0].displayLabel == "Title" && defs[1].displayLabel == "n")
+        #expect(defs[3].options.map(\.label) == ["X", "y"])
+        let values = RunInputs.initialValues(defs)
+        #expect(values["n"] == .number(2.5))
+        #expect(values["b"] == .bool(true))
+        #expect(values["t"] == .string(""))
+    }
+
+    @Test func validatesRequiredAnswers() {
+        let text = WorkflowInputDef(key: "a", required: true)
+        let flag = WorkflowInputDef(key: "f", type: .boolean, required: true)
+        let num = WorkflowInputDef(key: "n", type: .number)
+        #expect(!RunInputs.areValid([text], ["a": "  "]))
+        #expect(RunInputs.areValid([text], ["a": "x"]))
+        #expect(RunInputs.areValid([flag], ["f": false]))
+        #expect(!RunInputs.areValid([flag], [:]))
+        #expect(RunInputs.areValid([num], ["n": ""]))
+        #expect(RunInputs.parseNumber(" 4 ") == .number(4))
+        #expect(RunInputs.parseNumber("4x") == .string(""))
+        #expect(RunInputs.parseNumber("") == .string(""))
+    }
+
+    @Test func detectsTheSourceFieldsStepsReference() {
+        let wf = workflow(trigger: ["triggerType": "manual", "contextual": true], steps: [
+            WorkflowNode(id: "s", type: .script, label: "S", config: ["scriptContent": "cd {{context.cwd}}"]),
+            WorkflowNode(id: "a", type: .launchAgent, label: "A", config: ["useWorktree": "fromContext"]),
+        ])
+        #expect(RunInputs.requiredFields(wf) == .init(needsProject: true, needsBranch: true, needsWorktree: true))
+    }
+}
+
+@Suite @MainActor struct RunPromptTests {
+    @Test func contextualParamsCarryASourceFromTheFields() {
+        let wf = workflow(trigger: ["triggerType": "manual", "contextual": true, "inputs": [["key": "goal", "required": true]]])
+        let prompt = RunPrompt(workflow: wf, context: nil, targetNodeId: "n2", projects: [alpha, beta])
+        #expect(prompt.required.needsProject)
+        #expect(prompt.projectName == "alpha")
+        #expect(!prompt.canSubmit)
+        prompt.values["goal"] = "go"
+        prompt.selectProject("beta")
+        prompt.branch = "dev"
+        prompt.useWorktree = true
+        #expect(prompt.canSubmit)
+        let params = prompt.params(now: Date(timeIntervalSince1970: 1.5))
+        #expect(params["workflowId"] == "wf")
+        #expect(params["targetNodeId"] == "n2")
+        let source = params["context"]?["source"]
+        #expect(source?["id"] == "prompt:wf:1500")
+        #expect(source?["projectName"] == "beta" && source?["projectPath"] == "/p/beta")
+        #expect(source?["branch"] == "dev" && source?["isWorktree"] == true && source?["agentType"] == "shell")
+        #expect(params["context"]?["inputs"] == ["goal": "go"])
+    }
+
+    @Test func aCallersContextPassesThroughWithTheInputs() {
+        let wf = workflow(trigger: ["triggerType": "manual", "contextual": true, "inputs": [["key": "n", "type": "number"]]])
+        let ctx = ManualRunContext(task: ["id": "task-1"])
+        let prompt = RunPrompt(workflow: wf, context: ctx, targetNodeId: nil, projects: [])
+        #expect(!prompt.required.needsProject)
+        prompt.values["n"] = RunInputs.parseNumber("3")
+        let params = prompt.params()
+        #expect(params["context"] == ["task": ["id": "task-1"], "inputs": ["n": 3]])
+        #expect(params["targetNodeId"] == nil)
+    }
+
+    @Test func storeOpensThePromptThenRunsItsParams() async throws {
+        let wf = workflow(trigger: ["triggerType": "manual", "inputs": [["key": "goal"]]])
+        let backend = FixtureWorkflowsBackend(workflows: [wf], runs: [])
+        let store = WorkflowsStore(backend: backend)
+        store.projects = [alpha, beta]
+        store.runNow(wf)
+        let prompt = try #require(store.surfaces.prompt)
+        #expect(prompt.projects.map(\.name) == ["alpha", "beta"])
+        prompt.values["goal"] = "x"
+        store.submitPrompt()
+        #expect(store.surfaces.prompt == nil)
+        for _ in 0..<50 where await backend.writes.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(await backend.writes == ["rpc workflow:run"])
+    }
+
+    @Test func aWorkflowWithoutATriggerToasts() {
+        let store = WorkflowsStore(backend: FixtureWorkflowsBackend(workflows: [], runs: []))
+        store.runNow(WorkflowDefinition(id: "x", name: "Bare"))
+        #expect(store.toast == "\"Bare\" has no trigger — add one in the editor first")
+        #expect(store.surfaces.prompt == nil)
+    }
+}
+
+@Suite struct OrderedJSONNumberTests {
+    @Test func printsNumbersAsJavaScriptDoes() {
+        let cases: [(Double, String)] = [
+            (0, "0"), (-0.0, "0"), (3, "3"), (-42, "-42"), (2.5, "2.5"), (0.1, "0.1"), (1e-6, "0.000001"),
+            (1e-7, "1e-7"), (1.5e-10, "1.5e-10"), (123456789012, "123456789012"), (1e20, "100000000000000000000"),
+            (1e21, "1e+21"), (9.3e18, "9300000000000000000"), (1.2345e25, "1.2345e+25"), (0.000123, "0.000123"),
+            (.infinity, "null"),
+        ]
+        for (n, js) in cases { #expect(OJSON.format(n) == js, "\(n)") }
+    }
+}

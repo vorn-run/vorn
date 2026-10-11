@@ -11,23 +11,13 @@ extension WorkflowsStore {
         }
         if RunInputs.needsPrompt(workflow, context: context) {
             surfaces.prompt = RunPrompt(
-                workflow: workflow, context: context, targetNodeId: targetNodeId, projects: promptProjects)
+                workflow: workflow, context: context, targetNodeId: targetNodeId, projects: projects)
             return
         }
         var params: [String: JSONValue] = ["workflowId": .string(workflow.id)]
         if let context, context.hasSource { params["context"] = .object(context.json) }
         if let targetNodeId { params["targetNodeId"] = .string(targetNodeId) }
         launch(.object(params))
-    }
-
-    /// The prompt lists the workspace's projects, the active one first.
-    private var promptProjects: [Project] {
-        let inWorkspace = projects.filter { ($0.workspaceId ?? "personal") == workspaceId }
-        let list = inWorkspace.isEmpty ? projects : inWorkspace
-        guard let active = activeProjectName, let i = list.firstIndex(where: { $0.name == active }) else { return list }
-        var sorted = list
-        sorted.insert(sorted.remove(at: i), at: 0)
-        return sorted
     }
 
     /// Run: starts the prompt's run and closes it.
