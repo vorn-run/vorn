@@ -23,6 +23,7 @@ ICONS = {
     "image": "image", "bookOpen": "book-open", "flaskConical": "flask-conical", "rocket": "rocket",
     "panelLeft": "panel-left",
     "monitor": "monitor",
+    "triangleAlert": "triangle-alert",
     "workflow": "workflow",
     "chevronsRight": "chevrons-right",
     "layers": "layers",
@@ -44,6 +45,10 @@ ICONS = {
     "heart": "heart",
     "star": "star",
     "sparkles": "sparkles",
+    "chevronLeft": "chevron-left",
+    "gripVertical": "grip-vertical",
+    "arrowDown": "arrow-down",
+    "keyboard": "keyboard",
 }
 # Inline glyphs from TaskToolbar.tsx and OptionRow.tsx rather than lucide.
 INLINE = {
@@ -52,6 +57,9 @@ INLINE = {
     '<line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />',
     "viewKanban": '<rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M15 3v18" />',
     "optionCheck": '<polyline points="20 6 9 17 4 12" />',
+    "layoutGrid": '<rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />'
+    '<rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />',
+    "layoutTabs": '<rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /><path d="M9 3v6" />',
 }
 
 # Lucide component names a project or workspace stores in config, as the sidebar resolves them.

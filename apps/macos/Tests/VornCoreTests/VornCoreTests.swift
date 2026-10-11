@@ -44,6 +44,21 @@ struct VornStoreTests {
         #expect(store.sessions[2].status == .idle)
         #expect(store.endedIDs == ["b"])
     }
+
+    @Test func broadcastsKeepTheShellsProjectAndWorktree() throws {
+        var held = session("a")
+        held.worktreePath = "/p/.wt/x"
+        held.worktreeName = "x"
+        held.isWorktree = true
+        let store = VornStore(projects: [], sessions: [held])
+        var update = TerminalSession(id: "a", agentType: .shell, projectName: "x", projectPath: "/p/.wt/x", status: .waiting)
+        update.displayName = "Renamed"
+        store.apply(.notification(method: "session:updated", params: try .from(update)))
+        let s = try #require(store.session("a"))
+        #expect(s.projectName == "p" && s.projectPath == "/p")
+        #expect(s.worktreePath == "/p/.wt/x" && s.worktreeName == "x" && s.isWorktree == true)
+        #expect(s.status == .waiting && s.displayName == "Renamed")
+    }
 }
 
 struct VornEndpointTests {

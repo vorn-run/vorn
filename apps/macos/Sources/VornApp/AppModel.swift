@@ -1,7 +1,9 @@
 import Foundation
 import Observation
+import SwiftUI
 import VornCore
 import VornTerminals
+import VornUI
 
 public enum MainViewMode: String, CaseIterable, Sendable {
     case sessions, tasks, workflows
@@ -20,6 +22,105 @@ public enum MainViewMode: String, CaseIterable, Sendable {
         case .tasks: "⌘T"
         case .workflows: "⌘⇧W"
         }
+    }
+}
+
+/// The grid's status filter (⌥1-5).
+public enum StatusFilter: String, CaseIterable, Sendable {
+    case all, running, waiting, idle, error
+
+    var label: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+
+    var dot: Color {
+        switch self {
+        case .all: Theme.gray400
+        case .running: Theme.green500
+        case .waiting: Theme.yellow500
+        case .idle: Theme.gray500
+        case .error: Theme.red500
+        }
+    }
+
+    func matches(_ status: AgentStatus) -> Bool {
+        switch self {
+        case .all: true
+        case .running: status == .running
+        case .waiting: status == .waiting
+        case .idle: status == .idle
+        case .error: status == .error
+        }
+    }
+}
+
+public enum SortMode: String, CaseIterable, Sendable {
+    case manual, created, recent
+
+    var label: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+}
+
+public enum LayoutMode: String, Sendable {
+    case grid, tabs
+}
+
+/// A floating panel the window shows over everything else.
+public enum Overlay: Equatable, Sendable {
+    case viewOptions, recent, shortcuts, headless, newMenu, sidebarOptions
+    /// The project's "More" menu.
+    case projectMenu(String)
+    /// AddProjectDialog.tsx; editing the named project when set.
+    case addProject(editing: String?)
+    /// WorktreeCleanupDialog.tsx.
+    case removeWorktree(projectPath: String, worktreePath: String)
+}
+
+/// What the sidebar's projects section lists (ProjectsSectionToolbar.tsx).
+public enum SidebarViewMode: String, CaseIterable, Sendable {
+    case worktrees, worktreesSessions = "worktrees-sessions", sessions, sessionsFlat = "sessions-flat"
+
+    var label: String {
+        switch self {
+        case .worktrees: "Projects > Worktrees"
+        case .worktreesSessions: "Projects > Worktrees > Sessions"
+        case .sessions: "Projects > Sessions"
+        case .sessionsFlat: "Sessions (Flat)"
+        }
+    }
+}
+
+public enum ProjectSort: String, CaseIterable, Sendable {
+    case manual, name, recent
+
+    var label: String { self == .recent ? "Recent activity" : rawValue.capitalized }
+}
+
+public enum WorktreeSort: String, CaseIterable, Sendable {
+    case name, recent
+
+    var label: String { self == .recent ? "Recent activity" : "Name" }
+}
+
+public enum WorktreeFilter: String, CaseIterable, Sendable {
+    case all, active
+
+    var label: String { self == .active ? "With active sessions" : "All" }
+}
+
+/// A right-click menu and where it opened, in the root view's space.
+public struct ContextMenuState: Equatable, Sendable {
+    public enum Target: Equatable, Sendable {
+        case grid
+        case card(String)
+    }
+
+    public var target: Target
+    public var point: CGPoint
+    /// A submenu shown open from the start, for renders.
+    public var submenu: String?
+
+    public init(target: Target, point: CGPoint, submenu: String? = nil) {
+        self.target = target
+        self.point = point
+        self.submenu = submenu
     }
 }
 
@@ -45,27 +146,150 @@ public final class AppModel {
     public var lastError: String?
     /// The composer tip an offscreen render shows; a live window picks one at random.
     public var launcherTip = 1
+    public var statusFilter: StatusFilter = .all
+    public var sortMode: SortMode = .manual
+    /// 0 auto, 1-4 fixed, -1 flexible.
+    public var gridColumns = 0
+    /// The tab the tabs layout shows.
+    public var activeTabID: String?
+    public var overlay: Overlay?
+    public var contextMenu: ContextMenuState?
+    /// The sidebar's toolbar choices, kept across launches as the renderer keeps them.
+    public var sidebarViewMode = SidebarViewMode(rawValue: AppModel.saved("viewMode") ?? "") ?? .worktreesSessions {
+        didSet { save("viewMode", sidebarViewMode.rawValue) }
+    }
+    public var projectSort = ProjectSort(rawValue: AppModel.saved("projectSort") ?? "") ?? .manual {
+        didSet { save("projectSort", projectSort.rawValue) }
+    }
+    public var worktreeSort = WorktreeSort(rawValue: AppModel.saved("worktreeSort") ?? "") ?? .name {
+        didSet { save("worktreeSort", worktreeSort.rawValue) }
+    }
+    public var worktreeFilter = WorktreeFilter(rawValue: AppModel.saved("worktreeFilter") ?? "") ?? .all {
+        didSet { save("worktreeFilter", worktreeFilter.rawValue) }
+    }
+    /// Renders and tests leave the user's defaults alone.
+    @ObservationIgnored public var persistsSidebar = true
+
+    var hasSidebarOptions: Bool {
+        sidebarViewMode != .worktreesSessions || projectSort != .manual || worktreeSort != .name || worktreeFilter != .all
+    }
+
+    private static func saved(_ key: String) -> String? {
+        UserDefaults.standard.string(forKey: "vorn.sidebar.\(key)")
+    }
+
+    private func save(_ key: String, _ value: String) {
+        if persistsSidebar { UserDefaults.standard.set(value, forKey: "vorn.sidebar.\(key)") }
+    }
+
+    /// F2: the session whose name field is open.
+    public var renamingSessionID: String?
+    /// The restored banner was dismissed for this launch.
+    public var bannerDismissed = false
+    /// Frames of the controls panels hang from, in the root view's space.
+    public var anchors: [String: CGRect] = [:]
+    /// Set while a layout change is being saved, so the switch is immediate.
+    public var layoutOverride: LayoutMode?
+    /// The recent list a render shows instead of asking vornd.
+    public var recentFixture: [RecentSession]?
 
     public static let mainWorktree = "__main__"
 
     public init() {}
 
-    /// The sessions the grid shows: active workspace, then project and worktree filters.
-    public func visibleSessions(_ store: VornStore) -> [TerminalSession] {
+    public func layoutMode(_ store: VornStore) -> LayoutMode {
+        layoutOverride ?? LayoutMode(rawValue: store.defaults?.layoutMode ?? "") ?? .grid
+    }
+
+    /// Sessions in the active project or workspace, whatever their status or worktree (`focusableIds`).
+    public func scopedSessions(_ store: VornStore) -> [TerminalSession] {
         let workspaceProjects = Set(store.projects.filter { $0.workspace == activeWorkspace }.map(\.name))
         let known = Set(store.projects.map(\.name))
-        return store.sessions.filter { s in
-            if minimizedIDs.contains(s.id) { return false }
-            if let activeProject {
-                guard s.projectName == activeProject else { return false }
-                if let wt = activeWorktreePath {
-                    if wt == Self.mainWorktree { return s.isWorktree != true }
-                    return s.worktreePath == wt
-                }
-                return true
-            }
+        return sorted(store.sessions.filter { s in
+            if let activeProject { return s.projectName == activeProject }
             return workspaceProjects.contains(s.projectName) || !known.contains(s.projectName)
+        }, store)
+    }
+
+    /// The sessions the grid shows (`useVisibleTerminals`): scope, worktree, status, then sort; minimized ones dock.
+    public func visibleSessions(_ store: VornStore, includeMinimized: Bool = false) -> [TerminalSession] {
+        scopedSessions(store).filter { s in
+            if !includeMinimized && minimizedIDs.contains(s.id) { return false }
+            if activeProject != nil, let wt = activeWorktreePath {
+                if wt == Self.mainWorktree {
+                    if s.isWorktree == true { return false }
+                } else if s.worktreePath != wt {
+                    return false
+                }
+            }
+            return statusFilter.matches(s.status)
         }
+    }
+
+    private func sorted(_ list: [TerminalSession], _ store: VornStore) -> [TerminalSession] {
+        switch sortMode {
+        case .manual: list
+        case .created: list.sorted { $0.createdAt > $1.createdAt }
+        case .recent:
+            list.sorted { (store.lastActivity[$0.id] ?? $0.createdAt) > (store.lastActivity[$1.id] ?? $1.createdAt) }
+        }
+    }
+
+    /// Whether anything in the view options differs from its default (the dot on the sliders).
+    public func hasActiveViewOptions(_ store: VornStore) -> Bool {
+        statusFilter != .all || sortMode != .manual || gridColumns != 0 || layoutMode(store) != .grid
+    }
+
+    /// ⌘] / ⌘[: the next or previous session in scope, wrapping.
+    public func cycleFocus(_ store: VornStore, by step: Int) {
+        let ids = scopedSessions(store).map(\.id)
+        guard !ids.isEmpty else { return }
+        let current = expandedSessionID ?? selectedSessionID
+        let start = current.flatMap { ids.firstIndex(of: $0) } ?? (step > 0 ? -1 : 0)
+        let next = ids[((start + step) % ids.count + ids.count) % ids.count]
+        minimizedIDs.remove(next)
+        if expandedSessionID != nil { expandedSessionID = next }
+        if layoutMode(store) == .tabs { activeTabID = next }
+        focus(next)
+    }
+
+    /// Esc: the innermost open thing closes first.
+    @discardableResult
+    public func escape() -> Bool {
+        if contextMenu != nil {
+            contextMenu = nil
+        } else if overlay != nil {
+            overlay = nil
+        } else if renamingSessionID != nil {
+            renamingSessionID = nil
+        } else if expandedSessionID != nil {
+            expandedSessionID = nil
+        } else if selectedSessionID != nil {
+            selectedSessionID = nil
+        } else {
+            return false
+        }
+        return true
+    }
+
+    /// ⌘1-9: the session at a position, in whichever surface is showing.
+    public func jump(to position: Int, _ store: VornStore) {
+        let ids = visibleSessions(store).map(\.id)
+        guard position >= 1, position <= ids.count else { return }
+        let id = ids[position - 1]
+        if expandedSessionID != nil { expandedSessionID = id }
+        if layoutMode(store) == .tabs { activeTabID = id }
+        focus(id)
+    }
+
+    /// F2: renames the focused or selected session.
+    public func startRename() {
+        renamingSessionID = expandedSessionID ?? selectedSessionID
+    }
+
+    public func toggle(_ panel: Overlay) {
+        contextMenu = nil
+        overlay = overlay == panel ? nil : panel
     }
 
     public func focus(_ id: String) {

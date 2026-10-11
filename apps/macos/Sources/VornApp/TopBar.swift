@@ -17,18 +17,19 @@ struct TopBar: View {
             HStack(spacing: 0) {
                 HStack(spacing: 4) {
                     if !model.sidebarOpen { AppNavCluster(model: model) }
-                    if model.mainViewMode == .sessions { SessionDock(model: model, store: store) }
+                    if model.mainViewMode == .sessions {
+                        SessionDock(model: model, store: store)
+                        HeadlessBadge(model: model, store: store)
+                    }
                 }
                 Spacer(minLength: 0)
                 HStack(spacing: 4) {
                     switch model.mainViewMode {
                     case .sessions:
-                        IconButton(.slidersHorizontal, size: 16, strokeWidth: 1.5, padding: 4,
-                                   hoverFill: Theme.white(0.06), help: "Filter & sort") {}
+                        ViewOptionsButton(model: model, store: store)
                         VDivider().padding(.horizontal, 2)
-                        IconButton(.rotateCcw, size: 16, strokeWidth: 1.5, padding: 4,
-                                   hoverColor: Theme.gray200, hoverFill: Theme.white(0.06), help: "Recent sessions") {}
-                        NewSessionMenu(store: store, actions: actions)
+                        RecentSessionsButton(model: model)
+                        NewSessionButton(model: model)
                     case .tasks:
                         TaskViewOptionsButton(store: features.tasks)
                         IconButton(.plus, size: 16, padding: 4, hoverFill: Theme.white(0.06), help: "Add task") {
@@ -208,32 +209,17 @@ private struct Breadcrumb: View {
     }
 }
 
-/// The top bar's "+": new session or terminal in a project (GridContextMenu.tsx).
-private struct NewSessionMenu: View {
-    let store: VornStore
-    let actions: ShellActions
+/// The top bar's "+": the grid menu under it (GridContextMenu.tsx).
+private struct NewSessionButton: View {
+    @Bindable var model: AppModel
 
     var body: some View {
-        Menu {
-            Menu("New session in…") {
-                ForEach(store.projects) { p in Button(p.name) { actions.newSession(p, nil) } }
-            }
-            Menu("New terminal in…") {
-                ForEach(store.projects) { p in Button(p.name) { actions.newTerminal(p, nil) } }
-            }
-        } label: {
-            Hovering { hover in
-                LucideIcon(.plus, size: 16)
-                    .foregroundStyle(hover ? Color.white : Theme.gray400)
-                    .padding(4)
-                    .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(hover ? Theme.white(0.06) : .clear))
-                    .contentShape(Rectangle())
-            }
+        let open = model.overlay == .newMenu
+        IconButton(.plus, size: 16, padding: 4, color: open ? .white : Theme.gray400, hoverFill: Theme.white(0.06)) {
+            model.toggle(.newMenu)
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
+        .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(open ? Theme.white(0.06) : .clear))
         .tooltip("New session", shortcut: "⌘N")
+        .controlAnchor("newMenu")
     }
 }

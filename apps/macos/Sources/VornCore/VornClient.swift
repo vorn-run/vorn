@@ -23,6 +23,7 @@ public actor VornClient {
     /// Writes-free methods a read-only client may call besides `list*`/`get*` queries.
     public static let readMethods: Set<String> = [
         "auth:authenticate", "subscribe:set", "config:load", "agent:detectInstalled", "git:isGitRepo",
+        "sessions:restored", "git:diffStat", "git:worktreeDirty",
     ]
 
     /// Whether a read-only connection may send `method`.
@@ -236,6 +237,15 @@ public actor VornClient {
     public func call<P: Encodable, R: Decodable>(_ method: String, _ params: P, as: R.Type = R.self) async throws -> R {
         let raw: JSONValue? = try JSONValue.from(params)
         return try decode(method, try await call(method, raw))
+    }
+
+    /// Sends `method` as a notification: no id, no reply.
+    public func notify(_ method: String, _ params: JSONValue) async throws {
+        if readOnly { throw VornError.refused("\(method) is a write, and this connection is read-only") }
+        guard let socket else { throw VornError.notConnected }
+        let frame: [String: JSONValue] = ["jsonrpc": "2.0", "method": .string(method), "params": params]
+        let text = String(decoding: try JSONEncoder().encode(JSONValue.object(frame)), as: UTF8.self)
+        try await socket.send(.string(text))
     }
 
     private func decode<R: Decodable>(_ method: String, _ result: JSONValue) throws -> R {
