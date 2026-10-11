@@ -1,0 +1,623 @@
+//! ProjectSidebar: the header with the view modes, the projects with their
+//! sessions (or the workflows), and the footer.
+
+use super::chrome::{draggable, tool};
+use super::{c, ico, white, MainView, Screen, MOD_LABEL};
+use crate::act::{Act, Acts};
+use crate::client::Session;
+use crate::look;
+use crate::state::MenuKind;
+use crate::ui::{div, text, tooltip, Action, El, Rgba, Role};
+use vorn_protocol::ProjectConfig;
+
+/// A project's configured colour, `#rrggbb`, else gray-400.
+pub(super) fn project_color(p: &ProjectConfig) -> Rgba {
+    p.icon_color
+        .as_deref()
+        .and_then(|h| u32::from_str_radix(h.trim_start_matches('#'), 16).ok())
+        .map_or(c(look::GRAY_400), Rgba::hex)
+}
+
+/// A project's configured icon when the app carries it, else a folder.
+pub(super) fn project_icon(p: &ProjectConfig, size: f32) -> El {
+    let name = p
+        .icon
+        .as_deref()
+        .map(lucide_name)
+        .filter(|n| look::icon(n, 1.5).is_some())
+        .unwrap_or_else(|| "folder".to_owned());
+    ico(&name, size, 1.5, project_color(p))
+}
+
+/// `FolderGit2` to `folder-git-2`.
+fn lucide_name(pascal: &str) -> String {
+    let mut out = String::new();
+    for (i, ch) in pascal.chars().enumerate() {
+        if (ch.is_ascii_uppercase()
+            || (ch.is_ascii_digit() && !out.ends_with(|c: char| c.is_ascii_digit())))
+            && i > 0
+        {
+            out.push('-');
+        }
+        out.push(ch.to_ascii_lowercase());
+    }
+    out
+}
+
+fn header(s: &Screen<'_>) -> El {
+    let workspace = s
+        .store
+        .config
+        .pointer("/workspaces/0/name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Personal");
+    let title = div()
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(10.0)
+        .py(6.0)
+        .grow()
+        .min_w0()
+        .role(Role::Label, workspace)
+        .child(ico("user", 14.0, 1.5, c(look::GRAY_500)))
+        .child(
+            text(workspace, 13.0, c(look::GRAY_300))
+                .weight(500)
+                .line_height(18.0)
+                .truncate()
+                .silent(),
+        );
+    let bar = div()
+        .row()
+        .items_center()
+        .h(look::TOP_BAR_H - 1.0)
+        .pl(12.0)
+        .pr(12.0)
+        .child(title)
+        .child(tool(
+            s,
+            "sidebar",
+            Act::ToggleSidebar,
+            "panel-left",
+            2.0,
+            "Toggle sidebar",
+            Some(&format!("{MOD_LABEL}B")),
+            false,
+        ));
+    let bar = draggable(
+        s,
+        div()
+            .col()
+            .shrink0()
+            .child(bar)
+            .child(div().h(1.0).w_full().bg(white(0.06))),
+    );
+    let modes = [
+        (
+            MainView::Sessions,
+            "monitor",
+            "Sessions",
+            format!("{MOD_LABEL}S"),
+        ),
+        (
+            MainView::Tasks,
+            "list-todo",
+            "Tasks",
+            format!("{MOD_LABEL}T"),
+        ),
+        (
+            MainView::Workflows,
+            "workflow",
+            "Workflows",
+            format!("{MOD_LABEL}\u{21e7}W"),
+        ),
+    ];
+    let mut row = div()
+        .row()
+        .items_center()
+        .gap(4.0)
+        .px(12.0)
+        .py(8.0)
+        .role(Role::TabList, "View mode");
+    for (view, name, label, keys) in modes {
+        let on = s.st.view == view;
+        let id = s.acts.on("sidebar-mode", Act::View(view));
+        let hot = s.ui.hover(id);
+        let fg = if on {
+            c(look::WHITE)
+        } else {
+            c(look::GRAY_500).mix(c(look::GRAY_300), hot)
+        };
+        let mut b = div()
+            .id(id)
+            .on(Action::Click)
+            .row()
+            .items_center()
+            .gap(6.0)
+            .px(10.0)
+            .py(6.0)
+            .rounded(8.0)
+            .bg(if on {
+                white(0.10)
+            } else {
+                white(0.0).mix(white(0.04), hot)
+            })
+            .role(Role::Tab, label)
+            .selected(on)
+            .child(ico(name, 14.0, 2.0, fg));
+        if on {
+            b = b.child(text(label, 12.0, fg).weight(500).line_height(16.0).silent());
+        }
+        row = row.child(tooltip(s.ui, b, id, label, Some(&keys)));
+    }
+    div().col().shrink0().child(bar).child(row)
+}
+
+/// SidebarSectionHeader: the label and its controls.
+fn section(s: &Screen<'_>, label: &str, controls: Vec<El>) -> El {
+    let _ = s;
+    div()
+        .row()
+        .items_center()
+        .justify_between()
+        .px(8.0)
+        .pt(8.0)
+        .pb(4.0)
+        .child(
+            text(label, 13.0, c(look::GRAY_500))
+                .line_height(18.0)
+                .role(Role::Heading, label),
+        )
+        .child(div().row().items_center().gap(2.0).children(controls))
+}
+
+/// A section control: `p-0.5 rounded`, gray-600 turning white.
+fn control(s: &Screen<'_>, act: Act, name: &str, label: &str, size: f32, stroke: f32) -> El {
+    let id = s.acts.on("sidebar", act);
+    let hot = s.ui.hover(id);
+    let b = div()
+        .id(id)
+        .on(Action::Click)
+        .p(2.0)
+        .rounded(4.0)
+        .bg(white(0.0).mix(white(0.08), hot))
+        .role(Role::Button, label)
+        .child(ico(
+            name,
+            size,
+            stroke,
+            c(look::GRAY_600).mix(c(look::WHITE), hot),
+        ));
+    tooltip(s.ui, b, id, label, None)
+}
+
+/// SidebarNavItem: an icon, a label and a count.
+fn nav_item(
+    s: &Screen<'_>,
+    act: Act,
+    icon: El,
+    label: &str,
+    badge: Option<usize>,
+    active: bool,
+) -> El {
+    let id = s.acts.on("sidebar", act);
+    let hot = s.ui.hover(id);
+    let fg = if active {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_300).mix(c(look::WHITE), hot)
+    };
+    div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(8.0)
+        .py(6.0)
+        .rounded(6.0)
+        .bg(if active {
+            white(0.08)
+        } else {
+            white(0.0).mix(white(0.04), hot)
+        })
+        .role(Role::Button, label)
+        .selected(active)
+        .child(icon)
+        .child(
+            div()
+                .row()
+                .grow()
+                .min_w0()
+                .child(text(label, 13.0, fg).line_height(18.0).truncate().silent()),
+        )
+        .child_if(badge.map(|n| {
+            text(n.to_string(), 12.0, c(look::GRAY_500))
+                .line_height(16.0)
+                .silent()
+        }))
+}
+
+/// SessionItem: the marker, status icon, name and branch, and close on
+/// hover.
+fn session_row(s: &Screen<'_>, session: &Session) -> El {
+    let sid = session.info.id.as_str();
+    let act = if s.st.layout == crate::state::LayoutMode::Tabs {
+        Act::Select(sid.to_owned())
+    } else {
+        Act::Expand(sid.to_owned())
+    };
+    let id = s.acts.on("sidebar-session", act);
+    let close_id = Acts::id("sidebar-session", &Act::CloseSession(sid.to_owned()));
+    let hot = s.ui.hovered(id) || s.ui.hovered(close_id);
+    let active = s.st.focused.as_deref() == Some(sid)
+        || (s.st.layout == crate::state::LayoutMode::Tabs && s.st.selected.as_deref() == Some(sid));
+    let fg = if active || hot {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_400)
+    };
+    let mut name = div().row().items_center().gap(6.0).grow().min_w0().child(
+        text(session.title(), 12.0, fg)
+            .line_height(16.0)
+            .truncate()
+            .silent(),
+    );
+    if let Some(b) = session.info.branch.as_deref() {
+        name = name.child(
+            text(b, 10.0, c(look::GRAY_600))
+                .line_height(14.0)
+                .truncate()
+                .silent(),
+        );
+    }
+    let mut row = div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(8.0)
+        .py(4.0)
+        .rounded(6.0)
+        .bg(white(0.0).mix(white(0.04), if hot { 1.0 } else { 0.0 }))
+        .role(Role::Button, session.title())
+        .selected(active)
+        .child(super::cards::status_icon(session, 14.0, 1.0))
+        .child(name);
+    if active {
+        row = row.child(div().absolute(0.0, 4.0).size(1.0, 16.0).bg(c(look::WHITE)));
+    }
+    if hot {
+        s.acts.bind(close_id, Act::CloseSession(sid.to_owned()));
+        let b = div()
+            .id(close_id)
+            .on(Action::Click)
+            .role(Role::Button, "Close session")
+            .child(ico(
+                "x",
+                12.0,
+                2.0,
+                c(look::GRAY_500).mix(c(look::DANGER), s.ui.hover(close_id)),
+            ));
+        row = row.child(tooltip(s.ui, b, close_id, "Close session", None));
+    }
+    row
+}
+
+/// ProjectItem: icon, name and count, its quick actions on hover, and its
+/// sessions under it while expanded.
+fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
+    let sessions: Vec<&Session> = s
+        .store
+        .sessions
+        .iter()
+        .filter(|x| x.info.project_name == p.name)
+        .collect();
+    let active = s.st.project.as_deref() == Some(p.name.as_str());
+    let id = s
+        .acts
+        .on("sidebar-project", Act::Project(Some(p.name.clone())));
+    let quick = [
+        (
+            Act::NewShellIn(p.path.clone()),
+            "terminal",
+            "New terminal",
+            1.5,
+        ),
+        (
+            Act::NewSessionIn {
+                project: p.name.clone(),
+                worktree: None,
+                agent: None,
+            },
+            "plus",
+            "New session",
+            2.0,
+        ),
+        (
+            Act::NewSessionIn {
+                project: p.name.clone(),
+                worktree: Some(String::new()),
+                agent: None,
+            },
+            "folder-git-2",
+            "New worktree",
+            1.5,
+        ),
+        (
+            Act::Open(MenuKind::Project(p.name.clone())),
+            "ellipsis",
+            "More",
+            2.0,
+        ),
+    ];
+    let hot = s.ui.hovered(id)
+        || quick
+            .iter()
+            .any(|(a, ..)| s.ui.hovered(Acts::id("sidebar-project", a)));
+    let open_menu =
+        s.st.menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::Project(p.name.clone()));
+    let fg = if active {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_300).mix(c(look::WHITE), if hot { 1.0 } else { 0.0 })
+    };
+    let expanded = !sessions.is_empty() && !s.st.collapsed.contains(&p.name);
+    let mut row = div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(8.0)
+        .py(6.0)
+        .rounded(6.0)
+        .bg(if active {
+            white(0.08)
+        } else {
+            white(0.0).mix(white(0.04), if hot { 1.0 } else { 0.0 })
+        })
+        .role(Role::Button, p.name.as_str())
+        .selected(active)
+        .expanded(expanded);
+    row = if hot && !sessions.is_empty() {
+        let toggle = s
+            .acts
+            .on("sidebar-project", Act::ToggleProject(p.name.clone()));
+        row.child(
+            div()
+                .id(toggle)
+                .on(Action::Click)
+                .size(14.0, 14.0)
+                .center()
+                .role(Role::Button, "Toggle sessions")
+                .child(ico(
+                    if expanded {
+                        "chevron-down"
+                    } else {
+                        "chevron-right"
+                    },
+                    12.0,
+                    2.0,
+                    c(look::GRAY_500),
+                )),
+        )
+    } else {
+        row.child(project_icon(p, 14.0))
+    };
+    row = row.child(
+        div().row().grow().min_w0().child(
+            text(p.name.as_str(), 13.0, fg)
+                .line_height(18.0)
+                .truncate()
+                .silent(),
+        ),
+    );
+    if hot || open_menu {
+        let mut acts = div().row().items_center().gap(2.0);
+        for (act, name, label, stroke) in quick {
+            let bid = s.acts.on("sidebar-project", act);
+            let h = s.ui.hover(bid);
+            let b = div()
+                .id(bid)
+                .on(Action::Click)
+                .p(2.0)
+                .rounded(4.0)
+                .bg(white(0.0).mix(white(0.08), h))
+                .role(Role::Button, label)
+                .child(ico(
+                    name,
+                    14.0,
+                    stroke,
+                    c(look::GRAY_500).mix(c(look::WHITE), h),
+                ));
+            acts = acts.child(tooltip(s.ui, b, bid, label, None));
+        }
+        row = row.child(acts);
+    } else if !sessions.is_empty() {
+        row = row.child(
+            text(sessions.len().to_string(), 12.0, c(look::GRAY_600))
+                .line_height(16.0)
+                .silent(),
+        );
+    }
+    let row = s
+        .acts
+        .context(row, id, Act::Open(MenuKind::Project(p.name.clone())));
+    let mut col = div().col().child(row);
+    if expanded {
+        let mut kids = div().col().ml(16.0);
+        for x in sessions {
+            kids = kids.child(session_row(s, x));
+        }
+        col = col.child(kids);
+    }
+    col
+}
+
+fn projects(s: &Screen<'_>) -> El {
+    let add = control(s, Act::AddProject, "folder-plus", "Add project", 13.0, 1.5);
+    let mut col = div()
+        .col()
+        .gap(2.0)
+        .child(section(s, "Projects", vec![add]))
+        .child(nav_item(
+            s,
+            Act::Project(None),
+            ico("layers", 14.0, 1.5, c(look::GRAY_400)),
+            "All Projects",
+            (s.st.view == MainView::Sessions).then_some(s.store.sessions.len()),
+            s.st.project.is_none(),
+        ));
+    if s.store.projects.is_empty() {
+        col = col.child(
+            div().px(10.0).py(4.0).child(
+                text("No projects", 13.0, c(look::GRAY_600))
+                    .line_height(18.0)
+                    .role(Role::Label, "No projects"),
+            ),
+        );
+    }
+    for p in &s.store.projects {
+        col = col.child(if s.st.view == MainView::Sessions {
+            project_row(s, p)
+        } else {
+            nav_item(
+                s,
+                Act::Project(Some(p.name.clone())),
+                project_icon(p, 14.0),
+                &p.name,
+                None,
+                s.st.project.as_deref() == Some(p.name.as_str()),
+            )
+        });
+    }
+    col
+}
+
+fn workflows(s: &Screen<'_>) -> El {
+    let mut col = div()
+        .col()
+        .gap(2.0)
+        .child(section(s, "Workflows", Vec::new()))
+        .child(nav_item(
+            s,
+            Act::View(MainView::Workflows),
+            ico("activity", 14.0, 1.5, c(look::GRAY_400)),
+            "All runs",
+            None,
+            true,
+        ));
+    if s.store.workflows.is_empty() {
+        col = col.child(
+            div().px(10.0).py(4.0).child(
+                text("No workflows", 13.0, c(look::GRAY_600))
+                    .line_height(18.0)
+                    .role(Role::Label, "No workflows"),
+            ),
+        );
+    }
+    for w in &s.store.workflows {
+        col = col.child(
+            div()
+                .row()
+                .items_center()
+                .gap(8.0)
+                .px(8.0)
+                .py(6.0)
+                .role(Role::Label, w.name.as_str())
+                .child(ico("workflow", 14.0, 1.5, c(look::GRAY_400)))
+                .child(
+                    text(w.name.as_str(), 13.0, c(look::GRAY_300))
+                        .line_height(18.0)
+                        .truncate()
+                        .silent(),
+                ),
+        );
+    }
+    col
+}
+
+fn footer(s: &Screen<'_>) -> El {
+    let button = |act: Act, name: &str, label: &str| {
+        let id = s.acts.on("sidebar-footer", act);
+        let hot = s.ui.hover(id);
+        let b = div()
+            .id(id)
+            .on(Action::Click)
+            .p(6.0)
+            .rounded(6.0)
+            .bg(white(0.0).mix(white(0.06), hot))
+            .role(Role::Button, label)
+            .child(ico(
+                name,
+                16.0,
+                1.5,
+                c(look::GRAY_500).mix(c(look::WHITE), hot),
+            ));
+        tooltip(s.ui, b, id, label, None)
+    };
+    div()
+        .row()
+        .items_center()
+        .gap(2.0)
+        .px(8.0)
+        .py(6.0)
+        .shrink0()
+        .child(button(Act::Welcome, "circle-help", "Welcome Guide"))
+        .child(button(Act::Settings, "settings", "Settings"))
+}
+
+pub(super) fn sidebar(s: &Screen<'_>) -> El {
+    let body = match s.st.view {
+        MainView::Workflows => workflows(s),
+        _ => projects(s),
+    };
+    let scroll = div()
+        .id(crate::ui::Id::new("sidebar-scroll"))
+        .col()
+        .grow()
+        .min_h(0.0)
+        .px(12.0)
+        .scroll_y()
+        .child(body);
+    div()
+        .col()
+        .w(look::SIDEBAR_W)
+        .h_full()
+        .shrink0()
+        .bg(c(look::SURFACE_PANEL))
+        .role(Role::Navigation, "Project sidebar")
+        .child(
+            div()
+                .row()
+                .grow()
+                .min_h(0.0)
+                .child(
+                    div()
+                        .col()
+                        .grow()
+                        .min_w0()
+                        .child(header(s))
+                        .child(scroll)
+                        .child(footer(s)),
+                )
+                .child(div().w(1.0).h_full().bg(white(0.06))),
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_icon_names_map_to_their_files() {
+        assert_eq!(lucide_name("FolderGit2"), "folder-git-2");
+        assert_eq!(lucide_name("Layers"), "layers");
+        assert_eq!(lucide_name("SquareTerminal"), "square-terminal");
+    }
+}

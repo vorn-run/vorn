@@ -481,6 +481,16 @@ fn edit_look(style: TextStyle, color: Rgba, placeholder: &str, multiline: bool) 
     }))
 }
 
+/// A bare one-line text field in `style`, for callers that draw their own
+/// frame around it.
+pub fn field(id: Id, name: &str, placeholder: &str, style: TextStyle, color: Rgba) -> El {
+    div()
+        .id(id)
+        .sense(Sense::TEXT)
+        .content(edit_look(style, color, placeholder, false))
+        .role(Role::TextInput, name)
+}
+
 /// A one-line text field in the bordered-chip style: 12px text, the
 /// outline brightening on hover or focus. Typing reports `Event::Changed`,
 /// Enter `Event::Submit`; IME composition shows underlined in place.

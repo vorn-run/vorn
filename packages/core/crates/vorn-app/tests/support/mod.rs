@@ -11,7 +11,10 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{json, Value};
+use vorn_app::client::Endpoint;
+use vorn_app::ui::{Id, Input, Offscreen, RenderMode, Ui};
+use vorn_app::{look, ui_config, App};
 
 pub const PATIENCE: Duration = Duration::from_secs(30);
 
@@ -66,6 +69,12 @@ impl TestVornd {
             return None;
         }
         let home = temp_home().expect("temp dir");
+        Some(TestVornd::spawn(home))
+    }
+
+    fn spawn(home: PathBuf) -> TestVornd {
+        let dir = bin_dir().expect("bin dir");
+        let (vornd, sessiond) = (exe(&dir, "vornd"), exe(&dir, "vorn-sessiond"));
         let mut child = Command::new(&vornd)
             .arg("--data-dir")
             .arg(&home)
@@ -109,7 +118,35 @@ impl TestVornd {
             .expect("port");
         v.grid = ready["grid"].as_str().expect("grid endpoint").to_owned();
         v.wait_connected();
-        Some(v)
+        v
+    }
+
+    /// Stops vornd and the terminals it held, then starts it again on the
+    /// same HOME: what the last run left is carried over.
+    pub fn restart(&mut self) {
+        self.stop();
+        let next = TestVornd::spawn(self.home.clone());
+        let old = std::mem::replace(self, next);
+        // Already stopped, and the HOME is the new run's now.
+        std::mem::forget(old);
+    }
+
+    fn stop(&mut self) {
+        let holders = self.holder_pids();
+        drop(self.child.stdin.take());
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(5) {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        for pid in holders {
+            kill(pid);
+        }
+        std::thread::sleep(Duration::from_millis(200));
     }
 
     pub fn log(&self) -> String {
@@ -177,19 +214,13 @@ fn kill(pid: u32) {
 
 impl Drop for TestVornd {
     fn drop(&mut self) {
-        let holders = self.holder_pids();
-        drop(self.child.stdin.take());
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        for pid in holders {
-            kill(pid);
-        }
-        std::thread::sleep(Duration::from_millis(200));
+        self.stop();
         let _ = std::fs::remove_dir_all(&self.home);
     }
 }
 
 /// Polls `f` until it answers, or fails the test with `what`.
+#[track_caller]
 pub fn wait_for<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
     let t = Instant::now();
     loop {
@@ -198,5 +229,149 @@ pub fn wait_for<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
         }
         assert!(t.elapsed() < PATIENCE, "timed out waiting for {what}");
         std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+pub fn key(code: &str, m: u16, text: Option<&str>) -> Input {
+    Input::Key {
+        code: code.into(),
+        mods: m,
+        text: text.map(Into::into),
+    }
+}
+
+pub fn connect(v: &TestVornd) -> App {
+    let ep = Endpoint::find(&v.home).expect("vornd wrote ws-port and local-token");
+    assert_eq!(
+        ep.grid, v.grid,
+        "the grid endpoint is derived as vornd names it"
+    );
+    let mut app = App::connect(&ep, std::sync::Arc::new(|| {})).expect("connects and loads");
+    assert_eq!(app.grid_error, None);
+    wait_for("the startup calls", || {
+        app.pump();
+        (!app.busy()).then_some(())
+    });
+    app
+}
+
+/// A project named `name` in the test HOME, with the default agent a
+/// plain shell so nothing real runs, and `defaults` merged in.
+pub fn add_project(app: &mut App, v: &TestVornd, name: &str, defaults: Value) -> PathBuf {
+    let path = v.home.join(name);
+    std::fs::create_dir_all(&path).expect("project dir");
+    let mut config = app.rpc().call("config:load", Value::Null).expect("config");
+    config["projects"] = json!([{ "name": name, "path": path, "preferredAgents": [] }]);
+    config["agentCommands"]["claude"] = json!({ "command": "/bin/sh", "args": [] });
+    config["defaults"]["defaultAgent"] = json!("claude");
+    if let (Some(d), Value::Object(more)) = (config["defaults"].as_object_mut(), defaults) {
+        d.extend(more);
+    }
+    app.rpc().call("config:save", config).expect("saved");
+    wait_for("the project to arrive", || {
+        app.pump();
+        (!app.store.projects.is_empty()).then_some(())
+    });
+    path
+}
+
+/// The app's UI, offscreen at 1440x900 on the GPU or the CPU.
+pub struct Shot {
+    pub ui: Ui,
+    target: Offscreen,
+}
+
+impl Shot {
+    pub fn new() -> Shot {
+        let ui = Ui::headless(RenderMode::Auto, &ui_config(1.0));
+        let px = (look::WINDOW.0 as u32, look::WINDOW.1 as u32);
+        let target = ui.offscreen(px);
+        Shot { ui, target }
+    }
+
+    /// A frame laid out, so controls have their place, without drawing.
+    pub fn frame(&mut self, app: &mut App) {
+        app.frame(&mut self.ui, look::WINDOW);
+    }
+
+    pub fn draw(&mut self, app: &mut App) {
+        // A full atlas empties itself; the second pass fits one frame.
+        app.frame(&mut self.ui, look::WINDOW);
+        if !self.ui.render_offscreen(&self.target) {
+            app.frame(&mut self.ui, look::WINDOW);
+            self.ui.render_offscreen(&self.target);
+        }
+    }
+
+    /// Draws the frame and saves it as `$VORN_APP_SHOT-<name>.png`, when
+    /// that is set.
+    pub fn save(&mut self, app: &mut App, name: &str) {
+        if let Some(base) = std::env::var_os("VORN_APP_SHOT") {
+            // Past a menu's grow-in and the hover fades.
+            self.frame(app);
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            self.draw(app);
+            let path = format!("{}-{name}.png", base.to_string_lossy());
+            self.ui.save_png(&self.target, &path).expect("png");
+        }
+    }
+
+    /// One key, after a frame as a window draws between keys.
+    pub fn send(&mut self, app: &mut App, input: Input) {
+        self.frame(app);
+        app.send(&mut self.ui, input);
+    }
+
+    pub fn type_text(&mut self, app: &mut App, s: &str) {
+        for ch in s.chars() {
+            self.send(app, Input::char(ch));
+        }
+    }
+
+    /// Types `s` and presses Enter.
+    pub fn type_line(&mut self, app: &mut App, s: &str) {
+        self.type_text(app, s);
+        self.send(app, key("Enter", 0, Some("\r")));
+    }
+
+    /// Clicks the control `id` where a fresh frame places it.
+    #[track_caller]
+    pub fn click(&mut self, app: &mut App, id: Id) {
+        self.frame(app);
+        assert!(app.click(&mut self.ui, id), "{id:?} is on screen");
+        self.frame(app);
+    }
+
+    /// Rests the pointer on `id`, for what shows on hover.
+    #[track_caller]
+    pub fn hover(&mut self, app: &mut App, id: Id) {
+        self.frame(app);
+        let r = self
+            .ui
+            .rect_of(id)
+            .unwrap_or_else(|| panic!("{id:?} is on screen"));
+        self.ui.pointer_move(r.x + r.w / 2.0, r.y + r.h / 2.0);
+        self.frame(app);
+    }
+
+    #[track_caller]
+    pub fn right_click(&mut self, app: &mut App, id: Id) {
+        self.frame(app);
+        assert!(app.right_click(&mut self.ui, id), "{id:?} is on screen");
+        self.frame(app);
+    }
+
+    /// Lays out frames until `f` answers.
+    #[track_caller]
+    pub fn until<T>(
+        &mut self,
+        app: &mut App,
+        what: &str,
+        mut f: impl FnMut(&mut App, &Ui) -> Option<T>,
+    ) -> T {
+        wait_for(what, || {
+            self.frame(app);
+            f(app, &self.ui)
+        })
     }
 }

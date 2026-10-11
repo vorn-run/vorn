@@ -205,6 +205,11 @@ impl Ui {
         self.clipboard = c;
     }
 
+    /// The clipboard edits cut to and paste from, for the app's own paste.
+    pub fn clipboard(&mut self) -> &mut dyn Clipboard {
+        self.clipboard.as_mut()
+    }
+
     /// Registers an RGBA image (straight alpha) for [`crate::image`] elements.
     pub fn image(&mut self, w: u32, h: u32, rgba: &[u8]) -> Option<u32> {
         if rgba.len() < (w * h * 4) as usize {
@@ -456,6 +461,10 @@ impl Ui {
         let (x, y) = (origin.0 + l.location.x, origin.1 + l.location.y);
         let rl = Rect::new(x, y, l.size.width, l.size.height);
         let r = rl.scaled(k);
+        if el.layered {
+            self.scene.layer();
+            cx.layer += 1;
+        }
         let focused = el.id.is_some() && self.st.focus == el.id;
         let ring = focused && self.st.focus_visible && el.ring.is_some();
         if el.opacity < 1.0 {
@@ -532,10 +541,12 @@ impl Ui {
                 wrap,
                 truncate,
             } => {
+                // Rounded layout can leave a box up to a pixel short of what its text measured.
+                let room = inner.w + 1.0;
                 let sh = if *truncate {
-                    self.text.shape_truncated(text, *style, inner.w)
+                    self.text.shape_truncated(text, *style, room)
                 } else {
-                    self.text.shape(text, *style, wrap.then_some(inner.w))
+                    self.text.shape(text, *style, wrap.then_some(room))
                 };
                 self.text.draw(
                     &mut self.scene,

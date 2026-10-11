@@ -35,10 +35,10 @@ pub use element::{
 };
 pub use gpu::Gpu;
 pub use input::Input;
-pub use interact::{Event, BLINK, MENU_IN, MIN_SPLIT, TOOLTIP_DELAY};
+pub use interact::{Event, WindowRequest, BLINK, MENU_IN, MIN_SPLIT, TOOLTIP_DELAY};
 pub use pace::Pacer;
 pub use render::{Offscreen, RenderMode, OFFSCREEN_FORMAT};
 pub use scene::{Rect, Rgba, Scene};
 pub use text::{TextStyle, TextSystem};
 pub use ui::{decode_png, rasterize_svg, write_png, CustomA11y, Laid, Ui, UiConfig, ROOT_NODE};
-pub use window::{run, App, UserEvent, Waker};
+pub use window::{run, run_with, App, UserEvent, Waker, WindowOptions};

@@ -57,7 +57,7 @@ impl Hasher for Fnv {
 
 /// What an element reacts to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Sense(u8);
+pub struct Sense(u16);
 
 impl Sense {
     pub const NONE: Sense = Sense(0);
@@ -73,6 +73,16 @@ impl Sense {
     pub const SCROLL: Sense = Sense(16);
     /// It edits text: keys and IME go to it while focused.
     pub const TEXT: Sense = Sense(32 | 4 | 1);
+    /// A secondary press reports [`Event::Context`](crate::Event::Context).
+    pub const CONTEXT: Sense = Sense(64);
+    /// The wheel reports [`Event::Wheel`](crate::Event::Wheel) when no
+    /// scroll view takes it.
+    pub const WHEEL: Sense = Sense(128);
+    /// A press moves the window (a custom title bar).
+    pub const WINDOW_DRAG: Sense = Sense(256);
+    /// A second press soon after reports
+    /// [`Event::DoubleClick`](crate::Event::DoubleClick).
+    pub const DOUBLE: Sense = Sense(512);
 
     pub fn has(self, s: Sense) -> bool {
         self.0 & s.0 == s.0
@@ -213,6 +223,8 @@ pub struct El {
     pub(crate) tip: bool,
     pub(crate) top_rule: Option<(f32, Rgba)>,
     pub(crate) slop: (f32, f32),
+    /// Painted, and hit-tested, above everything in the window drawn before it.
+    pub(crate) layered: bool,
 }
 
 pub fn div() -> El {
@@ -237,6 +249,7 @@ pub fn div() -> El {
         tip: false,
         top_rule: None,
         slop: (0.0, 0.0),
+        layered: false,
     }
 }
 
@@ -417,6 +430,10 @@ impl El {
         self.style.align_items = Some(AlignItems::Center);
         self
     }
+    pub fn items_end(mut self) -> El {
+        self.style.align_items = Some(AlignItems::End);
+        self
+    }
     pub fn items_stretch(mut self) -> El {
         self.style.align_items = Some(AlignItems::Stretch);
         self
@@ -427,6 +444,10 @@ impl El {
     }
     pub fn justify_center(mut self) -> El {
         self.style.justify_content = Some(JustifyContent::Center);
+        self
+    }
+    pub fn justify_end(mut self) -> El {
+        self.style.justify_content = Some(JustifyContent::End);
         self
     }
     pub fn justify_between(mut self) -> El {
@@ -588,6 +609,12 @@ impl El {
         self.scroll = true;
         self.clip = true;
         self.sense = self.sense | Sense::SCROLL;
+        self
+    }
+    /// Paints this element and what follows it in a layer of its own, above
+    /// the window's layer and what the app paints there: a modal's backdrop.
+    pub fn layered(mut self) -> El {
+        self.layered = true;
         self
     }
     /// Draws the focus-visible ring with corner radius `r` when focused by

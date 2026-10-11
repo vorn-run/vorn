@@ -557,3 +557,107 @@ fn tab_walks_focus_and_shows_the_ring() {
     assert!(r.key("Space"));
     assert_eq!(r.ui.take_events(), vec![Event::Click(b)]);
 }
+
+#[test]
+fn right_presses_double_clicks_wheels_and_title_bars_report() {
+    use vornui::{Action, Sense, WindowRequest};
+    let (card, button, bar) = (Id::new("card"), Id::new("btn"), Id::new("bar"));
+    let mut rig = Rig::new();
+    let build = |_: &Ui| {
+        div()
+            .col()
+            .child(
+                div()
+                    .id(bar)
+                    .h(20.0)
+                    .sense(Sense::WINDOW_DRAG)
+                    .role(Role::Toolbar, "bar"),
+            )
+            .child(
+                div()
+                    .id(card)
+                    .h(100.0)
+                    .sense(Sense::CONTEXT | Sense::WHEEL | Sense::DOUBLE)
+                    .on(Action::Click)
+                    .role(Role::Group, "card")
+                    .child(
+                        div()
+                            .id(button)
+                            .size(20.0, 20.0)
+                            .on(Action::Click)
+                            .role(Role::Button, "b"),
+                    ),
+            )
+    };
+    rig.frame(&build);
+    let (x, y) = rig.center(button);
+    rig.ui.pointer_move(x, y);
+    rig.ui.pointer_down_secondary();
+    let events = rig.ui.take_events();
+    assert!(
+        matches!(events.as_slice(), [Event::Context { id, .. }] if *id == card),
+        "{events:?}"
+    );
+
+    rig.ui.wheel(40.0);
+    assert!(
+        matches!(rig.ui.take_events().as_slice(), [Event::Wheel { id, dy, .. }] if *id == card && *dy == 40.0)
+    );
+
+    rig.click(card);
+    rig.wait(100);
+    rig.click(card);
+    let events = rig.ui.take_events();
+    assert_eq!(
+        events,
+        [
+            Event::Click(card),
+            Event::DoubleClick(card),
+            Event::Click(card)
+        ]
+    );
+    rig.wait(600);
+    rig.click(card);
+    assert_eq!(rig.ui.take_events(), [Event::Click(card)]);
+
+    let (x, y) = rig.center(bar);
+    rig.ui.pointer_move(x, y);
+    rig.ui.pointer_down();
+    assert_eq!(rig.ui.take_requests(), [WindowRequest::Drag]);
+    rig.ui.pointer_up();
+}
+
+#[test]
+fn tab_is_left_to_the_app_when_nothing_takes_focus() {
+    let mut rig = Rig::new();
+    rig.frame(&|_| div().h(10.0));
+    assert!(!rig.key("Tab"));
+}
+
+#[test]
+fn a_layered_box_covers_text_painted_before_it() {
+    let red = Rgba([1.0, 0.0, 0.0, 1.0]);
+    let build = |layered: bool| {
+        move |_: &Ui| {
+            let cover = div().absolute(0.0, 0.0).size(SIZE.0, 120.0).bg(red);
+            div()
+                .h(120.0)
+                .child(vornui::text("MMMMMMMM", 48.0, Rgba([1.0, 1.0, 1.0, 1.0])))
+                .child(if layered { cover.layered() } else { cover })
+        }
+    };
+    let mut rig = Rig::new();
+    let white = |rig: &mut Rig, layered: bool| {
+        rig.frame(&build(layered));
+        let size = (SIZE.0 as u32, SIZE.1 as u32);
+        let target = rig.ui.offscreen(size);
+        assert!(rig.ui.render_offscreen(&target));
+        let px = rig.ui.read(&target).expect("cpu frame");
+        px.chunks(4)
+            .take(size.0 as usize * 120)
+            .filter(|p| p[1] > 128)
+            .count()
+    };
+    assert!(white(&mut rig, false) > 0);
+    assert_eq!(white(&mut rig, true), 0);
+}

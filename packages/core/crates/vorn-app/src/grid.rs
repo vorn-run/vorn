@@ -207,6 +207,52 @@ impl Grid {
         );
     }
 
+    /// Bracketed paste of `utf8`, already confirmed by the person.
+    pub fn paste(&self, session: &str, utf8: &str) {
+        self.input(
+            session,
+            InputEvent::Paste {
+                utf8: utf8.to_owned(),
+                confirmed: true,
+            },
+        );
+    }
+
+    /// The wheel over the terminal: `dy` in lines, at cell `(x, y)`.
+    pub fn wheel(&self, session: &str, dy: f32, x: f32, y: f32) {
+        self.input(
+            session,
+            InputEvent::Wheel {
+                dx: 0.0,
+                dy,
+                mods: 0,
+                x,
+                y,
+            },
+        );
+    }
+
+    /// Locks the session's size to this client's viewport, or releases it.
+    pub fn lock_size(&self, session: &str, locked: bool) {
+        self.send(session, |sid| ClientMsg::LockSize { sid, locked });
+    }
+
+    /// Makes the session follow this client's viewport ("Fit to this device").
+    pub fn take_size(&self, session: &str) {
+        self.send(session, |sid| ClientMsg::TakeSize { sid });
+    }
+
+    fn send(&self, session: &str, msg: impl FnOnce(u32) -> ClientMsg) {
+        {
+            let mut st = self.lock();
+            let Some(sid) = st.sid(session) else {
+                return;
+            };
+            st.client.send(&msg(sid));
+        }
+        self.flush();
+    }
+
     fn input(&self, session: &str, event: InputEvent) {
         {
             let mut st = self.lock();
@@ -337,7 +383,13 @@ impl Grid {
                         .push(format!("sid {sid} refused a frame: {why:?}"));
                 }
                 Got::Message(ServerMsg::Error { code, message }) => {
-                    st.errors.push(format!("error {code}: {message}"));
+                    // An attach that beat the session's start: forget it, so the next paint asks again.
+                    if let Some(session) = message.strip_prefix("no session ") {
+                        st.panes.retain(|p| p.session != session || p.sid.is_some());
+                        changed = true;
+                    } else {
+                        st.errors.push(format!("error {code}: {message}"));
+                    }
                 }
                 _ => {}
             }

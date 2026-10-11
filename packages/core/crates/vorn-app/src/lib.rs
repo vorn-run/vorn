@@ -9,6 +9,7 @@
 //!
 //! The UI layer is reached only through [`ui`], so it can be repointed.
 
+pub mod act;
 pub mod app;
 pub mod client;
 pub mod grid;
@@ -16,6 +17,7 @@ pub mod layout;
 pub mod look;
 pub mod paint;
 pub mod screen;
+pub mod state;
 pub mod ui;
 pub mod view;
 
