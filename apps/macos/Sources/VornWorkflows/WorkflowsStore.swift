@@ -41,6 +41,8 @@ public final class WorkflowsStore {
     /// The shell's projects and the sidebar's active one, for forms that pick a project.
     public var projects: [Project] = []
     public var activeProjectName: String?
+    /// The run prompt, full output, review page and missed schedules drawn over the window.
+    public let surfaces = RunSurfaces()
 
     @ObservationIgnored let backend: WorkflowsBackend
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
@@ -185,15 +187,9 @@ public final class WorkflowsStore {
 
     // MARK: Actions
 
-    /// Starts a manual run, the same checks as every manual surface.
-    public func runNow(_ workflow: WorkflowDefinition) {
-        guard workflow.triggerNode != nil else {
-            toast = "\"\(workflow.name)\" has no trigger — add one in the editor first"
-            return
-        }
-        perform { [backend] in
-            if let run = try await backend.run(workflowId: workflow.id, inputs: nil) { self.upsert(run) }
-        }
+    /// Starts a manual run, the same checks as every manual surface; asks first when it needs inputs or a source.
+    public func runNow(_ workflow: WorkflowDefinition, context: ManualRunContext? = nil, targetNodeId: String? = nil) {
+        startManualRun(workflow, context: context, targetNodeId: targetNodeId)
     }
 
     public func setEnabled(_ workflow: WorkflowDefinition, _ enabled: Bool) {
@@ -247,7 +243,7 @@ public final class WorkflowsStore {
         }
     }
 
-    private func perform(_ work: @escaping @MainActor () async throws -> Void) {
+    func perform(_ work: @escaping @MainActor () async throws -> Void) {
         Task {
             do { try await work() } catch { toast = String(describing: error) }
         }
@@ -307,7 +303,7 @@ public final class WorkflowsStore {
         runs.sort { $0.startedAt > $1.startedAt }
     }
 
-    private func scheduleReload() {
+    func scheduleReload() {
         reloadTask?.cancel()
         reloadTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
