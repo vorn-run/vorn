@@ -186,9 +186,9 @@ public enum TemplateVars {
     }
 
     /// buildInputVars: `{{inputs.<key>}}` for each declared run input.
-    public static func inputVars(_ inputs: [WorkflowRunInput]?) -> [TemplateVariable] {
+    public static func inputVars(_ inputs: [WorkflowInputDef]?) -> [TemplateVariable] {
         (inputs ?? []).filter { !$0.key.isEmpty }.map {
-            .init("{{inputs.\($0.key)}}", $0.label.isEmpty ? $0.key : $0.label, .inputs)
+            TemplateVariable("{{inputs.\($0.key)}}", $0.displayLabel, .inputs)
         }
     }
 
