@@ -33,7 +33,7 @@ let package = Package(
             ]
         ),
         .target(name: "VornTerminals", dependencies: ["VornCore", "VornUI", "CVornGrid"]),
-        .target(name: "VornTasks", dependencies: ["VornCore", "VornUI"]),
+        .target(name: "VornTasks", dependencies: ["VornCore", "VornUI", "VornWorkflows"]),
         .target(name: "VornWorkflows", dependencies: ["VornCore", "VornUI"]),
         .target(
             name: "VornApp",
