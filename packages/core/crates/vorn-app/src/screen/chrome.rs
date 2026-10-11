@@ -483,6 +483,9 @@ pub(super) fn window_controls(s: &Screen<'_>) -> Option<El> {
 /// What the toolbar shows on its right: grid options, recent sessions,
 /// new session and the window controls. The tab strip ends with the same.
 pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
+    if s.st.view == MainView::Workflows {
+        return super::workflows::header_tools(s);
+    }
     let mut right = div().row().items_center().gap(4.0);
     if s.st.view == MainView::Tasks {
         return right

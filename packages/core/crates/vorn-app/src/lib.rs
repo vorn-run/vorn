@@ -22,6 +22,7 @@ pub mod state;
 pub mod tasks;
 pub mod ui;
 pub mod view;
+pub mod workflows;
 
 pub use app::App;
 

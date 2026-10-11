@@ -98,6 +98,9 @@ impl Item {
 
 /// How wide each menu is, as the renderer sizes them.
 pub fn width(kind: &MenuKind) -> f32 {
+    if let Some(w) = super::workflows::menu_width(kind) {
+        return w;
+    }
     match kind {
         MenuKind::Grid | MenuKind::Card(_) => 220.0,
         MenuKind::Terminal(_) => 180.0,
@@ -109,6 +112,7 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::Recent | MenuKind::Headless => 280.0,
         MenuKind::TaskOptions | MenuKind::TaskStatus(_) | MenuKind::TaskAgent(_) => 200.0,
         MenuKind::TaskCard(_) | MenuKind::TaskProject(_) => 180.0,
+        _ => 200.0,
     }
 }
 
@@ -276,6 +280,13 @@ pub fn items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::LaunchWorktree => launch_worktrees(s),
         MenuKind::LaunchBranch => launch_branches(s),
         MenuKind::Recent | MenuKind::Headless => Vec::new(),
+        MenuKind::RunStatus
+        | MenuKind::WorkflowFilter
+        | MenuKind::WorkflowItem(_)
+        | MenuKind::EditorMore
+        | MenuKind::WfChoice(_)
+        | MenuKind::PromptProject
+        | MenuKind::NodeMore(_) => super::workflows::menu_items(s, kind),
         MenuKind::TaskOptions => super::tasks::options_items(s),
         MenuKind::TaskCard(id) => super::tasks::card_items(s, id),
         MenuKind::TaskStatus(f) => super::tasks::status_items(s, *f),

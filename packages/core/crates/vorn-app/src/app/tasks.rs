@@ -765,6 +765,7 @@ impl App {
                 .iter()
                 .find(|r| runs::key(r) == key)
                 .cloned()
+                .or_else(|| self.find_wf_run(key))
         })
     }
 

@@ -11,6 +11,7 @@ pub mod menus;
 pub mod runs;
 mod sidebar;
 pub mod tasks;
+pub mod workflows;
 
 use std::collections::HashMap;
 
@@ -70,6 +71,8 @@ impl Screen<'_> {
             main.child(cards::tabs(self))
         } else if self.st.view == MainView::Sessions && self.st.focused.is_some() {
             main.child(cards::focused(self))
+        } else if self.st.view == MainView::Workflows && self.st.wf.editor.is_some() {
+            main.child(workflows::editor(self))
         } else {
             main.child(chrome::top_bar(self)).child(self.body())
         };
@@ -127,11 +130,7 @@ impl Screen<'_> {
             MainView::Sessions if self.store.sessions.is_empty() => composer::empty_state(self),
             MainView::Sessions => cards::grid(self),
             MainView::Tasks => tasks::view(self),
-            MainView::Workflows => list(
-                "Workflows",
-                self.store.workflows.iter().map(|w| w.name.as_str()),
-                "No workflows yet",
-            ),
+            MainView::Workflows => workflows::landing(self),
         };
         let mut col = div().col().grow().min_h(0.0);
         if st.view == MainView::Sessions {
@@ -152,27 +151,6 @@ impl Screen<'_> {
             (self.size.1 - look::TOP_BAR_H).max(0.0),
         )
     }
-}
-
-/// The Tasks and Workflows views are not ported yet; until they are, their
-/// pill shows the live list by name so the data is visible.
-fn list<'a>(label: &str, names: impl Iterator<Item = &'a str>, empty: &str) -> El {
-    let mut col = div()
-        .col()
-        .gap(8.0)
-        .px(24.0)
-        .py(24.0)
-        .grow()
-        .role(crate::ui::Role::List, label);
-    let mut any = false;
-    for name in names {
-        any = true;
-        col = col.child(text(name, 13.0, c(look::GRAY_300)).line_height(18.0));
-    }
-    if !any {
-        col = col.child(text(empty, 13.0, c(look::GRAY_600)).line_height(18.0));
-    }
-    col
 }
 
 pub(crate) fn c(rgb: Rgb) -> Rgba {

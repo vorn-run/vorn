@@ -317,6 +317,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::AddTask => super::tasks::add_task(s),
         Dialog::Commit => super::tasks::commit(s),
         Dialog::Output => super::tasks::output(s),
+        Dialog::RunPrompt | Dialog::Missed | Dialog::WfFile => super::workflows::dialog(s)?,
     })
 }
 

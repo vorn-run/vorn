@@ -129,6 +129,20 @@ pub enum MenuKind {
     TaskStatus(crate::tasks::Form),
     TaskProject(crate::tasks::Form),
     TaskAgent(crate::tasks::Form),
+    /// The landing's status filter.
+    RunStatus,
+    /// The sidebar's workflow filter.
+    WorkflowFilter,
+    /// A workflow row's More and context menu.
+    WorkflowItem(String),
+    /// The editor's More options.
+    EditorMore,
+    /// A config select, by the path it writes.
+    WfChoice(String),
+    /// The run prompt's project picker.
+    PromptProject,
+    /// The node panel's More menu.
+    NodeMore(String),
 }
 
 impl MenuKind {
@@ -164,6 +178,12 @@ pub enum Dialog {
     Commit,
     /// LogReplayModal: a workflow step's full output.
     Output,
+    /// SourcePromptDialog: what a run asks for first.
+    RunPrompt,
+    /// MissedSchedulesDialog.
+    Missed,
+    /// The export or import path.
+    WfFile,
 }
 
 /// A toast in the bottom right.
@@ -336,6 +356,7 @@ pub struct State {
     pub collapsed: HashSet<String>,
     pub tasks: crate::tasks::Tasks,
     pub runs: crate::runs::RunView,
+    pub wf: crate::workflows::Workflows,
 }
 
 impl State {

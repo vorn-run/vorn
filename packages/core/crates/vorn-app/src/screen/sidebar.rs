@@ -155,7 +155,7 @@ fn header(s: &Screen<'_>) -> El {
 }
 
 /// SidebarSectionHeader: the label and its controls.
-fn section(s: &Screen<'_>, label: &str, controls: Vec<El>) -> El {
+pub(super) fn section(s: &Screen<'_>, label: &str, controls: Vec<El>) -> El {
     let _ = s;
     div()
         .row()
@@ -173,7 +173,14 @@ fn section(s: &Screen<'_>, label: &str, controls: Vec<El>) -> El {
 }
 
 /// A section control: `p-0.5 rounded`, gray-600 turning white.
-fn control(s: &Screen<'_>, act: Act, name: &str, label: &str, size: f32, stroke: f32) -> El {
+pub(super) fn control(
+    s: &Screen<'_>,
+    act: Act,
+    name: &str,
+    label: &str,
+    size: f32,
+    stroke: f32,
+) -> El {
     let id = s.acts.on("sidebar", act);
     let hot = s.ui.hover(id);
     let b = div()
@@ -193,7 +200,7 @@ fn control(s: &Screen<'_>, act: Act, name: &str, label: &str, size: f32, stroke:
 }
 
 /// SidebarNavItem: an icon, a label and a count.
-fn nav_item(
+pub(super) fn nav_item(
     s: &Screen<'_>,
     act: Act,
     icon: El,
@@ -573,49 +580,6 @@ fn tasks_projects(s: &Screen<'_>) -> El {
     col
 }
 
-fn workflows(s: &Screen<'_>) -> El {
-    let mut col = div()
-        .col()
-        .gap(2.0)
-        .child(section(s, "Workflows", Vec::new()))
-        .child(nav_item(
-            s,
-            Act::View(MainView::Workflows),
-            ico("activity", 14.0, 1.5, c(look::GRAY_400)),
-            "All runs",
-            None,
-            true,
-        ));
-    if s.store.workflows.is_empty() {
-        col = col.child(
-            div().px(10.0).py(4.0).child(
-                text("No workflows", 13.0, c(look::GRAY_600))
-                    .line_height(18.0)
-                    .role(Role::Label, "No workflows"),
-            ),
-        );
-    }
-    for w in &s.store.workflows {
-        col = col.child(
-            div()
-                .row()
-                .items_center()
-                .gap(8.0)
-                .px(8.0)
-                .py(6.0)
-                .role(Role::Label, w.name.as_str())
-                .child(ico("workflow", 14.0, 1.5, c(look::GRAY_400)))
-                .child(
-                    text(w.name.as_str(), 13.0, c(look::GRAY_300))
-                        .line_height(18.0)
-                        .truncate()
-                        .silent(),
-                ),
-        );
-    }
-    col
-}
-
 fn footer(s: &Screen<'_>) -> El {
     let button = |act: Act, name: &str, label: &str| {
         let id = s.acts.on("sidebar-footer", act);
@@ -648,7 +612,7 @@ fn footer(s: &Screen<'_>) -> El {
 
 pub(super) fn sidebar(s: &Screen<'_>) -> El {
     let body = match s.st.view {
-        MainView::Workflows => workflows(s),
+        MainView::Workflows => super::workflows::sidebar(s),
         MainView::Tasks => tasks_projects(s),
         _ => projects(s),
     };
