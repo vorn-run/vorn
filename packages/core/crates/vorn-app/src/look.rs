@@ -19,6 +19,16 @@ pub const GRAY_300: Rgb = 0xd1d5dc;
 pub const GRAY_400: Rgb = 0x99a1af;
 pub const GRAY_500: Rgb = 0x6a7282;
 pub const GRAY_600: Rgb = 0x4a5565;
+pub const GRAY_700: Rgb = 0x364153;
+pub const SURFACE_OVERLAY: Rgb = 0x1c1c20;
+pub const SURFACE_PANEL: Rgb = 0x101012;
+pub const GREEN_400: Rgb = 0x05df72;
+pub const GREEN_500: Rgb = 0x00c758;
+pub const YELLOW_500: Rgb = 0xedb200;
+pub const RED_400: Rgb = 0xff6467;
+pub const RED_500: Rgb = 0xfb2c36;
+pub const AMBER_400: Rgb = 0xffba00;
+pub const BLUE_400: Rgb = 0x54a2ff;
 /// `--color-ink-secondary` and `--color-ink-faint`: white at these alphas.
 pub const INK_SECONDARY: f32 = 0.55;
 pub const INK_FAINT: f32 = 0.35;
@@ -26,6 +36,7 @@ pub const INK_FAINT: f32 = 0.35;
 /// The window's first size, in logical pixels.
 pub const WINDOW: (f32, f32) = (1440.0, 900.0);
 pub const TOP_BAR_H: f32 = 40.0;
+pub const SIDEBAR_W: f32 = 256.0;
 pub const COMPOSER_MAX_W: f32 = 800.0;
 /// The terminal font size, in points.
 pub const TERM_FONT: f32 = 12.0;
@@ -67,30 +78,83 @@ pub const LOGO_PNG: &[u8] = include_bytes!("../assets/vorn-logo.png");
 /// The logo's aspect, width over height.
 pub const LOGO_ASPECT: f32 = 400.0 / 185.0;
 
+macro_rules! icons {
+    ($($name:literal,)*) => {
+        /// Every icon the screens use, by lucide name.
+        pub const ICONS: &[&str] = &[$($name),*];
+
+        fn icon_src(name: &str) -> Option<&'static str> {
+            Some(match name {
+                $($name => include_str!(concat!("../assets/icons/", $name, ".svg")),)*
+                _ => return None,
+            })
+        }
+    };
+}
+
+icons! {
+    "activity",
+    "arrow-up",
+    "bot",
+    "check",
+    "chevron-down",
+    "chevron-left",
+    "chevron-right",
+    "chevrons-left",
+    "circle-help",
+    "clipboard-paste",
+    "copy",
+    "corner-down-left",
+    "cpu",
+    "download",
+    "ellipsis",
+    "folder",
+    "folder-git-2",
+    "folder-open",
+    "folder-plus",
+    "folder-tree",
+    "git-branch",
+    "globe",
+    "grid-4",
+    "group",
+    "history",
+    "keyboard",
+    "layers",
+    "lightbulb",
+    "list-todo",
+    "lock",
+    "lock-open",
+    "maximize-2",
+    "minimize-2",
+    "minus",
+    "monitor",
+    "panel-left",
+    "pencil",
+    "play",
+    "plus",
+    "refresh-cw",
+    "rotate-ccw",
+    "server",
+    "settings",
+    "sliders-horizontal",
+    "smartphone",
+    "sparkles",
+    "square",
+    "square-terminal",
+    "tab-window",
+    "terminal",
+    "trash-2",
+    "user",
+    "workflow",
+    "x",
+    "zap",
+}
+
 /// The icon's SVG with its stroke width set, ready to tint.
 pub fn icon(name: &str, stroke: f32) -> Option<String> {
-    let src = match name {
-        "arrow-up" => include_str!("../assets/icons/arrow-up.svg"),
-        "bot" => include_str!("../assets/icons/bot.svg"),
-        "chevron-down" => include_str!("../assets/icons/chevron-down.svg"),
-        "chevrons-left" => include_str!("../assets/icons/chevrons-left.svg"),
-        "folder" => include_str!("../assets/icons/folder.svg"),
-        "folder-git-2" => include_str!("../assets/icons/folder-git-2.svg"),
-        "git-branch" => include_str!("../assets/icons/git-branch.svg"),
-        "layers" => include_str!("../assets/icons/layers.svg"),
-        "list-todo" => include_str!("../assets/icons/list-todo.svg"),
-        "monitor" => include_str!("../assets/icons/monitor.svg"),
-        "panel-left" => include_str!("../assets/icons/panel-left.svg"),
-        "plus" => include_str!("../assets/icons/plus.svg"),
-        "rotate-ccw" => include_str!("../assets/icons/rotate-ccw.svg"),
-        "sliders-horizontal" => include_str!("../assets/icons/sliders-horizontal.svg"),
-        "sparkles" => include_str!("../assets/icons/sparkles.svg"),
-        "terminal" => include_str!("../assets/icons/terminal.svg"),
-        "workflow" => include_str!("../assets/icons/workflow.svg"),
-        _ => return None,
-    };
     Some(
-        src.replace("stroke-width=\"2\"", &format!("stroke-width=\"{stroke}\""))
+        icon_src(name)?
+            .replace("stroke-width=\"2\"", &format!("stroke-width=\"{stroke}\""))
             .replace("currentColor", "#ffffff"),
     )
 }
@@ -114,25 +178,7 @@ mod tests {
 
     #[test]
     fn every_icon_used_loads_and_takes_its_stroke() {
-        for name in [
-            "arrow-up",
-            "bot",
-            "chevron-down",
-            "chevrons-left",
-            "folder",
-            "folder-git-2",
-            "git-branch",
-            "layers",
-            "list-todo",
-            "monitor",
-            "panel-left",
-            "plus",
-            "rotate-ccw",
-            "sliders-horizontal",
-            "sparkles",
-            "terminal",
-            "workflow",
-        ] {
+        for name in ICONS {
             let svg = icon(name, 1.5).unwrap_or_else(|| panic!("{name}"));
             assert!(
                 svg.contains("stroke-width=\"1.5\"") && svg.contains("#ffffff"),

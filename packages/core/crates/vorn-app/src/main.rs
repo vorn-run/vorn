@@ -3,7 +3,11 @@
 //! ```text
 //! vorn-app [window] [--data-dir D]
 //! vorn-app shot --out a.png [--data-dir D] [--size WxH] [--scale S] [--select N]
+//!               [--keys K1,K2] [--chrome off]
 //! ```
+//!
+//! `--keys` sends shortcuts before the shot (`Mod+KeyN`, `Alt+Digit2`,
+//! `F2`, `Escape`).
 //!
 //! Both find vornd through `D` (default `VORN_DATA_DIR`, else `~/.vorn`).
 //! `shot` draws one frame offscreen once every card has its screen.
@@ -13,7 +17,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use vorn_app::client::{data_dir, Endpoint};
-use vorn_app::ui::{run_window, El, Input, Laid, Rect, RenderMode, Rgba, Ui, Waker, WindowApp};
+use vorn_app::ui::{
+    mods, run_with, El, Event, Input, Laid, Rect, RenderMode, Rgba, Ui, Waker, WindowApp,
+    WindowOptions,
+};
 use vorn_app::{look, ui_config, App};
 
 struct Args {
@@ -71,10 +78,22 @@ fn shot(args: &Args) -> Result<(), String> {
         None => look::WINDOW,
     };
     let mut app = connect(args, Arc::new(|| {}))?;
-    if let Some(n) = args.get("select").and_then(|n| n.parse::<usize>().ok()) {
-        app.input(jump(n));
-    }
+    app.chrome = args.get("chrome") != Some("off");
     let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(scale));
+    // The startup calls answer before the first frame is drawn.
+    let until = Instant::now() + Duration::from_secs(5);
+    while app.busy() && Instant::now() < until {
+        app.pump();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    app.frame(&mut ui, size);
+    if let Some(n) = args.get("select").and_then(|n| n.parse::<usize>().ok()) {
+        app.send(&mut ui, key(&format!("Mod+Digit{n}")));
+    }
+    for k in args.get("keys").into_iter().flat_map(|k| k.split(',')) {
+        app.frame(&mut ui, size);
+        app.send(&mut ui, key(k));
+    }
     let px = (
         (size.0 * scale).round() as u32,
         (size.1 * scale).round() as u32,
@@ -88,7 +107,7 @@ fn shot(args: &Args) -> Result<(), String> {
             .store
             .sessions
             .iter()
-            .all(|s| app.pane(&s.info.id).is_some());
+            .all(|s| s.ended() || app.pane(&s.info.id).is_some());
         if ready || Instant::now() > until {
             break;
         }
@@ -106,15 +125,22 @@ fn shot(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-/// Mod+`n`: selects the `n`th card.
-fn jump(n: usize) -> Input {
-    let m = if cfg!(target_os = "macos") {
-        vorn_app::ui::mods::SUPER
-    } else {
-        vorn_app::ui::mods::CTRL
-    };
+/// A key from its name: `Mod+KeyN`, `Alt+Digit2`, `Shift+Tab`, `F2`.
+fn key(spec: &str) -> Input {
+    let mut m = 0;
+    let mut code = spec;
+    while let Some((head, rest)) = code.split_once('+') {
+        m |= match head {
+            "Mod" => vorn_app::app::MOD,
+            "Ctrl" => mods::CTRL,
+            "Alt" => mods::ALT,
+            "Shift" => mods::SHIFT,
+            _ => 0,
+        };
+        code = rest;
+    }
     Input::Key {
-        code: format!("Digit{n}"),
+        code: code.to_owned(),
         mods: m,
         text: None,
     }
@@ -132,8 +158,16 @@ impl WindowApp for Win {
         self.0.paint(ui, laid);
     }
 
+    fn event(&mut self, ui: &mut Ui, event: Event) {
+        self.0.event(ui, event);
+    }
+
     fn input(&mut self, _ui: &mut Ui, input: Input) {
         self.0.input(input);
+    }
+
+    fn intercept(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        self.0.intercept(ui, input)
     }
 
     fn background(&self) -> Rgba {
@@ -163,7 +197,13 @@ fn window(args: &Args) -> Result<(), String> {
             }
         }),
     )?;
-    run_window("Vorn", look::WINDOW, ui_config(1.0), move |_, wake| {
+    let opts = WindowOptions {
+        min_size: Some((800.0, 600.0)),
+        // macOS keeps its title bar; elsewhere the app draws its own.
+        decorations: cfg!(target_os = "macos"),
+        ..WindowOptions::sized(look::WINDOW)
+    };
+    run_with("Vorn", opts, ui_config(1.0), move |_, wake| {
         if let Ok(mut slot) = waker.lock() {
             *slot = Some(wake);
         }

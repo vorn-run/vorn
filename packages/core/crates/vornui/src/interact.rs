@@ -38,6 +38,25 @@ pub enum Event {
     ResizeEnd { id: Id, ratio: f32 },
     /// A menu closed without a choice (Escape, a click outside).
     Dismiss(Id),
+    /// A secondary press on an element with [`Sense::CONTEXT`], at `(x, y)`
+    /// logical pixels.
+    Context { id: Id, x: f32, y: f32 },
+    /// A second press on the same element within the double-click time.
+    DoubleClick(Id),
+    /// The wheel over an element with [`Sense::WHEEL`] that no scroll view
+    /// took, at `(x, y)` logical pixels.
+    Wheel { id: Id, dy: f32, x: f32, y: f32 },
+}
+
+/// What the app asks of the window it runs in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowRequest {
+    Minimize,
+    ToggleMaximize,
+    Close,
+    /// Starts moving the window with the pressed pointer (a title bar).
+    Drag,
+    ToggleFullscreen,
 }
 
 /// How long the pointer rests on an element before its tooltip shows.
@@ -128,6 +147,8 @@ pub(crate) struct State {
     /// The tooltip owner under the pointer, and since when.
     pub tip: Option<(Id, Instant)>,
     pub menu: Option<Menu>,
+    /// The menu last closed, for [`Ui::reopen_menu`].
+    pub closed_menu: Option<Menu>,
     pub scroll: HashMap<Id, Scroll>,
     pub drag: Option<Id>,
     pub selecting: Option<Id>,
@@ -144,6 +165,8 @@ pub(crate) struct State {
     pub groups: HashMap<Id, Vec<(Id, bool)>>,
     pub cursor: Cursor,
     pub ime: Option<Rect>,
+    pub requests: Vec<WindowRequest>,
+    pub maximized: bool,
 }
 
 impl State {
@@ -158,6 +181,7 @@ impl State {
             fades: HashMap::new(),
             tip: None,
             menu: None,
+            closed_menu: None,
             scroll: HashMap::new(),
             drag: None,
             selecting: None,
@@ -172,6 +196,8 @@ impl State {
             groups: HashMap::new(),
             cursor: Cursor::Default,
             ime: None,
+            requests: Vec::new(),
+            maximized: false,
         }
     }
 
@@ -351,9 +377,18 @@ impl Ui {
         });
     }
 
+    /// Opens again, as it was, the menu a choice just closed: for entries
+    /// that change something and leave their menu up.
+    pub fn reopen_menu(&mut self) {
+        if self.st.menu.is_none() {
+            self.st.menu = self.st.closed_menu.take();
+        }
+    }
+
     /// Closes the open menu; focus goes back to its trigger if it was inside.
     pub fn close_menu(&mut self) {
         if let Some(m) = self.st.menu.take() {
+            self.st.closed_menu = Some(m);
             let inside = self.st.focus.is_some_and(|f| {
                 self.st
                     .groups
@@ -511,6 +546,8 @@ impl Ui {
                     || h.sense.has(Sense::CLICK)
                     || h.sense.has(Sense::FOCUS)
                     || h.sense.has(Sense::DRAG)
+                    || h.sense.has(Sense::WINDOW_DRAG)
+                    || h.sense.has(Sense::DOUBLE)
             })
             .last()
             .cloned();
@@ -532,6 +569,21 @@ impl Ui {
         };
         if h.sense.has(Sense::FOCUS) {
             self.set_focus(Some(h.id));
+        }
+        if h.sense.has(Sense::DOUBLE) {
+            let double = self.st.last_click.is_some_and(|(id, at)| {
+                id == h.id && now.saturating_duration_since(at) < DOUBLE_CLICK
+            });
+            if double {
+                self.st.last_click = None;
+                self.st.events.push(Event::DoubleClick(h.id));
+            } else {
+                self.st.last_click = Some((h.id, now));
+            }
+        }
+        if h.sense.has(Sense::WINDOW_DRAG) {
+            self.st.requests.push(WindowRequest::Drag);
+            return;
         }
         if h.sense.has(Sense::TEXT) {
             let double = self.st.last_click.is_some_and(|(id, at)| {
@@ -563,6 +615,56 @@ impl Ui {
         if h.action.is_some() {
             self.st.pressed = Some(h.id);
         }
+    }
+
+    /// The secondary button went down at the pointer: closes an open menu
+    /// and reports [`Event::Context`] for the topmost element that takes it.
+    pub fn pointer_down_secondary(&mut self) {
+        let Some(p) = self.st.pointer else {
+            return;
+        };
+        if let Some(m) = self.st.menu.take() {
+            self.st.events.push(Event::Dismiss(m.id));
+        }
+        let target = self
+            .st
+            .stack(p)
+            .filter(|h| h.sense.has(Sense::CONTEXT))
+            .last()
+            .map(|h| h.id);
+        if let Some(id) = target {
+            self.st.events.push(Event::Context { id, x: p.0, y: p.1 });
+        }
+    }
+
+    /// Where the pointer is, logical pixels.
+    pub fn pointer(&self) -> Option<(f32, f32)> {
+        self.st.pointer
+    }
+
+    /// Where `id` was laid out last frame (logical pixels, clipped), if it
+    /// takes input.
+    pub fn rect_of(&self, id: Id) -> Option<Rect> {
+        self.st.hit(id).map(|h| h.rect)
+    }
+
+    /// Asks the window for something; a window applies it after the event.
+    pub fn request(&mut self, r: WindowRequest) {
+        self.st.requests.push(r);
+    }
+
+    /// The requests since the last call, oldest first.
+    pub fn take_requests(&mut self) -> Vec<WindowRequest> {
+        std::mem::take(&mut self.st.requests)
+    }
+
+    /// Whether the window is maximized, as the window last said.
+    pub fn maximized(&self) -> bool {
+        self.st.maximized
+    }
+
+    pub fn set_maximized(&mut self, m: bool) {
+        self.st.maximized = m;
     }
 
     /// The primary button went up.
@@ -609,6 +711,21 @@ impl Ui {
             s.offset = (s.offset + dy).clamp(0.0, s.max);
             // A tooltip anchored to something that moved would float loose.
             self.st.tip = None;
+            return;
+        }
+        let wheel = self
+            .st
+            .stack(p)
+            .filter(|h| h.sense.has(Sense::WHEEL))
+            .last()
+            .map(|h| h.id);
+        if let Some(id) = wheel {
+            self.st.events.push(Event::Wheel {
+                id,
+                dy,
+                x: p.0,
+                y: p.1,
+            });
         }
     }
 
@@ -643,10 +760,7 @@ impl Ui {
             }
         }
         match code.as_str() {
-            "Tab" if *mods & !crate::input::mods::SHIFT == 0 => {
-                self.tab(shift);
-                true
-            }
+            "Tab" if *mods & !crate::input::mods::SHIFT == 0 => self.tab(shift),
             "Enter" | "NumpadEnter" | "Space" => {
                 let Some(id) = self.st.focus else {
                     return false;
@@ -765,10 +879,11 @@ impl Ui {
         }
     }
 
-    fn tab(&mut self, back: bool) {
+    /// Moves focus along the Tab order; false when nothing takes focus.
+    fn tab(&mut self, back: bool) -> bool {
         let order = &self.st.focus_order;
         if order.is_empty() {
-            return;
+            return false;
         }
         let at = self
             .st
@@ -783,6 +898,7 @@ impl Ui {
         };
         self.st.focus_visible = true;
         self.set_focus(Some(order[next]));
+        true
     }
 
     fn move_in_group(&mut self, group: Id, code: &str) {

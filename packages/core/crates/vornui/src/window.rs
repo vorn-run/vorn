@@ -19,13 +19,13 @@ use winit::event::{
     ElementState, Modifiers, MouseButton, MouseScrollDelta, StartCause, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
-use winit::window::{CursorIcon, Window, WindowId};
+use winit::window::{CursorIcon, Fullscreen, Window, WindowId};
 
 use crate::edit::Clipboard;
 use crate::element::{Cursor, El};
 use crate::gpu::{adapter_name, instance_desc, Gpu};
 use crate::input::{from_winit, mods_of, Input};
-use crate::interact::Event;
+use crate::interact::{Event, WindowRequest};
 use crate::pace::Pacer;
 use crate::render::RenderMode;
 use crate::scene::{Rect, Rgba};
@@ -45,6 +45,11 @@ pub trait App: 'static {
     fn event(&mut self, _ui: &mut Ui, _event: Event) {}
     /// Input the UI did not use (a terminal takes what a field did not).
     fn input(&mut self, _ui: &mut Ui, _input: Input) {}
+    /// Input before the UI sees it: true keeps it from the UI (global
+    /// shortcuts, which win over a focused field).
+    fn intercept(&mut self, _ui: &mut Ui, _input: &Input) -> bool {
+        false
+    }
     /// A screen-reader request for a node the UI does not own.
     fn access(&mut self, _ui: &mut Ui, _req: &ActionRequest) {}
     /// Whether the last frame showed what the last keystroke was waiting
@@ -127,9 +132,31 @@ struct Live<A> {
     pending: Option<Instant>,
 }
 
+/// How the window opens.
+#[derive(Debug, Clone, Copy)]
+pub struct WindowOptions {
+    /// The first size, logical pixels.
+    pub size: (f32, f32),
+    pub min_size: Option<(f32, f32)>,
+    /// The system's title bar and frame; without them the app draws its own.
+    pub decorations: bool,
+    pub maximized: bool,
+}
+
+impl WindowOptions {
+    pub fn sized(size: (f32, f32)) -> WindowOptions {
+        WindowOptions {
+            size,
+            min_size: None,
+            decorations: true,
+            maximized: false,
+        }
+    }
+}
+
 struct Runner<A, F> {
     title: String,
-    size: (f32, f32),
+    opts: WindowOptions,
     cfg: UiConfig,
     make: Option<F>,
     proxy: EventLoopProxy<UserEvent>,
@@ -145,12 +172,26 @@ where
     A: App,
     F: FnOnce(&mut Ui, Waker) -> A,
 {
+    run_with(title, WindowOptions::sized(size), cfg, make)
+}
+
+/// [`run`] with a window opened as `opts` says.
+pub fn run_with<A, F>(
+    title: &str,
+    opts: WindowOptions,
+    cfg: UiConfig,
+    make: F,
+) -> Result<(), String>
+where
+    A: App,
+    F: FnOnce(&mut Ui, Waker) -> A,
+{
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .map_err(|e| e.to_string())?;
     let mut r = Runner {
         title: title.to_owned(),
-        size,
+        opts,
         cfg,
         make: Some(make),
         proxy: event_loop.create_proxy(),
@@ -164,11 +205,17 @@ where
 
 impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
     fn open(&mut self, el: &ActiveEventLoop) -> Result<Live<A>, String> {
-        let attrs = Window::default_attributes()
+        let o = self.opts;
+        let mut attrs = Window::default_attributes()
             .with_title(&self.title)
-            .with_inner_size(LogicalSize::new(self.size.0, self.size.1))
+            .with_inner_size(LogicalSize::new(o.size.0, o.size.1))
+            .with_decorations(o.decorations)
+            .with_maximized(o.maximized)
             // AccessKit's adapter must exist before the window is first shown.
             .with_visible(false);
+        if let Some((w, h)) = o.min_size {
+            attrs = attrs.with_min_inner_size(LogicalSize::new(w, h));
+        }
         let window = Arc::new(el.create_window(attrs).map_err(|e| e.to_string())?);
         let access =
             accesskit_winit::Adapter::with_event_loop_proxy(el, &window, self.proxy.clone());
@@ -215,6 +262,7 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
                 Duration::from_secs_f64(1000.0 / f64::from(mhz))
             });
         let make = self.make.take().ok_or("app already made")?;
+        ui.set_maximized(window.is_maximized());
         let app = make(&mut ui, Waker(self.proxy.clone()));
         window.set_visible(true);
         Ok(Live {
@@ -253,7 +301,7 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
         }
     }
 
-    fn user_event(&mut self, _: &ActiveEventLoop, ev: UserEvent) {
+    fn user_event(&mut self, el: &ActiveEventLoop, ev: UserEvent) {
         let Some(l) = &mut self.live else {
             return;
         };
@@ -279,6 +327,9 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
                     l.ui.access(&req);
                     l.app.access(&mut l.ui, &req);
                     l.dispatch();
+                    if l.apply_requests() {
+                        el.exit();
+                    }
                 }
                 accesskit_winit::WindowEvent::AccessibilityDeactivated => {}
             },
@@ -297,6 +348,7 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::ModifiersChanged(m) => self.mods = *m,
             WindowEvent::Resized(px) => {
+                l.ui.set_maximized(l.window.is_maximized());
                 if let (Present::Gpu { surface, config }, Some(g)) = (&mut l.present, &l.ui.gpu) {
                     config.width = px.width.max(1);
                     config.height = px.height.max(1);
@@ -333,6 +385,14 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
                 }
                 l.dispatch();
             }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Right,
+                ..
+            } => {
+                l.ui.pointer_down_secondary();
+                l.dispatch();
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let dy = match delta {
                     MouseScrollDelta::LineDelta(_, y) => -y * LINE,
@@ -348,12 +408,15 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
             _ => {
                 if let Some(input) = from_winit(&ev, mods_of(&self.mods)) {
                     l.pacer.input(now);
-                    if !l.ui.key(&input) {
+                    if !l.app.intercept(&mut l.ui, &input) && !l.ui.key(&input) {
                         l.app.input(&mut l.ui, input);
                     }
                     l.dispatch();
                 }
             }
+        }
+        if l.apply_requests() {
+            el.exit();
         }
     }
 
@@ -380,6 +443,30 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
 }
 
 impl<A: App> Live<A> {
+    /// Does what the app asked of the window; true when it asked to close.
+    fn apply_requests(&mut self) -> bool {
+        let mut close = false;
+        for r in self.ui.take_requests() {
+            match r {
+                WindowRequest::Minimize => self.window.set_minimized(true),
+                WindowRequest::ToggleMaximize => {
+                    self.window.set_maximized(!self.window.is_maximized());
+                }
+                WindowRequest::Close => close = true,
+                // Fails only when the button is no longer down.
+                WindowRequest::Drag => {
+                    let _ = self.window.drag_window();
+                }
+                WindowRequest::ToggleFullscreen => {
+                    let full = self.window.fullscreen().is_some();
+                    self.window
+                        .set_fullscreen((!full).then_some(Fullscreen::Borderless(None)));
+                }
+            }
+        }
+        close
+    }
+
     /// Hands the UI's events to the app and asks for the frame that shows
     /// their effect.
     fn dispatch(&mut self) {

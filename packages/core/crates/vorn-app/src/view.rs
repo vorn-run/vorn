@@ -4,7 +4,7 @@
 
 use vorn_term_mirror::Mirror;
 use vorn_term_proto::row;
-use vorn_term_proto::screen::{attrs, Color, CursorStyle, StyleDef, Underline};
+use vorn_term_proto::screen::{attrs, row_flags, Color, CursorStyle, StyleDef, Underline};
 
 use crate::look::{term, Rgb};
 
@@ -61,6 +61,8 @@ pub struct PaneView {
     pub runs: Vec<Run>,
     /// Every run's text, back to back: one allocation per view, not per run.
     pub text: Vec<u8>,
+    /// Rows where a shell prompt starts (OSC 133): one command block each.
+    pub prompts: Vec<u16>,
 }
 
 /// The xterm 256-colour palette, its first sixteen the app's.
@@ -170,8 +172,12 @@ pub fn build(m: &Mirror) -> PaneView {
         cursor_color: t.colors.cursor.map_or(term::CURSOR, rgb),
         runs: Vec::with_capacity(t.rows as usize * 2),
         text: Vec::with_capacity(t.rows as usize * t.cols as usize),
+        prompts: Vec::new(),
     };
     for (y, r) in m.rows().iter().enumerate() {
+        if r.flags & row_flags::PROMPT != 0 && r.flags & row_flags::PROMPT_CONTINUATION == 0 {
+            v.prompts.push(y as u16);
+        }
         let Ok(runs) = row::decode(&r.cells) else {
             continue;
         };

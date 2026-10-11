@@ -30,6 +30,8 @@ pub struct Session {
     pub info: TerminalSession,
     /// The exit code once its program has ended; the card stays until closed.
     pub exited: Option<i64>,
+    /// Why a session carried over from the last run ended, when it did.
+    pub cause: Option<&'static str>,
 }
 
 impl Session {
@@ -51,9 +53,23 @@ impl Session {
         self.info.agent_type.as_str() == "shell"
     }
 
+    /// Whether its program is gone and the card shows the ended strip.
+    pub fn ended(&self) -> bool {
+        self.exited.is_some() || self.cause.is_some()
+    }
+
+    /// The ended strip's cause: `exited with N`, or why a carried-over
+    /// session stopped.
+    pub fn ended_cause(&self) -> Option<String> {
+        if let Some(cause) = self.cause {
+            return Some(cause.to_owned());
+        }
+        self.exited.map(|code| format!("exited with {code}"))
+    }
+
     /// The status the card shows: an ended session is idle.
     pub fn status(&self) -> &str {
-        if self.exited.is_some() {
+        if self.ended() {
             "idle"
         } else {
             self.info.status.as_str()
@@ -174,7 +190,11 @@ impl Store {
     pub fn upsert(&mut self, info: TerminalSession) {
         match self.sessions.iter_mut().find(|s| s.info.id == info.id) {
             Some(s) => s.info = info,
-            None => self.sessions.push(Session { info, exited: None }),
+            None => self.sessions.push(Session {
+                info,
+                exited: None,
+                cause: None,
+            }),
         }
     }
 
