@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Seeds a TEST vornd with workflows and runs for the Workflows view.
-// usage: node seed-test-vornd.mjs <data-dir> [--no-runs] [--shell <cwd>]   (never the real ~/.vorn)
+// usage: node seed-test-vornd.mjs <data-dir> [--no-runs] [--shell <cwd>] [--shells N]   (never the real ~/.vorn)
 import { readFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -126,7 +126,9 @@ if (!process.argv.includes('--no-runs')) {
   await sleep(1500)
 }
 const shellAt = process.argv.indexOf('--shell')
-if (shellAt > 0) await call('shell:create', process.argv[shellAt + 1])
+const shellsAt = process.argv.indexOf('--shells')
+const shellCount = shellsAt > 0 ? Number(process.argv[shellsAt + 1]) : 1
+if (shellAt > 0) for (let i = 0; i < shellCount; i++) await call('shell:create', process.argv[shellAt + 1])
 const runs = await call('workflowRun:listAll', { workspaceId: 'personal', limit: 50 })
 console.log(
   runs

@@ -51,7 +51,7 @@ let package = Package(
             dependencies: ["VornWorkflows", "VornCore"],
             resources: [.copy("Fixtures")]
         ),
-        .testTarget(name: "VornE2ETests", dependencies: ["VornCore", "VornTerminals", "VornTasks", "VornWorkflows"]),
+        .testTarget(name: "VornE2ETests", dependencies: ["VornCore", "VornTerminals", "VornTasks", "VornWorkflows", "VornApp"]),
     ],
     swiftLanguageModes: [.v5]
 )

@@ -98,6 +98,7 @@ public struct TerminalSession: Codable, Identifiable, Hashable, Sendable {
     public var rows: Int?
     public var workspaceId: String?
     public var shellCwd: String?
+    public var shellExitCode: Int?
 
     public init(
         id: String, agentType: AgentType, projectName: String, projectPath: String,
@@ -212,6 +213,16 @@ public struct AppConfigSummary: Decodable, Sendable, Equatable {
         public var mainViewMode: String?
         public var fontSize: Double?
         public var layoutMode: String?
+        public var reopenSessions: Bool?
+        public var showHeadlessAgents: Bool?
+
+        public init(defaultAgent: AgentType? = nil, layoutMode: String? = nil, reopenSessions: Bool? = nil,
+                    showHeadlessAgents: Bool? = nil) {
+            self.defaultAgent = defaultAgent
+            self.layoutMode = layoutMode
+            self.reopenSessions = reopenSessions
+            self.showHeadlessAgents = showHeadlessAgents
+        }
     }
 
     public var defaults: Defaults?
@@ -236,6 +247,7 @@ public struct CreateTerminalPayload: Encodable, Sendable, Equatable {
     public var existingWorktreePath: String?
     public var worktreeName: String?
     public var initialPrompt: String?
+    public var resumeSessionId: String?
 
     public init(agentType: AgentType, projectName: String, projectPath: String,
                 displayName: String? = nil, branch: String? = nil, useWorktree: Bool? = nil,
@@ -257,4 +269,205 @@ public struct CreateTerminalPayload: Encodable, Sendable, Equatable {
 public struct SessionStatusUpdate: Decodable, Sendable {
     public var id: String
     public var status: AgentStatus
+}
+
+/// What the server found when it checked a restored record against the tree.
+public struct RestoreEnvironment: Codable, Hashable, Sendable {
+    public struct Pair: Codable, Hashable, Sendable {
+        public var recorded: String?
+        public var actual: String?
+
+        public init(recorded: String?, actual: String?) {
+            self.recorded = recorded
+            self.actual = actual
+        }
+    }
+
+    public var worktree: String
+    public var branch: Pair
+    public var head: Pair
+
+    public init(worktree: String, branch: Pair, head: Pair) {
+        self.worktree = worktree
+        self.branch = branch
+        self.head = head
+    }
+
+    public var worktreeMissing: Bool { worktree == "missing" }
+
+    /// `headMoved` in types.ts.
+    public var headMoved: Bool {
+        guard let r = head.recorded, let a = head.actual else { return false }
+        return r != a
+    }
+}
+
+/// Why a pane has nothing running behind it (`EndedSession` in the renderer).
+public struct EndedInfo: Hashable, Sendable {
+    public enum Reason: String, Sendable {
+        case exited
+        case appClosed = "app-closed"
+        case machineRestarted = "machine-restarted"
+        case serverStopped = "server-stopped"
+    }
+
+    public var reason: Reason
+    /// Unix ms.
+    public var at: Double
+    public var replayed: Bool
+    public var partial: Bool
+    public var exitCode: Int?
+    public var cwd: String?
+    public var environment: RestoreEnvironment?
+
+    public init(reason: Reason, at: Double, replayed: Bool, partial: Bool = false, exitCode: Int? = nil,
+                cwd: String? = nil, environment: RestoreEnvironment? = nil) {
+        self.reason = reason
+        self.at = at
+        self.replayed = replayed
+        self.partial = partial
+        self.exitCode = exitCode
+        self.cwd = cwd
+        self.environment = environment
+    }
+
+    /// The words after "Ended ·" (EndedStrip.tsx).
+    public var cause: String {
+        switch reason {
+        case .exited: exitCode.map { "exited with \($0)" } ?? "exited"
+        case .appClosed: "Vorn was closed"
+        case .machineRestarted: "the machine restarted"
+        case .serverStopped: "the server stopped unexpectedly"
+        }
+    }
+}
+
+/// A session a previous run left behind (`sessions:restored`).
+public struct RestoredSession: Decodable, Hashable, Sendable {
+    public var session: TerminalSession
+    public var endedAt: Double
+    public var replayable: Bool
+    public var partial: Bool
+    public var closedCleanly: Bool
+    public var rebooted: Bool
+    public var environment: RestoreEnvironment?
+
+    public init(session: TerminalSession, endedAt: Double, replayable: Bool = true, partial: Bool = false,
+                closedCleanly: Bool = true, rebooted: Bool = false, environment: RestoreEnvironment? = nil) {
+        self.session = session
+        self.endedAt = endedAt
+        self.replayable = replayable
+        self.partial = partial
+        self.closedCleanly = closedCleanly
+        self.rebooted = rebooted
+        self.environment = environment
+    }
+
+    /// `endedFromRestored`: one reading of a record, so the board and the strip agree.
+    public var ended: EndedInfo {
+        EndedInfo(reason: closedCleanly ? .appClosed : rebooted ? .machineRestarted : .serverStopped,
+                  at: endedAt, replayed: replayable, partial: partial, cwd: session.shellCwd,
+                  environment: environment)
+    }
+}
+
+/// What `sessions:resume` answers.
+public struct ResumeResult: Decodable, Sendable {
+    public var ok: Bool
+    public var session: TerminalSession?
+    public var boundTo: String?
+    public var reason: String?
+    public var message: String?
+}
+
+/// An agent conversation on disk that can be resumed (`sessions:getRecent`).
+public struct RecentSession: Decodable, Identifiable, Hashable, Sendable {
+    public var sessionId: String
+    public var agentType: AgentType
+    public var display: String
+    public var projectPath: String
+    public var timestamp: Double
+    public var activityCount: Int
+    public var activityLabel: String
+    public var canResumeExact: Bool
+
+    public var id: String { sessionId }
+
+    public init(sessionId: String, agentType: AgentType, display: String, projectPath: String, timestamp: Double,
+                activityCount: Int, activityLabel: String, canResumeExact: Bool) {
+        self.sessionId = sessionId
+        self.agentType = agentType
+        self.display = display
+        self.projectPath = projectPath
+        self.timestamp = timestamp
+        self.activityCount = activityCount
+        self.activityLabel = activityLabel
+        self.canResumeExact = canResumeExact
+    }
+
+    /// `formatRecentSessionActivity`: "3 prompts", "1 reply".
+    public var activity: String {
+        var label = activityLabel
+        if activityCount != 1 { label = label.hasSuffix("y") ? String(label.dropLast()) + "ies" : label + "s" }
+        return "\(activityCount) \(label)"
+    }
+}
+
+/// An agent running without a terminal (`headless:list`).
+public struct HeadlessSession: Decodable, Identifiable, Hashable, Sendable {
+    public var id: String
+    public var pid: Int
+    public var agentType: AgentType
+    public var projectName: String
+    public var projectPath: String
+    public var displayName: String?
+    public var branch: String?
+    public var status: String
+    public var exitCode: Int?
+    public var startedAt: Double
+    public var endedAt: Double?
+    public var workflowId: String?
+    public var workflowName: String?
+
+    public init(id: String, agentType: AgentType, projectName: String, projectPath: String = "",
+                status: String = "running", exitCode: Int? = nil, startedAt: Double, endedAt: Double? = nil,
+                displayName: String? = nil, branch: String? = nil) {
+        self.id = id
+        self.pid = 0
+        self.agentType = agentType
+        self.projectName = projectName
+        self.projectPath = projectPath
+        self.status = status
+        self.exitCode = exitCode
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.displayName = displayName
+        self.branch = branch
+    }
+
+    public var isRunning: Bool { status == "running" }
+    public var isError: Bool { status == "exited" && exitCode != 0 }
+
+    /// The status the grid's filter reads it as.
+    public var filterStatus: AgentStatus { isRunning ? .running : isError ? .error : .idle }
+}
+
+/// Uncommitted changes in a tree (`git:diffStat`).
+public struct DiffStat: Decodable, Hashable, Sendable {
+    public var filesChanged: Int
+    public var insertions: Int
+    public var deletions: Int
+
+    public init(filesChanged: Int, insertions: Int, deletions: Int) {
+        self.filesChanged = filesChanged
+        self.insertions = insertions
+        self.deletions = deletions
+    }
+}
+
+/// A repo's local branches (`git:listBranches`).
+public struct BranchList: Decodable, Hashable, Sendable {
+    public var local: [String]
+    public var current: String?
+    public var isGitRepo: Bool?
 }

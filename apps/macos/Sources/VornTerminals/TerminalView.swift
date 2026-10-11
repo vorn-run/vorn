@@ -187,18 +187,6 @@ public final class TerminalNSView: NSView, NSTextInputClient, TerminalHost {
 
 // MARK: - SwiftUI
 
-/// Whether terminals draw as static snapshots (offscreen renders, where an NSView cannot draw).
-public struct TerminalSnapshotKey: EnvironmentKey {
-    public static let defaultValue = false
-}
-
-public extension EnvironmentValues {
-    var terminalSnapshot: Bool {
-        get { self[TerminalSnapshotKey.self] }
-        set { self[TerminalSnapshotKey.self] = newValue }
-    }
-}
-
 /// A live session's terminal, or a drawing of its last frame in snapshot mode.
 public struct TerminalSurface: View {
     let engine: TerminalEngine

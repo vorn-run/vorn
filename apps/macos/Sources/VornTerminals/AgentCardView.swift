@@ -9,13 +9,52 @@ public struct CardActions {
     public var minimize: (String) -> Void = { _ in }
     public var close: (String) -> Void = { _ in }
     public var rename: (String, String) -> Void = { _, _ in }
-    public var more: (String) -> Void = { _ in }
+    /// Opens the card's menu at a point in window space (top-left origin).
+    public var contextMenu: (String, CGPoint) -> Void = { _, _ in }
     public var browseFiles: (String) -> Void = { _ in }
+    public var addTerminal: (String) -> Void = { _ in }
+    public var resume: (String) -> Void = { _ in }
+    /// Writes bytes to the session's terminal.
+    public var write: (String, String) -> Void = { _, _ in }
+    /// Starts an agent on a prompt from a shell's composer.
+    public var prompt: (String, String) -> Void = { _, _ in }
+    public var showChanges: (String) -> Void = { _ in }
+    /// F2: the session whose name field should open, cleared through `endRename`.
+    public var renameRequest: String?
+    public var endRename: () -> Void = {}
 
     public init() {}
 }
 
-/// A session's card in the grid (AgentCard.tsx, mini variant): header, terminal, status bar.
+/// Which surface a card is drawn on.
+public enum CardVariant: Sendable {
+    /// A cell in the grid.
+    case mini
+    /// The focused stage, filling the content area.
+    case focused
+}
+
+/// What the card shows besides the session: why it ended, its tree's changes, where it sits in a focus cycle.
+public struct CardContext {
+    public var ended: EndedInfo?
+    public var diffStat: DiffStat?
+    /// Another surface is showing this session expanded.
+    public var shownElsewhere = false
+    /// Position and count for the focused stage's nav hint.
+    public var nav: (index: Int, total: Int)?
+    public var onPrevious: () -> Void = {}
+    public var onNext: () -> Void = {}
+    /// Left inset for the traffic lights when the header stands in for the titlebar.
+    public var leadingInset: CGFloat = 12
+    public var headerLeading: AnyView?
+
+    public init(ended: EndedInfo? = nil, diffStat: DiffStat? = nil) {
+        self.ended = ended
+        self.diffStat = diffStat
+    }
+}
+
+/// A session's card (AgentCard.tsx / FocusedTerminal.tsx): header, terminal, composer, status bar.
 public struct AgentCardView: View {
     let session: TerminalSession
     let index: Int
@@ -25,10 +64,13 @@ public struct AgentCardView: View {
     let isExpanded: Bool
     let focusRequest: Int
     let actions: CardActions
+    let context: CardContext
+    let variant: CardVariant
     @State private var hovering = false
 
     public init(session: TerminalSession, index: Int, engine: TerminalEngine?, isSelected: Bool,
-                isDimmed: Bool, isExpanded: Bool = false, focusRequest: Int = 0, actions: CardActions) {
+                isDimmed: Bool, isExpanded: Bool = false, focusRequest: Int = 0, actions: CardActions,
+                context: CardContext = CardContext(), variant: CardVariant? = nil) {
         self.session = session
         self.index = index
         self.engine = engine
@@ -37,17 +79,23 @@ public struct AgentCardView: View {
         self.isExpanded = isExpanded
         self.focusRequest = focusRequest
         self.actions = actions
+        self.context = context
+        self.variant = variant ?? (isExpanded ? .focused : .mini)
     }
 
     public var body: some View {
         VStack(spacing: 0) {
-            CardHeader(session: session, index: index, hovering: hovering, isExpanded: isExpanded, actions: actions)
+            CardHeader(session: session, index: index, hovering: hovering, isExpanded: isExpanded,
+                       variant: variant, context: context, actions: actions)
                 .opacity(isDimmed && !hovering ? 0.6 : 1)
-            body(engine: engine)
+            terminal
+                .padding(variant == .focused ? 4 : 0)
                 .padding(.top, 2)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Theme.surfaceSunken)
-            CardStatusBar(session: session)
+                .onRightClick { p in actions.contextMenu(session.id, p) }
+            SessionComposer(session: session, ended: context.ended, compact: variant == .mini, actions: actions)
+            CardStatusBar(session: session, diffStat: context.diffStat) { actions.showChanges(session.id) }
                 .opacity(isDimmed && !hovering ? 0.6 : 1)
         }
         .background(Theme.surfaceRaised)
@@ -58,8 +106,13 @@ public struct AgentCardView: View {
         .simultaneousGesture(TapGesture().onEnded { if !isSelected { actions.select(session.id) } })
     }
 
-    @ViewBuilder private func body(engine: TerminalEngine?) -> some View {
-        if let engine {
+    @ViewBuilder private var terminal: some View {
+        if context.shownElsewhere {
+            Text("Expanded")
+                .font(.ui(12))
+                .foregroundStyle(Theme.gray600)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let engine {
             TerminalSurface(engine: engine, sessionID: session.id, focusRequest: focusRequest, onFocus: actions.select)
         } else {
             Color.clear
@@ -67,7 +120,8 @@ public struct AgentCardView: View {
     }
 
     private var borderColor: Color {
-        if isExpanded { return Theme.white(0.4) }
+        if variant == .focused { return .clear }
+        if isExpanded || context.shownElsewhere { return Theme.white(0.4) }
         return hovering ? Theme.white(0.12) : Theme.hairline
     }
 }
@@ -77,6 +131,8 @@ struct CardHeader: View {
     let index: Int
     let hovering: Bool
     let isExpanded: Bool
+    let variant: CardVariant
+    let context: CardContext
     let actions: CardActions
     @State private var renaming = false
     @State private var draft = ""
@@ -84,6 +140,10 @@ struct CardHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            if let leading = context.headerLeading {
+                leading
+                Rectangle().fill(Theme.hairline).frame(width: 1, height: 16)
+            }
             HStack(spacing: 8) {
                 AgentStatusIcon(session.agentType, status: session.status, size: 18)
                 HStack(spacing: 4) {
@@ -96,8 +156,9 @@ struct CardHeader: View {
                                 let name = draft.trimmingCharacters(in: .whitespaces)
                                 if !name.isEmpty { actions.rename(session.id, name) }
                                 renaming = false
+                                actions.endRename()
                             }
-                            .onExitCommand { renaming = false }
+                            .onExitCommand { renaming = false; actions.endRename() }
                     } else {
                         Text(session.title)
                             .font(.ui(13, weight: .medium))
@@ -122,8 +183,13 @@ struct CardHeader: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { actions.expand(session.id) }
 
+            if variant == .focused, let nav = context.nav {
+                FocusedNavHint(index: nav.index, total: nav.total, onPrevious: context.onPrevious, onNext: context.onNext)
+                    .padding(.trailing, 4)
+            }
+
             ZStack(alignment: .trailing) {
-                if index < 9 {
+                if variant == .mini && index < 9 {
                     Text("⌘\(index + 1)")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Theme.gray600)
@@ -135,15 +201,19 @@ struct CardHeader: View {
                         .allowsHitTesting(false)
                 }
                 CardActionCluster(session: session, isExpanded: isExpanded, actions: actions)
-                    .opacity(hovering ? 1 : 0)
+                    .opacity(hovering || variant == .focused ? 1 : 0)
             }
             .fixedSize()
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, context.leadingInset)
+        .padding(.trailing, 12)
         .padding(.vertical, 10)
         .frame(height: 41)
         .background(Theme.surfaceRaised)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.white(0.04)).frame(height: 1) }
+        .onChange(of: actions.renameRequest == session.id, initial: true) { _, asked in
+            if asked { draft = session.title; renaming = true }
+        }
     }
 }
 
@@ -153,13 +223,17 @@ struct CardActionCluster: View {
     let isExpanded: Bool
     let actions: CardActions
     @State private var confirmClose = false
+    @State private var moreFrame: CGRect = .zero
 
     var body: some View {
         HStack(spacing: 2) {
-            button(.ellipsis, "More actions") { actions.more(session.id) }
+            button(.ellipsis, "More actions") {
+                actions.contextMenu(session.id, CGPoint(x: moreFrame.minX, y: moreFrame.maxY + 4))
+            }
+            .reportFrame($moreFrame)
             button(.folderOpen, "Browse files") { actions.browseFiles(session.id) }
             if session.agentType != .shell {
-                button(.squareTerminal, "Add a terminal") {}
+                button(.squareTerminal, "Add a terminal") { actions.addTerminal(session.id) }
                 button(.globe, "Open browser") {}
             }
             if !isExpanded {
@@ -185,12 +259,18 @@ struct CardActionCluster: View {
     }
 }
 
+
 /// "Close this session?" (ConfirmPopover).
-struct ConfirmClose: View {
+public struct ConfirmClose: View {
     let onCancel: () -> Void
     let onConfirm: () -> Void
 
-    var body: some View {
+    public init(onCancel: @escaping () -> Void, onConfirm: @escaping () -> Void) {
+        self.onCancel = onCancel
+        self.onConfirm = onConfirm
+    }
+
+    public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Close this session?").font(.ui(12)).foregroundStyle(Theme.gray200)
             HStack(spacing: 6) {
@@ -205,9 +285,11 @@ struct ConfirmClose: View {
     }
 }
 
-/// The card's bottom bar: branch and worktree (CardStatusBar.tsx).
+/// The card's bottom bar: branch, worktree, the tree's uncommitted changes (CardStatusBar.tsx).
 struct CardStatusBar: View {
     let session: TerminalSession
+    var diffStat: DiffStat?
+    var onChanges: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 8) {
@@ -222,6 +304,9 @@ struct CardStatusBar: View {
                 .foregroundStyle(Theme.inkSecondary)
             }
             Spacer(minLength: 0)
+            if let diffStat, diffStat.insertions > 0 || diffStat.deletions > 0 {
+                GitChangesIndicator(stat: diffStat, action: onChanges)
+            }
         }
         .font(.ui(11))
         .padding(.horizontal, 8)
@@ -252,5 +337,40 @@ struct BranchChip: View {
             .padding(.vertical, 2)
             .background(RoundedRectangle(cornerRadius: Theme.radius).fill(hover ? Theme.white(0.06) : .clear))
         }
+    }
+}
+
+/// A session without its header: what the tabs layout shows under the active tab.
+public struct SessionStage: View {
+    let session: TerminalSession
+    let engine: TerminalEngine?
+    let focusRequest: Int
+    let actions: CardActions
+    let context: CardContext
+
+    public init(session: TerminalSession, engine: TerminalEngine?, focusRequest: Int = 0, actions: CardActions,
+                context: CardContext = CardContext()) {
+        self.session = session
+        self.engine = engine
+        self.focusRequest = focusRequest
+        self.actions = actions
+        self.context = context
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            Group {
+                if let engine {
+                    TerminalSurface(engine: engine, sessionID: session.id, focusRequest: focusRequest, onFocus: actions.select)
+                } else {
+                    Color.clear
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onRightClick { p in actions.contextMenu(session.id, p) }
+            SessionComposer(session: session, ended: context.ended, compact: false, actions: actions)
+            CardStatusBar(session: session, diffStat: context.diffStat) { actions.showChanges(session.id) }
+        }
+        .background(Theme.surfaceSunken)
     }
 }

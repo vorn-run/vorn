@@ -34,7 +34,12 @@ struct Sidebar: View {
     private var list: some View {
         VStack(alignment: .leading, spacing: 2) {
             switch model.mainViewMode {
-            case .sessions: ProjectsSection(model: model, store: store, actions: actions)
+            case .sessions:
+                if model.sidebarViewMode == .sessionsFlat {
+                    FlatSessionsSection(model: model, store: store, actions: actions)
+                } else {
+                    ProjectsSection(model: model, store: store, actions: actions)
+                }
             case .tasks: TasksProjectsSection(model: model, store: store)
             case .workflows: WorkflowsSidebarSection(store: features.workflows)
             }
@@ -187,12 +192,27 @@ struct ProjectsSection: View {
         return store.sessions.filter { names.contains($0.projectName) }.count
     }
 
+    /// ProjectsSection.tsx: the "active" filter, then the chosen order.
+    private var sorted: [Project] {
+        var list = projects
+        if model.worktreeFilter == .active { list = list.filter { !store.sessions(in: $0).isEmpty } }
+        switch model.projectSort {
+        case .manual: return list
+        case .name: return list.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+        case .recent:
+            func last(_ p: Project) -> Double { store.sessions(in: p).map { store.lastActivity[$0.id] ?? 0 }.max() ?? 0 }
+            return list.sorted { last($0) > last($1) }
+        }
+    }
+
     var body: some View {
         SectionHeader(title: "Projects", open: $model.projectsOpen) {
-            IconButton(.listFilter, size: 13, strokeWidth: 1.5, padding: 2, radius: Theme.radius,
-                       color: Theme.gray600, hoverFill: Theme.white(0.08), help: "Filter & sort") {}
+            SidebarOptionsButton(model: model)
             IconButton(.folderPlus, size: 13, strokeWidth: 1.5, padding: 2, radius: Theme.radius,
-                       color: Theme.gray600, hoverFill: Theme.white(0.08), help: "Add project") {}
+                       color: Theme.gray600, hoverFill: Theme.white(0.08), help: "Add project") {
+                model.contextMenu = nil
+                model.overlay = .addProject(editing: nil)
+            }
         }
         if model.projectsOpen {
             NavRow(icon: .layers, label: "All Projects", badge: workspaceSessionCount,
@@ -204,7 +224,7 @@ struct ProjectsSection: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
             }
-            ForEach(projects) { p in
+            ForEach(sorted) { p in
                 ProjectItem(project: p, model: model, store: store, actions: actions)
                     .padding(.top, 2)
             }
@@ -331,12 +351,30 @@ struct ProjectItem: View {
     let store: VornStore
     let actions: ShellActions
     @State private var hover = false
+    /// Branches whose sessions are folded away, keyed by worktree path ("__main__" for the main tree).
+    @State private var collapsed: Set<String> = []
 
     private var sessions: [TerminalSession] { store.sessions(in: project) }
     private var isGit: Bool { store.gitRepos[project.path] == true }
     private var worktrees: [Worktree] { store.worktrees[project.path] ?? [] }
     private var expanded: Bool { model.expandedProjects[project.name] ?? !sessions.isEmpty }
     private var active: Bool { model.activeProject == project.name && model.activeWorktreePath == nil }
+    private var mode: SidebarViewMode { model.sidebarViewMode }
+    private var showSessions: Bool { mode == .worktreesSessions }
+
+    /// ProjectItem.tsx's sortedWorktrees: filter, then name or most recent activity.
+    private var sortedWorktrees: [Worktree] {
+        var list = worktrees.filter { !$0.isMain }
+        if model.worktreeFilter == .active {
+            list = list.filter { wt in sessions.contains { $0.worktreePath == wt.path } }
+        }
+        let byName: (Worktree, Worktree) -> Bool = { $0.name.localizedCompare($1.name) == .orderedAscending }
+        guard model.worktreeSort == .recent else { return list.sorted(by: byName) }
+        func last(_ wt: Worktree) -> Double {
+            sessions.filter { $0.worktreePath == wt.path }.map { store.lastActivity[$0.id] ?? 0 }.max() ?? 0
+        }
+        return list.sorted { last($0) != last($1) ? last($0) > last($1) : byName($0, $1) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -367,10 +405,15 @@ struct ProjectItem: View {
                     rowAction(.terminal, "New terminal") { actions.newTerminal(project, nil) }
                     rowAction(.plus, "New session", stroke: 2) { actions.newSession(project, nil) }
                     if isGit {
-                        rowAction(.folderGit2, "New worktree", color: Theme.inkSecondary) {}
+                        rowAction(.folderGit2, "New worktree", color: Theme.inkSecondary) { actions.newWorktree(project) }
                     }
-                    rowAction(.ellipsis, "More", stroke: 2) {}
+                    rowAction(.ellipsis, "More", stroke: 2) {
+                        model.contextMenu = nil
+                        model.overlay = model.overlay == .projectMenu(project.name) ? nil : .projectMenu(project.name)
+                    }
                 }
+            } else if mode == .worktrees, !sessions.isEmpty {
+                Text("\(sessions.count)").font(.ui(12)).foregroundStyle(Theme.gray600)
             }
         }
         .font(.ui(13))
@@ -386,36 +429,54 @@ struct ProjectItem: View {
             model.select(project: project.name)
             if model.expandedProjects[project.name] == nil, sessions.isEmpty { model.expandedProjects[project.name] = true }
         }
+        .controlAnchor("project:\(project.name)")
     }
 
     @ViewBuilder private func body(expanded: Void) -> some View {
-        if !isGit {
-            if sessions.isEmpty {
-                Text("No active sessions")
-                    .font(.ui(11))
-                    .foregroundStyle(Theme.gray600)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-            }
-            ForEach(sessions) { s in
-                SessionItem(session: s, model: model, store: store, actions: actions, showBranch: true)
+        if mode == .sessions || !isGit {
+            if mode == .sessions || showSessions {
+                if sessions.isEmpty {
+                    Text("No active sessions")
+                        .font(.ui(11))
+                        .foregroundStyle(Theme.gray600)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                }
+                ForEach(sessions) { s in
+                    SessionItem(session: s, model: model, store: store, actions: actions, showBranch: true)
+                }
             }
         } else {
             let main = worktrees.first { $0.isMain }
-            MainWorktreeRow(project: project, branch: main?.branch ?? "main", model: model, actions: actions,
-                            worktree: main)
-            ForEach(sessions.filter { $0.isWorktree != true }) { s in
-                SessionItem(session: s, model: model, store: store, actions: actions, showBranch: false)
-                    .padding(.leading, 16)
+            let mainSessions = sessions.filter { $0.isWorktree != true }
+            if let main {
+                MainWorktreeRow(project: project, branch: main.branch, model: model, actions: actions, worktree: main,
+                                count: showSessions ? 0 : mainSessions.count,
+                                sessionsOpen: showSessions ? !collapsed.contains("__main__") : nil) { toggle("__main__") }
+                if showSessions && !collapsed.contains("__main__") {
+                    ForEach(mainSessions) { s in
+                        SessionItem(session: s, model: model, store: store, actions: actions, showBranch: false)
+                            .padding(.leading, 16)
+                    }
+                }
             }
-            ForEach(worktrees.filter { !$0.isMain }.sorted { $0.name < $1.name }) { wt in
-                WorktreeItem(project: project, worktree: wt, model: model, actions: actions)
-                ForEach(sessions.filter { $0.worktreePath == wt.path }) { s in
-                    SessionItem(session: s, model: model, store: store, actions: actions, showBranch: false)
-                        .padding(.leading, 16)
+            ForEach(sortedWorktrees) { wt in
+                let wtSessions = sessions.filter { $0.worktreePath == wt.path }
+                WorktreeItem(project: project, worktree: wt, model: model, actions: actions,
+                             count: showSessions ? 0 : wtSessions.count,
+                             sessionsOpen: showSessions ? !collapsed.contains(wt.path) : nil) { toggle(wt.path) }
+                if showSessions && !collapsed.contains(wt.path) {
+                    ForEach(wtSessions) { s in
+                        SessionItem(session: s, model: model, store: store, actions: actions, showBranch: false)
+                            .padding(.leading, 16)
+                    }
                 }
             }
         }
+    }
+
+    private func toggle(_ key: String) {
+        if collapsed.contains(key) { collapsed.remove(key) } else { collapsed.insert(key) }
     }
 }
 
@@ -425,6 +486,10 @@ private struct MainWorktreeRow: View {
     @Bindable var model: AppModel
     let actions: ShellActions
     let worktree: Worktree?
+    let count: Int
+    /// Whether its sessions show beneath it, when the view lists them.
+    let sessionsOpen: Bool?
+    let toggleSessions: () -> Void
     @State private var hover = false
 
     private var active: Bool {
@@ -433,8 +498,18 @@ private struct MainWorktreeRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            LucideIcon(hover ? .chevronRight : .gitBranch, size: 14, strokeWidth: 1.5)
-                .foregroundStyle(Theme.gray500)
+            if let open = sessionsOpen, hover {
+                Button(action: toggleSessions) {
+                    LucideIcon(.chevronRight, size: 12, strokeWidth: 2.5)
+                        .foregroundStyle(Theme.gray500)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                        .frame(width: 14, height: 14)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Toggle sessions")
+            } else {
+                LucideIcon(.gitBranch, size: 14, strokeWidth: 1.5).foregroundStyle(Theme.gray500)
+            }
             Text(branch).lineLimit(1)
             Spacer(minLength: 0)
             if hover {
@@ -442,10 +517,12 @@ private struct MainWorktreeRow: View {
                     rowAction(.terminal, "New terminal") { actions.newTerminal(project, worktree) }
                     rowAction(.plus, "New session", stroke: 2) { actions.newSession(project, worktree) }
                 }
+            } else if count > 0 {
+                Text("\(count)").font(.ui(12)).foregroundStyle(Theme.gray600)
             }
         }
         .font(.ui(13))
-        .foregroundStyle(active ? Color.white : Theme.gray400)
+        .foregroundStyle(active || hover ? Color.white : Theme.gray400)
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .frame(height: 30)
@@ -455,7 +532,8 @@ private struct MainWorktreeRow: View {
         .onHover { hover = $0 }
         .onTapGesture {
             model.activeProject = project.name
-            model.activeWorktreePath = AppModel.mainWorktree
+            model.activeWorktreePath = active ? nil : AppModel.mainWorktree
+            model.expandedSessionID = nil
         }
     }
 }
@@ -465,15 +543,54 @@ private struct WorktreeItem: View {
     let worktree: Worktree
     @Bindable var model: AppModel
     let actions: ShellActions
+    let count: Int
+    let sessionsOpen: Bool?
+    let toggleSessions: () -> Void
     @State private var hover = false
+    @State private var renaming = false
+    @State private var draft = ""
 
     private var active: Bool { model.activeWorktreePath == worktree.path }
 
     var body: some View {
+        if renaming {
+            HStack(spacing: 8) {
+                LucideIcon(.folderGit2, size: 14, strokeWidth: 1.5).foregroundStyle(Theme.gray500)
+                TextField("", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.ui(12))
+                    .foregroundStyle(Theme.gray200)
+                    .onSubmit {
+                        let name = draft.trimmingCharacters(in: .whitespaces)
+                        if !name.isEmpty, name != worktree.name { actions.renameWorktree(project, worktree, to: name) }
+                        renaming = false
+                    }
+                    .onExitCommand { renaming = false }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+        } else {
+            row
+        }
+    }
+
+    private var row: some View {
         HStack(spacing: 0) {
-            LucideIcon(.folderGit2, size: 14, strokeWidth: 1.5)
-                .foregroundStyle(Theme.gray500)
-                .padding(.leading, 8)
+            Group {
+                if let open = sessionsOpen, hover {
+                    Button(action: toggleSessions) {
+                        LucideIcon(.chevronRight, size: 12, strokeWidth: 2.5)
+                            .foregroundStyle(Theme.gray500)
+                            .rotationEffect(.degrees(open ? 90 : 0))
+                            .frame(width: 14, height: 14)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Toggle sessions")
+                } else {
+                    LucideIcon(.folderGit2, size: 14, strokeWidth: 1.5).foregroundStyle(Theme.gray500)
+                }
+            }
+            .padding(.leading, 8)
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(worktree.name).font(.ui(13)).lineLimit(1)
@@ -489,11 +606,19 @@ private struct WorktreeItem: View {
                     HStack(spacing: 2) {
                         rowAction(.terminal, "New terminal") { actions.newTerminal(project, worktree) }
                         rowAction(.plus, "New session", stroke: 2) { actions.newSession(project, worktree) }
-                        rowAction(.pencil, "Rename worktree") {}
+                        rowAction(.pencil, "Rename worktree", stroke: 2) {
+                            draft = worktree.name
+                            renaming = true
+                        }
+                        rowAction(.trash2, "Remove worktree", hoverColor: Theme.red400) {
+                            actions.requestRemoveWorktree(project, worktree)
+                        }
                     }
+                } else if count > 0 {
+                    Text("\(count)").font(.ui(11)).foregroundStyle(Theme.gray600)
                 }
             }
-            .foregroundStyle(active ? Color.white : Theme.gray400)
+            .foregroundStyle(active || hover ? Color.white : Theme.gray400)
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .overlay(alignment: .leading) {
@@ -504,7 +629,8 @@ private struct WorktreeItem: View {
         .onHover { hover = $0 }
         .onTapGesture {
             model.activeProject = project.name
-            model.activeWorktreePath = worktree.path
+            model.activeWorktreePath = active ? nil : worktree.path
+            model.expandedSessionID = nil
         }
     }
 }
