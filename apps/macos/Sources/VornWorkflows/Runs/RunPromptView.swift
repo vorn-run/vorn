@@ -278,5 +278,7 @@ private struct RunSurfacesHost: ViewModifier {
                     RunPromptView(store: store, prompt: prompt).id(ObjectIdentifier(prompt))
                 }
             }
+            .overlay { if !store.surfaces.missed.isEmpty { MissedSchedulesView(store: store) } }
+            .task { await store.followMissedSchedules() }
     }
 }

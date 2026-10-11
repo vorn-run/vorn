@@ -45,6 +45,12 @@ func stageRunSurface(_ store: WorkflowsStore, scene: String) async -> Bool {
         prompt.branch = "fix/login"
         prompt.values["goal"] = "Stop the login loop"
         store.surfaces.prompt = prompt
+    case "missed":
+        store.showMissed(MissedSchedule.list([
+            ["workflowId": "wf-nightly", "workflowName": "Nightly digest", "missedAt": "2026-03-02T07:00:00Z"],
+            ["workflowId": "wf-weekly", "workflowName": "Weekly cleanup", "missedAt": "2026-03-01T18:30:00Z"],
+        ]))
+        store.toggleMissed("wf-weekly")
     default:
         return false
     }

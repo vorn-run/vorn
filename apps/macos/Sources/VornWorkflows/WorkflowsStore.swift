@@ -264,6 +264,9 @@ public final class WorkflowsStore {
             if let list { workflows = list } else { scheduleReload() }
         case .disconnected(let why):
             connectionError = why
+        case .schedulerMissed:
+            // App-level: `followMissedSchedules` shows these whether or not this view is open.
+            break
         }
     }
 

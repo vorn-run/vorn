@@ -63,12 +63,15 @@ struct FormCheckbox: View {
 
 struct CheckSquare: View {
     let checked: Bool
+    var tint: Color = Theme.white(0.8)
 
     var body: some View {
         RoundedRectangle(cornerRadius: 3)
-            .fill(checked ? Theme.white(0.8) : Theme.white(0.04))
-            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(checked ? .clear : Theme.white(0.3), lineWidth: 1))
-            .overlay { if checked { LucideIcon(.check, size: 10, strokeWidth: 3).foregroundStyle(Color.black) } }
+            .fill(checked ? tint : Theme.white(0.05))
+            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(checked ? .clear : Theme.gray600, lineWidth: 1))
+            .overlay {
+                if checked { LucideIcon(.check, size: 10, strokeWidth: 3).foregroundStyle(tint == Theme.blue500 ? .white : .black) }
+            }
             .frame(width: 13, height: 13)
     }
 }

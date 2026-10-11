@@ -134,3 +134,53 @@ private let beta = Project(name: "beta", path: "/p/beta")
         for (n, js) in cases { #expect(OJSON.format(n) == js, "\(n)") }
     }
 }
+
+@Suite @MainActor struct MissedSchedulesTests {
+    @Test func readsBothWireShapes() {
+        let list = MissedSchedule.list([
+            ["workflowId": "a", "workflowName": "A", "missedAt": "2026-01-01T00:00:00Z"],
+            ["workflow": ["id": "b", "name": "B"], "scheduledFor": "2026-01-02T00:00:00Z"],
+            ["workflowId": "c"],
+            ["nothing": true],
+        ])
+        #expect(list.map(\.workflowId) == ["a", "b", "c"])
+        #expect(list.map(\.name) == ["A", "B", "c"])
+        #expect(list[1].scheduledFor == "2026-01-02T00:00:00Z")
+        #expect(list[0].scheduledLabel.hasPrefix("Scheduled for "))
+        #expect(MissedSchedule.list("nope").isEmpty)
+    }
+
+    @Test func decodesThePush() {
+        let event = WorkflowEvent(.notification(method: "scheduler:missed", params: [["workflowId": "a"]]))
+        guard case .schedulerMissed(let json)? = event else {
+            Issue.record("not a missed push")
+            return
+        }
+        #expect(MissedSchedule.list(json).map(\.workflowId) == ["a"])
+        #expect(WorkflowEvent.topics.contains("scheduler:missed"))
+    }
+
+    @Test func runsTheSelectedOnesThatStillExist() async throws {
+        let wf = WorkflowDefinition(
+            id: "a", name: "A", nodes: [WorkflowNode(id: "t", type: .trigger, label: "T", config: ["triggerType": "recurring"])])
+        let backend = FixtureWorkflowsBackend(workflows: [wf], runs: [])
+        let store = WorkflowsStore(backend: backend)
+        await store.reload()
+        store.showMissed([
+            MissedSchedule(workflowId: "a", name: "A", scheduledFor: ""),
+            MissedSchedule(workflowId: "gone", name: "Gone", scheduledFor: ""),
+            MissedSchedule(workflowId: "b", name: "B", scheduledFor: ""),
+        ])
+        #expect(store.surfaces.missedSelected == ["a", "gone", "b"])
+        #expect(store.surfaces.hasModal)
+        store.toggleMissed("b")
+        store.runMissedSelected()
+        #expect(store.surfaces.missed.isEmpty)
+        for _ in 0..<50 where await backend.writes.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(await backend.writes == ["rpc workflow:run"])
+
+        store.showMissed([MissedSchedule(workflowId: "a", name: "A", scheduledFor: "")])
+        store.skipMissed()
+        #expect(store.surfaces.missed.isEmpty)
+    }
+}

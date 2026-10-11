@@ -38,8 +38,20 @@ extension WorkflowsStore {
 
     // MARK: Missed schedules
 
+    /// Shows each `scheduler:missed` push for as long as the window lives, as App.tsx keeps the dialog mounted.
+    public func followMissedSchedules() async {
+        guard let stream = try? await backend.events() else { return }
+        for await event in stream {
+            guard case .schedulerMissed(let json) = event else { continue }
+            let items = MissedSchedule.list(json)
+            // Run Selected skips workflows it does not know, so the list must be loaded.
+            if workflows.isEmpty && !items.isEmpty { await reload() }
+            showMissed(items)
+        }
+    }
+
     /// A `scheduler:missed` push: every item starts selected.
-    func showMissed(_ items: [MissedSchedule]) {
+    public func showMissed(_ items: [MissedSchedule]) {
         guard !items.isEmpty else { return }
         surfaces.missed = items
         surfaces.missedSelected = Set(items.map(\.workflowId))
