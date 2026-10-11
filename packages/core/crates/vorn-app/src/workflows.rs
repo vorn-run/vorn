@@ -201,6 +201,20 @@ pub struct Workflows {
     pub connections: Vec<Value>,
 }
 
+/// `liveExecSignature`'s part for one run: its status, end and the nodes
+/// parked on a gate.
+pub fn live_signature(run: &Value) -> (String, String, Vec<String>) {
+    let waiting = crate::runs::states(run)
+        .filter(|n| s(n, "status") == Some("waiting"))
+        .filter_map(|n| s(n, "nodeId").map(str::to_owned))
+        .collect();
+    (
+        text_of(run.get("status")),
+        text_of(run.get("completedAt")),
+        waiting,
+    )
+}
+
 /// The editor field that edits `path` on `node`, or on the workflow.
 pub fn field_id(node: Option<&str>, path: &str) -> crate::ui::Id {
     crate::ui::Id::new("wf-field").child((node, path))

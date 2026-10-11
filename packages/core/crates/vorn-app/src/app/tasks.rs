@@ -1027,7 +1027,7 @@ pub(super) fn open_url(url: &str) {
     } else {
         "xdg-open"
     };
-    // Nothing to do when there is no handler.
+    // spawn-visible: the system opener shows the link; nothing to do without one.
     let _ = std::process::Command::new(opener).arg(url).spawn();
 }
 

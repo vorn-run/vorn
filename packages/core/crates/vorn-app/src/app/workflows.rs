@@ -110,9 +110,16 @@ impl App {
         }
         self.st.wf.launching = None;
         let key = runs::key(run);
-        match self.st.wf.history.iter_mut().find(|r| runs::key(r) == key) {
-            Some(r) => *r = run.clone(),
-            None => self.st.wf.history.insert(0, run.clone()),
+        let before = match self.st.wf.history.iter_mut().find(|r| runs::key(r) == key) {
+            Some(r) => Some(std::mem::replace(r, run.clone())),
+            None => {
+                self.st.wf.history.insert(0, run.clone());
+                None
+            }
+        };
+        // Re-read on a status change or a gate, as an earlier read may answer last.
+        if before.is_none_or(|b| wf::live_signature(&b) != wf::live_signature(run)) {
+            self.load_history(&id);
         }
     }
 
