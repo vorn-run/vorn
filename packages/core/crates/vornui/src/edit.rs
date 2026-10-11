@@ -54,6 +54,8 @@ pub struct TextEdit {
     anchor: usize,
     preedit: String,
     multiline: bool,
+    /// Its field has been painted, so `multiline` is the field's.
+    shaped: bool,
     /// Where an up/down run started, physical pixels, so the caret keeps
     /// its column across short lines.
     pub(crate) goal_x: Option<f32>,
@@ -65,6 +67,7 @@ impl TextEdit {
     pub fn new(text: &str, multiline: bool) -> TextEdit {
         let mut e = TextEdit {
             multiline,
+            shaped: true,
             ..TextEdit::default()
         };
         e.set_text(text);
@@ -82,7 +85,8 @@ impl TextEdit {
     /// Follows the field's look, for edits made before their field was
     /// first painted.
     pub(crate) fn set_multiline(&mut self, multiline: bool) {
-        if self.multiline != multiline {
+        if !self.shaped || self.multiline != multiline {
+            self.shaped = true;
             self.multiline = multiline;
             let t = std::mem::take(&mut self.text);
             self.text = self.clean(&t);
@@ -326,7 +330,7 @@ impl TextEdit {
     /// The paste of a single-line field loses its newlines, as a browser's
     /// `<input>` does.
     fn clean(&self, s: &str) -> String {
-        if self.multiline {
+        if self.multiline || !self.shaped {
             s.replace("\r\n", "\n")
         } else {
             s.replace(['\r', '\n'], "")
@@ -482,6 +486,15 @@ mod tests {
         one.set_selection(0, 0);
         one.insert("a\nb");
         assert_eq!(one.text(), "abx", "single-line fields drop newlines");
+
+        let mut early = TextEdit::default();
+        early.set_text("a\nb");
+        assert_eq!(early.text(), "a\nb", "kept until the field is painted");
+        let mut multi = early.clone();
+        multi.set_multiline(true);
+        assert_eq!(multi.text(), "a\nb");
+        early.set_multiline(false);
+        assert_eq!(early.text(), "ab");
     }
 
     #[test]

@@ -104,11 +104,17 @@ fn a_task_is_created_edited_moved_and_deleted() {
     shot.type_text(&mut app, "Fix login");
     shot.save(&mut app, "task-dialog");
     let id = app.st.tasks.dialog_form.id.clone();
-    shot.click(&mut app, control("task-dialog-submit", task(TaskAct::Submit)));
+    shot.click(
+        &mut app,
+        control("task-dialog-submit", task(TaskAct::Submit)),
+    );
     assert_eq!(app.st.dialog, None);
     toast(&mut shot, &mut app, "Task created");
     let t = shot.until(&mut app, "the task saved", |app, _| saved(app, &id));
     assert_eq!(t["title"], "Fix login");
+    assert!(t["description"]
+        .as_str()
+        .is_some_and(|d| d.starts_with("## Description\n")));
     assert_eq!(t["status"], "todo");
     assert_eq!(t["projectName"], "web");
     shot.until(&mut app, "its row", |app, _| {
@@ -149,17 +155,13 @@ fn a_task_is_created_edited_moved_and_deleted() {
 
     shot.click(&mut app, control("task-panel", task(TaskAct::CloseDetail)));
     assert_eq!(app.st.tasks.selected, None);
+    // A list row's hover buttons complete and archive it.
     shot.hover(&mut app, card_id(&id));
+    shot.save(&mut app, "task-row-actions");
     shot.click(
         &mut app,
-        control("task-card-menu", Act::Open(MenuKind::TaskCard(id.clone()))),
+        control("task-row-done", task(TaskAct::Complete(id.clone()))),
     );
-    assert_eq!(
-        app.menu_labels(&shot.ui),
-        ["Review diff", "Mark as done", "Edit", "Cancel task", "Delete"]
-    );
-    shot.save(&mut app, "task-card-menu");
-    choose(&mut shot, &mut app, "Mark as done");
     toast(&mut shot, &mut app, "Task completed");
     shot.until(&mut app, "done", |app, _| {
         (saved(app, &id)?["status"] == "done").then_some(())
@@ -167,30 +169,41 @@ fn a_task_is_created_edited_moved_and_deleted() {
     shot.hover(&mut app, card_id(&id));
     shot.click(
         &mut app,
-        control("task-card-menu", Act::Open(MenuKind::TaskCard(id.clone()))),
+        control("task-row-archive", task(TaskAct::Archive(id.clone()))),
     );
-    choose(&mut shot, &mut app, "Archive");
     toast(&mut shot, &mut app, "Task archived");
     shot.until(&mut app, "archived", |app, _| {
         saved(app, &id)?["archivedAt"].as_str().map(|_| ())
     });
     shot.until(&mut app, "the row hidden", |app, ui| {
-        ui.rect_of(card_id(&id)).is_none().then_some(()).filter(|_| {
-            app.store
-                .tasks
-                .iter()
-                .any(|t| t.id == id && t.archived_at.is_some())
-        })
+        ui.rect_of(card_id(&id))
+            .is_none()
+            .then_some(())
+            .filter(|_| {
+                app.store
+                    .tasks
+                    .iter()
+                    .any(|t| t.id == id && t.archived_at.is_some())
+            })
     });
 
     // Archived tasks show with the toolbar's switch; the panel deletes one.
-    shot.click(&mut app, control("toolbar", Act::Open(MenuKind::TaskOptions)));
+    shot.click(
+        &mut app,
+        control("toolbar", Act::Open(MenuKind::TaskOptions)),
+    );
     shot.save(&mut app, "task-options");
-    shot.click(&mut app, control("task-archived", task(TaskAct::ToggleArchived)));
+    shot.click(
+        &mut app,
+        control("task-archived", task(TaskAct::ToggleArchived)),
+    );
     assert!(app.st.tasks.archived);
     shot.send(&mut app, key("Escape", 0, None));
     shot.click(&mut app, card_id(&id));
-    shot.click(&mut app, control("task-panel", task(TaskAct::AskDelete(id.clone()))));
+    shot.click(
+        &mut app,
+        control("task-panel", task(TaskAct::AskDelete(id.clone()))),
+    );
     assert_eq!(app.st.tasks.confirm_delete.as_deref(), Some(id.as_str()));
     shot.save(&mut app, "task-delete-confirm");
     shot.click(
@@ -212,8 +225,14 @@ fn the_board_moves_a_dragged_card_to_the_column_it_is_dropped_on() {
     let (mut app, mut shot) = tasks_view(&v);
     let id = create(&mut shot, &mut app, "Ship it");
 
-    shot.click(&mut app, control("toolbar", Act::Open(MenuKind::TaskOptions)));
-    shot.click(&mut app, control("task-mode", task(TaskAct::Mode(Mode::Board))));
+    shot.click(
+        &mut app,
+        control("toolbar", Act::Open(MenuKind::TaskOptions)),
+    );
+    shot.click(
+        &mut app,
+        control("task-mode", task(TaskAct::Mode(Mode::Board))),
+    );
     assert_eq!(app.st.tasks.mode, Mode::Board);
     shot.until(&mut app, "the mode saved", |app, _| {
         let c = app.rpc().call("config:load", Value::Null).ok()?;
@@ -221,6 +240,16 @@ fn the_board_moves_a_dragged_card_to_the_column_it_is_dropped_on() {
     });
     shot.send(&mut app, key("Escape", 0, None));
     shot.save(&mut app, "tasks-board");
+
+    shot.hover(&mut app, card_id(&id));
+    shot.click(
+        &mut app,
+        control("task-card-menu", Act::Open(MenuKind::TaskCard(id.clone()))),
+    );
+    assert_eq!(app.menu_labels(&shot.ui), ["Edit", "Cancel task", "Delete"]);
+    shot.save(&mut app, "task-card-menu");
+    shot.send(&mut app, key("Escape", 0, None));
+    assert!(app.st.menu.is_none());
 
     shot.frame(&mut app);
     let from = shot.ui.rect_of(card_id(&id)).expect("the card");
@@ -271,7 +300,11 @@ fn the_editor_runs_slash_commands_carries_lists_and_formats_a_selection() {
     shot.send(&mut app, key("Enter", 0, Some("\r")));
     assert_eq!(shot.ui.edit_text(desc), "- [ ] first\n- [ ] ");
     shot.send(&mut app, key("Enter", 0, Some("\r")));
-    assert_eq!(shot.ui.edit_text(desc), "- [ ] first\n\n", "an empty item ends it");
+    assert_eq!(
+        shot.ui.edit_text(desc),
+        "- [ ] first\n\n",
+        "an empty item ends it"
+    );
 
     shot.ui.edit_mut(desc).set_selection(6, 11);
     shot.save(&mut app, "task-toolbar");
@@ -285,10 +318,7 @@ fn the_editor_runs_slash_commands_carries_lists_and_formats_a_selection() {
     shot.ui.edit_mut(desc).set_selection(8, 13);
     shot.click(
         &mut app,
-        control(
-            "task-format",
-            task(TaskAct::StartLink(Form::Dialog)),
-        ),
+        control("task-format", task(TaskAct::StartLink(Form::Dialog))),
     );
     assert!(app.st.tasks.linking.is_some());
     shot.type_text(&mut app, "example.com");
@@ -350,7 +380,10 @@ fn a_review_shows_the_diff_takes_line_comments_and_commits() {
     shot.save(&mut app, "task-diff");
     shot.click(
         &mut app,
-        control("task-diff-file", task(TaskAct::PickFile(Some(path.clone())))),
+        control(
+            "task-diff-file",
+            task(TaskAct::PickFile(Some(path.clone()))),
+        ),
     );
     let diff = app.st.tasks.diff.files[0].diff.clone();
     let line = diff
@@ -366,7 +399,10 @@ fn a_review_shows_the_diff_takes_line_comments_and_commits() {
     shot.send(&mut app, key("Enter", MOD, Some("\r")));
     let c = &app.st.tasks.diff.comments;
     assert_eq!(c.len(), 1);
-    assert_eq!((c[0].content.as_str(), c[0].text.as_str()), ("+two", "Say three too"));
+    assert_eq!(
+        (c[0].content.as_str(), c[0].text.as_str()),
+        ("+two", "Say three too")
+    );
     shot.save(&mut app, "task-comments");
     shot.click(
         &mut app,
@@ -375,7 +411,10 @@ fn a_review_shows_the_diff_takes_line_comments_and_commits() {
     toast(&mut shot, &mut app, "Review feedback copied to clipboard");
     assert!(app.st.tasks.diff.comments.is_empty());
 
-    shot.click(&mut app, control("task-commit-open", task(TaskAct::OpenCommit)));
+    shot.click(
+        &mut app,
+        control("task-commit-open", task(TaskAct::OpenCommit)),
+    );
     assert_eq!(app.st.dialog, Some(Dialog::Commit));
     assert_eq!(shot.ui.focus(), Some(commit_id()));
     shot.type_text(&mut app, "Add two");
@@ -422,7 +461,10 @@ fn the_panel_attaches_images_and_lists_the_tasks_workflow_runs() {
     shot.until(&mut app, "the run", |app, _| {
         (app.st.tasks.runs.first()?["runId"] == "run-1").then_some(())
     });
-    shot.click(&mut app, control("run-toggle", Act::Run(RunAct::Toggle("run-1".into()))));
+    shot.click(
+        &mut app,
+        control("run-toggle", Act::Run(RunAct::Toggle("run-1".into()))),
+    );
     shot.click(
         &mut app,
         control(
@@ -452,13 +494,13 @@ fn the_panel_attaches_images_and_lists_the_tasks_workflow_runs() {
     );
     assert_eq!(shot.ui.focus(), Some(image_id(Form::Detail)));
     shot.type_line(&mut app, &png.to_string_lossy());
+    // The store keeps no image list (the renderer's saves drop it too), so
+    // the file and the panel's form are what show it was attached.
     let name = shot.until(&mut app, "the image saved", |app, _| {
-        for t in &app.st.toasts {
-            eprintln!("toast: {}", t.text);
-        }
-        let images = saved(app, &id)?["images"].as_array()?.clone();
-        images.first()?.as_str().map(str::to_owned)
+        app.st.tasks.detail_form.images.first().cloned()
     });
+    let file = v.home.join("task-images").join(&id).join(&name);
+    assert!(file.is_file(), "{} stored", file.display());
     shot.until(&mut app, "its thumbnail", |app, _| {
         app.st.tasks.thumbs.contains_key(&name).then_some(())
     });
@@ -470,11 +512,8 @@ fn the_panel_attaches_images_and_lists_the_tasks_workflow_runs() {
             task(TaskAct::RemoveImage(Form::Detail, name.clone())),
         ),
     );
-    shot.until(&mut app, "the image removed", |app, _| {
-        let t = saved(app, &id)?;
-        t["images"]
-            .as_array()
-            .is_none_or(|i| i.is_empty())
-            .then_some(())
+    assert!(app.st.tasks.detail_form.images.is_empty());
+    shot.until(&mut app, "the file removed", |_, _| {
+        (!file.exists()).then_some(())
     });
 }

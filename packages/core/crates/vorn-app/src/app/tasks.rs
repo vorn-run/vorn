@@ -255,7 +255,12 @@ impl App {
         if !self.st.tasks.diff_open {
             return None;
         }
-        let t = self.st.tasks.selected.as_deref().and_then(|id| self.task(id))?;
+        let t = self
+            .st
+            .tasks
+            .selected
+            .as_deref()
+            .and_then(|id| self.task(id))?;
         if !matches!(t.status.to_string().as_str(), "in_review" | "in_progress") {
             return None;
         }
@@ -270,7 +275,11 @@ impl App {
         let Some(cwd) = self.diff_cwd() else { return };
         self.st.tasks.diff.cwd = cwd.clone();
         self.st.tasks.diff.loading = true;
-        self.call(Call::Task(TaskCall::Diff(cwd.clone())), "git:diffFull", json!(cwd));
+        self.call(
+            Call::Task(TaskCall::Diff(cwd.clone())),
+            "git:diffFull",
+            json!(cwd),
+        );
     }
 
     /// Saves the detail panel's pending edits now.

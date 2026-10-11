@@ -629,6 +629,7 @@ pub(super) fn panel(s: &Screen<'_>) -> Option<El> {
     let title_focus = s.ui.focused(title_id(Form::Detail));
     let title = div().px(16.0).pt(16.0).pb(8.0).child(
         div()
+            .w_full()
             .px(4.0)
             .ml(-4.0)
             .py(2.0)
