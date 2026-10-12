@@ -132,8 +132,8 @@ impl App {
                 json!(path),
             );
         }
-        if self.st.git.ides.is_none() {
-            self.st.git.ides = Some(Vec::new());
+        if !self.st.git.ides_asked {
+            self.st.git.ides_asked = true;
             self.call(Call::Git(GitCall::Ides), "ide:detect", Value::Null);
         }
         let due: Vec<Pending> = {

@@ -2,7 +2,6 @@
 //! the card's status bar, the `BranchPicker` popover, the Changes panel
 //! (`RightPanel`), `WorktreeCleanupDialog`, and the worktree toasts.
 
-use super::menus::Item;
 use super::tasks::diff::{self, Scope};
 use super::{c, ico, sidebar_project_icon, truncate, white, Screen};
 use crate::act::Act;
@@ -146,27 +145,59 @@ pub(super) fn open_in(s: &Screen<'_>, session: &Session, dim: f32) -> Option<El>
     )
 }
 
-/// The `Open in` menu's entries.
-pub(super) fn open_in_items(s: &Screen<'_>, session: &str) -> Vec<Item> {
+/// The `Open in` menu: its title and each editor with its mark.
+pub(super) fn open_in_panel(s: &Screen<'_>, session: &str) -> El {
     let Some(path) = s
         .store
         .session(session)
         .map(|x| x.info.project_path.clone())
     else {
-        return Vec::new();
+        return div();
     };
-    let mut out = vec![Item::header("Open in")];
+    let mut col = div()
+        .col()
+        .w(180.0)
+        .py(4.0)
+        .rounded(8.0)
+        .border(1.0, white(0.08))
+        .bg(c(look::SURFACE_OVERLAY))
+        .role(Role::Menu, "Open in")
+        .child(
+            div().px(12.0).py(6.0).child(
+                text("Open in", 11.0, c(look::GRAY_500))
+                    .weight(500)
+                    .line_height(16.0)
+                    .silent(),
+            ),
+        );
     for ide in s.st.git.ides.iter().flatten() {
-        out.push(
-            Item {
-                label: ide.name.clone(),
-                act: Some(git(GitAct::OpenIn(path.clone(), Some(ide.id.clone())))),
-                ..Item::default()
-            }
-            .mark(ide_mark(&ide.id, 14.0, c(look::GRAY_300))),
+        let id = s.acts.on(
+            "open-in-pick",
+            git(GitAct::OpenIn(path.clone(), Some(ide.id.clone()))),
+        );
+        let hot = s.ui.hover(id);
+        let fg = c(look::GRAY_300).mix(c(look::WHITE), hot);
+        col = col.child(
+            div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_center()
+                .gap(10.0)
+                .px(12.0)
+                .py(6.0)
+                .bg(white(0.06 * hot))
+                .role(Role::MenuItem, ide.name.as_str())
+                .child(ide_mark(&ide.id, 14.0, fg))
+                .child(text(&ide.name, 13.0, fg).line_height(18.0).silent()),
         );
     }
-    out
+    col
+}
+
+/// The `Open in` menu's height, to open it above its chip.
+pub fn open_in_height(n: usize) -> f32 {
+    8.0 + 28.0 + n as f32 * 30.0
 }
 
 /// `BranchPicker`: the filter, the fetch, and the branches.

@@ -722,6 +722,12 @@ impl App {
             {
                 (r.x + r.w - w, r.y + r.h + 4.0)
             }
+            // `OpenInButton` opens upwards, its right edge on the chip's.
+            (None, Some(r)) if matches!(kind, MenuKind::OpenIn(_)) => {
+                let n = self.st.git.ides.as_ref().map_or(0, Vec::len);
+                let h = crate::screen::git::open_in_height(n);
+                (r.x + r.w - w, (r.y - h - 4.0).max(8.0))
+            }
             (None, Some(r)) => (r.x, r.y + r.h + 4.0),
             (None, None) => (self.size.0 - w - 12.0, look::TOP_BAR_H),
         };

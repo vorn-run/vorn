@@ -258,8 +258,9 @@ pub struct Git {
     pub diff: Diff,
     pub commit: Commit,
     pub branches: Option<Branches>,
-    /// Detected editors, the default first; `None` until asked.
+    /// Detected editors, the default first; `None` until vornd answers.
     pub ides: Option<Vec<Ide>>,
+    pub ides_asked: bool,
     pub removal: Option<Removal>,
     pub offers: Vec<Offer>,
     pub removing: Vec<Removing>,

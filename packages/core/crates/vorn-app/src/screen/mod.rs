@@ -132,6 +132,7 @@ impl Screen<'_> {
                 crate::state::MenuKind::WfIcon => workflows::icon_picker(self),
                 crate::state::MenuKind::SetShell => settings::shell_panel(self),
                 crate::state::MenuKind::Branch(_) => git::branch_panel(self),
+                crate::state::MenuKind::OpenIn(ref sid) => git::open_in_panel(self, sid),
                 _ => menus::panel(
                     self.ui,
                     menus::MENU,

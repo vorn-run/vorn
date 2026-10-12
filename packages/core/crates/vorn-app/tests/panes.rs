@@ -216,9 +216,17 @@ fn git_follows_a_sessions_changes_into_a_commit_and_a_branch() {
             &mut app,
             control("open-in-more", Act::Git(GitAct::OpenInMenu(sid.clone()))),
         );
-        assert_eq!(
-            app.menu_labels(&shot.ui).first().map(String::as_str),
-            Some("Open in")
+        let first = app
+            .st
+            .git
+            .ides
+            .as_ref()
+            .and_then(|l| l.first())
+            .map(|i| i.id.clone());
+        let pick = Act::Git(GitAct::OpenIn(repo.to_string_lossy().into_owned(), first));
+        assert!(
+            shot.ui.rect_of(control("open-in-pick", pick)).is_some(),
+            "the editors are listed"
         );
         shot.save(&mut app, "c-openin");
     }
