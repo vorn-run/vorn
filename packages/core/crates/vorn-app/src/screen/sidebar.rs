@@ -245,71 +245,42 @@ pub(super) fn nav_item(
         }))
 }
 
-/// SessionItem: the marker, status icon, name and branch, and close on
-/// hover.
+/// SessionItem under its project, which leaves out the branch.
 fn session_row(s: &Screen<'_>, session: &Session) -> El {
+    use crate::components::sidebar::{session_row, SessionRow, SessionRowIds};
+    use crate::components::Status;
     let sid = session.info.id.as_str();
-    let act = if s.st.layout == crate::state::LayoutMode::Tabs {
+    let tabs = s.st.layout == crate::state::LayoutMode::Tabs;
+    let act = if tabs {
         Act::Select(sid.to_owned())
     } else {
         Act::Expand(sid.to_owned())
     };
-    let id = s.acts.on("sidebar-session", act);
-    let close_id = Acts::id("sidebar-session", &Act::CloseSession(sid.to_owned()));
-    let hot = s.ui.hovered(id) || s.ui.hovered(close_id);
-    let active = s.st.focused.as_deref() == Some(sid)
-        || (s.st.layout == crate::state::LayoutMode::Tabs && s.st.selected.as_deref() == Some(sid));
-    let fg = if active || hot {
-        c(look::WHITE)
+    let active = if tabs {
+        s.st.selected.as_deref() == Some(sid)
     } else {
-        c(look::GRAY_400)
+        s.st.focused.as_deref() == Some(sid)
     };
-    let mut name = div().row().items_center().gap(6.0).grow().min_w0().child(
-        text(session.title(), 12.0, fg)
-            .line_height(16.0)
-            .truncate()
-            .silent(),
-    );
-    if let Some(b) = session.info.branch.as_deref() {
-        name = name.child(
-            text(b, 10.0, c(look::GRAY_600))
-                .line_height(14.0)
-                .truncate()
-                .silent(),
-        );
-    }
-    let mut row = div()
-        .id(id)
-        .on(Action::Click)
-        .row()
-        .items_center()
-        .gap(8.0)
-        .px(8.0)
-        .py(4.0)
-        .rounded(6.0)
-        .bg(white(0.0).mix(white(0.04), if hot { 1.0 } else { 0.0 }))
-        .role(Role::Button, session.title())
-        .selected(active)
-        .child(super::cards::status_icon(s, session, 14.0, 1.0))
-        .child(name);
-    if active {
-        row = row.child(div().absolute(0.0, 4.0).size(1.0, 16.0).bg(c(look::WHITE)));
-    }
-    if hot {
-        s.acts.bind(close_id, Act::CloseSession(sid.to_owned()));
-        let b = div()
-            .id(close_id)
-            .on(Action::Click)
-            .role(Role::Button, "Close session")
-            .child(ico(
-                "x",
-                12.0,
-                2.0,
-                c(look::GRAY_500).mix(c(look::DANGER), s.ui.hover(close_id)),
-            ));
-        row = row.child(tooltip(s.ui, b, close_id, "Close session", None));
-    }
-    row
+    let ids = SessionRowIds {
+        row: s.acts.on("sidebar-session", act),
+        more: None,
+        close: s
+            .acts
+            .on("sidebar-session", Act::CloseSession(sid.to_owned())),
+    };
+    let title = session.title();
+    session_row(
+        s.ui,
+        s.agents,
+        ids,
+        &SessionRow {
+            name: &title,
+            branch: None,
+            agent: &session.info.agent_type,
+            status: Status::parse(session.status()),
+            active,
+        },
+    )
 }
 
 /// ProjectItem: icon, name and count, its quick actions on hover, and its

@@ -5391,6 +5391,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite",
+ "vorn-components",
  "vorn-grid-client",
  "vorn-mcp",
  "vorn-protocol",
@@ -5422,6 +5423,13 @@ dependencies = [
  "vorn-protocol",
  "vorn-spawn",
  "vorn-store",
+]
+
+[[package]]
+name = "vorn-components"
+version = "0.8.0-beta.7"
+dependencies = [
+ "vornui",
 ]
 
 [[package]]

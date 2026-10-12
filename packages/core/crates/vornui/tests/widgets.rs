@@ -121,16 +121,7 @@ fn near(px: [u8; 4], c: Rgba) {
 #[test]
 fn pills_choose_on_click_and_arrows() {
     let g = Id::new("view");
-    let items = [
-        Pill {
-            label: "Terminals",
-            icon: None,
-        },
-        Pill {
-            label: "Tasks",
-            icon: None,
-        },
-    ];
+    let items = [Pill::new("Terminals", None), Pill::new("Tasks", None)];
     let build = |ui: &Ui| widgets::pills(ui, g, "View", &items, 0);
     let mut r = Rig::new();
     r.frame(&build);

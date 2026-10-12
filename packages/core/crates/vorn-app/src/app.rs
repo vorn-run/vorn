@@ -17,7 +17,7 @@ use crate::look;
 use crate::paint;
 use crate::screen::{
     card_index, intent_id, menus, rename_id, term_id, Composer, MainView, Screen, PROJECT_NAME,
-    PROJECT_PATH,
+    PROJECT_PATH, VIEWS, VIEW_ORDER,
 };
 use crate::state::{
     basename, Dialog, Filter, Headless, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
@@ -198,7 +198,7 @@ pub struct App {
     saving: bool,
     logo: Option<u32>,
     /// The agents' marks, registered as images.
-    agents: HashMap<&'static str, u32>,
+    agents: crate::components::AgentMarks,
     /// vornd hung up.
     pub closed: bool,
     /// The app draws its own title bar and window controls.
@@ -242,7 +242,7 @@ impl App {
             saves: VecDeque::new(),
             saving: false,
             logo: None,
-            agents: HashMap::new(),
+            agents: Default::default(),
             closed: false,
             chrome: !cfg!(target_os = "macos"),
             size: look::WINDOW,
@@ -851,6 +851,34 @@ impl App {
                 ui.set_focus(Some(field));
                 self.st.renaming = Some(id);
             }
+            Act::ToggleMinimized(id) => {
+                if self.st.minimized.remove(&id) {
+                    self.st.selected = Some(id);
+                } else {
+                    if self.st.focused.as_deref() == Some(id.as_str()) {
+                        self.st.focused = None;
+                    }
+                    self.st.minimized.insert(id);
+                }
+            }
+            Act::ToggleDock => {
+                self.st.dock_collapsed = !self.st.dock_collapsed;
+                ui.close_menu();
+            }
+            Act::DockPopover => {
+                if ui.menu_open(crate::screen::DOCK) {
+                    ui.close_menu();
+                } else {
+                    self.close_menu(ui);
+                    ui.open_menu(crate::screen::DOCK, src.id.unwrap_or(crate::screen::DOCK));
+                }
+            }
+            Act::ShowRun(key) => {
+                self.run_wf(ui, crate::workflows::WfAct::AllRuns, Src::default());
+                self.st.wf.tab = crate::workflows::Tab::All;
+                self.st.wf.bucket = crate::workflows::Bucket::All;
+                self.st.wf.selected = Some(key);
+            }
             Act::AskClose(id) => {
                 self.st.confirm_close = (!id.is_empty()).then_some(id);
             }
@@ -864,6 +892,7 @@ impl App {
                 self.store.remove(&id);
                 self.views.remove(&id);
                 self.st.confirm_close = None;
+                self.st.minimized.remove(&id);
                 if self.st.selected.as_deref() == Some(id.as_str()) {
                     self.st.selected = None;
                 }
@@ -1119,6 +1148,11 @@ impl App {
                     if !keep && self.st.menu.is_some() {
                         self.close_menu(ui);
                     }
+                    if ui.menu_open(crate::screen::DOCK)
+                        && !matches!(act, Act::DockPopover | Act::Gate(_))
+                    {
+                        ui.close_menu();
+                    }
                     self.run(
                         ui,
                         act,
@@ -1184,6 +1218,11 @@ impl App {
                     ((x - r.x) / cell.w).floor(),
                     ((y - r.y) / cell.h).floor(),
                 );
+            }
+            UiEvent::Select { group, index } if group == VIEWS => {
+                if let Some(&v) = VIEW_ORDER.get(index) {
+                    self.run(ui, Act::View(v), Src::default());
+                }
             }
             UiEvent::Select { group, index } if group == menus::MENU || group == menus::SUB => {
                 self.choose(ui, group, index);
@@ -1513,16 +1552,7 @@ impl App {
         self.pump();
         self.tasks_tick(ui);
         self.size = size;
-        if self.agents.is_empty() {
-            for (name, svg) in look::AGENT_ICONS {
-                let px = 48;
-                if let Some(id) = crate::ui::rasterize_svg_rgba(svg, px, px)
-                    .and_then(|rgba| ui.image(px, px, &rgba))
-                {
-                    self.agents.insert(name, id);
-                }
-            }
-        }
+        self.agents.load(ui);
         if self.logo.is_none() {
             // A logo that does not decode costs only the logo.
             self.logo = decode_png(look::LOGO_PNG)

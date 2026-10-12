@@ -6,7 +6,9 @@ use super::{c, ico, truncate, white, MainView, Screen, MOD_LABEL};
 use crate::act::{Act, Acts};
 use crate::look;
 use crate::state::{now_ms, short_duration, time_ago, MenuKind};
+use crate::ui::widgets::{self, Pill, ToastKind};
 use crate::ui::{div, icon, text, tooltip, Action, El, Id, Role, Sense};
+use serde_json::Value;
 
 /// The toolbar's drag region; a double press maximizes.
 pub const TITLE_BAR: Id = Id(0x7469_746c_6562_6172);
@@ -54,41 +56,28 @@ fn menu_open(s: &Screen<'_>, kind: &MenuKind) -> bool {
     s.st.menu.as_ref().is_some_and(|m| &m.kind == kind)
 }
 
+/// The main view pills; choosing one reports `Event::Select` on this group.
+pub const VIEWS: Id = Id(0x7669_6577_7069_6c6c);
+
+/// The views in pill order, indexed by `Event::Select`.
+pub const VIEW_ORDER: [MainView; 3] = [MainView::Sessions, MainView::Tasks, MainView::Workflows];
+
+/// `MainViewPills`: icon-only pills whose tooltips name the view.
 fn pills(s: &Screen<'_>) -> El {
-    let views = [
-        (MainView::Sessions, format!("{MOD_LABEL}S")),
-        (MainView::Tasks, format!("{MOD_LABEL}T")),
-        (MainView::Workflows, format!("{MOD_LABEL}\u{21e7}W")),
+    let keys = [
+        format!("{MOD_LABEL}S"),
+        format!("{MOD_LABEL}T"),
+        format!("{MOD_LABEL}\u{21e7}W"),
     ];
-    let mut row = div()
-        .row()
-        .bg(white(0.04))
-        .rounded(8.0)
-        .p(2.0)
-        .gap(2.0)
-        .role(Role::TabList, "Main view");
-    for ((name, label), (view, keys)) in look::PILLS.iter().zip(views) {
-        let on = view == s.st.view;
-        let id = s.acts.on("pill", Act::View(view));
-        let hot = s.ui.hover(id);
-        let fg = if on {
-            c(look::WHITE)
-        } else {
-            c(look::GRAY_500).mix(c(look::GRAY_300), hot)
-        };
-        let pill = div()
-            .id(id)
-            .on(Action::Click)
-            .px(10.0)
-            .py(4.0)
-            .rounded(6.0)
-            .bg(if on { white(0.1) } else { white(0.0) })
-            .role(Role::Tab, *label)
-            .selected(on)
-            .child(ico(name, 14.0, 2.0, fg));
-        row = row.child(tooltip(s.ui, pill, id, label, Some(&keys)));
-    }
-    row
+    let icons = look::PILLS.map(|(name, _)| look::icon(name, 2.0).unwrap_or_default());
+    let items: Vec<Pill<'_>> = look::PILLS
+        .iter()
+        .zip(&icons)
+        .zip(&keys)
+        .map(|(((_, label), svg), keys)| Pill::icon_only(label, svg, keys))
+        .collect();
+    let on = VIEW_ORDER.iter().position(|v| *v == s.st.view).unwrap_or(0);
+    widgets::pills(s.ui, VIEWS, "Main view", &items, on)
 }
 
 /// SidebarToggle, a divider and the view pills: what the toolbar starts
@@ -112,40 +101,135 @@ pub(super) fn nav_cluster(s: &Screen<'_>) -> El {
         .child(pills(s))
 }
 
-/// SessionDock, collapsed to its chip; not there when nothing waits.
-fn dock(approvals: usize) -> Option<El> {
-    if approvals == 0 {
-        return None;
+/// The dock's popover, as the one menu open: a press outside closes it.
+pub const DOCK: Id = Id(0x646f_636b_706f_7076);
+
+/// One waiting approval gate (`useWaitingApprovals`): its run's key, the
+/// gate's key and its workflow, in the active workspace.
+struct Waiting<'a> {
+    run: String,
+    gate: String,
+    started: &'a str,
+    workflow: Option<&'a Value>,
+    message: Option<&'a str>,
+}
+
+fn waiting<'a>(s: &'a Screen<'_>) -> Vec<Waiting<'a>> {
+    let config = &s.store.config;
+    let ws = config
+        .pointer("/defaults/activeWorkspace")
+        .and_then(Value::as_str)
+        .unwrap_or("personal");
+    let workflows = config.get("workflows").and_then(Value::as_array);
+    let str_of = |v: &'a Value, k: &str| v.get(k).and_then(Value::as_str);
+    let mut out = Vec::new();
+    for run in s.store.runs.values() {
+        let workflow = str_of(run, "workflowId")
+            .and_then(|id| workflows?.iter().find(|w| str_of(w, "id") == Some(id)));
+        if workflow.is_some_and(|w| str_of(w, "workspaceId").unwrap_or("personal") != ws) {
+            continue;
+        }
+        let Some(states) = run.get("nodeStates").and_then(Value::as_array) else {
+            continue;
+        };
+        for ns in states {
+            if str_of(ns, "status") != Some("waiting") || str_of(ns, "waitingFor") == Some("signIn")
+            {
+                continue;
+            }
+            let node = str_of(ns, "nodeId").unwrap_or("");
+            let config_message = || {
+                let n = workflow?
+                    .get("nodes")?
+                    .as_array()?
+                    .iter()
+                    .find(|n| str_of(n, "id") == Some(node))?;
+                (str_of(n, "type") == Some("approval"))
+                    .then(|| n.pointer("/config/message").and_then(Value::as_str))
+                    .flatten()
+            };
+            let key = crate::runs::key(run);
+            out.push(Waiting {
+                gate: crate::gates::key(crate::gates::Place::Pane, &key, node),
+                run: key,
+                started: str_of(run, "startedAt").unwrap_or(""),
+                workflow,
+                message: str_of(ns, "message").or_else(config_message),
+            });
+        }
     }
-    let label = format!(
-        "{approvals} waiting approval{}",
-        if approvals == 1 { "" } else { "s" }
-    );
-    let chip = div()
-        .row()
-        .items_center()
-        .gap(6.0)
-        .h(26.0)
-        .px(8.0)
-        .rounded(6.0)
-        .border(1.0, white(0.06))
-        .bg(c(look::SURFACE_RAISED))
-        .role(Role::Button, label)
-        .child(ico("layers", 11.0, 1.5, c(look::GRAY_300)))
-        .child(
-            text(approvals.to_string(), 11.0, c(look::GRAY_300))
-                .weight(500)
-                .line_height(11.0)
-                .silent(),
-        )
-        .child(
-            div()
-                .size(6.0, 6.0)
-                .rounded(3.0)
-                .bg(c(look::BRONZO))
-                .absolute_right(-2.0, -2.0),
+    out.sort_by(|a, b| a.started.cmp(b.started).then_with(|| a.gate.cmp(&b.gate)));
+    out
+}
+
+/// `SessionDock`: waiting approvals, then minimized cards; nothing when
+/// neither.
+fn dock(s: &Screen<'_>) -> Option<El> {
+    use crate::components::dock::{
+        approval_pill, dock, minimized_pill, Approval, ApprovalIds, DockIds, DockKind, DockState,
+        Minimized,
+    };
+    use crate::components::Status;
+    let mut items = Vec::new();
+    for w in waiting(s) {
+        let field = |k: &str| w.workflow.and_then(|v| v.get(k)).and_then(Value::as_str);
+        let ids = ApprovalIds {
+            open: s.acts.on("dock", Act::ShowRun(w.run.clone())),
+            approve: s.acts.on(
+                "dock",
+                Act::Gate(crate::gates::GateOp::Approve(w.gate.clone())),
+            ),
+            reject: s
+                .acts
+                .on("dock", Act::Gate(crate::gates::GateOp::Reject(w.gate))),
+        };
+        let pill = approval_pill(
+            s.ui,
+            ids,
+            &Approval {
+                workflow: field("name").unwrap_or(""),
+                icon: field("icon").and_then(look::icon_map).unwrap_or("workflow"),
+                icon_color: super::workflows::hex(field("iconColor")),
+                message: w.message,
+            },
         );
-    Some(chip)
+        items.push((DockKind::Waiting, pill));
+    }
+    for i in s.st.docked(s.store) {
+        let session = &s.store.sessions[i];
+        let info = &session.info;
+        let name = session.title();
+        let worktree = info.is_worktree == Some(true);
+        let branch = match (worktree, info.worktree_name.as_deref()) {
+            (true, Some(w)) if info.branch.is_some() => Some(w),
+            _ => info.branch.as_deref(),
+        };
+        let id = s.acts.on("dock", Act::ToggleMinimized(info.id.clone()));
+        let pill = minimized_pill(
+            s.ui,
+            s.agents,
+            id,
+            &Minimized {
+                name: &name,
+                agent: &info.agent_type,
+                status: Status::parse(session.status()),
+                branch,
+                worktree,
+            },
+        );
+        items.push((DockKind::Minimized, pill));
+    }
+    let ids = DockIds {
+        chip: s.acts.on("dock", Act::DockPopover),
+        overflow: s.acts.on("dock", Act::DockPopover),
+        collapse: s.acts.on("dock", Act::ToggleDock),
+        expand: s.acts.on("dock", Act::ToggleDock),
+    };
+    let state = DockState {
+        collapsed: s.st.dock_collapsed,
+        open: s.ui.menu_open(DOCK),
+    };
+    dock(s.ui, ids, state, items)
 }
 
 /// HeadlessBadge: hidden without headless sessions; a zap and the count,
@@ -594,7 +678,7 @@ pub(super) fn left_extras(s: &Screen<'_>) -> El {
         .row()
         .items_center()
         .gap(8.0)
-        .child_if(dock(s.store.approvals()))
+        .child_if(dock(s))
         .child_if(headless_badge(s))
 }
 
@@ -742,48 +826,13 @@ pub(super) fn toasts(s: &Screen<'_>) -> Option<El> {
     }
     let mut col = div().col().gap(8.0);
     for t in &s.st.toasts {
-        let (glyph, tint) = if t.error {
-            ("x", look::RED_400)
+        let kind = if t.error {
+            ToastKind::Error
         } else {
-            ("check", look::GREEN_400)
+            ToastKind::Success
         };
         let close = s.acts.on("toast", Act::DismissToast(t.text.clone()));
-        let hover = s.ui.hover(close);
-        col = col.child(
-            div()
-                .row()
-                .items_center()
-                .gap(10.0)
-                .px(16.0)
-                .py(10.0)
-                .min_w(200.0)
-                .max_w(360.0)
-                .rounded(8.0)
-                .border(1.0, c(tint).alpha(0.2))
-                .bg(crate::ui::Rgba::hexa(0x1a1a1e, 0.92))
-                .role(Role::Status, t.text.as_str())
-                .child(ico(glyph, 15.0, 2.5, c(tint)))
-                .child(
-                    text(t.text.as_str(), 14.0, c(look::GRAY_200))
-                        .line_height(20.0)
-                        .truncate()
-                        .silent(),
-                )
-                .child(div().grow())
-                .child(
-                    div()
-                        .id(close)
-                        .on(Action::Click)
-                        .p(2.0)
-                        .role(Role::Button, "Dismiss")
-                        .child(ico(
-                            "x",
-                            12.0,
-                            2.0,
-                            c(look::GRAY_500).mix(c(look::GRAY_300), hover),
-                        )),
-                ),
-        );
+        col = col.child(widgets::toast(s.ui, close, &t.text, kind));
     }
     Some(
         div()

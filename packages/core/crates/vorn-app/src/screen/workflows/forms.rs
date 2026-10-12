@@ -1258,55 +1258,18 @@ fn switch_card(
 
 /// `Segmented`: one row of choices.
 fn segmented(s: &Screen<'_>, node: &str, path: &str, cur: &str, opts: &[(&str, &str)]) -> El {
-    let mut row = div()
-        .row()
-        .w_full()
-        .rounded(8.0)
-        .border(1.0, white(0.06))
-        .clip();
-    for (v, l) in opts {
-        let on = *v == cur;
+    let segments = opts.iter().map(|&(v, l)| {
         let id = s.acts.on(
             "wf-seg",
             act(WfAct::Choose(
                 Some(node.to_owned()),
                 path.to_owned(),
-                (*v).to_owned(),
+                v.to_owned(),
             )),
         );
-        let hot = s.ui.hover(id);
-        row = row.child(
-            div()
-                .id(id)
-                .on(Action::Click)
-                .flex(1.0)
-                .row()
-                .justify_center()
-                .px(8.0)
-                .py(6.0)
-                .bg(if on {
-                    white(0.10)
-                } else {
-                    white(0.0).mix(white(0.04), hot)
-                })
-                .role(Role::Button, *l)
-                .toggled(on)
-                .child(
-                    text(
-                        *l,
-                        12.0,
-                        if on {
-                            c(look::GRAY_200)
-                        } else {
-                            c(look::GRAY_500).mix(c(look::GRAY_300), hot)
-                        },
-                    )
-                    .line_height(18.0)
-                    .silent(),
-                ),
-        );
-    }
-    row
+        (id, l, v == cur)
+    });
+    crate::ui::widgets::segmented(s.ui, segments)
 }
 
 /// The Advanced fold: chevron, gear, uppercase label.

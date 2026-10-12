@@ -11,7 +11,7 @@ use crate::layout::{self, Mode};
 use crate::look::{self, Rgb};
 use crate::state::MenuKind;
 use crate::ui::{
-    custom, div, field, icon, text, text_input, tooltip, Action, El, Id, Place, Rgba, Role, Sense,
+    custom, div, field, icon, text, text_input, tooltip, Action, El, Id, Rgba, Role, Sense,
     TextStyle,
 };
 
@@ -77,158 +77,53 @@ fn fade(color: Rgb, alpha: f32, dim: f32) -> Rgba {
 /// AgentStatusIcon: the agent's own icon, or the running glyph while an
 /// agent works. A shell is always its terminal icon.
 pub(super) fn status_icon(s: &Screen<'_>, session: &Session, size: f32, dim: f32) -> El {
-    let agent = session.info.agent_type.as_str();
-    if agent != "shell" && session.status() == "running" {
-        return super::glyph::running(s.ui, size, fade(look::WHITE, 0.85, dim));
-    }
-    super::agent_icon(s, agent, size).opacity(dim)
+    use crate::components::{status_icon, Status};
+    let status = Status::parse(session.status());
+    status_icon(s.ui, s.agents, &session.info.agent_type, status, size, dim)
 }
 
-/// `p-1 rounded hover:bg-white/10 text-ink`, the danger one turning red.
-fn icon_button(
-    s: &Screen<'_>,
-    act: Act,
-    name: &str,
-    label: &str,
-    tip: (&str, Option<&str>),
-    danger: bool,
-) -> El {
-    let id = s.acts.on("card", act);
-    let hot = s.ui.hover(id);
-    let fg = if danger {
-        c(look::INK).mix(c(look::DANGER), hot)
-    } else {
-        c(look::INK)
-    };
-    let b = div()
-        .id(id)
-        .on(Action::Click)
-        .p(4.0)
-        .rounded(4.0)
-        .bg(white(0.0).mix(white(0.10), hot))
-        .role(Role::Button, label)
-        .child(ico(name, 14.0, 2.0, fg));
-    tooltip(s.ui, b, id, tip.0, tip.1)
-}
-
-/// ConfirmPopover: the question and its two buttons, under `trigger`.
+/// ConfirmPopover under `trigger`, its buttons running `ok` and `cancel`.
 fn confirm(s: &Screen<'_>, trigger: El, message: &str, ok: Act, cancel: Act, label: &str) -> El {
-    let cancel_id = s.acts.on("confirm", cancel);
-    let ok_id = s.acts.on("confirm", ok);
-    let panel = div()
-        .col()
-        .min_w(180.0)
-        .max_w(280.0)
-        .p(12.0)
-        .rounded(8.0)
-        .border(1.0, white(0.1))
-        .bg(c(look::SURFACE_OVERLAY))
-        .role(Role::AlertDialog, message)
-        .child(
-            text(message, 12.0, c(look::GRAY_300))
-                .line_height(16.0)
-                .mt(0.0)
-                .silent(),
-        )
-        .child(
-            div()
-                .row()
-                .justify_between()
-                .gap(8.0)
-                .mt(12.0)
-                .child(div().grow())
-                .child(
-                    div()
-                        .id(cancel_id)
-                        .on(Action::Click)
-                        .px(12.0)
-                        .py(8.0)
-                        .rounded(6.0)
-                        .bg(white(0.04).mix(white(0.08), s.ui.hover(cancel_id)))
-                        .role(Role::Button, "Cancel")
-                        .child(
-                            text("Cancel", 12.0, c(look::GRAY_400))
-                                .line_height(16.0)
-                                .silent(),
-                        ),
-                )
-                .child(
-                    div()
-                        .id(ok_id)
-                        .on(Action::Click)
-                        .px(12.0)
-                        .py(8.0)
-                        .rounded(6.0)
-                        .bg(Rgba::hexa(look::RED_500, 0.1)
-                            .mix(Rgba::hexa(look::RED_500, 0.2), s.ui.hover(ok_id)))
-                        .border(1.0, Rgba::hexa(look::RED_500, 0.2))
-                        .role(Role::Button, label)
-                        .child(
-                            text(label, 12.0, c(look::RED_400))
-                                .weight(500)
-                                .line_height(16.0)
-                                .silent(),
-                        ),
-                ),
-        );
-    trigger.overlay(panel, Place::Below, 4.0)
+    let ok = (s.acts.on("confirm", ok), label);
+    let cancel = s.acts.on("confirm", cancel);
+    crate::ui::widgets::confirm(
+        s.ui,
+        trigger,
+        message,
+        ok,
+        cancel,
+        crate::ui::widgets::Tone::Danger,
+    )
 }
 
-/// CardActionCluster: more actions, expand or collapse, close.
+/// CardActionCluster: more actions, minimize on a grid card, expand or
+/// collapse, and close behind its confirmation.
 fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
+    use crate::components::card::{card_actions, CardActions, CardVariant};
     let sid = session.info.id.clone();
-    let expand = if focused {
-        icon_button(
-            s,
-            Act::Collapse,
-            "minimize-2",
-            "Collapse session",
-            ("Collapse to grid", Some(&format!("{MOD_LABEL}W"))),
-            false,
-        )
+    let (variant, toggle, key) = if focused {
+        (CardVariant::Focused, Act::Collapse, 'W')
     } else {
-        icon_button(
-            s,
-            Act::Expand(sid.clone()),
-            "maximize-2",
-            "Expand session",
-            ("Expand", Some(&format!("{MOD_LABEL}O"))),
-            false,
-        )
+        (CardVariant::Mini, Act::Expand(sid.clone()), 'O')
     };
-    let mut close = icon_button(
-        s,
-        Act::AskClose(sid.clone()),
-        "x",
-        "Close session",
-        ("Close session", None),
-        true,
-    );
-    if s.st.confirm_close.as_deref() == Some(sid.as_str()) {
-        close = confirm(
-            s,
-            close,
-            "Close this session?",
-            Act::CloseSession(sid.clone()),
-            Act::AskClose(String::new()),
-            "Close",
-        );
-    }
-    div()
-        .row()
-        .items_center()
-        .gap(2.0)
-        .shrink0()
-        .child(icon_button(
-            s,
-            Act::Open(MenuKind::Card(sid)),
-            "ellipsis",
-            "More actions",
-            ("More actions", None),
-            false,
-        ))
-        .child(expand)
-        .child(close)
+    let confirming = (s.st.confirm_close.as_deref() == Some(sid.as_str())).then(|| {
+        (
+            s.acts.on("confirm", Act::CloseSession(sid.clone())),
+            s.acts.on("confirm", Act::AskClose(String::new())),
+        )
+    });
+    card_actions(
+        s.ui,
+        &CardActions {
+            variant,
+            more: s.acts.on("card", Act::Open(MenuKind::Card(sid.clone()))),
+            minimize: s.acts.on("card", Act::ToggleMinimized(sid.clone())),
+            toggle: s.acts.on("card", toggle),
+            close: s.acts.on("card", Act::AskClose(sid)),
+            toggle_key: &format!("{MOD_LABEL}{key}"),
+            confirming,
+        },
+    )
 }
 
 /// The title, or the inline rename field while renaming.

@@ -1,14 +1,9 @@
 //! RunningGlyph and the pulsing status dot: the two pieces of motion a
 //! session's status makes, timed as the renderer's CSS times them.
 
-use std::sync::OnceLock;
-use std::time::{Duration, Instant};
-
-use crate::ui::{div, El, Rgba, Role, Ui};
-
-/// How often a moving glyph asks for a frame. Opacity steps this small
-/// read as continuous; the display's own rate would only spend more.
-const FRAME: Duration = Duration::from_millis(33);
+use vornui::accesskit::Role;
+use vornui::theme::motion::FRAME;
+use vornui::{div, El, Rgba, Ui};
 
 /// A cell of the glyph's 4x4 grid: the inner four pulse brighter than the
 /// edge, and the corners are never drawn.
@@ -87,21 +82,16 @@ fn cell_opacity(i: usize, elapsed: f64) -> f64 {
     envelope(elapsed, delay, duration, range, EASE_IN_OUT)
 }
 
-/// Seconds since the first glyph was drawn: one clock for all of them, so
-/// they stay in phase as the renderer's do.
-fn elapsed(ui: &Ui) -> f64 {
-    static EPOCH: OnceLock<Instant> = OnceLock::new();
-    let epoch = *EPOCH.get_or_init(|| ui.now());
-    ui.now().saturating_duration_since(epoch).as_secs_f64()
-}
-
 /// RunningGlyph: a 15-unit grid of twelve 3x3 cells in `color`, each
 /// pulsing on its own beat, drawn `size` square.
-pub(super) fn running(ui: &Ui, size: f32, color: Rgba) -> El {
+pub fn running(ui: &Ui, size: f32, color: Rgba) -> El {
     ui.wake_at(ui.now() + FRAME);
-    let t = elapsed(ui);
+    let t = ui.anim_time();
     let unit = size / 15.0;
-    let mut g = div().size(size, size).shrink0().role(Role::Image, "Running");
+    let mut g = div()
+        .size(size, size)
+        .shrink0()
+        .role(Role::Image, "Running");
     for (i, tier) in GRID.iter().enumerate() {
         if *tier == Tier::Hidden {
             continue;
@@ -119,9 +109,9 @@ pub(super) fn running(ui: &Ui, size: f32, color: Rgba) -> El {
 }
 
 /// A status dot's opacity under `animate-pulse`: 1 → 0.5 → 1 every 2 s.
-pub(super) fn pulse(ui: &Ui) -> f32 {
+pub fn pulse(ui: &Ui) -> f32 {
     ui.wake_at(ui.now() + FRAME);
-    envelope(elapsed(ui), 0.0, 2.0, (1.0, 0.5), PULSE) as f32
+    envelope(ui.anim_time(), 0.0, 2.0, (1.0, 0.5), PULSE) as f32
 }
 
 #[cfg(test)]

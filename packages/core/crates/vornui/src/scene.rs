@@ -12,6 +12,7 @@ pub struct Rgba(pub [f32; 4]);
 
 impl Rgba {
     pub const TRANSPARENT: Rgba = Rgba([0.0; 4]);
+    pub const BLACK: Rgba = Rgba([0.0, 0.0, 0.0, 1.0]);
 
     /// `0xRRGGBB`, opaque.
     pub const fn hex(c: u32) -> Rgba {
