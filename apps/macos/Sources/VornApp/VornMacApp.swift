@@ -200,7 +200,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         return 1
     }
     try? await Task.sleep(for: .milliseconds(300))
-    engines.update(socket: endpoint.gridSocket, readOnly: true)
+    engines.update(socket: endpoint.gridSocket, readOnly: true, fontSize: store.defaults?.fontSize)
 
     features.bind(store: store, model: model)
     switch model.mainViewMode {

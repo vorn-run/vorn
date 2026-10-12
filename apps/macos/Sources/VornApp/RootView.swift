@@ -49,7 +49,10 @@ public struct RootView: View {
         .runSurfacesHost(features.workflows)
         .environment(\.colorScheme, .dark)
         .onChange(of: store.endpoint, initial: true) { _, ep in
-            engines.update(socket: ep?.gridSocket, readOnly: store.readOnly)
+            engines.update(socket: ep?.gridSocket, readOnly: store.readOnly, fontSize: store.defaults?.fontSize)
+        }
+        .onChange(of: store.defaults?.fontSize) { _, size in
+            engines.update(socket: store.endpoint?.gridSocket, readOnly: store.readOnly, fontSize: size)
         }
         .onChange(of: store.sessions.map(\.id)) { _, ids in
             let live = Set(ids)
