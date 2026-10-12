@@ -4,6 +4,8 @@
 //! - [`client`] speaks JSON-RPC to vornd and keeps its models current.
 //! - [`grid`] holds the terminals' screens over the grid endpoint.
 //! - [`screen`] turns that state into elements; [`paint`] draws terminals.
+//! - [`browser`], [`artifact`] and [`device`] model the side pane; [`web`]
+//!   seats the OS web views it shows.
 //! - [`app`] ties them together and routes keys; `main` gives it a window
 //!   or an offscreen target.
 //!
@@ -11,8 +13,11 @@
 
 pub mod act;
 pub mod app;
+pub mod artifact;
+pub mod browser;
 pub mod canvas;
 pub mod client;
+pub mod device;
 pub mod gates;
 pub mod graph;
 pub mod grid;
@@ -21,6 +26,7 @@ pub mod library;
 pub mod look;
 pub mod markdown;
 pub mod paint;
+pub mod panes;
 pub mod runs;
 pub mod screen;
 pub mod state;
@@ -29,6 +35,7 @@ pub mod templates;
 pub mod ui;
 pub mod vars;
 pub mod view;
+pub mod web;
 pub mod workflows;
 
 /// Vorn's composed components, built on [`ui`].

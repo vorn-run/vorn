@@ -29,6 +29,7 @@ use crate::ui::{
 use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
 
+mod browser;
 pub mod canvas;
 pub mod forms;
 mod gates;
@@ -169,6 +170,7 @@ enum Call {
     Saved(Box<Call>),
     Task(tasks::TaskCall),
     Workflow(workflows::WfCall),
+    Pane(browser::PaneCall),
 }
 
 /// Where an act came from: the control's id and, for a right click, the
@@ -209,6 +211,8 @@ pub struct App {
     port: u16,
     /// The sessions the banner offers, with why each ended.
     carried: Vec<(TerminalSession, &'static str)>,
+    /// The browser and device panes' web views and calls in flight.
+    web: browser::Web,
 }
 
 impl App {
@@ -217,6 +221,7 @@ impl App {
     pub fn connect(ep: &Endpoint, wake: Wake) -> Result<App, RpcError> {
         let (rpc, events) = Rpc::connect(ep, Arc::clone(&wake))?;
         let store = Store::load(&rpc)?;
+        let web = browser::Web::new(Arc::clone(&wake));
         // A grid that will not open still leaves the screen and its data.
         let (grid, grid_error) = match Grid::connect(&ep.grid, wake) {
             Ok(g) => (Some(g), None),
@@ -248,6 +253,7 @@ impl App {
             size: look::WINDOW,
             port: ep.port,
             carried: Vec::new(),
+            web,
         };
         app.call(Call::Restored, "sessions:restored", Value::Null);
         app.call(Call::Headless, "headless:list", Value::Null);
@@ -295,12 +301,14 @@ impl App {
                         self.task_run_updated(&params);
                         self.wf_run_updated(&params);
                     }
+                    self.pane_notified(&method, &params);
                     if method == "scheduler:missed" {
                         self.wf_missed(&params);
                         continue;
                     }
                     self.store.apply(&method, params);
                 }
+                Event::Request { id, method, params } => self.bridge(id, &method, params),
                 Event::Closed => self.closed = true,
             }
         }
@@ -327,6 +335,8 @@ impl App {
                 }
             }
         }
+        self.pump_web();
+        self.detect_mobile();
         let now = std::time::Instant::now();
         self.st.toasts.retain(|t| t.until > now);
         let gone = |id: &Option<String>, store: &Store| {
@@ -372,6 +382,7 @@ impl App {
             Call::Resumed { id, auto } => self.resumed(&id, auto, answer),
             Call::Task(c) => self.task_answered(c, answer),
             Call::Workflow(c) => self.wf_answered(c, answer),
+            Call::Pane(c) => self.pane_answered(c, answer),
             Call::Saved(call) => {
                 self.saving = false;
                 self.answered(*call, answer);
@@ -935,6 +946,7 @@ impl App {
             }
             Act::Shortcuts => self.run_shortcut(ui, Shortcut::Shortcuts),
             Act::Task(a) => self.run_task(ui, a),
+            Act::Pane(a) => self.run_pane(ui, a),
             Act::Run(a) => self.run_run(a),
             Act::Gate(op) => self.run_gate(ui, op),
             Act::OpenUrl(u) => tasks::open_url(&u),
@@ -1119,6 +1131,7 @@ impl App {
             || self.form_event(ui, &event)
             || self.task_event(ui, &event)
             || self.wf_event(ui, &event)
+            || self.pane_event(ui, &event)
         {
             return;
         }
@@ -1354,6 +1367,7 @@ impl App {
             ui.set_focus(None);
         } else if self.st.confirm_close.is_some() {
             self.st.confirm_close = None;
+        } else if self.pane_escape() {
         } else if self.st.composer_overlay(&self.store) {
             self.st.composer_open = false;
         } else {
@@ -1579,6 +1593,7 @@ impl App {
         if let Some(id) = self.st.wf.open_next.take() {
             self.run_wf(ui, crate::workflows::WfAct::Edit(id), Src::default());
         }
+        self.web_slots(ui);
         self.acts.clear();
         let root = self.screen(ui).build();
         self.seed_texts(ui);
@@ -1621,6 +1636,7 @@ impl App {
                 paint::pane(ui, v, *r, focused, pre);
             }
         }
+        self.paint_web(ui, laid);
     }
 }
 

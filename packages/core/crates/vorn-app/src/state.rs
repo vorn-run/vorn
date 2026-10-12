@@ -365,6 +365,7 @@ pub struct State {
     pub tasks: crate::tasks::Tasks,
     pub runs: crate::runs::RunView,
     pub wf: crate::workflows::Workflows,
+    pub bench: crate::panes::Workbench,
 }
 
 impl State {

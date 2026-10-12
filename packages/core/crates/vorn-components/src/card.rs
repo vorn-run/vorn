@@ -17,7 +17,8 @@ pub enum CardVariant {
 }
 
 impl CardVariant {
-    fn tip_place(self) -> Place {
+    /// The side the cluster's tooltips sit on.
+    pub fn tip_place(self) -> Place {
         match self {
             CardVariant::Mini => Place::Above,
             CardVariant::Focused => Place::Below,
@@ -76,6 +77,12 @@ pub struct CardActions<'a> {
 /// `CardActionCluster`: More actions, Minimize (grid cards only), Expand
 /// or Collapse, and Close with its confirmation, `gap-0.5`.
 pub fn card_actions(ui: &Ui, a: &CardActions<'_>) -> El {
+    card_actions_with(ui, a, [])
+}
+
+/// [`card_actions`] with `extra` buttons after More actions, where the
+/// card's pane toggles (browser, device) sit.
+pub fn card_actions_with(ui: &Ui, a: &CardActions<'_>, extra: impl IntoIterator<Item = El>) -> El {
     let place = a.variant.tip_place();
     let button = |b: CardButton<'_>| card_button(ui, &b, place);
     let more = button(CardButton {
@@ -138,6 +145,7 @@ pub fn card_actions(ui: &Ui, a: &CardActions<'_>) -> El {
         .gap(2.0)
         .shrink0()
         .child(more)
+        .children(extra)
         .child_if(minimize)
         .child(button(toggle))
         .child(close)

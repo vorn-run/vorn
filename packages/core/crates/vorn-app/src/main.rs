@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 
 use vorn_app::client::{data_dir, Endpoint};
 use vorn_app::ui::{
-    mods, run_with, El, Event, Input, Laid, Rect, RenderMode, Rgba, Ui, Waker, WindowApp,
-    WindowOptions,
+    mods, run_with, El, Event, Input, Laid, NativeWindow, Rect, RenderMode, Rgba, Ui, Waker,
+    WindowApp, WindowOptions,
 };
 use vorn_app::{look, ui_config, App};
 
@@ -60,8 +60,11 @@ impl Args {
 }
 
 fn connect(args: &Args, wake: vorn_app::client::rpc::Wake) -> Result<App, String> {
-    let ep = Endpoint::find(&args.data_dir()?).map_err(|e| e.to_string())?;
-    App::connect(&ep, wake).map_err(|e| e.to_string())
+    let dir = args.data_dir()?;
+    let ep = Endpoint::find(&dir).map_err(|e| e.to_string())?;
+    let mut app = App::connect(&ep, wake).map_err(|e| e.to_string())?;
+    app.load_panes(&dir);
+    Ok(app)
 }
 
 fn shot(args: &Args) -> Result<(), String> {
@@ -181,6 +184,14 @@ impl WindowApp for Win {
 
     fn ime_area(&self) -> Option<Rect> {
         None
+    }
+
+    fn opened(&mut self, window: &Arc<NativeWindow>) {
+        self.0.opened(window);
+    }
+
+    fn tick(&mut self) -> Option<Instant> {
+        self.0.tick()
     }
 }
 

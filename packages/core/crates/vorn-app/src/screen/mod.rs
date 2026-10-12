@@ -10,6 +10,7 @@ mod composer;
 mod dialogs;
 pub mod gates;
 pub mod menus;
+mod panes;
 pub mod runs;
 mod sidebar;
 pub mod tasks;
