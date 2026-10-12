@@ -235,8 +235,10 @@ struct WorkflowContextMenu: View {
                     store.setEnabled(workflow, !workflow.enabled)
                 }
             }
-            MenuItemRow(glyph: .upload, label: "Export as file…") {}
-                .disabled(true)
+            MenuItemRow(glyph: .upload, label: "Export as file…") {
+                store.menu = nil
+                store.exportWorkflow(workflow)
+            }
             MenuItemRow(glyph: .trash, label: "Delete Workflow", danger: true) {
                 store.menu = nil
                 store.delete(workflow)
