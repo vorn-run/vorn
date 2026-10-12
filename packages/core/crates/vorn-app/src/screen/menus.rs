@@ -30,13 +30,17 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::Project(_) => 140.0,
         MenuKind::Group(_) | MenuKind::SessionGroups(_) => 176.0,
         MenuKind::GroupIcon(_) => 248.0,
-        MenuKind::OpenIn(_) => 180.0,
         MenuKind::LaunchAgent => 160.0,
         MenuKind::LaunchProject | MenuKind::LaunchWorktree => 240.0,
         MenuKind::LaunchBranch => 220.0,
         MenuKind::Recent | MenuKind::Headless => 280.0,
         MenuKind::TaskOptions | MenuKind::TaskStatus(_) | MenuKind::TaskAgent(_) => 200.0,
         MenuKind::TaskCard(_) | MenuKind::TaskProject(_) => 180.0,
+        MenuKind::SetShell => 288.0,
+        MenuKind::SetSelect(_) => 128.0,
+        MenuKind::SshKey(_) => 300.0,
+        MenuKind::OpenIn(_) => 180.0,
+        MenuKind::Branch(_) | MenuKind::FileTabs(_) => 220.0,
         _ => 200.0,
     }
 }
@@ -89,12 +93,15 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::Group(id) => group(s, id),
         MenuKind::SessionGroups(id) => session_groups(s, id),
         MenuKind::GroupIcon(_) => Vec::new(),
-        MenuKind::OpenIn(sid) => open_in(s, sid),
         MenuKind::LaunchProject => launch_projects(s),
         MenuKind::LaunchAgent => launch_agents(s),
         MenuKind::LaunchWorktree => launch_worktrees(s),
         MenuKind::LaunchBranch => launch_branches(s),
-        MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon => Vec::new(),
+        MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon | MenuKind::SetShell => Vec::new(),
+        MenuKind::SetSelect(key) => super::settings::select_items(s, key),
+        MenuKind::SshKey(host) => super::settings::ssh_key_items(s, host),
+        MenuKind::FileTabs(owner) => super::side::tab_items(s, owner),
+        MenuKind::Branch(_) | MenuKind::OpenIn(_) => Vec::new(),
         MenuKind::RunStatus
         | MenuKind::WorkflowFilter
         | MenuKind::WorkflowItem(_)
@@ -490,41 +497,6 @@ fn group(s: &Screen<'_>, id: &str) -> Vec<Item> {
             Act::DeleteGroup(id),
         ),
     ]
-}
-
-/// `OpenInButton`'s list: the editors found, under "Open in".
-fn open_in(s: &Screen<'_>, sid: &str) -> Vec<Item> {
-    let Some(session) = s.store.session(sid) else {
-        return Vec::new();
-    };
-    let header = div().px(12.0).py(6.0).child(
-        text("Open in", 11.0, c(look::GRAY_500))
-            .weight(500)
-            .line_height(16.5)
-            .role(Role::Label, "Open in"),
-    );
-    let mut items = vec![Item {
-        row: Some(header),
-        header: true,
-        ..Item::default()
-    }];
-    for (id, name) in &s.st.ides {
-        let act = Act::OpenIde {
-            ide: id.clone(),
-            path: session.info.project_path.clone(),
-        };
-        items.push(
-            Item::option(name.as_str(), false, act)
-                .side(Inset { left: 12.0, y: 6.0 })
-                .mark(ico(
-                    super::cards::ide_glyph(id),
-                    14.0,
-                    1.5,
-                    c(look::GRAY_300),
-                )),
-        );
-    }
-    items
 }
 
 /// `SessionContextMenu`: the groups a session can move to, choosing its

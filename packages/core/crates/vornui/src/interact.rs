@@ -566,6 +566,16 @@ impl Ui {
         self.st.scroll.get(&id).map_or(0.0, |s| s.offset)
     }
 
+    /// Scrolls scroll view `id` to `offset`, clamped once it is laid out.
+    pub fn set_scroll_offset(&mut self, id: Id, offset: f32) {
+        let s = self.st.scroll.entry(id).or_default();
+        s.offset = if s.max > 0.0 {
+            offset.clamp(0.0, s.max)
+        } else {
+            offset.max(0.0)
+        };
+    }
+
     /// The events since the last call, oldest first.
     pub fn take_events(&mut self) -> Vec<Event> {
         std::mem::take(&mut self.st.events)

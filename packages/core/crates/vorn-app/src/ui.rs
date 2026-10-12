@@ -5,7 +5,9 @@
 pub use vornui::accesskit::{Role, TreeUpdate};
 pub use vornui::input::{from_ime, mods};
 pub use vornui::text::{BOLD, ITALIC};
-pub use vornui::widgets::{area, field, item_id, split, text_input, textarea, tooltip, tooltip_at};
+pub use vornui::widgets::{
+    area, code, field, item_id, split, text_input, textarea, tooltip, tooltip_at,
+};
 pub use vornui::window::{run as run_window, run_with, App as WindowApp, Waker, WindowOptions};
 pub use vornui::winit::window::Window as NativeWindow;
 pub use vornui::TextStyle;

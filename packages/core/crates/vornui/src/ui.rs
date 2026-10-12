@@ -419,14 +419,20 @@ impl Ui {
                     style,
                     wrap,
                 } => {
+                    let k = text.scale;
                     let max_w = wrap.then(|| {
                         known.width.unwrap_or(match avail.width {
                             AvailableSpace::Definite(w) => w,
-                            _ => f32::MAX,
+                            // As CSS sizes it: the longest word.
+                            AvailableSpace::MinContent => s
+                                .split_whitespace()
+                                .map(|w| text.shape(w, *style, None).w / k)
+                                .fold(0.0, f32::max)
+                                .ceil(),
+                            AvailableSpace::MaxContent => f32::MAX,
                         })
                     });
                     let sh = text.shape(s, *style, max_w);
-                    let k = text.scale;
                     Size {
                         width: known.width.unwrap_or(sh.w / k),
                         height: known.height.unwrap_or(sh.h / k),
@@ -917,9 +923,8 @@ impl Ui {
             pre.end
         };
         let sel = e.selection();
-        let sh = self
-            .text
-            .shape(&shown, look.style, look.multiline.then_some(inner.w));
+        let wrap = look.multiline && !look.nowrap;
+        let sh = self.text.shape(&shown, look.style, wrap.then_some(inner.w));
         // Keep the caret in view.
         let (cx_, line) = sh.caret(caret_at);
         let e = self.st.edits.get_mut(&id).expect("inserted above");
@@ -932,9 +937,15 @@ impl Ui {
                 e.scroll_y = top + line_h - inner.h;
             }
             e.scroll_y = e.scroll_y.clamp(0.0, (sh.h / k - inner.h).max(0.0));
-        } else {
+        }
+        if !wrap {
             let cxl = cx_ / k;
-            let sx = &mut e.scroll_y; // a single line scrolls sideways
+            // A single line keeps its sideways scroll in `scroll_y`.
+            let sx = if look.multiline {
+                &mut e.scroll_x
+            } else {
+                &mut e.scroll_y
+            };
             if cxl < *sx {
                 *sx = cxl;
             } else if cxl > *sx + inner.w - 1.0 {
@@ -950,10 +961,10 @@ impl Ui {
                 0.0
             }
         };
-        let (ox, oy) = if look.multiline {
-            (inner.x * k, (inner.y - e.scroll_y) * k)
-        } else {
-            ((inner.x - e.scroll_y) * k + centre(sh.w), inner.y * k)
+        let (ox, oy) = match (look.multiline, wrap) {
+            (true, true) => (inner.x * k, (inner.y - e.scroll_y) * k),
+            (true, false) => ((inner.x - e.scroll_x) * k, (inner.y - e.scroll_y) * k),
+            (false, _) => ((inner.x - e.scroll_y) * k + centre(sh.w), inner.y * k),
         };
         let anchor_caret = (e.anchor(), e.caret());
         self.scene.push_clip(inner.scaled(k));
@@ -974,6 +985,19 @@ impl Ui {
                 self.scene.quad(rr, theme::color::SELECTION, 0.0, None);
             }
         }
+        for (range, bg) in &look.marks {
+            for (i, l) in sh.lines.iter().enumerate() {
+                let start = range.start.max(l.start);
+                let end = range.end.min(a11y::run_end(&sh, i, shown.len()));
+                if start >= end {
+                    continue;
+                }
+                let x0 = sh.caret(start).0;
+                let x1 = sh.caret(end).0.max(x0 + 1.0);
+                let rr = Rect::new(ox + x0, oy + l.top, x1 - x0, l.height);
+                self.scene.quad(rr, *bg, k, None);
+            }
+        }
         if shown.is_empty() && !look.placeholder.is_empty() {
             let ph = self.text.shape(
                 &look.placeholder,
@@ -988,13 +1012,24 @@ impl Ui {
                 look.placeholder_color,
             );
         }
-        self.text.draw(
-            &mut self.scene,
-            &mut self.atlases,
-            &sh,
-            (ox, oy),
-            look.color,
-        );
+        if look.spans.is_empty() || !pre.is_empty() {
+            self.text.draw(
+                &mut self.scene,
+                &mut self.atlases,
+                &sh,
+                (ox, oy),
+                look.color,
+            );
+        } else {
+            self.text.draw_spans(
+                &mut self.scene,
+                &mut self.atlases,
+                &sh,
+                (ox, oy),
+                look.color,
+                &look.spans,
+            );
+        }
         if !pre.is_empty() {
             for (i, l) in sh.lines.iter().enumerate() {
                 let start = pre.start.max(l.start);

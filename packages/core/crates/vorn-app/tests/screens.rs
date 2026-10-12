@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use support::{connect, key, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::{GROUP_NAME, MOD};
+use vorn_app::git::GitAct;
 use vorn_app::screen::menus::MENU;
 use vorn_app::screen::tasks::card_id;
 use vorn_app::screen::MainView;
@@ -172,11 +173,10 @@ fn the_sessions_screens() {
     shot.save(&mut app, "grid");
 
     // The status bar's Open lists the editors found here, when there are any.
-    if !app.st.ides.is_empty() {
-        let open_in = MenuKind::OpenIn(ids[0].clone());
-        shot.click(&mut app, control("open-in", Act::Open(open_in.clone())));
-        assert_eq!(menu(&app), Some(open_in));
-        assert_eq!(app.menu_labels(&shot.ui).len(), app.st.ides.len() + 1);
+    if app.st.git.ides.as_ref().is_some_and(|l| !l.is_empty()) {
+        let open_in = Act::Git(GitAct::OpenInMenu(ids[0].clone()));
+        shot.click(&mut app, control("open-in-more", open_in));
+        assert_eq!(menu(&app), Some(MenuKind::OpenIn(ids[0].clone())));
         shot.save(&mut app, "open-in");
         escape(&mut shot, &mut app);
     }

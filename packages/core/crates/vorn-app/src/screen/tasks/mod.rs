@@ -4,7 +4,7 @@
 
 mod detail;
 mod dialog;
-mod diff;
+pub(crate) mod diff;
 mod editor;
 
 pub(super) use dialog::{add_task, commit, output};

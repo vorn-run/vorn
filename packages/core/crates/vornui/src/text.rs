@@ -27,6 +27,7 @@ pub struct TextStyle {
     pub mono: bool,
     /// Letter spacing in ems (Tailwind's `tracking-wider` is 0.05).
     pub tracking: f32,
+    pub italic: bool,
 }
 
 impl TextStyle {
@@ -38,6 +39,7 @@ impl TextStyle {
             weight: 400,
             mono: false,
             tracking: 0.0,
+            italic: false,
         }
     }
 
@@ -142,6 +144,7 @@ struct ShapeKey {
     weight: u16,
     mono: bool,
     tracking: u32,
+    italic: bool,
     max_w: Option<u32>,
 }
 
@@ -298,13 +301,14 @@ impl TextSystem {
             weight: style.weight,
             mono: style.mono,
             tracking: style.tracking.to_bits(),
+            italic: style.italic,
             max_w: max_w.map(|w| (w * s).ceil() as u32),
         };
         if let Some(sh) = self.shaped.get(&key) {
             self.used.insert(Rc::as_ptr(sh));
             return sh.clone();
         }
-        let mut attrs = self.attrs(style.weight, style.mono, false);
+        let mut attrs = self.attrs(style.weight, style.mono, style.italic);
         let mut tracking = style.tracking;
         if !style.mono && self.ui_family == crate::theme::font::SF {
             tracking += crate::theme::font::sf_tracking(style.size, style.weight);
@@ -459,12 +463,90 @@ impl TextSystem {
         }
     }
 
+    /// Draws `sh` as [`TextSystem::draw`] does, each glyph in the colour of
+    /// the span (sorted, by byte range) holding its first byte.
+    pub fn draw_spans(
+        &mut self,
+        scene: &mut Scene,
+        atlases: &mut Atlases,
+        sh: &Shaped,
+        (x, y): (f32, f32),
+        color: Rgba,
+        spans: &[(std::ops::Range<usize>, Rgba)],
+    ) {
+        for ((g, line_y), pos) in sh.glyphs.iter().zip(&sh.pos) {
+            let at = spans.partition_point(|(r, _)| r.end <= pos.start);
+            let c = spans
+                .get(at)
+                .filter(|(r, _)| r.start <= pos.start)
+                .map_or(color, |(_, c)| *c);
+            let p = g.physical((x, y + line_y), 1.0);
+            let Some(ra) = self.raster(atlases, p.cache_key) else {
+                continue;
+            };
+            let rect = Rect::new(
+                p.x as f32 + ra.left,
+                p.y as f32 - ra.top,
+                ra.uv[2],
+                ra.uv[3],
+            );
+            scene.sprite(rect, ra.uv, c, ra.colored);
+        }
+    }
+
+    /// The terminal font size, logical pixels.
+    pub fn term_size(&self) -> f32 {
+        self.term_size
+    }
+
+    /// Changes the terminal font size; cells are measured again.
+    pub fn set_term_size(&mut self, size: f32) {
+        if (size - self.term_size).abs() < f32::EPSILON {
+            return;
+        }
+        self.term_size = size;
+        self.ascii.fill(None);
+        self.clusters.clear();
+        self.cell = self.measure_cell();
+    }
+
+    /// A terminal cluster's pieces: in the terminal font, or for a symbol
+    /// that is text by default (U+23FA) and came back from a colour emoji
+    /// face, in the first text symbol face that draws it in one colour.
     fn shape_cell(&mut self, atlases: &mut Atlases, text: &str, style: u8) -> Vec<CellPiece> {
-        let size = self.term_size * self.scale;
         let weight = if style & BOLD != 0 { 700 } else { 400 };
         let attrs = self.attrs(weight, true, style & ITALIC != 0);
+        let pieces = self.shape_cell_in(atlases, text, &attrs);
+        if !pieces.iter().any(|p| p.raster.colored) || !text_presentation(text) {
+            return pieces;
+        }
+        for family in TEXT_SYMBOL_FAMILIES {
+            let known = self
+                .fonts
+                .db()
+                .faces()
+                .any(|f| f.families.iter().any(|(n, _)| n == family));
+            if !known {
+                continue;
+            }
+            let a = attrs.clone().family(Family::Name(family));
+            let alt = self.shape_cell_in(atlases, text, &a);
+            if !alt.is_empty() && !alt.iter().any(|p| p.raster.colored) {
+                return alt;
+            }
+        }
+        pieces
+    }
+
+    fn shape_cell_in(
+        &mut self,
+        atlases: &mut Atlases,
+        text: &str,
+        attrs: &Attrs<'_>,
+    ) -> Vec<CellPiece> {
+        let size = self.term_size * self.scale;
         let mut b = Buffer::new(&mut self.fonts, Metrics::new(size, self.cell.h));
-        b.set_text(text, &attrs, Shaping::Advanced, None);
+        b.set_text(text, attrs, Shaping::Advanced, None);
         b.shape_until_scroll(&mut self.fonts, false);
         let glyphs: Vec<LayoutGlyph> = b
             .layout_runs()
@@ -532,6 +614,126 @@ impl TextSystem {
     }
 }
 
+/// Faces with one-colour symbols, tried in order for a cluster that should
+/// not be drawn as an emoji.
+const TEXT_SYMBOL_FAMILIES: &[&str] = if cfg!(target_os = "macos") {
+    &[
+        "Apple Symbols",
+        "STIX Two Math",
+        "Arial Unicode MS",
+        "Menlo",
+    ]
+} else if cfg!(windows) {
+    &["Segoe UI Symbol", "Cambria Math", "Consolas"]
+} else {
+    &[
+        "DejaVu Sans Mono",
+        "DejaVu Sans",
+        "Noto Sans Symbols 2",
+        "Noto Sans Symbols",
+        "Symbola",
+    ]
+};
+
+/// Unicode's `Emoji_Presentation=Yes` ranges (emoji-data.txt, Unicode 16):
+/// the code points drawn as emoji without a variation selector.
+const EMOJI_PRESENTATION: &[(u32, u32)] = &[
+    (0x231A, 0x231B),
+    (0x23E9, 0x23EC),
+    (0x23F0, 0x23F0),
+    (0x23F3, 0x23F3),
+    (0x25FD, 0x25FE),
+    (0x2614, 0x2615),
+    (0x2648, 0x2653),
+    (0x267F, 0x267F),
+    (0x2693, 0x2693),
+    (0x26A1, 0x26A1),
+    (0x26AA, 0x26AB),
+    (0x26BD, 0x26BE),
+    (0x26C4, 0x26C5),
+    (0x26CE, 0x26CE),
+    (0x26D4, 0x26D4),
+    (0x26EA, 0x26EA),
+    (0x26F2, 0x26F3),
+    (0x26F5, 0x26F5),
+    (0x26FA, 0x26FA),
+    (0x26FD, 0x26FD),
+    (0x2705, 0x2705),
+    (0x270A, 0x270B),
+    (0x2728, 0x2728),
+    (0x274C, 0x274C),
+    (0x274E, 0x274E),
+    (0x2753, 0x2755),
+    (0x2757, 0x2757),
+    (0x2795, 0x2797),
+    (0x27B0, 0x27B0),
+    (0x27BF, 0x27BF),
+    (0x2B1B, 0x2B1C),
+    (0x2B50, 0x2B50),
+    (0x2B55, 0x2B55),
+    (0x1F004, 0x1F004),
+    (0x1F0CF, 0x1F0CF),
+    (0x1F18E, 0x1F18E),
+    (0x1F191, 0x1F19A),
+    (0x1F1E6, 0x1F1FF),
+    (0x1F201, 0x1F201),
+    (0x1F21A, 0x1F21A),
+    (0x1F22F, 0x1F22F),
+    (0x1F232, 0x1F236),
+    (0x1F238, 0x1F23A),
+    (0x1F250, 0x1F251),
+    (0x1F300, 0x1F320),
+    (0x1F32D, 0x1F335),
+    (0x1F337, 0x1F37C),
+    (0x1F37E, 0x1F393),
+    (0x1F3A0, 0x1F3CA),
+    (0x1F3CF, 0x1F3D3),
+    (0x1F3E0, 0x1F3F0),
+    (0x1F3F4, 0x1F3F4),
+    (0x1F3F8, 0x1F43E),
+    (0x1F440, 0x1F440),
+    (0x1F442, 0x1F4FC),
+    (0x1F4FF, 0x1F53D),
+    (0x1F54B, 0x1F54E),
+    (0x1F550, 0x1F567),
+    (0x1F57A, 0x1F57A),
+    (0x1F595, 0x1F596),
+    (0x1F5A4, 0x1F5A4),
+    (0x1F5FB, 0x1F64F),
+    (0x1F680, 0x1F6C5),
+    (0x1F6CC, 0x1F6CC),
+    (0x1F6D0, 0x1F6D2),
+    (0x1F6D5, 0x1F6D7),
+    (0x1F6DC, 0x1F6DF),
+    (0x1F6EB, 0x1F6EC),
+    (0x1F6F4, 0x1F6FC),
+    (0x1F7E0, 0x1F7EB),
+    (0x1F7F0, 0x1F7F0),
+    (0x1F90C, 0x1F93A),
+    (0x1F93C, 0x1F945),
+    (0x1F947, 0x1F9FF),
+    (0x1FA70, 0x1FA7C),
+    (0x1FA80, 0x1FA89),
+    (0x1FA8F, 0x1FAC6),
+    (0x1FACE, 0x1FADC),
+    (0x1FADF, 0x1FAE9),
+    (0x1FAF0, 0x1FAF8),
+];
+
+/// Whether a cluster should be drawn as text: its first code point is not
+/// emoji by default and no VS16 (U+FE0F) asks for emoji, as terminals do.
+pub fn text_presentation(cluster: &str) -> bool {
+    let Some(first) = cluster.chars().next() else {
+        return true;
+    };
+    if cluster.contains('\u{fe0f}') {
+        return false;
+    }
+    let c = u32::from(first);
+    let at = EMOJI_PRESENTATION.partition_point(|&(_, hi)| hi < c);
+    !EMOJI_PRESENTATION.get(at).is_some_and(|&(lo, _)| lo <= c)
+}
+
 fn put(scene: &mut Scene, p: &CellPiece, x: f32, y: f32, color: Rgba, gamma: TextGamma) {
     let ra = &p.raster;
     scene.glyph(
@@ -541,4 +743,27 @@ fn put(scene: &mut Scene, p: &CellPiece, x: f32, y: f32, color: Rgba, gamma: Tex
         ra.colored,
         gamma,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symbols_are_text_unless_emoji_by_default_or_asked_for() {
+        assert!(text_presentation("\u{23fa}"));
+        assert!(text_presentation("\u{2714}"));
+        assert!(text_presentation("a"));
+        assert!(!text_presentation("\u{23fa}\u{fe0f}"));
+        assert!(!text_presentation("\u{231a}"));
+        assert!(!text_presentation("\u{1f680}"));
+        assert!(!text_presentation("\u{1f1fa}\u{1f1f8}"));
+    }
+
+    #[test]
+    fn emoji_ranges_are_sorted_for_the_search() {
+        assert!(EMOJI_PRESENTATION
+            .windows(2)
+            .all(|w| w[0].1 < w[1].0 && w[0].0 <= w[0].1));
+    }
 }

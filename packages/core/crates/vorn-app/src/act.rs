@@ -84,11 +84,6 @@ pub enum Act {
         project: String,
         path: String,
     },
-    /// Opens a project in the editor `ide` (`ide:open`).
-    OpenIde {
-        ide: String,
-        path: String,
-    },
     AddProject,
     /// How the sidebar arranges the sessions.
     SidebarMode(SidebarMode),
@@ -138,6 +133,11 @@ pub enum Act {
     Task(crate::tasks::TaskAct),
     Run(crate::runs::RunAct),
     Workflow(crate::workflows::WfAct),
+    /// The settings page's controls.
+    Set(crate::settings::SetAct),
+    Git(crate::git::GitAct),
+    Side(crate::side::SideAct),
+    Edit(crate::editor::EditAct),
     Pane(crate::panes::PaneAct),
     /// Opens a link in the system browser.
     OpenUrl(String),

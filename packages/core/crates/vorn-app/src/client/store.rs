@@ -20,6 +20,7 @@ pub const TOPICS: &[&str] = &[
     "widget:status-update",
     "config:changed",
     "workflow:runUpdated",
+    "worktree:confirmCleanup",
     "artifact:published",
     "artifact:commentsChanged",
     "connector:catalogChanged",
@@ -221,13 +222,6 @@ impl Store {
                 exited: None,
                 cause: None,
             }),
-        }
-    }
-
-    /// Sets the branch `id` is on, as the git poll found it.
-    pub fn set_branch(&mut self, id: &str, branch: String) {
-        if let Some(s) = self.sessions.iter_mut().find(|s| s.info.id == id) {
-            s.info.branch = Some(branch);
         }
     }
 

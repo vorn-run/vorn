@@ -185,8 +185,18 @@ pub enum MenuKind {
     NodeMore(String),
     /// The editor's icon and colour picker.
     WfIcon,
-    /// A status bar's Open chevron: the editors to open the project in.
+    /// The settings shell picker's list.
+    SetShell,
+    /// A settings `<select>`, by the default it writes.
+    SetSelect(String),
+    /// A host's stored-key select.
+    SshKey(String),
+    /// A session's branch switcher.
+    Branch(String),
+    /// The editors a session's project opens in.
     OpenIn(String),
+    /// A Files pane's list of every open tab.
+    FileTabs(String),
 }
 
 impl MenuKind {
@@ -235,6 +245,12 @@ pub enum Dialog {
     WfFile,
     /// GateReviewModal: the review page of a waiting gate.
     GateReview,
+    /// The Changes panel's CommitDialog.
+    GitCommit,
+    /// WorktreeCleanupDialog.
+    RemoveWorktree,
+    /// "Discard unsaved changes?" before a buffer goes.
+    Discard,
 }
 
 /// A toast in the bottom right.
@@ -416,12 +432,6 @@ pub struct State {
     /// The selected card's terminal takes the keys on the next frame, as
     /// today's `term.focus()` after a jump or a new session.
     pub focus_terminal: bool,
-    /// The editors found here (`ide:detect`), by id and name; the first opens.
-    pub ides: Vec<(String, String)>,
-    /// Sessions whose branch was asked since the last poll.
-    pub branch_asked: HashSet<String>,
-    /// When every session's branch was last asked (`useGitDiffPolling`).
-    pub branch_polled: Option<Instant>,
     /// When each session last drew, for the recent sort.
     pub last_output: HashMap<String, Instant>,
     /// Panes whose size this device does not drive.
@@ -437,6 +447,12 @@ pub struct State {
     pub tasks: crate::tasks::Tasks,
     pub runs: crate::runs::RunView,
     pub wf: crate::workflows::Workflows,
+    pub settings: crate::settings::Settings,
+    pub git: crate::git::Git,
+    pub side: crate::side::Side,
+    pub editors: crate::editor::Editors,
+    /// The build of the vornd this app talks to, from `server:identity`.
+    pub server_version: Option<String>,
     pub bench: crate::panes::Workbench,
 }
 
@@ -461,6 +477,7 @@ impl State {
                         .as_deref()
                         .is_none_or(|w| s.info.worktree_path.as_deref().unwrap_or("") == w)
                     && self.filter.keeps(s)
+                    && self.side.holder(&s.info.id).is_none()
             })
             .map(|(i, _)| i)
             .collect();

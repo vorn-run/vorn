@@ -63,6 +63,8 @@ pub struct TextEdit {
     pub(crate) goal_x: Option<f32>,
     /// How far a multiline field is scrolled, logical pixels.
     pub(crate) scroll_y: f32,
+    /// How far a no-wrap multiline field is scrolled sideways.
+    pub(crate) scroll_x: f32,
 }
 
 impl TextEdit {

@@ -12,7 +12,7 @@ use crate::layout::{self, Mode};
 use crate::look::{self, Rgb};
 use crate::state::MenuKind;
 use crate::ui::{
-    custom, div, field, icon, split, text, text_input, tooltip, Action, El, Id, Rgba, Role, Sense,
+    custom, div, field, icon, text, text_input, tooltip, Action, El, Id, Rgba, Role, Sense,
     TextStyle,
 };
 
@@ -100,7 +100,7 @@ fn confirm(s: &Screen<'_>, trigger: El, message: &str, ok: Act, cancel: Act, lab
 /// CardActionCluster: more actions, minimize on a grid card, expand or
 /// collapse, and close behind its confirmation.
 fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
-    use crate::components::card::{card_actions_with, CardActions, CardVariant};
+    use crate::components::card::{card_actions_with, CardActions, CardButton, CardVariant};
     let sid = session.info.id.clone();
     let (variant, toggle, key) = if focused {
         (CardVariant::Focused, Act::Collapse, 'W')
@@ -113,11 +113,24 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             s.acts.on("confirm", Act::AskClose(String::new())),
         )
     });
+    let specs = super::side::header_buttons(s, session);
+    let side: Vec<CardButton<'_>> = specs
+        .iter()
+        .map(|(act, icon, label)| CardButton {
+            id: s.acts.on("card", act.clone()),
+            icon,
+            label,
+            tip: label,
+            shortcut: None,
+            danger: false,
+        })
+        .collect();
     card_actions_with(
         s.ui,
         &CardActions {
             variant,
             more: s.acts.on("card", Act::Open(MenuKind::Card(sid.clone()))),
+            panes: &side,
             minimize: s.acts.on("card", Act::ToggleMinimized(sid.clone())),
             toggle: s.acts.on("card", toggle),
             close: s.acts.on("card", Act::AskClose(sid)),
@@ -300,7 +313,7 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
         .row()
         .items_center()
         .gap(8.0)
-        .pl(12.0)
+        .pl(s.lead())
         .pr(if s.chrome { 0.0 } else { 12.0 })
         .h(look::TOP_BAR_H - 1.0)
         .bg(c(look::SURFACE_RAISED));
@@ -324,7 +337,7 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
         .shrink0()
         .child(row)
         .child(div().h(1.0).w_full().bg(white(0.04)));
-    if s.chrome {
+    if s.chrome || s.traffic {
         s.acts.double(chrome::TITLE_BAR, Act::Collapse);
         bar.id(chrome::TITLE_BAR)
             .sense(Sense::WINDOW_DRAG | Sense::DOUBLE)
@@ -335,16 +348,30 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
     }
 }
 
-/// BranchChip: the worktree in ink-secondary, then the branch.
-fn branch_chip(s: &Session, dim: f32) -> Option<El> {
+/// BranchChip: the worktree in ink-secondary, then the branch; a click
+/// opens the branch switcher.
+pub(super) fn branch_chip(sc: &Screen<'_>, s: &Session, dim: f32) -> Option<El> {
     let branch = s.info.branch.as_deref()?;
+    let id = sc.acts.on("branch-chip", super::side::branch_act(s));
+    let open = sc
+        .st
+        .menu
+        .as_ref()
+        .is_some_and(|m| m.kind == MenuKind::Branch(s.info.id.clone()));
     let mut chip = div()
+        .id(id)
+        .on(Action::Click)
         .row()
         .items_center()
         .gap(4.0)
         .px(4.0)
         .py(2.0)
         .rounded(4.0)
+        .bg(if open {
+            white(0.08)
+        } else {
+            white(0.06 * sc.ui.hover(id))
+        })
         .role(Role::Button, format!("Switch branch (current: {branch})"));
     if let (Some(true), Some(name)) = (s.info.is_worktree, s.info.worktree_name.as_deref()) {
         let ink = fade(look::INK, look::INK_SECONDARY, dim);
@@ -419,90 +446,21 @@ fn status_bar(s: &Screen<'_>, session: &Session, dim: f32) -> El {
         .px(8.0)
         .h(look::CARD_STATUS_H - 1.0)
         .shrink0();
-    if let Some(chip) = branch_chip(session, dim) {
+    if let Some(chip) = branch_chip(s, session, dim) {
         bar = bar.child(chip);
     }
     if let Some(chip) = task_chip(s, &session.info.id, dim) {
         bar = bar.child(chip);
     }
-    if let Some(open) = open_in(s, session) {
-        bar = bar.child(div().grow()).child(open);
+    bar = bar.child(div().grow());
+    for item in super::side::status_items(s, session, dim) {
+        bar = bar.child(item);
     }
     div()
         .col()
         .shrink0()
         .child(div().h(1.0).w_full().bg(white(0.04)))
         .child(bar)
-}
-
-/// The glyph an editor's entry draws: the brand marks are not shipped.
-pub(super) fn ide_glyph(id: &str) -> &'static str {
-    match id {
-        "terminal" => "square-terminal",
-        "finder" => "folder-open",
-        _ => "code-xml",
-    }
-}
-
-/// `OpenInButton` (upward): Open in the first editor found, and a chevron
-/// listing them all. Nothing when none was found.
-fn open_in(s: &Screen<'_>, session: &Session) -> Option<El> {
-    let (ide, name) = s.st.ides.first()?;
-    let sid = session.info.id.as_str();
-    let open = Id::new("open-in").child(sid);
-    s.acts.bind(
-        open,
-        Act::OpenIde {
-            ide: ide.clone(),
-            path: session.info.project_path.clone(),
-        },
-    );
-    let choose = s
-        .acts
-        .on("open-in", Act::Open(MenuKind::OpenIn(sid.to_owned())));
-    let shown =
-        s.st.menu
-            .as_ref()
-            .is_some_and(|m| m.kind == MenuKind::OpenIn(sid.to_owned()));
-    let tone = |id: Id, on: bool| {
-        let hot = s.ui.hover(id).max(if on { 1.0 } else { 0.0 });
-        (
-            c(look::GRAY_500).mix(c(look::GRAY_300), hot),
-            white(0.0).mix(white(0.06), hot),
-        )
-    };
-    let (fg, bg) = tone(open, false);
-    let main = div()
-        .id(open)
-        .on(Action::Click)
-        .row()
-        .items_center()
-        .gap(4.0)
-        .px(4.0)
-        .py(2.0)
-        .rounded(4.0)
-        .bg(bg)
-        .role(Role::Button, format!("Open in {name}"))
-        .child(ico(ide_glyph(ide), 11.0, 1.5, fg))
-        .child(text("Open", 10.0, fg).line_height(12.0).silent());
-    let (fg, bg) = tone(choose, shown);
-    let chevron = div()
-        .id(choose)
-        .on(Action::Click)
-        .row()
-        .items_center()
-        .px(2.0)
-        .rounded(4.0)
-        .bg(bg)
-        .role(Role::Button, "Choose IDE")
-        .child(ico("chevron-down", 9.0, 2.0, fg));
-    Some(
-        div()
-            .row()
-            .items_stretch()
-            .child(tooltip(s.ui, main, open, &format!("Open in {name}"), None))
-            .child(chevron),
-    )
 }
 
 /// CommandSpine: an 8 px gutter with its hairline and a mark per command
@@ -725,52 +683,35 @@ fn intent_bar(s: &Screen<'_>, session: &Session, compact: bool) -> El {
 }
 
 /// SessionComposer: the ended strip, or a shell's intent bar.
-fn composer(s: &Screen<'_>, session: &Session, compact: bool) -> Option<El> {
+pub(super) fn composer(s: &Screen<'_>, session: &Session, compact: bool) -> Option<El> {
     if session.ended() {
         return Some(ended_strip(s, session, compact));
     }
     session.is_shell().then(|| intent_bar(s, session, compact))
 }
 
-/// The terminal, its composer and status bar: what every layout shows of a
-/// session under its header or tab.
-fn body(s: &Screen<'_>, i: usize, session: &Session, compact: bool, dim: f32) -> El {
-    let sid = session.info.id.as_str();
-    let side = panes::column(s, session);
-    let main = match side {
-        Some(side) if panes::maximized(s, sid) => side.grow().min_h(0.0),
-        Some(side) => {
-            let term = div()
-                .col()
-                .w_full()
-                .h_full()
-                .min_w0()
-                .child(terminal(s, i, session))
-                .child_if(composer(s, session, compact));
-            div().row().grow().min_h(0.0).child(split(
-                s.ui,
-                Id::new("card-split").child(sid),
-                true,
-                0.5,
-                term,
-                side,
-            ))
-        }
-        None => div()
-            .col()
-            .grow()
-            .min_h(0.0)
-            .child(terminal(s, i, session))
-            .child_if(composer(s, session, compact)),
-    };
+/// The terminal and its composer: what every layout shows of a session
+/// under its header or tab.
+fn term_body(s: &Screen<'_>, i: usize, session: &Session, compact: bool) -> El {
     div()
         .col()
         .grow()
         .min_h(0.0)
         .bg(c(look::SURFACE_SUNKEN))
         .child(div().h(look::CARD_BODY_PT).shrink0())
-        .child(main)
-        .child(status_bar(s, session, dim))
+        .child(terminal(s, i, session))
+        .child_if(composer(s, session, compact))
+}
+
+/// The terminal with its status bar, beside the session's panes.
+fn body(s: &Screen<'_>, i: usize, session: &Session, compact: bool, dim: f32) -> El {
+    super::side::frame(
+        s,
+        session,
+        None,
+        term_body(s, i, session, compact),
+        status_bar(s, session, dim),
+    )
 }
 
 fn card(s: &Screen<'_>, i: usize, pos: usize, session: &Session) -> El {
@@ -791,8 +732,13 @@ fn card(s: &Screen<'_>, i: usize, pos: usize, session: &Session) -> El {
         .border(1.0, white(0.06).mix(white(0.12), s.ui.hover(card_id)))
         .role(Role::Group, session.title())
         .selected(selected)
-        .child(header(s, session, pos, dim, hot))
-        .child(body(s, i, session, true, dim))
+        .child(super::side::frame(
+            s,
+            session,
+            Some(header(s, session, pos, dim, hot)),
+            term_body(s, i, session, true),
+            status_bar(s, session, dim),
+        ))
         .child(div().h(look::CARD_FOOT_H).shrink0());
     s.acts
         .click(el, "card-box", Act::Select(sid.to_owned()))
@@ -825,25 +771,45 @@ fn no_match() -> El {
         )
 }
 
+/// A grid cell: a session's card, or a file popped out of one.
+enum Cell<'a> {
+    Session(usize),
+    Card(&'a str),
+}
+
+/// The grid's cells: each session, then the cards it popped out.
+fn cells<'a>(s: &'a Screen<'_>) -> Vec<Cell<'a>> {
+    let mut out = Vec::new();
+    for i in s.st.gridded(s.store) {
+        out.push(Cell::Session(i));
+        for card in s.st.side.cards_of(&s.store.sessions[i].info.id) {
+            out.push(Cell::Card(card));
+        }
+    }
+    out
+}
+
 pub(super) fn grid(s: &Screen<'_>) -> El {
-    let shown = s.st.gridded(s.store);
-    if shown.is_empty() {
+    let cells = cells(s);
+    if cells.is_empty() {
         return no_match();
     }
     let selected = s.st.selected.as_deref().and_then(|id| {
-        shown
-            .iter()
-            .position(|&i| s.store.sessions[i].info.id == id)
+        cells.iter().position(|cell| match cell {
+            Cell::Session(i) => s.store.sessions[*i].info.id == id,
+            Cell::Card(c) => *c == id,
+        })
     });
-    let (l, first, rows) = visible(shown.len(), selected, s.grid_size(), s.st.columns);
+    let (l, first, rows) = visible(cells.len(), selected, s.grid_size(), s.st.columns);
     let mut body = div().col().grow().min_h(0.0).role(Role::Grid, "Sessions");
     let grid_id = Id::new("grid");
     for r in first..first + rows {
         let mut row = div().row().grow().min_h(0.0);
         for col in 0..l.cols {
             let n = r * l.cols + col;
-            row = row.child(match shown.get(n) {
-                Some(&i) => card(s, i, n, &s.store.sessions[i]).flex(1.0),
+            row = row.child(match cells.get(n) {
+                Some(Cell::Session(i)) => card(s, *i, n, &s.store.sessions[*i]).flex(1.0),
+                Some(Cell::Card(c)) => super::side::editor_card(s, c).flex(1.0),
                 None => div().grow(),
             });
         }
@@ -1005,6 +971,9 @@ pub(super) fn tabs(s: &Screen<'_>) -> El {
         .items_center()
         .min_h(40.0)
         .bg(c(look::SURFACE_OVERLAY));
+    if s.traffic && !s.st.sidebar {
+        strip = strip.pl(look::TRAFFIC_LIGHT_PAD);
+    }
     if !s.st.sidebar {
         strip = strip.child(div().pl(8.0).child(chrome::nav_cluster(s)));
     }

@@ -195,6 +195,12 @@ pub struct EditLook {
     /// A `<textarea>`: Enter starts a line and the primary modifier with
     /// Enter submits.
     pub textarea: bool,
+    /// A multiline field whose lines do not wrap; long ones scroll sideways.
+    pub nowrap: bool,
+    /// Colours for byte ranges of the text (code), `color` elsewhere.
+    pub spans: Vec<(std::ops::Range<usize>, Rgba)>,
+    /// Backgrounds under byte ranges (find matches).
+    pub marks: Vec<(std::ops::Range<usize>, Rgba)>,
     /// One line drawn mid-field (`text-center`) rather than from the left.
     pub centered: bool,
 }
@@ -331,6 +337,20 @@ impl El {
         self
     }
     /// An edit field's placeholder ink, for one without `placeholder-*`.
+    /// Colours an edit field's text by byte range and marks ranges with a
+    /// background; a no-op on anything else.
+    pub fn edit_colors(
+        mut self,
+        spans: Vec<(std::ops::Range<usize>, Rgba)>,
+        marks: Vec<(std::ops::Range<usize>, Rgba)>,
+    ) -> El {
+        if let Content::Edit(look) = &mut self.content {
+            look.spans = spans;
+            look.marks = marks;
+        }
+        self
+    }
+
     pub fn placeholder_color(mut self, c: Rgba) -> El {
         if let Content::Edit(l) = &mut self.content {
             l.placeholder_color = c;
@@ -651,6 +671,14 @@ impl El {
     pub fn mono(mut self) -> El {
         if let Content::Text { style, .. } = &mut self.content {
             style.mono = true;
+        }
+        self
+    }
+
+    /// Slanted, for a text element (a preview tab's name).
+    pub fn italic(mut self) -> El {
+        if let Content::Text { style, .. } = &mut self.content {
+            style.italic = true;
         }
         self
     }
