@@ -1435,10 +1435,7 @@
     {
       "original": "**bold** quick the gamma\n\nthe",
       "edited": "**bold** quick the gamma\n\nbeta - item **bold**\n\nthe",
-      "paragraphs": [
-        "**bold** quick the gamma",
-        "the"
-      ],
+      "paragraphs": ["**bold** quick the gamma", "the"],
       "merged": {
         "body": "**bold** quick the gamma\n\nbeta - item **bold**\n\nthe\n",
         "edits": [
@@ -1467,10 +1464,7 @@
     {
       "original": "delta delta\n\n\nquick delta gamma **bold** beta",
       "edited": "delta delta",
-      "paragraphs": [
-        "delta delta",
-        "quick delta gamma **bold** beta"
-      ],
+      "paragraphs": ["delta delta", "quick delta gamma **bold** beta"],
       "merged": {
         "body": "delta delta\n",
         "edits": [
@@ -1519,9 +1513,7 @@
     {
       "original": "fox alpha gamma fox quick",
       "edited": "fox alpha gamma fox quick",
-      "paragraphs": [
-        "fox alpha gamma fox quick"
-      ],
+      "paragraphs": ["fox alpha gamma fox quick"],
       "merged": {
         "body": "fox alpha gamma fox quick\n",
         "edits": []
@@ -1592,9 +1584,7 @@
     {
       "original": "alpha alpha beta",
       "edited": "alpha alpha beta",
-      "paragraphs": [
-        "alpha alpha beta"
-      ],
+      "paragraphs": ["alpha alpha beta"],
       "merged": {
         "body": "alpha alpha beta\n",
         "edits": []
@@ -1624,11 +1614,7 @@
     {
       "original": "alpha - item the\n\ngamma delta\n\n- item",
       "edited": "alpha - item the\n\ngamma delta\n\n- item",
-      "paragraphs": [
-        "alpha - item the",
-        "gamma delta",
-        "- item"
-      ],
+      "paragraphs": ["alpha - item the", "gamma delta", "- item"],
       "merged": {
         "body": "alpha - item the\n\ngamma delta\n\n- item\n",
         "edits": []
@@ -1637,10 +1623,7 @@
     {
       "original": "quick gamma beta\n  \nfox - item",
       "edited": "quick gamma beta\n\nfox - item\n\n**bold** quick the the",
-      "paragraphs": [
-        "quick gamma beta",
-        "fox - item"
-      ],
+      "paragraphs": ["quick gamma beta", "fox - item"],
       "merged": {
         "body": "quick gamma beta\n\nfox - item\n\n**bold** quick the the\n",
         "edits": [
@@ -1654,12 +1637,7 @@
     {
       "original": "delta\n\ngamma delta alpha\n\n- item\n\n**bold** fox - item the the fox",
       "edited": "delta\n\ngamma delta alpha\n\n- item\n\n**bold** fox - item the the fox",
-      "paragraphs": [
-        "delta",
-        "gamma delta alpha",
-        "- item",
-        "**bold** fox - item the the fox"
-      ],
+      "paragraphs": ["delta", "gamma delta alpha", "- item", "**bold** fox - item the the fox"],
       "merged": {
         "body": "delta\n\ngamma delta alpha\n\n- item\n\n**bold** fox - item the the fox\n",
         "edits": []
@@ -1668,9 +1646,7 @@
     {
       "original": "beta - item - item beta fox",
       "edited": "the delta delta beta\n\ndelta - item",
-      "paragraphs": [
-        "beta - item - item beta fox"
-      ],
+      "paragraphs": ["beta - item - item beta fox"],
       "merged": {
         "body": "the delta delta beta\n\ndelta - item\n",
         "edits": [
@@ -1914,11 +1890,7 @@
     {
       "original": "the beta beta\n\n\nthe alpha fox\n\n\nbeta - item",
       "edited": "the beta beta\n\nthe alpha fox\n\nbeta - item",
-      "paragraphs": [
-        "the beta beta",
-        "the alpha fox",
-        "beta - item"
-      ],
+      "paragraphs": ["the beta beta", "the alpha fox", "beta - item"],
       "merged": {
         "body": "the beta beta\n\nthe alpha fox\n\nbeta - item\n",
         "edits": []
@@ -1927,11 +1899,7 @@
     {
       "original": "alpha **bold** the quick beta quick\n\nquick\n\ngamma **bold** fox alpha",
       "edited": "alpha **bold** the quick beta quick\n\n**bold** - item fox\n\nquick\n\ngamma **bold** fox alpha",
-      "paragraphs": [
-        "alpha **bold** the quick beta quick",
-        "quick",
-        "gamma **bold** fox alpha"
-      ],
+      "paragraphs": ["alpha **bold** the quick beta quick", "quick", "gamma **bold** fox alpha"],
       "merged": {
         "body": "alpha **bold** the quick beta quick\n\n**bold** - item fox\n\nquick\n\ngamma **bold** fox alpha\n",
         "edits": [
@@ -1945,10 +1913,7 @@
     {
       "original": "fox\n\nquick",
       "edited": "",
-      "paragraphs": [
-        "fox",
-        "quick"
-      ],
+      "paragraphs": ["fox", "quick"],
       "merged": {
         "body": "\n",
         "edits": [
@@ -1971,9 +1936,7 @@
     {
       "original": "**bold**",
       "edited": "fox gamma",
-      "paragraphs": [
-        "**bold**"
-      ],
+      "paragraphs": ["**bold**"],
       "merged": {
         "body": "fox gamma\n",
         "edits": [
@@ -2011,11 +1974,7 @@
     {
       "original": "gamma the\n\nquick\n\nfox quick delta alpha",
       "edited": "the the\n\nquick\n\nfox the - item **bold** alpha",
-      "paragraphs": [
-        "gamma the",
-        "quick",
-        "fox quick delta alpha"
-      ],
+      "paragraphs": ["gamma the", "quick", "fox quick delta alpha"],
       "merged": {
         "body": "the the\n\nquick\n\nfox the - item **bold** alpha\n",
         "edits": [
@@ -2052,9 +2011,7 @@
     {
       "original": "gamma - item the gamma",
       "edited": "fox the the - item",
-      "paragraphs": [
-        "gamma - item the gamma"
-      ],
+      "paragraphs": ["gamma - item the gamma"],
       "merged": {
         "body": "fox the the - item\n",
         "edits": [
@@ -2077,11 +2034,7 @@
     {
       "original": "delta fox quick\n\n\n**bold** the\n\n\ngamma the **bold** **bold** fox",
       "edited": "delta fox quick\n\n**bold** the\n\ngamma the **bold** **bold** fox",
-      "paragraphs": [
-        "delta fox quick",
-        "**bold** the",
-        "gamma the **bold** **bold** fox"
-      ],
+      "paragraphs": ["delta fox quick", "**bold** the", "gamma the **bold** **bold** fox"],
       "merged": {
         "body": "delta fox quick\n\n**bold** the\n\ngamma the **bold** **bold** fox\n",
         "edits": []
@@ -2090,12 +2043,7 @@
     {
       "original": "the gamma\n  \ngamma\n  \nthe delta\n  \n**bold**",
       "edited": "gamma\n\nthe delta\n\n**bold**",
-      "paragraphs": [
-        "the gamma",
-        "gamma",
-        "the delta",
-        "**bold**"
-      ],
+      "paragraphs": ["the gamma", "gamma", "the delta", "**bold**"],
       "merged": {
         "body": "gamma\n\nthe delta\n\n**bold**\n",
         "edits": [
@@ -2180,9 +2128,7 @@
     {
       "original": "alpha gamma **bold** gamma",
       "edited": "",
-      "paragraphs": [
-        "alpha gamma **bold** gamma"
-      ],
+      "paragraphs": ["alpha gamma **bold** gamma"],
       "merged": {
         "body": "\n",
         "edits": [
@@ -2230,9 +2176,7 @@
     {
       "original": "quick delta the alpha **bold** the",
       "edited": "quick delta the alpha **bold** the",
-      "paragraphs": [
-        "quick delta the alpha **bold** the"
-      ],
+      "paragraphs": ["quick delta the alpha **bold** the"],
       "merged": {
         "body": "quick delta the alpha **bold** the\n",
         "edits": []
@@ -2291,10 +2235,7 @@
     {
       "original": "delta gamma - item beta - item **bold**\n\n\nthe gamma quick",
       "edited": "- item delta",
-      "paragraphs": [
-        "delta gamma - item beta - item **bold**",
-        "the gamma quick"
-      ],
+      "paragraphs": ["delta gamma - item beta - item **bold**", "the gamma quick"],
       "merged": {
         "body": "- item delta\n",
         "edits": [
@@ -2317,9 +2258,7 @@
     {
       "original": "gamma delta",
       "edited": "beta quick quick\n\ngamma delta the",
-      "paragraphs": [
-        "gamma delta"
-      ],
+      "paragraphs": ["gamma delta"],
       "merged": {
         "body": "beta quick quick\n\ngamma delta the\n",
         "edits": [
@@ -2333,10 +2272,7 @@
     {
       "original": "delta alpha\n  \ngamma delta alpha **bold**",
       "edited": "delta alpha\n\ngamma delta alpha **bold**",
-      "paragraphs": [
-        "delta alpha",
-        "gamma delta alpha **bold**"
-      ],
+      "paragraphs": ["delta alpha", "gamma delta alpha **bold**"],
       "merged": {
         "body": "delta alpha\n\ngamma delta alpha **bold**\n",
         "edits": []
@@ -2369,10 +2305,7 @@
     {
       "original": "fox - item - item gamma **bold**\n\n\ngamma **bold** quick quick",
       "edited": "- item gamma alpha the beta\n\nfox",
-      "paragraphs": [
-        "fox - item - item gamma **bold**",
-        "gamma **bold** quick quick"
-      ],
+      "paragraphs": ["fox - item - item gamma **bold**", "gamma **bold** quick quick"],
       "merged": {
         "body": "- item gamma alpha the beta\n\nfox\n",
         "edits": [
@@ -6274,18 +6207,12 @@
           "tone": {
             "type": "color",
             "default": "#000",
-            "options": [
-              "#000",
-              "#fff"
-            ]
+            "options": ["#000", "#fff"]
           },
           "plan": {
             "type": "select",
             "default": "free",
-            "options": [
-              "free",
-              "pro"
-            ]
+            "options": ["free", "pro"]
           }
         },
         "artboards": [
@@ -6319,9 +6246,7 @@
           "ok": {
             "type": "select",
             "default": "a",
-            "options": [
-              "a"
-            ]
+            "options": ["a"]
           }
         }
       }

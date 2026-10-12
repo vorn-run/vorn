@@ -22,6 +22,7 @@ vorn-term-mirror = { path = "../term-mirror" }
 vorn-term-proto = { path = "../term-proto" }
 # Workflow files: the portable format the editor exports and imports.
 vorn-mcp = { path = "../mcp" }
+vorn-spawn = { path = "../spawn" }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "sync", "macros", "time"] }
 tokio-tungstenite = "0.28"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

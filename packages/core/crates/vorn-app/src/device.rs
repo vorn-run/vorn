@@ -4,7 +4,6 @@
 //! exist only on macOS; elsewhere the list is empty and a claim says why.
 
 use std::collections::HashMap;
-use std::process::Command;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -153,7 +152,7 @@ fn simctl(args: &[&str]) -> Result<String, String> {
     if !cfg!(target_os = "macos") {
         return Err("Simulators need macOS with Xcode.".to_owned());
     }
-    let out = Command::new("xcrun")
+    let out = vorn_spawn::command("xcrun")
         .arg("simctl")
         .args(args)
         .output()

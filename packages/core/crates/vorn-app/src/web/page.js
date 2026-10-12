@@ -1,23 +1,31 @@
 // Seated in every pane page: reports console and requests, and answers the agent's reads and actions.
-(() => {
+/* global CSS, Event, Highlight, InputEvent, KeyboardEvent, MouseEvent, NodeFilter, Range, XMLHttpRequest, console, document, getComputedStyle, history, location, window */
+;(() => {
   if (window.__vorn) return
   const post = (m) => {
     try {
       window.ipc.postMessage(JSON.stringify(m))
-    } catch (_) {}
+    } catch {
+      // The host is gone while the page unloads.
+    }
   }
   const show = (v) => {
     if (typeof v === 'string') return v
     try {
       return JSON.stringify(v)
-    } catch (_) {
+    } catch {
       return String(v)
     }
   }
   for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
     const orig = console[level]
     console[level] = function (...args) {
-      post({ t: 'console', level: level === 'warn' ? 'warning' : level, text: args.map(show).join(' ').slice(0, 2000), timestamp: Date.now() })
+      post({
+        t: 'console',
+        level: level === 'warn' ? 'warning' : level,
+        text: args.map(show).join(' ').slice(0, 2000),
+        timestamp: Date.now()
+      })
       return orig.apply(this, args)
     }
   }
@@ -25,7 +33,13 @@
     post({ t: 'console', level: 'error', text: String(e.message), timestamp: Date.now() })
   )
   const net = (method, url, status) =>
-    post({ t: 'network', method: String(method || 'GET').toUpperCase(), url: String(url), status, timestamp: Date.now() })
+    post({
+      t: 'network',
+      method: String(method || 'GET').toUpperCase(),
+      url: String(url),
+      status,
+      timestamp: Date.now()
+    })
   const origFetch = window.fetch
   if (origFetch) {
     window.fetch = function (input, init) {
@@ -58,9 +72,58 @@
     })
   })
 
-  const INTERACTIVE = new Set(['button', 'link', 'textbox', 'searchbox', 'combobox', 'checkbox', 'radio', 'switch', 'slider', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'tab', 'spinbutton'])
-  const INPUT_ROLES = { button: 'button', submit: 'button', reset: 'button', image: 'button', checkbox: 'checkbox', radio: 'radio', range: 'slider', number: 'spinbutton', search: 'searchbox', email: 'textbox', tel: 'textbox', url: 'textbox', text: 'textbox', password: 'textbox' }
-  const TAG_ROLES = { button: 'button', select: 'combobox', textarea: 'textbox', h1: 'heading', h2: 'heading', h3: 'heading', h4: 'heading', h5: 'heading', h6: 'heading', p: 'paragraph', li: 'listitem', nav: 'navigation', main: 'main', img: 'img', option: 'option', summary: 'button', label: 'LabelText' }
+  const INTERACTIVE = new Set([
+    'button',
+    'link',
+    'textbox',
+    'searchbox',
+    'combobox',
+    'checkbox',
+    'radio',
+    'switch',
+    'slider',
+    'menuitem',
+    'menuitemcheckbox',
+    'menuitemradio',
+    'option',
+    'tab',
+    'spinbutton'
+  ])
+  const INPUT_ROLES = {
+    button: 'button',
+    submit: 'button',
+    reset: 'button',
+    image: 'button',
+    checkbox: 'checkbox',
+    radio: 'radio',
+    range: 'slider',
+    number: 'spinbutton',
+    search: 'searchbox',
+    email: 'textbox',
+    tel: 'textbox',
+    url: 'textbox',
+    text: 'textbox',
+    password: 'textbox'
+  }
+  const TAG_ROLES = {
+    button: 'button',
+    select: 'combobox',
+    textarea: 'textbox',
+    h1: 'heading',
+    h2: 'heading',
+    h3: 'heading',
+    h4: 'heading',
+    h5: 'heading',
+    h6: 'heading',
+    p: 'paragraph',
+    li: 'listitem',
+    nav: 'navigation',
+    main: 'main',
+    img: 'img',
+    option: 'option',
+    summary: 'button',
+    label: 'LabelText'
+  }
   const roleOf = (el) => {
     const explicit = el.getAttribute('role')
     if (explicit) return explicit.split(' ')[0]
@@ -78,10 +141,20 @@
     if (label) return label.trim()
     const by = el.getAttribute('aria-labelledby')
     if (by) {
-      const t = by.split(/\s+/).map((id) => document.getElementById(id)).filter(Boolean).map((n) => n.innerText).join(' ').trim()
+      const t = by
+        .split(/\s+/)
+        .map((id) => document.getElementById(id))
+        .filter(Boolean)
+        .map((n) => n.innerText)
+        .join(' ')
+        .trim()
       if (t) return t
     }
-    if (el.labels && el.labels.length) return Array.from(el.labels).map((l) => l.innerText).join(' ').trim()
+    if (el.labels && el.labels.length)
+      return Array.from(el.labels)
+        .map((l) => l.innerText)
+        .join(' ')
+        .trim()
     const alt = el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('placeholder')
     if (alt) return alt.trim()
     const tag = el.tagName.toLowerCase()
@@ -109,7 +182,8 @@
     if (!interactive && !name) return null
     const node = { role }
     if (name) node.name = name
-    if ('value' in el && typeof el.value === 'string' && el.value && role !== 'button') node.value = el.value
+    if ('value' in el && typeof el.value === 'string' && el.value && role !== 'button')
+      node.value = el.value
     if (el.disabled === true || el.getAttribute('aria-disabled') === 'true') node.disabled = true
     if (interactive) {
       node.ref = 'g' + generation + '_ref_' + (refs.size + 1)
@@ -122,17 +196,32 @@
     if (!t) return null
     if (typeof t.x === 'number') return { el: document.elementFromPoint(t.x, t.y), x: t.x, y: t.y }
     const el = refs.get(t.ref)
-    if (!el || !el.isConnected) throw new Error('Ref "' + t.ref + '" is stale — the page changed since it was read. Call read_page again for fresh refs.')
+    if (!el || !el.isConnected)
+      throw new Error(
+        'Ref "' +
+          t.ref +
+          '" is stale — the page changed since it was read. Call read_page again for fresh refs.'
+      )
     el.scrollIntoView({ block: 'center', inline: 'center' })
     const r = el.getBoundingClientRect()
     if (!r.width && !r.height) throw new Error('Ref "' + t.ref + '" is not visible on the page.')
     return { el, x: r.x + r.width / 2, y: r.y + r.height / 2 }
   }
   const mouse = (el, type, x, y) =>
-    el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 }))
+    el.dispatchEvent(
+      new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: x,
+        clientY: y,
+        button: 0
+      })
+    )
   const click = (p) => {
     if (!p.el) return
-    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) mouse(p.el, type, p.x, p.y)
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup'])
+      mouse(p.el, type, p.x, p.y)
     if (p.el.focus) p.el.focus()
     p.el.click()
   }
@@ -172,7 +261,8 @@
         }
         return out
       }),
-    text: () => wrap(() => ({ url: location.href, text: document.body ? document.body.innerText : '' })),
+    text: () =>
+      wrap(() => ({ url: location.href, text: document.body ? document.body.innerText : '' })),
     act: (p) =>
       wrap(() => {
         if (p.action === 'type') {
@@ -188,20 +278,31 @@
         }
         if (p.action === 'key') {
           const el = document.activeElement || document.body
-          for (const type of ['keydown', 'keyup']) el.dispatchEvent(new KeyboardEvent(type, { key: p.text || '', bubbles: true, cancelable: true }))
-          if (p.text === 'Enter' && el.form) el.form.requestSubmit ? el.form.requestSubmit() : el.form.submit()
+          for (const type of ['keydown', 'keyup'])
+            el.dispatchEvent(
+              new KeyboardEvent(type, { key: p.text || '', bubbles: true, cancelable: true })
+            )
+          if (p.text === 'Enter' && el.form) {
+            if (el.form.requestSubmit) el.form.requestSubmit()
+            else el.form.submit()
+          }
           return { ok: true }
         }
         if (p.action === 'scroll') {
           const at = p.target ? target(p.target) : null
-          const box = at && at.el && at.el !== document.body ? at.el : document.scrollingElement || document.body
+          const box =
+            at && at.el && at.el !== document.body
+              ? at.el
+              : document.scrollingElement || document.body
           box.scrollBy(0, typeof p.deltaY === 'number' ? p.deltaY : 400)
           return { ok: true }
         }
         if (!p.target) throw new Error('"' + p.action + '" needs a target (a ref or x/y).')
         const at = target(p.target)
         if (p.action === 'hover') {
-          if (at.el) for (const type of ['pointerover', 'mouseover', 'mouseenter', 'mousemove']) mouse(at.el, type, at.x, at.y)
+          if (at.el)
+            for (const type of ['pointerover', 'mouseover', 'mouseenter', 'mousemove'])
+              mouse(at.el, type, at.x, at.y)
           return { ok: true }
         }
         click(at)
@@ -220,7 +321,11 @@
             if (kept >= 24) break
             if (!Object.prototype.hasOwnProperty.call(t, k)) continue
             const v = t[k]
-            if ((typeof v === 'number' && isFinite(v)) || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 200)) {
+            if (
+              (typeof v === 'number' && isFinite(v)) ||
+              typeof v === 'boolean' ||
+              (typeof v === 'string' && v.length <= 200)
+            ) {
               live[k] = v
               kept++
             }
@@ -261,10 +366,12 @@
         if (!document.getElementById('vorn-marks')) {
           const style = document.createElement('style')
           style.id = 'vorn-marks'
-          style.textContent = '::highlight(vorn-draft){background:rgba(96,165,250,.28)}::highlight(vorn-sent){background:rgba(148,163,184,.22)}::highlight(vorn-focus){background:rgba(96,165,250,.55)}'
+          style.textContent =
+            '::highlight(vorn-draft){background:rgba(96,165,250,.28)}::highlight(vorn-sent){background:rgba(148,163,184,.22)}::highlight(vorn-focus){background:rgba(96,165,250,.55)}'
           document.head.appendChild(style)
         }
-        for (const k in groups) if (groups[k].length) CSS.highlights.set('vorn-' + k, new Highlight(...groups[k]))
+        for (const k in groups)
+          if (groups[k].length) CSS.highlights.set('vorn-' + k, new Highlight(...groups[k]))
         return found
       }),
     reveal: (id) =>
@@ -285,7 +392,8 @@
         box.setAttribute('aria-label', 'Comment on the selection')
         box.className = 'pop'
         box.style.cssText = 'left:' + x + 'px;top:' + y + 'px;width:' + width + 'px'
-        box.innerHTML = '<q></q><textarea rows="3" aria-label="Comment" placeholder="What should change here?"></textarea><div class="row"><span>\u2318\u21b5 to add</span><button class="cancel" type="button">Cancel</button><button class="add" type="button" disabled>Add</button></div>'
+        box.innerHTML =
+          '<q></q><textarea rows="3" aria-label="Comment" placeholder="What should change here?"></textarea><div class="row"><span>\u2318\u21b5 to add</span><button class="cancel" type="button">Cancel</button><button class="add" type="button" disabled>Add</button></div>'
         box.querySelector('q').textContent = quote
         const area = box.querySelector('textarea')
         const add = box.querySelector('.add')
@@ -344,7 +452,13 @@
     host.addEventListener('click', (e) => {
       if (e.target !== host) return
       const el = document.elementsFromPoint(e.clientX, e.clientY).find((n) => n !== host)
-      post({ t: 'point', x: Math.round(e.clientX), y: Math.round(e.clientY), element: el ? describe(el) : '', ...(el ? detail(el) : {}) })
+      post({
+        t: 'point',
+        x: Math.round(e.clientX),
+        y: Math.round(e.clientY),
+        element: el ? describe(el) : '',
+        ...(el ? detail(el) : {})
+      })
     })
     ;(document.body || document.documentElement).appendChild(host)
     return shadow
@@ -373,7 +487,8 @@
           componentName = f.type.displayName || f.type.name
           break
         }
-        if (f._debugSource && !source) source = f._debugSource.fileName + ':' + f._debugSource.lineNumber
+        if (f._debugSource && !source)
+          source = f._debugSource.fileName + ':' + f._debugSource.lineNumber
       }
     }
     return {
