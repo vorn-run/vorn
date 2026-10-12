@@ -78,6 +78,7 @@ fn shot(args: &Args) -> Result<(), String> {
         None => look::WINDOW,
     };
     let mut app = connect(args, Arc::new(|| {}))?;
+    app.set_data_dir(args.data_dir()?);
     app.chrome = args.get("chrome") != Some("off");
     // Drawn window controls stand in for the traffic lights.
     app.traffic = cfg!(target_os = "macos") && !app.chrome;
@@ -191,7 +192,7 @@ fn window(args: &Args) -> Result<(), String> {
     // reports a missing vornd before any window appears.
     let waker: Arc<Mutex<Option<Waker>>> = Arc::default();
     let w = Arc::clone(&waker);
-    let app = connect(
+    let mut app = connect(
         args,
         Arc::new(move || {
             if let Some(w) = w.lock().ok().as_ref().and_then(|w| w.as_ref()) {
@@ -199,6 +200,7 @@ fn window(args: &Args) -> Result<(), String> {
             }
         }),
     )?;
+    app.set_data_dir(args.data_dir()?);
     let opts = WindowOptions {
         min_size: Some((800.0, 600.0)),
         // macOS keeps its traffic lights over the app's top bar, with no

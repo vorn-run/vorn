@@ -18,6 +18,7 @@ pub const TOPICS: &[&str] = &[
     "widget:status-update",
     "config:changed",
     "workflow:runUpdated",
+    "worktree:confirmCleanup",
 ];
 
 /// The agent a new composer session starts when the config names none, as

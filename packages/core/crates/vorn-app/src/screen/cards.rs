@@ -130,6 +130,12 @@ fn icon_button(
     tooltip(s.ui, b, id, tip.0, tip.1)
 }
 
+/// A pane button in the card header: an icon button whose tooltip is its
+/// label.
+pub(super) fn header_button(s: &Screen<'_>, act: Act, name: &str, label: &str) -> El {
+    icon_button(s, act, name, label, (label, None), false)
+}
+
 /// ConfirmPopover: the question and its two buttons, under `trigger`.
 fn confirm(s: &Screen<'_>, trigger: El, message: &str, ok: Act, cancel: Act, label: &str) -> El {
     let cancel_id = s.acts.on("confirm", cancel);
@@ -233,7 +239,7 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             "Close",
         );
     }
-    div()
+    let mut row = div()
         .row()
         .items_center()
         .gap(2.0)
@@ -245,9 +251,11 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             "More actions",
             ("More actions", None),
             false,
-        ))
-        .child(expand)
-        .child(close)
+        ));
+    for b in super::panes::header_buttons(s, session) {
+        row = row.child(b);
+    }
+    row.child(expand).child(close)
 }
 
 /// The title, or the inline rename field while renaming.
@@ -457,16 +465,30 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
     }
 }
 
-/// BranchChip: the worktree in ink-secondary, then the branch.
-fn branch_chip(s: &Session, dim: f32) -> Option<El> {
+/// BranchChip: the worktree in ink-secondary, then the branch; a click
+/// opens the branch switcher.
+pub(super) fn branch_chip(sc: &Screen<'_>, s: &Session, dim: f32) -> Option<El> {
     let branch = s.info.branch.as_deref()?;
+    let id = sc.acts.on("branch-chip", super::panes::branch_act(s));
+    let open = sc
+        .st
+        .menu
+        .as_ref()
+        .is_some_and(|m| m.kind == MenuKind::Branch(s.info.id.clone()));
     let mut chip = div()
+        .id(id)
+        .on(Action::Click)
         .row()
         .items_center()
         .gap(4.0)
         .px(4.0)
         .py(2.0)
         .rounded(4.0)
+        .bg(if open {
+            white(0.08)
+        } else {
+            white(0.06 * sc.ui.hover(id))
+        })
         .role(Role::Button, format!("Switch branch (current: {branch})"));
     if let (Some(true), Some(name)) = (s.info.is_worktree, s.info.worktree_name.as_deref()) {
         let ink = fade(look::INK, look::INK_SECONDARY, dim);
@@ -541,11 +563,15 @@ fn status_bar(s: &Screen<'_>, session: &Session, dim: f32) -> El {
         .px(8.0)
         .h(look::CARD_STATUS_H - 1.0)
         .shrink0();
-    if let Some(chip) = branch_chip(session, dim) {
+    if let Some(chip) = branch_chip(s, session, dim) {
         bar = bar.child(chip);
     }
     if let Some(chip) = task_chip(s, &session.info.id, dim) {
         bar = bar.child(chip);
+    }
+    bar = bar.child(div().grow());
+    for item in super::panes::status_items(s, session, dim) {
+        bar = bar.child(item);
     }
     div()
         .col()
@@ -774,16 +800,16 @@ fn intent_bar(s: &Screen<'_>, session: &Session, compact: bool) -> El {
 }
 
 /// SessionComposer: the ended strip, or a shell's intent bar.
-fn composer(s: &Screen<'_>, session: &Session, compact: bool) -> Option<El> {
+pub(super) fn composer(s: &Screen<'_>, session: &Session, compact: bool) -> Option<El> {
     if session.ended() {
         return Some(ended_strip(s, session, compact));
     }
     session.is_shell().then(|| intent_bar(s, session, compact))
 }
 
-/// The terminal, its composer and status bar: what every layout shows of a
-/// session under its header or tab.
-fn body(s: &Screen<'_>, i: usize, session: &Session, compact: bool, dim: f32) -> El {
+/// The terminal and its composer: what every layout shows of a session
+/// under its header or tab.
+fn term_body(s: &Screen<'_>, i: usize, session: &Session, compact: bool) -> El {
     div()
         .col()
         .grow()
@@ -792,7 +818,17 @@ fn body(s: &Screen<'_>, i: usize, session: &Session, compact: bool, dim: f32) ->
         .child(div().h(look::CARD_BODY_PT).shrink0())
         .child(terminal(s, i, session))
         .child_if(composer(s, session, compact))
-        .child(status_bar(s, session, dim))
+}
+
+/// The terminal with its status bar, beside the session's panes.
+fn body(s: &Screen<'_>, i: usize, session: &Session, compact: bool, dim: f32) -> El {
+    super::panes::frame(
+        s,
+        session,
+        None,
+        term_body(s, i, session, compact),
+        status_bar(s, session, dim),
+    )
 }
 
 fn card(s: &Screen<'_>, i: usize, pos: usize, session: &Session) -> El {
@@ -813,8 +849,13 @@ fn card(s: &Screen<'_>, i: usize, pos: usize, session: &Session) -> El {
         .border(1.0, white(0.06).mix(white(0.12), s.ui.hover(card_id)))
         .role(Role::Group, session.title())
         .selected(selected)
-        .child(header(s, session, pos, dim, hot))
-        .child(body(s, i, session, true, dim));
+        .child(super::panes::frame(
+            s,
+            session,
+            Some(header(s, session, pos, dim, hot)),
+            term_body(s, i, session, true),
+            status_bar(s, session, dim),
+        ));
     s.acts
         .click(el, "card-box", Act::Select(sid.to_owned()))
         .sense(Sense::HOVER)
@@ -840,25 +881,45 @@ fn no_match() -> El {
         )
 }
 
+/// A grid cell: a session's card, or a file popped out of one.
+enum Cell<'a> {
+    Session(usize),
+    Card(&'a str),
+}
+
+/// The grid's cells: each session, then the cards it popped out.
+fn cells<'a>(s: &'a Screen<'_>) -> Vec<Cell<'a>> {
+    let mut out = Vec::new();
+    for i in s.st.visible(s.store) {
+        out.push(Cell::Session(i));
+        for card in s.st.panes.cards_of(&s.store.sessions[i].info.id) {
+            out.push(Cell::Card(card));
+        }
+    }
+    out
+}
+
 pub(super) fn grid(s: &Screen<'_>) -> El {
-    let shown = s.st.visible(s.store);
-    if shown.is_empty() {
+    let cells = cells(s);
+    if cells.is_empty() {
         return no_match();
     }
     let selected = s.st.selected.as_deref().and_then(|id| {
-        shown
-            .iter()
-            .position(|&i| s.store.sessions[i].info.id == id)
+        cells.iter().position(|cell| match cell {
+            Cell::Session(i) => s.store.sessions[*i].info.id == id,
+            Cell::Card(c) => *c == id,
+        })
     });
-    let (l, first, rows) = visible(shown.len(), selected, s.grid_size(), s.st.columns);
+    let (l, first, rows) = visible(cells.len(), selected, s.grid_size(), s.st.columns);
     let mut body = div().col().grow().min_h(0.0).role(Role::Grid, "Sessions");
     let grid_id = Id::new("grid");
     for r in first..first + rows {
         let mut row = div().row().grow().min_h(0.0);
         for col in 0..l.cols {
             let n = r * l.cols + col;
-            row = row.child(match shown.get(n) {
-                Some(&i) => card(s, i, n, &s.store.sessions[i]).flex(1.0),
+            row = row.child(match cells.get(n) {
+                Some(Cell::Session(i)) => card(s, *i, n, &s.store.sessions[*i]).flex(1.0),
+                Some(Cell::Card(c)) => super::panes::editor_card(s, c).flex(1.0),
                 None => div().grow(),
             });
         }

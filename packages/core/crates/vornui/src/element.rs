@@ -646,6 +646,14 @@ impl El {
         }
         self
     }
+
+    /// Slanted, for a text element (a preview tab's name).
+    pub fn italic(mut self) -> El {
+        if let Content::Text { style, .. } = &mut self.content {
+            style.italic = true;
+        }
+        self
+    }
     /// Lets a text element wrap to its box instead of overflowing it.
     pub fn wrapping(mut self) -> El {
         if let Content::Text { wrap, .. } = &mut self.content {

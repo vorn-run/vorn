@@ -247,6 +247,7 @@ pub fn connect(v: &TestVornd) -> App {
         "the grid endpoint is derived as vornd names it"
     );
     let mut app = App::connect(&ep, std::sync::Arc::new(|| {})).expect("connects and loads");
+    app.set_data_dir(v.home.clone());
     assert_eq!(app.grid_error, None);
     wait_for("the startup calls", || {
         app.pump();

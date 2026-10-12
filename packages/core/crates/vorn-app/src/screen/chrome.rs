@@ -737,10 +737,14 @@ pub(super) fn banner(s: &Screen<'_>) -> Option<El> {
 
 /// The toasts, newest at the bottom right.
 pub(super) fn toasts(s: &Screen<'_>) -> Option<El> {
-    if s.st.toasts.is_empty() {
+    let worktrees = super::git::toasts(s);
+    if s.st.toasts.is_empty() && worktrees.is_empty() {
         return None;
     }
     let mut col = div().col().gap(8.0);
+    for t in worktrees {
+        col = col.child(t);
+    }
     for t in &s.st.toasts {
         let (glyph, tint) = if t.error {
             ("x", look::RED_400)

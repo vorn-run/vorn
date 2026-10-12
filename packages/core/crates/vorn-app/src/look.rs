@@ -163,6 +163,7 @@ icons! {
     "image",
     "image-plus",
     "inbox",
+    "info",
     "italic",
     "key",
     "key-round",

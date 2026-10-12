@@ -316,15 +316,124 @@ fn session_row(s: &Screen<'_>, session: &Session) -> El {
     row
 }
 
+/// WorktreeItem: a worktree's name and branch, and on hover a terminal or
+/// session in it and its removal.
+fn worktree_row(s: &Screen<'_>, p: &ProjectConfig, wt: &crate::state::Worktree) -> El {
+    let quick = [
+        (
+            Act::NewShellIn(wt.path.clone()),
+            "terminal",
+            "New terminal",
+            1.5,
+        ),
+        (
+            Act::NewSessionIn {
+                project: p.name.clone(),
+                worktree: Some(wt.path.clone()),
+                agent: None,
+            },
+            "plus",
+            "New session",
+            2.0,
+        ),
+        (
+            Act::Git(crate::git::GitAct::Remove {
+                project: p.path.clone(),
+                worktree: wt.path.clone(),
+            }),
+            "trash-2",
+            "Remove worktree",
+            2.0,
+        ),
+    ];
+    let id = Acts::id("sidebar-worktree", &Act::Nothing).child(&wt.path);
+    let hot = s.ui.hovered(id)
+        || quick
+            .iter()
+            .any(|(a, ..)| s.ui.hovered(Acts::id("sidebar-worktree", a)));
+    let label = div()
+        .col()
+        .grow()
+        .min_w0()
+        .child(
+            text(
+                &wt.name,
+                13.0,
+                c(look::GRAY_400).mix(c(look::WHITE), if hot { 1.0 } else { 0.0 }),
+            )
+            .line_height(17.0)
+            .truncate()
+            .silent(),
+        )
+        .child(
+            div()
+                .row()
+                .items_center()
+                .gap(4.0)
+                .child(ico("git-branch", 8.0, 2.0, c(look::GRAY_600)))
+                .child(
+                    text(&wt.branch, 10.0, c(look::GRAY_600))
+                        .line_height(14.0)
+                        .truncate()
+                        .silent(),
+                ),
+        );
+    let mut row = div()
+        .id(id)
+        .sense(crate::ui::Sense::HOVER)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .pl(8.0)
+        .pr(8.0)
+        .py(6.0)
+        .rounded(6.0)
+        .bg(white(0.04 * if hot { 1.0 } else { 0.0 }))
+        .role(Role::Group, wt.name.as_str())
+        .child(ico("folder-git-2", 14.0, 1.5, c(look::GRAY_500)))
+        .child(label);
+    if hot {
+        let mut acts = div().row().items_center().gap(2.0);
+        for (act, name, tip, stroke) in quick {
+            let danger = matches!(act, Act::Git(_));
+            let bid = s.acts.on("sidebar-worktree", act);
+            let h = s.ui.hover(bid);
+            let to = if danger {
+                c(look::RED_400)
+            } else {
+                c(look::WHITE)
+            };
+            let b = div()
+                .id(bid)
+                .on(Action::Click)
+                .p(2.0)
+                .rounded(4.0)
+                .bg(white(0.08 * h))
+                .role(Role::Button, tip)
+                .child(ico(name, 14.0, stroke, c(look::GRAY_500).mix(to, h)));
+            acts = acts.child(tooltip(s.ui, b, bid, tip, None));
+        }
+        row = row.child(acts);
+    }
+    row
+}
+
 /// ProjectItem: icon, name and count, its quick actions on hover, and its
-/// sessions under it while expanded.
+/// sessions under it while expanded, those in a worktree under its row.
 fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
     let sessions: Vec<&Session> = s
         .store
         .sessions
         .iter()
-        .filter(|x| x.info.project_name == p.name)
+        .filter(|x| x.info.project_name == p.name && s.st.panes.holder(&x.info.id).is_none())
         .collect();
+    let worktrees: Vec<&crate::state::Worktree> =
+        s.st.worktrees
+            .get(&p.path)
+            .into_iter()
+            .flatten()
+            .filter(|w| !w.main)
+            .collect();
     let active = s.st.project.as_deref() == Some(p.name.as_str());
     let id = s
         .acts
@@ -376,7 +485,8 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
     } else {
         c(look::GRAY_300).mix(c(look::WHITE), if hot { 1.0 } else { 0.0 })
     };
-    let expanded = !sessions.is_empty() && !s.st.collapsed.contains(&p.name);
+    let expanded =
+        (!sessions.is_empty() || !worktrees.is_empty()) && !s.st.collapsed.contains(&p.name);
     let mut row = div()
         .id(id)
         .on(Action::Click)
@@ -394,7 +504,7 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
         .role(Role::Button, p.name.as_str())
         .selected(active)
         .expanded(expanded);
-    row = if hot && !sessions.is_empty() {
+    row = if hot && (!sessions.is_empty() || !worktrees.is_empty()) {
         let toggle = s
             .acts
             .on("sidebar-project", Act::ToggleProject(p.name.clone()));
@@ -460,9 +570,19 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
         .context(row, id, Act::Open(MenuKind::Project(p.name.clone())));
     let mut col = div().col().child(row);
     if expanded {
+        let in_wt = |x: &Session, w: &str| x.info.worktree_path.as_deref() == Some(w);
         let mut kids = div().col().ml(16.0);
-        for x in sessions {
+        for x in sessions
+            .iter()
+            .filter(|x| !worktrees.iter().any(|w| in_wt(x, &w.path)))
+        {
             kids = kids.child(session_row(s, x));
+        }
+        for w in &worktrees {
+            kids = kids.child(worktree_row(s, p, w));
+            for x in sessions.iter().filter(|x| in_wt(x, &w.path)) {
+                kids = kids.child(div().ml(16.0).child(session_row(s, x)));
+            }
         }
         col = col.child(kids);
     }

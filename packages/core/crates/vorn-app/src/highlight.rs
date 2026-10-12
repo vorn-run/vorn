@@ -31,6 +31,9 @@ mod theme {
 /// A token's colour as `0xRRGGBB` and alpha.
 pub type Color = (u32, u8);
 
+/// Colours by byte range, sorted and apart.
+pub type Spans = Vec<(Range<usize>, Color)>;
+
 /// `EXT_TO_LANG` and `FILENAME_TO_LANG`: the Shiki language id for a file.
 pub fn lang_for(name: &str) -> Option<&'static str> {
     let lower = name.to_lowercase();
@@ -575,8 +578,8 @@ pub fn highlight(code: &str, lang: &str) -> Vec<(Range<usize>, Color)> {
             continue;
         }
         if let Some((open, close)) = sp.block_comment {
-            if rest.starts_with(open) {
-                let end = rest[open.len()..]
+            if let Some(after) = rest.strip_prefix(open) {
+                let end = after
                     .find(close)
                     .map_or(code.len(), |e| i + open.len() + e + close.len());
                 out.push(i..end, theme::COMMENT);
@@ -683,9 +686,7 @@ pub fn highlight(code: &str, lang: &str) -> Vec<(Range<usize>, Color)> {
             line_start = false;
             continue;
         }
-        let color = if sp.keys && ch == '-' && line_start {
-            theme::PUNCT
-        } else if ch.is_ascii_punctuation() {
+        let color = if ch.is_ascii_punctuation() {
             theme::PUNCT
         } else {
             theme::TEXT

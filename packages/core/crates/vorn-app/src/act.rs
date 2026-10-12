@@ -91,6 +91,9 @@ pub enum Act {
     Workflow(crate::workflows::WfAct),
     /// The settings page's controls.
     Set(crate::settings::SetAct),
+    Git(crate::git::GitAct),
+    Pane(crate::panes::PaneAct),
+    Edit(crate::editor::EditAct),
     /// Opens a link in the system browser.
     OpenUrl(String),
     /// A control that only takes the press, so nothing under it does.

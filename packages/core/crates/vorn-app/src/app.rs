@@ -32,6 +32,8 @@ use vorn_protocol::TerminalSession;
 pub mod canvas;
 pub mod forms;
 mod gates;
+mod git;
+mod panes;
 mod settings;
 mod tasks;
 mod workflows;
@@ -171,6 +173,10 @@ enum Call {
     Task(tasks::TaskCall),
     Workflow(workflows::WfCall),
     Set(settings::SetCall),
+    Git(git::GitCall),
+    Pane(panes::PaneCall),
+    /// Nothing to do with the answer, an error included.
+    Ignore,
 }
 
 /// Where an act came from: the control's id and, for a right click, the
@@ -220,6 +226,10 @@ pub struct App {
     health: Option<std::sync::mpsc::Receiver<Option<Value>>>,
     /// The field that had focus last frame, to tell when one loses it.
     last_focus: Option<Id>,
+    /// Worktree removals waiting for the sessions they closed.
+    removals: Vec<git::Pending>,
+    /// A discard the person agreed to is being run.
+    discarding: bool,
 }
 
 impl App {
@@ -264,11 +274,23 @@ impl App {
             data_dir: None,
             health: None,
             last_focus: None,
+            removals: Vec::new(),
+            discarding: false,
         };
         app.call(Call::Restored, "sessions:restored", Value::Null);
         app.call(Call::Headless, "headless:list", Value::Null);
         app.call(Call::Installed, "agent:detectInstalled", Value::Null);
         Ok(app)
+    }
+
+    /// Where vornd keeps its data: the session holders announce themselves
+    /// there, and this app keeps its own view of it (open panes, drafts)
+    /// beside them.
+    pub fn set_data_dir(&mut self, dir: std::path::PathBuf) {
+        self.st.panes = crate::panes::Panes::load(Some(crate::panes::view_file(&dir)));
+        self.st.editors.drafts =
+            crate::editor::Drafts::load(Some(crate::editor::drafts_file(&dir)));
+        self.data_dir = Some(dir);
     }
 
     /// The vornd connection, for calls the screen does not make itself.
@@ -320,6 +342,10 @@ impl App {
                     }
                     if method == "scheduler:missed" {
                         self.wf_missed(&params);
+                        continue;
+                    }
+                    if method == "worktree:confirmCleanup" {
+                        self.git_offer(&params);
                         continue;
                     }
                     self.store.apply(&method, params);
@@ -396,6 +422,9 @@ impl App {
             Call::Task(c) => self.task_answered(c, answer),
             Call::Workflow(c) => self.wf_answered(c, answer),
             Call::Set(c) => self.set_answered(c, answer),
+            Call::Git(c) => self.git_answered(c, answer),
+            Call::Pane(c) => self.pane_answered(c, answer),
+            Call::Ignore => {}
             Call::Saved(call) => {
                 self.saving = false;
                 self.answered(*call, answer);
@@ -574,6 +603,18 @@ impl App {
     /// The card a shortcut acts on: the focused one, else the selected.
     fn current(&self) -> Option<String> {
         self.st.focused.clone().or_else(|| self.st.selected.clone())
+    }
+
+    /// Where typing goes: a panel shell holding the keyboard while its
+    /// owner is the current card, else the current card.
+    fn typing_target(&self) -> Option<String> {
+        let current = self.current();
+        if let Some(t) = &self.st.panes.focus {
+            if current.as_deref().is_some() && self.st.panes.holder(t) == current.as_deref() {
+                return Some(t.clone());
+            }
+        }
+        current
     }
 
     /// Moves to the card `id`: onto the stage when one is focused.
@@ -787,8 +828,12 @@ impl App {
             Act::Select(id) => {
                 self.st.view = MainView::Sessions;
                 self.st.selected = Some(id);
+                self.st.panes.focus = None;
                 ui.set_focus(None);
             }
+            Act::Git(a) => self.run_git(ui, a, src),
+            Act::Pane(a) => self.run_pane(ui, a, src),
+            Act::Edit(a) => self.run_edit(ui, a),
             Act::Expand(id) => {
                 self.st.view = MainView::Sessions;
                 self.st.selected = Some(id.clone());
@@ -1224,6 +1269,13 @@ impl App {
                 self.st.confirm_delete = None;
             }
             UiEvent::Submit(id) => self.submit(ui, id),
+            UiEvent::Changed(id) if self.pane_changed(ui, id) => {}
+            UiEvent::Resized { id, ratio } => {
+                self.pane_resized(ui, id, ratio, false);
+            }
+            UiEvent::ResizeEnd { id, ratio } => {
+                self.pane_resized(ui, id, ratio, true);
+            }
             UiEvent::Changed(id) if id == PROJECT_PATH => {
                 // The folder's name, until another name is typed.
                 let name = ui.edit_text(PROJECT_NAME).to_owned();
@@ -1317,6 +1369,19 @@ impl App {
         if self.settings_key(ui, input) {
             return true;
         }
+        if let Input::Key { code, mods: m, .. } = input {
+            let with_mod = *m & MOD != 0;
+            if !self.st.settings.open
+                && (self.git_key(ui, code, with_mod)
+                    || self.pane_key(ui, code, with_mod, *m & mods::SHIFT != 0))
+            {
+                return true;
+            }
+            if self.st.dialog == Some(Dialog::Discard) && code == "Escape" {
+                self.run_edit(ui, crate::editor::EditAct::CancelDiscard);
+                return true;
+            }
+        }
         if self.st.settings.open {
             return false;
         }
@@ -1373,7 +1438,7 @@ impl App {
         if self.st.view != MainView::Sessions {
             return;
         }
-        let (Some(g), Some(id)) = (&self.grid, self.current()) else {
+        let (Some(g), Some(id)) = (&self.grid, self.typing_target()) else {
             return;
         };
         match input {
@@ -1549,6 +1614,8 @@ impl App {
     /// vornd sent.
     pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
         self.pump();
+        self.git_tick();
+        self.panes_tick(ui);
         self.tasks_tick(ui);
         self.settings_tick(std::time::Instant::now());
         let focus = ui.focus();
@@ -1619,7 +1686,7 @@ impl App {
     /// sizing the terminal to it.
     pub fn paint(&mut self, ui: &mut Ui, laid: &Laid) {
         let cell = ui.text.cell();
-        let current = self.current();
+        let current = self.typing_target();
         for (id, r) in &laid.customs {
             let Some(session) = card_index(*id).and_then(|i| self.store.sessions.get(i)) else {
                 continue;
@@ -1642,7 +1709,10 @@ impl App {
                     && self.st.dialog.is_none()
                     && ui.focus().is_none();
                 let pre = if focused { self.preedit.as_str() } else { "" };
+                // A screen not yet resized to a narrower box stays inside it.
+                ui.scene.push_clip(*r);
                 paint::pane(ui, v, *r, focused, pre);
+                ui.scene.pop_clip();
             }
         }
     }

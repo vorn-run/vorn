@@ -8,7 +8,9 @@ mod chrome;
 mod composer;
 mod dialogs;
 pub mod gates;
+pub mod git;
 pub mod menus;
+pub mod panes;
 pub mod runs;
 pub mod settings;
 mod sidebar;
@@ -81,8 +83,22 @@ impl Screen<'_> {
         } else if self.st.view == MainView::Workflows && self.st.wf.editor.is_some() {
             main.child(workflows::editor(self))
         } else {
-            main.child(chrome::top_bar(self)).child(self.body())
+            main.child(chrome::top_bar(self))
+                .child(self.beside(self.body()))
         };
+        // Without a top bar the panel takes the window's height.
+        if self.st.view == MainView::Sessions && (tabs || self.st.focused.is_some()) {
+            if let Some(panel) = git::right_panel(self) {
+                main = div()
+                    .id(git::changes_row_id())
+                    .row()
+                    .grow()
+                    .min_w0()
+                    .min_h(0.0)
+                    .child(main)
+                    .child(panel);
+            }
+        }
         let mut row = div().row().grow().min_h(0.0);
         if self.st.sidebar {
             row = row.child(sidebar::sidebar(self));
@@ -115,6 +131,7 @@ impl Screen<'_> {
                 crate::state::MenuKind::Headless => chrome::headless_panel(self),
                 crate::state::MenuKind::WfIcon => workflows::icon_picker(self),
                 crate::state::MenuKind::SetShell => settings::shell_panel(self),
+                crate::state::MenuKind::Branch(_) => git::branch_panel(self),
                 _ => menus::panel(
                     self.ui,
                     menus::MENU,
@@ -170,6 +187,21 @@ impl Screen<'_> {
         }
     }
 
+    /// `content` with the Changes panel beside it, under the top bar.
+    fn beside(&self, content: El) -> El {
+        match git::right_panel(self).filter(|_| self.st.view == MainView::Sessions) {
+            Some(panel) => div()
+                .id(git::changes_row_id())
+                .sense(crate::ui::Sense::HOVER)
+                .row()
+                .grow()
+                .min_h(0.0)
+                .child(div().col().grow().min_w0().min_h(0.0).child(content))
+                .child(panel),
+            None => content,
+        }
+    }
+
     /// The grid's size: the window under the top bar, beside the sidebar.
     pub fn grid_size(&self) -> (f32, f32) {
         let side = if self.st.sidebar {
@@ -177,8 +209,15 @@ impl Screen<'_> {
         } else {
             0.0
         };
+        let panel = match &self.st.git.panel {
+            Some(_) if self.st.view == MainView::Sessions && self.st.git.maximized => {
+                (self.size.0 - 48.0).max(look::MIN_CARD.0)
+            }
+            Some(_) if self.st.view == MainView::Sessions => self.st.git.width(),
+            _ => 0.0,
+        };
         (
-            (self.size.0 - side).max(0.0),
+            (self.size.0 - side - panel).max(0.0),
             (self.size.1 - look::TOP_BAR_H).max(0.0),
         )
     }
