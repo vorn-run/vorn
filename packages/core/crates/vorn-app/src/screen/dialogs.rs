@@ -1,11 +1,12 @@
 //! The modal dialogs: the keyboard shortcuts panel and the add or edit
 //! project dialog.
 
-use super::{c, ico, kbd, white, Screen, ALT_LABEL, MOD_LABEL};
+use super::{c, ico, white, Screen, ALT_LABEL, MOD_LABEL};
 use crate::act::Act;
 use crate::look;
 use crate::state::Dialog;
-use crate::ui::{div, text, text_input, Action, El, Id, Rgba, Role};
+use crate::ui::widgets::kbd;
+use crate::ui::{div, text, text_input, Action, El, Id, Role};
 
 /// The project dialog's folder field.
 pub const PROJECT_PATH: Id = Id(0x7072_6f6a_7061_7468);
@@ -82,7 +83,7 @@ fn shortcuts(s: &Screen<'_>) -> El {
                 .line_height(20.0)
                 .role(Role::Heading, "Keyboard Shortcuts"),
         )
-        .child(kbd("ESC", 10.0, look::GRAY_600));
+        .child(kbd("ESC", (10.0, 15.0), c(look::GRAY_600)));
     let row = |desc: &str, keys: El| {
         div()
             .row()
@@ -113,7 +114,10 @@ fn shortcuts(s: &Screen<'_>) -> El {
             .gap(2.0)
             .child(div().pb(8.0).child(group_label(label)));
         for (desc, keys) in items {
-            g = g.child(row(desc, kbd(&keys, 11.0, look::GRAY_400)));
+            g = g.child(row(
+                desc,
+                kbd(&keys, (11.0, 16.5), c(look::GRAY_400)).px(8.0),
+            ));
         }
         body = body.child(g);
     }
@@ -178,13 +182,7 @@ fn shortcuts(s: &Screen<'_>) -> El {
 
 pub(super) fn backdrop(s: &Screen<'_>, alpha: f32) -> El {
     let id = s.acts.on("dialog-backdrop", Act::CloseDialog);
-    div()
-        .id(id)
-        .on(Action::Click)
-        .absolute(0.0, 0.0)
-        .size(s.size.0, s.size.1)
-        .bg(Rgba::hexa(0, alpha))
-        .layered()
+    crate::ui::widgets::scrim(id, s.size, alpha)
 }
 
 fn label(t: &str) -> El {

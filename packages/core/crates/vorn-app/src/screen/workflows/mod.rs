@@ -69,7 +69,7 @@ fn listed<'a>(s: &'a Screen<'_>) -> Vec<&'a Value> {
 }
 
 /// `#rrggbb` as a colour.
-fn hex(v: Option<&str>) -> Option<Rgba> {
+pub(super) fn hex(v: Option<&str>) -> Option<Rgba> {
     let h = v?.strip_prefix('#')?;
     (h.len() == 6)
         .then(|| u32::from_str_radix(h, 16).ok())

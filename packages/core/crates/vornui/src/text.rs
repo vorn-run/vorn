@@ -196,6 +196,10 @@ impl TextSystem {
     /// in logical pixels.
     pub fn new(scale: f32, ui: &'static str, mono: &'static str, term_size: f32) -> TextSystem {
         let mut fonts = FontSystem::new();
+        if ui == crate::theme::font::SF {
+            // A missing file leaves fallback to pick the face.
+            let _ = fonts.db_mut().load_font_file(crate::theme::font::SF_FILE);
+        }
         fonts.db_mut().set_sans_serif_family(ui);
         fonts.db_mut().set_monospace_family(mono);
         let mut t = TextSystem {
@@ -297,8 +301,12 @@ impl TextSystem {
             return sh.clone();
         }
         let mut attrs = self.attrs(style.weight, style.mono, false);
-        if style.tracking != 0.0 {
-            attrs = attrs.letter_spacing(style.tracking);
+        let mut tracking = style.tracking;
+        if !style.mono && self.ui_family == crate::theme::font::SF {
+            tracking += crate::theme::font::sf_tracking(style.size, style.weight);
+        }
+        if tracking != 0.0 {
+            attrs = attrs.letter_spacing(tracking);
         }
         let mut b = Buffer::new(
             &mut self.fonts,

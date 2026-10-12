@@ -166,6 +166,8 @@ pub(crate) struct EditGeom {
 
 pub(crate) struct State {
     pub now: Instant,
+    /// What looping animations count from, so every instance stays in phase.
+    pub epoch: Instant,
     pub pointer: Option<(f32, f32)>,
     /// Ids under the pointer in its topmost layer, outermost first.
     pub under: Vec<Id>,
@@ -203,6 +205,7 @@ impl State {
     pub fn new(now: Instant) -> State {
         State {
             now,
+            epoch: now,
             pointer: None,
             under: Vec::new(),
             pressed: None,
@@ -500,8 +503,36 @@ impl Ui {
         self.st.animating(self.st.now)
     }
 
+    /// The time this frame is drawn at: what a view animates by.
+    pub fn now(&self) -> Instant {
+        self.st.now
+    }
+
+    /// Seconds since the shared clock that looping animations (a spinner,
+    /// a pulse) count from, so every instance of one runs in phase.
+    pub fn anim_time(&self) -> f64 {
+        self.st
+            .now
+            .saturating_duration_since(self.st.epoch)
+            .as_secs_f64()
+    }
+
+    /// Restarts the clock [`Ui::anim_time`] counts from at `epoch`.
+    pub fn set_anim_epoch(&mut self, epoch: Instant) {
+        self.st.epoch = epoch;
+    }
+
+    /// Asks for a frame at `at` (or sooner), for motion the view drives
+    /// itself. Holds for the frame being built only: a view that keeps
+    /// moving asks again each frame.
+    pub fn wake_at(&self, at: Instant) {
+        let next = self.wake.get().map_or(at, |w| w.min(at));
+        self.wake.set(Some(next));
+    }
+
     /// When a frame is next needed without input: a tooltip's delay
-    /// running out, the caret blinking. `None` when nothing is pending.
+    /// running out, the caret blinking, a view's [`Ui::wake_at`]. `None`
+    /// when nothing is pending.
     pub fn next_wake(&self) -> Option<Instant> {
         let now = self.st.now;
         if self.animating() {
@@ -519,7 +550,7 @@ impl Ui {
                 / BLINK.as_millis();
             self.st.blink_from + BLINK * (n as u32 + 1)
         });
-        tip.into_iter().chain(blink).min()
+        tip.into_iter().chain(blink).chain(self.wake.get()).min()
     }
 
     /// Whether keys should go through the IME: a text field has focus.

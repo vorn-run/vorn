@@ -5,6 +5,7 @@
 
 mod cards;
 mod chrome;
+pub use chrome::{DOCK, VIEWS, VIEW_ORDER};
 mod composer;
 mod dialogs;
 pub mod gates;
@@ -20,7 +21,7 @@ use crate::act::Acts;
 use crate::client::Store;
 use crate::look::{self, Rgb};
 use crate::state::{LayoutMode, State};
-use crate::ui::{div, icon, text, El, Place, Rgba, Ui};
+use crate::ui::{div, icon, El, Place, Rgba, Ui};
 use crate::view::PaneView;
 
 pub use cards::{card_index, intent_id, rename_id, term_id, CARD_ID_BASE};
@@ -58,7 +59,7 @@ pub struct Screen<'a> {
     /// The logo's image id, once registered.
     pub logo: Option<u32>,
     /// The agents' marks, by agent.
-    pub agents: &'a HashMap<&'static str, u32>,
+    pub agents: &'a crate::components::AgentMarks,
     pub size: (f32, f32),
     /// The app draws its own window controls (no system title bar).
     pub chrome: bool,
@@ -132,7 +133,7 @@ impl Screen<'_> {
     fn body(&self) -> El {
         let st = self.st;
         let body = match st.view {
-            MainView::Sessions if self.store.sessions.is_empty() => composer::empty_state(self),
+            MainView::Sessions if st.composer_inline(self.store) => composer::empty_state(self),
             MainView::Sessions => cards::grid(self),
             MainView::Tasks => tasks::view(self),
             MainView::Workflows => workflows::landing(self),
@@ -174,10 +175,7 @@ pub(crate) fn ico(name: &str, size: f32, stroke: f32, color: Rgba) -> El {
 
 /// `AgentIcon`: an agent's mark, or a shell's terminal.
 pub(crate) fn agent_icon(s: &Screen<'_>, agent: &str, size: f32) -> El {
-    match s.agents.get(agent) {
-        Some(id) => crate::ui::image(*id, size, size),
-        None => ico("terminal", size, 1.5, c(look::GRAY_400)),
-    }
+    crate::components::agent_icon(s.agents, agent, size)
 }
 
 /// The Alt key's label in shortcut hints.
@@ -186,31 +184,6 @@ pub(crate) const ALT_LABEL: &str = if cfg!(target_os = "macos") {
 } else {
     "Alt+"
 };
-
-/// `border-t white/[0.06]` with `margin` above and below.
-pub(crate) fn rule(margin: f32) -> El {
-    div()
-        .py(margin)
-        .w_full()
-        .child(div().h(1.0).w_full().bg(white(0.06)))
-}
-
-/// A `<kbd>`: mono text on `white/[0.04]` in a `white/[0.06]` outline.
-pub(crate) fn kbd(label: &str, size: f32, color: Rgb) -> El {
-    div()
-        .px(6.0)
-        .py(2.0)
-        .rounded(4.0)
-        .bg(white(0.04))
-        .border(1.0, white(0.06))
-        .shrink0()
-        .child(
-            text(label, size, c(color))
-                .mono()
-                .line_height(size + 2.0)
-                .silent(),
-        )
-}
 
 /// The modifier the renderer's shortcuts use: ⌘ on macOS, Ctrl elsewhere.
 pub(crate) const MOD_LABEL: &str = if cfg!(target_os = "macos") {

@@ -14,6 +14,8 @@ path = "src/main.rs"
 [dependencies]
 # The UI layer, reached only through `src/ui.rs`.
 vornui = { path = "../vornui" }
+# The composed components the screens are built from.
+vorn-components = { path = "../vorn-components" }
 vorn-protocol = { path = "../protocol" }
 vorn-grid-client = { path = "../grid-client" }
 vorn-term-mirror = { path = "../term-mirror" }

@@ -31,14 +31,12 @@ pub mod vars;
 pub mod view;
 pub mod workflows;
 
+/// Vorn's composed components, built on [`ui`].
+pub use vorn_components as components;
+
 pub use app::App;
 
 /// The UI config at `scale`: the app's fonts and terminal size.
 pub fn ui_config(scale: f32) -> ui::UiConfig {
-    ui::UiConfig {
-        scale,
-        ui_font: look::UI_FONT,
-        mono_font: look::MONO_FONT,
-        term_size: look::TERM_FONT,
-    }
+    ui::UiConfig::system(scale, look::TERM_FONT)
 }

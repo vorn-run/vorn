@@ -121,16 +121,7 @@ fn near(px: [u8; 4], c: Rgba) {
 #[test]
 fn pills_choose_on_click_and_arrows() {
     let g = Id::new("view");
-    let items = [
-        Pill {
-            label: "Terminals",
-            icon: None,
-        },
-        Pill {
-            label: "Tasks",
-            icon: None,
-        },
-    ];
+    let items = [Pill::new("Terminals", None), Pill::new("Tasks", None)];
     let build = |ui: &Ui| widgets::pills(ui, g, "View", &items, 0);
     let mut r = Rig::new();
     r.frame(&build);
@@ -284,6 +275,22 @@ fn menu_grows_in_then_settles() {
     assert_eq!(r.ui.menu_progress(menu), 1.0);
     r.frame(&build);
     assert!(!r.ui.animating());
+}
+
+#[test]
+fn a_view_asked_wake_holds_for_its_frame_only() {
+    let mut r = Rig::new();
+    r.frame(&|_| div());
+    assert_eq!(r.ui.next_wake(), None);
+    let at = r.now + Duration::from_millis(33);
+    r.frame(&|ui: &Ui| {
+        ui.wake_at(ui.now() + Duration::from_millis(50));
+        ui.wake_at(ui.now() + Duration::from_millis(33));
+        div()
+    });
+    assert_eq!(r.ui.next_wake(), Some(at));
+    r.frame(&|_| div());
+    assert_eq!(r.ui.next_wake(), None);
 }
 
 #[test]

@@ -134,6 +134,8 @@ pub enum Place {
     Below,
     /// Below, left edges aligned (a dropdown menu).
     BelowStart,
+    /// Below, right edges aligned (a popover at the end of a row).
+    BelowEnd,
     /// Above, left edges aligned (a dropdown that has no room below).
     AboveStart,
     /// To the right, vertically centred.
@@ -241,6 +243,8 @@ pub struct El {
     pub(crate) layered: bool,
     /// The border drawn in dashes (`border-dashed`).
     pub(crate) dashed: bool,
+    /// Box-shadow layers drawn behind it (`theme::shadow`).
+    pub(crate) shadow: Option<&'static [(f32, f32, f32, f32)]>,
 }
 
 pub fn div() -> El {
@@ -267,6 +271,7 @@ pub fn div() -> El {
         slop: (0.0, 0.0),
         layered: false,
         dashed: false,
+        shadow: None,
     }
 }
 
@@ -384,6 +389,14 @@ impl El {
         self.style.margin.left = length(m);
         self
     }
+    pub fn mb(mut self, m: f32) -> El {
+        self.style.margin.bottom = length(m);
+        self
+    }
+    pub fn mr(mut self, m: f32) -> El {
+        self.style.margin.right = length(m);
+        self
+    }
     /// Horizontal margins; negative pulls a hover background past the
     /// text it surrounds (`-mx-1.5`).
     pub fn mx(mut self, m: f32) -> El {
@@ -462,6 +475,10 @@ impl El {
         self.style.align_items = Some(AlignItems::Center);
         self
     }
+    pub fn items_start(mut self) -> El {
+        self.style.align_items = Some(AlignItems::Start);
+        self
+    }
     pub fn items_end(mut self) -> El {
         self.style.align_items = Some(AlignItems::End);
         self
@@ -527,6 +544,12 @@ impl El {
     /// Draws the border in 3 px dashes, as `border-dashed` does.
     pub fn dashed(mut self) -> El {
         self.dashed = true;
+        self
+    }
+    /// A box shadow behind it: black layers of (y offset, blur, spread,
+    /// alpha), as `theme::shadow` lists them.
+    pub fn shadow(mut self, layers: &'static [(f32, f32, f32, f32)]) -> El {
+        self.shadow = Some(layers);
         self
     }
     /// A top border only (`border-t`).
