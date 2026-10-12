@@ -28,6 +28,19 @@ pub fn on_path(dir: &Path, path_var: &str) -> bool {
     std::env::split_paths(path_var).any(|e| !e.as_os_str().is_empty() && fold(&e) == wanted)
 }
 
+/// Whether this user may write in `dir` (`accessSync(dir, W_OK)`): a mode
+/// with any write bit is not enough when another user owns it.
+#[cfg(unix)]
+fn writable(dir: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: `c` is a valid NUL-terminated path that outlives the call.
+    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
+}
+
+#[cfg(not(unix))]
 fn writable(dir: &Path) -> bool {
     std::fs::metadata(dir).is_ok_and(|m| !m.permissions().readonly())
 }

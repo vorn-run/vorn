@@ -102,6 +102,19 @@ fn git_follows_a_sessions_changes_into_a_commit_and_a_branch() {
     );
     shot.save(&mut app, "p-changes");
 
+    // Its left edge drags the width, following the pointer.
+    let handle = vorn_app::screen::git::changes_resize_id();
+    shot.frame(&mut app);
+    let r = shot.ui.rect_of(handle).expect("the resize handle");
+    let before = app.st.git.width();
+    shot.ui.pointer_move(r.x + 2.0, r.y + 40.0);
+    shot.ui.pointer_down();
+    shot.ui.pointer_move(r.x - 100.0, r.y + 40.0);
+    shot.ui.pointer_up();
+    app.events(&mut shot.ui);
+    let after = app.st.git.width();
+    assert!((after - before - 100.0).abs() < 8.0, "{before} -> {after}");
+
     // A review comment on a changed line, sent to the session.
     let line = app.st.git.diff.files[0]
         .diff
@@ -323,7 +336,8 @@ fn panes_browse_edit_save_and_hold_terminals() {
     assert!(app.st.editors.buffers[&key_].find.is_none());
 
     // An edit left unsaved asks before its tab closes, and a draft keeps it.
-    shot.click(&mut app, editor_id(&key_));
+    // A second click on the same spot would be a double click selecting a word.
+    shot.ui.set_focus(Some(editor_id(&key_)));
     shot.type_text(&mut app, "x");
     std::thread::sleep(std::time::Duration::from_millis(450));
     shot.frame(&mut app);
@@ -448,7 +462,8 @@ fn panes_browse_edit_save_and_hold_terminals() {
             .filter(|b| b.dirty())
             .map(|_| ())
     });
-    assert!(again.st.editors.buffers[&key_].draft.contains("// edited"));
+    let restored = &again.st.editors.buffers[&key_].draft;
+    assert!(restored.contains("// edited"), "{restored:?}");
 }
 
 #[test]

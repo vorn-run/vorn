@@ -922,12 +922,17 @@ impl App {
                 }
             }
             PaneDivider::Changes => {
-                let row = ui
-                    .rect_of(crate::screen::git::changes_row_id())
-                    .map_or(self.size.0, |r| r.w);
+                // The handle sits inside the panel; the width is the row's right
+                // edge less the pointer, as today's drag measures it.
+                let (Some(row), Some((x, _))) = (
+                    ui.rect_of(crate::screen::git::changes_row_id()),
+                    ui.pointer(),
+                ) else {
+                    return true;
+                };
                 self.st.git.maximized = false;
                 self.st.git.width =
-                    Some((row * (1.0 - ratio)).clamp(crate::git::PANEL_MIN, crate::git::PANEL_MAX));
+                    Some((row.x + row.w - x).clamp(crate::git::PANEL_MIN, crate::git::PANEL_MAX));
             }
         }
         true
