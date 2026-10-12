@@ -1,5 +1,6 @@
 import SwiftUI
 import VornCore
+import VornSettings
 import VornTasks
 import VornTerminals
 import VornUI
@@ -43,6 +44,12 @@ public struct RootView: View {
         .overlay(alignment: .topLeading) { if fauxChrome { FauxTrafficLights() } }
         .overlayPreferenceValue(ControlAnchors.self) { anchors in
             OverlayHost(model: model, store: store, actions: actions, features: features, anchors: anchors)
+        }
+        .overlay {
+            if model.settingsOpen {
+                SettingsPage(model: features.settings) { model.settingsOpen = false }
+                    .transition(.opacity)
+            }
         }
         .overlay(alignment: .bottom) { ErrorToast(model: model) }
         .workflowsMenuHost(features.workflows)

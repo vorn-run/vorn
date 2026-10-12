@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import VornCore
+import VornSettings
 import VornTerminals
 import VornUI
 import VornWorkflows
@@ -60,6 +61,9 @@ struct ShellCommands: Commands {
     private var actions: ShellActions { ShellActions(store: store, model: model) }
 
     var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { model.settingsOpen = true }.keyboardShortcut(",")
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Session") { actions.newSession(actions.activeProject, actions.activeWorktree) }
                 .keyboardShortcut("n")
@@ -210,6 +214,40 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         await features.workflows.reload()
     }
 
+    if let s = value("--update-status") {
+        let parts = s.split(separator: ":", maxSplits: 1).map(String.init)
+        let v = parts.count > 1 ? parts[1] : "0.8.1"
+        features.settings.updateStatus = switch parts[0] {
+        case "idle": .idle(lastCheckedAt: Date().timeIntervalSince1970 * 1000 - 180_000)
+        case "checking": .checking
+        case "available": .available(version: v)
+        case "downloading": .downloading(version: v, percent: 42)
+        case "ready": .ready(version: v)
+        case "error": .error(v)
+        default: .unsupported
+        }
+    }
+    if let cat = value("--settings") {
+        guard let category = SettingsCategory(rawValue: cat) else {
+            FileHandle.standardError.write(Data("unknown settings category \(cat)\n".utf8))
+            return 2
+        }
+        let settings = features.settings
+        settings.category = category
+        if let hints = value("--settings-hints") { settings.renderHints = Set(hints.split(separator: ",").map(String.init)) }
+        model.settingsOpen = true
+        await settings.load()
+        switch category {
+        case .general: await settings.detectAgents(); await settings.loadShells()
+        case .agents: await settings.detectAgents()
+        case .ssh: await settings.loadSSHKeys()
+        case .keys: await settings.loadConnectorKeys()
+        case .about: await settings.loadCore()
+        case .worktrees: await settings.wtLoad(refresh: false)
+        default: break
+        }
+    }
+
     let visible = model.mainViewMode == .sessions ? model.visibleSessions(store) : []
     if let n = value("--focused").flatMap(Int.init), visible.indices.contains(n) {
         model.selectedSessionID = visible[n].id
@@ -273,7 +311,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
     // ImageRenderer leaves scroll views blank, so Tasks and the scrolling panels are drawn through a hosting view.
-    let scrolls = model.mainViewMode == .tasks || model.overlay == .shortcuts || model.overlay == .recent
+    let scrolls = model.mainViewMode == .tasks || model.overlay == .shortcuts || model.overlay == .recent || model.settingsOpen
     let image = scrolls ? await hostedImage(of: content, size: size) : {
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2

@@ -144,6 +144,17 @@ public final class AppModel {
     /// Bumped to pull keyboard focus into a session's terminal.
     public var focusRequests: [String: Int] = [:]
     public var lastError: String?
+    /// SettingsPage.tsx covers the window while open.
+    public var settingsOpen = false
+    /// The sidebar's update notice was waved away; the gear keeps a dot.
+    public var updateBannerDismissed = false
+    public var toastIsError = true
+
+    /// A toast at the window's foot; errors and notes share it.
+    public func toast(_ message: String, error: Bool) {
+        toastIsError = error
+        lastError = message
+    }
     /// The composer tip an offscreen render shows; a live window picks one at random.
     public var launcherTip = 1
     public var statusFilter: StatusFilter = .all
@@ -260,6 +271,8 @@ public final class AppModel {
             contextMenu = nil
         } else if overlay != nil {
             overlay = nil
+        } else if settingsOpen {
+            settingsOpen = false
         } else if renamingSessionID != nil {
             renamingSessionID = nil
         } else if expandedSessionID != nil {

@@ -24,6 +24,7 @@ public actor VornClient {
     public static let readMethods: Set<String> = [
         "auth:authenticate", "subscribe:set", "config:load", "agent:detectInstalled", "git:isGitRepo",
         "sessions:restored", "git:diffStat", "git:worktreeDirty",
+        "core:status", "credential:safeStorageAvailable", "worktree:inventory", "git:diffFull", "file:readContent", "file:stamp", "ide:detect",
     ]
 
     /// Whether a read-only connection may send `method`.
