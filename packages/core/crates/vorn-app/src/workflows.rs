@@ -239,6 +239,10 @@ pub struct Workflows {
     pub imported: Option<(String, Vec<Value>)>,
     /// A workflow vornd just made, opened once the frame has a `Ui`.
     pub open_next: Option<String>,
+    /// When the editor launched a run whose entry should open by itself.
+    pub follow_armed: Option<f64>,
+    /// The followed run's key: its running step opens as it starts.
+    pub follow: Option<String>,
 }
 
 impl Workflows {

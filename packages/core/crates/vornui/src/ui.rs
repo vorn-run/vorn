@@ -376,7 +376,7 @@ impl Ui {
         let mut again = false;
         for n in scrolls {
             let Ok(l) = cx.taffy.layout(n) else { continue };
-            if l.content_size.height > l.size.height + 0.5 {
+            if l.content_size.height + l.border.bottom > l.size.height + 0.5 {
                 if let Ok(s) = cx.taffy.style(n) {
                     let mut s = s.clone();
                     s.scrollbar_width = theme::scrollbar::WIDTH;
@@ -671,8 +671,12 @@ impl Ui {
         let mut max = 0.0;
         if el.scroll {
             if let Some(id) = el.id {
-                max = (l.content_size.height - l.size.height + l.border.top + l.border.bottom)
-                    .max(0.0);
+                // Taffy measures the content from the border box's top edge.
+                max = l.content_size.height + l.border.bottom - l.size.height;
+                // The rounded box against unrounded content is not an overflow.
+                if max < 1.0 {
+                    max = 0.0;
+                }
                 let s = self.st.scroll.entry(id).or_default();
                 s.max = max;
                 s.offset = s.offset.clamp(0.0, max);

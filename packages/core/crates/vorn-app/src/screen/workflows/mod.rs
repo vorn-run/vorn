@@ -448,7 +448,7 @@ fn detail(s: &Screen<'_>, run: Option<&Value>) -> El {
             div().grow().min_w0().child(
                 text(d.title.as_str(), 15.0, ink(1.0))
                     .weight(500)
-                    .line_height(22.0)
+                    .line_height(22.5)
                     .truncate()
                     .role(Role::Heading, d.title.as_str()),
             ),
@@ -492,11 +492,11 @@ fn detail(s: &Screen<'_>, run: Option<&Value>) -> El {
         .child(title)
         .child(
             text(meta.join(" \u{b7} "), 12.0, faint())
-                .line_height(16.0)
+                .line_height(18.0)
                 .truncate(),
         );
     if let Some(sub) = &d.subtitle {
-        head = head.child(text(sub.as_str(), 13.0, secondary()).line_height(18.0));
+        head = head.child(text(sub.as_str(), 13.0, secondary()).line_height(19.5));
     }
     head = head.child(
         div()
@@ -504,7 +504,7 @@ fn detail(s: &Screen<'_>, run: Option<&Value>) -> El {
             .items_center()
             .gap(8.0)
             .child(status_dot(dot_status(run)))
-            .child(text(wf::status_line(run, nodes), 13.0, ink(1.0)).line_height(18.0)),
+            .child(text(wf::status_line(run, nodes), 13.0, ink(1.0)).line_height(19.5)),
     );
     let mut col = div()
         .id(Id::new("wf-detail"))
@@ -565,7 +565,7 @@ fn gate_button(
         .role(Role::Button, label)
         .disabled(disabled)
         .child(ico(icon, 14.0, 2.0, fg))
-        .child(text(label, 13.0, fg).line_height(18.0).silent())
+        .child(text(label, 13.0, fg).line_height(19.5).silent())
         .child(div().grow());
     if !disabled {
         b = b.on(Action::Click);
@@ -577,7 +577,7 @@ fn gate_button(
                 .py(2.0)
                 .rounded(4.0)
                 .border(1.0, white(0.08))
-                .child(text(k, 10.0, faint()).mono().line_height(12.0).silent()),
+                .child(text(k, 10.0, faint()).mono().line_height(15.0).silent()),
         );
     }
     b

@@ -303,14 +303,14 @@ pub fn steps(s: &Screen<'_>, run: &Value, nodes: &Value, key: &str, trigger: boo
                     12.5,
                     if dim { faint() } else { ink(1.0) },
                 )
-                .line_height(16.0)
+                .line_height(18.75)
                 .truncate()
                 .silent(),
             );
         if let Some(meta) = step_meta(node) {
             label = label.child(
                 text(&meta, 11.5, faint())
-                    .line_height(15.0)
+                    .line_height(17.25)
                     .truncate()
                     .silent(),
             );
@@ -344,7 +344,7 @@ pub fn steps(s: &Screen<'_>, run: &Value, nodes: &Value, key: &str, trigger: boo
             .child(status_dot(if rejected { "cancelled" } else { status }))
             .child(label);
         if let Some(d) = dur {
-            button = button.child(d.mono().line_height(16.0).silent());
+            button = button.child(d.mono().line_height(18.0).silent());
         }
         let mut item = div().col().child(button);
         if i < last {
@@ -437,18 +437,21 @@ fn trace(s: &Screen<'_>, ns: &Value, key: &str, nid: &str, can_resume: bool) -> 
             .bg(Rgba::hexa(0x000000, 0.30))
             .border(1.0, white(0.05));
         for l in &timeline {
+            // A closing line break opens no new line in a `<pre>`.
+            let shown = |t: &str| t.strip_suffix('\n').unwrap_or(t).to_owned();
             bx = bx.child(match l {
                 Line::Agent(t) => div().px(10.0).py(6.0).child(
-                    text(t, 12.0, secondary())
+                    text(shown(t), 12.0, secondary())
                         .mono()
                         .line_height(19.5)
                         .wrapping(),
                 ),
-                Line::Engine(t) => div()
-                    .px(10.0)
-                    .py(2.0)
-                    .bg(white(0.02))
-                    .child(text(t, 12.0, faint()).mono().line_height(19.5).wrapping()),
+                Line::Engine(t) => div().px(10.0).py(2.0).bg(white(0.02)).child(
+                    text(shown(t), 12.0, faint())
+                        .mono()
+                        .line_height(19.5)
+                        .wrapping(),
+                ),
             });
         }
         col = col.child(bx);

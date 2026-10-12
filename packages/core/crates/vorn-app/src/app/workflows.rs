@@ -209,6 +209,25 @@ impl App {
         }
         self.st.wf.launching = None;
         let key = runs::key(run);
+        // The run the editor just launched opens in the history, as `followRunId` does.
+        if let Some(at) = self.st.wf.follow_armed.take() {
+            if now_ms() - at < 10_000.0 {
+                self.st.runs.open.insert(key.clone(), true);
+                self.st.wf.follow = Some(key.clone());
+            }
+        }
+        if self.st.wf.follow.as_deref() == Some(key.as_str()) {
+            let running = run
+                .get("nodeStates")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|n| s(n, "status") == Some("running"))
+                .and_then(|n| s(n, "nodeId"));
+            if let Some(nid) = running {
+                self.st.runs.step.insert(key.clone(), Some(nid.to_owned()));
+            }
+        }
         let before = match self.st.wf.history.iter_mut().find(|r| runs::key(r) == key) {
             Some(r) => Some(std::mem::replace(r, run.clone())),
             None => {
@@ -815,6 +834,7 @@ impl App {
                     return;
                 }
                 let Some(id) = self.persist(None) else { return };
+                self.st.wf.follow_armed = Some(now_ms());
                 self.start_run(ui, &id, None, None);
                 if self.st.dialog.is_none() {
                     self.st.wf.launching = Some(now_ms());
@@ -825,6 +845,7 @@ impl App {
             }
             WfAct::RunTo(node) => {
                 let Some(id) = self.persist(None) else { return };
+                self.st.wf.follow_armed = Some(now_ms());
                 self.start_run(ui, &id, None, Some(node));
                 self.st.wf.panel = Panel::History;
                 self.st.wf.node = None;
