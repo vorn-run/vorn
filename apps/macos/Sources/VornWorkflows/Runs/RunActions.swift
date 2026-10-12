@@ -78,9 +78,10 @@ extension WorkflowsStore {
 
     public func showFullOutput(_ logs: String) { surfaces.fullOutput = logs }
 
-    /// SignInButton.tsx: the sign-in window is browser-hosted and not native yet.
-    public func signIn(connectionId: String) {
-        toast = "Sign in from the Vorn desktop app."
+    /// SignInButton.tsx: opens the connection's sign-in window; the step runs again once vornd hears it signed in.
+    @discardableResult
+    public func signIn(connectionId: String) async -> SignInResult {
+        await ConnectionSignIn.shared.signIn(connectionId, backend: backend)
     }
 
     /// Names for "Sign in to <connection>", read once.

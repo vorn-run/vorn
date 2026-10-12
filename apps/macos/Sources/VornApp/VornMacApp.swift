@@ -260,6 +260,14 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
                 features.workflows.showFullOutput(logs)
             }
         }
+        if args.contains("--review") {
+            let wf = features.workflows
+            if let run = (wf.runs + wf.workflowRuns).first(where: { $0.nodeStates.contains { $0.viewToken != nil } }),
+               let gate = run.nodeStates.first(where: { $0.viewToken != nil }) {
+                wf.selectedRunId = run.runId
+                wf.openReview(run, nodeId: gate.nodeId, workflowName: wf.ref(for: run)?.name)
+            }
+        }
     }
 
     let visible = model.mainViewMode == .sessions ? model.visibleSessions(store) : []
@@ -327,7 +335,8 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     // ImageRenderer leaves scroll views blank, so Tasks and the scrolling panels are drawn through a hosting view.
     let scrolls = model.mainViewMode != .sessions || model.overlay == .shortcuts || model.overlay == .recent
     let editorState = value("--editor")
-    let image = scrolls ? await hostedImage(of: content, size: size) { root in
+    let settle = args.contains("--review") ? 2500 : 300
+    let image = scrolls ? await hostedImage(of: content, size: size, settle: settle) { root in
         if let editorState { RichEditorDriver.drive(root, editorState) }
     } : {
         let renderer = ImageRenderer(content: content)
@@ -356,7 +365,9 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
 
 /// Draws `content` in an offscreen window at 2x, for views ImageRenderer cannot draw.
 @MainActor
-private func hostedImage(of content: some View, size: CGSize, prepare: (NSView) -> Void = { _ in }) async -> CGImage? {
+private func hostedImage(
+    of content: some View, size: CGSize, settle: Int = 300, prepare: (NSView) -> Void = { _ in }
+) async -> CGImage? {
     let host = NSHostingView(rootView: content)
     host.frame = CGRect(origin: .zero, size: size)
     let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -367,7 +378,7 @@ private func hostedImage(of content: some View, size: CGSize, prepare: (NSView) 
     host.layoutSubtreeIfNeeded()
     try? await Task.sleep(for: .milliseconds(400))
     prepare(host)
-    try? await Task.sleep(for: .milliseconds(300))
+    try? await Task.sleep(for: .milliseconds(settle))
     host.layoutSubtreeIfNeeded()
     guard let rep = NSBitmapImageRep(
         bitmapDataPlanes: nil, pixelsWide: Int(size.width * 2), pixelsHigh: Int(size.height * 2),

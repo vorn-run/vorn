@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Seeds a TEST vornd with workflows and runs for the Workflows view.
-// usage: node seed-test-vornd.mjs <data-dir> [--no-runs] [--shell <cwd>] [--shells N]   (never the real ~/.vorn)
+// usage: node seed-test-vornd.mjs <data-dir> [--no-runs] [--review] [--shell <cwd>] [--shells N]   (never the real ~/.vorn)
 import { readFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -112,6 +112,29 @@ const workflows = [
   )
 ]
 
+// A gate with a review page, built by the step before it, that can send the work back once.
+if (process.argv.includes('--review')) {
+  workflows.push(
+    workflow('wf-review', 'Review it', 'Hand', '#c9972a', [
+      trigger({ triggerType: 'manual' }),
+      script('find', 'Find issues', "echo '<h1>Findings</h1><p>found</p>'", 120),
+      {
+        id: 'check',
+        type: 'approval',
+        label: 'Check findings',
+        slug: 'check',
+        config: {
+          message: 'Look over the findings.',
+          view: '{{steps.find.output}}',
+          edit: '{{steps.find.output}}',
+          feedback: { from: 'find', maxRounds: 2 }
+        },
+        position: at(0, 240)
+      }
+    ])
+  )
+}
+
 const existing = new Set((await call('workflow:list')).map((w) => w.id))
 for (const wf of workflows) {
   if (existing.has(wf.id)) await call('workflow:update', { id: wf.id, updates: wf })
@@ -123,6 +146,11 @@ if (!process.argv.includes('--no-runs')) {
     console.log('started', id, run?.runId)
     await sleep(1200)
   }
+  await sleep(1500)
+}
+if (process.argv.includes('--review')) {
+  const run = await call('workflow:run', { workflowId: 'wf-review' })
+  console.log('started wf-review', run?.runId)
   await sleep(1500)
 }
 const shellAt = process.argv.indexOf('--shell')

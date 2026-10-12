@@ -184,3 +184,65 @@ private let beta = Project(name: "beta", path: "/p/beta")
         #expect(store.surfaces.missed.isEmpty)
     }
 }
+
+@Suite struct GateReviewTests {
+    @Test func producerIsTheStepThePageTemplateReads() {
+        let nodes = [WorkflowNode(id: "f", type: .script, label: "Find issues", slug: "find", config: [:])]
+        #expect(GateReviewModal.producer(view: "{{ steps.find.output }}", nodes: nodes) == "Find issues")
+        #expect(GateReviewModal.producer(view: "{{steps.other.output}}", nodes: nodes) == nil)
+        #expect(GateReviewModal.producer(view: "<h1>static</h1>", nodes: nodes) == nil)
+        #expect(GateReviewModal.producer(view: nil, nodes: nodes) == nil)
+    }
+
+    @Test func signInButtonFindsTheConnectionAStepActsThrough() {
+        let action = WorkflowNode(id: "a", type: .callConnectorAction, label: "A", config: ["connectionId": "c1"])
+        let poll = WorkflowNode(id: "t", type: .trigger, label: "T", config: ["triggerType": "connectorPoll", "connectionId": "c2"])
+        let manual = WorkflowNode(id: "m", type: .trigger, label: "M", config: ["triggerType": "manual", "connectionId": "c3"])
+        #expect(SignInButton.connectionId(action) == "c1")
+        #expect(SignInButton.connectionId(poll) == "c2")
+        #expect(SignInButton.connectionId(manual) == nil)
+        #expect(SignInButton.connectionId(nil) == nil)
+    }
+}
+
+@Suite struct BrowserSignInTests {
+    private let answer: JSONValue = [
+        "name": "Tracker",
+        "browser": [
+            "signInUrl": "https://tracker.example.com/login",
+            "origins": ["https://tracker.example.com", "https://*.cdn.example.com"],
+            "check": [
+                "url": "https://tracker.example.com/api/me",
+                "headers": ["x-requested-with": "vorn", "Cookie": "a=b", "sec-fetch-mode": "cors"],
+                "identity": ["user.email", "user.id"],
+            ],
+        ],
+    ]
+
+    @Test func readsTheTargetAndDropsHeadersThePageMayNotSet() throws {
+        let target = try #require(BrowserSignIn(answer))
+        #expect(target.name == "Tracker")
+        #expect(target.signInURL.absoluteString == "https://tracker.example.com/login")
+        #expect(target.checkHeaders == ["x-requested-with": "vorn"])
+        #expect(target.requestHeaders == ["x-requested-with": "vorn", "accept": "application/json"])
+        #expect(BrowserSignIn(.null) == nil)
+    }
+
+    @Test func checksStayOnTheDeclaredOrigins() {
+        let origins = ["https://tracker.example.com", "https://*.cdn.example.com"]
+        #expect(BrowserSignIn.within(origins, URL(string: "https://tracker.example.com/api")!))
+        #expect(BrowserSignIn.within(origins, URL(string: "https://a.cdn.example.com/x")!))
+        #expect(!BrowserSignIn.within(origins, URL(string: "https://cdn.example.com/x")!))
+        #expect(!BrowserSignIn.within(origins, URL(string: "http://tracker.example.com/api")!))
+        #expect(!BrowserSignIn.within(origins, URL(string: "https://tracker.example.com:8443/api")!))
+        #expect(!BrowserSignIn.within(origins, URL(string: "https://evil.com/api")!))
+    }
+
+    @Test func identityNamesTheFirstValueAndTheRestInParentheses() {
+        let paths = ["user.email", "user.id", "user.none"]
+        #expect(BrowserSignIn.identity(#"{"user":{"email":"a@b.c","id":42}}"#, paths: paths) == "a@b.c (42)")
+        #expect(BrowserSignIn.identity(#"{"user":{"email":" ","id":7}}"#, paths: paths) == "7")
+        #expect(BrowserSignIn.identity(#"{"user":{"email":true}}"#, paths: paths) == nil)
+        #expect(BrowserSignIn.identity("not json", paths: paths) == nil)
+    }
+}

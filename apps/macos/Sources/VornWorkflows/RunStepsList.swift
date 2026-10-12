@@ -162,7 +162,8 @@ private struct StepRow: View {
             if waitingGate, node != nil {
                 VStack(alignment: .leading, spacing: 8) {
                     GateAsk(state: state, config: node?.config)
-                    GateActions(store: store, run: run, state: state, config: node?.config, nodes: nodes)
+                    GateActions(store: store, run: run, state: state, config: node?.config, nodes: nodes,
+                                onOpenReview: { store.openReview(run, nodeId: state.nodeId) })
                 }
                 .underLabel()
             }
@@ -172,7 +173,7 @@ private struct StepRow: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(Theme.bronzo)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    SignInButton(compact: true)
+                    SignInButton(store: store, connectionId: SignInButton.connectionId(node), compact: true)
                 }
                 .underLabel()
             }
@@ -251,21 +252,39 @@ private struct ExpandedStep: View {
     }
 }
 
-/// Opens a connection's sign-in; the native app has no sign-in window yet, so it stays shut.
+/// Opens the sign-in window of the connection a parked step acts through.
 struct SignInButton: View {
+    let store: WorkflowsStore
+    let connectionId: String?
     var compact = false
 
     var body: some View {
-        Button {} label: {
+        let name = connectionId.flatMap { store.surfaces.connectionNames[$0] } ?? "the connection"
+        Button {
+            guard let connectionId else { return }
+            Task { await store.signIn(connectionId: connectionId) }
+        } label: {
             HStack(spacing: compact ? 4 : 8) {
-                Icon(symbol: "person.crop.circle.badge.checkmark", size: compact ? 11 : 14)
-                Text("Sign in to the connection")
+                LucideIcon(.logIn, size: compact ? 11 : 14, strokeWidth: compact ? 2.5 : 2)
+                Text("Sign in to \(name)")
             }
             .font(.system(size: compact ? 11 : 13))
             .frame(maxWidth: compact ? nil : .infinity, alignment: .leading)
         }
         .buttonStyle(GateButtonStyle(tone: .approve, horizontal: compact ? 8 : 16, vertical: compact ? 4 : 10))
-        .disabled(true)
+        .disabled(connectionId == nil)
+        .task { await store.loadConnectionNames() }
+    }
+
+    /// node-visuals.ts nodeConnectionId: the connection a step or a polling trigger acts through.
+    static func connectionId(_ node: WorkflowNode?) -> String? {
+        guard let node else { return nil }
+        switch node.type {
+        case .callConnectorAction: return node.config["connectionId"]?.stringValue
+        case .trigger where node.config["triggerType"]?.stringValue == "connectorPoll":
+            return node.config["connectionId"]?.stringValue
+        default: return nil
+        }
     }
 }
 

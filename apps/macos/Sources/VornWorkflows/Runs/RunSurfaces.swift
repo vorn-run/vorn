@@ -6,10 +6,13 @@ import VornCore
 public struct GateReviewTarget: Equatable, Sendable {
     public var runId: String
     public var nodeId: String
+    /// Shown in the header's meta line when the run detail opens it.
+    public var workflowName: String?
 
-    public init(runId: String, nodeId: String) {
+    public init(runId: String, nodeId: String, workflowName: String? = nil) {
         self.runId = runId
         self.nodeId = nodeId
+        self.workflowName = workflowName
     }
 }
 

@@ -161,6 +161,21 @@ public final class WorkflowsStore {
         return nil
     }
 
+    public func findRun(_ id: String) -> WorkflowExecution? {
+        runs.first { $0.runId == id } ?? workflowRuns.first { $0.runId == id }
+    }
+
+    /// The address of a gate's review page for this round (gate-view-url.ts).
+    public func gateViewURL(runId: String, nodeId: String, token: String) async -> URL? {
+        guard let base = await backend.serverURL() else { return nil }
+        let segment: (String) -> String = { $0.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? $0 }
+        return URL(string: "\(base.absoluteString)/gate-view/\(segment(runId))/\(segment(nodeId))?t=\(segment(token))")
+    }
+
+    public func openReview(_ run: WorkflowExecution, nodeId: String, workflowName: String? = nil) {
+        surfaces.review = GateReviewTarget(runId: run.runId, nodeId: nodeId, workflowName: workflowName)
+    }
+
     public func isDeleted(_ run: WorkflowExecution) -> Bool { workflow(run.workflowId) == nil }
 
     /// Runs in this workspace, newest first.

@@ -264,7 +264,7 @@ private struct NumberInput: View {
 }
 
 extension View {
-    /// Draws the run prompt and the missed-schedules dialog over the window, and follows `scheduler:missed`.
+    /// Draws the run prompt, a gate's review page and the missed-schedules dialog over the window, and follows `scheduler:missed`.
     /// Apply once at the window root, as App.tsx mounts SourcePromptDialog and MissedScheduleDialog.
     public func runSurfacesHost(_ store: WorkflowsStore) -> some View {
         modifier(RunSurfacesHost(store: store))
@@ -276,12 +276,16 @@ private struct RunSurfacesHost: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .blur(radius: store.surfaces.review == nil ? 0 : 4)
             .overlay {
                 if let prompt = store.surfaces.prompt {
                     RunPromptView(store: store, prompt: prompt).id(ObjectIdentifier(prompt))
                 }
             }
             .overlay { if !store.surfaces.missed.isEmpty { MissedSchedulesView(store: store) } }
+            .overlay {
+                if let review = store.surfaces.review { GateReviewModal(store: store, target: review).id(review.runId + review.nodeId) }
+            }
             .overlay {
                 if let logs = store.surfaces.fullOutput {
                     LogReplayModal(logs: logs) { store.surfaces.fullOutput = nil }

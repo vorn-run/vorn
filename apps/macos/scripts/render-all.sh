@@ -47,6 +47,9 @@ for mode in worktrees sessions sessions-flat; do
   "$bin/Vorn" --render "$out/sidebar-$mode.png" --sidebar-mode "$mode"
 done
 "$bin/Vorn" --render "$out/app-workflows.png" --view workflows
+node "$here/scripts/seed-test-vornd.mjs" "$data" --no-runs --review >/dev/null
+sleep 3
+"$bin/Vorn" --render "$out/app-workflows-review.png" --view workflows --review
 
 for state in list kanban dialog detail options; do
   "$bin/VornTasksPreview" --sample --render "$out/tasks-$state.png" --state "$state"

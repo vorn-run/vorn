@@ -228,10 +228,16 @@ struct RunDetailPane: View {
                     GateComposer(
                         store: store, run: run, state: state, config: gate.config, nodes: nodes, kind: .changes,
                         edited: saved, large: true, onDone: { composingFor = nil })
-                } else if state.editableText != nil || GateRounds.canRequestChanges(gate.config, round: state.round) {
+                } else if state.editableText != nil || state.viewToken != nil
+                    || GateRounds.canRequestChanges(gate.config, round: state.round) {
                     HStack(spacing: 6) {
                         if state.editableText != nil {
                             neutral(.pencil, saved == nil ? "Edit" : "Edited") { editingFor = key }
+                        }
+                        if state.viewToken != nil {
+                            neutral(.eye, "Open review") {
+                                store.openReview(run, nodeId: state.nodeId, workflowName: store.ref(for: run)?.name)
+                            }
                         }
                         if GateRounds.canRequestChanges(gate.config, round: state.round) {
                             neutral(.messageSquare, "Request changes") { composingFor = key }
@@ -240,7 +246,7 @@ struct RunDetailPane: View {
                 }
             }
             if signIn {
-                SignInButton()
+                SignInButton(store: store, connectionId: SignInButton.connectionId(nodes.first { $0.id == state.nodeId }))
             } else {
                 Button { answer(state, .approve, edited: saved) } label: {
                     HStack(spacing: 8) {

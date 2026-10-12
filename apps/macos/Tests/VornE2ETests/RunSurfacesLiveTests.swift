@@ -23,6 +23,55 @@ struct RunSurfacesLiveTests {
 
         try await runThroughThePrompt(client, store: store, project: project)
         try await listConnections(store)
+        try await reviewPage(client, store: store)
+        #expect(await store.signIn(connectionId: "no-such-connection")
+            == SignInResult(ok: false, error: "This connection does not sign in through a Vorn window."))
+    }
+
+    /// A gate whose review page the step before it built, served by vornd for this round only.
+    private func reviewPage(_ client: VornClient, store: WorkflowsStore) async throws {
+        let id = "wf-review-\(UUID().uuidString.prefix(8))"
+        try await client.createWorkflow(WorkflowDefinition(
+            id: id, name: "Review it",
+            nodes: [
+                WorkflowNode(id: "trigger", type: .trigger, label: "Trigger", config: ["triggerType": "manual"]),
+                WorkflowNode(id: "find", type: .script, label: "Find issues", slug: "find", config: [
+                    "scriptType": "bash", "scriptContent": "echo '<h1>Findings</h1><p>found</p>'",
+                ], position: .init(x: 0, y: 120)),
+                WorkflowNode(id: "check", type: .approval, label: "Check findings", slug: "check", config: [
+                    "message": "Look over the findings.", "view": "{{steps.find.output}}",
+                    "feedback": ["from": "find", "maxRounds": 2],
+                ], position: .init(x: 0, y: 240)),
+            ],
+            edges: [
+                WorkflowEdge(id: "e0", source: "trigger", target: "find"),
+                WorkflowEdge(id: "e1", source: "find", target: "check"),
+            ],
+            workspaceId: "personal"))
+        _ = try await client.runWorkflow(id: id)
+        var run: WorkflowExecution?
+        let parked = await until(timeout: 20) {
+            run = try? await client.listRuns(workflowId: id, limit: 5).first
+            return run?.nodeStates.contains { $0.nodeId == "check" && $0.viewToken != nil } == true
+        }
+        #expect(parked, "run: \(String(describing: run?.status))")
+        let parkedRun = try #require(run)
+        let gate = try #require(parkedRun.nodeStates.first { $0.nodeId == "check" })
+        let token = try #require(gate.viewToken)
+
+        let url = try #require(await store.gateViewURL(runId: parkedRun.runId, nodeId: "check", token: token))
+        let (body, response) = try await URLSession.shared.data(from: url)
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+        #expect(String(decoding: body, as: UTF8.self).contains("<h1>Findings</h1>"))
+        let csp = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Security-Policy") ?? ""
+        #expect(csp.contains("default-src 'none'"), "csp: \(csp)")
+
+        let wrong = try #require(await store.gateViewURL(runId: parkedRun.runId, nodeId: "check", token: "nope"))
+        let (_, refused) = try await URLSession.shared.data(from: wrong)
+        #expect((refused as? HTTPURLResponse)?.statusCode == 404)
+
+        store.openReview(parkedRun, nodeId: "check", workflowName: "Review it")
+        #expect(store.surfaces.review == GateReviewTarget(runId: parkedRun.runId, nodeId: "check", workflowName: "Review it"))
     }
 
     private func runThroughThePrompt(_ client: VornClient, store: WorkflowsStore, project: String) async throws {

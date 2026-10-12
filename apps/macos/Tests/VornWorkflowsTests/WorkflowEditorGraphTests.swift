@@ -497,7 +497,7 @@ private let bodyLoop = g(
         ]
         let reqs = TemplateRequirements.requirementsOfDefinition(nodes)
         #expect(reqs.map(\.nodeId) == ["h", "c"])
-        #expect(reqs.map(\.description) == ["an HTTP profile", "a github connection"])
+        #expect(reqs.map(WorkflowFiles.describeRequirement) == ["an HTTP profile", "a github connection"])
     }
 }
 
