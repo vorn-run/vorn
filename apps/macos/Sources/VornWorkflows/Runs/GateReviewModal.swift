@@ -37,11 +37,15 @@ struct GateReviewModal: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Review: \(node?.label ?? "")")
         .task(id: state?.viewToken) { await resolve(state?.viewToken) }
+        // Like today's, the modal goes once the gate is answered.
+        .onChange(of: state?.status == .waiting) { _, waiting in if !waiting { close() } }
     }
 
     private func close() { store.surfaces.review = nil }
 
     private func resolve(_ token: String?) async {
+        url = nil
+        failed = false
         guard let token else { return }
         if let next = await store.gateViewURL(runId: target.runId, nodeId: target.nodeId, token: token) {
             url = next
@@ -80,6 +84,7 @@ struct GateReviewModal: View {
     private func page(state: NodeExecutionState?, label: String) -> some View {
         if let url {
             GateReviewPage(url: url, label: label, onFail: { failed = true; self.url = nil })
+                .id(url)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.white)
         } else {
