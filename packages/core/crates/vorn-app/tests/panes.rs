@@ -352,6 +352,24 @@ fn panes_browse_edit_save_and_hold_terminals() {
     );
     assert!(app.st.panes.saved.files[&sid].tabs.contains(&file));
 
+    // The divider between the terminal and the panes moves and is kept.
+    let divider = vorn_app::ui::Id::new("card-divider").child(&sid);
+    shot.frame(&mut app);
+    let r = shot.ui.rect_of(divider).expect("the card divider");
+    let card = shot
+        .ui
+        .rect_of(control("card-box", Act::Select(sid.clone())))
+        .expect("the card");
+    shot.ui.pointer_move(r.x + r.w / 2.0, r.y + r.h / 2.0);
+    shot.ui.pointer_down();
+    shot.ui.pointer_move(card.x + card.w * 0.3, r.y + r.h / 2.0);
+    shot.ui.pointer_up();
+    app.events(&mut shot.ui);
+    let ratio = app.st.panes.terminal_ratio(&sid);
+    assert!((ratio - 0.3).abs() < 0.05, "{ratio}");
+    let view = std::fs::read_to_string(v.home.join("desktop/view.json")).expect("view");
+    assert!(view.contains("\"terminal\""), "{view}");
+
     // A file pops out into a card of its own beside the session, and back.
     let readme = repo.join("README.md").to_string_lossy().into_owned();
     shot.click(
