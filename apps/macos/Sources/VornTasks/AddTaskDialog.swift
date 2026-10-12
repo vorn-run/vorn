@@ -145,8 +145,7 @@ struct AddTaskDialog: View {
                 BareField(placeholder: "Task title", text: $form.title, font: .system(size: 15, weight: .medium))
                     .focused($titleFocused)
                     .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
-                DescriptionEditor(text: $form.description, placeholder: "Add description...")
-                    .frame(minHeight: 120, maxHeight: 300)
+                RichMarkdownEditor(value: $form.description, placeholder: "Add description...")
                     .padding(.horizontal, 16).padding(.bottom, 12)
             }
 

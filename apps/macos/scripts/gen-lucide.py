@@ -54,6 +54,18 @@ ICONS = {
     "gitCommitHorizontal": "git-commit-horizontal",
     "send": "send",
     "messageSquare": "message-square",
+    "heading1": "heading-1",
+    "heading2": "heading-2",
+    "heading3": "heading-3",
+    "list": "list",
+    "listOrdered": "list-ordered",
+    "squareCheckBig": "square-check-big",
+    "quote": "quote",
+    "bold": "bold",
+    "italic": "italic",
+    "strikethrough": "strikethrough",
+    "link": "link",
+    "unlink": "unlink",
 }
 # Inline glyphs from TaskToolbar.tsx and OptionRow.tsx rather than lucide.
 INLINE = {

@@ -157,7 +157,7 @@ struct WindowConfigurator: NSViewRepresentable {
 /// Renders the main screen offscreen with live data from vornd (read-only),
 /// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`, `--tip N`,
 /// `--view sessions|tasks|workflows`, `--layout grid|tabs`, `--focused N`, `--filter STATUS`, `--columns N`,
-/// `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
+/// `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
 @MainActor
 func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 {
     func value(_ flag: String) -> String? {
@@ -206,6 +206,10 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
     case .tasks:
         features.tasks.scope = features.scope(model, store)
         await features.tasks.reload()
+        if let title = value("--task"), let task = features.tasks.tasks.first(where: { $0.title == title }) {
+            features.tasks.selectedTaskId = task.id
+            try? await Task.sleep(for: .milliseconds(800))
+        }
     case .workflows:
         await features.workflows.reload()
     }
@@ -274,7 +278,10 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
     // ImageRenderer leaves scroll views blank, so Tasks and the scrolling panels are drawn through a hosting view.
     let scrolls = model.mainViewMode == .tasks || model.overlay == .shortcuts || model.overlay == .recent
-    let image = scrolls ? await hostedImage(of: content, size: size) : {
+    let editorState = value("--editor")
+    let image = scrolls ? await hostedImage(of: content, size: size) { root in
+        if let editorState { RichEditorDriver.drive(root, editorState) }
+    } : {
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2
         renderer.isOpaque = false
@@ -301,7 +308,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
 
 /// Draws `content` in an offscreen window at 2x, for views ImageRenderer cannot draw.
 @MainActor
-private func hostedImage(of content: some View, size: CGSize) async -> CGImage? {
+private func hostedImage(of content: some View, size: CGSize, prepare: (NSView) -> Void = { _ in }) async -> CGImage? {
     let host = NSHostingView(rootView: content)
     host.frame = CGRect(origin: .zero, size: size)
     let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -311,6 +318,8 @@ private func hostedImage(of content: some View, size: CGSize) async -> CGImage? 
     window.contentView = host
     host.layoutSubtreeIfNeeded()
     try? await Task.sleep(for: .milliseconds(400))
+    prepare(host)
+    try? await Task.sleep(for: .milliseconds(300))
     host.layoutSubtreeIfNeeded()
     guard let rep = NSBitmapImageRep(
         bitmapDataPlanes: nil, pixelsWide: Int(size.width * 2), pixelsHigh: Int(size.height * 2),

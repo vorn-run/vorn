@@ -30,6 +30,16 @@ public final class FeatureStores {
             }
         }
         tasks.onToast = { [weak model] message, _ in model?.lastError = message }
+        tasks.workflows = workflows
+        tasks.launchSession = { [weak store] payload in
+            guard let store else { throw VornError.notConnected }
+            return try await store.createSession(payload)
+        }
+        tasks.focusSession = { [weak model] id in
+            model?.mainViewMode = .sessions
+            model?.focus(id)
+        }
+        tasks.writeSession = { [weak store] id, data in try await store?.write(id, data) }
     }
 
     /// The board follows the sidebar: the active project, else the workspace's projects.

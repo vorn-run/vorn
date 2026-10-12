@@ -30,6 +30,7 @@ struct TaskDetailPanel: View {
                     properties
                     BareField(placeholder: "Task title", text: $form.title, font: .system(size: 16, weight: .semibold))
                         .focused($titleFocused)
+                        .frame(minHeight: 29.6)
                         .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
                     if let task, task.sourceConnectorId != nil, let url = task.sourceExternalUrl.flatMap(URL.init(string:)) {
                         Link(destination: url) {
@@ -44,9 +45,8 @@ struct TaskDetailPanel: View {
                         }
                         .padding(.horizontal, 16).padding(.bottom, 8)
                     }
-                    DescriptionEditor(text: $form.description,
-                                      placeholder: "Describe the task in detail, or type / for commands...")
-                        .frame(minHeight: 200)
+                    RichMarkdownEditor(value: $form.description,
+                                       placeholder: "Describe the task in detail, or type / for commands...")
                         .padding(.horizontal, 16).padding(.bottom, 12)
                     TaskImagesStrip(model: model)
                     if let task {
@@ -209,6 +209,7 @@ struct TaskDetailPanel: View {
             content()
             Spacer(minLength: 0)
         }
+        .frame(minHeight: 22)
     }
 
     private func dated(_ glyph: LucideGlyph, _ date: String) -> some View {
