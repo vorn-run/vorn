@@ -1125,7 +1125,7 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
                 "Delete Workflow",
                 act(WfAct::Delete(id.clone())),
             )));
-            out
+            out.into_iter().map(Item::plain).collect()
         }
         MenuKind::EditorMore => {
             let Some(d) = &s.st.wf.editor else {
@@ -1152,7 +1152,7 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
                     .sep(),
                 );
             }
-            out
+            out.into_iter().map(Item::plain).collect()
         }
         MenuKind::NodeMore(id) => {
             let Some(n) = s.st.wf.editor.as_ref().and_then(|d| d.node(id)) else {

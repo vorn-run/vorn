@@ -7,7 +7,7 @@ use super::{c, ico, white, Screen};
 use crate::act::Act;
 use crate::look::{self, Rgb};
 use crate::state::{Filter, LayoutMode, MenuKind, Sort};
-use crate::ui::{div, item_id, text, Action, El, Id, Place, Role, Ui};
+use crate::ui::{div, item_id, text, Action, El, Id, Place, Rgba, Role, Ui};
 
 /// The open menu's choice group; entries report `Select` in it.
 pub const MENU: Id = Id(0x6d65_6e75_0000_0001);
@@ -39,6 +39,8 @@ pub struct Item {
     pub picker: bool,
     /// A glyph drawn by the caller (a connector's or a project's mark).
     pub mark: Option<El>,
+    /// A plain `px-3 py-2` button with a 12 px icon in its text colour.
+    pub plain: bool,
 }
 
 impl Item {
@@ -49,6 +51,12 @@ impl Item {
             act: Some(act),
             ..Item::default()
         }
+    }
+
+    /// Drawn as a plain menu button (`plain_row`).
+    pub fn plain(mut self) -> Item {
+        self.plain = true;
+        self
     }
 
     pub fn header(label: impl Into<String>) -> Item {
@@ -151,6 +159,9 @@ fn row(ui: &Ui, group: Id, i: usize, item: Item, sub_open: Option<El>) -> El {
     if item.picker {
         return picker_row(ui, group, i, id, item);
     }
+    if item.plain {
+        return plain_row(ui, group, i, id, item);
+    }
     let hot = ui.hover(id).max(if sub_open.is_some() { 1.0 } else { 0.0 });
     let fg = if item.danger {
         c(look::DANGER)
@@ -222,6 +233,42 @@ fn row(ui: &Ui, group: Id, i: usize, item: Item, sub_open: Option<El>) -> El {
     }
 }
 
+/// A plain menu button: `text-[12px] text-gray-300` (danger at 80 %), the
+/// icon in the text's colour.
+fn plain_row(ui: &Ui, group: Id, i: usize, id: Id, item: Item) -> El {
+    let hot = ui.hover(id);
+    let fg = if item.danger {
+        Rgba::hexa(look::DANGER, 0.8).mix(c(look::DANGER), hot)
+    } else {
+        c(look::GRAY_300).mix(c(look::WHITE), hot)
+    };
+    let mut r = div()
+        .id(id)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(12.0)
+        .py(8.0)
+        .bg(white(0.0).mix(white(0.06), hot))
+        .role(Role::MenuItem, item.label.as_str());
+    if item.disabled {
+        r = r.opacity(0.4).disabled(true);
+    } else {
+        r = r.on(Action::Select { group, index: i });
+    }
+    if let Some((name, _)) = item.icon {
+        r = r.child(ico(name, 12.0, 1.5, fg).shrink0());
+    }
+    r.child(
+        div().row().grow().min_w(0.0).child(
+            text(&item.label, 12.0, fg)
+                .line_height(18.0)
+                .truncate()
+                .silent(),
+        ),
+    )
+}
+
 /// `SelectPicker`'s option: the check (or its room), the mark, the label
 /// and a hint.
 fn picker_row(ui: &Ui, group: Id, i: usize, id: Id, item: Item) -> El {
@@ -279,12 +326,17 @@ fn picker_row(ui: &Ui, group: Id, i: usize, id: Id, item: Item) -> El {
 /// py-1`, rows of 32 px, separators as rules.
 pub fn panel(ui: &Ui, group: Id, w: f32, name: &str, items: Vec<Item>, sub: Option<usize>) -> El {
     let p = ui.menu_progress(MENU);
+    let edge = if items.iter().any(|i| i.plain) {
+        0.08
+    } else {
+        0.10
+    };
     let mut col = div()
         .col()
         .w(w)
         .py(4.0)
         .bg(c(look::SURFACE_OVERLAY))
-        .border(1.0, white(0.10))
+        .border(1.0, white(edge))
         .rounded(8.0)
         .opacity(p)
         .transform(0.96 + 0.04 * p, (0.0, -4.0 * (1.0 - p)))
