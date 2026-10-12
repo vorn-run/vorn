@@ -10,6 +10,7 @@ use crate::client::RpcError;
 use crate::runs::{self, s};
 use crate::screen::MainView;
 use crate::state::{now_ms, Dialog};
+use crate::templates;
 use crate::ui::{mods, Event as UiEvent, Input, Ui};
 use crate::workflows::{self as wf, Draft, Missed, Panel, Prompt, WfAct};
 
@@ -25,12 +26,29 @@ pub(super) enum WfCall {
     Runs,
     /// `workflowRun:list` for the editor's workflow.
     History(String),
-    /// `workflow:resolveGate`.
-    Gate,
+    /// `workflow:resolveGate` from a gate's controls, and whether it sent
+    /// the work back.
+    Gate(Option<String>, bool),
     /// `connection:browserAuth`.
     SignIn,
-    /// `connection:list`, for the sign-in button's name.
+    /// `connection:list`, for the sign-in button's name and the library.
     Connections,
+    /// `connector:catalog`.
+    Catalog,
+    /// `connector:listPacks`.
+    Packs,
+    /// `connector:list`.
+    Connectors,
+    /// `connection:listActions` for one connection.
+    Actions(String),
+    /// `webhook:info`.
+    Webhook,
+    /// `agent:listModels` for an agent in a project.
+    Models(String, String),
+    /// `git:isGitRepo` for a path.
+    GitRepo(String),
+    /// `connector:seedWorkflow`, with the suggestion's name.
+    Seed(String),
 }
 
 impl App {
@@ -42,15 +60,96 @@ impl App {
                     self.st.wf.history = list(answer);
                 }
             }
-            WfCall::Gate => match answer {
+            WfCall::Gate(key, changes) => match answer {
                 Ok(v) if v.get("accepted").and_then(Value::as_bool) == Some(false) => {
-                    let why = s(&v, "reason").unwrap_or("That gate is no longer waiting");
+                    let why = s(&v, "reason").unwrap_or(if changes {
+                        "This gate takes no more changes. Approve or reject it."
+                    } else {
+                        "The gate did not take that answer."
+                    });
                     self.st.toast(why.to_owned(), true);
+                    if let Some(k) = key {
+                        self.gate_answered(&k, false);
+                    }
                 }
-                Ok(_) => self.wf_refresh(),
+                Ok(_) => {
+                    if let Some(k) = key {
+                        self.gate_answered(&k, true);
+                    }
+                    self.wf_refresh();
+                }
+                Err(e) => {
+                    self.st.toast(e.to_string(), true);
+                    if let Some(k) = key {
+                        self.gate_answered(&k, false);
+                    }
+                }
+            },
+            WfCall::Connections => {
+                self.st.wf.connections = list(answer);
+                let ids: Vec<String> = self
+                    .st
+                    .wf
+                    .connections
+                    .iter()
+                    .filter_map(|c| s(c, "id").map(str::to_owned))
+                    .collect();
+                for id in ids {
+                    self.call(
+                        Call::Workflow(WfCall::Actions(id.clone())),
+                        "connection:listActions",
+                        json!(id),
+                    );
+                }
+            }
+            WfCall::Actions(id) => {
+                self.st.wf.lib.actions.insert(id, list(answer));
+            }
+            WfCall::Catalog => {
+                if let Ok(v) = answer {
+                    let take = |k: &str| {
+                        v.get(k)
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default()
+                    };
+                    self.st.wf.lib.catalog = take("items");
+                    self.st.wf.lib.templates = take("templates");
+                }
+            }
+            WfCall::Packs => self.st.wf.lib.packs = list(answer),
+            WfCall::Models(agent, path) => {
+                let choices = answer
+                    .ok()
+                    .and_then(|v| v.get("choices").and_then(Value::as_array).cloned())
+                    .unwrap_or_default();
+                self.st.wf.models.insert((agent, path), choices);
+            }
+            WfCall::GitRepo(path) => {
+                let yes = answer.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+                self.st.wf.git_repo.insert(path, yes);
+            }
+            WfCall::Webhook => {
+                self.st.wf.webhook = answer
+                    .ok()
+                    .and_then(|v| s(&v, "baseUrl").map(str::to_owned));
+            }
+            WfCall::Connectors => self.st.wf.lib.connectors = list(answer),
+            WfCall::Seed(name) => match answer {
+                Ok(v) => {
+                    let Some(id) = s(&v, "workflowId").map(str::to_owned) else {
+                        return;
+                    };
+                    if self.workflow(&id).is_none() {
+                        if let Ok(config) = self.rpc.call("config:load", Value::Null) {
+                            self.store.apply("config:changed", config);
+                        }
+                    }
+                    self.st.wf.open_next = Some(id);
+                    self.st.toast(format!("Started \"{name}\""), false);
+                }
                 Err(e) => self.st.toast(e.to_string(), true),
             },
-            WfCall::Connections => self.st.wf.connections = list(answer),
             WfCall::SignIn => match answer {
                 Ok(v) => match v.pointer("/browser/signInUrl").and_then(Value::as_str) {
                     Some(url) => open_url(url),
@@ -110,6 +209,25 @@ impl App {
         }
         self.st.wf.launching = None;
         let key = runs::key(run);
+        // The run the editor just launched opens in the history, as `followRunId` does.
+        if let Some(at) = self.st.wf.follow_armed.take() {
+            if now_ms() - at < 10_000.0 {
+                self.st.runs.open.insert(key.clone(), true);
+                self.st.wf.follow = Some(key.clone());
+            }
+        }
+        if self.st.wf.follow.as_deref() == Some(key.as_str()) {
+            let running = run
+                .get("nodeStates")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|n| s(n, "status") == Some("running"))
+                .and_then(|n| s(n, "nodeId"));
+            if let Some(nid) = running {
+                self.st.runs.step.insert(key.clone(), Some(nid.to_owned()));
+            }
+        }
         let before = match self.st.wf.history.iter_mut().find(|r| runs::key(r) == key) {
             Some(r) => Some(std::mem::replace(r, run.clone())),
             None => {
@@ -175,13 +293,12 @@ impl App {
             self.open_prompt(ui, id, &name, &nodes, source, target);
             return;
         }
-        self.launch_wf(id, &name, source.map(|s| ("source", s)), None, target);
+        self.launch_wf(id, source.map(|s| ("source", s)), None, target);
     }
 
     fn launch_wf(
         &mut self,
         id: &str,
-        name: &str,
         base: Option<(&str, Value)>,
         inputs: Option<Value>,
         target: Option<String>,
@@ -193,7 +310,8 @@ impl App {
         if let Some(i) = inputs {
             context.insert("inputs".into(), i);
         }
-        let toast = Call::Toast(format!("Started \"{name}\""));
+        // `startManualRun` says nothing on success; the run shows up live.
+        let toast = Call::Quiet;
         if context.is_empty() && target.is_none() {
             self.call(toast, "workflow:runManual", json!({ "workflowId": id }));
             return;
@@ -309,13 +427,56 @@ impl App {
             }
             _ => None,
         };
-        self.launch_wf(&p.workflow, &p.name, base, inputs, p.target);
+        self.launch_wf(&p.workflow, base, inputs, p.target);
         self.st.wf.prompt = None;
         self.st.dialog = None;
         ui.set_focus(None);
     }
 
     /// Saves the config with the workflows `f` changed, toasting `text`.
+    /// The sidebar's rows, by workflow id, while it is unfiltered.
+    fn side_ids(&self) -> Vec<(String, crate::ui::Id)> {
+        let ws = self.workspace();
+        self.store.config["workflows"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|w| s(w, "workspaceId").unwrap_or("personal") == ws)
+            .filter_map(|w| s(w, "id"))
+            .map(|id| {
+                let rid = App::control(
+                    "wf-side",
+                    &crate::act::Act::Workflow(WfAct::Edit(id.into())),
+                );
+                (id.to_owned(), rid)
+            })
+            .collect()
+    }
+
+    /// `reorderWorkflows`: within the active workspace, the others kept in
+    /// their slots.
+    fn reorder_workflows(&mut self, from: usize, to: usize) {
+        if from == to {
+            return;
+        }
+        let ws = self.workspace();
+        self.change_workflows(None, |list| {
+            let mine: Vec<usize> = (0..list.len())
+                .filter(|&i| s(&list[i], "workspaceId").unwrap_or("personal") == ws)
+                .collect();
+            if from >= mine.len() || to >= mine.len() {
+                return false;
+            }
+            let mut order: Vec<Value> = mine.iter().map(|&i| list[i].clone()).collect();
+            let moved = order.remove(from);
+            order.insert(to, moved);
+            for (slot, w) in mine.into_iter().zip(order) {
+                list[slot] = w;
+            }
+            true
+        });
+    }
+
     fn change_workflows(&mut self, text: Option<String>, f: impl FnOnce(&mut Vec<Value>) -> bool) {
         let mut config = self.store.config.clone();
         if !config.get("workflows").is_some_and(Value::is_array) {
@@ -374,19 +535,12 @@ impl App {
         self.st.wf.panel = panel;
         self.st.wf.history.clear();
         self.st.wf.launching = None;
+        self.st.wf.undo.clear();
+        self.st.wf.canvas.gesture = None;
+        self.st.wf.canvas.dragged.clear();
         self.st.view = MainView::Workflows;
-    }
-
-    /// The open node's fields filled from it.
-    fn seed(&self, ui: &mut Ui) {
-        let Some(d) = &self.st.wf.editor else { return };
-        let Some(node) = self.st.wf.node.as_deref().and_then(|n| d.node(n)) else {
-            return;
-        };
-        let nid = s(node, "id");
-        for path in wf::text_paths(node) {
-            ui.set_edit_text(wf::field_id(nid, &path), &wf::field_text(node, &path));
-        }
+        self.open_view();
+        self.load_library();
     }
 
     fn select_node(&mut self, ui: &mut Ui, id: Option<String>) {
@@ -396,8 +550,53 @@ impl App {
             Panel::Properties
         };
         self.st.wf.node = id;
+        self.st.wf.ac = None;
         ui.set_focus(None);
-        self.seed(ui);
+        self.agent_facts();
+    }
+
+    /// What an agent step's form asks of vornd: its agent's models and
+    /// whether its project is a git repository.
+    pub(super) fn agent_facts(&mut self) {
+        let Some(n) = self
+            .st
+            .wf
+            .node
+            .as_deref()
+            .and_then(|id| self.st.wf.editor.as_ref()?.node(id))
+            .filter(|n| s(n, "type") == Some("launchAgent"))
+            .cloned()
+        else {
+            return;
+        };
+        let agent = n
+            .pointer("/config/agentType")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let path = n
+            .pointer("/config/projectPath")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let key = (agent.clone(), path.clone());
+        if matches!(agent.as_str(), "claude" | "copilot" | "opencode" | "codex")
+            && !self.st.wf.models.contains_key(&key)
+        {
+            self.st.wf.models.insert(key.clone(), Vec::new());
+            self.call(
+                Call::Workflow(WfCall::Models(key.0, key.1)),
+                "agent:listModels",
+                json!({ "agentType": agent, "projectPath": path }),
+            );
+        }
+        if !path.is_empty() && !path.contains("{{") && !self.st.wf.git_repo.contains_key(&path) {
+            self.call(
+                Call::Workflow(WfCall::GitRepo(path.clone())),
+                "git:isGitRepo",
+                json!(path),
+            );
+        }
     }
 
     /// The node the form edits: none for the workflow's own properties.
@@ -409,9 +608,112 @@ impl App {
     }
 
     fn edit(&mut self, f: impl FnOnce(&mut Draft)) {
-        if let Some(d) = self.st.wf.editor.as_mut() {
-            f(d);
+        self.edit_graph(f);
+    }
+
+    /// The library's lines for the open anchor, as it draws them.
+    pub(super) fn library_entries(&self) -> Vec<crate::library::Entry> {
+        let Panel::Library(at) = &self.st.wf.panel else {
+            return Vec::new();
+        };
+        let lib = &self.st.wf.lib;
+        let src = crate::library::Sources {
+            connections: &self.st.wf.connections,
+            actions: &lib.actions,
+            catalog: &lib.catalog,
+            packs: &lib.packs,
+            connectors: &lib.connectors,
+        };
+        crate::library::entries(&src, at.into(), &self.st.wf.search, &lib.recent, &lib.open)
+    }
+
+    /// Enter on the library: the highlighted group folds, a row is picked.
+    fn library_choose(&mut self, ui: &mut Ui) {
+        let entries = self.library_entries();
+        let reach: Vec<&crate::library::Entry> = entries.iter().filter(|e| e.reachable()).collect();
+        let i = self.st.wf.lib.highlight.min(reach.len().saturating_sub(1));
+        match reach.get(i) {
+            Some(crate::library::Entry::Group { key, .. }) => {
+                let key = key.clone();
+                self.run_wf(ui, WfAct::Group(key), Src::default());
+            }
+            Some(crate::library::Entry::Row { pick, recent, .. }) => {
+                if let Some(r) = recent.clone() {
+                    crate::library::remember(&mut self.st.wf.lib.recent, r);
+                }
+                let p = pick.clone();
+                self.run_wf(ui, WfAct::Pick(p), Src::default());
+            }
+            _ => {}
         }
+    }
+
+    /// The first project, which a new agent step runs in.
+    /// `handlePickTemplate`.
+    fn pick_template(&mut self, ui: &mut Ui, i: usize) {
+        let Some(template) = self.st.wf.lib.templates.get(i).cloned() else {
+            return;
+        };
+        let project = self
+            .active_project()
+            .or_else(|| self.first_project())
+            .unwrap_or_default();
+        let (def, unresolved) =
+            templates::seed(&template, (&project.0, &project.1), &self.st.wf.connections);
+        let name = s(&template, "name").unwrap_or("").to_owned();
+        self.edit_graph(|d| {
+            d.wf["name"] = json!(name);
+            for key in ["icon", "iconColor"] {
+                if let Some(v) = def.get(key).filter(|v| v.is_string()) {
+                    d.wf[key] = v.clone();
+                }
+            }
+            d.wf["nodes"] = def["nodes"].clone();
+            d.wf["edges"] = def["edges"].clone();
+        });
+        ui.set_edit_text(wf::field_id(None, "name"), &name);
+        self.st.wf.panel = Panel::Properties;
+        let pending: Vec<String> = unresolved.iter().map(templates::describe).collect();
+        if !pending.is_empty() {
+            let text = format!(
+                "Started from \"{name}\" \u{2014} still needs {}",
+                pending.join(", ")
+            );
+            self.st.toast(text, false);
+        }
+    }
+
+    fn first_project(&self) -> Option<(String, String)> {
+        self.store
+            .projects
+            .first()
+            .map(|p| (p.name.clone(), p.path.clone()))
+    }
+
+    /// What the library and start-from draw: the catalog, packs,
+    /// connectors, connections and each connection's actions.
+    fn load_library(&mut self) {
+        self.call(
+            Call::Workflow(WfCall::Catalog),
+            "connector:catalog",
+            Value::Null,
+        );
+        self.call(
+            Call::Workflow(WfCall::Packs),
+            "connector:listPacks",
+            Value::Null,
+        );
+        self.call(Call::Workflow(WfCall::Webhook), "webhook:info", Value::Null);
+        self.call(
+            Call::Workflow(WfCall::Connectors),
+            "connector:list",
+            Value::Null,
+        );
+        self.call(
+            Call::Workflow(WfCall::Connections),
+            "connection:list",
+            json!({}),
+        );
     }
 
     pub(super) fn run_wf(&mut self, ui: &mut Ui, act: WfAct, _src: Src) {
@@ -428,14 +730,6 @@ impl App {
                     self.run_wf(ui, WfAct::Edit(wid), Src::default());
                 }
             }
-            WfAct::Gate { run, node, approve } => {
-                let decision = if approve { "approve" } else { "reject" };
-                self.call(
-                    Call::Workflow(WfCall::Gate),
-                    "workflow:resolveGate",
-                    json!({ "runId": run, "nodeId": node, "decision": decision }),
-                );
-            }
             WfAct::SignIn(conn) => {
                 self.call(
                     Call::Workflow(WfCall::SignIn),
@@ -444,6 +738,7 @@ impl App {
                 );
             }
             WfAct::Side(f) => self.st.wf.side = f,
+            WfAct::Fold => self.st.wf.folded = !self.st.wf.folded,
             WfAct::AllRuns | WfAct::Close => {
                 self.st.wf.editor = None;
                 self.st.wf.node = None;
@@ -539,6 +834,7 @@ impl App {
                     return;
                 }
                 let Some(id) = self.persist(None) else { return };
+                self.st.wf.follow_armed = Some(now_ms());
                 self.start_run(ui, &id, None, None);
                 if self.st.dialog.is_none() {
                     self.st.wf.launching = Some(now_ms());
@@ -549,6 +845,7 @@ impl App {
             }
             WfAct::RunTo(node) => {
                 let Some(id) = self.persist(None) else { return };
+                self.st.wf.follow_armed = Some(now_ms());
                 self.start_run(ui, &id, None, Some(node));
                 self.st.wf.panel = Panel::History;
                 self.st.wf.node = None;
@@ -581,18 +878,69 @@ impl App {
             }
             WfAct::SelectNode(id) => self.select_node(ui, Some(id)),
             WfAct::Library(at) => {
+                self.st.wf.lib.highlight = 0;
                 self.st.wf.search.clear();
                 ui.set_edit_text(wf::search_id(), "");
                 ui.set_focus(Some(wf::search_id()));
                 self.st.wf.panel = Panel::Library(at);
             }
-            WfAct::Pick(kind) => {
+            WfAct::Pick(p) => {
                 let Panel::Library(at) = self.st.wf.panel.clone() else {
                     return;
                 };
+                let project = self.first_project();
                 let mut added = None;
-                self.edit(|d| added = wf::add(d, &at, &kind));
-                self.select_node(ui, added);
+                self.edit(|d| {
+                    added = wf::pick(
+                        d,
+                        &at,
+                        &p,
+                        project.as_ref().map(|(n, p)| (n.as_str(), p.as_str())),
+                    )
+                });
+                match added {
+                    Some(n) => self.select_node(ui, Some(n)),
+                    None => {
+                        self.st.wf.panel = if self.st.wf.node.is_some() {
+                            Panel::Node
+                        } else {
+                            Panel::Properties
+                        };
+                        ui.set_focus(None);
+                    }
+                }
+            }
+            WfAct::ZoomIn => self.zoom(1.2),
+            WfAct::ZoomOut => self.zoom(1.0 / 1.2),
+            WfAct::Fit => self.fit(),
+            WfAct::Tidy => self.edit(wf::tidy),
+            WfAct::Undo(redo) => self.undo(redo),
+            WfAct::Group(key) => {
+                let open = &mut self.st.wf.lib.open;
+                if !open.remove(&key) {
+                    open.insert(key);
+                }
+            }
+            WfAct::Highlight(i) => self.st.wf.lib.highlight = i,
+            WfAct::Choose(..)
+            | WfAct::Advanced(_)
+            | WfAct::AddHeader(_)
+            | WfAct::RemoveHeader(..)
+            | WfAct::ArgFree(..)
+            | WfAct::Copy(_)
+            | WfAct::Vars(_)
+            | WfAct::VarGroup(_)
+            | WfAct::Insert(_) => self.run_form(ui, act),
+            WfAct::Text(_) => {}
+            WfAct::Icon(name) => {
+                if let Some(d) = self.st.wf.editor.as_mut() {
+                    d.wf["icon"] = json!(name);
+                }
+            }
+            WfAct::IconColor(color) => {
+                if let Some(d) = self.st.wf.editor.as_mut() {
+                    d.wf["iconColor"] = json!(color);
+                }
             }
             WfAct::DeleteNode(id) => {
                 self.edit(|d| wf::remove(d, &id));
@@ -600,10 +948,35 @@ impl App {
                     self.select_node(ui, None);
                 }
             }
-            WfAct::Set(path, value) => {
-                let node = self.form_node();
-                self.set_value(node.as_deref(), &path, &value);
-                self.seed(ui);
+            WfAct::Toggle(path) if path == "config.feedback" => {
+                let Some(n) = self.form_node() else { return };
+                self.edit(|d| {
+                    let on = d
+                        .node(&n)
+                        .and_then(|x| x.pointer("/config/feedback"))
+                        .is_some_and(Value::is_object);
+                    let first = crate::vars::ancestors(d.nodes(), d.edges(), &n)
+                        .first()
+                        .and_then(|u| s(u, "id"))
+                        .unwrap_or("")
+                        .to_owned();
+                    if let Some(x) = d.node_mut(&n) {
+                        let v = (!on).then(
+                            || json!({ "from": first, "maxRounds": crate::gates::DEFAULT_ROUNDS }),
+                        );
+                        wf::set_path(x, "config.feedback", v);
+                    }
+                });
+            }
+            WfAct::Toggle(path) if path == "config.contextual" => {
+                let Some(n) = self.form_node() else { return };
+                self.edit(|d| {
+                    if let Some(x) = d.node_mut(&n) {
+                        let on =
+                            x.pointer("/config/contextual").and_then(Value::as_bool) == Some(true);
+                        wf::set_path(x, "config.contextual", (!on).then(|| json!(true)));
+                    }
+                });
             }
             WfAct::Toggle(path) => {
                 let node = self.form_node();
@@ -624,16 +997,30 @@ impl App {
                     return;
                 };
                 self.edit(|d| wf::add_input(d, &node));
-                self.seed(ui);
             }
             WfAct::RemoveInput(i) => {
                 let Some(node) = self.st.wf.node.clone() else {
                     return;
                 };
                 self.edit(|d| wf::remove_input(d, &node, i));
-                self.seed(ui);
             }
             WfAct::StartBlank => self.st.wf.panel = Panel::Properties,
+            WfAct::Template(i) => self.pick_template(ui, i),
+            WfAct::Suggest(key) => {
+                let all =
+                    templates::suggestions(&self.st.wf.connections, &self.st.wf.lib.connectors);
+                if let Some(sg) = all.into_iter().find(|sg| sg.key == key) {
+                    self.call(
+                        Call::Workflow(WfCall::Seed(sg.name)),
+                        "connector:seedWorkflow",
+                        json!({ "connectionId": sg.connection_id, "event": sg.event }),
+                    );
+                }
+            }
+            WfAct::Fix(_) => self
+                .st
+                .toast("Connector setup is not in this build yet", true),
+            WfAct::DismissNeeds => self.st.wf.imported = None,
             WfAct::ClosePanel => {
                 self.st.wf.panel = match self.st.wf.panel {
                     Panel::Properties => Panel::None,
@@ -685,30 +1072,6 @@ impl App {
                 self.st.dialog = None;
             }
         }
-    }
-
-    /// A select's pick: the project's path with its name, and nothing for
-    /// "Any status".
-    fn set_value(&mut self, node: Option<&str>, path: &str, value: &str) {
-        let path_of = |name: &str| {
-            self.store
-                .projects
-                .iter()
-                .find(|p| p.name == name)
-                .map(|p| p.path.clone())
-        };
-        let project = (path == "config.projectName").then(|| path_of(value));
-        self.edit(|d| {
-            let v = if value.is_empty() && path != "config.projectName" {
-                Value::Null
-            } else {
-                json!(value)
-            };
-            wf::set(d, node, path, v);
-            if let Some(p) = project {
-                wf::set(d, node, "config.projectPath", json!(p.unwrap_or_default()));
-            }
-        });
     }
 
     pub(super) fn find_wf_run(&self, key: &str) -> Option<Value> {
@@ -816,9 +1179,10 @@ impl App {
             .and_then(|e| e.get("workspaceId").cloned())
             .unwrap_or_else(|| json!(self.workspace()));
         let name = s(&def, "name").unwrap_or("").to_owned();
+        self.st.wf.imported = (!unresolved.is_empty()).then(|| (id.clone(), unresolved.clone()));
         let pending = unresolved
             .iter()
-            .map(describe_requirement)
+            .map(crate::templates::describe)
             .collect::<Vec<_>>()
             .join(", ");
         let note = if !pending.is_empty() {
@@ -845,32 +1209,44 @@ impl App {
     /// The editor's and the landing's own events: a field's edit.
     pub(super) fn wf_event(&mut self, ui: &mut Ui, event: &UiEvent) -> bool {
         match *event {
+            UiEvent::Move { id, x, y, .. } => {
+                let ids = self.side_ids();
+                let Some(from) = ids.iter().find(|(_, rid)| *rid == id) else {
+                    return false;
+                };
+                let over = ids.iter().position(|(_, rid)| {
+                    ui.rect_of(*rid)
+                        .is_some_and(|r| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
+                });
+                self.st.wf.drag = Some((from.0.clone(), over));
+                true
+            }
+            UiEvent::Drop { id, .. } => {
+                let ids = self.side_ids();
+                if !ids.iter().any(|(_, rid)| *rid == id) {
+                    return false;
+                }
+                if let Some((from, Some(to))) = self.st.wf.drag.take() {
+                    if let Some(from) = ids.iter().position(|(w, _)| *w == from) {
+                        self.reorder_workflows(from, to);
+                    }
+                }
+                true
+            }
             UiEvent::Changed(id) => {
                 if id == wf::search_id() {
                     self.st.wf.search = ui.edit_text(id).to_owned();
+                    self.st.wf.lib.highlight = 0;
                     return true;
                 }
-                let Some(d) = &self.st.wf.editor else {
-                    return false;
-                };
-                let node = self.form_node();
-                let paths: Vec<String> = match node.as_deref().and_then(|n| d.node(n)) {
-                    Some(n) => wf::text_paths(n),
-                    None => Vec::new(),
-                };
-                let own = ["name", "staggerDelayMs"];
-                let hit = paths
-                    .iter()
-                    .map(|p| (node.as_deref(), p.as_str()))
-                    .chain(own.iter().map(|p| (None, *p)))
-                    .find(|(n, p)| wf::field_id(*n, p) == id)
-                    .map(|(n, p)| (n.map(str::to_owned), p.to_owned()));
-                let Some((n, path)) = hit else {
-                    return false;
-                };
-                let (vpath, value) = wf::field_value(&path, ui.edit_text(id));
-                self.edit(|d| wf::set(d, n.as_deref(), &vpath, value));
-                true
+                if id == wf::field_id(None, "name") {
+                    let name = ui.edit_text(id).to_owned();
+                    if let Some(d) = self.st.wf.editor.as_mut() {
+                        d.wf["name"] = json!(name);
+                    }
+                    return true;
+                }
+                false
             }
             UiEvent::Submit(id) => {
                 if id == wf::file_id() {
@@ -888,12 +1264,7 @@ impl App {
                     return true;
                 }
                 if id == wf::search_id() {
-                    let first = crate::screen::workflows::library_rows(&self.st.wf)
-                        .into_iter()
-                        .next();
-                    if let Some((kind, _, _)) = first {
-                        self.run_wf(ui, WfAct::Pick(kind.to_owned()), Src::default());
-                    }
+                    self.library_choose(ui);
                     return true;
                 }
                 if self.st.wf.editor.is_some() && id == wf::field_id(None, "name") {
@@ -909,6 +1280,9 @@ impl App {
     /// Keys the workflow views take before the UI: the landing gate's
     /// Mod+Enter and R, and Escape closing the editor's panel.
     pub(super) fn wf_key(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        if self.form_key(ui, input) {
+            return true;
+        }
         let Input::Key { code, mods: m, .. } = input else {
             return false;
         };
@@ -917,6 +1291,52 @@ impl App {
         }
         let held = *m & (mods::CTRL | mods::SUPER | mods::ALT | mods::SHIFT);
         if self.st.wf.editor.is_some() {
+            let typed = match input {
+                Input::Key { text, .. } => text.as_deref(),
+                _ => None,
+            };
+            if matches!(self.st.wf.panel, Panel::Library(_)) && ui.focus() == Some(wf::search_id())
+            {
+                let reach = self
+                    .library_entries()
+                    .into_iter()
+                    .filter(|e| e.reachable())
+                    .count();
+                let h = &mut self.st.wf.lib.highlight;
+                match code.as_str() {
+                    "ArrowDown" => {
+                        *h = (*h + 1).min(reach.saturating_sub(1));
+                        return true;
+                    }
+                    "ArrowUp" => {
+                        *h = h.saturating_sub(1);
+                        return true;
+                    }
+                    "ArrowRight" | "ArrowLeft" => {
+                        let entries = self.library_entries();
+                        let reach: Vec<&crate::library::Entry> =
+                            entries.iter().filter(|e| e.reachable()).collect();
+                        let i = self.st.wf.lib.highlight.min(reach.len().saturating_sub(1));
+                        if let Some(crate::library::Entry::Group { key, open, .. }) = reach.get(i) {
+                            if *open != (code == "ArrowRight") {
+                                let key = key.clone();
+                                self.run_wf(ui, WfAct::Group(key), Src::default());
+                            }
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let primary = held & (mods::CTRL | mods::SUPER) != 0;
+            let on_canvas = ui.focus().is_none_or(|f| f == super::canvas::pane_id());
+            let undo = primary && code == "KeyZ" && !ui.wants_ime();
+            if (undo || on_canvas && !ui.wants_ime() && !primary)
+                && code != "Escape"
+                && self.canvas_key(ui, code, typed, held)
+            {
+                return true;
+            }
             if code == "Escape"
                 && held == 0
                 && self.st.wf.panel != Panel::None
@@ -948,16 +1368,21 @@ impl App {
         }
         let node = s(gate, "nodeId").unwrap_or("").to_owned();
         let key = runs::key(run);
-        let act = if wf::is_sign_in(gate) {
-            WfAct::SignIn(s(gate, "connectionId").unwrap_or("").to_owned())
+        if wf::is_sign_in(gate) {
+            let conn = s(gate, "connectionId").unwrap_or("").to_owned();
+            self.run_wf(ui, WfAct::SignIn(conn), Src::default());
+            return true;
+        }
+        let gk = crate::gates::key(crate::gates::Place::Pane, &key, &node);
+        if self.st.runs.gates.get(&gk).is_some_and(|g| g.busy()) {
+            return false;
+        }
+        let op = if approve {
+            crate::gates::GateOp::Approve(gk)
         } else {
-            WfAct::Gate {
-                run: key,
-                node,
-                approve,
-            }
+            crate::gates::GateOp::Reject(gk)
         };
-        self.run_wf(ui, act, Src::default());
+        self.run_gate(ui, op);
         true
     }
 }
@@ -1057,30 +1482,6 @@ fn graph_complaint(p: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// `describeRequirement`.
-fn describe_requirement(r: &Value) -> String {
-    let name = s(r, "name").filter(|n| !n.is_empty());
-    if s(r, "kind") == Some("httpProfile") {
-        return name.map_or_else(
-            || "an HTTP profile".to_owned(),
-            |n| format!("an HTTP profile like \"{n}\""),
-        );
-    }
-    let connector = s(r, "connectorId")
-        .filter(|c| !c.is_empty())
-        .unwrap_or("connector");
-    if s(r, "key") == Some("secretsFrom") {
-        let used = name
-            .map(|n| format!(" (it used \"{n}\")"))
-            .unwrap_or_default();
-        return format!("a {connector} key for its Secrets from{used}");
-    }
-    name.map_or_else(
-        || format!("a {connector} connection"),
-        |n| format!("a {connector} connection like \"{n}\""),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1128,11 +1529,11 @@ mod tests {
     #[test]
     fn requirements_read_as_the_toast_says_them() {
         assert_eq!(
-            describe_requirement(&json!({ "kind": "httpProfile", "name": "api" })),
+            crate::templates::describe(&json!({ "kind": "httpProfile", "name": "api" })),
             "an HTTP profile like \"api\""
         );
         assert_eq!(
-            describe_requirement(&json!({ "kind": "connection", "connectorId": "github" })),
+            crate::templates::describe(&json!({ "kind": "connection", "connectorId": "github" })),
             "a github connection"
         );
     }

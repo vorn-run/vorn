@@ -25,6 +25,8 @@ pub struct TextStyle {
     pub line_height: f32,
     pub weight: u16,
     pub mono: bool,
+    /// Letter spacing in ems (Tailwind's `tracking-wider` is 0.05).
+    pub tracking: f32,
 }
 
 impl TextStyle {
@@ -35,6 +37,7 @@ impl TextStyle {
             line_height: (size * 1.5).round(),
             weight: 400,
             mono: false,
+            tracking: 0.0,
         }
     }
 
@@ -138,6 +141,7 @@ struct ShapeKey {
     line: u32,
     weight: u16,
     mono: bool,
+    tracking: u32,
     max_w: Option<u32>,
 }
 
@@ -285,13 +289,17 @@ impl TextSystem {
             line: (style.line_height * s).to_bits(),
             weight: style.weight,
             mono: style.mono,
+            tracking: style.tracking.to_bits(),
             max_w: max_w.map(|w| (w * s).ceil() as u32),
         };
         if let Some(sh) = self.shaped.get(&key) {
             self.used.insert(Rc::as_ptr(sh));
             return sh.clone();
         }
-        let attrs = self.attrs(style.weight, style.mono, false);
+        let mut attrs = self.attrs(style.weight, style.mono, false);
+        if style.tracking != 0.0 {
+            attrs = attrs.letter_spacing(style.tracking);
+        }
         let mut b = Buffer::new(
             &mut self.fonts,
             Metrics::new(style.size * s, style.line_height * s),

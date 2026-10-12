@@ -478,6 +478,7 @@ fn edit_look(style: TextStyle, color: Rgba, placeholder: &str, multiline: bool) 
         placeholder: placeholder.to_owned(),
         placeholder_color: color::GRAY_600,
         multiline,
+        textarea: false,
     }))
 }
 
@@ -489,6 +490,20 @@ pub fn field(id: Id, name: &str, placeholder: &str, style: TextStyle, color: Rgb
         .sense(Sense::TEXT)
         .content(edit_look(style, color, placeholder, false))
         .role(Role::TextInput, name)
+}
+
+/// A bare `<textarea>` in `style`: Enter starts a new line and Cmd+Enter
+/// (Ctrl+Enter off macOS) reports `Event::Submit`.
+pub fn textarea(id: Id, name: &str, placeholder: &str, style: TextStyle, color: Rgba) -> El {
+    let mut look = edit_look(style, color, placeholder, true);
+    if let Content::Edit(l) = &mut look {
+        l.textarea = true;
+    }
+    div()
+        .id(id)
+        .sense(Sense::TEXT)
+        .content(look)
+        .role(Role::MultilineTextInput, name)
 }
 
 /// A bare multiline text field in `style`; Enter reports `Event::Submit`,

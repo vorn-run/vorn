@@ -109,7 +109,7 @@ pub(in crate::screen) fn add_task(s: &Screen<'_>) -> El {
             s,
             Form::Dialog,
             "Add description...",
-            120.0,
+            202.0,
             64,
         )));
     if !f.images.is_empty() || f.attaching {
@@ -121,9 +121,9 @@ pub(in crate::screen) fn add_task(s: &Screen<'_>) -> El {
         .gap(8.0)
         .px(16.0)
         .py(8.0)
-        .child(status_picker(s, Form::Dialog, true, false))
-        .child(project_picker(s, Form::Dialog, true))
-        .child(agent_picker(s, Form::Dialog, true));
+        .child(status_picker(s, Form::Dialog, false))
+        .child(project_picker(s, Form::Dialog))
+        .child(agent_picker(s, Form::Dialog));
     if !f.branch.is_empty() || f.editing {
         pills = pills.child(
             div()

@@ -11,16 +11,23 @@
 
 pub mod act;
 pub mod app;
+pub mod canvas;
 pub mod client;
+pub mod gates;
+pub mod graph;
 pub mod grid;
 pub mod layout;
+pub mod library;
 pub mod look;
+pub mod markdown;
 pub mod paint;
 pub mod runs;
 pub mod screen;
 pub mod state;
 pub mod tasks;
+pub mod templates;
 pub mod ui;
+pub mod vars;
 pub mod view;
 pub mod workflows;
 

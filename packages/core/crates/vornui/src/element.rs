@@ -165,6 +165,12 @@ pub enum Content {
         size: f32,
         color: Rgba,
     },
+    /// An SVG drawn over the whole box in one colour (a canvas's lines),
+    /// rasterized at the size it is drawn.
+    Svg {
+        svg: String,
+        color: Rgba,
+    },
     /// An RGBA image the app registered with [`crate::Ui::image`].
     Image {
         id: u32,
@@ -184,6 +190,9 @@ pub struct EditLook {
     pub placeholder: String,
     pub placeholder_color: Rgba,
     pub multiline: bool,
+    /// A `<textarea>`: Enter starts a line and the primary modifier with
+    /// Enter submits.
+    pub textarea: bool,
 }
 
 /// Accessibility facts beyond role and label.
@@ -230,6 +239,8 @@ pub struct El {
     pub(crate) slop: (f32, f32),
     /// Painted, and hit-tested, above everything in the window drawn before it.
     pub(crate) layered: bool,
+    /// The border drawn in dashes (`border-dashed`).
+    pub(crate) dashed: bool,
 }
 
 pub fn div() -> El {
@@ -255,6 +266,7 @@ pub fn div() -> El {
         rules: [None; 4],
         slop: (0.0, 0.0),
         layered: false,
+        dashed: false,
     }
 }
 
@@ -283,6 +295,14 @@ pub fn icon(svg: impl Into<String>, size: f32, color: Rgba) -> El {
     })
 }
 
+/// `svg` stretched over a `w`×`h` box and tinted `color`.
+pub fn shape(svg: impl Into<String>, w: f32, h: f32, color: Rgba) -> El {
+    div().size(w, h).content(Content::Svg {
+        svg: svg.into(),
+        color,
+    })
+}
+
 pub fn image(id: u32, w: f32, h: f32) -> El {
     div().size(w, h).content(Content::Image {
         id,
@@ -297,6 +317,13 @@ pub fn custom(id: u64) -> El {
 impl El {
     pub fn content(mut self, c: Content) -> El {
         self.content = c;
+        self
+    }
+    /// An edit field's placeholder ink, for one without `placeholder-*`.
+    pub fn placeholder_color(mut self, c: Rgba) -> El {
+        if let Content::Edit(l) = &mut self.content {
+            l.placeholder_color = c;
+        }
         self
     }
     pub fn row(mut self) -> El {
@@ -497,6 +524,11 @@ impl El {
         };
         self
     }
+    /// Draws the border in 3 px dashes, as `border-dashed` does.
+    pub fn dashed(mut self) -> El {
+        self.dashed = true;
+        self
+    }
     /// A top border only (`border-t`).
     pub fn border_top(mut self, w: f32, c: Rgba) -> El {
         self.style.border.top = length(w);
@@ -536,6 +568,7 @@ impl El {
         match &mut self.content {
             Content::Image { color, .. }
             | Content::Icon { color, .. }
+            | Content::Svg { color, .. }
             | Content::Text { color, .. } => *color = color.alpha(a),
             Content::None | Content::Custom(_) | Content::Edit(_) => {}
         }
@@ -556,6 +589,13 @@ impl El {
     pub fn weight(mut self, w: u16) -> El {
         if let Content::Text { style, .. } = &mut self.content {
             style.weight = w;
+        }
+        self
+    }
+    /// Letter spacing in ems, for a text element.
+    pub fn tracking(mut self, em: f32) -> El {
+        if let Content::Text { style, .. } = &mut self.content {
+            style.tracking = em;
         }
         self
     }

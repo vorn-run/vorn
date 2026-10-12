@@ -143,6 +143,8 @@ pub enum MenuKind {
     PromptProject,
     /// The node panel's More menu.
     NodeMore(String),
+    /// The editor's icon and colour picker.
+    WfIcon,
 }
 
 impl MenuKind {
@@ -184,6 +186,8 @@ pub enum Dialog {
     Missed,
     /// The export or import path.
     WfFile,
+    /// GateReviewModal: the review page of a waiting gate.
+    GateReview,
 }
 
 /// A toast in the bottom right.

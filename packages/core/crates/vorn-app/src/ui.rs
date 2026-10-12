@@ -5,12 +5,13 @@
 pub use vornui::accesskit::{Role, TreeUpdate};
 pub use vornui::input::{from_ime, mods};
 pub use vornui::text::{BOLD, ITALIC};
-pub use vornui::widgets::{area, field, item_id, text_input, tooltip};
+pub use vornui::widgets::{area, field, item_id, text_input, textarea, tooltip};
 pub use vornui::window::{run as run_window, run_with, App as WindowApp, Waker, WindowOptions};
 pub use vornui::TextStyle;
 pub use vornui::{
-    custom, decode_png, div, icon, image, text, Action, Clipboard, Cursor, El, Event, Id, Input,
-    Laid, Offscreen, Place, Rect, RenderMode, Rgba, Sense, Ui, UiConfig, WindowRequest,
+    custom, decode_png, div, icon, image, rasterize_svg_rgba, shape, text, Action, Clipboard,
+    Cursor, El, Event, Id, Input, Laid, Offscreen, Place, Rect, RenderMode, Rgba, Sense, Ui,
+    UiConfig, WindowRequest,
 };
 pub use vornui::{TextEdit, MOVE_SLOP};
 

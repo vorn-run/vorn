@@ -29,6 +29,9 @@ use crate::ui::{
 use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
 
+pub mod canvas;
+pub mod forms;
+mod gates;
 mod tasks;
 mod workflows;
 
@@ -194,12 +197,16 @@ pub struct App {
     saves: VecDeque<(Value, Call)>,
     saving: bool,
     logo: Option<u32>,
+    /// The agents' marks, registered as images.
+    agents: HashMap<&'static str, u32>,
     /// vornd hung up.
     pub closed: bool,
     /// The app draws its own title bar and window controls.
     pub chrome: bool,
     /// The last frame's size.
     size: (f32, f32),
+    /// vornd's HTTP port, for pages it serves (a gate's review page).
+    port: u16,
     /// The sessions the banner offers, with why each ended.
     carried: Vec<(TerminalSession, &'static str)>,
 }
@@ -235,9 +242,11 @@ impl App {
             saves: VecDeque::new(),
             saving: false,
             logo: None,
+            agents: HashMap::new(),
             closed: false,
             chrome: !cfg!(target_os = "macos"),
             size: look::WINDOW,
+            port: ep.port,
             carried: Vec::new(),
         };
         app.call(Call::Restored, "sessions:restored", Value::Null);
@@ -640,7 +649,14 @@ impl App {
         let mut at = match (src.at, rect) {
             (Some(p), _) => p,
             (None, Some(r)) if kind.is_launch() => (r.x, r.y - 4.0),
-            (None, Some(r)) if kind == MenuKind::Grid => (r.x + r.w - w, r.y + r.h + 4.0),
+            (None, Some(r))
+                if matches!(
+                    kind,
+                    MenuKind::Grid | MenuKind::TaskOptions | MenuKind::TaskCard(_)
+                ) =>
+            {
+                (r.x + r.w - w, r.y + r.h + 4.0)
+            }
             (None, Some(r)) => (r.x, r.y + r.h + 4.0),
             (None, None) => (self.size.0 - w - 12.0, look::TOP_BAR_H),
         };
@@ -891,6 +907,7 @@ impl App {
             Act::Shortcuts => self.run_shortcut(ui, Shortcut::Shortcuts),
             Act::Task(a) => self.run_task(ui, a),
             Act::Run(a) => self.run_run(a),
+            Act::Gate(op) => self.run_gate(ui, op),
             Act::OpenUrl(u) => tasks::open_url(&u),
             Act::CloseDialog if self.st.dialog == Some(Dialog::AddTask) => {
                 self.close_task_dialog(ui);
@@ -1068,7 +1085,12 @@ impl App {
 
     /// Something the UI reported.
     pub fn event(&mut self, ui: &mut Ui, event: UiEvent) {
-        if self.task_event(ui, &event) || self.wf_event(ui, &event) {
+        if self.gate_event(ui, &event)
+            || self.canvas_event(ui, &event)
+            || self.form_event(ui, &event)
+            || self.task_event(ui, &event)
+            || self.wf_event(ui, &event)
+        {
             return;
         }
         match event {
@@ -1085,6 +1107,14 @@ impl App {
                     ) || self.st.menu.as_ref().is_some_and(|m| {
                         matches!(m.kind, MenuKind::Recent | MenuKind::Headless)
                             && matches!(act, Act::ToggleHeadless(_))
+                            || m.kind == MenuKind::WfIcon
+                                && matches!(
+                                    act,
+                                    Act::Workflow(
+                                        crate::workflows::WfAct::Icon(_)
+                                            | crate::workflows::WfAct::IconColor(_)
+                                    )
+                                )
                     });
                     if !keep && self.st.menu.is_some() {
                         self.close_menu(ui);
@@ -1461,6 +1491,7 @@ impl App {
             st: &self.st,
             panes: &self.views,
             logo: self.logo,
+            agents: &self.agents,
             size: self.size,
             chrome: self.chrome,
         }
@@ -1482,6 +1513,16 @@ impl App {
         self.pump();
         self.tasks_tick(ui);
         self.size = size;
+        if self.agents.is_empty() {
+            for (name, svg) in look::AGENT_ICONS {
+                let px = 48;
+                if let Some(id) = crate::ui::rasterize_svg_rgba(svg, px, px)
+                    .and_then(|rgba| ui.image(px, px, &rgba))
+                {
+                    self.agents.insert(name, id);
+                }
+            }
+        }
         if self.logo.is_none() {
             // A logo that does not decode costs only the logo.
             self.logo = decode_png(look::LOGO_PNG)
@@ -1505,8 +1546,12 @@ impl App {
         if self.st.menu.is_some() && !ui.menu_open(menus::MENU) {
             self.st.menu = None;
         }
+        if let Some(id) = self.st.wf.open_next.take() {
+            self.run_wf(ui, crate::workflows::WfAct::Edit(id), Src::default());
+        }
         self.acts.clear();
         let root = self.screen(ui).build();
+        self.seed_texts(ui);
         ui.custom_a11y.clear();
         for (i, s) in self.store.sessions.iter().enumerate() {
             let id = crate::screen::CARD_ID_BASE + i as u64;

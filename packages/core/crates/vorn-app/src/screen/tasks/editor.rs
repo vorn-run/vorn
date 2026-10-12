@@ -5,6 +5,7 @@
 use super::{desc_form, desc_id, link_id};
 use crate::act::Act;
 use crate::look;
+use crate::markdown as md;
 use crate::screen::{c, ico, white, Screen};
 use crate::tasks::{self, Form, Mark, TaskAct, SLASH};
 use crate::ui::{area, div, field, text, tooltip, Action, El, Role, TextStyle};
@@ -22,6 +23,9 @@ pub(super) fn editor(s: &Screen<'_>, form: Form, placeholder: &str, min_h: f32, 
         .sum();
     let h = (lines as f32 * LINE + 24.0).max(min_h);
     let focus = s.ui.focused(id);
+    if !focus && !body.trim().is_empty() {
+        return preview(s, form, body, min_h);
+    }
     div()
         .w_full()
         .h(h)
@@ -44,6 +48,211 @@ pub(super) fn editor(s: &Screen<'_>, form: Form, placeholder: &str, min_h: f32, 
             .w_full()
             .h_full(),
         )
+}
+
+/// The description drawn as its editor draws it at rest; a click edits
+/// the markdown, a task's box checks it.
+fn preview(s: &Screen<'_>, form: Form, body: &str, min_h: f32) -> El {
+    let id = s
+        .acts
+        .on("task-desc-preview", Act::Task(TaskAct::EditDesc(form)));
+    let mut col = div().col().w_full();
+    let blocks = md::blocks(body);
+    for (i, b) in blocks.iter().enumerate() {
+        if i > 0 {
+            col = col.child(div().h(md::gap(&blocks[i - 1], b)).shrink0());
+        }
+        col = col.child(block(s, form, b));
+    }
+    if let Some(last) = blocks.last() {
+        col = col.child(div().h(last.margins().1).shrink0());
+    }
+    div()
+        .id(id)
+        .on(Action::Click)
+        .w_full()
+        .min_h(min_h)
+        .px(16.0)
+        .py(12.0)
+        .rounded(8.0)
+        .bg(white(0.03))
+        .border(1.0, white(0.06))
+        .role(Role::TextInput, "Description")
+        .child(col)
+}
+
+/// One block, as `editor-theme.css` styles it.
+fn block(s: &Screen<'_>, form: Form, b: &md::Block) -> El {
+    let base = Look {
+        size: 14.0,
+        line: LINE,
+        weight: 400,
+        color: 0xe5e7eb,
+    };
+    match b {
+        md::Block::Heading(level, text) => {
+            let (size, color) = match level {
+                1 => (20.0, 0xf3f4f6),
+                2 => (15.2, 0xe5e7eb),
+                _ => (12.8, 0xd1d5db),
+            };
+            flow(
+                text,
+                Look {
+                    size,
+                    line: size * 1.6,
+                    weight: 600,
+                    color,
+                },
+            )
+        }
+        md::Block::Para(text) => flow(text, base),
+        md::Block::Quote(text) => {
+            div()
+                .w_full()
+                .pl(12.0)
+                .border_left(2.0, white(0.12))
+                .child(flow(
+                    text,
+                    Look {
+                        color: 0x9ca3af,
+                        ..base
+                    },
+                ))
+        }
+        md::Block::Bullet(text) | md::Block::Ordered(_, text) => {
+            let mark = match b {
+                md::Block::Ordered(n, _) => format!("{n}."),
+                _ => "\u{2022}".to_owned(),
+            };
+            div()
+                .row()
+                .w_full()
+                .child(div().w(20.0).shrink0().child(text_el(
+                    &mark,
+                    Look {
+                        color: 0xd1d5db,
+                        ..base
+                    },
+                )))
+                .child(div().grow().min_w0().child(flow(
+                    text,
+                    Look {
+                        color: 0xd1d5db,
+                        ..base
+                    },
+                )))
+        }
+        md::Block::Task {
+            line,
+            checked,
+            text,
+        } => {
+            let bid = s.acts.on(
+                &format!("task-check.{line}"),
+                Act::Task(TaskAct::CheckItem(form, *line)),
+            );
+            let mut bx = div()
+                .id(bid)
+                .on(Action::Click)
+                .size(15.0, 15.0)
+                .shrink0()
+                .rounded(3.0)
+                .center()
+                .role(Role::CheckBox, "Task item")
+                .toggled(*checked);
+            bx = if *checked {
+                bx.bg(c(0x22c55e))
+                    .child(ico("check", 11.0, 2.5, c(look::WHITE)))
+            } else {
+                bx.border(1.5, white(0.2))
+            };
+            let look = if *checked {
+                Look {
+                    color: 0x6b7280,
+                    ..base
+                }
+            } else {
+                base
+            };
+            div()
+                .row()
+                .gap(8.0)
+                .w_full()
+                // The label's `margin-top: 3px` over a middle-aligned box in a 22.4 px line.
+                .child(div().h(LINE + 3.0).pt(8.0).shrink0().child(bx))
+                .child(div().grow().min_w0().child(flow(text, look)))
+        }
+        md::Block::Code(code) => div()
+            .w_full()
+            .px(12.0)
+            .py(10.0)
+            .rounded(6.0)
+            .bg(white(0.04))
+            .child(
+                text(code.as_str(), 12.0, c(0xd1d5db))
+                    .mono()
+                    .line_height(19.2)
+                    .wrapping(),
+            ),
+        md::Block::Rule => div().w_full().h(1.0).bg(white(0.08)),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Look {
+    size: f32,
+    line: f32,
+    weight: u16,
+    color: u32,
+}
+
+fn text_el(t: &str, l: Look) -> El {
+    text(t, l.size, c(l.color))
+        .weight(l.weight)
+        .line_height(l.line)
+        .silent()
+}
+
+/// Inline runs laid word by word, so marked words wrap with the rest.
+fn flow(runs: &[md::Inline], l: Look) -> El {
+    let mut row = div().row().wrap_children().w_full().min_h(l.line);
+    for r in runs {
+        let mut look = l;
+        if r.bold {
+            look.weight = 600;
+            look.color = 0xf3f4f6;
+        }
+        if r.link {
+            look.color = 0x60a5fa;
+        }
+        if r.strike {
+            look.color = 0x6b7280;
+        }
+        if r.code {
+            row = row.child(
+                div().px(5.0).rounded(4.0).bg(white(0.06)).child(
+                    text(r.text.as_str(), 12.0, c(0xd1d5db))
+                        .mono()
+                        .line_height(l.line)
+                        .silent(),
+                ),
+            );
+            continue;
+        }
+        let mut word = String::new();
+        for ch in r.text.chars() {
+            word.push(ch);
+            if ch == ' ' {
+                row = row.child(text_el(&word, look));
+                word.clear();
+            }
+        }
+        if !word.is_empty() {
+            row = row.child(text_el(&word, look));
+        }
+    }
+    row
 }
 
 /// The form whose description is focused, with its text and caret.
@@ -82,7 +291,8 @@ pub(in crate::screen) fn overlay(s: &Screen<'_>) -> Option<El> {
     let caret = s.ui.ime_area();
     if let Some((form, _, matches)) = slash_open(s.ui, s.st.tasks.slash_closed) {
         let r = caret?;
-        return Some(slash_menu(s, form, &matches).absolute(r.x, r.y + r.h + 6.0));
+        let x = (r.x - s.st.tasks.slash_dx).max(0.0);
+        return Some(slash_menu(s, form, &matches).absolute(x, r.y + r.h + 6.0));
     }
     if s.st.tasks.linking.is_some() {
         let (x, y) = s.st.tasks.link_pos;

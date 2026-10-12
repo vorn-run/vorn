@@ -19,7 +19,7 @@ pub(super) fn project_color(p: &ProjectConfig) -> Rgba {
 }
 
 /// A project's configured icon when the app carries it, else a folder.
-pub(super) fn project_icon(p: &ProjectConfig, size: f32) -> El {
+pub(crate) fn project_icon(p: &ProjectConfig, size: f32) -> El {
     let name = p
         .icon
         .as_deref()
@@ -62,7 +62,7 @@ fn header(s: &Screen<'_>) -> El {
         .role(Role::Label, workspace)
         .child(ico("user", 14.0, 1.5, c(look::GRAY_500)))
         .child(
-            text(workspace, 13.0, c(look::GRAY_300))
+            text(workspace, 13.0, c(look::GRAY_200))
                 .weight(500)
                 .line_height(18.0)
                 .truncate()
@@ -71,7 +71,7 @@ fn header(s: &Screen<'_>) -> El {
     let bar = div()
         .row()
         .items_center()
-        .h(look::TOP_BAR_H - 1.0)
+        .h(look::TOP_BAR_H)
         .pl(12.0)
         .pr(12.0)
         .child(title)
@@ -85,14 +85,7 @@ fn header(s: &Screen<'_>) -> El {
             Some(&format!("{MOD_LABEL}B")),
             false,
         ));
-    let bar = draggable(
-        s,
-        div()
-            .col()
-            .shrink0()
-            .child(bar)
-            .child(div().h(1.0).w_full().bg(white(0.06))),
-    );
+    let bar = draggable(s, div().col().shrink0().child(bar));
     let modes = [
         (
             MainView::Sessions,
@@ -147,11 +140,17 @@ fn header(s: &Screen<'_>) -> El {
             .selected(on)
             .child(ico(name, 14.0, 2.0, fg));
         if on {
-            b = b.child(text(label, 12.0, fg).weight(500).line_height(16.0).silent());
+            b = b.child(text(label, 12.0, fg).weight(500).line_height(18.0).silent());
         }
         row = row.child(tooltip(s.ui, b, id, label, Some(&keys)));
     }
-    div().col().shrink0().child(bar).child(row)
+    // `border-b` under the whole header, the view pills included.
+    div()
+        .col()
+        .shrink0()
+        .child(bar)
+        .child(row)
+        .child(div().h(1.0).w_full().bg(white(0.06)))
 }
 
 /// SidebarSectionHeader: the label and its controls.
@@ -237,7 +236,7 @@ pub(super) fn nav_item(
                 .row()
                 .grow()
                 .min_w0()
-                .child(text(label, 13.0, fg).line_height(18.0).truncate().silent()),
+                .child(text(label, 13.0, fg).line_height(19.5).truncate().silent()),
         )
         .child_if(badge.map(|n| {
             text(n.to_string(), 12.0, c(look::GRAY_500))
@@ -507,7 +506,13 @@ fn projects(s: &Screen<'_>) -> El {
 }
 
 /// SidebarSectionHeader with a fold: a chevron and an uppercase title.
-pub(super) fn toggle_section(s: &Screen<'_>, title: &str, open: bool, act: Act) -> El {
+pub(super) fn toggle_section(
+    s: &Screen<'_>,
+    title: &str,
+    open: bool,
+    act: Act,
+    actions: Vec<El>,
+) -> El {
     let id = s.acts.on("sidebar-section", act);
     let hot = s.ui.hover(id);
     let chevron = if open {
@@ -515,27 +520,35 @@ pub(super) fn toggle_section(s: &Screen<'_>, title: &str, open: bool, act: Act) 
     } else {
         "chevron-right"
     };
-    div().row().items_center().pt(12.0).pb(6.0).child(
-        div()
-            .id(id)
-            .on(Action::Click)
-            .row()
-            .items_center()
-            .gap(6.0)
-            .role(Role::Button, title)
-            .expanded(open)
-            .child(ico(chevron, 10.0, 2.0, c(look::GRAY_600)))
-            .child(
-                text(
-                    title.to_uppercase(),
-                    11.0,
-                    c(look::GRAY_500).mix(c(look::GRAY_300), hot),
-                )
-                .weight(500)
-                .line_height(14.0)
-                .silent(),
-            ),
-    )
+    div()
+        .row()
+        .items_center()
+        .justify_between()
+        .pt(12.0)
+        .pb(6.0)
+        .child(
+            div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_center()
+                .gap(6.0)
+                .role(Role::Button, title)
+                .expanded(open)
+                .child(ico(chevron, 10.0, 2.0, c(look::GRAY_600)))
+                .child(
+                    text(
+                        title.to_uppercase(),
+                        11.0,
+                        c(look::GRAY_500).mix(c(look::GRAY_300), hot),
+                    )
+                    .weight(500)
+                    .tracking(0.05)
+                    .line_height(16.5)
+                    .silent(),
+                ),
+        )
+        .child(div().row().items_center().gap(2.0).children(actions))
 }
 
 /// TasksProjectsSection: All Projects and each project, under a fold.
@@ -546,6 +559,7 @@ fn tasks_projects(s: &Screen<'_>) -> El {
         "Projects",
         open,
         Act::Task(crate::tasks::TaskAct::ToggleProjects),
+        Vec::new(),
     ));
     if !open {
         return col;

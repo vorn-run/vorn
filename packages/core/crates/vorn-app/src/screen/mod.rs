@@ -7,6 +7,7 @@ mod cards;
 mod chrome;
 mod composer;
 mod dialogs;
+pub mod gates;
 pub mod menus;
 pub mod runs;
 mod sidebar;
@@ -24,6 +25,7 @@ use crate::view::PaneView;
 
 pub use cards::{card_index, intent_id, rename_id, term_id, CARD_ID_BASE};
 pub use dialogs::{PROJECT_NAME, PROJECT_PATH};
+pub(crate) use sidebar::project_icon as sidebar_project_icon;
 
 /// The three views the top bar's pills switch between.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -55,6 +57,8 @@ pub struct Screen<'a> {
     pub panes: &'a HashMap<String, PaneView>,
     /// The logo's image id, once registered.
     pub logo: Option<u32>,
+    /// The agents' marks, by agent.
+    pub agents: &'a HashMap<&'static str, u32>,
     pub size: (f32, f32),
     /// The app draws its own window controls (no system title bar).
     pub chrome: bool,
@@ -95,6 +99,7 @@ impl Screen<'_> {
             let panel = match menu.kind {
                 crate::state::MenuKind::Recent => chrome::recent_panel(self),
                 crate::state::MenuKind::Headless => chrome::headless_panel(self),
+                crate::state::MenuKind::WfIcon => workflows::icon_picker(self),
                 _ => menus::panel(
                     self.ui,
                     menus::MENU,
@@ -167,6 +172,14 @@ pub(crate) fn ico(name: &str, size: f32, stroke: f32, color: Rgba) -> El {
     icon(look::icon(name, stroke).unwrap_or_default(), size, color)
 }
 
+/// `AgentIcon`: an agent's mark, or a shell's terminal.
+pub(crate) fn agent_icon(s: &Screen<'_>, agent: &str, size: f32) -> El {
+    match s.agents.get(agent) {
+        Some(id) => crate::ui::image(*id, size, size),
+        None => ico("terminal", size, 1.5, c(look::GRAY_400)),
+    }
+}
+
 /// The Alt key's label in shortcut hints.
 pub(crate) const ALT_LABEL: &str = if cfg!(target_os = "macos") {
     "\u{2325}"
@@ -213,6 +226,16 @@ pub(crate) fn truncate(s: &str, max: usize) -> String {
         Some((at, _)) => format!("{}\u{2026}", s[..at].trim_end()),
         None => s.to_owned(),
     }
+}
+
+/// A dashed outline over a `w`×`h` box.
+pub(crate) fn dashed(w: f32, h: f32, r: f32, color: Rgba) -> El {
+    let svg = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"><rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{}\" rx=\"{r}\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"1\" stroke-dasharray=\"3 3\"/></svg>",
+        w - 1.0,
+        h - 1.0
+    );
+    crate::ui::shape(svg, w, h, color).absolute(0.0, 0.0)
 }
 
 #[cfg(test)]

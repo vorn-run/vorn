@@ -122,6 +122,7 @@ icons! {
     "cloud",
     "code",
     "code-xml",
+    "columns-3",
     "copy",
     "corner-down-left",
     "cpu",
@@ -141,6 +142,7 @@ icons! {
     "folder-tree",
     "gamepad-2",
     "git-branch",
+    "github",
     "git-commit-horizontal",
     "git-fork",
     "globe",
@@ -158,6 +160,7 @@ icons! {
     "keyboard",
     "layers",
     "lightbulb",
+    "linear",
     "link",
     "list",
     "list-filter",
@@ -170,6 +173,7 @@ icons! {
     "log-in",
     "maximize",
     "maximize-2",
+    "mcp",
     "message-square",
     "minimize-2",
     "minus",
@@ -219,6 +223,60 @@ icons! {
     "zap",
 }
 
+/// `AgentIcon`'s marks, in their own colours.
+pub const AGENT_ICONS: [(&str, &str); 5] = [
+    ("claude", include_str!("../assets/agents/claude.svg")),
+    ("copilot", include_str!("../assets/agents/copilot.svg")),
+    ("codex", include_str!("../assets/agents/codex.svg")),
+    ("opencode", include_str!("../assets/agents/opencode.svg")),
+    ("gemini", include_str!("../assets/agents/gemini.svg")),
+];
+
+/// `ICON_MAP` and `PROJECT_ICON_OPTIONS`: the names a workflow or project
+/// stores, the glyph each draws and the picker's label.
+pub const ICON_OPTIONS: [(&str, &str, &str); 24] = [
+    ("Folder", "folder", "Folder"),
+    ("FolderGit2", "folder-git-2", "Git Repo"),
+    ("Code", "code", "Code"),
+    ("Globe", "globe", "Web"),
+    ("Database", "database", "Database"),
+    ("Server", "server", "Server"),
+    ("Smartphone", "smartphone", "Mobile"),
+    ("Package", "package", "Package"),
+    ("FileCode", "file-code", "Script"),
+    ("Terminal", "terminal", "Terminal"),
+    ("Cpu", "cpu", "Hardware"),
+    ("Cloud", "cloud", "Cloud"),
+    ("Shield", "shield", "Security"),
+    ("Zap", "zap", "Fast"),
+    ("Workflow", "workflow", "Workflow"),
+    ("Gamepad2", "gamepad-2", "Game"),
+    ("Music", "music", "Audio"),
+    ("Image", "image", "Image"),
+    ("BookOpen", "book-open", "Docs"),
+    ("FlaskConical", "flask-conical", "Lab"),
+    ("Rocket", "rocket", "Launch"),
+    ("github", "github", "GitHub"),
+    ("linear", "linear", "Linear"),
+    ("mcp", "mcp", "MCP"),
+];
+
+/// `ICON_COLOR_PALETTE`.
+pub const ICON_COLORS: [Rgb; 8] = [
+    0x6b7280, 0x3b82f6, 0x8b5cf6, 0xec4899, 0xef4444, 0xf97316, 0xeab308, 0x22c55e,
+];
+
+/// `ICON_MAP[name]`: the glyph a stored icon name draws, `Play` included.
+pub fn icon_map(name: &str) -> Option<&'static str> {
+    if name == "Play" {
+        return Some("play");
+    }
+    ICON_OPTIONS
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|(_, glyph, _)| *glyph)
+}
+
 /// The icon's SVG with its stroke width set, ready to tint.
 pub fn icon(name: &str, stroke: f32) -> Option<String> {
     Some(
@@ -249,8 +307,10 @@ mod tests {
     fn every_icon_used_loads_and_takes_its_stroke() {
         for name in ICONS {
             let svg = icon(name, 1.5).unwrap_or_else(|| panic!("{name}"));
+            // The brand marks are filled, not stroked.
+            let filled = matches!(*name, "github" | "linear" | "mcp");
             assert!(
-                svg.contains("stroke-width=\"1.5\"") && svg.contains("#ffffff"),
+                (filled || svg.contains("stroke-width=\"1.5\"")) && svg.contains("#ffffff"),
                 "{name}"
             );
         }

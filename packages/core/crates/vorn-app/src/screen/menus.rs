@@ -7,7 +7,7 @@ use super::{c, ico, white, Screen};
 use crate::act::Act;
 use crate::look::{self, Rgb};
 use crate::state::{Filter, LayoutMode, MenuKind, Sort};
-use crate::ui::{div, item_id, text, Action, El, Id, Place, Role, Ui};
+use crate::ui::{div, item_id, text, Action, El, Id, Place, Rgba, Role, Ui};
 
 /// The open menu's choice group; entries report `Select` in it.
 pub const MENU: Id = Id(0x6d65_6e75_0000_0001);
@@ -35,6 +35,16 @@ pub struct Item {
     pub mono: bool,
     /// A row drawn by the caller (the layout buttons); not a choice.
     pub row: Option<El>,
+    /// A `SelectPicker` row: the check on the left, 30 px tall.
+    pub picker: bool,
+    /// A glyph drawn by the caller (a connector's or a project's mark).
+    pub mark: Option<El>,
+    /// A plain `px-3 py-2` button with a 12 px icon in its text colour.
+    pub plain: bool,
+    /// An `OptionRow` menu's entry: check on the left, sections of `py-1.5`.
+    pub option_row: bool,
+    /// A `KanbanCardMenu` entry: 28 px, the label always secondary.
+    pub card_row: bool,
 }
 
 impl Item {
@@ -45,6 +55,12 @@ impl Item {
             act: Some(act),
             ..Item::default()
         }
+    }
+
+    /// Drawn as a plain menu button (`plain_row`).
+    pub fn plain(mut self) -> Item {
+        self.plain = true;
+        self
     }
 
     pub fn header(label: impl Into<String>) -> Item {
@@ -62,6 +78,22 @@ impl Item {
             checked,
             ..Item::default()
         }
+    }
+
+    /// A `SelectPicker` option.
+    pub fn pick(label: impl Into<String>, checked: bool, act: Act) -> Item {
+        Item {
+            label: label.into(),
+            act: Some(act),
+            checked,
+            picker: true,
+            ..Item::default()
+        }
+    }
+
+    pub fn mark(mut self, el: El) -> Item {
+        self.mark = Some(el);
+        self
     }
 
     pub fn sep(mut self) -> Item {
@@ -120,6 +152,14 @@ fn row(ui: &Ui, group: Id, i: usize, item: Item, sub_open: Option<El>) -> El {
     if let Some(r) = item.row {
         return r;
     }
+    if item.header && item.option_row {
+        return div().px(12.0).py(4.0).child(
+            text(item.label.to_uppercase(), 10.0, c(look::GRAY_500))
+                .tracking(0.05)
+                .line_height(15.0)
+                .role(Role::Label, item.label.as_str()),
+        );
+    }
     if item.header {
         return div().px(12.0).pt(6.0).pb(4.0).child(
             text(item.label.to_uppercase(), 10.0, c(look::GRAY_500))
@@ -128,7 +168,16 @@ fn row(ui: &Ui, group: Id, i: usize, item: Item, sub_open: Option<El>) -> El {
         );
     }
     let id = item_id(group, i);
+    if item.picker {
+        return picker_row(ui, group, i, id, item);
+    }
+    if item.plain {
+        return plain_row(ui, group, i, id, item);
+    }
     let hot = ui.hover(id).max(if sub_open.is_some() { 1.0 } else { 0.0 });
+    if item.card_row {
+        return card_row(group, i, id, hot, item);
+    }
     let fg = if item.danger {
         c(look::DANGER)
     } else if item.checked {
@@ -199,23 +248,154 @@ fn row(ui: &Ui, group: Id, i: usize, item: Item, sub_open: Option<El>) -> El {
     }
 }
 
+/// `KanbanCardMenu`'s button: `px-3 py-1.5 text-xs text-ink-secondary`,
+/// only the icon in the action's colour.
+fn card_row(group: Id, i: usize, id: Id, hot: f32, item: Item) -> El {
+    let mut r = div()
+        .id(id)
+        .row()
+        .items_center()
+        .gap(10.0)
+        .px(12.0)
+        .py(6.0)
+        .bg(white(0.0).mix(white(0.06), hot))
+        .role(Role::MenuItem, item.label.as_str())
+        .on(Action::Select { group, index: i });
+    if let Some((name, color)) = item.icon {
+        let color = if item.danger { look::DANGER } else { color };
+        r = r.child(ico(name, 14.0, 2.0, c(color)).shrink0());
+    }
+    r.child(
+        text(
+            &item.label,
+            12.0,
+            Rgba::hexa(look::INK, look::INK_SECONDARY),
+        )
+        .line_height(16.0)
+        .silent(),
+    )
+}
+
+/// A plain menu button: `text-[12px] text-gray-300` (danger at 80 %), the
+/// icon in the text's colour.
+fn plain_row(ui: &Ui, group: Id, i: usize, id: Id, item: Item) -> El {
+    let hot = ui.hover(id);
+    let fg = if item.danger {
+        Rgba::hexa(look::DANGER, 0.8).mix(c(look::DANGER), hot)
+    } else {
+        c(look::GRAY_300).mix(c(look::WHITE), hot)
+    };
+    let mut r = div()
+        .id(id)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(12.0)
+        .py(8.0)
+        .bg(white(0.0).mix(white(0.06), hot))
+        .role(Role::MenuItem, item.label.as_str());
+    if item.disabled {
+        r = r.opacity(0.4).disabled(true);
+    } else {
+        r = r.on(Action::Select { group, index: i });
+    }
+    if let Some((name, _)) = item.icon {
+        r = r.child(ico(name, 12.0, 1.5, fg).shrink0());
+    }
+    r.child(
+        div().row().grow().min_w(0.0).child(
+            text(&item.label, 12.0, fg)
+                .line_height(18.0)
+                .truncate()
+                .silent(),
+        ),
+    )
+}
+
+/// `SelectPicker`'s option: the check (or its room), the mark, the label
+/// and a hint.
+fn picker_row(ui: &Ui, group: Id, i: usize, id: Id, item: Item) -> El {
+    let hot = ui.hover(id);
+    let fg = if item.checked {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_300).mix(c(look::WHITE), hot)
+    };
+    let bg = if item.checked {
+        white(0.06)
+    } else {
+        white(0.0).mix(white(0.04), hot)
+    };
+    let mut r = div()
+        .id(id)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(12.0)
+        .py(6.0)
+        .bg(bg)
+        .role(Role::MenuItem, item.label.as_str())
+        .selected(item.checked)
+        .child(if item.checked {
+            ico("check", 11.0, 3.0, fg)
+        } else {
+            div().w(11.0).shrink0()
+        });
+    if let Some(d) = item.dot.filter(|_| item.option_row) {
+        r = r.child(div().size(6.0, 6.0).rounded(3.0).bg(c(d)).shrink0());
+    }
+    if item.disabled {
+        r = r.opacity(0.4).disabled(true);
+    } else {
+        r = r.on(Action::Select { group, index: i });
+    }
+    if let Some(m) = item.mark {
+        r = r.child(div().shrink0().child(m));
+    } else if let Some((name, color)) = item.icon {
+        r = r.child(ico(name, 12.0, 2.0, c(color)).shrink0());
+    }
+    r = r.child(
+        div().row().grow().min_w(0.0).child(
+            text(&item.label, 12.0, fg)
+                .line_height(18.0)
+                .truncate()
+                .silent(),
+        ),
+    );
+    if let Some(d) = &item.detail {
+        r = r.child(text(d, 10.0, c(look::GRAY_600)).line_height(15.0).silent());
+    }
+    r
+}
+
 /// A panel of `items`: `bg-surface-overlay border-white/10 rounded-lg
 /// py-1`, rows of 32 px, separators as rules.
 pub fn panel(ui: &Ui, group: Id, w: f32, name: &str, items: Vec<Item>, sub: Option<usize>) -> El {
     let p = ui.menu_progress(MENU);
+    let edge = if items.iter().any(|i| i.plain || i.option_row) {
+        0.08
+    } else {
+        0.10
+    };
+    // An `OptionRow` menu is sections of `py-1.5` with a rule between.
+    let pad = if items.iter().any(|i| i.option_row) {
+        6.0
+    } else {
+        4.0
+    };
     let mut col = div()
         .col()
         .w(w)
-        .py(4.0)
+        .py(pad)
         .bg(c(look::SURFACE_OVERLAY))
-        .border(1.0, white(0.10))
+        .border(1.0, white(edge))
         .rounded(8.0)
         .opacity(p)
         .transform(0.96 + 0.04 * p, (0.0, -4.0 * (1.0 - p)))
         .role(Role::Menu, name);
     for (i, mut item) in items.into_iter().enumerate() {
         if item.separator && i > 0 {
-            col = col.child(super::rule(4.0));
+            col = col.child(super::rule(pad));
         }
         let sub_items = std::mem::take(&mut item.sub);
         let open = sub == Some(i) && !sub_items.is_empty();
@@ -269,6 +449,29 @@ pub fn chosen(mut items: Vec<Item>, sub: Option<usize>, group: Id, index: usize)
 
 /// The entries of the menu `kind`, from what the screen shows.
 pub fn items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
+    let mut items = kind_items(s, kind);
+    // These menus are `OptionRow`s under small uppercase section titles.
+    if matches!(
+        kind,
+        MenuKind::ViewOptions | MenuKind::TaskOptions | MenuKind::WorkflowFilter
+    ) {
+        for it in &mut items {
+            it.option_row = true;
+            if !it.header && it.row.is_none() {
+                it.picker = true;
+                it.icon = None;
+            }
+        }
+    }
+    if matches!(kind, MenuKind::TaskCard(_)) {
+        for it in &mut items {
+            it.card_row = true;
+        }
+    }
+    items
+}
+
+fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
     match kind {
         MenuKind::Grid => grid(s),
         MenuKind::Card(id) => card(s, id),
@@ -279,7 +482,7 @@ pub fn items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::LaunchAgent => launch_agents(s),
         MenuKind::LaunchWorktree => launch_worktrees(s),
         MenuKind::LaunchBranch => launch_branches(s),
-        MenuKind::Recent | MenuKind::Headless => Vec::new(),
+        MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon => Vec::new(),
         MenuKind::RunStatus
         | MenuKind::WorkflowFilter
         | MenuKind::WorkflowItem(_)

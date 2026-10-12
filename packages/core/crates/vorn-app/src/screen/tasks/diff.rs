@@ -130,7 +130,7 @@ pub(super) fn file_list(s: &Screen<'_>, files: &[DiffFile]) -> El {
                     div().grow().min_w0().child(
                         text(&f.path, 12.0, c(look::GRAY_300))
                             .mono()
-                            .line_height(16.0)
+                            .line_height(18.0)
                             .truncate()
                             .silent(),
                     ),
@@ -298,7 +298,7 @@ fn num(n: Option<usize>, color: Rgba) -> El {
     div().w(35.0).pr(8.0).shrink0().row().justify_end().child(
         text(n.map_or(String::new(), |n| n.to_string()), 11.0, color)
             .mono()
-            .line_height(19.0)
+            .line_height(19.2)
             .silent(),
     )
 }
@@ -319,7 +319,7 @@ fn file(s: &Screen<'_>, f: &DiffFile) -> El {
             div().grow().min_w0().child(
                 text(&f.path, 12.0, c(look::GRAY_300))
                     .mono()
-                    .line_height(16.0)
+                    .line_height(18.0)
                     .truncate()
                     .silent(),
             ),
@@ -356,7 +356,7 @@ fn file(s: &Screen<'_>, f: &DiffFile) -> El {
                         .px(12.0)
                         .py(2.0)
                         .bg(white(0.05))
-                        .child(text(t, 12.0, secondary()).mono().line_height(19.0).silent()),
+                        .child(text(t, 12.0, secondary()).mono().line_height(19.2).silent()),
                 );
                 continue;
             }
@@ -365,7 +365,7 @@ fn file(s: &Screen<'_>, f: &DiffFile) -> El {
                     div().px(12.0).child(
                         text(t, 12.0, c(look::GRAY_500))
                             .mono()
-                            .line_height(19.0)
+                            .line_height(19.2)
                             .silent(),
                     ),
                 );
@@ -381,7 +381,7 @@ fn file(s: &Screen<'_>, f: &DiffFile) -> El {
                             div().px(4.0).grow().min_w0().child(
                                 text(body(&t), 12.0, c(look::GRAY_400))
                                     .mono()
-                                    .line_height(19.0)
+                                    .line_height(19.2)
                                     .silent(),
                             ),
                         ),
@@ -408,7 +408,7 @@ fn file(s: &Screen<'_>, f: &DiffFile) -> El {
                             div().px(4.0).grow().min_w0().child(
                                 text(body(&t), 12.0, c(0x86efac))
                                     .mono()
-                                    .line_height(19.0)
+                                    .line_height(19.2)
                                     .silent(),
                             ),
                         )
@@ -440,7 +440,7 @@ fn file(s: &Screen<'_>, f: &DiffFile) -> El {
                             div().px(4.0).grow().min_w0().child(
                                 text(body(&t), 12.0, c(0xfca5a5))
                                     .mono()
-                                    .line_height(19.0)
+                                    .line_height(19.2)
                                     .silent(),
                             ),
                         )
