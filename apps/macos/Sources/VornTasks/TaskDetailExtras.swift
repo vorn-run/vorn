@@ -184,10 +184,11 @@ struct TaskWorkflowRuns: View {
                     VStack(spacing: 8) {
                         ForEach(Array(model.runs.enumerated()), id: \.offset) { _, run in
                             let wf = model.workflow(for: run)
-                            RunEntryCard(store: workflows, run: run, nodes: wf?.nodes ?? run.definition?.nodes ?? [],
+                            RunEntryCard(store: workflows, run: run, nodes: wf?.nodes ?? [],
                                          workflowName: run.workflowName ?? wf?.name, taskTitles: model.taskTitles,
                                          onViewFullOutput: { model.fullOutput = $0 },
-                                         onResumeSession: { store.resumeStep($0) })
+                                         onResumeSession: { store.resumeStep($0) },
+                                         taskContext: { store.runTaskContext($0) }, offersRerun: false)
                         }
                     }
                     .padding(.horizontal, 12).padding(.bottom, 12)

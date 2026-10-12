@@ -41,6 +41,12 @@ public final class WorkflowsStore {
     /// The shell's projects and the sidebar's active one, for forms that pick a project.
     public var projects: [Project] = []
     public var activeProjectName: String?
+    /// The shell's tasks, for run chips and resume: title and place by task id.
+    @ObservationIgnored public var taskTitles: () -> [String: String] = { [:] }
+    @ObservationIgnored public var taskContext: (String) -> RunTaskContext? = { _ in nil }
+    /// Opens a task from a run's chip, and reopens a step's agent conversation.
+    @ObservationIgnored public var openTask: ((String) -> Void)?
+    @ObservationIgnored public var resumeSession: ((RunResumeRequest) -> Void)?
     /// The run prompt, full output, review page and missed schedules drawn over the window.
     public let surfaces = RunSurfaces()
 

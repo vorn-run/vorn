@@ -194,17 +194,40 @@ struct Hovering<Content: View>: View {
 
 /// `p-1 rounded` icon button: ink-faint, hover ink on white .06, disabled at .4.
 struct IconButton: View {
-    let glyph: Glyph
+    var glyph: Glyph = .x
+    var lucide: LucideGlyph?
     var size: CGFloat = 14
     var help: String
     var disabled = false
     var hoverTint: Color = Theme.ink
     let action: () -> Void
 
+    init(glyph: Glyph, size: CGFloat = 14, help: String, disabled: Bool = false, hoverTint: Color = Theme.ink,
+         action: @escaping () -> Void) {
+        self.glyph = glyph
+        self.size = size
+        self.help = help
+        self.disabled = disabled
+        self.hoverTint = hoverTint
+        self.action = action
+    }
+
+    init(lucide: LucideGlyph, size: CGFloat = 14, help: String, disabled: Bool = false, hoverTint: Color = Theme.ink,
+         action: @escaping () -> Void) {
+        self.lucide = lucide
+        self.size = size
+        self.help = help
+        self.disabled = disabled
+        self.hoverTint = hoverTint
+        self.action = action
+    }
+
     var body: some View {
         Hovering { hovered in
             Button(action: action) {
-                Icon(glyph, size: size)
+                Group {
+                    if let lucide { LucideIcon(lucide, size: size) } else { Icon(glyph, size: size) }
+                }
                     .foregroundStyle(hovered && !disabled ? hoverTint : Theme.inkFaint)
                     .padding(4)
                     .background(

@@ -159,7 +159,9 @@ public final class TaskDetailModel {
     public func loadRuns() async {
         guard let id = taskId, let extras = store.extras else { return }
         if let rows = try? await extras.listTaskRuns(taskId: id, limit: 20) { runs = rows }
-        if !runs.isEmpty, workflows.isEmpty, store.workflows == nil, let all = try? await extras.listWorkflows() {
+        // The shell's workflows store is empty until the Workflows view first opens, so the panel names runs itself.
+        let known = Set((store.workflows?.workflows ?? []).map(\.id) + workflows.map(\.id))
+        if runs.contains(where: { !known.contains($0.workflowId) }), let all = try? await extras.listWorkflows() {
             workflows = all
         }
     }

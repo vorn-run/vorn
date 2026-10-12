@@ -357,7 +357,12 @@ public final class TasksStore {
     }
 
     /// Resumes a workflow step's agent conversation (TaskDetailPanel.tsx handleRunResumeSession).
-    func resumeStep(_ r: RunResumeRequest) {
+    /// A task's project, branch and worktree choice, for resuming a run step it started.
+    public func runTaskContext(_ id: String) -> RunTaskContext? {
+        task(id: id).map { RunTaskContext(projectName: $0.projectName, branch: $0.branch, useWorktree: $0.useWorktree) }
+    }
+
+    public func resumeStep(_ r: RunResumeRequest) {
         guard let launch = launchSession, r.agentType != .gemini, r.agentType != .shell else { return }
         var payload = CreateTerminalPayload(agentType: r.agentType, projectName: r.projectName, projectPath: r.projectPath,
                                             branch: r.branch, useWorktree: r.useWorktree)

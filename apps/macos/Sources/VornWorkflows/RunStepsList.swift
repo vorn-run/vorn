@@ -8,6 +8,11 @@ struct RunStepsList: View {
     let run: WorkflowExecution
     let nodes: [WorkflowNode]
     var includeTrigger = false
+    var taskTitles: [String: String] = [:]
+    var onViewFullOutput: ((String) -> Void)?
+    var onResumeSession: ((RunResumeRequest) -> Void)?
+    var onClickTask: ((String) -> Void)?
+    var taskContext: (String) -> RunTaskContext? = { _ in nil }
 
     @State private var expanded: String?
     @State private var openedFor: String?
@@ -28,12 +33,37 @@ struct RunStepsList: View {
                 StepRow(
                     store: store, run: run, state: state, node: byId[state.nodeId], nodes: nodes,
                     expanded: expanded == state.nodeId,
-                    toggle: { expanded = expanded == state.nodeId ? nil : state.nodeId })
+                    toggle: { expanded = expanded == state.nodeId ? nil : state.nodeId },
+                    taskTitle: state.taskId.flatMap { taskTitles[$0] },
+                    onClickTask: onClickTask, onViewFullOutput: onViewFullOutput,
+                    resume: resumeRequest(state, node: byId[state.nodeId]))
                 if i < states.count - 1 { Hairline(opacity: 0.05) }
             }
         }
         .onAppear { syncFocus() }
         .onChange(of: focus) { syncFocus() }
+    }
+
+    /// What Resume session reopens: the step's own agent and place, else its config's, else its task's.
+    private func resumeRequest(_ ns: NodeExecutionState, node: WorkflowNode?) -> (() -> Void)? {
+        guard let agentSessionId = ns.agentSessionId, let onResumeSession else { return nil }
+        let config = node?.config
+        let configAgent = config?.str("agentType").flatMap { $0 == "fromTask" ? nil : $0 }
+        guard let agentName = ns.agentType ?? configAgent else { return nil }
+        let agent = AgentType(rawValue: agentName)
+        guard agent != .gemini, agent != .shell else { return nil }
+        let nodeTask = ns.taskId.flatMap(taskContext)
+        let triggerTask = run.triggerTaskId.flatMap(taskContext)
+        let projectName = [ns.projectName, config?.str("projectName"), nodeTask?.projectName, triggerTask?.projectName]
+            .compactMap { $0 }.first { !$0.isEmpty } ?? ""
+        guard !projectName.isEmpty else { return nil }
+        let projectPath = [ns.projectPath, config?.str("projectPath")].compactMap { $0 }.first { !$0.isEmpty } ?? ""
+        let branch = config?.str("branch") ?? nodeTask?.branch ?? triggerTask?.branch
+        let useWorktree = config?["useWorktree"]?.boolValue ?? nodeTask?.useWorktree ?? triggerTask?.useWorktree
+        return {
+            onResumeSession(RunResumeRequest(agentSessionId: agentSessionId, agentType: agent, projectName: projectName,
+                                             projectPath: projectPath, branch: branch, useWorktree: useWorktree))
+        }
     }
 
     /// A failed run opens its failed step, once per failure.
@@ -77,6 +107,10 @@ private struct StepRow: View {
     let nodes: [WorkflowNode]
     let expanded: Bool
     let toggle: () -> Void
+    var taskTitle: String?
+    var onClickTask: ((String) -> Void)?
+    var onViewFullOutput: ((String) -> Void)?
+    var resume: (() -> Void)?
 
     @State private var hovered = false
 
@@ -110,6 +144,9 @@ private struct StepRow: View {
                                 .foregroundStyle(Theme.inkFaint)
                                 .lineLimit(1)
                         }
+                        if let taskTitle, let id = state.taskId {
+                            TaskChip(title: taskTitle, maxWidth: 80) { onClickTask?(id) }
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     trailing(waitingGate: waitingGate)
@@ -139,7 +176,7 @@ private struct StepRow: View {
                 }
                 .underLabel()
             }
-            if expanded { ExpandedStep(state: state).underLabel() }
+            if expanded { ExpandedStep(state: state, onViewFullOutput: onViewFullOutput, resume: resume).underLabel() }
         }
     }
 
@@ -159,6 +196,8 @@ private struct StepRow: View {
 
 private struct ExpandedStep: View {
     let state: NodeExecutionState
+    var onViewFullOutput: ((String) -> Void)?
+    var resume: (() -> Void)?
 
     var body: some View {
         let timeline = StepVisuals.timeline(logs: state.logs, diagnostics: state.diagnostics)
@@ -196,6 +235,17 @@ private struct ExpandedStep: View {
                     .font(.system(size: 11.5))
                     .italic()
                     .foregroundStyle(Theme.inkFaint)
+            }
+            let canViewFull = onViewFullOutput != nil && !(state.logs ?? "").isEmpty && !timeline.isEmpty
+            if canViewFull || resume != nil {
+                HStack(spacing: 4) {
+                    if canViewFull, let logs = state.logs {
+                        IconButton(lucide: .maximize2, size: 12, help: "View full output") { onViewFullOutput?(logs) }
+                    }
+                    if let resume {
+                        IconButton(lucide: .rotateCcw, size: 12, help: "Resume session", action: resume)
+                    }
+                }
             }
         }
     }

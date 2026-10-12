@@ -30,7 +30,7 @@ struct DiffFileList: View {
         Hovering { hovered in
             Button { onSelect(file.filePath) } label: {
                 HStack(spacing: 8) {
-                    LucideIcon(.fileCode, size: 15, strokeWidth: 1.5).foregroundStyle(Theme.inkSecondary)
+                    FileTypeIcon(name: (file.filePath as NSString).lastPathComponent, size: 15)
                     Text(file.filePath).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.gray300)
                         .lineLimit(1).truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -78,7 +78,7 @@ struct DiffContent: View {
     private func header(_ file: GitFileDiff) -> some View {
         let count = model.comments.filter { $0.filePath == file.filePath }.count
         return HStack(spacing: 8) {
-            LucideIcon(.fileCode, size: 14, strokeWidth: 1.5).foregroundStyle(Theme.inkSecondary)
+            FileTypeIcon(name: (file.filePath as NSString).lastPathComponent, size: 14)
             Text(file.filePath).foregroundStyle(Theme.gray300).lineLimit(1).truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(DiffReview.letter(file.status)).font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.inkSecondary)

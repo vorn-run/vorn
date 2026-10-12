@@ -300,8 +300,10 @@ public struct NodeExecutionState: Sendable, Hashable, Codable {
     public var structuredOutput: JSONValue?
     public var iteration: Int?
     public var taskId: String?
+    public var agentSessionId: String?
     public var agentType: String?
     public var projectName: String?
+    public var projectPath: String?
     public var approvedAt: String?
     public var rejectedAt: String?
     public var message: String?
@@ -333,8 +335,10 @@ public struct NodeExecutionState: Sendable, Hashable, Codable {
         structuredOutput = try? c.decode(JSONValue.self, forKey: .structuredOutput)
         iteration = try? c.decode(Int.self, forKey: .iteration)
         taskId = try? c.decode(String.self, forKey: .taskId)
+        agentSessionId = try? c.decode(String.self, forKey: .agentSessionId)
         agentType = try? c.decode(String.self, forKey: .agentType)
         projectName = try? c.decode(String.self, forKey: .projectName)
+        projectPath = try? c.decode(String.self, forKey: .projectPath)
         approvedAt = try? c.decode(String.self, forKey: .approvedAt)
         rejectedAt = try? c.decode(String.self, forKey: .rejectedAt)
         message = try? c.decode(String.self, forKey: .message)

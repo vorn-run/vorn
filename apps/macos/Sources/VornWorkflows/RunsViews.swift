@@ -186,7 +186,8 @@ struct RunDetailPane: View {
                         .padding(.bottom, 16)
                 }
 
-                RunStepsList(store: store, run: run, nodes: nodes, includeTrigger: true)
+                RunStepsList(store: store, run: run, nodes: nodes, includeTrigger: true, taskTitles: store.taskTitles(),
+                             onViewFullOutput: { store.showFullOutput($0) })
                     .padding(.horizontal, 20)
                     .padding(.bottom, 24)
             }

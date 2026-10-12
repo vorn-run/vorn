@@ -279,6 +279,11 @@ private struct RunSurfacesHost: ViewModifier {
                 }
             }
             .overlay { if !store.surfaces.missed.isEmpty { MissedSchedulesView(store: store) } }
+            .overlay {
+                if let logs = store.surfaces.fullOutput {
+                    LogReplayModal(logs: logs) { store.surfaces.fullOutput = nil }
+                }
+            }
             .task { await store.followMissedSchedules() }
     }
 }
