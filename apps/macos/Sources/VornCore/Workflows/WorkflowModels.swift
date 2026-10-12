@@ -161,6 +161,8 @@ public struct GateFeedbackEntry: Sendable, Hashable, Codable {
     public var comment: String
     public var at: String
     public var edited: String?
+    /// Anchored review comments: `{quote?, comment}` objects.
+    public var comments: JSONValue?
 
     public init(round: Int, decision: String, comment: String, at: String, edited: String? = nil) {
         self.round = round
@@ -177,6 +179,7 @@ public struct GateFeedbackEntry: Sendable, Hashable, Codable {
         comment = (try? c.decode(String.self, forKey: .comment)) ?? ""
         at = (try? c.decode(String.self, forKey: .at)) ?? ""
         edited = try? c.decode(String.self, forKey: .edited)
+        comments = try? c.decode(JSONValue.self, forKey: .comments)
     }
 }
 
@@ -205,6 +208,7 @@ public struct NodeExecutionState: Sendable, Hashable, Codable {
     public var editableText: String?
     public var editedText: String?
     public var diagnostics: String?
+    public var worktreePath: String?
 
     public init(nodeId: String, status: NodeExecutionStatus) {
         self.nodeId = nodeId
@@ -237,6 +241,7 @@ public struct NodeExecutionState: Sendable, Hashable, Codable {
         editableText = try? c.decode(String.self, forKey: .editableText)
         editedText = try? c.decode(String.self, forKey: .editedText)
         diagnostics = try? c.decode(String.self, forKey: .diagnostics)
+        worktreePath = try? c.decode(String.self, forKey: .worktreePath)
     }
 
     /// Waits for a signed-out connection rather than a person's answer.

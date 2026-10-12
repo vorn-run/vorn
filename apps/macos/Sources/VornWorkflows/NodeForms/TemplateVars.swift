@@ -355,12 +355,18 @@ public enum TemplateVars {
         return cur
     }
 
+    /// MAX_OUTPUT_LENGTH: longer text keeps its end.
+    public static let maxOutputLength = 50_000
+
     static func stringifyResolved(_ v: JSONValue) -> String {
+        let text: String
         switch v {
         case .null: return ""
-        case .string, .number, .bool: return v.displayString ?? ""
-        default: return v.jsonText
+        case .number, .bool: return v.displayString ?? ""
+        case .string(let s): text = s
+        default: text = v.jsonText
         }
+        return text.count > maxOutputLength ? String(text.suffix(maxOutputLength)) : text
     }
 
     /// previewStepTokens: resolves known `steps.*` tokens to last-run text and flags the first unknown one.
@@ -430,7 +436,7 @@ public enum TemplateVars {
                 entry["output"] = .string(primary)
                 entry["status"] = .string(s.status.rawValue)
                 entry["error"] = .string(s.error ?? "")
-                entry["worktreePath"] = .string("")
+                entry["worktreePath"] = .string(s.worktreePath ?? "")
             }
             for (k, v) in gate ?? [:] { entry[k] = v }
             out[slug] = entry
@@ -446,15 +452,29 @@ public enum TemplateVars {
             "text": .string(text),
             "feedback": .string(entries.last?.comment ?? ""),
             "feedbackAll": .string(entries.map { "Round \($0.round): \($0.comment)" }.joined(separator: "\n")),
-            "comments": .array([]),
+            "comments": .array((entries.last?.comments?.arrayValue ?? []).map { c in
+                let quote = c.str("quote") ?? ""
+                return ["quote": .string(quote), "comment": c["comment"] ?? .null, "anchored": .bool(!quote.isEmpty)]
+            }),
             "round": .number(Double(s.round ?? 1)),
         ]
-        if case .array(let rows)? = JSONValue.parse(text), !rows.isEmpty,
-            rows.allSatisfy({ $0.objectValue != nil })
-        {
+        if let rows = itemList(text), !rows.isEmpty, rows.allSatisfy({ $0.objectValue != nil }) {
             out["items"] = .array(rows)
         }
         return out
+    }
+
+    /// item-list.ts toItemList: a JSON array, or an object holding exactly one; nil otherwise.
+    static func itemList(_ text: String) -> [JSONValue]? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return [] }
+        switch JSONValue.parse(trimmed) {
+        case .array(let rows)?: return rows
+        case .object(let o)?:
+            let lists = o.values.compactMap(\.arrayValue)
+            return lists.count == 1 ? lists[0] : nil
+        default: return nil
+        }
     }
 
     /// The last run as buildStepGroups reads it.
