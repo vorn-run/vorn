@@ -15,16 +15,16 @@ enum TriggerKinds {
     static let all: [Kind] = [
         .init(type: "manual", label: "Manual", glyph: .lucide(.zap), hint: "Run manually from the play button"),
         .init(type: "once", label: "Once", glyph: .lucide(.clock), hint: "Runs once at the scheduled time"),
-        .init(type: "recurring", label: "Recurring", glyph: .sf("arrow.clockwise"), hint: "Runs on a repeating schedule"),
-        .init(type: "taskCreated", label: "Task Created", glyph: .sf("text.badge.plus"), hint: "Fires when a new task is added"),
+        .init(type: "recurring", label: "Recurring", glyph: .lucide(.refreshCw), hint: "Runs on a repeating schedule"),
+        .init(type: "taskCreated", label: "Task Created", glyph: .lucide(.listPlus), hint: "Fires when a new task is added"),
         .init(
-            type: "taskStatusChanged", label: "Status Change", glyph: .sf("arrow.left.arrow.right"),
+            type: "taskStatusChanged", label: "Status Change", glyph: .lucide(.arrowRightLeft),
             hint: "Fires when a task's status changes"),
         .init(
             type: "sessionRestored", label: "Session Restored", glyph: .lucide(.rotateCcw),
             hint: "Fires when a session comes back after a quit, a crash or a reboot"),
         .init(
-            type: "connectorPoll", label: "Connector Poll", glyph: .sf("powerplug"),
+            type: "connectorPoll", label: "Connector Poll", glyph: .lucide(.plug),
             hint: "Polls an external connector on cron and fires per new item"),
         .init(
             type: "webhook", label: "Webhook", glyph: .lucide(.globe),
@@ -80,6 +80,25 @@ enum TriggerEdits {
         ["triggerType": "once", "runAt": .string(FormHelpers.isoString(date))]
     }
 
+    /// The datetime-local field shows `runAt`'s UTC wall time and reads what is typed as local time.
+    static func runAtFromField(_ shownAsUTC: Date, zone: TimeZone = .current) -> Date {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        var local = Calendar(identifier: .gregorian)
+        local.timeZone = zone
+        let parts = utc.dateComponents([.year, .month, .day, .hour, .minute], from: shownAsUTC)
+        return local.date(from: parts) ?? shownAsUTC
+    }
+
+    /// The field's text: `MM/dd/yyyy, hh:mm AM` of the UTC wall time.
+    static func runAtText(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "MM/dd/yyyy, hh:mm a"
+        return f.string(from: date)
+    }
+
     /// ConnectorPollTriggerForm.tsx: a new connection clears the event.
     static func setPollConnection(_ c: JSONValue, _ id: String) -> JSONValue {
         c.merged(["connectionId": .string(id), "event": .string("")])
@@ -133,7 +152,7 @@ struct TriggerConfigForm: View {
             FormLabel("Trigger Type")
             HStack(spacing: 8) {
                 if let kind { FormIcon(kind.glyph, size: 13).foregroundStyle(Theme.gray400) }
-                Text(kind?.label ?? triggerType).font(.system(size: 13)).foregroundStyle(Theme.gray200)
+                Text(kind?.label ?? triggerType).font(.system(size: 13)).foregroundStyle(Theme.gray200).cssLineHeight(13)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12)
@@ -148,6 +167,7 @@ struct TriggerConfigForm: View {
                             .font(.system(size: 11))
                             .underline()
                             .foregroundStyle(hovered ? Theme.gray300 : Theme.gray500)
+                            .cssLineHeight(11)
                     }
                     .buttonStyle(.plain)
                 }
@@ -165,7 +185,7 @@ struct TriggerConfigForm: View {
     private var onceFields: some View {
         FormSection("Run At") {
             RunAtField(date: config.str("runAt").flatMap(FormHelpers.parseISO)) {
-                config = TriggerEdits.setRunAt($0)
+                config = TriggerEdits.setRunAt(TriggerEdits.runAtFromField($0))
             }
         }
     }
@@ -291,19 +311,19 @@ private struct WebhookURLRow: View {
     }
 }
 
-/// The once trigger's time; the native picker in local time where the TSX uses datetime-local.
+/// The once trigger's datetime-local field: it shows the UTC wall time, like `toISOString().slice(0, 16)`.
 private struct RunAtField: View {
     let date: Date?
     let onChange: (Date) -> Void
     @Environment(\.workflowsStaticLayout) private var isStatic
 
     var body: some View {
-        Group {
+        HStack(spacing: 8) {
             if isStatic {
-                Text(date.map { $0.formatted(date: .numeric, time: .shortened) } ?? "")
+                Text(date.map(TriggerEdits.runAtText) ?? "mm/dd/yyyy, --:-- --")
                     .font(.system(size: 13))
                     .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 19.5, alignment: .leading)
             } else {
                 DatePicker(
                     "", selection: Binding(get: { date ?? Date() }, set: onChange),
@@ -311,9 +331,11 @@ private struct RunAtField: View {
                 )
                 .labelsHidden()
                 .datePickerStyle(.field)
+                .environment(\.timeZone, TimeZone(identifier: "UTC")!)
                 .colorScheme(.dark)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 19.5, alignment: .leading)
             }
+            LucideIcon(.calendar, size: 13).foregroundStyle(Color.white)
         }
         .fieldChrome()
     }

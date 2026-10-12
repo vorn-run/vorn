@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import VornCore
 import VornUI
@@ -62,6 +63,17 @@ extension View {
     }
 }
 
+// MARK: Line height
+
+extension View {
+    /// CSS `line-height`: the leading a browser splits above and below each line.
+    func cssLineHeight(_ size: CGFloat, _ ratio: CGFloat = 1.5, mono: Bool = false) -> some View {
+        let font = mono ? NSFont.monospacedSystemFont(ofSize: size, weight: .regular) : NSFont.systemFont(ofSize: size)
+        let extra = max(0, size * ratio - (font.ascender - font.descender + font.leading))
+        return lineSpacing(extra).padding(.vertical, extra / 2)
+    }
+}
+
 // MARK: Labels and fields
 
 /// `text-[13px] text-gray-400 font-medium block mb-2`.
@@ -73,6 +85,7 @@ struct FormLabel: View {
         Text(text)
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(Theme.gray400)
+            .cssLineHeight(13)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, 8)
     }
@@ -93,7 +106,7 @@ struct FormHint: View {
         Text(text)
             .font(.system(size: 11))
             .foregroundStyle(color)
-            .lineSpacing(2)
+            .cssLineHeight(11)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, top)
@@ -164,12 +177,13 @@ struct BareTextInput: View {
                 .font(font)
                 .foregroundStyle(text.isEmpty ? Theme.gray600 : color)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: size * 1.5, maxHeight: size * 1.5, alignment: .leading)
         } else {
             TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(Theme.gray600))
                 .textFieldStyle(.plain)
                 .font(font)
                 .foregroundStyle(color)
+                .frame(height: size * 1.5)
         }
     }
 }
@@ -272,7 +286,7 @@ struct PickerTrigger<Leading: View>: View {
                         .font(.system(size: 13))
                         .foregroundStyle(text == nil || disabled ? Theme.gray600 : tone.text)
                         .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 19.5, alignment: .leading)
                     if chevron {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 9, weight: .semibold))
@@ -341,6 +355,7 @@ struct SelectRow: View {
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(selected || hovered ? Color.white : Theme.gray300)
+                .frame(minHeight: 18)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(selected ? Theme.white(0.06) : hovered ? Theme.white(0.04) : .clear)
@@ -416,6 +431,7 @@ struct CheckTrailingRow<Leading: View>: View {
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(disabled || muted ? (disabled ? Theme.gray600 : Theme.gray500) : Theme.gray300)
+                .frame(minHeight: 16)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(hovered && !disabled ? Theme.white(0.06) : .clear)
@@ -457,10 +473,12 @@ struct SwitchCard: View {
                             }
                             .foregroundStyle(isOn ? Theme.gray300 : Theme.gray500)
                             Text(title).font(.system(size: 12)).foregroundStyle(isOn ? Theme.gray200 : Theme.gray400)
+                                .cssLineHeight(12)
                         }
                         Text(detail)
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.gray500)
+                            .cssLineHeight(11)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -521,7 +539,7 @@ struct FormSegmented: View {
                             .font(.system(size: 12))
                             .foregroundStyle(
                                 o.value == value ? Theme.gray200 : hovered ? Theme.gray300 : Theme.gray500)
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, minHeight: 18)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 6)
                             .background(o.value == value ? Theme.white(0.1) : hovered ? Theme.white(0.04) : .clear)
