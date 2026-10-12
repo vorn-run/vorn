@@ -41,6 +41,8 @@ pub struct Item {
     pub mark: Option<El>,
     /// A plain `px-3 py-2` button with a 12 px icon in its text colour.
     pub plain: bool,
+    /// An `OptionRow` menu's entry: check on the left, sections of `py-1.5`.
+    pub option_row: bool,
 }
 
 impl Item {
@@ -147,6 +149,14 @@ pub fn width(kind: &MenuKind) -> f32 {
 fn row(ui: &Ui, group: Id, i: usize, item: Item, sub_open: Option<El>) -> El {
     if let Some(r) = item.row {
         return r;
+    }
+    if item.header && item.option_row {
+        return div().px(12.0).py(4.0).child(
+            text(item.label.to_uppercase(), 10.0, c(look::GRAY_500))
+                .tracking(0.05)
+                .line_height(15.0)
+                .role(Role::Label, item.label.as_str()),
+        );
     }
     if item.header {
         return div().px(12.0).pt(6.0).pb(4.0).child(
@@ -298,6 +308,9 @@ fn picker_row(ui: &Ui, group: Id, i: usize, id: Id, item: Item) -> El {
         } else {
             div().w(11.0).shrink0()
         });
+    if let Some(d) = item.dot.filter(|_| item.option_row) {
+        r = r.child(div().size(6.0, 6.0).rounded(3.0).bg(c(d)).shrink0());
+    }
     if item.disabled {
         r = r.opacity(0.4).disabled(true);
     } else {
@@ -326,15 +339,21 @@ fn picker_row(ui: &Ui, group: Id, i: usize, id: Id, item: Item) -> El {
 /// py-1`, rows of 32 px, separators as rules.
 pub fn panel(ui: &Ui, group: Id, w: f32, name: &str, items: Vec<Item>, sub: Option<usize>) -> El {
     let p = ui.menu_progress(MENU);
-    let edge = if items.iter().any(|i| i.plain) {
+    let edge = if items.iter().any(|i| i.plain || i.option_row) {
         0.08
     } else {
         0.10
     };
+    // An `OptionRow` menu is sections of `py-1.5` with a rule between.
+    let pad = if items.iter().any(|i| i.option_row) {
+        6.0
+    } else {
+        4.0
+    };
     let mut col = div()
         .col()
         .w(w)
-        .py(4.0)
+        .py(pad)
         .bg(c(look::SURFACE_OVERLAY))
         .border(1.0, white(edge))
         .rounded(8.0)
@@ -343,7 +362,7 @@ pub fn panel(ui: &Ui, group: Id, w: f32, name: &str, items: Vec<Item>, sub: Opti
         .role(Role::Menu, name);
     for (i, mut item) in items.into_iter().enumerate() {
         if item.separator && i > 0 {
-            col = col.child(super::rule(4.0));
+            col = col.child(super::rule(pad));
         }
         let sub_items = std::mem::take(&mut item.sub);
         let open = sub == Some(i) && !sub_items.is_empty();
@@ -397,6 +416,24 @@ pub fn chosen(mut items: Vec<Item>, sub: Option<usize>, group: Id, index: usize)
 
 /// The entries of the menu `kind`, from what the screen shows.
 pub fn items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
+    let mut items = kind_items(s, kind);
+    // These menus are `OptionRow`s under small uppercase section titles.
+    if matches!(
+        kind,
+        MenuKind::ViewOptions | MenuKind::TaskOptions | MenuKind::WorkflowFilter
+    ) {
+        for it in &mut items {
+            it.option_row = true;
+            if !it.header && it.row.is_none() {
+                it.picker = true;
+                it.icon = None;
+            }
+        }
+    }
+    items
+}
+
+fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
     match kind {
         MenuKind::Grid => grid(s),
         MenuKind::Card(id) => card(s, id),

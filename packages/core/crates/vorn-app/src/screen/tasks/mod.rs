@@ -838,11 +838,11 @@ pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
                 .child(
                     div().grow().child(
                         text("Include archived", 12.0, secondary())
-                            .line_height(16.0)
+                            .line_height(18.0)
                             .silent(),
                     ),
                 )
-                .child(switch(t.archived)),
+                .child(toggle_switch(t.archived)),
         ),
         ..Item::default()
     });
@@ -869,7 +869,7 @@ pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
             .role(Role::Button, label)
             .selected(on)
             .child(ico(icon, 12.0, 2.0, fg))
-            .child(text(label, 11.0, fg).line_height(14.0).silent())
+            .child(text(label, 11.0, fg).line_height(16.5).silent())
     };
     items.push(Item {
         row: Some(
@@ -879,39 +879,27 @@ pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
                 .px(12.0)
                 .py(4.0)
                 .child(seg(Mode::List, "List", "list"))
-                .child(seg(Mode::Board, "Board", "grid-4")),
+                .child(seg(Mode::Board, "Board", "columns-3")),
         ),
         ..Item::default()
     });
     items
 }
 
-/// `ToggleSwitch`: a 28 by 16 track with its knob.
-pub(super) fn switch(on: bool) -> El {
-    let track = if on {
-        c(look::INK).mix(white(0.0), 0.0)
-    } else {
-        white(0.12)
-    };
+/// `ToggleSwitch`: 40 by 24, blue when on, a 16 px knob.
+fn toggle_switch(on: bool) -> El {
     div()
-        .w(28.0)
-        .h(16.0)
-        .rounded(8.0)
-        .bg(if on {
-            Rgba::hexa(look::INK, 0.85)
-        } else {
-            track
-        })
+        .w(40.0)
+        .h(24.0)
+        .rounded(12.0)
+        .shrink0()
+        .bg(if on { c(0x2b7fff) } else { white(0.1) })
         .child(
             div()
-                .absolute(if on { 14.0 } else { 2.0 }, 2.0)
-                .size(12.0, 12.0)
-                .rounded(6.0)
-                .bg(if on {
-                    c(look::SURFACE_BASE)
-                } else {
-                    white(0.6)
-                }),
+                .absolute(if on { 20.0 } else { 4.0 }, 4.0)
+                .size(16.0, 16.0)
+                .rounded(8.0)
+                .bg(c(look::WHITE)),
         )
 }
 

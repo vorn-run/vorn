@@ -122,6 +122,7 @@ icons! {
     "cloud",
     "code",
     "code-xml",
+    "columns-3",
     "copy",
     "corner-down-left",
     "cpu",

@@ -649,7 +649,9 @@ impl App {
         let mut at = match (src.at, rect) {
             (Some(p), _) => p,
             (None, Some(r)) if kind.is_launch() => (r.x, r.y - 4.0),
-            (None, Some(r)) if kind == MenuKind::Grid => (r.x + r.w - w, r.y + r.h + 4.0),
+            (None, Some(r)) if matches!(kind, MenuKind::Grid | MenuKind::TaskOptions) => {
+                (r.x + r.w - w, r.y + r.h + 4.0)
+            }
             (None, Some(r)) => (r.x, r.y + r.h + 4.0),
             (None, None) => (self.size.0 - w - 12.0, look::TOP_BAR_H),
         };
