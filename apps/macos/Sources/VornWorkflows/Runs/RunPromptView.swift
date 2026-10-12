@@ -197,7 +197,7 @@ struct RunInputFields: View {
                 }
                 TextEditor(text: text)
                     .scrollContentBackground(.hidden)
-                    .frame(height: 3 * 17)
+                    .frame(height: 3 * 19.5)
                     .accessibilityLabel(def.displayLabel)
             }
             .formInput()

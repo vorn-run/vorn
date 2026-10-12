@@ -158,7 +158,7 @@ struct WindowConfigurator: NSViewRepresentable {
 /// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`, `--tip N`,
 /// `--view sessions|tasks|workflows`, `--layout grid|tabs`, `--focused N`, `--filter STATUS`, `--columns N`,
 /// `--workflow NAME [--history] [--full-output] [--select LABEL] [--library [--library-query Q]] [--icon-picker] [--more] [--form-open more|agent|model|vars:PLACEHOLDER] [--panel-scroll PT]` opens a workflow's page,
-/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--export-workflow NAME@PATH` and `--drop-file PATH` export and import without a dialog, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
+/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--run-prompt NAME` the run prompt, `--missed JSON` the missed-schedules dialog, `--export-workflow NAME@PATH` and `--drop-file PATH` export and import without a dialog, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
 @MainActor
 func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 {
     func value(_ flag: String) -> String? {
@@ -233,6 +233,14 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
             features.workflows.projects = store.projects
             features.workflows.importDroppedWorkflow([URL(fileURLWithPath: path)])
             try? await Task.sleep(for: .milliseconds(800))
+        }
+        if let name = value("--run-prompt"), let wf = features.workflows.workflows.first(where: { $0.name == name }) {
+            features.workflows.projects = store.projects
+            features.workflows.runNow(wf)
+        }
+        if let raw = value("--missed"), let json = try? JSONDecoder().decode(JSONValue.self, from: Data(raw.utf8)) {
+            features.workflows.surfaces.missed = MissedSchedule.list(json)
+            features.workflows.surfaces.missedSelected = Set(features.workflows.surfaces.missed.map(\.workflowId))
         }
         if let target = value("--workflow-menu")?.split(separator: "@"), target.count == 2,
            let wf = features.workflows.workflows.first(where: { $0.name == target[0] }) {

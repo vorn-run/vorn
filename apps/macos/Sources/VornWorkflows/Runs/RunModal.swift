@@ -31,6 +31,7 @@ extension View {
     func formInput() -> some View {
         font(.system(size: 13))
             .foregroundStyle(Color.white)
+            .frame(minHeight: 19.5)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -66,9 +67,10 @@ struct CheckSquare: View {
     var tint: Color = Theme.white(0.8)
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 3)
-            .fill(checked ? tint : Theme.white(0.05))
-            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(checked ? .clear : Theme.gray600, lineWidth: 1))
+        // An unstyled checkbox draws light even in a dark page.
+        RoundedRectangle(cornerRadius: 2.5)
+            .fill(checked ? tint : Color.white)
+            .overlay(RoundedRectangle(cornerRadius: 2.5).strokeBorder(checked ? .clear : Color(hex: 0x767676), lineWidth: 1))
             .overlay {
                 if checked { LucideIcon(.check, size: 10, strokeWidth: 3).foregroundStyle(tint == Theme.blue500 ? .white : .black) }
             }
@@ -112,6 +114,7 @@ struct FormDropdown: View {
                         .rotationEffect(.degrees(open && !showsProjectIcon ? 180 : 0))
                 }
                 .font(.system(size: 13))
+                .frame(minHeight: 19.5)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(Theme.white(0.06), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
@@ -124,7 +127,7 @@ struct FormDropdown: View {
             .accessibilityLabel(current?.label ?? placeholder)
         }
         .overlay(alignment: .topLeading) {
-            if open { list.offset(y: 40) }
+            if open { list.offset(y: 41.5) }
         }
         .zIndex(open ? 10 : 0)
     }
