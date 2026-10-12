@@ -239,6 +239,8 @@ pub struct El {
     pub(crate) slop: (f32, f32),
     /// Painted, and hit-tested, above everything in the window drawn before it.
     pub(crate) layered: bool,
+    /// The border drawn in dashes (`border-dashed`).
+    pub(crate) dashed: bool,
 }
 
 pub fn div() -> El {
@@ -264,6 +266,7 @@ pub fn div() -> El {
         rules: [None; 4],
         slop: (0.0, 0.0),
         layered: false,
+        dashed: false,
     }
 }
 
@@ -519,6 +522,11 @@ impl El {
             top: length(w),
             bottom: length(w),
         };
+        self
+    }
+    /// Draws the border in 3 px dashes, as `border-dashed` does.
+    pub fn dashed(mut self) -> El {
+        self.dashed = true;
         self
     }
     /// A top border only (`border-t`).

@@ -649,7 +649,12 @@ impl App {
         let mut at = match (src.at, rect) {
             (Some(p), _) => p,
             (None, Some(r)) if kind.is_launch() => (r.x, r.y - 4.0),
-            (None, Some(r)) if matches!(kind, MenuKind::Grid | MenuKind::TaskOptions) => {
+            (None, Some(r))
+                if matches!(
+                    kind,
+                    MenuKind::Grid | MenuKind::TaskOptions | MenuKind::TaskCard(_)
+                ) =>
+            {
                 (r.x + r.w - w, r.y + r.h + 4.0)
             }
             (None, Some(r)) => (r.x, r.y + r.h + 4.0),

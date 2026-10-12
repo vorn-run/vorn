@@ -520,8 +520,24 @@ impl Ui {
         };
         if el.bg.is_some() || el.border.is_some() {
             let fill = el.bg.unwrap_or_default();
-            let border = el.border.map(|(w, c)| (w * k, c));
+            let border = el.border.filter(|_| !el.dashed).map(|(w, c)| (w * k, c));
             self.scene.quad(r, fill, radius * k, border);
+        }
+        if let Some((w, c)) = el.border.filter(|_| el.dashed) {
+            let svg = format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\"><rect x=\"{h}\" y=\"{h}\" width=\"{}\" height=\"{}\" rx=\"{radius}\" fill=\"none\" stroke=\"#fff\" stroke-width=\"{w}\" stroke-dasharray=\"{d} {d}\"/></svg>",
+                rl.w,
+                rl.h,
+                rl.w - w,
+                rl.h - w,
+                h = w / 2.0,
+                d = 3.0 * w,
+            );
+            let z = cx.xf.scale;
+            let px = ((rl.w * k * z).round() as u32, (rl.h * k * z).round() as u32);
+            if let Some(uv) = self.svg_raster(&svg, px) {
+                self.scene.sprite(r, uv, c, false);
+            }
         }
         for (side, rule) in el.rules.iter().enumerate() {
             let Some((w, c)) = *rule else { continue };

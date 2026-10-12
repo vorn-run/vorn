@@ -643,6 +643,7 @@ fn kanban(s: &Screen<'_>, shown: &[&TaskConfig]) -> El {
                         .py(20.0)
                         .rounded(8.0)
                         .border(1.0, white(0.08))
+                        .dashed()
                         .center()
                         .child(
                             text("Drop tasks here", 12.0, faint())

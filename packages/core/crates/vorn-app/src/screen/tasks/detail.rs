@@ -291,14 +291,10 @@ pub(super) fn images(s: &Screen<'_>, form: Form, size: f32) -> El {
         .on(Action::Click)
         .size(size, size)
         .rounded(8.0)
+        .border(1.0, white(0.10 + 0.10 * hot))
+        .dashed()
         .center()
         .role(Role::Button, "Add images")
-        .child(crate::screen::dashed(
-            size,
-            size,
-            8.0,
-            white(0.10 + 0.10 * hot),
-        ))
         .child(ico(
             "image-plus",
             if size < 60.0 { 16.0 } else { 18.0 },

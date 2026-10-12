@@ -43,6 +43,8 @@ pub struct Item {
     pub plain: bool,
     /// An `OptionRow` menu's entry: check on the left, sections of `py-1.5`.
     pub option_row: bool,
+    /// A `KanbanCardMenu` entry: 28 px, the label always secondary.
+    pub card_row: bool,
 }
 
 impl Item {
@@ -173,6 +175,9 @@ fn row(ui: &Ui, group: Id, i: usize, item: Item, sub_open: Option<El>) -> El {
         return plain_row(ui, group, i, id, item);
     }
     let hot = ui.hover(id).max(if sub_open.is_some() { 1.0 } else { 0.0 });
+    if item.card_row {
+        return card_row(group, i, id, hot, item);
+    }
     let fg = if item.danger {
         c(look::DANGER)
     } else if item.checked {
@@ -241,6 +246,34 @@ fn row(ui: &Ui, group: Id, i: usize, item: Item, sub_open: Option<El>) -> El {
         Some(panel) => r.overlay(panel, Place::Right, 4.0),
         None => r,
     }
+}
+
+/// `KanbanCardMenu`'s button: `px-3 py-1.5 text-xs text-ink-secondary`,
+/// only the icon in the action's colour.
+fn card_row(group: Id, i: usize, id: Id, hot: f32, item: Item) -> El {
+    let mut r = div()
+        .id(id)
+        .row()
+        .items_center()
+        .gap(10.0)
+        .px(12.0)
+        .py(6.0)
+        .bg(white(0.0).mix(white(0.06), hot))
+        .role(Role::MenuItem, item.label.as_str())
+        .on(Action::Select { group, index: i });
+    if let Some((name, color)) = item.icon {
+        let color = if item.danger { look::DANGER } else { color };
+        r = r.child(ico(name, 14.0, 2.0, c(color)).shrink0());
+    }
+    r.child(
+        text(
+            &item.label,
+            12.0,
+            Rgba::hexa(look::INK, look::INK_SECONDARY),
+        )
+        .line_height(16.0)
+        .silent(),
+    )
 }
 
 /// A plain menu button: `text-[12px] text-gray-300` (danger at 80 %), the
@@ -428,6 +461,11 @@ pub fn items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
                 it.picker = true;
                 it.icon = None;
             }
+        }
+    }
+    if matches!(kind, MenuKind::TaskCard(_)) {
+        for it in &mut items {
+            it.card_row = true;
         }
     }
     items
