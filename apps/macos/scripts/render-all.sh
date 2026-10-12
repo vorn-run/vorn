@@ -47,6 +47,14 @@ for mode in worktrees sessions sessions-flat; do
   "$bin/Vorn" --render "$out/sidebar-$mode.png" --sidebar-mode "$mode"
 done
 "$bin/Vorn" --render "$out/app-workflows.png" --view workflows
+for page in appearance general updates notifications worktrees agents ssh mcp keys about; do
+  "$bin/Vorn" --render "$out/settings-$page.png" --settings "$page"
+done
+"$bin/Vorn" --render "$out/shell-update-ready.png" --update-status ready:0.8.1
+"$bin/Vorn" --render "$out/panes-files.png" --files 0 --claim 0:1
+"$bin/Vorn" --render "$out/panes-changes.png" --changes 0
+"$bin/Vorn" --render "$out/panes-commit.png" --changes 0 --commit
+"$bin/Vorn" --render "$out/component-branch-picker.png" --size 300x320 --component branch-picker
 
 for state in list kanban dialog detail options; do
   "$bin/VornTasksPreview" --sample --render "$out/tasks-$state.png" --state "$state"
