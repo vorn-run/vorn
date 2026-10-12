@@ -2,9 +2,9 @@
 //! different rasterizers, so the check is per pixel within a tolerance and
 //! a small share of edge pixels, not byte equality.
 
-use vornui::theme::color;
+use vornui::theme::{self, color};
 use vornui::widgets::{self, Choice, PickerLook, Pill, Tab};
-use vornui::{div, El, Id, RenderMode, Ui, UiConfig};
+use vornui::{div, text, El, Id, RenderMode, Rgba, Ui, UiConfig};
 
 const SIZE: (u32, u32) = (640, 400);
 
@@ -67,13 +67,14 @@ fn frame(ui: &Ui) -> El {
         ))
 }
 
-fn draw(mode: RenderMode) -> Option<Vec<u8>> {
-    let mut ui = Ui::headless(mode, &UiConfig::system(2.0, 13.0));
+fn draw(mode: RenderMode, scale: f32, frame: fn(&Ui) -> El) -> Option<Vec<u8>> {
+    let mut ui = Ui::headless(mode, &UiConfig::system(scale, 13.0));
     if mode == RenderMode::Gpu && ui.is_cpu() {
         return None;
     }
     ui.set_edit_text(Id::new("q"), "hello world");
-    let target = ui.offscreen((SIZE.0 * 2, SIZE.1 * 2));
+    let px = |v: u32| (v as f32 * scale).round() as u32;
+    let target = ui.offscreen((px(SIZE.0), px(SIZE.1)));
     loop {
         ui.begin(color::SURFACE_BASE);
         let root = frame(&ui);
@@ -85,13 +86,59 @@ fn draw(mode: RenderMode) -> Option<Vec<u8>> {
     ui.read(&target).ok()
 }
 
-#[test]
-fn gpu_and_cpu_draw_the_same_widgets() {
-    let Some(gpu) = draw(RenderMode::Gpu) else {
+/// A striped field under a glass panel (backdrop blur), cards with the
+/// theme's shadows at several radii, hairline borders and text in light
+/// and dark ink.
+fn effects(_ui: &Ui) -> El {
+    let stripes = (0..16).map(|i| {
+        let c = [0xc9972a, 0x6f8faf, 0x7d9471, 0xd4623f][i % 4];
+        div().w(40.0).h(SIZE.1 as f32).bg(Rgba::hex(c))
+    });
+    let card = |r: f32, sh: &[(f32, f32, f32, f32)]| {
+        div()
+            .w(120.0)
+            .h(70.0)
+            .rounded(r)
+            .bg(color::SURFACE_OVERLAY)
+            .border(1.0, Rgba::white(0.1))
+            .shadow(sh)
+            .p(8.0)
+            .child(text("Shadow", 13.0, color::INK))
+    };
+    div()
+        .w(SIZE.0 as f32)
+        .h(SIZE.1 as f32)
+        .bg(color::GRAY_100)
+        .child(div().row().children(stripes))
+        .child(
+            div()
+                .absolute(24.0, 24.0)
+                .w(300.0)
+                .h(150.0)
+                .rounded(theme::radius::XL)
+                .bg(Rgba::hexa(0x1c1c20, 0.55))
+                .backdrop_blur(theme::blur::GLASS)
+                .p(16.0)
+                .child(text("Frosted glass", 14.0, color::INK))
+                .child(text("dark ink", 13.0, Rgba::hex(0x101012))),
+        )
+        .child(
+            div()
+                .absolute(360.0, 40.0)
+                .col()
+                .gap(40.0)
+                .child(card(theme::radius::LG, &theme::shadow::XL))
+                .child(card(0.0, &theme::shadow::XL2))
+                .child(card(theme::radius::FULL, &theme::shadow::GLASS)),
+        )
+}
+
+fn compare(frame: fn(&Ui) -> El, scale: f32) {
+    let Some(gpu) = draw(RenderMode::Gpu, scale, frame) else {
         eprintln!("no GPU adapter; skipped");
         return;
     };
-    let cpu = draw(RenderMode::Cpu).expect("cpu frame");
+    let cpu = draw(RenderMode::Cpu, scale, frame).expect("cpu frame");
     assert_eq!(gpu.len(), cpu.len());
     let px = gpu.len() / 4;
     let (mut off, mut total) = (0usize, 0u64);
@@ -104,11 +151,23 @@ fn gpu_and_cpu_draw_the_same_widgets() {
     }
     let mean = total as f64 / px as f64;
     let share = off as f64 / px as f64;
-    eprintln!("mean {mean:.3}, {:.3}% beyond 32", share * 100.0);
+    eprintln!("@{scale}x: mean {mean:.3}, {:.3}% beyond 32", share * 100.0);
     assert!(
         share < 0.01,
-        "{:.3}% of pixels differ by more than 32",
+        "@{scale}x: {:.3}% of pixels differ by more than 32",
         share * 100.0
     );
-    assert!(mean < 1.0, "mean difference {mean:.3}");
+    assert!(mean < 1.0, "@{scale}x: mean difference {mean:.3}");
+}
+
+#[test]
+fn gpu_and_cpu_draw_the_same_widgets() {
+    compare(frame, 2.0);
+}
+
+#[test]
+fn gpu_and_cpu_draw_the_same_shadows_blur_and_text() {
+    for scale in [1.0, 1.5, 2.0] {
+        compare(effects, scale);
+    }
 }

@@ -589,8 +589,12 @@ fn configure(
         wgpu::PresentMode::Fifo
     };
     let px = window.inner_size();
+    // Copying from the frame is what backdrop blur reads; without it blurs
+    // are skipped.
+    let usage =
+        wgpu::TextureUsages::RENDER_ATTACHMENT | (caps.usages & wgpu::TextureUsages::COPY_SRC);
     let config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        usage,
         format,
         width: px.width.max(1),
         height: px.height.max(1),

@@ -1,7 +1,7 @@
-//! What a frame draws, independent of how: layers of rounded quads and
-//! atlas sprites in physical pixels, each with the clip it was recorded
-//! under. The GPU and CPU renderers both draw exactly this, so a scene is
-//! the contract between layout and pixels.
+//! What a frame draws, independent of how: layers of rounded quads, soft
+//! shadows, atlas sprites and backdrop blurs in physical pixels, each with
+//! the clip it was recorded under. The GPU and CPU renderers both draw
+//! exactly this, so a scene is the contract between layout and pixels.
 
 use bytemuck::{Pod, Zeroable};
 
@@ -113,23 +113,225 @@ impl Rect {
         Rect::new(self.x + dx, self.y + dy, self.w, self.h)
     }
 
+    /// Each edge moved to the nearest whole pixel, so a box's edges and
+    /// borders land on pixel boundaries instead of blending across two.
+    pub fn snapped(&self) -> Rect {
+        let (x, y) = (self.x.round(), self.y.round());
+        Rect::new(x, y, self.right().round() - x, self.bottom().round() - y)
+    }
+
     fn corners(&self) -> [f32; 4] {
         [self.x, self.y, self.right(), self.bottom()]
     }
 }
 
-/// A rounded rectangle with an optional inside border, as the GPU takes it.
+/// A rounded rectangle with an optional inside border, or a soft shadow,
+/// as the GPU takes it.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub struct Quad {
     /// x, y, w, h.
     pub rect: [f32; 4],
     pub color: [f32; 4],
+    /// The border's colour; for a shadow, the box it is cut out under
+    /// (x, y, w, h).
     pub border_color: [f32; 4],
-    /// Corner radius, border width, unused, unused.
+    /// Corner radius, then border width (a shadow's box radius), the blur's
+    /// standard deviation, and [`Quad::BOX`] or [`Quad::SHADOW`].
     pub params: [f32; 4],
     /// Visible region: x0, y0, x1, y1.
     pub clip: [f32; 4],
+}
+
+impl Quad {
+    /// A filled, bordered rounded rectangle.
+    pub const BOX: f32 = 0.0;
+    /// A Gaussian-blurred rounded rectangle, outside its box only.
+    pub const SHADOW: f32 = 1.0;
+    /// Below this standard deviation a shadow is drawn with a hard edge.
+    pub const MIN_SIGMA: f32 = 0.5;
+
+    pub fn is_shadow(&self) -> bool {
+        self.params[3] > 0.5
+    }
+
+    /// How far past its rect the quad may colour pixels: half a pixel of
+    /// antialiasing, or a shadow's three standard deviations.
+    pub fn reach(&self) -> f32 {
+        if self.is_shadow() {
+            3.0 * self.params[2] + 1.0
+        } else {
+            1.0
+        }
+    }
+}
+
+/// A CSS `box-shadow` (outer): `offset` and `blur` and `spread` in the
+/// units of the box it is cast by; `blur` is CSS's blur radius, twice the
+/// Gaussian's standard deviation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shadow {
+    pub offset: (f32, f32),
+    pub blur: f32,
+    pub spread: f32,
+    pub color: Rgba,
+}
+
+impl Shadow {
+    pub const fn new(x: f32, y: f32, blur: f32, spread: f32, color: Rgba) -> Shadow {
+        Shadow {
+            offset: (x, y),
+            blur,
+            spread,
+            color,
+        }
+    }
+
+    /// Every length times `k`: logical to physical pixels.
+    pub fn scaled(&self, k: f32) -> Shadow {
+        Shadow {
+            offset: (self.offset.0 * k, self.offset.1 * k),
+            blur: self.blur * k,
+            spread: self.spread * k,
+            color: self.color,
+        }
+    }
+}
+
+/// A CSS `backdrop-filter: blur()`: what earlier layers drew under `rect`,
+/// blurred with a Gaussian of standard deviation `sigma` and masked to the
+/// rounded rect.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Blur {
+    /// x, y, w, h.
+    pub rect: [f32; 4],
+    pub sigma: f32,
+    pub radius: f32,
+    /// The opacity in force when it was recorded.
+    pub alpha: f32,
+    /// Visible region: x0, y0, x1, y1.
+    pub clip: [f32; 4],
+}
+
+impl Blur {
+    /// The largest standard deviation drawn; wider blurs are clamped to it.
+    pub const MAX_SIGMA: f32 = 64.0;
+
+    /// The power-of-two downsampling a blur runs at: the largest that
+    /// leaves at least two texels of standard deviation, at least 2, at
+    /// most 32. Each halving is a 2x2 box average, so a wide blur costs
+    /// about what a narrow one does.
+    pub fn factor(&self) -> u32 {
+        let mut f = 2;
+        while f < 32 && (f * 2) as f32 * 2.0 <= self.sigma {
+            f *= 2;
+        }
+        f
+    }
+
+    /// The Gaussian's standard deviation left to apply at the downsampled
+    /// size, after what the box averages and the bilinear upsample
+    /// already spread, in downsampled texels.
+    pub fn residual_sigma(&self) -> f32 {
+        let f = self.factor() as f32;
+        let spent = (f * f - 1.0) / 12.0 + f * f / 6.0;
+        (self.sigma * self.sigma - spent).max(0.0).sqrt() / f
+    }
+
+    /// Taps each side of the centre in the Gaussian passes.
+    pub fn taps(&self) -> i32 {
+        (self.residual_sigma() * 3.0).ceil() as i32
+    }
+
+    /// The pixels the blur reads around what it shows: enough for the
+    /// Gaussian and the downsampling chain.
+    pub fn margin(&self) -> f32 {
+        let f = self.factor() as f32;
+        (self.taps() as f32 + 2.0) * f + 2.0
+    }
+
+    /// Where the blur shows: its rect within its clip.
+    pub fn bounds(&self) -> Rect {
+        let r = Rect::new(self.rect[0], self.rect[1], self.rect[2], self.rect[3]);
+        let c = &self.clip;
+        r.intersect(&Rect::new(c[0], c[1], c[2] - c[0], c[3] - c[1]))
+    }
+}
+
+/// The text-rendering correction applied to a glyph mask's coverage, so
+/// text drawn with sRGB blending has the weight it would with linear
+/// blending and a platform's stem darkening.
+///
+/// `contrast` thickens thin coverage: a = a(1 + c) / (1 + ac). `gamma`
+/// lifts coverage toward what linear-light blending gives: light text on a
+/// dark field takes a^(1/γ), dark text on a light field 1 - (1 - a)^(1/γ),
+/// mixed by the text colour's luminance.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextGamma {
+    pub gamma: f32,
+    pub contrast: f32,
+}
+
+impl TextGamma {
+    /// No correction: coverage blended as rasterized.
+    pub const OFF: TextGamma = TextGamma {
+        gamma: 1.0,
+        contrast: 0.0,
+    };
+
+    /// The text weight today's app has on this platform. The macOS value is
+    /// fitted to the ink in `spikes/vornui/results/mac/today.png`. The
+    /// Windows (enhanced contrast) and Linux (lighter gamma) values are
+    /// estimates.
+    pub fn platform() -> TextGamma {
+        if cfg!(target_os = "macos") {
+            TextGamma {
+                gamma: 1.4,
+                contrast: 0.5,
+            }
+        } else if cfg!(windows) {
+            TextGamma {
+                gamma: 1.6,
+                contrast: 0.5,
+            }
+        } else {
+            TextGamma {
+                gamma: 1.3,
+                contrast: 0.2,
+            }
+        }
+    }
+
+    pub fn is_off(&self) -> bool {
+        self.gamma == 1.0 && self.contrast == 0.0
+    }
+
+    /// The corrected coverage of `a` for text of colour `rgb`.
+    pub fn apply(&self, a: f32, rgb: [f32; 3]) -> f32 {
+        text_coverage(a, luminance(rgb), self.contrast, self.gamma)
+    }
+}
+
+impl Default for TextGamma {
+    fn default() -> TextGamma {
+        TextGamma::platform()
+    }
+}
+
+/// Rec. 709 luma of an sRGB colour, as `sprite_fs` weighs light and dark
+/// text.
+pub(crate) fn luminance(rgb: [f32; 3]) -> f32 {
+    rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722
+}
+
+/// `shader.wgsl`'s `text_coverage`: the [`TextGamma`] formula.
+pub(crate) fn text_coverage(a: f32, lum: f32, contrast: f32, gamma: f32) -> f32 {
+    let a = a.clamp(0.0, 1.0);
+    let a = a * (contrast + 1.0) / (a * contrast + 1.0);
+    let g = 1.0 / gamma.max(0.1);
+    let light = a.powf(g);
+    let dark = 1.0 - (1.0 - a).powf(g);
+    dark + (light - dark) * lum
 }
 
 /// An atlas region drawn into a rectangle.
@@ -141,7 +343,8 @@ pub struct Sprite {
     /// Atlas texels: x, y, w, h.
     pub uv: [f32; 4],
     pub color: [f32; 4],
-    /// [`Sprite::MASK`] or [`Sprite::COLOR`], then three unused.
+    /// [`Sprite::MASK`] or [`Sprite::COLOR`]; then, for a glyph mask, its
+    /// [`TextGamma`]'s contrast and gamma (gamma 0: no correction); unused.
     pub kind: [f32; 4],
     /// Visible region: x0, y0, x1, y1.
     pub clip: [f32; 4],
@@ -156,13 +359,36 @@ impl Sprite {
     pub fn is_color(&self) -> bool {
         self.kind[0] > 0.5
     }
+
+    /// The glyph correction this sprite's mask takes, if any.
+    pub fn text_gamma(&self) -> Option<TextGamma> {
+        (!self.is_color() && self.kind[2] > 0.0).then_some(TextGamma {
+            contrast: self.kind[1],
+            gamma: self.kind[2],
+        })
+    }
 }
 
-/// One layer: its quads, then its sprites, over everything before it.
+/// One layer: its blurs, its quads, then its sprites, over everything
+/// before it.
 #[derive(Default, Debug, Clone)]
 pub struct Layer {
     pub quads: Vec<Quad>,
     pub sprites: Vec<Sprite>,
+    /// Backdrop blurs of what earlier layers drew, under this layer's quads.
+    pub blurs: Vec<Blur>,
+}
+
+impl Layer {
+    fn clear(&mut self) {
+        self.quads.clear();
+        self.sprites.clear();
+        self.blurs.clear();
+    }
+
+    fn is_empty(&self) -> bool {
+        self.quads.is_empty() && self.sprites.is_empty()
+    }
 }
 
 /// A scale about a point, then a shift, applied to what is recorded while
@@ -226,8 +452,7 @@ impl Scene {
     pub fn clear(&mut self) {
         self.layers.truncate(1);
         if let Some(l) = self.layers.first_mut() {
-            l.quads.clear();
-            l.sprites.clear();
+            l.clear();
         } else {
             self.layers.push(Layer::default());
         }
@@ -343,6 +568,24 @@ impl Scene {
 
     /// The atlas texels `uv` drawn into `r`; tinted when `colored` is false.
     pub fn sprite(&mut self, r: Rect, uv: [f32; 4], color: Rgba, colored: bool) {
+        let kind = if colored { Sprite::COLOR } else { Sprite::MASK };
+        self.push_sprite(r, uv, color, [kind, 0.0, 0.0, 0.0]);
+    }
+
+    /// A glyph: the mask (or, for an emoji, colour) texels `uv` drawn into
+    /// `r`, a mask's coverage corrected by `gamma`.
+    pub fn glyph(&mut self, r: Rect, uv: [f32; 4], color: Rgba, colored: bool, gamma: TextGamma) {
+        let kind = if colored {
+            [Sprite::COLOR, 0.0, 0.0, 0.0]
+        } else if gamma.is_off() {
+            [Sprite::MASK, 0.0, 0.0, 0.0]
+        } else {
+            [Sprite::MASK, gamma.contrast, gamma.gamma, 0.0]
+        };
+        self.push_sprite(r, uv, color, kind);
+    }
+
+    fn push_sprite(&mut self, r: Rect, uv: [f32; 4], color: Rgba, kind: [f32; 4]) {
         let r = self.transform().apply(r);
         let clip = self.clip();
         if r.is_empty() || r.intersect(&clip).is_empty() {
@@ -352,14 +595,73 @@ impl Scene {
         if color.0[3] * a <= 0.0 {
             return;
         }
-        let kind = if colored { Sprite::COLOR } else { Sprite::MASK };
         self.top().sprites.push(Sprite {
             rect: [r.x, r.y, r.w, r.h],
             uv,
             color: color.alpha(a).0,
-            kind: [kind, 0.0, 0.0, 0.0],
+            kind,
             clip: clip.corners(),
         });
+    }
+
+    /// `shadow` cast by the box `r` with corner radius `radius`, as CSS
+    /// draws an outer `box-shadow`: offset, grown by its spread, blurred,
+    /// and never under the box itself. Record it before the box.
+    pub fn shadow(&mut self, r: Rect, radius: f32, shadow: &Shadow) {
+        let t = self.transform();
+        let k = t.scale;
+        let boxr = t.apply(r);
+        let s = shadow.scaled(k);
+        let sr = boxr.translate(s.offset.0, s.offset.1).outset(s.spread);
+        let clip = self.clip();
+        let sigma = (s.blur * 0.5).max(0.0);
+        let a = self.alpha() * s.color.0[3];
+        let quad = Quad {
+            rect: [sr.x, sr.y, sr.w, sr.h],
+            color: s.color.alpha(self.alpha()).0,
+            border_color: [boxr.x, boxr.y, boxr.w, boxr.h],
+            params: [
+                // CSS keeps a square box's shadow square whatever its spread.
+                if radius > 0.0 {
+                    (radius * k + s.spread).max(0.0)
+                } else {
+                    0.0
+                },
+                radius * k,
+                sigma,
+                Quad::SHADOW,
+            ],
+            clip: clip.corners(),
+        };
+        if sr.is_empty() || a <= 0.0 || sr.outset(quad.reach()).intersect(&clip).is_empty() {
+            return;
+        }
+        self.top().quads.push(quad);
+    }
+
+    /// Blurs what earlier layers drew under `r` (CSS `backdrop-filter:
+    /// blur(sigma)`), masked to corner radius `radius`. A blur draws first
+    /// in its layer, so when this layer already holds something a new
+    /// layer is started on top for it and what follows.
+    pub fn backdrop_blur(&mut self, r: Rect, sigma: f32, radius: f32) {
+        let t = self.transform();
+        let r = t.apply(r);
+        let clip = self.clip();
+        let a = self.alpha();
+        if r.is_empty() || sigma <= 0.0 || a <= 0.0 || r.intersect(&clip).is_empty() {
+            return;
+        }
+        if !self.top().is_empty() {
+            self.layer();
+        }
+        let blur = Blur {
+            rect: [r.x, r.y, r.w, r.h],
+            sigma: (sigma * t.scale).min(Blur::MAX_SIGMA),
+            radius: radius * t.scale,
+            alpha: a,
+            clip: clip.corners(),
+        };
+        self.top().blurs.push(blur);
     }
 
     /// Quads and sprites over every layer.
