@@ -448,6 +448,10 @@ impl App {
             .map_or(text.len(), |e| e.caret())
             .min(text.len());
         let start = ac.start.min(end);
+        // An edit since the dropdown opened can leave its start inside a character.
+        if !text.is_char_boundary(start) || !text.is_char_boundary(end) {
+            return;
+        }
         let next = format!("{}{pattern}{}", &text[..start], &text[end..]);
         ui.set_edit_text(id, &next);
         let caret = start + pattern.len();
@@ -477,7 +481,10 @@ impl App {
         let Some(ac) = self.st.wf.ac.as_mut().filter(|a| &a.bind == bind) else {
             return;
         };
-        if caret < ac.start + 2 || !text.is_char_boundary(ac.start + 2) {
+        if caret < ac.start + 2
+            || !text.is_char_boundary(ac.start)
+            || !text.is_char_boundary(ac.start + 2)
+        {
             self.st.wf.ac = None;
             return;
         }
