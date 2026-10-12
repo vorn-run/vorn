@@ -5,7 +5,7 @@
 use serde_json::{json, Map, Value};
 use vorn_mcp::workflow::portability as port;
 
-use super::{list, tasks::open_url, App, Call, Src, MOD};
+use super::{list, tasks::open_url, Act, App, Call, Src, MOD};
 use crate::client::RpcError;
 use crate::runs::{self, s};
 use crate::screen::MainView;
@@ -693,7 +693,7 @@ impl App {
 
     /// What the library and start-from draw: the catalog, packs,
     /// connectors, connections and each connection's actions.
-    fn load_library(&mut self) {
+    pub(super) fn load_library(&mut self) {
         self.call(
             Call::Workflow(WfCall::Catalog),
             "connector:catalog",
@@ -1018,9 +1018,15 @@ impl App {
                     );
                 }
             }
-            WfAct::Fix(_) => self
-                .st
-                .toast("Connector setup is not in this build yet", true),
+            WfAct::Fix(fix) => {
+                self.run(
+                    ui,
+                    Act::Set(crate::settings::SetAct::Open(crate::settings::Category::Connectors)),
+                    Src::default(),
+                );
+                self.st.plugins.from_editor = true;
+                self.run_plug(ui, crate::plugins::PlugAct::Fix(fix));
+            }
             WfAct::DismissNeeds => self.st.wf.imported = None,
             WfAct::ClosePanel => {
                 self.st.wf.panel = match self.st.wf.panel {

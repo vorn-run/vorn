@@ -37,6 +37,10 @@ mod gates;
 mod git;
 mod settings;
 mod side;
+mod network;
+mod onboarding;
+mod palette;
+mod plugins;
 mod tasks;
 mod workflows;
 
@@ -75,6 +79,11 @@ pub enum Shortcut {
     Rename,
     /// F11.
     Fullscreen,
+    /// Mod+K.
+    Palette,
+    /// Mod+Shift+A and Mod+Shift+D: allow or deny the oldest pending
+    /// permission request, wherever its session is.
+    Permission(bool),
 }
 
 /// The renderer's global shortcuts (`useKeyboardShortcuts`). Escape is not
@@ -84,8 +93,13 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
     if code == "Backquote" && only(mods::CTRL) {
         return Some(Shortcut::NewShell);
     }
-    if only(MOD | mods::SHIFT) && code == "KeyW" {
-        return Some(Shortcut::View(MainView::Workflows));
+    if only(MOD | mods::SHIFT) {
+        return match code {
+            "KeyW" => Some(Shortcut::View(MainView::Workflows)),
+            "KeyA" => Some(Shortcut::Permission(true)),
+            "KeyD" => Some(Shortcut::Permission(false)),
+            _ => None,
+        };
     }
     if only(0) {
         return match code {
@@ -113,6 +127,7 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
         "KeyO" => Shortcut::Expand,
         "KeyW" => Shortcut::Collapse,
         "Slash" => Shortcut::Shortcuts,
+        "KeyK" => Shortcut::Palette,
         "BracketRight" => Shortcut::Cycle(true),
         "BracketLeft" => Shortcut::Cycle(false),
         _ => {
@@ -182,6 +197,8 @@ enum Call {
     /// Nothing to do with the answer, an error included.
     Ignore,
     Pane(browser::PaneCall),
+    Plug(plugins::PlugCall),
+    Net(network::NetCall),
 }
 
 /// The launcher model picker's id field.
@@ -243,6 +260,9 @@ pub struct App {
     agents: crate::components::AgentMarks,
     /// vornd hung up.
     pub closed: bool,
+    notifier: crate::notify::Notifier,
+    /// Notifications heard since the last frame, for the frame to admit.
+    notices: Vec<crate::notify::Notice>,
     /// The app draws its own title bar and window controls.
     pub chrome: bool,
     /// macOS: the traffic lights sit over the app's top bar.
@@ -285,6 +305,8 @@ impl App {
             layout: LayoutMode::from_config(&store.config),
             tasks: crate::tasks::Tasks::new(&store.config),
             settings: crate::settings::Settings::new(),
+            // A first run, or one before this guide, opens the welcome guide.
+            dialog: (!crate::onboarding::seen(&store.config)).then_some(Dialog::Welcome),
             ..State::default()
         };
         let mut app = App {
@@ -303,6 +325,8 @@ impl App {
             logo: None,
             agents: Default::default(),
             closed: false,
+            notifier: Default::default(),
+            notices: Vec::new(),
             chrome: !cfg!(target_os = "macos"),
             traffic: cfg!(target_os = "macos"),
             size: look::WINDOW,
@@ -418,6 +442,7 @@ impl App {
                     }
                     if method == "connector:catalogChanged" {
                         self.wf_catalog(&params);
+                        self.plug_notified(&method, &params);
                         continue;
                     }
                     if method == "scheduler:missed" {
@@ -428,6 +453,29 @@ impl App {
                         self.git_offer(&params);
                         continue;
                     }
+                    let store = &self.store;
+                    let heard = self.notifier.heard(
+                        &method,
+                        &params,
+                        &store.config,
+                        |id| {
+                            store.session(id).map(|s| crate::notify::Who {
+                                agent: if s.is_shell() {
+                                    "Shell"
+                                } else {
+                                    crate::screen::menus::agent_name(s.info.agent_type.as_str())
+                                },
+                                name: s.title(),
+                            })
+                        },
+                        std::time::Instant::now(),
+                    );
+                    self.notices.extend(heard);
+                    if method == "widget:permission-request" {
+                        self.st.permission_keys = true;
+                    }
+                    self.plug_notified(&method, &params);
+                    self.net_notified(&method, &params);
                     let before = self.store.workspace().to_owned();
                     self.store.apply(&method, params);
                     if self.store.workspace() != before {
@@ -515,6 +563,8 @@ impl App {
             Call::Side(c) => self.side_answered(c, answer),
             Call::Ignore => {}
             Call::Pane(c) => self.pane_answered(c, answer),
+            Call::Plug(c) => self.plug_answered(c, answer),
+            Call::Net(c) => self.net_answered(c, answer),
             Call::Saved(call) => {
                 self.saving = false;
                 self.answered(*call, answer);
@@ -797,6 +847,14 @@ impl App {
                 }
             }
             Shortcut::Fullscreen => ui.request(WindowRequest::ToggleFullscreen),
+            Shortcut::Palette => self.toggle_palette(ui),
+            Shortcut::Permission(allow) => {
+                self.call(
+                    Call::Quiet,
+                    "permission:resolve-top",
+                    json!({ "allow": allow }),
+                );
+            }
         }
     }
 
@@ -1360,7 +1418,15 @@ impl App {
                 self.start_run(ui, &id, source, None);
             }
             Act::Workflow(a) => self.run_wf(ui, a, src),
-            Act::Set(a) => self.run_set(ui, a),
+            Act::Set(a) => {
+                let was = self.st.shown(crate::settings::Category::Connectors);
+                self.run_set(ui, a);
+                match (was, self.st.shown(crate::settings::Category::Connectors)) {
+                    (true, false) => self.plug_leave(),
+                    (false, true) => self.run_plug(ui, crate::plugins::PlugAct::Refresh),
+                    _ => {}
+                }
+            }
             Act::Rename(id) => {
                 let Some(title) = self.store.session(&id).map(|s| s.title()) else {
                     return;
@@ -1472,8 +1538,21 @@ impl App {
                 let cat = self.st.settings.category;
                 self.open_settings(cat);
             }
-            // The welcome guide is a later surface of the port.
-            Act::Welcome => self.st.dialog = None,
+            Act::Welcome => self.open_onboard(ui),
+            Act::Palette(a) => self.run_palette(ui, a),
+            Act::Onboard(a) => self.run_onboard(ui, a),
+            Act::Plug(a) => self.run_plug(ui, a),
+            Act::Net(a) => self.run_net(ui, a),
+            Act::Copy { text, toast } => {
+                ui.clipboard().set(&text);
+                if !toast.is_empty() {
+                    self.st.toast(toast, false);
+                }
+            }
+            Act::StopServer => {
+                self.call(Call::Quiet, "server:shutdown", Value::Null);
+                ui.request(WindowRequest::Close);
+            }
             Act::Project(p) => {
                 self.st.project = p;
                 self.st.group = None;
@@ -1765,6 +1844,9 @@ impl App {
             || self.task_event(ui, &event)
             || self.wf_event(ui, &event)
             || self.pane_event(ui, &event)
+            || self.palette_event(ui, &event)
+            || self.plug_event(ui, &event)
+            || self.net_event(ui, &event)
         {
             return;
         }
@@ -2015,6 +2097,9 @@ impl App {
     /// Input before the UI sees it: the global shortcuts, and Escape
     /// closing what is open. True when it was used.
     pub fn intercept(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        if self.palette_key(ui, input) || self.onboard_key(ui, input) {
+            return true;
+        }
         if self.settings_key(ui, input) {
             return true;
         }
@@ -2040,7 +2125,10 @@ impl App {
         let Input::Key { code, mods: m, .. } = input else {
             return false;
         };
-        if let Some(s) = shortcut(code, *m) {
+        // The approve and deny keys exist once an agent has asked for permission.
+        let s = shortcut(code, *m)
+            .filter(|s| !matches!(s, Shortcut::Permission(_)) || self.st.permission_keys);
+        if let Some(s) = s {
             self.run_shortcut(ui, s);
             return true;
         }
@@ -2278,10 +2366,17 @@ impl App {
         if std::mem::take(&mut self.st.focus_terminal) {
             ui.set_focus(None);
         }
+        let now = std::time::Instant::now();
+        for notice in std::mem::take(&mut self.notices) {
+            if self.notifier.admit(&notice, ui.window_focused(), now) {
+                crate::notify::show(notice);
+            }
+        }
         self.git_tick();
         self.panes_tick(ui);
         self.tasks_tick(ui);
-        self.settings_tick(std::time::Instant::now());
+        self.net_tick(ui);
+        self.settings_tick(now);
         let focus = ui.focus();
         if focus != self.last_focus {
             if let Some(old) = self.last_focus {
@@ -2413,6 +2508,15 @@ mod tests {
         assert_eq!(shortcut("BracketRight", MOD), Some(Shortcut::Cycle(true)));
         assert_eq!(shortcut("Backquote", mods::CTRL), Some(Shortcut::NewShell));
         assert_eq!(shortcut("Slash", MOD), Some(Shortcut::Shortcuts));
+        assert_eq!(shortcut("KeyK", MOD), Some(Shortcut::Palette));
+        assert_eq!(
+            shortcut("KeyA", MOD | mods::SHIFT),
+            Some(Shortcut::Permission(true))
+        );
+        assert_eq!(
+            shortcut("KeyD", MOD | mods::SHIFT),
+            Some(Shortcut::Permission(false))
+        );
         assert_eq!(shortcut("KeyJ", MOD), Some(Shortcut::ViewOptions));
         assert_eq!(shortcut("KeyB", MOD), Some(Shortcut::Sidebar));
         assert_eq!(shortcut("F2", 0), Some(Shortcut::Rename));

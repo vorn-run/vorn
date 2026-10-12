@@ -127,7 +127,8 @@ pub fn connection_connector(c: &Value) -> &str {
         .unwrap_or("")
 }
 
-fn parse_icon(v: &Value) -> Option<(String, Vec<String>)> {
+/// A `{viewBox, paths}` glyph, when it has paths to draw.
+pub(crate) fn parse_icon(v: &Value) -> Option<(String, Vec<String>)> {
     let paths: Vec<String> = v
         .get("paths")?
         .as_array()?

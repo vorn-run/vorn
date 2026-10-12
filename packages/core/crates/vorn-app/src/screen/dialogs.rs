@@ -320,6 +320,8 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::Output => super::tasks::output(s),
         Dialog::RunPrompt | Dialog::Missed | Dialog::WfFile => super::workflows::dialog(s)?,
         Dialog::GateReview => super::gates::review(s)?,
+        Dialog::Palette => super::palette::palette(s),
+        Dialog::Welcome => super::onboarding::modal(s)?,
     })
 }
 

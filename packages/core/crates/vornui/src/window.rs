@@ -432,8 +432,11 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
                 l.ui.wheel(dy);
                 l.dispatch();
             }
-            WindowEvent::Focused(false) => {
-                l.ui.pointer_leave();
+            WindowEvent::Focused(focused) => {
+                l.ui.set_window_focused(*focused);
+                if !*focused {
+                    l.ui.pointer_leave();
+                }
                 l.dispatch();
             }
             _ => {

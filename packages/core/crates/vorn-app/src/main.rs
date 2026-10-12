@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use vorn_app::client::{data_dir, Endpoint};
+use vorn_app::crash::{self, CrashAct};
 use vorn_app::ui::{
     mods, run_with, El, Event, Input, Laid, NativeWindow, Rect, RenderMode, Rgba, Ui, Waker,
     WindowApp, WindowOptions,
@@ -152,28 +153,69 @@ fn key(spec: &str) -> Input {
     }
 }
 
-struct Win(App);
+/// The window's app, or the error that stopped it and how to start again.
+struct Win {
+    app: Option<App>,
+    error: Option<String>,
+    reconnect: Box<dyn Fn() -> Result<App, String>>,
+    window: Option<Arc<NativeWindow>>,
+}
+
+impl Win {
+    /// Runs `f` on the app; a panic swaps the app for the crash screen.
+    fn guard<T: Default>(&mut self, f: impl FnOnce(&mut App) -> T) -> T {
+        let Some(app) = self.app.as_mut() else {
+            return T::default();
+        };
+        match crash::guard(|| f(app)) {
+            Ok(v) => v,
+            Err(e) => {
+                self.app = None;
+                self.error = Some(e);
+                T::default()
+            }
+        }
+    }
+}
 
 impl WindowApp for Win {
     fn view(&mut self, ui: &mut Ui) -> El {
         let size = ui.viewport();
-        self.0.view(ui, size)
+        match self.guard(|app| Some(app.view(ui, size))) {
+            Some(el) => el,
+            None => crash::view(ui, self.error.as_deref().unwrap_or_default()),
+        }
     }
 
     fn paint(&mut self, ui: &mut Ui, laid: &Laid) {
-        self.0.paint(ui, laid);
+        self.guard(|app| app.paint(ui, laid));
     }
 
     fn event(&mut self, ui: &mut Ui, event: Event) {
-        self.0.event(ui, event);
+        if let Some(error) = &self.error {
+            if crash::event(ui, &event, error) == Some(CrashAct::Reload) {
+                match (self.reconnect)() {
+                    Ok(mut app) => {
+                        if let Some(window) = &self.window {
+                            app.opened(window);
+                        }
+                        self.app = Some(app);
+                        self.error = None;
+                    }
+                    Err(e) => self.error = Some(e),
+                }
+            }
+            return;
+        }
+        self.guard(|app| app.event(ui, event));
     }
 
     fn input(&mut self, _ui: &mut Ui, input: Input) {
-        self.0.input(input);
+        self.guard(|app| app.input(input));
     }
 
     fn intercept(&mut self, ui: &mut Ui, input: &Input) -> bool {
-        self.0.intercept(ui, input)
+        self.guard(|app| app.intercept(ui, input))
     }
 
     fn background(&self) -> Rgba {
@@ -182,7 +224,7 @@ impl WindowApp for Win {
 
     // Terminals take composed text.
     fn wants_ime(&self) -> bool {
-        true
+        self.app.is_some()
     }
 
     fn ime_area(&self) -> Option<Rect> {
@@ -190,11 +232,12 @@ impl WindowApp for Win {
     }
 
     fn opened(&mut self, window: &Arc<NativeWindow>) {
-        self.0.opened(window);
+        self.window = Some(Arc::clone(window));
+        self.guard(|app| app.opened(window));
     }
 
     fn tick(&mut self) -> Option<Instant> {
-        self.0.tick()
+        self.guard(App::tick)
     }
 }
 
@@ -203,15 +246,21 @@ fn window(args: &Args) -> Result<(), String> {
     // reports a missing vornd before any window appears.
     let waker: Arc<Mutex<Option<Waker>>> = Arc::default();
     let w = Arc::clone(&waker);
-    let mut app = connect(
-        args,
-        Arc::new(move || {
-            if let Some(w) = w.lock().ok().as_ref().and_then(|w| w.as_ref()) {
-                w.wake();
-            }
-        }),
-    )?;
-    app.set_data_dir(args.data_dir()?);
+    let wake: vorn_app::client::rpc::Wake = Arc::new(move || {
+        if let Some(w) = w.lock().ok().as_ref().and_then(|w| w.as_ref()) {
+            w.wake();
+        }
+    });
+    let dir = args.data_dir()?;
+    let mut app = connect(args, Arc::clone(&wake))?;
+    app.set_data_dir(dir.clone());
+    let reconnect = Box::new(move || {
+        let ep = Endpoint::find(&dir).map_err(|e| e.to_string())?;
+        let mut app = App::connect(&ep, Arc::clone(&wake)).map_err(|e| e.to_string())?;
+        app.set_data_dir(dir.clone());
+        Ok(app)
+    });
+    crash::install();
     let opts = WindowOptions {
         min_size: Some((800.0, 600.0)),
         // macOS keeps its traffic lights over the app's top bar, with no
@@ -224,7 +273,12 @@ fn window(args: &Args) -> Result<(), String> {
         if let Ok(mut slot) = waker.lock() {
             *slot = Some(wake);
         }
-        Win(app)
+        Win {
+            app: Some(app),
+            error: None,
+            reconnect,
+            window: None,
+        }
     })
 }
 

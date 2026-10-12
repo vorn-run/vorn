@@ -70,11 +70,26 @@ fn pills(s: &Screen<'_>) -> El {
         format!("{MOD_LABEL}\u{21e7}W"),
     ];
     let icons = look::PILLS.map(|(name, _)| look::icon(name, 2.0).unwrap_or_default());
+    let waiting = waiting(s).len();
+    let count = if waiting > 9 {
+        "9+".to_owned()
+    } else {
+        waiting.to_string()
+    };
+    let hint = format!("Workflows \u{b7} {waiting} awaiting review");
     let items: Vec<Pill<'_>> = look::PILLS
         .iter()
         .zip(&icons)
         .zip(&keys)
-        .map(|(((_, label), svg), keys)| Pill::icon_only(label, svg, keys))
+        .zip(VIEW_ORDER)
+        .map(|((((_, label), svg), keys), view)| {
+            let pill = Pill::icon_only(label, svg, keys);
+            if view == MainView::Workflows && waiting > 0 {
+                pill.badge(&count, &hint)
+            } else {
+                pill
+            }
+        })
         .collect();
     let on = VIEW_ORDER.iter().position(|v| *v == s.st.view).unwrap_or(0);
     widgets::pills(s.ui, VIEWS, "Main view", &items, on)
@@ -441,16 +456,10 @@ pub(super) fn recent_panel(s: &Screen<'_>) -> El {
             r.display.as_str()
         };
         let project = crate::state::basename(&r.project_path);
-        let label = if r.activity_label.is_empty() {
-            "message"
-        } else {
-            r.activity_label.as_str()
-        };
         let meta = format!(
-            "{project} \u{b7} {} \u{b7} {} {label}{}",
+            "{project} \u{b7} {} \u{b7} {}",
             time_ago(r.timestamp, now),
-            r.activity,
-            if r.activity == 1 { "" } else { "s" }
+            r.activity_text()
         );
         let side = if r.can_resume {
             (hot > 0.5).then(|| {

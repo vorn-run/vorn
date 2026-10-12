@@ -211,6 +211,7 @@ pub(crate) struct State {
     /// since the last layout; a value nobody asks for is dropped.
     pub motions: RefCell<HashMap<Id, (Motion, bool)>>,
     pub reduced_motion: bool,
+    pub window_focused: bool,
 }
 
 impl State {
@@ -247,6 +248,7 @@ impl State {
             maximized: false,
             motions: RefCell::new(HashMap::new()),
             reduced_motion: motion::system_reduced_motion(),
+            window_focused: true,
         }
     }
 
@@ -843,6 +845,16 @@ impl Ui {
     /// Whether the window is maximized, as the window last said.
     pub fn maximized(&self) -> bool {
         self.st.maximized
+    }
+
+    /// Whether the window has the keyboard, as the window last said: what
+    /// decides if something worth noticing needs a system notification.
+    pub fn window_focused(&self) -> bool {
+        self.st.window_focused
+    }
+
+    pub fn set_window_focused(&mut self, focused: bool) {
+        self.st.window_focused = focused;
     }
 
     pub fn set_maximized(&mut self, m: bool) {

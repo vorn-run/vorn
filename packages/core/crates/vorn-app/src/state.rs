@@ -272,6 +272,10 @@ pub enum Dialog {
     RemoveWorktree,
     /// "Discard unsaved changes?" before a buffer goes.
     Discard,
+    /// CommandPalette.
+    Palette,
+    /// OnboardingModal: the welcome guide.
+    Welcome,
 }
 
 /// A toast in the bottom right.
@@ -306,6 +310,17 @@ pub struct Recent {
 }
 
 impl Recent {
+    /// `formatRecentSessionActivity`: "3 messages".
+    pub fn activity_text(&self) -> String {
+        let label = if self.activity_label.is_empty() {
+            "message"
+        } else {
+            self.activity_label.as_str()
+        };
+        let plural = if self.activity == 1 { "" } else { "s" };
+        format!("{} {label}{plural}", self.activity)
+    }
+
     pub fn from_value(v: &Value) -> Option<Recent> {
         let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
         Some(Recent {
@@ -501,9 +516,20 @@ pub struct State {
     /// The build of the vornd this app talks to, from `server:identity`.
     pub server_version: Option<String>,
     pub bench: crate::panes::Workbench,
+    pub palette: crate::palette::Palette,
+    pub onboard: crate::onboarding::Onboard,
+    pub plugins: crate::plugins::Plugins,
+    pub network: crate::network::Network,
+    /// An agent has asked for permission, so Mod+Shift+A and D answer it.
+    pub permission_keys: bool,
 }
 
 impl State {
+    /// Settings is open on `cat`.
+    pub fn shown(&self, cat: crate::settings::Category) -> bool {
+        self.settings.open && self.settings.category == cat
+    }
+
     /// The cards the grid shows, as indexes into `store.sessions`: the
     /// active project's, through the status filter, in the chosen order.
     pub fn visible(&self, store: &Store) -> Vec<usize> {

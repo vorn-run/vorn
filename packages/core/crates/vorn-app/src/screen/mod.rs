@@ -11,7 +11,11 @@ mod dialogs;
 pub mod gates;
 pub mod git;
 pub mod menus;
+mod network;
+mod onboarding;
+mod palette;
 mod panes;
+mod plugins;
 pub mod runs;
 pub mod settings;
 pub mod side;
@@ -30,6 +34,7 @@ use crate::view::PaneView;
 
 pub use cards::{card_index, intent_id, rename_id, term_id, CARD_ID_BASE};
 pub use dialogs::{PROJECT_NAME, PROJECT_PATH};
+pub use palette::{PALETTE_INPUT, PALETTE_LIST};
 pub(crate) use sidebar::{picker_project_icon, project_icon as sidebar_project_icon};
 
 /// The three views the top bar's pills switch between.

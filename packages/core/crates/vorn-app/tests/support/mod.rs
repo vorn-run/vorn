@@ -240,7 +240,20 @@ pub fn key(code: &str, m: u16, text: Option<&str>) -> Input {
     }
 }
 
+/// The app over `v`, past the welcome guide: it is marked seen first, so
+/// tests start on the main screen as a returning user does.
 pub fn connect(v: &TestVornd) -> App {
+    let ep = Endpoint::find(&v.home).expect("vornd wrote ws-port and local-token");
+    let (rpc, _events) =
+        vorn_app::client::Rpc::connect(&ep, std::sync::Arc::new(|| {})).expect("rpc");
+    let mut config = rpc.call("config:load", Value::Null).expect("config");
+    config["defaults"]["hasSeenOnboarding"] = json!(2);
+    rpc.call("config:save", config).expect("saved");
+    first_run(v)
+}
+
+/// The app over `v` as it opens on a first run.
+pub fn first_run(v: &TestVornd) -> App {
     let ep = Endpoint::find(&v.home).expect("vornd wrote ws-port and local-token");
     assert_eq!(
         ep.grid, v.grid,

@@ -113,6 +113,8 @@ pub struct Pill<'a> {
     /// Draws the icon alone and moves the label into a tooltip below, with
     /// this shortcut: `MainViewPills`.
     pub tip: Option<&'a str>,
+    /// A count over the pill's corner; the tooltip then reads `hint`.
+    pub badge: Option<(&'a str, &'a str)>,
 }
 
 impl<'a> Pill<'a> {
@@ -122,6 +124,7 @@ impl<'a> Pill<'a> {
             label,
             icon,
             tip: None,
+            badge: None,
         }
     }
 
@@ -131,7 +134,15 @@ impl<'a> Pill<'a> {
             label,
             icon: Some(icon),
             tip: Some(shortcut),
+            badge: None,
         }
+    }
+
+    /// Adds `count` over the corner (`bg-bronzo`, 9 px mono), and `hint`
+    /// as the tooltip's text in place of the label.
+    pub fn badge(mut self, count: &'a str, hint: &'a str) -> Self {
+        self.badge = Some((count, hint));
+        self
     }
 }
 
@@ -164,9 +175,28 @@ pub fn pills(ui: &Ui, group: Id, name: &str, items: &[Pill<'_>], selected: usize
             .ring(radius::SM)
             .role(Role::RadioButton, p.label)
             .toggled(on)
-            .child_if(p.icon.map(|svg| icon(svg, 14.0, fg)));
+            .child_if(p.icon.map(|svg| icon(svg, 14.0, fg)))
+            .child_if(p.badge.map(|(count, _)| {
+                div()
+                    .absolute_right(-2.0, -2.0)
+                    .row()
+                    .items_center()
+                    .justify_center()
+                    .min_w(12.0)
+                    .h(12.0)
+                    .px(3.0)
+                    .rounded(6.0)
+                    .bg(color::BRONZO)
+                    .child(
+                        text(count, 9.0, color::SURFACE_BASE)
+                            .mono()
+                            .line_height(9.0)
+                            .silent(),
+                    )
+            }));
+        let tip = p.badge.map_or(p.label, |(_, hint)| hint);
         match p.tip {
-            Some(keys) => tooltip_at(ui, pill, id, p.label, Some(keys), Place::Below),
+            Some(keys) => tooltip_at(ui, pill, id, tip, Some(keys), Place::Below),
             None => pill.child(label(p.label, crate::theme::text::XS, fg)),
         }
     };

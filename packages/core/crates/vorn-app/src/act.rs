@@ -160,6 +160,22 @@ pub enum Act {
     Side(crate::side::SideAct),
     Edit(crate::editor::EditAct),
     Pane(crate::panes::PaneAct),
+    /// The command palette's controls.
+    Palette(crate::palette::PalAct),
+    /// The welcome guide's controls.
+    Onboard(crate::onboarding::OnbAct),
+    /// The Plugins page's controls.
+    Plug(crate::plugins::PlugAct),
+    /// The Remote Access page's controls.
+    Net(crate::network::NetAct),
+    /// Copies text to the clipboard, saying so in a toast.
+    Copy {
+        text: String,
+        toast: String,
+    },
+    /// Ends every session and the server, then the app (the File menu's
+    /// Stop Sessions and Server).
+    StopServer,
     /// Opens a link in the system browser.
     OpenUrl(String),
     /// A control that only takes the press, so nothing under it does.
@@ -268,5 +284,11 @@ mod tests {
         assert_ne!(id, Acts::id("row", &Act::Select("a".into())));
         acts.clear();
         assert_eq!(acts.clicked(id), None);
+    }
+}
+
+impl From<crate::settings::SetAct> for Act {
+    fn from(a: crate::settings::SetAct) -> Self {
+        Act::Set(a)
     }
 }
