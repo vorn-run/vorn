@@ -7,7 +7,7 @@ description: How Vorn's GPU UI should look, move and read. Load it for any visua
 
 vornui (`packages/core/crates/vornui`) draws basic components: quads, text,
 icons, focus, hover, menus. `vorn-components` composes them (planned; it is not
-in the tree yet). `vorn-app` builds the screens. This skill says what *right*
+in the tree yet). `vorn-app` builds the screens. This skill says what _right_
 looks and feels like there, in numbers.
 
 Order of authority, highest first:
@@ -63,7 +63,7 @@ pairs are in `examples/`.
 
 ## Motion
 
-Apple's two rules (WWDC18 *Designing Fluid Interfaces*): respond immediately,
+Apple's two rules (WWDC18 _Designing Fluid Interfaces_): respond immediately,
 and let every motion be interrupted and redirected. Everything below serves
 them.
 
@@ -79,14 +79,14 @@ them.
 
 ### Durations
 
-| What | Duration | Shape |
-|---|---|---|
-| Hover / colour fades | 100–150 ms (`theme::TRANSITION`, 150 ms) | ease in-out |
-| Press release, toggles, checks | 100–150 ms | ease out or `snap` |
-| Menus, popovers, tooltips in | 150–200 ms (`MENU_IN`, 200 ms) | ease out or `snap` |
-| Panels, sidebars, dialogs | 180–240 ms | `panel` |
-| Card reflow, large moves | 240–300 ms | `move` |
-| Exits | ~70% of the matching entrance | ease in |
+| What                           | Duration                                 | Shape              |
+| ------------------------------ | ---------------------------------------- | ------------------ |
+| Hover / colour fades           | 100–150 ms (`theme::TRANSITION`, 150 ms) | ease in-out        |
+| Press release, toggles, checks | 100–150 ms                               | ease out or `snap` |
+| Menus, popovers, tooltips in   | 150–200 ms (`MENU_IN`, 200 ms)           | ease out or `snap` |
+| Panels, sidebars, dialogs      | 180–240 ms                               | `panel`            |
+| Card reflow, large moves       | 240–300 ms                               | `move`             |
+| Exits                          | ~70% of the matching entrance            | ease in            |
 
 - **Nothing exceeds ~300 ms.** Vorn is used all day; the HIG asks for brief,
   precise feedback and little motion on frequent interactions.
@@ -99,12 +99,12 @@ Specify springs as Apple does: **response** (perceptual duration, seconds)
 and **damping ratio** (1 = no overshoot; bounce = 1 − damping). Presets,
 derived from SwiftUI's documented defaults and scaled to Vorn's 300 ms cap:
 
-| Preset | Response | Damping | Use | Apple origin |
-|---|---|---|---|---|
-| `track` | 0.15 | 0.86 | follow the pointer: drags, split dividers | `interactiveSpring()` 0.15 / 0.86 |
-| `snap` | 0.20 | 0.90 | menus, popovers, toggles | today's menu spring, 0.2 s / bounce 0.1 (`interact.rs:1090`) |
-| `panel` | 0.24 | 1.00 | panels, sidebars, dialogs | `.smooth` (bounce 0), Vorn pace |
-| `move` | 0.30 | 1.00 | card reflow, large spatial moves | `.smooth` (bounce 0), Vorn pace |
+| Preset  | Response | Damping | Use                                       | Apple origin                                                 |
+| ------- | -------- | ------- | ----------------------------------------- | ------------------------------------------------------------ |
+| `track` | 0.15     | 0.86    | follow the pointer: drags, split dividers | `interactiveSpring()` 0.15 / 0.86                            |
+| `snap`  | 0.20     | 0.90    | menus, popovers, toggles                  | today's menu spring, 0.2 s / bounce 0.1 (`interact.rs:1090`) |
+| `panel` | 0.24     | 1.00    | panels, sidebars, dialogs                 | `.smooth` (bounce 0), Vorn pace                              |
+| `move`  | 0.30     | 1.00    | card reflow, large spatial moves          | `.smooth` (bounce 0), Vorn pace                              |
 
 - SwiftUI's defaults for comparison: `spring()` 0.5 / 0.825;
   `spring(duration:bounce:)` 0.5 s, bounce 0; `.smooth`, `.snappy`,
@@ -116,7 +116,7 @@ derived from SwiftUI's documented defaults and scaled to Vorn's 300 ms cap:
 - Convert for code (mass 1): `stiffness = (2π / response)²`,
   `damping = 4π · ratio / response`. A closed-form spring is in
   `references.md`.
-- Never wait for a spring to *settle* before acting; settling is longer and
+- Never wait for a spring to _settle_ before acting; settling is longer and
   unpredictable. Act at the perceptual duration.
 
 ### Easing (when a curve, not a spring)
@@ -156,8 +156,8 @@ Core Animation's named curves are the reference:
 
 ### Reduce motion
 
-- When the OS asks for reduced motion (macOS *Reduce motion*, Windows
-  *Show animations* off, GNOME *Animations* off): replace movement and scale
+- When the OS asks for reduced motion (macOS _Reduce motion_, Windows
+  _Show animations_ off, GNOME _Animations_ off): replace movement and scale
   with an opacity crossfade ≤ 150 ms, set every spring to damping 1.0, drop
   repeating motion. Colour fades and progress indicators stay.
 - vornui has no reduce-motion switch yet. If your change adds movement, read
@@ -177,7 +177,7 @@ Core Animation's named curves are the reference:
   point; align text by baseline across columns; align a row's icon with the
   text above it, not with its own bounding box.
 - Icons: one stroke width per surface (lucide, 1.5–2 px at 16 px), gray at
-  rest, ink on hover. Status colour on an icon only when it *is* the status.
+  rest, ink on hover. Status colour on an icon only when it _is_ the status.
 
 ## Type and contrast
 
@@ -196,12 +196,12 @@ Core Animation's named curves are the reference:
 Apple layers functional surfaces over content. Vorn keeps that hierarchy but
 builds it from opaque steps, never blur:
 
-| Layer | Fill | Edge |
-|---|---|---|
-| Window | `SURFACE_BASE` #0d0d0f | none |
-| Panels, sidebar | `SURFACE_PANEL` #101012 | 1 px `white/0.06` divider |
-| Cards, inputs, sunken wells | `SURFACE_SUNKEN` #141416 | 1 px `white/0.08` |
-| Menus, popovers, dialogs | `SURFACE_OVERLAY` #1c1c20 | 1 px `white/0.08` |
+| Layer                       | Fill                      | Edge                      |
+| --------------------------- | ------------------------- | ------------------------- |
+| Window                      | `SURFACE_BASE` #0d0d0f    | none                      |
+| Panels, sidebar             | `SURFACE_PANEL` #101012   | 1 px `white/0.06` divider |
+| Cards, inputs, sunken wells | `SURFACE_SUNKEN` #141416  | 1 px `white/0.08`         |
+| Menus, popovers, dialogs    | `SURFACE_OVERLAY` #1c1c20 | 1 px `white/0.08`         |
 
 - Separate with one step of fill plus a hairline. Never two borders on one
   edge, never a border and a shadow on a control.

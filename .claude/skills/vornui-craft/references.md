@@ -54,7 +54,7 @@ everything, motion never the only signal.
 > "Thicker materials, which are more opaque, can provide better contrast for
 > text and other elements with fine features."
 
-Take: the *layering model* (functional surfaces float over content, each
+Take: the _layering model_ (functional surfaces float over content, each
 layer chosen by meaning). Leave: blur, translucency, Liquid Glass. Vorn's
 brand forbids them, so each layer is an opaque surface step plus a hairline
 (SKILL.md, Materials).
@@ -121,7 +121,7 @@ ring versus row highlight.
 - A spring is set by **duration** (perceptual, predictable) and **bounce**.
 - Settling duration "can be a bit unpredictable … you shouldn't wait for the
   settling duration for user-facing changes."
-- Continuous position *and* velocity: a jump in velocity "doesn't feel
+- Continuous position _and_ velocity: a jump in velocity "doesn't feel
   right"; a retargeted spring keeps its velocity.
 - Bounce scale: 0 "a smooth, gradual change"; "around 15%" brisk without
   feeling bouncy; "30%" noticeably bouncy; "be cautious about using values
@@ -141,26 +141,26 @@ transitions and gesture-driven springs.
 
 ### SwiftUI spring defaults (Apple's documentation, declarations)
 
-| API | Default |
-|---|---|
-| `Animation.spring(response:dampingFraction:blendDuration:)` | 0.5, 0.825, 0 |
-| `Animation.spring(duration:bounce:blendDuration:)` | 0.5, 0.0, 0 |
-| `Animation.interactiveSpring(response:dampingFraction:blendDuration:)` | 0.15, 0.86, 0.25 |
-| `Animation.smooth(duration:extraBounce:)` | 0.5, 0 (base bounce 0) |
-| `Animation.snappy(duration:extraBounce:)` | 0.5, 0 ("small amount of bounce"; WWDC23 uses 0.15) |
-| `Animation.bouncy(duration:extraBounce:)` | 0.5, 0 ("higher amount of bounce"; WWDC23 uses 0.3) |
+| API                                                                    | Default                                             |
+| ---------------------------------------------------------------------- | --------------------------------------------------- |
+| `Animation.spring(response:dampingFraction:blendDuration:)`            | 0.5, 0.825, 0                                       |
+| `Animation.spring(duration:bounce:blendDuration:)`                     | 0.5, 0.0, 0                                         |
+| `Animation.interactiveSpring(response:dampingFraction:blendDuration:)` | 0.15, 0.86, 0.25                                    |
+| `Animation.smooth(duration:extraBounce:)`                              | 0.5, 0 (base bounce 0)                              |
+| `Animation.snappy(duration:extraBounce:)`                              | 0.5, 0 ("small amount of bounce"; WWDC23 uses 0.15) |
+| `Animation.bouncy(duration:extraBounce:)`                              | 0.5, 0 ("higher amount of bounce"; WWDC23 uses 0.3) |
 
 `dampingFraction = 1 − bounce`; `response ≈ duration`.
 
 ### Core Animation timing defaults
 
-| Name | Control points |
-|---|---|
+| Name                            | Control points         |
+| ------------------------------- | ---------------------- |
 | `kCAMediaTimingFunctionDefault` | (0.25, 0.1, 0.25, 1.0) |
-| `easeIn` | (0.42, 0, 1, 1) |
-| `easeOut` | (0, 0, 0.58, 1) |
-| `easeInEaseOut` | (0.42, 0, 0.58, 1) |
-| `linear` | (0, 0, 1, 1) |
+| `easeIn`                        | (0.42, 0, 1, 1)        |
+| `easeOut`                       | (0, 0, 0.58, 1)        |
+| `easeInEaseOut`                 | (0.42, 0, 0.58, 1)     |
+| `linear`                        | (0, 0, 1, 1)           |
 
 Implicit `CATransaction` and `NSAnimationContext` durations default to
 0.25 s. `CASpringAnimation`'s raw defaults (mass 1, stiffness 100, damping 10)
