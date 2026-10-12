@@ -13,39 +13,10 @@ use accesskit::Role;
 use crate::element::{div, icon, text, Action, Content, EditLook, El, Id, Place, Sense};
 use crate::scene::Rgba;
 use crate::text::TextStyle;
-use crate::theme::{color, radius};
+use crate::theme::{color, radius, shadow};
 use crate::Ui;
 
-/// The icons the widgets draw (Lucide, ISC; see `icons/LICENSE`).
-pub mod icons {
-    pub const CHECK: &str = include_str!("../icons/check.svg");
-    pub const CHEVRON_DOWN: &str = include_str!("../icons/chevron-down.svg");
-    pub const PLUS: &str = include_str!("../icons/plus.svg");
-    pub const X: &str = include_str!("../icons/x.svg");
-
-    /// `svg` drawn with lines `w` units wide (Lucide's `strokeWidth`).
-    pub fn stroke(svg: &str, w: f32) -> String {
-        svg.replacen("stroke-width=\"2\"", &format!("stroke-width=\"{w}\""), 1)
-    }
-
-    /// `svg` turned `deg` degrees about its centre, to whole degrees so a
-    /// turning icon rasterizes a bounded number of times.
-    pub fn rotated(svg: &str, deg: f32) -> String {
-        let deg = deg.round();
-        if deg == 0.0 {
-            return svg.to_owned();
-        }
-        match (svg.find('>'), svg.rfind("</svg>")) {
-            (Some(open), Some(close)) if open < close => format!(
-                "{}<g transform=\"rotate({deg} 12 12)\">{}</g>{}",
-                &svg[..=open],
-                &svg[open + 1..close],
-                &svg[close..]
-            ),
-            _ => svg.to_owned(),
-        }
-    }
-}
+pub use crate::icons;
 
 /// Entry `index` of a choice group (a pill, a menu entry, a list row).
 pub fn item_id(group: Id, index: usize) -> Id {
@@ -66,6 +37,19 @@ fn label(s: &str, (size, line): (f32, f32), c: Rgba) -> El {
 /// Makes `owner` show `label` above it after the pointer rests on it, as
 /// `Tooltip.tsx` does: hover only, never on focus, gone on scroll or press.
 pub fn tooltip(ui: &Ui, owner: El, id: Id, label: &str, shortcut: Option<&str>) -> El {
+    tooltip_at(ui, owner, id, label, shortcut, Place::Above)
+}
+
+/// [`tooltip`] on side `place` (`position="bottom"` is [`Place::Below`]);
+/// it still flips when that side has no room.
+pub fn tooltip_at(
+    ui: &Ui,
+    owner: El,
+    id: Id,
+    label: &str,
+    shortcut: Option<&str>,
+    place: Place,
+) -> El {
     let owner = owner.id(id).tooltip_owner();
     if !ui.tooltip_shown(id) {
         return owner;
@@ -78,10 +62,11 @@ pub fn tooltip(ui: &Ui, owner: El, id: Id, label: &str, shortcut: Option<&str>) 
         .rounded(radius::MD)
         .border(1.0, Rgba::white(0.08))
         .bg(color::SURFACE_OVERLAY)
+        .shadow(&shadow::LG)
         .role(Role::Tooltip, label)
         .child(text(label, 11.0, color::GRAY_200).silent())
         .child_if(shortcut.map(|s| text(s, 10.0, color::GRAY_500).mono().ml(8.0).silent()));
-    owner.overlay(tip, Place::Above, 6.0)
+    owner.overlay(tip, place, 6.0)
 }
 
 /// A text button: `px-2.5 py-1 rounded-md text-xs`, gray turning white
@@ -125,6 +110,29 @@ pub fn icon_button(ui: &Ui, id: Id, svg: &str, size: f32, label: &str) -> El {
 pub struct Pill<'a> {
     pub label: &'a str,
     pub icon: Option<&'a str>,
+    /// Draws the icon alone and moves the label into a tooltip below, with
+    /// this shortcut: `MainViewPills`.
+    pub tip: Option<&'a str>,
+}
+
+impl<'a> Pill<'a> {
+    /// A labelled pill, with `icon` before the label when there is one.
+    pub fn new(label: &'a str, icon: Option<&'a str>) -> Self {
+        Pill {
+            label,
+            icon,
+            tip: None,
+        }
+    }
+
+    /// An icon-only pill whose tooltip shows `label` and `shortcut`.
+    pub fn icon_only(label: &'a str, icon: &'a str, shortcut: &'a str) -> Self {
+        Pill {
+            label,
+            icon: Some(icon),
+            tip: Some(shortcut),
+        }
+    }
 }
 
 /// A segmented control: `bg-white/[0.04] rounded-lg p-0.5 gap-0.5`, the
@@ -139,7 +147,7 @@ pub fn pills(ui: &Ui, group: Id, name: &str, items: &[Pill<'_>], selected: usize
         } else {
             tint(ui, id, color::GRAY_500, color::GRAY_300)
         };
-        div()
+        let pill = div()
             .id(id)
             .row()
             .items_center()
@@ -156,8 +164,11 @@ pub fn pills(ui: &Ui, group: Id, name: &str, items: &[Pill<'_>], selected: usize
             .ring(radius::SM)
             .role(Role::RadioButton, p.label)
             .toggled(on)
-            .child_if(p.icon.map(|svg| icon(svg, 14.0, fg)))
-            .child(label(p.label, crate::theme::text::XS, fg))
+            .child_if(p.icon.map(|svg| icon(svg, 14.0, fg)));
+        match p.tip {
+            Some(keys) => tooltip_at(ui, pill, id, p.label, Some(keys), Place::Below),
+            None => pill.child(label(p.label, crate::theme::text::XS, fg)),
+        }
     };
     div()
         .row()
@@ -168,6 +179,42 @@ pub fn pills(ui: &Ui, group: Id, name: &str, items: &[Pill<'_>], selected: usize
         .bg(Rgba::white(0.04))
         .role(Role::RadioGroup, name)
         .children(items.iter().enumerate().map(pill))
+}
+
+/// A full-width segmented row (the workflow trigger form's `Segmented`):
+/// equal `flex-1` buttons in a `white/[0.06]` outline, the chosen one
+/// `bg-white/[0.1] text-gray-200`. Each segment is `(id, label, chosen)`
+/// and reports `Click` on its id, so the caller maps each to its own value.
+pub fn segmented<'a>(ui: &Ui, segments: impl IntoIterator<Item = (Id, &'a str, bool)>) -> El {
+    let segment = |(id, text, on): (Id, &str, bool)| {
+        let (fg, bg) = if on {
+            (color::GRAY_200, Rgba::white(0.1))
+        } else {
+            (
+                tint(ui, id, color::GRAY_500, color::GRAY_300),
+                tint(ui, id, Rgba::TRANSPARENT, Rgba::white(0.04)),
+            )
+        };
+        div()
+            .id(id)
+            .on(Action::Click)
+            .flex(1.0)
+            .row()
+            .justify_center()
+            .px(8.0)
+            .py(6.0)
+            .bg(bg)
+            .role(Role::Button, text)
+            .toggled(on)
+            .child(label(text, (12.0, 18.0), fg))
+    };
+    div()
+        .row()
+        .w_full()
+        .rounded(radius::LG)
+        .border(1.0, Rgba::white(0.06))
+        .clip()
+        .children(segments.into_iter().map(segment))
 }
 
 /// One entry of a [`picker`]'s menu or a [`option`] row.
@@ -285,8 +332,9 @@ pub fn picker(
 }
 
 /// A choosable row (a menu entry, a list item): `px-3 py-1.5 text-[12px]`,
-/// the chosen one white on `white/[0.06]` with a check, the others gray
-/// turning white on hover. Reports `Event::Select { group, index }`.
+/// the chosen one white on `white/[0.06]` behind a leading check, the others
+/// gray turning white on hover with the check's column kept empty so labels
+/// line up. Reports `Event::Select { group, index }`.
 pub fn option(ui: &Ui, group: Id, index: usize, selected: bool, c: Choice<'_>) -> El {
     let id = item_id(group, index);
     let fg = if selected {
@@ -311,9 +359,13 @@ pub fn option(ui: &Ui, group: Id, index: usize, selected: bool, c: Choice<'_>) -
         .ring(radius::SM)
         .role(Role::ListBoxOption, c.label)
         .selected(selected)
+        .child(if selected {
+            icon(icons::stroke(icons::CHECK, 3.0), 11.0, fg)
+        } else {
+            div().w(11.0).shrink0()
+        })
         .child(label(c.label, (12.0, 18.0), fg).truncate().grow())
         .child_if(c.hint.map(|h| label(h, (10.0, 15.0), color::GRAY_600)))
-        .child_if(selected.then(|| icon(icons::stroke(icons::CHECK, 3.0), 11.0, fg)))
 }
 
 /// A scrolling list of [`option`] rows: a listbox named `name`.
@@ -614,4 +666,273 @@ mod tests {
             assert!(crate::rasterize_svg(&svg, 16).is_some_and(|m| m.iter().any(|&a| a > 0)));
         }
     }
+}
+
+/// A [`toggle`]'s look alone, for a row that is the switch itself (a menu
+/// entry): 40 by 24, blue when on, a 16 px knob.
+pub fn switch_track(on: bool) -> El {
+    div()
+        .w(40.0)
+        .h(24.0)
+        .shrink0()
+        .rounded(radius::FULL)
+        .bg(if on {
+            color::BLUE_500
+        } else {
+            Rgba::white(0.1)
+        })
+        .child(
+            div()
+                .absolute(if on { 20.0 } else { 4.0 }, 4.0)
+                .size(16.0, 16.0)
+                .rounded(radius::FULL)
+                .bg(color::WHITE),
+        )
+}
+
+/// `ToggleSwitch`: a `w-10 h-6` track, blue when on, its knob sliding
+/// from `translate-x-1` to `translate-x-5`. Clicking reports `Click` on
+/// `id`; the caller flips the value.
+pub fn toggle(id: Id, name: &str, on: bool, disabled: bool) -> El {
+    let track = switch_track(on)
+        .id(id)
+        .ring(radius::FULL)
+        .role(Role::Switch, name)
+        .toggled(on);
+    if disabled {
+        track.disabled(true)
+    } else {
+        track.on(Action::Click)
+    }
+}
+
+/// What a [`confirm`]'s button does: a destructive one is red.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Neutral,
+    Danger,
+}
+
+/// `ConfirmPopover`'s panel under `trigger`: the question, Cancel and the
+/// confirming button. Both report `Click` on their ids.
+pub fn confirm(
+    ui: &Ui,
+    trigger: El,
+    message: &str,
+    (ok, ok_label): (Id, &str),
+    cancel: Id,
+    tone: Tone,
+) -> El {
+    let down = |id: Id| if ui.pressed(id) { 1.0 } else { 0.0 };
+    let wash = |id: Id, rest: f32, hot: f32, pressed: f32| {
+        Rgba::white(rest)
+            .mix(Rgba::white(hot), ui.hover(id))
+            .mix(Rgba::white(pressed), down(id))
+    };
+    let cancel_btn = div()
+        .id(cancel)
+        .on(Action::Click)
+        .px(12.0)
+        .py(8.0)
+        .rounded(radius::MD)
+        .bg(wash(cancel, 0.04, 0.08, 0.12))
+        .ring(radius::MD)
+        .role(Role::Button, "Cancel")
+        .child(label(
+            "Cancel",
+            crate::theme::text::XS,
+            tint(ui, cancel, color::GRAY_400, color::GRAY_200),
+        ));
+    let (bg, edge, fg) = match tone {
+        Tone::Danger => {
+            let red = |a| Rgba::hexa(crate::theme::rgb::RED_500, a);
+            (
+                red(0.1).mix(red(0.2), ui.hover(ok)).mix(red(0.3), down(ok)),
+                Some(red(0.2)),
+                color::RED_400,
+            )
+        }
+        Tone::Neutral => (wash(ok, 0.1, 0.15, 0.2), None, color::WHITE),
+    };
+    let mut ok_btn = div()
+        .id(ok)
+        .on(Action::Click)
+        .px(12.0)
+        .py(8.0)
+        .rounded(radius::MD)
+        .bg(bg)
+        .ring(radius::MD)
+        .role(Role::Button, ok_label)
+        .child(label(ok_label, crate::theme::text::XS, fg).weight(500));
+    if let Some(e) = edge {
+        ok_btn = ok_btn.border(1.0, e);
+    }
+    let panel = div()
+        .col()
+        .min_w(180.0)
+        .max_w(280.0)
+        .p(12.0)
+        .rounded(radius::LG)
+        .border(1.0, Rgba::white(0.1))
+        .bg(color::SURFACE_OVERLAY)
+        .shadow(&shadow::XL2)
+        .role(Role::AlertDialog, message)
+        .child(label(message, crate::theme::text::XS, color::GRAY_300).mb(12.0))
+        .child(
+            div()
+                .row()
+                .justify_end()
+                .gap(8.0)
+                .child(cancel_btn)
+                .child(ok_btn),
+        );
+    // `POPOVER_GAP`.
+    trigger.overlay(panel, Place::Below, 6.0)
+}
+
+/// What a [`toast`] reports, and the colour it reports it in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToastKind {
+    Success,
+    Error,
+    Warning,
+    Info,
+}
+
+impl ToastKind {
+    /// The icon and the Tailwind 400/500 pair `Toast.tsx` tints it with.
+    fn look(self) -> (&'static str, u32, u32) {
+        use crate::theme::rgb;
+        match self {
+            ToastKind::Success => ("check", rgb::GREEN_400, rgb::GREEN_500),
+            ToastKind::Error => ("x", rgb::RED_400, rgb::RED_500),
+            ToastKind::Warning => ("triangle-alert", rgb::AMBER_400, rgb::AMBER_500),
+            ToastKind::Info => ("info", rgb::BLUE_400, rgb::BLUE_500),
+        }
+    }
+}
+
+/// One `Toast`: icon, message and a dismiss button (`close` reports
+/// `Click`), on the near-opaque toast glass.
+pub fn toast(ui: &Ui, close: Id, message: &str, kind: ToastKind) -> El {
+    let (glyph, fg, edge) = kind.look();
+    let lucide = |name, stroke| crate::icons::lucide(name, stroke).unwrap_or_default();
+    div()
+        .row()
+        .items_center()
+        .gap(10.0)
+        .px(16.0)
+        .py(10.0)
+        .min_w(200.0)
+        .max_w(360.0)
+        .rounded(radius::LG)
+        .border(1.0, Rgba::hexa(edge, 0.2))
+        .bg(Rgba::hexa(0x1a1a1e, 0.92))
+        .shadow(&shadow::XL)
+        .role(Role::Status, message)
+        .child(icon(lucide(glyph, 2.5), 15.0, Rgba::hex(fg)))
+        .child(
+            div()
+                .row()
+                .grow()
+                .min_w(0.0)
+                .child(label(message, crate::theme::text::SM, color::GRAY_200).truncate()),
+        )
+        .child(
+            div()
+                .id(close)
+                .on(Action::Click)
+                .p(2.0)
+                .role(Role::Button, "Dismiss")
+                .child(icon(
+                    lucide("x", 2.0),
+                    12.0,
+                    tint(ui, close, color::GRAY_500, color::GRAY_300),
+                )),
+        )
+}
+
+/// A popover's panel: `bg-surface-raised border-white/[0.08] rounded-md
+/// shadow-lg`. The caller adds padding and places it with `overlay`.
+pub fn popover(name: &str) -> El {
+    div()
+        .col()
+        .rounded(radius::MD)
+        .border(1.0, Rgba::white(0.08))
+        .bg(color::SURFACE_RAISED)
+        .shadow(&shadow::LG)
+        .role(Role::Dialog, name)
+}
+
+/// A modal: a `bg-black/[alpha]` backdrop over a `size` window with
+/// `panel` at `at`. Clicking the backdrop reports `Click` on `id`.
+pub fn dialog(id: Id, size: (f32, f32), alpha: f32, panel: El, at: (f32, f32)) -> El {
+    scrim(id, size, alpha).child(panel.absolute(at.0, at.1))
+}
+
+/// A modal's backdrop: `bg-black/{alpha}` over a `size` window on its own
+/// layer, reporting `Click` on `id` (click-outside closes). The caller
+/// places the panel in it.
+pub fn scrim(id: Id, size: (f32, f32), alpha: f32) -> El {
+    div()
+        .id(id)
+        .on(Action::Click)
+        .absolute(0.0, 0.0)
+        .size(size.0, size.1)
+        .bg(Rgba::hexa(0, alpha))
+        .layered()
+}
+
+/// A count or status badge: `text` at 10 px, medium, on a rounded tint.
+pub fn badge(text: &str, fg: Rgba, bg: Rgba) -> El {
+    div()
+        .row()
+        .items_center()
+        .px(6.0)
+        .h(16.0)
+        .rounded(radius::FULL)
+        .bg(bg)
+        .shrink0()
+        .child(label(text, (10.0, 14.0), fg).weight(500))
+}
+
+/// A chip: `h-[26px] px-2 gap-1.5 rounded-md` on the raised surface, its
+/// `white/[0.06]` hairline brightening on hover. `body` is its content.
+pub fn chip(ui: &Ui, id: Id, name: &str, body: impl IntoIterator<Item = El>) -> El {
+    div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(6.0)
+        .h(26.0)
+        .px(8.0)
+        .rounded(radius::MD)
+        .border(1.0, tint(ui, id, Rgba::white(0.06), Rgba::white(0.12)))
+        .bg(color::SURFACE_RAISED)
+        .ring(radius::MD)
+        .role(Role::Button, name)
+        .children(body)
+}
+
+/// A `<kbd>`: mono text on `white/[0.04]` in a `white/[0.06]` outline,
+/// `(size, line height)` as the caller's `text-*` and `leading-*` set it
+/// (`KbdHint` is `leading-none`; a shortcut list inherits its line's).
+pub fn kbd(text: &str, (size, line): (f32, f32), fg: Rgba) -> El {
+    div()
+        .row()
+        .items_center()
+        .justify_center()
+        .px(6.0)
+        .py(2.0)
+        .rounded(radius::SM)
+        .bg(Rgba::white(0.04))
+        .border(1.0, Rgba::white(0.06))
+        .shrink0()
+        .child(
+            crate::element::text(text, size, fg)
+                .mono()
+                .line_height(line)
+                .silent(),
+        )
 }

@@ -1545,19 +1545,20 @@ pub(super) fn discard(s: &Screen<'_>) -> El {
 }
 
 /// The card header's pane buttons: Browse files, and the terminals panel
-/// for an agent (or a shell that has one open).
-pub(super) fn header_buttons(s: &Screen<'_>, session: &Session) -> Vec<El> {
+/// for an agent (or a shell that has one open), as act, icon and label.
+pub(super) fn header_buttons(
+    s: &Screen<'_>,
+    session: &Session,
+) -> Vec<(Act, &'static str, &'static str)> {
     let sid = session.info.id.clone();
-    let mut out = vec![cards::header_button(
-        s,
+    let mut out = vec![(
         pane(PaneAct::ToggleFiles(sid.clone())),
         "folder-open",
         "Browse files",
     )];
     let has = s.st.panes.saved.panels.contains_key(&sid);
     if !session.is_shell() || has {
-        out.push(cards::header_button(
-            s,
+        out.push((
             pane(PaneAct::ToggleTerminals(sid)),
             "square-terminal",
             if has {

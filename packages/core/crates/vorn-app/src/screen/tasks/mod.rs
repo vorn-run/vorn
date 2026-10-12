@@ -843,7 +843,7 @@ pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
                             .silent(),
                     ),
                 )
-                .child(toggle_switch(t.archived)),
+                .child(crate::ui::widgets::switch_track(t.archived)),
         ),
         ..Item::default()
     });
@@ -885,23 +885,6 @@ pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
         ..Item::default()
     });
     items
-}
-
-/// `ToggleSwitch`: 40 by 24, blue when on, a 16 px knob.
-fn toggle_switch(on: bool) -> El {
-    div()
-        .w(40.0)
-        .h(24.0)
-        .rounded(12.0)
-        .shrink0()
-        .bg(if on { c(0x2b7fff) } else { white(0.1) })
-        .child(
-            div()
-                .absolute(if on { 20.0 } else { 4.0 }, 4.0)
-                .size(16.0, 16.0)
-                .rounded(8.0)
-                .bg(c(look::WHITE)),
-        )
 }
 
 /// `KanbanCardMenu`'s entries.

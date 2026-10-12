@@ -9,16 +9,7 @@ use vornui::{div, El, Id, RenderMode, Ui, UiConfig};
 const SIZE: (u32, u32) = (640, 400);
 
 fn frame(ui: &Ui) -> El {
-    let pills = [
-        Pill {
-            label: "Terminals",
-            icon: None,
-        },
-        Pill {
-            label: "Tasks",
-            icon: None,
-        },
-    ];
+    let pills = [Pill::new("Terminals", None), Pill::new("Tasks", None)];
     let choices = [
         Choice {
             label: "Opus",

@@ -3,6 +3,7 @@
 //! records where interactive boxes landed and builds the accessibility
 //! tree; [`Ui::render_offscreen`] or the window then draws the scene.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -44,16 +45,9 @@ pub struct UiConfig {
 
 impl UiConfig {
     /// The faces the app's CSS stacks resolve to on this platform
-    /// (`-apple-system, "Segoe UI", Roboto, sans-serif` and the terminal's
-    /// monospace).
+    /// ([`crate::theme::font`]).
     pub fn system(scale: f32, term_size: f32) -> UiConfig {
-        let (ui_font, mono_font) = if cfg!(target_os = "macos") {
-            ("Helvetica Neue", "Menlo")
-        } else if cfg!(windows) {
-            ("Segoe UI", "Consolas")
-        } else {
-            ("DejaVu Sans", "DejaVu Sans Mono")
-        };
+        let (ui_font, mono_font) = (crate::theme::font::UI, crate::theme::font::MONO);
         UiConfig {
             scale,
             ui_font,
@@ -90,6 +84,10 @@ pub struct Ui {
     icons: HashMap<(u64, u32), Option<[f32; 4]>>,
     images: Vec<Image>,
     anon: u64,
+    /// The earliest frame a view asked for while building this one, for
+    /// motion that is not a hover fade (a spinner, a pulse). A `Cell` so a
+    /// view holding `&Ui` can ask.
+    pub(crate) wake: Cell<Option<Instant>>,
 }
 
 enum Measure<'a> {
@@ -184,6 +182,7 @@ impl Ui {
             icons: HashMap::new(),
             images: Vec::new(),
             anon: 0,
+            wake: Cell::new(None),
         }
     }
 
@@ -266,6 +265,7 @@ impl Ui {
     /// Starts a frame at `now`: tests drive animations and timers with it.
     pub fn begin_at(&mut self, clear: Rgba, now: Instant) {
         self.st.now = now;
+        self.wake.set(None);
         self.scene.clear();
         self.clear = clear;
     }
@@ -455,6 +455,7 @@ impl Ui {
             Place::Above => (host.x + (host.w - w) / 2.0, host.y - g - h),
             Place::Below => (host.x + (host.w - w) / 2.0, host.bottom() + g),
             Place::BelowStart => (host.x, host.bottom() + g),
+            Place::BelowEnd => (host.right() - w, host.bottom() + g),
             Place::AboveStart => (host.x, host.y - g - h),
             Place::Right => (host.right() + g, host.y + (host.h - h) / 2.0),
         };
@@ -524,6 +525,9 @@ impl Ui {
         } else {
             el.radius
         };
+        if let Some(layers) = el.shadow {
+            self.paint_shadow(rl, radius, layers, k * cx.xf.scale);
+        }
         if el.bg.is_some() || el.border.is_some() {
             let fill = el.bg.unwrap_or_default();
             let border = el.border.filter(|_| !el.dashed).map(|(w, c)| (w * k, c));
@@ -1083,6 +1087,38 @@ impl Ui {
     }
 
     /// An SVG's coverage at `w`×`h` physical pixels, kept with the icons.
+    /// A box shadow under `rl`: the layers blurred into one mask, drawn
+    /// black. CSS blurs by a radius; a Gaussian's deviation is half of it.
+    fn paint_shadow(&mut self, rl: Rect, radius: f32, layers: &[(f32, f32, f32, f32)], px: f32) {
+        let pad = layers
+            .iter()
+            .map(|(dy, blur, spread, _)| dy.abs() + blur + spread.max(0.0))
+            .fold(0.0_f32, f32::max)
+            .ceil();
+        let (w, h) = (rl.w + 2.0 * pad, rl.h + 2.0 * pad);
+        let mut svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\">"
+        );
+        for (i, (dy, blur, spread, alpha)) in layers.iter().enumerate() {
+            let r = (radius + spread).max(0.0);
+            svg += &format!(
+                "<filter id=\"b{i}\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\"><feGaussianBlur stdDeviation=\"{}\"/></filter><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{r}\" fill=\"#fff\" fill-opacity=\"{alpha}\" filter=\"url(#b{i})\"/>",
+                blur / 2.0,
+                pad - spread,
+                pad - spread + dy,
+                (rl.w + 2.0 * spread).max(0.0),
+                (rl.h + 2.0 * spread).max(0.0),
+            );
+        }
+        svg += "</svg>";
+        let size = ((w * px).round() as u32, (h * px).round() as u32);
+        if let Some(uv) = self.svg_raster(&svg, size) {
+            let k = self.scale();
+            let r = Rect::new(rl.x - pad, rl.y - pad, w, h).scaled(k);
+            self.scene.sprite(r, uv, Rgba::BLACK, false);
+        }
+    }
+
     fn svg_raster(&mut self, svg: &str, (w, h): (u32, u32)) -> Option<[f32; 4]> {
         if w == 0 || h == 0 {
             return None;

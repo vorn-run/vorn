@@ -13,6 +13,7 @@ pub use vornui::{
     Cursor, El, Event, Id, Input, Laid, Offscreen, Place, Rect, RenderMode, Rgba, Sense, Ui,
     UiConfig, WindowRequest,
 };
+pub use vornui::{icons, menu, theme, widgets};
 pub use vornui::{TextEdit, MOVE_SLOP};
 
 /// The terminal cell at `scale`, in logical pixels, without a GPU.

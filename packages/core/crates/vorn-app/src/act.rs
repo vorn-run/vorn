@@ -54,6 +54,15 @@ pub enum Act {
     /// Asks before closing a session.
     AskClose(String),
     CloseSession(String),
+    /// Stows a card in the session dock, or brings it back
+    /// (`toggleMinimized`).
+    ToggleMinimized(String),
+    /// Folds the session dock into its chip, or opens it out.
+    ToggleDock,
+    /// Opens or closes the dock's popover.
+    DockPopover,
+    /// Opens a run on the workflows landing (`showRun`), by key.
+    ShowRun(String),
     Resume(String),
     Paste(String),
     FitToDevice(String),

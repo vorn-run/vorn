@@ -8,38 +8,85 @@ use std::time::Duration;
 
 use crate::scene::Rgba;
 
-/// Colours from `theme.css`.
-pub mod color {
-    use super::Rgba;
+/// The palette as `0xRRGGBB`: the one place each value is written.
+/// [`color`] wraps these as [`Rgba`]; apps that keep `u32`s read them here.
+pub mod rgb {
+    pub const BRONZO: u32 = 0xc9972a;
+    pub const BRONZO_DARK: u32 = 0xb8862a;
+    pub const DANGER: u32 = 0xd4623f;
+    pub const INK: u32 = 0xfaf9f7;
+    pub const STATUS_SLATE: u32 = 0x7d8590;
+    pub const STATUS_BLUE: u32 = 0x6f8faf;
+    pub const STATUS_SAGE: u32 = 0x7d9471;
+    pub const DIFF_ADD: u32 = 0x7ea96a;
+    pub const DIFF_REMOVE: u32 = 0xc96f62;
+    pub const SURFACE_BASE: u32 = 0x0d0d0f;
+    pub const SURFACE_SUNKEN: u32 = 0x141416;
+    pub const SURFACE_PANEL: u32 = 0x101012;
+    pub const SURFACE_OVERLAY: u32 = 0x1c1c20;
+    pub const SURFACE_RAISED: u32 = SURFACE_SUNKEN;
+    pub const SURFACE_NODE: u32 = SURFACE_SUNKEN;
+    pub const WHITE: u32 = 0xffffff;
+    pub const BLACK: u32 = 0x000000;
 
-    pub const BRONZO: Rgba = Rgba::hex(0xc9972a);
-    pub const BRONZO_DARK: Rgba = Rgba::hex(0xb8862a);
-    pub const DANGER: Rgba = Rgba::hex(0xd4623f);
-    pub const INK: Rgba = Rgba::hex(0xfaf9f7);
+    /// Tailwind v4's palette (its OKLCH values in sRGB), the steps in use.
+    pub const GRAY_100: u32 = 0xf3f4f6;
+    pub const GRAY_200: u32 = 0xe5e7eb;
+    pub const GRAY_300: u32 = 0xd1d5dc;
+    pub const GRAY_400: u32 = 0x99a1af;
+    pub const GRAY_500: u32 = 0x6a7282;
+    pub const GRAY_600: u32 = 0x4a5565;
+    pub const GRAY_700: u32 = 0x364153;
+    pub const GREEN_400: u32 = 0x05df72;
+    pub const GREEN_500: u32 = 0x00c758;
+    pub const YELLOW_500: u32 = 0xedb200;
+    pub const RED_400: u32 = 0xff6467;
+    pub const RED_500: u32 = 0xfb2c36;
+    pub const AMBER_400: u32 = 0xffba00;
+    pub const AMBER_500: u32 = 0xfe9a00;
+    pub const BLUE_400: u32 = 0x54a2ff;
+    pub const BLUE_500: u32 = 0x2b7fff;
+}
+
+/// Colours from `theme.css` and Tailwind, ready to paint.
+pub mod color {
+    use super::{rgb, Rgba};
+
+    pub const BRONZO: Rgba = Rgba::hex(rgb::BRONZO);
+    pub const BRONZO_DARK: Rgba = Rgba::hex(rgb::BRONZO_DARK);
+    pub const DANGER: Rgba = Rgba::hex(rgb::DANGER);
+    pub const INK: Rgba = Rgba::hex(rgb::INK);
     pub const INK_SECONDARY: Rgba = Rgba::white(0.55);
     pub const INK_FAINT: Rgba = Rgba::white(0.35);
     pub const INK_GHOST: Rgba = Rgba::white(0.18);
-    pub const STATUS_SLATE: Rgba = Rgba::hex(0x7d8590);
-    pub const STATUS_BLUE: Rgba = Rgba::hex(0x6f8faf);
-    pub const STATUS_SAGE: Rgba = Rgba::hex(0x7d9471);
-    pub const DIFF_ADD: Rgba = Rgba::hex(0x7ea96a);
-    pub const DIFF_REMOVE: Rgba = Rgba::hex(0xc96f62);
-    pub const SURFACE_BASE: Rgba = Rgba::hex(0x0d0d0f);
-    pub const SURFACE_SUNKEN: Rgba = Rgba::hex(0x141416);
-    pub const SURFACE_PANEL: Rgba = Rgba::hex(0x101012);
-    pub const SURFACE_OVERLAY: Rgba = Rgba::hex(0x1c1c20);
+    pub const STATUS_SLATE: Rgba = Rgba::hex(rgb::STATUS_SLATE);
+    pub const STATUS_BLUE: Rgba = Rgba::hex(rgb::STATUS_BLUE);
+    pub const STATUS_SAGE: Rgba = Rgba::hex(rgb::STATUS_SAGE);
+    pub const DIFF_ADD: Rgba = Rgba::hex(rgb::DIFF_ADD);
+    pub const DIFF_REMOVE: Rgba = Rgba::hex(rgb::DIFF_REMOVE);
+    pub const SURFACE_BASE: Rgba = Rgba::hex(rgb::SURFACE_BASE);
+    pub const SURFACE_SUNKEN: Rgba = Rgba::hex(rgb::SURFACE_SUNKEN);
+    pub const SURFACE_PANEL: Rgba = Rgba::hex(rgb::SURFACE_PANEL);
+    pub const SURFACE_OVERLAY: Rgba = Rgba::hex(rgb::SURFACE_OVERLAY);
     pub const SURFACE_RAISED: Rgba = SURFACE_SUNKEN;
     pub const SURFACE_NODE: Rgba = SURFACE_SUNKEN;
 
-    /// Tailwind v4's grays (its OKLCH values in sRGB).
-    pub const GRAY_100: Rgba = Rgba::hex(0xf3f4f6);
-    pub const GRAY_200: Rgba = Rgba::hex(0xe5e7eb);
-    pub const GRAY_300: Rgba = Rgba::hex(0xd1d5dc);
-    pub const GRAY_400: Rgba = Rgba::hex(0x99a1af);
-    pub const GRAY_500: Rgba = Rgba::hex(0x6a7282);
-    pub const GRAY_600: Rgba = Rgba::hex(0x4a5565);
-    pub const GRAY_700: Rgba = Rgba::hex(0x364153);
-    pub const BLUE_500: Rgba = Rgba::hex(0x2b7fff);
+    pub const GRAY_100: Rgba = Rgba::hex(rgb::GRAY_100);
+    pub const GRAY_200: Rgba = Rgba::hex(rgb::GRAY_200);
+    pub const GRAY_300: Rgba = Rgba::hex(rgb::GRAY_300);
+    pub const GRAY_400: Rgba = Rgba::hex(rgb::GRAY_400);
+    pub const GRAY_500: Rgba = Rgba::hex(rgb::GRAY_500);
+    pub const GRAY_600: Rgba = Rgba::hex(rgb::GRAY_600);
+    pub const GRAY_700: Rgba = Rgba::hex(rgb::GRAY_700);
+    pub const GREEN_400: Rgba = Rgba::hex(rgb::GREEN_400);
+    pub const GREEN_500: Rgba = Rgba::hex(rgb::GREEN_500);
+    pub const YELLOW_500: Rgba = Rgba::hex(rgb::YELLOW_500);
+    pub const RED_400: Rgba = Rgba::hex(rgb::RED_400);
+    pub const RED_500: Rgba = Rgba::hex(rgb::RED_500);
+    pub const AMBER_400: Rgba = Rgba::hex(rgb::AMBER_400);
+    pub const AMBER_500: Rgba = Rgba::hex(rgb::AMBER_500);
+    pub const BLUE_400: Rgba = Rgba::hex(rgb::BLUE_400);
+    pub const BLUE_500: Rgba = Rgba::hex(rgb::BLUE_500);
     pub const WHITE: Rgba = Rgba::white(1.0);
 
     /// Text selection: the colour Chromium paints `::selection` with when
@@ -47,10 +94,112 @@ pub mod color {
     pub const SELECTION: Rgba = Rgba::rgba_const(0x33, 0x90, 0xff, 0.4);
 }
 
-/// Tailwind's type scale, logical pixels: (size, line height).
+/// The hairlines and washes the components draw with, as `white/[a]`
+/// alphas: borders step 0.04 → 0.12, hover washes 0.04 → 0.10.
+pub mod line {
+    use super::Rgba;
+    /// A card header's bottom rule (`border-white/[0.04]`).
+    pub const FAINT: Rgba = Rgba::white(0.04);
+    /// A pill or chip at rest (`border-white/[0.06]`).
+    pub const SOFT: Rgba = Rgba::white(0.06);
+    /// Tooltips, popovers and dividers (`border-white/[0.08]`).
+    pub const BASE: Rgba = Rgba::white(0.08);
+    /// Menus and dialogs (`border-white/10`).
+    pub const STRONG: Rgba = Rgba::white(0.10);
+    /// A pill or chip under the pointer (`border-white/[0.12]`).
+    pub const HOVER: Rgba = Rgba::white(0.12);
+}
+
+/// Tailwind's type scale, logical pixels: (size, line height). The
+/// bracketed sizes (`text-[11px]`) the components use take their own size
+/// as line height under `leading-none`, else Tailwind's inherited 1.5.
 pub mod text {
     pub const XS: (f32, f32) = (12.0, 16.0);
     pub const SM: (f32, f32) = (14.0, 20.0);
+    pub const BASE: (f32, f32) = (16.0, 24.0);
+    pub const LG: (f32, f32) = (18.0, 28.0);
+    pub const XL: (f32, f32) = (20.0, 28.0);
+    pub const XL2: (f32, f32) = (24.0, 32.0);
+    /// `text-[9px]` to `text-[13px]`, the chrome's small sizes.
+    pub const PX9: f32 = 9.0;
+    pub const PX10: f32 = 10.0;
+    pub const PX11: f32 = 11.0;
+    pub const PX13: f32 = 13.0;
+    /// `font-medium` and `font-semibold`.
+    pub const MEDIUM: u16 = 500;
+    pub const SEMIBOLD: u16 = 600;
+}
+
+/// The faces `global.css`'s stacks resolve to on each platform:
+/// `-apple-system, "Segoe UI", Roboto, sans-serif` and the terminal's
+/// monospace.
+pub mod font {
+    /// San Francisco's family name; fontdb's scan skips its file, so the
+    /// text system loads [`SF_FILE`] itself.
+    pub const SF: &str = "System Font";
+    pub const SF_FILE: &str = "/System/Library/Fonts/SFNS.ttf";
+
+    pub const UI: &str = if cfg!(target_os = "macos") {
+        SF
+    } else if cfg!(windows) {
+        "Segoe UI"
+    } else {
+        "DejaVu Sans"
+    };
+
+    /// Tracking in em that widens [`SF`]'s default instance to the width
+    /// browsers draw it at `size` px: they pick the optical size (`opsz`)
+    /// for the size, an axis cosmic-text cannot set. Fitted to Chromium's
+    /// widths of the same text at weights 400 to 600.
+    pub fn sf_tracking(size: f32, weight: u16) -> f32 {
+        const PX: [(f32, f32); 12] = [
+            (9.0, 0.683),
+            (10.0, 0.691),
+            (11.0, 0.695),
+            (12.0, 0.688),
+            (13.0, 0.669),
+            (14.0, 0.652),
+            (15.0, 0.626),
+            (16.0, 0.605),
+            (18.0, 0.545),
+            (20.0, 0.427),
+            (24.0, 0.320),
+            (40.0, 0.0),
+        ];
+        let px = match PX.iter().position(|&(s, _)| s >= size) {
+            None => 0.0,
+            Some(0) => PX[0].1,
+            Some(i) => {
+                let ((s0, p0), (s1, p1)) = (PX[i - 1], PX[i]);
+                p0 + (p1 - p0) * (size - s0) / (s1 - s0)
+            }
+        };
+        let px = px - 0.00024 * (f32::from(weight) - 400.0);
+        (px / size).max(0.0)
+    }
+
+    pub const MONO: &str = if cfg!(target_os = "macos") {
+        "Menlo"
+    } else if cfg!(windows) {
+        "Consolas"
+    } else {
+        "DejaVu Sans Mono"
+    };
+}
+
+/// Tailwind's spacing: `p-1` is one unit of 4 logical pixels.
+pub const fn space(units: f32) -> f32 {
+    units * 4.0
+}
+
+/// Tailwind's shadows, as (y offset, blur, spread, alpha) of black layers.
+pub mod shadow {
+    /// `shadow-lg`.
+    pub const LG: [(f32, f32, f32, f32); 2] = [(10.0, 15.0, -3.0, 0.1), (4.0, 6.0, -4.0, 0.1)];
+    /// `shadow-xl`.
+    pub const XL: [(f32, f32, f32, f32); 2] = [(20.0, 25.0, -5.0, 0.1), (8.0, 10.0, -6.0, 0.1)];
+    /// `shadow-2xl`.
+    pub const XL2: [(f32, f32, f32, f32); 1] = [(25.0, 50.0, -12.0, 0.25)];
 }
 
 /// Tailwind's radii, logical pixels.
@@ -65,6 +214,18 @@ pub mod radius {
 /// `transition-colors`: Tailwind's default duration and easing.
 pub const TRANSITION: Duration = Duration::from_millis(150);
 
+/// Motion beyond hover fades.
+pub mod motion {
+    use std::time::Duration;
+    /// `animate-pulse`: opacity 1 → 0.5 → 1, `cubic-bezier(0.4, 0, 0.6, 1)`.
+    pub const PULSE: Duration = Duration::from_secs(2);
+    /// `animate-spin`: one turn, linear.
+    pub const SPIN: Duration = Duration::from_secs(1);
+    /// How often a view that moves on its own asks for a frame: opacity
+    /// steps this small read as continuous.
+    pub const FRAME: Duration = Duration::from_millis(33);
+}
+
 /// Tailwind's `ease-in-out`, `cubic-bezier(0.4, 0, 0.2, 1)`.
 pub fn ease_in_out(t: f32) -> f32 {
     match t {
@@ -74,8 +235,8 @@ pub fn ease_in_out(t: f32) -> f32 {
     }
 }
 
-/// `y` of a CSS cubic-bezier timing function at `x`.
-fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32, x: f32) -> f32 {
+/// `y` of a CSS `cubic-bezier(x1, y1, x2, y2)` timing function at `x`.
+pub fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32, x: f32) -> f32 {
     let curve = |a: f32, b: f32, t: f32| {
         let u = 1.0 - t;
         3.0 * u * u * t * a + 3.0 * u * t * t * b + t * t * t

@@ -16,10 +16,12 @@ mod cpu;
 pub mod edit;
 pub mod element;
 pub mod gpu;
+pub mod icons;
 pub mod input;
 mod interact;
 #[cfg(target_os = "macos")]
 mod macos;
+pub mod menu;
 pub mod pace;
 mod render;
 pub mod scene;
