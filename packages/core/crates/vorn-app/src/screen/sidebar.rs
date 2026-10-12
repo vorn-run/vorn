@@ -236,7 +236,7 @@ pub(super) fn nav_item(
                 .row()
                 .grow()
                 .min_w0()
-                .child(text(label, 13.0, fg).line_height(18.0).truncate().silent()),
+                .child(text(label, 13.0, fg).line_height(19.5).truncate().silent()),
         )
         .child_if(badge.map(|n| {
             text(n.to_string(), 12.0, c(look::GRAY_500))

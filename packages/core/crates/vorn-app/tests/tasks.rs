@@ -290,7 +290,22 @@ fn the_editor_runs_slash_commands_carries_lists_and_formats_a_selection() {
         control("toolbar", task(TaskAct::New("todo".into()))),
     );
     let desc = desc_id(Form::Dialog);
-    shot.click(&mut app, desc);
+    // At rest the description is drawn; a click edits its markdown.
+    shot.save(&mut app, "task-dialog-rendered");
+    shot.click(
+        &mut app,
+        control("task-check.4", task(TaskAct::CheckItem(Form::Dialog, 4))),
+    );
+    assert!(shot
+        .ui
+        .edit_text(desc)
+        .contains("- [x] Criterion 1\n- [ ] Criterion 2"));
+    shot.save(&mut app, "task-dialog-checked");
+    shot.click(
+        &mut app,
+        control("task-desc-preview", task(TaskAct::EditDesc(Form::Dialog))),
+    );
+    assert!(shot.ui.focused(desc));
     shot.ui.set_edit_text(desc, "");
     shot.type_text(&mut app, "/task");
     shot.save(&mut app, "task-slash");

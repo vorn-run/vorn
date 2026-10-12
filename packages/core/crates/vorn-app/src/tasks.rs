@@ -361,6 +361,10 @@ pub enum TaskAct {
     RemoveImage(Form, String),
     /// A slash command, by index into [`SLASH`].
     Slash(Form, usize),
+    /// The rendered description clicked: edit its markdown.
+    EditDesc(Form),
+    /// A task item's box in the rendered description, by source line.
+    CheckItem(Form, usize),
     Format(Form, Mark),
     /// "Add link": the toolbar asks for the address.
     StartLink(Form),

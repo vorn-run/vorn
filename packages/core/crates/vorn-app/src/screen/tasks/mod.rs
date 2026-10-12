@@ -1128,16 +1128,25 @@ pub(in crate::screen) fn agent_items(s: &Screen<'_>, form: Form) -> Vec<Item> {
     items
 }
 
+/// How a picker's trigger is drawn: `StatusPicker` is bare,
+/// `ProjectPicker` adds a chevron, `AgentPicker` a chevron in an outline.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Trigger {
+    Bare,
+    Chevron,
+    Outlined,
+}
+
 /// A picker's trigger: an icon and a label that open `kind`.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn picker(
+fn picker(
     s: &Screen<'_>,
     place: &str,
     kind: MenuKind,
     icon: El,
     label: &str,
     color: Rgba,
-    pill: bool,
+    look: Trigger,
     disabled: bool,
 ) -> El {
     let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
@@ -1148,77 +1157,94 @@ pub(super) fn picker(
         .row()
         .items_center()
         .gap(6.0)
+        .px(6.0)
+        .py(2.0)
+        .rounded(4.0)
+        .bg(white(0.0).mix(white(0.04), hot))
         .role(Role::Button, label)
         .has_popup()
         .expanded(open)
         .child(icon)
         .child(
-            text(label, if pill { 11.0 } else { 12.0 }, color)
-                .line_height(16.0)
+            text(label, 12.0, color)
+                .line_height(18.0)
                 .truncate()
                 .silent(),
         );
+    if look != Trigger::Bare {
+        b = b.child(ico("chevron-down", 11.0, 2.0, c(look::GRAY_500)));
+    }
+    b = if look == Trigger::Outlined {
+        b.border(1.0, white(0.12).mix(white(0.25), hot))
+    } else {
+        // `-mx-1.5`: the label lines up with the text around it.
+        b.mx(-6.0)
+    };
     if !disabled {
         b = b.on(Action::Click);
     }
-    if pill {
-        b.px(8.0)
-            .py(4.0)
-            .rounded(6.0)
-            .border(1.0, white(0.08))
-            .bg(white(0.03).mix(white(0.06), hot.max(if open { 1.0 } else { 0.0 })))
-    } else {
-        b.px(6.0)
-            .py(2.0)
-            .rounded(4.0)
-            .bg(white(0.0).mix(white(0.04), hot))
-    }
+    b
 }
 
-pub(super) fn status_picker(s: &Screen<'_>, form: Form, pill: bool, disabled: bool) -> El {
+pub(super) fn status_picker(s: &Screen<'_>, form: Form, disabled: bool) -> El {
     let status = s.st.tasks.form_ref(form).status.clone();
     let st = tasks::status(&status);
     picker(
         s,
         "task-status-picker",
         MenuKind::TaskStatus(form),
-        ico(st.icon, if pill { 12.0 } else { 13.0 }, 2.0, tone(&status)),
+        ico(st.icon, 13.0, 2.0, tone(&status)),
         st.label,
         tone(&status),
-        pill,
+        Trigger::Bare,
         disabled,
     )
 }
 
-pub(super) fn project_picker(s: &Screen<'_>, form: Form, pill: bool) -> El {
+pub(super) fn project_picker(s: &Screen<'_>, form: Form) -> El {
     let p = &s.st.tasks.form_ref(form).project;
-    let label = if p.is_empty() { "Project" } else { p.as_str() };
+    let label = if p.is_empty() {
+        "Select project..."
+    } else {
+        p.as_str()
+    };
     picker(
         s,
         "task-project-picker",
         MenuKind::TaskProject(form),
-        ico("folder", if pill { 12.0 } else { 13.0 }, 2.0, secondary()),
+        s.store.projects.iter().find(|q| &q.name == p).map_or_else(
+            || ico("folder", 14.0, 1.5, c(look::GRAY_500)),
+            |q| crate::screen::sidebar_project_icon(q, 14.0),
+        ),
         label,
-        if p.is_empty() { faint() } else { secondary() },
-        pill,
+        if p.is_empty() {
+            c(look::GRAY_600)
+        } else {
+            c(look::GRAY_300)
+        },
+        Trigger::Chevron,
         false,
     )
 }
 
-pub(super) fn agent_picker(s: &Screen<'_>, form: Form, pill: bool) -> El {
+pub(super) fn agent_picker(s: &Screen<'_>, form: Form) -> El {
     let a = s.st.tasks.form_ref(form).agent.as_deref();
-    let label = a.map_or(
-        if pill { "Agent" } else { "None" },
-        crate::screen::menus::agent_name,
-    );
+    let icon = match a {
+        Some(k) => crate::screen::agent_icon(s, k, 14.0),
+        None => ico("bot", 14.0, 2.0, c(look::GRAY_500)),
+    };
     picker(
         s,
         "task-agent-picker",
         MenuKind::TaskAgent(form),
-        ico("bot", if pill { 12.0 } else { 13.0 }, 1.5, secondary()),
-        label,
-        if a.is_some() { secondary() } else { faint() },
-        pill,
+        icon,
+        a.map_or("Unassigned", crate::screen::menus::agent_name),
+        if a.is_some() {
+            c(look::GRAY_300)
+        } else {
+            c(look::GRAY_600)
+        },
+        Trigger::Outlined,
         false,
     )
 }

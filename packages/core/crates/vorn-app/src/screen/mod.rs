@@ -239,3 +239,13 @@ mod tests {
         assert_eq!(truncate("ab cd", 3), "ab\u{2026}");
     }
 }
+
+/// A dashed outline over a `w`×`h` box.
+pub(crate) fn dashed(w: f32, h: f32, r: f32, color: Rgba) -> El {
+    let svg = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"><rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{}\" rx=\"{r}\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"1\" stroke-dasharray=\"3 3\"/></svg>",
+        w - 1.0,
+        h - 1.0
+    );
+    crate::ui::shape(svg, w, h, color).absolute(0.0, 0.0)
+}

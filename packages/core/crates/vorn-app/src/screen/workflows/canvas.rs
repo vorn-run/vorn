@@ -11,6 +11,7 @@ use crate::app::canvas::{card_id, mini_id, pane_id, panel_width, port_id};
 use crate::canvas::{self, Card, Element, Elements, Viewport, LOOP_HEADER, PLUS};
 use crate::look;
 use crate::runs::{self, s as sv};
+use crate::screen::dashed;
 use crate::screen::{c, ico, white, Screen};
 use crate::ui::{div, shape, text, tooltip, Action, Cursor, El, Id, Rgba, Role, Sense};
 use crate::workflows::{self as wf, Anchor, Draft, Gesture, Panel, WfAct};
@@ -363,16 +364,6 @@ fn add_trigger(s: &Screen<'_>) -> El {
         .child(dashed(280.0, 58.0, 8.0, border))
         .child(ico("zap", 14.0, 2.0, fg))
         .child(text("Add a trigger", 13.0, fg).line_height(19.5).silent())
-}
-
-/// A dashed outline over a `w`×`h` box.
-fn dashed(w: f32, h: f32, r: f32, color: Rgba) -> El {
-    let svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"><rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{}\" rx=\"{r}\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"1\" stroke-dasharray=\"3 3\"/></svg>",
-        w - 1.0,
-        h - 1.0
-    );
-    shape(svg, w, h, color).absolute(0.0, 0.0)
 }
 
 /// `HANDLE_CLASS`: a port, 7 px, ringed.

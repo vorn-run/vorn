@@ -42,7 +42,7 @@ fn head_btn(
 }
 
 fn header(s: &Screen<'_>, task: Option<&TaskConfig>) -> El {
-    let mut row = div().row().items_center().gap(8.0);
+    let mut row = div().row().w_full().items_center().gap(8.0);
     row = match task {
         None => row.child(
             div().grow().child(
@@ -176,12 +176,12 @@ fn properties(s: &Screen<'_>, task: Option<&TaskConfig>) -> El {
         .border_bottom(1.0, white(0.06))
         .child(prop(
             "Status",
-            status_picker(s, Form::Detail, false, task.is_none()),
+            status_picker(s, Form::Detail, task.is_none()),
         ))
-        .child(prop("Project", project_picker(s, Form::Detail, false)))
+        .child(prop("Project", project_picker(s, Form::Detail)))
         .child(prop("Branch", branch))
         .child(prop("Worktree", worktree))
-        .child(prop("Agent", agent_picker(s, Form::Detail, false)));
+        .child(prop("Agent", agent_picker(s, Form::Detail)));
     let date = |icon: &str, iso: &str| {
         div()
             .row()
@@ -291,9 +291,14 @@ pub(super) fn images(s: &Screen<'_>, form: Form, size: f32) -> El {
         .on(Action::Click)
         .size(size, size)
         .rounded(8.0)
-        .border(1.0, white(0.10 + 0.10 * hot))
         .center()
         .role(Role::Button, "Add images")
+        .child(crate::screen::dashed(
+            size,
+            size,
+            8.0,
+            white(0.10 + 0.10 * hot),
+        ))
         .child(ico(
             "image-plus",
             if size < 60.0 { 16.0 } else { 18.0 },

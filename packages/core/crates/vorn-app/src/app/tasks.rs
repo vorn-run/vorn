@@ -614,6 +614,18 @@ impl App {
                 self.st.tasks.slash = 0;
                 self.set_desc(ui, form, &text, caret);
             }
+            TaskAct::EditDesc(form) => {
+                let id = desc_id(form);
+                let end = ui.edit_text(id).len();
+                ui.set_focus(Some(id));
+                ui.edit_mut(id).move_to(end, false);
+            }
+            TaskAct::CheckItem(form, line) => {
+                let id = desc_id(form);
+                let text = crate::markdown::toggle_task(ui.edit_text(id), line);
+                ui.set_edit_text(id, &text);
+                self.touch(form);
+            }
             TaskAct::Format(form, mark) => {
                 let Some(edit) = ui.edit(desc_id(form)) else {
                     return;
