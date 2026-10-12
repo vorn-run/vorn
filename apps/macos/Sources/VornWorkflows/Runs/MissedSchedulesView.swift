@@ -13,10 +13,12 @@ struct MissedSchedulesView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
                         LucideIcon(.triangleAlert, size: 16).foregroundStyle(Theme.amber400)
-                        Text("Missed Schedules").font(.system(size: 16, weight: .medium)).foregroundStyle(Color.white)
+                        Text("Missed Schedules").font(.system(size: 16, weight: .medium)).frame(height: 24).foregroundStyle(Color.white)
                     }
                     Text("These workflows were scheduled while Vorn was closed.")
                         .font(.system(size: 14))
+                        .lineSpacing(3)
+                        .frame(minHeight: 20)
                         .foregroundStyle(Theme.gray500)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -36,6 +38,7 @@ struct MissedSchedulesView: View {
                         Button(action: store.skipMissed) {
                             Text("Skip All")
                                 .font(.system(size: 14))
+                                .frame(height: 20)
                                 .foregroundStyle(hovered ? Theme.gray200 : Theme.gray400)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 8)
@@ -49,6 +52,7 @@ struct MissedSchedulesView: View {
                         Button(action: store.runMissedSelected) {
                             Text("Run Selected (\(count))")
                                 .font(.system(size: 14, weight: .medium))
+                                .frame(height: 20)
                                 .foregroundStyle(Color.white)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 8)
@@ -77,12 +81,13 @@ struct MissedSchedulesView: View {
                 HStack(spacing: 12) {
                     CheckSquare(checked: checked, tint: Theme.blue500)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name).font(.system(size: 14)).foregroundStyle(Theme.gray200)
+                        Text(item.name).font(.system(size: 14)).frame(height: 20).foregroundStyle(Theme.gray200)
                         HStack(spacing: 4) {
                             LucideIcon(.clock, size: 10)
                             Text(item.scheduledLabel)
                         }
                         .font(.system(size: 11))
+                        .frame(height: 16.5)
                         .foregroundStyle(Theme.gray500)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -241,6 +241,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         if let raw = value("--missed"), let json = try? JSONDecoder().decode(JSONValue.self, from: Data(raw.utf8)) {
             features.workflows.surfaces.missed = MissedSchedule.list(json)
             features.workflows.surfaces.missedSelected = Set(features.workflows.surfaces.missed.map(\.workflowId))
+            if let off = value("--missed-unselect") { features.workflows.surfaces.missedSelected.remove(off) }
         }
         if let target = value("--workflow-menu")?.split(separator: "@"), target.count == 2,
            let wf = features.workflows.workflows.first(where: { $0.name == target[0] }) {

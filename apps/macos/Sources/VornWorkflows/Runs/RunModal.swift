@@ -33,7 +33,7 @@ extension View {
             .foregroundStyle(Color.white)
             .frame(minHeight: 19.5)
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.white(0.06), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.white(0.1), lineWidth: 1))
@@ -116,7 +116,7 @@ struct FormDropdown: View {
                 .font(.system(size: 13))
                 .frame(minHeight: 19.5)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.vertical, 9)
                 .background(Theme.white(0.06), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.radiusMd)

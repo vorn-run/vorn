@@ -45,6 +45,7 @@ struct RunPromptView: View {
                 LucideIcon(.zap, size: 14).foregroundStyle(Theme.blue400)
                 Text("Run \"\(prompt.workflow.name)\"")
             }
+            .frame(height: 22.5)
             .font(.system(size: 15, weight: .medium))
             .foregroundStyle(Color.white)
             Text(
@@ -53,6 +54,7 @@ struct RunPromptView: View {
                     : "This workflow needs a few details before it runs."
             )
             .font(.system(size: 12))
+            .lineSpacing(3.5)
             .foregroundStyle(Theme.gray500)
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -96,6 +98,7 @@ struct RunPromptView: View {
                 Button(action: store.cancelPrompt) {
                     Text("Cancel")
                         .font(.system(size: 13))
+                        .frame(height: 19.5)
                         .foregroundStyle(hovered ? Color.white : Theme.gray300)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -108,6 +111,7 @@ struct RunPromptView: View {
                 Button(action: store.submitPrompt) {
                     Text("Run")
                         .font(.system(size: 13))
+                        .frame(height: 19.5)
                         .foregroundStyle(Color.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
@@ -141,6 +145,7 @@ struct FieldLabel: View {
             if required { Text("*").foregroundStyle(Theme.danger) }
         }
         .font(.system(size: 11, weight: .medium))
+        .frame(height: 16.5)
         .foregroundStyle(Theme.gray500)
     }
 }
@@ -153,8 +158,7 @@ struct BranchField: View {
     var body: some View {
         HStack(spacing: 6) {
             LucideIcon(.gitBranch, size: 12).foregroundStyle(Theme.gray500)
-            TextField("", text: $text, prompt: Text(placeholder).foregroundColor(Theme.gray600))
-                .textFieldStyle(.plain)
+            BareTextInput(placeholder: placeholder, text: $text)
         }
         .formInput()
     }
@@ -179,7 +183,8 @@ struct RunInputFields: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.gray500)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
+                        // A textarea sits on the text baseline, which leaves a gap under it.
+                        .padding(.top, def.type == .textarea ? 9 : 4)
                 }
             }
             .zIndex(openPicker == def.key ? 10 : 0)
@@ -224,8 +229,7 @@ struct RunInputFields: View {
                 text: text, placeholder: (def.placeholder?.isEmpty == false ? def.placeholder : nil) ?? "branch name")
                 .accessibilityLabel(def.displayLabel)
         case .text:
-            TextField("", text: text, prompt: def.placeholder.map { Text($0).foregroundColor(Theme.gray600) })
-                .textFieldStyle(.plain)
+            BareTextInput(placeholder: def.placeholder ?? "", text: text)
                 .formInput()
                 .accessibilityLabel(def.displayLabel)
         }
@@ -253,8 +257,7 @@ private struct NumberInput: View {
     }
 
     var body: some View {
-        TextField("", text: $text, prompt: Text(placeholder).foregroundColor(Theme.gray600))
-            .textFieldStyle(.plain)
+        BareTextInput(placeholder: placeholder, text: $text)
             .formInput()
             .onChange(of: text) { _, t in onChange(RunInputs.parseNumber(t)) }
     }

@@ -107,6 +107,44 @@ struct WorkflowFilesLiveTests {
         #expect(await until { store.toast == "That is not a workflow file" }, "toast: \(store.toast ?? "-")")
     }
 
+    /// Missed Schedules: Run Selected starts only the ticked workflows that still exist.
+    @Test func missedSchedulesRunSelected() async throws {
+        guard let server = try TestVornd.launch() else { return }
+        defer { server.stop() }
+        let vorn = VornStore(dataDir: server.dataDir, readOnly: false)
+        vorn.start()
+        defer { vorn.stop() }
+        #expect(await until(timeout: 15) { vorn.phase == .connected })
+        try #require(vorn.phase == .connected)
+        let client = vorn.client
+        let store = WorkflowsStore(backend: LiveWorkflowsBackend(client: client))
+        for (id, name) in [("wf-m1", "Morning"), ("wf-m2", "Evening")] {
+            try await client.createWorkflow(WorkflowDefinition(
+                id: id, name: name,
+                nodes: [
+                    WorkflowNode(id: "trigger", type: .trigger, label: "Trigger", config: ["triggerType": "recurring", "cron": "0 3 * * *"]),
+                    WorkflowNode(id: "say", type: .script, label: "Say", slug: "say", config: [
+                        "scriptType": "bash", "scriptContent": "echo \(name)", "cwd": "/tmp",
+                    ], position: .init(x: 0, y: 120)),
+                ],
+                edges: [WorkflowEdge(id: "e0", source: "trigger", target: "say")], workspaceId: "personal"))
+        }
+        await store.reload()
+        let payload: JSONValue = [
+            ["workflow": ["id": "wf-m1", "name": "Morning"], "scheduledFor": "2026-10-12T03:00:00.000Z"],
+            ["workflow": ["id": "wf-m2", "name": "Evening"], "scheduledFor": "2026-10-12T03:00:00.000Z"],
+            ["workflow": ["id": "wf-gone", "name": "Gone"], "scheduledFor": "2026-10-12T03:00:00.000Z"],
+        ]
+        store.surfaces.missed = MissedSchedule.list(payload)
+        store.surfaces.missedSelected = Set(store.surfaces.missed.map(\.workflowId))
+        store.toggleMissed("wf-m2")
+        store.runMissedSelected()
+        #expect(store.surfaces.missed.isEmpty)
+        #expect(await until { (try? await client.listRuns(workflowId: "wf-m1", limit: 5).first?.status) == .success })
+        #expect(try await client.listRuns(workflowId: "wf-m2", limit: 5).isEmpty)
+        #expect(store.toast == nil, "toast: \(store.toast ?? "-")")
+    }
+
     @discardableResult
     func until(timeout: TimeInterval = 10, _ check: @MainActor () async -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
