@@ -269,11 +269,19 @@ extension WorkflowsStore {
 
         let pending = imported.unresolved.map(WorkflowFiles.describeRequirement).joined(separator: ", ")
         let note = !pending.isEmpty ? " — still needs \(pending)" : existing != nil ? "" : " — enable it when ready"
-        notify("\(existing != nil ? "Updated" : "Imported") \"\(imported.definition.name)\"\(note)", tone: .success)
-        // No toast actions here, so the editor's "Still needs" list is primed rather than offered.
-        if !imported.unresolved.isEmpty {
-            importedRequirements = ImportedRequirements(workflowId: imported.definition.id, requirements: imported.unresolved)
-        }
+        let headline = "\(existing != nil ? "Updated" : "Imported") \"\(imported.definition.name)\"\(note)"
+        guard !imported.unresolved.isEmpty else { return notify(headline, tone: .success) }
+        // What it still needs is best answered where the steps are.
+        let id = imported.definition.id, requirements = imported.unresolved
+        notify(headline, tone: .success, action: ToastAction(label: "Review") { [weak self] in
+            self?.openImported(ImportedRequirements(workflowId: id, requirements: requirements))
+        })
+    }
+
+    /// The toast's Review: the imported workflow's editor, its unbound steps listed.
+    func openImported(_ imported: ImportedRequirements) {
+        openWorkflow(imported.workflowId)
+        importedRequirements = imported
     }
 
     /// This machine's connections, enough to bind or name them; none when vornd cannot list them.

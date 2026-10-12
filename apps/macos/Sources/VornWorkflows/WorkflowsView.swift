@@ -55,8 +55,28 @@ struct ToastView: View {
                 }
                 Text(message)
                     .font(.system(size: 14))
+                    .lineSpacing(3)
+                    .padding(.vertical, 1.5)
                     .foregroundStyle(Theme.gray200)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                if let action = store.toastAction {
+                    Hovering { hovered in
+                        Button {
+                            store.toast = nil
+                            action.run()
+                        } label: {
+                            Text(action.label)
+                                .font(.system(size: 12))
+                                .foregroundStyle(hovered ? Color.white : Theme.gray300)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(hovered ? Theme.white(0.06) : .clear, in: RoundedRectangle(cornerRadius: Theme.radius))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .fixedSize()
+                    }
+                }
                 Hovering { hovered in
                     Button { store.toast = nil } label: {
                         Icon(.x, size: 12, weight: .semibold)

@@ -4,6 +4,17 @@ import VornCore
 
 public enum ToastTone: Sendable { case error, success, warning }
 
+/// A labelled button on a toast.
+public struct ToastAction {
+    public let label: String
+    public let run: @MainActor () -> Void
+
+    public init(label: String, run: @escaping @MainActor () -> Void) {
+        self.label = label
+        self.run = run
+    }
+}
+
 public enum WorkflowsTab: String, Sendable { case runs, review }
 
 public enum SidebarWorkflowFilter: String, Sendable, CaseIterable {
@@ -45,8 +56,13 @@ public final class WorkflowsStore {
         didSet {
             toastTone = nextTone ?? .error
             nextTone = nil
+            toastAction = nextAction
+            nextAction = nil
         }
     }
+    /// The toast's one button, like a toast's `actions` entry; it dismisses the toast itself.
+    public private(set) var toastAction: ToastAction?
+    @ObservationIgnored private var nextAction: ToastAction?
     public private(set) var toastTone: ToastTone = .error
     @ObservationIgnored private var nextTone: ToastTone?
     /// The open dropdown, drawn by `workflowsMenuHost`.
@@ -243,8 +259,9 @@ public final class WorkflowsStore {
     }
 
     /// Shows one toast; errors stay red, the rest carry their own tone.
-    public func notify(_ message: String, tone: ToastTone = .error) {
+    public func notify(_ message: String, tone: ToastTone = .error, action: ToastAction? = nil) {
         nextTone = tone
+        nextAction = action
         toast = message
     }
 

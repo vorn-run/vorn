@@ -158,7 +158,7 @@ struct WindowConfigurator: NSViewRepresentable {
 /// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`, `--tip N`,
 /// `--view sessions|tasks|workflows`, `--layout grid|tabs`, `--focused N`, `--filter STATUS`, `--columns N`,
 /// `--workflow NAME [--history] [--full-output] [--select LABEL] [--library [--library-query Q]] [--icon-picker] [--more] [--form-open more|agent|model|vars:PLACEHOLDER] [--panel-scroll PT]` opens a workflow's page,
-/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
+/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--export-workflow NAME@PATH` and `--drop-file PATH` export and import without a dialog, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
 @MainActor
 func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 {
     func value(_ flag: String) -> String? {
@@ -169,7 +169,8 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         size = CGSize(width: w, height: h)
     }
 
-    let store = VornStore(readOnly: true)
+    // An import writes, so a render that drops a file needs a writable connection to its test vornd.
+    let store = VornStore(readOnly: !args.contains("--drop-file"))
     let features = FeatureStores(client: store.client)
     let model = AppModel()
     model.persistsSidebar = false
@@ -218,6 +219,20 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
             await features.workflows.awaitFreshCatalog()
             features.workflows.newWorkflow()
             if args.contains("--trigger-library") { features.workflows.editor?.driveForRender(triggerLibrary: true) }
+        }
+        if let spec = value("--export-workflow")?.split(separator: "@"), spec.count == 2,
+           let wf = features.workflows.workflows.first(where: { $0.name == spec[0] }) {
+            let to = URL(fileURLWithPath: String(spec[1]))
+            features.workflows.workflowFiles = WorkflowFileIO(
+                save: { _, contents, _ in try contents.write(to: to, atomically: true, encoding: .utf8); return true },
+                pick: { nil })
+            features.workflows.exportWorkflow(wf)
+            try? await Task.sleep(for: .milliseconds(800))
+        }
+        if let path = value("--drop-file") {
+            features.workflows.projects = store.projects
+            features.workflows.importDroppedWorkflow([URL(fileURLWithPath: path)])
+            try? await Task.sleep(for: .milliseconds(800))
         }
         if let target = value("--workflow-menu")?.split(separator: "@"), target.count == 2,
            let wf = features.workflows.workflows.first(where: { $0.name == target[0] }) {
