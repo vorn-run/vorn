@@ -62,7 +62,8 @@ public struct LogReplayModal: View {
                         }
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(hovered ? Theme.gray200 : Theme.gray400)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .padding(.horizontal, 10)
+                        .frame(height: 27)
                         .background(Theme.white(hovered ? 0.08 : 0.04), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
                         .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.white(0.06), lineWidth: 1))
                     }

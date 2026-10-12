@@ -157,7 +157,7 @@ struct WindowConfigurator: NSViewRepresentable {
 /// Renders the main screen offscreen with live data from vornd (read-only),
 /// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`, `--tip N`,
 /// `--view sessions|tasks|workflows`, `--layout grid|tabs`, `--focused N`, `--filter STATUS`, `--columns N`,
-/// `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
+/// `--workflow NAME [--history] [--full-output]` opens a workflow's page, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
 @MainActor
 func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 {
     func value(_ flag: String) -> String? {
@@ -212,6 +212,14 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         }
     case .workflows:
         await features.workflows.reload()
+        if let name = value("--workflow"), let wf = features.workflows.workflows.first(where: { $0.name == name }) {
+            await features.workflows.openWorkflow(wf.id).value
+            features.workflows.historyOpen = args.contains("--history")
+            if args.contains("--full-output"),
+               let logs = features.workflows.workflowRuns.first?.nodeStates.compactMap(\.logs).first(where: { !$0.isEmpty }) {
+                features.workflows.showFullOutput(logs)
+            }
+        }
     }
 
     let visible = model.mainViewMode == .sessions ? model.visibleSessions(store) : []
@@ -277,7 +285,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
     // ImageRenderer leaves scroll views blank, so Tasks and the scrolling panels are drawn through a hosting view.
-    let scrolls = model.mainViewMode == .tasks || model.overlay == .shortcuts || model.overlay == .recent
+    let scrolls = model.mainViewMode != .sessions || model.overlay == .shortcuts || model.overlay == .recent
     let editorState = value("--editor")
     let image = scrolls ? await hostedImage(of: content, size: size) { root in
         if let editorState { RichEditorDriver.drive(root, editorState) }
