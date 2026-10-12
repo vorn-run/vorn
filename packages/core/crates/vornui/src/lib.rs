@@ -12,6 +12,7 @@
 
 mod a11y;
 pub mod atlas;
+mod backdrop;
 mod cpu;
 pub mod edit;
 pub mod element;
@@ -20,6 +21,7 @@ pub mod icons;
 pub mod input;
 mod interact;
 pub mod menu;
+pub mod motion;
 pub mod pace;
 mod render;
 pub mod scene;
@@ -38,9 +40,10 @@ pub use element::{
 pub use gpu::Gpu;
 pub use input::Input;
 pub use interact::{Event, WindowRequest, BLINK, MENU_IN, MIN_SPLIT, MOVE_SLOP, TOOLTIP_DELAY};
+pub use motion::{Animate, Transform, Transition};
 pub use pace::Pacer;
 pub use render::{Offscreen, RenderMode, OFFSCREEN_FORMAT};
-pub use scene::{Rect, Rgba, Scene};
+pub use scene::{Blur, Rect, Rgba, Scene, Shadow, TextGamma};
 pub use text::{TextStyle, TextSystem};
 pub use ui::{
     decode_png, rasterize_svg, rasterize_svg_rgba, write_png, CustomA11y, Laid, Ui, UiConfig,

@@ -16,7 +16,7 @@ use cosmic_text::{
 };
 
 use crate::atlas::Atlases;
-use crate::scene::{Rect, Rgba, Scene};
+use crate::scene::{Rect, Rgba, Scene, TextGamma};
 
 /// How a UI string looks. Sizes are logical pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -179,6 +179,9 @@ pub struct TextSystem {
     swash: SwashCache,
     /// Physical pixels per logical pixel.
     pub scale: f32,
+    /// How glyph coverage is corrected as it blends; [`TextGamma::OFF`]
+    /// draws masks as rasterized.
+    pub gamma: TextGamma,
     ui_family: &'static str,
     mono_family: &'static str,
     shaped: HashMap<ShapeKey, Rc<Shaped>>,
@@ -206,6 +209,7 @@ impl TextSystem {
             fonts,
             swash: SwashCache::new(),
             scale,
+            gamma: TextGamma::platform(),
             ui_family: ui,
             mono_family: mono,
             shaped: HashMap::new(),
@@ -439,7 +443,9 @@ impl TextSystem {
         color: Rgba,
     ) {
         for (g, line_y) in &sh.glyphs {
-            let p = g.physical((x, y + line_y), 1.0);
+            // x keeps cosmic-text's quarter-pixel bins; the baseline sits
+            // on a whole pixel so horizontal stems stay sharp.
+            let p = g.physical((x, (y + line_y).round()), 1.0);
             let Some(ra) = self.raster(atlases, p.cache_key) else {
                 continue;
             };
@@ -449,7 +455,7 @@ impl TextSystem {
                 ra.uv[2],
                 ra.uv[3],
             );
-            scene.sprite(rect, ra.uv, color, ra.colored);
+            scene.glyph(rect, ra.uv, color, ra.colored, self.gamma);
         }
     }
 
@@ -505,7 +511,7 @@ impl TextSystem {
                 }
             };
             if let Some(p) = piece {
-                put(scene, &p, x, y, color);
+                put(scene, &p, x, y, color, self.gamma);
             }
             return;
         }
@@ -521,17 +527,18 @@ impl TextSystem {
             }
         };
         for p in pieces.iter() {
-            put(scene, p, x, y, color);
+            put(scene, p, x, y, color, self.gamma);
         }
     }
 }
 
-fn put(scene: &mut Scene, p: &CellPiece, x: f32, y: f32, color: Rgba) {
+fn put(scene: &mut Scene, p: &CellPiece, x: f32, y: f32, color: Rgba, gamma: TextGamma) {
     let ra = &p.raster;
-    scene.sprite(
+    scene.glyph(
         Rect::new(x + p.dx, y + p.dy, ra.uv[2], ra.uv[3]),
         ra.uv,
         color,
         ra.colored,
+        gamma,
     );
 }

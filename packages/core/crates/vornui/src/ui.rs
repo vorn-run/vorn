@@ -116,6 +116,16 @@ struct Cx<'a> {
     xf: Xf,
 }
 
+/// A border `w` logical pixels wide at scale `k`, in whole physical pixels
+/// and never under one, so a 1px border is one crisp pixel at 1.5x too.
+fn border_px(w: f32, k: f32) -> f32 {
+    if w <= 0.0 {
+        0.0
+    } else {
+        (w * k + 0.01).floor().max(1.0)
+    }
+}
+
 /// Scale about `origin`, then shift: an element's `transform`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Xf {
@@ -519,13 +529,24 @@ impl Ui {
         } else {
             el.radius
         };
-        if let Some(layers) = el.shadow {
-            self.paint_shadow(rl, radius, layers, k * cx.xf.scale);
+        // Unscaled boxes snap to whole pixels; a scaling transform is mid
+        // animation, where snapping would make it judder.
+        let snap = cx.xf.scale == 1.0;
+        let bx = if snap { r.snapped() } else { r };
+        let stroke = |w: f32| if snap { border_px(w, k) } else { w * k };
+        if let Some(sigma) = el.backdrop_blur {
+            self.scene.backdrop_blur(bx, sigma * k, radius * k);
+        }
+        for s in &el.shadows {
+            self.scene.shadow(bx, radius * k, &s.scaled(k));
         }
         if el.bg.is_some() || el.border.is_some() {
             let fill = el.bg.unwrap_or_default();
-            let border = el.border.filter(|_| !el.dashed).map(|(w, c)| (w * k, c));
-            self.scene.quad(r, fill, radius * k, border);
+            let border = el
+                .border
+                .filter(|_| !el.dashed)
+                .map(|(w, c)| (stroke(w), c));
+            self.scene.quad(bx, fill, radius * k, border);
         }
         if let Some((w, c)) = el.border.filter(|_| el.dashed) {
             let svg = format!(
@@ -545,13 +566,14 @@ impl Ui {
         }
         for (side, rule) in el.rules.iter().enumerate() {
             let Some((w, c)) = *rule else { continue };
+            let w = stroke(w);
             let line = match side {
-                0 => Rect::new(x, y, rl.w, w),
-                1 => Rect::new(x + rl.w - w, y, w, rl.h),
-                2 => Rect::new(x, y + rl.h - w, rl.w, w),
-                _ => Rect::new(x, y, w, rl.h),
+                0 => Rect::new(bx.x, bx.y, bx.w, w),
+                1 => Rect::new(bx.right() - w, bx.y, w, bx.h),
+                2 => Rect::new(bx.x, bx.bottom() - w, bx.w, w),
+                _ => Rect::new(bx.x, bx.y, w, bx.h),
             };
-            self.scene.quad(line.scaled(k), c, 0.0, None);
+            self.scene.quad(line, c, 0.0, None);
         }
         if let Some(id) = el.id {
             if el.sense != Sense::NONE || el.action.is_some() || el.tip {
@@ -751,11 +773,13 @@ impl Ui {
         }
         if ring {
             let d = theme::focus::OFFSET + theme::focus::WIDTH;
+            let w = stroke(theme::focus::WIDTH);
+            let outer = rl.outset(d).scaled(k);
             self.scene.quad(
-                rl.outset(d).scaled(k),
+                if snap { outer.snapped() } else { outer },
                 Rgba::TRANSPARENT,
                 (theme::focus::RADIUS + d) * k,
-                Some((theme::focus::WIDTH * k, theme::focus::RING)),
+                Some((w, theme::focus::RING)),
             );
         }
         for ov in &el.overlays {
@@ -1052,38 +1076,6 @@ impl Ui {
     }
 
     /// An SVG's coverage at `w`×`h` physical pixels, kept with the icons.
-    /// A box shadow under `rl`: the layers blurred into one mask, drawn
-    /// black. CSS blurs by a radius; a Gaussian's deviation is half of it.
-    fn paint_shadow(&mut self, rl: Rect, radius: f32, layers: &[(f32, f32, f32, f32)], px: f32) {
-        let pad = layers
-            .iter()
-            .map(|(dy, blur, spread, _)| dy.abs() + blur + spread.max(0.0))
-            .fold(0.0_f32, f32::max)
-            .ceil();
-        let (w, h) = (rl.w + 2.0 * pad, rl.h + 2.0 * pad);
-        let mut svg = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\">"
-        );
-        for (i, (dy, blur, spread, alpha)) in layers.iter().enumerate() {
-            let r = (radius + spread).max(0.0);
-            svg += &format!(
-                "<filter id=\"b{i}\" x=\"-50%\" y=\"-50%\" width=\"200%\" height=\"200%\"><feGaussianBlur stdDeviation=\"{}\"/></filter><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"{r}\" fill=\"#fff\" fill-opacity=\"{alpha}\" filter=\"url(#b{i})\"/>",
-                blur / 2.0,
-                pad - spread,
-                pad - spread + dy,
-                (rl.w + 2.0 * spread).max(0.0),
-                (rl.h + 2.0 * spread).max(0.0),
-            );
-        }
-        svg += "</svg>";
-        let size = ((w * px).round() as u32, (h * px).round() as u32);
-        if let Some(uv) = self.svg_raster(&svg, size) {
-            let k = self.scale();
-            let r = Rect::new(rl.x - pad, rl.y - pad, w, h).scaled(k);
-            self.scene.sprite(r, uv, Rgba::BLACK, false);
-        }
-    }
-
     fn svg_raster(&mut self, svg: &str, (w, h): (u32, u32)) -> Option<[f32; 4]> {
         if w == 0 || h == 0 {
             return None;
