@@ -1176,7 +1176,13 @@ fn picker(
 }
 
 pub(super) fn status_picker(s: &Screen<'_>, form: Form, disabled: bool) -> El {
-    let status = s.st.tasks.form_ref(form).status.clone();
+    let f = s.st.tasks.form_ref(form);
+    // An open task's picker shows the task as it is now, moved from anywhere.
+    let live = (form == Form::Detail && f.editing)
+        .then(|| s.store.tasks.iter().find(|t| t.id == f.id))
+        .flatten()
+        .map(|t| t.status.to_string());
+    let status = live.unwrap_or_else(|| f.status.clone());
     let st = tasks::status(&status);
     picker(
         s,

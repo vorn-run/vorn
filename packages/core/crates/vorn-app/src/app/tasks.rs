@@ -543,8 +543,9 @@ impl App {
             }
             TaskAct::SetStatus(Form::Dialog, s) => self.st.tasks.dialog_form.status = s,
             TaskAct::SetStatus(Form::Detail, s) => {
-                let f = &self.st.tasks.detail_form;
+                let f = &mut self.st.tasks.detail_form;
                 if f.editing {
+                    f.status = s.clone();
                     let id = f.id.clone();
                     self.set_status(&id, &s);
                 }

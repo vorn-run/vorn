@@ -114,7 +114,7 @@ fn prop(label: &str, value: El) -> El {
             div()
                 .w(80.0)
                 .shrink0()
-                .child(text(label, 12.0, faint()).line_height(16.0).silent()),
+                .child(text(label, 12.0, faint()).line_height(18.0).silent()),
         )
         .child(value)
 }
@@ -145,7 +145,7 @@ fn properties(s: &Screen<'_>, task: Option<&TaskConfig>) -> El {
             .child(ico("folder-git-2", 13.0, 1.5, color))
             .child(
                 text(if on { "Enabled" } else { "Disabled" }, 12.0, color)
-                    .line_height(16.0)
+                    .line_height(18.0)
                     .silent(),
             )
     };
@@ -165,6 +165,7 @@ fn properties(s: &Screen<'_>, task: Option<&TaskConfig>) -> El {
                     TextStyle::ui(12.0),
                     secondary(),
                 )
+                .placeholder_color(faint())
                 .w_full(),
             ),
         );
@@ -190,7 +191,7 @@ fn properties(s: &Screen<'_>, task: Option<&TaskConfig>) -> El {
             .child(ico(icon, 11.0, 2.0, secondary()))
             .child(
                 text(tasks::long_date(iso), 12.0, secondary())
-                    .line_height(16.0)
+                    .line_height(18.0)
                     .silent(),
             )
     };
