@@ -422,7 +422,7 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
         .row()
         .items_center()
         .gap(8.0)
-        .pl(12.0)
+        .pl(s.lead())
         .pr(if s.chrome { 0.0 } else { 12.0 })
         .h(look::TOP_BAR_H - 1.0)
         .bg(c(look::SURFACE_RAISED));
@@ -446,7 +446,7 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
         .shrink0()
         .child(row)
         .child(div().h(1.0).w_full().bg(white(0.04)));
-    if s.chrome {
+    if s.chrome || s.traffic {
         s.acts.double(chrome::TITLE_BAR, Act::Collapse);
         bar.id(chrome::TITLE_BAR)
             .sense(Sense::WINDOW_DRAG | Sense::DOUBLE)
@@ -1020,6 +1020,9 @@ pub(super) fn tabs(s: &Screen<'_>) -> El {
         .items_center()
         .min_h(40.0)
         .bg(c(look::SURFACE_OVERLAY));
+    if s.traffic && !s.st.sidebar {
+        strip = strip.pl(look::TRAFFIC_LIGHT_PAD);
+    }
     if !s.st.sidebar {
         strip = strip.child(div().pl(8.0).child(chrome::nav_cluster(s)));
     }

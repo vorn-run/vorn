@@ -140,6 +140,10 @@ pub struct WindowOptions {
     pub min_size: Option<(f32, f32)>,
     /// The system's title bar and frame; without them the app draws its own.
     pub decorations: bool,
+    /// macOS: no title bar drawn, the traffic lights at this logical point
+    /// over the app's own top bar; the title still names the window for the
+    /// Dock and the window switcher.
+    pub inset_title: Option<(f32, f32)>,
     pub maximized: bool,
 }
 
@@ -149,6 +153,7 @@ impl WindowOptions {
             size,
             min_size: None,
             decorations: true,
+            inset_title: None,
             maximized: false,
         }
     }
@@ -216,6 +221,14 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         if let Some((w, h)) = o.min_size {
             attrs = attrs.with_min_inner_size(LogicalSize::new(w, h));
         }
+        #[cfg(target_os = "macos")]
+        if o.inset_title.is_some() {
+            use winit::platform::macos::WindowAttributesExtMacOS;
+            attrs = attrs
+                .with_titlebar_transparent(true)
+                .with_title_hidden(true)
+                .with_fullsize_content_view(true);
+        }
         let window = Arc::new(el.create_window(attrs).map_err(|e| e.to_string())?);
         let access =
             accesskit_winit::Adapter::with_event_loop_proxy(el, &window, self.proxy.clone());
@@ -263,6 +276,10 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
             });
         let make = self.make.take().ok_or("app already made")?;
         ui.set_maximized(window.is_maximized());
+        #[cfg(target_os = "macos")]
+        if let Some(at) = o.inset_title {
+            crate::macos::place_traffic_lights(&window, at);
+        }
         let app = make(&mut ui, Waker(self.proxy.clone()));
         window.set_visible(true);
         Ok(Live {
@@ -349,6 +366,11 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
             WindowEvent::ModifiersChanged(m) => self.mods = *m,
             WindowEvent::Resized(px) => {
                 l.ui.set_maximized(l.window.is_maximized());
+                // AppKit lays the buttons out again on every resize.
+                #[cfg(target_os = "macos")]
+                if let Some(at) = self.opts.inset_title {
+                    crate::macos::place_traffic_lights(&l.window, at);
+                }
                 if let (Present::Gpu { surface, config }, Some(g)) = (&mut l.present, &l.ui.gpu) {
                     config.width = px.width.max(1);
                     config.height = px.height.max(1);

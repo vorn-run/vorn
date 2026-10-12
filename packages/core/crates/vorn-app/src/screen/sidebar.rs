@@ -72,7 +72,11 @@ fn header(s: &Screen<'_>) -> El {
         .row()
         .items_center()
         .h(look::TOP_BAR_H)
-        .pl(12.0)
+        .pl(if s.traffic {
+            look::TRAFFIC_LIGHT_PAD
+        } else {
+            12.0
+        })
         .pr(12.0)
         .child(title)
         .child(tool(

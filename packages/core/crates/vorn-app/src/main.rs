@@ -79,6 +79,8 @@ fn shot(args: &Args) -> Result<(), String> {
     };
     let mut app = connect(args, Arc::new(|| {}))?;
     app.chrome = args.get("chrome") != Some("off");
+    // Drawn window controls stand in for the traffic lights.
+    app.traffic = cfg!(target_os = "macos") && !app.chrome;
     let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(scale));
     // The startup calls answer before the first frame is drawn.
     let until = Instant::now() + Duration::from_secs(5);
@@ -199,8 +201,10 @@ fn window(args: &Args) -> Result<(), String> {
     )?;
     let opts = WindowOptions {
         min_size: Some((800.0, 600.0)),
-        // macOS keeps its title bar; elsewhere the app draws its own.
+        // macOS keeps its traffic lights over the app's top bar, with no
+        // title drawn; elsewhere the app draws its own controls.
         decorations: cfg!(target_os = "macos"),
+        inset_title: cfg!(target_os = "macos").then_some(look::TRAFFIC_LIGHTS),
         ..WindowOptions::sized(look::WINDOW)
     };
     run_with("Vorn", opts, ui_config(1.0), move |_, wake| {

@@ -36,6 +36,10 @@ pub const INK_FAINT: f32 = 0.35;
 /// The window's first size, in logical pixels.
 pub const WINDOW: (f32, f32) = (1440.0, 900.0);
 pub const TOP_BAR_H: f32 = 40.0;
+/// Room for the macOS traffic lights at a bar's left end (`TRAFFIC_LIGHT_PAD_PX`).
+pub const TRAFFIC_LIGHT_PAD: f32 = 80.0;
+/// Where the traffic lights sit (`trafficLightPosition`).
+pub const TRAFFIC_LIGHTS: (f32, f32) = (16.0, 13.0);
 pub const SIDEBAR_W: f32 = 256.0;
 pub const COMPOSER_MAX_W: f32 = 800.0;
 /// The terminal font size, in points.

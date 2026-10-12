@@ -600,7 +600,7 @@ pub(super) fn left_extras(s: &Screen<'_>) -> El {
 
 /// Makes `el` the window's title bar when the app draws its own frame.
 pub(super) fn draggable(s: &Screen<'_>, el: El) -> El {
-    if !s.chrome {
+    if !s.chrome && !s.traffic {
         return el;
     }
     s.acts.double(TITLE_BAR, Act::ToggleMaximize);
@@ -625,7 +625,7 @@ pub(super) fn top_bar(s: &Screen<'_>) -> El {
         .items_center()
         .justify_between()
         .h(look::TOP_BAR_H - 1.0)
-        .pl(12.0)
+        .pl(s.lead())
         .pr(if s.chrome { 0.0 } else { 12.0 })
         .role(Role::Toolbar, "Toolbar")
         .child(left)

@@ -63,6 +63,8 @@ pub struct Screen<'a> {
     pub size: (f32, f32),
     /// The app draws its own window controls (no system title bar).
     pub chrome: bool,
+    /// macOS: the traffic lights sit over the top bar's left end.
+    pub traffic: bool,
 }
 
 impl Screen<'_> {
@@ -155,6 +157,17 @@ impl Screen<'_> {
             col = col.child_if(chrome::banner(self));
         }
         col.child(body)
+    }
+
+    /// The left padding of a bar at the window's top left: room for the
+    /// traffic lights on macOS (`TRAFFIC_LIGHT_PAD_PX`) while the sidebar,
+    /// which otherwise holds them, is closed.
+    pub fn lead(&self) -> f32 {
+        if self.traffic && !self.st.sidebar {
+            look::TRAFFIC_LIGHT_PAD
+        } else {
+            12.0
+        }
     }
 
     /// The grid's size: the window under the top bar, beside the sidebar.

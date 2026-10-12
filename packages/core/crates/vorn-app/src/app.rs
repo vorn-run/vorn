@@ -205,6 +205,8 @@ pub struct App {
     pub closed: bool,
     /// The app draws its own title bar and window controls.
     pub chrome: bool,
+    /// macOS: the traffic lights sit over the app's top bar.
+    pub traffic: bool,
     /// The last frame's size.
     size: (f32, f32),
     /// vornd's HTTP port, for pages it serves (a gate's review page).
@@ -255,6 +257,7 @@ impl App {
             agents: HashMap::new(),
             closed: false,
             chrome: !cfg!(target_os = "macos"),
+            traffic: cfg!(target_os = "macos"),
             size: look::WINDOW,
             port: ep.port,
             carried: Vec::new(),
@@ -1528,6 +1531,7 @@ impl App {
             agents: &self.agents,
             size: self.size,
             chrome: self.chrome,
+            traffic: self.traffic,
         }
     }
 
