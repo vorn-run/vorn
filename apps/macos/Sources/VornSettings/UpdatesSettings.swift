@@ -124,9 +124,18 @@ public struct UpdateBanner: View {
             if let cost {
                 Text(cost).font(.ui(10.5)).foregroundStyle(Theme.bronzo).padding(.top, 6).fixedSize(horizontal: false, vertical: true)
             }
-            QuietButton(label: "Restart to update", fontSize: 11, radius: Theme.radius, padding: (8, 4), action: onRestart)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 8)
+            Hovering { hover in
+                Button(action: onRestart) {
+                    Text("Restart to update").font(.ui(11)).foregroundStyle(Theme.gray300)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                        .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.white(hover ? 0.08 : 0.04)))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.white(0.08), lineWidth: 1))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 8)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)

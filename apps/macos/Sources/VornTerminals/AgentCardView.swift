@@ -352,6 +352,8 @@ struct CardStatusBar: View {
             }
             OpenInButton(projectPath: session.projectPath, git: git)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
         .font(.ui(11))
         .padding(.horizontal, 8)
         .frame(height: 22)

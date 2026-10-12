@@ -10,6 +10,7 @@ struct PaneIconButton: View {
     var strokeWidth: CGFloat = 2
     var active = false
     var disabled = false
+    var dimsWhenDisabled = true
     let action: () -> Void
 
     var body: some View {
@@ -23,7 +24,7 @@ struct PaneIconButton: View {
             }
             .buttonStyle(.plain)
             .disabled(disabled)
-            .opacity(disabled ? 0.4 : 1)
+            .opacity(disabled && dimsWhenDisabled ? 0.4 : 1)
         }
         .help(help)
         .accessibilityLabel(help)

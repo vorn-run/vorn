@@ -41,12 +41,12 @@ public struct BranchChip: View {
                         if session.isWorktree == true, let wt = session.worktreeName {
                             LucideIcon(.folderGit2, size: icon, strokeWidth: 1.5).foregroundStyle(Theme.inkSecondary)
                             Text(wt).font(.system(size: text, design: .monospaced)).foregroundStyle(Theme.inkSecondary)
-                                .lineLimit(1).frame(maxWidth: maxW, alignment: .leading).fixedSize(horizontal: true, vertical: false)
+                                .lineLimit(1).frame(maxWidth: maxW, alignment: .leading)
                             Text("·").foregroundStyle(Theme.gray600)
                         }
                         LucideIcon(.gitBranch, size: icon, strokeWidth: 1.5).foregroundStyle(Theme.gray500)
                         Text(branch).font(.system(size: text, design: .monospaced)).lineLimit(1).truncationMode(.tail)
-                            .frame(maxWidth: maxW, alignment: .leading).fixedSize(horizontal: true, vertical: false)
+                            .frame(maxWidth: maxW, alignment: .leading)
                         LucideIcon(.chevronDown, size: icon - 1).foregroundStyle(Theme.gray500)
                     }
                     .foregroundStyle(open || hover ? Theme.gray200 : Theme.gray400)
@@ -187,6 +187,7 @@ struct GitChangesIndicator: View {
                     Text("-\(stat.deletions)").foregroundStyle(Theme.diffRemove)
                 }
                 .font(.system(size: 11, design: .monospaced))
+                .fixedSize()
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(RoundedRectangle(cornerRadius: Theme.radius).fill(hover ? Theme.white(0.06) : .clear))

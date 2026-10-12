@@ -324,6 +324,9 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
             "new-menu": .newMenu, "sidebar-options": .sidebarOptions,
             "add-project": .addProject(editing: nil), "edit-project": .addProject(editing: store.projects.first?.name),
             "project-menu": .projectMenu(store.projects.first?.name ?? ""),
+            "remove-worktree": store.sessions.first(where: { $0.worktreePath != nil }).map {
+                .removeWorktree(projectPath: $0.projectPath, worktreePath: $0.worktreePath ?? "")
+            } ?? .viewOptions,
         ]
         guard let overlay = overlays[name] else {
             FileHandle.standardError.write(Data("unknown overlay \(name)\n".utf8))
@@ -348,6 +351,10 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
                                              submenu: value("--submenu"))
     }
 
+    if args.contains("--cleanup-toast"), let s = all.first(where: { $0.worktreePath != nil }), let wt = s.worktreePath {
+        ShellActions(store: store, model: model).offerWorktreeCleanup(projectPath: s.projectPath, worktreePath: wt)
+        try? await Task.sleep(for: .milliseconds(500))
+    }
     if let name = value("--component"), let s0 = all.first(where: { $0.branch != nil }) ?? all.first {
         let actions = ShellActions(store: store, model: model)
         let view: AnyView

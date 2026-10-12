@@ -237,7 +237,7 @@ struct ShellActions {
         let busy = store.sessions.contains { $0.worktreePath == worktree.path }
         run {
             if !busy, await store.worktreeDirty(worktree.path) == false {
-                try await store.removeWorktree(projectPath: project.path, worktreePath: worktree.path)
+                removeWorktree(projectPath: project.path, worktreePath: worktree.path, force: false)
             } else {
                 model.overlay = .removeWorktree(projectPath: project.path, worktreePath: worktree.path)
             }

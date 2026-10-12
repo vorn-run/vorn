@@ -40,7 +40,7 @@ public struct FilesCard: View {
                              menuFooter: [("Close saved tabs", { panes.closeSavedFileTabs(sessionID) })],
                              onDoubleClick: { panes.toggleMaximized(paneID) }) {
                     PaneIconButton(icon: .listTree, help: treeShown ? "Hide file tree" : "Show file tree", active: treeShown,
-                                   disabled: !hasTabs) { panes.toggleFileTree(sessionID) }
+                                   disabled: !hasTabs, dimsWhenDisabled: false) { panes.toggleFileTree(sessionID) }
                 } trailing: {
                     PaneControls(panes: panes, paneID: paneID, title: "Files",
                                  onPopOut: pane.active.map { a in { panes.popOutTab(sessionID, a) } }, popOutLabel: "this file",

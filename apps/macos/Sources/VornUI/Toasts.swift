@@ -1,3 +1,4 @@
+import AppKit
 import Observation
 import SwiftUI
 
@@ -127,6 +128,13 @@ private struct ToastRow: View {
         }
     }
 
+    /// The width the row would take unwrapped, capped by the 360 maximum.
+    static func idealWidth(_ item: ToastCenter.Item) -> CGFloat {
+        let text = (item.message as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 14)]).width
+        let actions = item.actions.reduce(CGFloat(0)) { $0 + ($1.label as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width + 26 }
+        return min(360, 32 + 15 + 10 + text + 10 + actions + 16)
+    }
+
     var body: some View {
         let s = style
         HStack(spacing: 10) {
@@ -138,8 +146,9 @@ private struct ToastRow: View {
                 }
             }
             .foregroundStyle(s.tint)
-            Text(item.message).font(.ui(14)).foregroundStyle(Theme.gray200).frame(maxWidth: .infinity, alignment: .leading)
+            Text(item.message).font(.ui(14)).foregroundStyle(Theme.gray200).lineHeight(20, size: 14)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             ForEach(Array(item.actions.enumerated()), id: \.offset) { _, a in
                 Hovering { hover in
                     Button { a.run(item.id) } label: {
@@ -155,7 +164,7 @@ private struct ToastRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .frame(minWidth: 200, maxWidth: 360)
+        .frame(minWidth: 200, idealWidth: Self.idealWidth(item), maxWidth: 360)
         .fixedSize(horizontal: true, vertical: false)
         .background(RoundedRectangle(cornerRadius: Theme.radiusLg).fill(Color(red: 26 / 255, green: 26 / 255, blue: 30 / 255, opacity: 0.92)))
         .background(RoundedRectangle(cornerRadius: Theme.radiusLg).fill(s.bg))
