@@ -519,3 +519,47 @@ fn a_worktree_whose_last_session_ends_is_offered_for_removal() {
         (!std::path::Path::new(&wt).exists()).then_some(())
     });
 }
+
+#[test]
+fn a_ready_update_is_offered_in_the_sidebar_until_dismissed() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = support::connect(&v);
+    let repo = seed_acme(&mut app, &v);
+    let mut shot = Shot::new();
+    let _ = shell(&mut shot, &mut app, &repo);
+    app.st.settings.update = Some(vorn_app::settings::UpdateStatus::Ready {
+        version: "0.8.1".into(),
+    });
+    let restart = control(
+        "update-notice",
+        Act::Set(vorn_app::settings::SetAct::CheckUpdates),
+    );
+    shot.frame(&mut app);
+    assert!(shot.ui.rect_of(restart).is_some(), "the notice shows");
+    shot.save(&mut app, "p-update");
+    shot.click(
+        &mut app,
+        control(
+            "update-notice",
+            Act::Set(vorn_app::settings::SetAct::DismissUpdate),
+        ),
+    );
+    assert!(shot.ui.rect_of(restart).is_none(), "the notice is gone");
+    // The gear keeps a dot and opens the Updates page.
+    shot.click(
+        &mut app,
+        control(
+            "sidebar-footer",
+            Act::Set(vorn_app::settings::SetAct::Open(
+                vorn_app::settings::Category::Updates,
+            )),
+        ),
+    );
+    assert!(app.st.settings.open);
+    assert_eq!(
+        app.st.settings.category,
+        vorn_app::settings::Category::Updates
+    );
+}

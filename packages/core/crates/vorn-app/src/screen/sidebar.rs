@@ -718,11 +718,17 @@ fn tasks_projects(s: &Screen<'_>) -> El {
     col
 }
 
+/// SidebarFooter: the ready-update notice above the guide and settings
+/// buttons, or a dot on the gear once the notice is dismissed.
 fn footer(s: &Screen<'_>) -> El {
-    let button = |act: Act, name: &str, label: &str| {
+    use crate::settings::{describe_update, update_cost, SetAct, UpdateStatus};
+    let status = s.st.settings.update.clone();
+    let pending = matches!(status, Some(UpdateStatus::Ready { .. }));
+    let dismissed = s.st.settings.update_dismissed;
+    let button = |act: Act, name: &str, label: &str, dot: bool| {
         let id = s.acts.on("sidebar-footer", act);
         let hot = s.ui.hover(id);
-        let b = div()
+        let mut b = div()
             .id(id)
             .on(Action::Click)
             .p(6.0)
@@ -735,17 +741,121 @@ fn footer(s: &Screen<'_>) -> El {
                 1.5,
                 c(look::GRAY_500).mix(c(look::WHITE), hot),
             ));
+        if dot {
+            b = b.child(
+                div()
+                    .absolute(19.0, 2.0)
+                    .size(9.0, 9.0)
+                    .rounded(5.0)
+                    .bg(c(look::SURFACE_PANEL))
+                    .center()
+                    .child(div().size(5.0, 5.0).rounded(3.0).bg(c(look::BRONZO))),
+            );
+        }
         tooltip(s.ui, b, id, label, None)
     };
-    div()
+    let row = div()
         .row()
         .items_center()
         .gap(2.0)
         .px(8.0)
         .py(6.0)
         .shrink0()
-        .child(button(Act::Welcome, "circle-help", "Welcome Guide"))
-        .child(button(Act::Settings, "settings", "Settings"))
+        .child(button(Act::Welcome, "circle-help", "Welcome Guide", false));
+    let row = if pending && dismissed {
+        row.child(button(
+            Act::Set(SetAct::Open(crate::settings::Category::Updates)),
+            "settings",
+            "Settings \u{2014} update ready",
+            true,
+        ))
+    } else {
+        row.child(button(Act::Settings, "settings", "Settings", false))
+    };
+    let Some(status) = status.filter(|_| pending && !dismissed) else {
+        return row;
+    };
+    let view = describe_update(&status, "stable", crate::state::now_ms());
+    let short = match &status {
+        UpdateStatus::Ready { version } => format!("v{version} ready"),
+        _ => view.label.clone(),
+    };
+    let live: Vec<_> = s.store.sessions.iter().filter(|x| !x.ended()).collect();
+    let cost = update_cost(
+        live.len(),
+        live.iter().any(|x| x.status() == "running"),
+        true,
+    );
+    let close = s.acts.on("update-notice", Act::Set(SetAct::DismissUpdate));
+    let go = s.acts.on("update-notice", Act::Set(SetAct::CheckUpdates));
+    let mut notice = div()
+        .col()
+        .mx(8.0)
+        .mb(6.0)
+        .px(10.0)
+        .py(8.0)
+        .rounded(6.0)
+        .border(1.0, white(0.08))
+        .bg(white(0.03))
+        .role(Role::Status, short.as_str())
+        .child(
+            div()
+                .row()
+                .items_center()
+                .gap(6.0)
+                .child(div().size(5.0, 5.0).rounded(3.0).bg(c(look::BRONZO)))
+                .child(
+                    div().grow().min_w0().child(
+                        text(&short, 11.5, c(look::GRAY_200))
+                            .line_height(16.0)
+                            .truncate()
+                            .silent(),
+                    ),
+                )
+                .child(
+                    div()
+                        .id(close)
+                        .on(Action::Click)
+                        .role(Role::Button, "Dismiss update notice")
+                        .child(
+                            text(
+                                "\u{2715}",
+                                11.0,
+                                c(look::GRAY_600).mix(c(look::GRAY_300), s.ui.hover(close)),
+                            )
+                            .line_height(11.0)
+                            .silent(),
+                        ),
+                ),
+        );
+    if let Some(cost) = cost {
+        notice = notice.child(
+            text(cost, 10.5, c(look::BRONZO))
+                .line_height(14.0)
+                .mt(6.0)
+                .wrapping(),
+        );
+    }
+    notice = notice.child(
+        div()
+            .id(go)
+            .on(Action::Click)
+            .row()
+            .justify_center()
+            .mt(8.0)
+            .px(8.0)
+            .py(4.0)
+            .rounded(4.0)
+            .bg(white(0.04).mix(white(0.08), s.ui.hover(go)))
+            .border(1.0, white(0.08))
+            .role(Role::Button, "Restart to update")
+            .child(
+                text("Restart to update", 11.0, c(look::GRAY_300))
+                    .line_height(16.0)
+                    .silent(),
+            ),
+    );
+    div().col().shrink0().child(notice).child(row)
 }
 
 pub(super) fn sidebar(s: &Screen<'_>) -> El {

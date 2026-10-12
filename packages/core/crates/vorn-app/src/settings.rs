@@ -86,6 +86,8 @@ pub enum SetAct {
     EditShell,
     InstallCli,
     CheckUpdates,
+    /// The sidebar's update notice put away; the gear keeps a dot.
+    DismissUpdate,
     // Worktrees.
     Rescan,
     ToggleWorktree(String),
@@ -933,6 +935,8 @@ pub struct Settings {
     pub cli_busy: bool,
     pub cli_error: Option<String>,
     pub update: Option<UpdateStatus>,
+    /// The sidebar's ready-update notice was dismissed (`updateBannerDismissed`).
+    pub update_dismissed: bool,
     pub worktrees: WorktreesPage,
     pub detecting: bool,
     pub agents_open: HashSet<String>,

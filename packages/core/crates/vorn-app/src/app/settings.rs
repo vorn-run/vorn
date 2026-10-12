@@ -396,6 +396,7 @@ impl App {
                 self.st.settings.cli_busy = false;
             }
             SetAct::CheckUpdates => {}
+            SetAct::DismissUpdate => self.st.settings.update_dismissed = true,
             SetAct::Rescan => self.rescan(),
             SetAct::ToggleWorktree(p) => {
                 let w = &mut self.st.settings.worktrees;
