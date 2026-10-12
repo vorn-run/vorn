@@ -124,7 +124,7 @@ struct WorkflowFilesLiveTests {
                 nodes: [
                     WorkflowNode(id: "trigger", type: .trigger, label: "Trigger", config: ["triggerType": "recurring", "cron": "0 3 * * *"]),
                     WorkflowNode(id: "say", type: .script, label: "Say", slug: "say", config: [
-                        "scriptType": "bash", "scriptContent": "echo \(name)", "cwd": "/tmp",
+                        "scriptType": "bash", "scriptContent": .string("echo \(name)"), "cwd": "/tmp",
                     ], position: .init(x: 0, y: 120)),
                 ],
                 edges: [WorkflowEdge(id: "e0", source: "trigger", target: "say")], workspaceId: "personal"))
