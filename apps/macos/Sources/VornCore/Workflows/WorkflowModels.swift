@@ -31,6 +31,8 @@ public struct WorkflowNode: Sendable, Hashable, Codable, Identifiable {
     public var config: JSONValue
     public var position: WorkflowNodePosition
     public var onError: String?
+    /// Keys this build does not model, written back untouched so a save loses nothing.
+    public var extra: [String: JSONValue] = [:]
 
     public init(
         id: String, type: WorkflowNodeType, label: String, slug: String? = nil,
@@ -46,14 +48,38 @@ public struct WorkflowNode: Sendable, Hashable, Codable, Identifiable {
     }
 
     public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(String.self, forKey: .id)
-        type = (try? c.decode(WorkflowNodeType.self, forKey: .type)) ?? .unknown
-        label = (try? c.decode(String.self, forKey: .label)) ?? ""
-        slug = try? c.decode(String.self, forKey: .slug)
-        config = (try? c.decode(JSONValue.self, forKey: .config)) ?? .object([:])
-        position = (try? c.decode(WorkflowNodePosition.self, forKey: .position)) ?? .init(x: 0, y: 0)
-        onError = try? c.decode(String.self, forKey: .onError)
+        var raw = try decoder.singleValueContainer().decode([String: JSONValue].self)
+        guard let id = raw.removeValue(forKey: "id")?.stringValue else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "node without id"))
+        }
+        self.id = id
+        let rawType = raw["type"]
+        type = rawType?.stringValue.flatMap(WorkflowNodeType.init(rawValue:)) ?? .unknown
+        if type != .unknown { raw["type"] = nil }
+        label = raw.removeValue(forKey: "label")?.stringValue ?? ""
+        slug = raw.takeString("slug")
+        config = raw.removeValue(forKey: "config") ?? .object([:])
+        if let p = raw["position"], let x = p["x"]?.numberValue, let y = p["y"]?.numberValue {
+            position = .init(x: x, y: y)
+            raw["position"] = nil
+        } else {
+            position = .init(x: 0, y: 0)
+        }
+        onError = raw.takeString("onError")
+        extra = raw
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var out = extra
+        out["id"] = .string(id)
+        if type != .unknown { out["type"] = .string(type.rawValue) }
+        out["label"] = .string(label)
+        if let slug { out["slug"] = .string(slug) }
+        out["config"] = config
+        out["position"] = .object(["x": .number(position.x), "y": .number(position.y)])
+        if let onError { out["onError"] = .string(onError) }
+        var c = encoder.singleValueContainer()
+        try c.encode(out)
     }
 
     /// A trigger's `triggerType`, nil for other nodes.
@@ -67,12 +93,38 @@ public struct WorkflowEdge: Sendable, Hashable, Codable, Identifiable {
     public var source: String
     public var target: String
     public var conditionBranch: String?
+    /// Keys this build does not model, written back untouched.
+    public var extra: [String: JSONValue] = [:]
 
     public init(id: String, source: String, target: String, conditionBranch: String? = nil) {
         self.id = id
         self.source = source
         self.target = target
         self.conditionBranch = conditionBranch
+    }
+
+    public init(from decoder: Decoder) throws {
+        var raw = try decoder.singleValueContainer().decode([String: JSONValue].self)
+        guard let id = raw.takeString("id"), let source = raw.takeString("source"),
+            let target = raw.takeString("target")
+        else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "malformed edge"))
+        }
+        self.id = id
+        self.source = source
+        self.target = target
+        conditionBranch = raw.takeString("conditionBranch")
+        extra = raw
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var out = extra
+        out["id"] = .string(id)
+        out["source"] = .string(source)
+        out["target"] = .string(target)
+        if let conditionBranch { out["conditionBranch"] = .string(conditionBranch) }
+        var c = encoder.singleValueContainer()
+        try c.encode(out)
     }
 }
 
@@ -89,6 +141,8 @@ public struct WorkflowDefinition: Sendable, Hashable, Codable, Identifiable {
     public var staggerDelayMs: Double?
     public var workspaceId: String?
     public var autoCleanupWorktrees: Bool?
+    /// Keys this build does not model, written back untouched.
+    public var extra: [String: JSONValue] = [:]
 
     public init(
         id: String, name: String, icon: String = "Zap", iconColor: String = "#6b7280",
@@ -107,20 +161,49 @@ public struct WorkflowDefinition: Sendable, Hashable, Codable, Identifiable {
         self.workspaceId = workspaceId
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, name, icon, iconColor, nodes, edges, enabled, lastRunAt, lastRunStatus, staggerDelayMs
+        case workspaceId, autoCleanupWorktrees
+    }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         name = (try? c.decode(String.self, forKey: .name)) ?? ""
         icon = (try? c.decode(String.self, forKey: .icon)) ?? ""
         iconColor = (try? c.decode(String.self, forKey: .iconColor)) ?? ""
-        nodes = (try? c.decode([WorkflowNode].self, forKey: .nodes)) ?? []
-        edges = (try? c.decode([WorkflowEdge].self, forKey: .edges)) ?? []
+        nodes = (try? c.decode([LossyNode].self, forKey: .nodes))?.compactMap(\.node) ?? []
+        edges = (try? c.decode([LossyEdge].self, forKey: .edges))?.compactMap(\.edge) ?? []
         enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? false
         lastRunAt = try? c.decode(String.self, forKey: .lastRunAt)
         lastRunStatus = try? c.decode(String.self, forKey: .lastRunStatus)
         staggerDelayMs = try? c.decode(Double.self, forKey: .staggerDelayMs)
         workspaceId = try? c.decode(String.self, forKey: .workspaceId)
         autoCleanupWorktrees = try? c.decode(Bool.self, forKey: .autoCleanupWorktrees)
+        var raw = (try? decoder.singleValueContainer().decode([String: JSONValue].self)) ?? [:]
+        for key in [CodingKeys.id, .name, .icon, .iconColor, .nodes, .edges, .enabled, .lastRunAt, .lastRunStatus,
+                    .staggerDelayMs, .workspaceId, .autoCleanupWorktrees] {
+            raw[key.rawValue] = nil
+        }
+        extra = raw
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var out = extra
+        out["id"] = .string(id)
+        out["name"] = .string(name)
+        out["icon"] = .string(icon)
+        out["iconColor"] = .string(iconColor)
+        out["nodes"] = try JSONValue.from(nodes)
+        out["edges"] = try JSONValue.from(edges)
+        out["enabled"] = .bool(enabled)
+        if let lastRunAt { out["lastRunAt"] = .string(lastRunAt) }
+        if let lastRunStatus { out["lastRunStatus"] = .string(lastRunStatus) }
+        if let staggerDelayMs { out["staggerDelayMs"] = .number(staggerDelayMs) }
+        if let workspaceId { out["workspaceId"] = .string(workspaceId) }
+        if let autoCleanupWorktrees { out["autoCleanupWorktrees"] = .bool(autoCleanupWorktrees) }
+        var c = encoder.singleValueContainer()
+        try c.encode(out)
     }
 
     public var workspace: String { workspaceId ?? "personal" }
@@ -133,6 +216,26 @@ public struct WorkflowDefinition: Sendable, Hashable, Codable, Identifiable {
     }
 
     public func node(_ id: String) -> WorkflowNode? { nodes.first { $0.id == id } }
+}
+
+/// One element of a list that skips what does not decode instead of failing the list.
+private struct LossyNode: Decodable {
+    let node: WorkflowNode?
+    init(from decoder: Decoder) throws { node = try? WorkflowNode(from: decoder) }
+}
+
+private struct LossyEdge: Decodable {
+    let edge: WorkflowEdge?
+    init(from decoder: Decoder) throws { edge = try? WorkflowEdge(from: decoder) }
+}
+
+extension Dictionary where Key == String, Value == JSONValue {
+    /// Removes and returns `key` when it holds a string; any other value stays for the round trip.
+    fileprivate mutating func takeString(_ key: String) -> String? {
+        guard let s = self[key]?.stringValue else { return nil }
+        self[key] = nil
+        return s
+    }
 }
 
 public enum NodeExecutionStatus: String, Sendable, Codable {
