@@ -54,7 +54,10 @@ struct WorkflowPage<Leading: View>: View {
         }
         let needs = stillNeeded
         if !startFrom && pending == nil && !history && selected == nil && !needs.isEmpty {
-            StillNeedsPanel(requirements: needs, dismissable: store.importedRequirements?.workflowId == editor.editingId) {
+            StillNeedsPanel(
+                store: store, requirements: needs, dismissable: store.importedRequirements?.workflowId == editor.editingId,
+                onConnected: { Task { portable = await store.portableConnections() } }
+            ) {
                 store.importedRequirements = nil
             }
         }
@@ -380,9 +383,12 @@ struct OutsideClick: NSViewRepresentable {
 
 /// The "Still needs" panel: what the canvas cannot run yet, worded like the template rows.
 struct StillNeedsPanel: View {
+    let store: WorkflowsStore
     let requirements: [TemplateRequirement]
     let dismissable: Bool
+    var onConnected: () -> Void = {}
     let onDismiss: () -> Void
+    @State private var profileFor: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -394,17 +400,13 @@ struct StillNeedsPanel: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.white(0.08)).frame(height: 1) }
+            RequirementProfileSlot(store: store, profileFor: $profileFor, onDone: onConnected)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(requirements, id: \.self) { entry in
-                        Text("Needs \(WorkflowFiles.describeRequirement(entry.requirement))")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.bronzo)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.leading, 38)
-                            .padding(.trailing, 10)
-                            .padding(.bottom, 6)
+                        RequirementRow(requirement: entry) { fix in
+                            if case .createProfile(let name) = fix { profileFor = name }
+                        }
                     }
                 }
                 .padding(.vertical, 8)

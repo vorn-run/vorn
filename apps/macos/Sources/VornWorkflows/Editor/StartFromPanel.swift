@@ -59,6 +59,7 @@ struct StartFromPanel: View {
     var preloaded: StartFromData? = nil
 
     @State private var loaded: StartFromData?
+    @State private var profileFor: String?
 
     private var data: StartFromData { preloaded ?? loaded ?? StartFromData(templates: [], connections: [], suggestions: []) }
 
@@ -72,6 +73,9 @@ struct StartFromPanel: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.white(0.08)).frame(height: 1) }
+            RequirementProfileSlot(store: store, profileFor: $profileFor) {
+                Task { loaded = await store.startFromData() }
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -85,7 +89,9 @@ struct StartFromPanel: View {
                     }
                     if !data.templates.isEmpty { sectionHeader("Templates") }
                     ForEach(data.templates) { template in
-                        TemplateRow(template: template, connections: data.connections) { pickTemplate(template) }
+                        TemplateRow(template: template, connections: data.connections, onFix: { fix in
+                            if case .createProfile(let name) = fix { profileFor = name }
+                        }) { pickTemplate(template) }
                     }
                     if !data.suggestions.isEmpty { sectionHeader("From your connections") }
                     ForEach(data.suggestions) { suggestion in
@@ -179,6 +185,7 @@ private struct PickRow<Content: View>: View {
 private struct TemplateRow: View {
     let template: WorkflowTemplate
     let connections: [PortableConnection]
+    var onFix: ((RequirementFix) -> Void)?
     let onPick: () -> Void
 
     var body: some View {
@@ -212,15 +219,7 @@ private struct TemplateRow: View {
                 }
                 .buttonStyle(.plain)
                 ForEach(pending, id: \.self) { entry in
-                    // RequirementRow.tsx, without its fix button.
-                    Text("Needs \(WorkflowFiles.describeRequirement(entry.requirement))")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.bronzo)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 38)
-                        .padding(.trailing, 10)
-                        .padding(.bottom, 6)
+                    RequirementRow(requirement: entry, onFix: onFix)
                 }
             }
             .background(hovered ? Theme.white(0.06) : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusMd))
