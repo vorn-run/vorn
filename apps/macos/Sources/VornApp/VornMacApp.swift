@@ -158,7 +158,7 @@ struct WindowConfigurator: NSViewRepresentable {
 /// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`, `--tip N`,
 /// `--view sessions|tasks|workflows`, `--layout grid|tabs`, `--focused N`, `--filter STATUS`, `--columns N`,
 /// `--workflow NAME [--history] [--full-output] [--select LABEL] [--library [--library-query Q]] [--icon-picker] [--more] [--form-open more|agent|model|vars:PLACEHOLDER] [--panel-scroll PT]` opens a workflow's page,
-/// `--new-workflow [--trigger-library]` a blank editor, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
+/// `--new-workflow [--trigger-library]` a blank editor, `--workflow-menu NAME@X,Y` a sidebar row's menu, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
 @MainActor
 func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 {
     func value(_ flag: String) -> String? {
@@ -218,6 +218,11 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
             await features.workflows.awaitFreshCatalog()
             features.workflows.newWorkflow()
             if args.contains("--trigger-library") { features.workflows.editor?.driveForRender(triggerLibrary: true) }
+        }
+        if let target = value("--workflow-menu")?.split(separator: "@"), target.count == 2,
+           let wf = features.workflows.workflows.first(where: { $0.name == target[0] }) {
+            let xy = target[1].split(separator: ",").compactMap { Double($0) }
+            if xy.count == 2 { features.workflows.menu = WorkflowsMenu(kind: .workflow(wf.id), at: CGPoint(x: xy[0], y: xy[1])) }
         }
         if let name = value("--workflow"), let wf = features.workflows.workflows.first(where: { $0.name == name }) {
             await features.workflows.openWorkflow(wf.id).value

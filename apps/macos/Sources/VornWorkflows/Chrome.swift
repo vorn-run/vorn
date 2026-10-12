@@ -244,7 +244,6 @@ private struct AllRunsRow: View {
 private struct WorkflowRow: View {
     let store: WorkflowsStore
     let workflow: WorkflowDefinition
-    @State private var rowFrame = CGRect.zero
     @State private var moreFrame = CGRect.zero
 
     private enum Dot { case waiting, scheduled, disabled, error }
@@ -268,25 +267,14 @@ private struct WorkflowRow: View {
             Group {
                 rowAction(.play, size: 11, help: "Run") { store.runNow(workflow) }
                 rowAction(.ellipsis, size: 12, help: "More") {
-                    store.menu = menuOpen ? nil : WorkflowsMenu(kind: .workflow(workflow.id), anchor: moreFrame, edge: .leading)
+                    store.menu = menuOpen ? nil : WorkflowsMenu(kind: .workflow(workflow.id), at: CGPoint(x: moreFrame.maxX, y: moreFrame.maxY))
                 }
                 .trackFrame($moreFrame)
             }
             .opacity(hovered || menuOpen ? 1 : 0)
         }
-        .trackFrame($rowFrame)
         .onTapGesture { store.openWorkflow(workflow.id) }
-        .contextMenu {
-            Button("Edit Workflow") { store.openWorkflow(workflow.id) }
-            if workflow.isScheduled {
-                Button(workflow.enabled ? "Disable Schedule" : "Enable Schedule") {
-                    store.setEnabled(workflow, !workflow.enabled)
-                }
-            }
-            Button("Export as file…") { store.exportWorkflow(workflow) }
-            Divider()
-            Button("Delete Workflow", role: .destructive) { store.delete(workflow) }
-        }
+        .onRightClick { p in store.menu = WorkflowsMenu(kind: .workflow(workflow.id), at: p) }
     }
 
     @ViewBuilder private func dotView(_ dot: Dot) -> some View {

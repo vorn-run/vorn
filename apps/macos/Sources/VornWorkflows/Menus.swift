@@ -8,7 +8,6 @@ public struct WorkflowsMenu: Equatable, Sendable {
         case runFilter
         case sidebarFilter
         case workflow(String)
-        case pageMore(String)
     }
 
     public enum Edge: Sendable { case leading, trailing }
@@ -16,11 +15,28 @@ public struct WorkflowsMenu: Equatable, Sendable {
     public var kind: Kind
     public var anchor: CGRect
     public var edge: Edge
+    /// A fixed top-left corner, kept inside the window like WorkflowContextMenu's clampToViewport.
+    public var at: CGPoint?
 
     public init(kind: Kind, anchor: CGRect, edge: Edge) {
         self.kind = kind
         self.anchor = anchor
         self.edge = edge
+    }
+
+    public init(kind: Kind, at: CGPoint) {
+        self.kind = kind
+        self.anchor = CGRect(origin: at, size: .zero)
+        self.edge = .leading
+        self.at = at
+    }
+
+    /// WorkflowContextMenu.tsx clampToViewport: 180 wide, up to 176 tall, 8 from every edge.
+    static func clamped(_ p: CGPoint, in size: CGSize) -> CGPoint {
+        var x = p.x, y = p.y
+        if x + 180 + 8 > size.width { x = size.width - 180 - 8 }
+        if y + 176 + 8 > size.height { y = size.height - 176 - 8 }
+        return CGPoint(x: max(x, 8), y: max(y, 8))
     }
 }
 
@@ -51,13 +67,20 @@ private struct MenuHost: View {
                 ZStack(alignment: .topLeading) {
                     Color.black.opacity(0.001)
                         .onTapGesture { store.menu = nil }
+                    let fixed = menu.at.map {
+                        WorkflowsMenu.clamped(CGPoint(x: $0.x - origin.x, y: $0.y - origin.y), in: g.size)
+                    }
                     content(menu)
                         .fixedSize()
                         .alignmentGuide(.leading) { d in
+                            if let fixed { return -fixed.x }
                             let x = menu.edge == .leading ? menu.anchor.minX : menu.anchor.maxX - d.width
                             return -(x - origin.x)
                         }
-                        .alignmentGuide(.top) { _ in -(menu.anchor.maxY + 4 - origin.y) }
+                        .alignmentGuide(.top) { _ in
+                            if let fixed { return -fixed.y }
+                            return -(menu.anchor.maxY + 4 - origin.y)
+                        }
                 }
                 .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
                 .onExitCommand { store.menu = nil }
@@ -92,8 +115,6 @@ private struct MenuHost: View {
             }
         case .workflow(let id):
             if let wf = store.workflow(id) { WorkflowContextMenu(store: store, workflow: wf) }
-        case .pageMore(let id):
-            if let wf = store.workflow(id) { WorkflowPageMenu(store: store, workflow: wf) }
         }
     }
 }
@@ -184,82 +205,32 @@ struct OptionRow: View {
     }
 }
 
-/// A context-menu item: px-3 py-2, 12px gray-300, 12pt icon.
-struct MenuItemRow: View {
-    let glyph: Glyph
-    let label: String
-    var danger = false
-    let action: () -> Void
-    @Environment(\.isEnabled) private var enabled
-
-    var body: some View {
-        Hovering { hovered0 in
-            let hovered = hovered0 && enabled
-            Button(action: action) {
-                HStack(spacing: 8) {
-                    Icon(glyph, size: 12)
-                    Text(label)
-                    Spacer(minLength: 0)
-                }
-                .font(.system(size: 12))
-                .foregroundStyle(danger ? Theme.danger.opacity(hovered ? 1 : 0.8) : hovered ? Color.white : Theme.gray300)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(hovered ? (danger ? Theme.danger.opacity(0.1) : Theme.white(0.06)) : .clear)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .opacity(enabled ? 1 : 0.4)
-        }
-    }
-}
-
 struct MenuDivider: View {
     var body: some View { Hairline(opacity: 0.06).padding(.vertical, 4) }
 }
 
-/// The sidebar row's menu (WorkflowContextMenu.tsx).
+/// The sidebar row's menu (WorkflowContextMenu.tsx); no confirm, like today.
 struct WorkflowContextMenu: View {
     let store: WorkflowsStore
     let workflow: WorkflowDefinition
 
     var body: some View {
         DropdownPanel(minWidth: 180) {
-            MenuItemRow(glyph: .pencil, label: "Edit Workflow") {
+            EditorMenuRow(glyph: .pencil, label: "Edit Workflow") {
                 store.menu = nil
                 store.openWorkflow(workflow.id)
             }
             if workflow.isScheduled {
-                MenuItemRow(glyph: .power, label: workflow.enabled ? "Disable Schedule" : "Enable Schedule") {
+                EditorMenuRow(glyph: .power, label: workflow.enabled ? "Disable Schedule" : "Enable Schedule") {
                     store.menu = nil
                     store.setEnabled(workflow, !workflow.enabled)
                 }
             }
-            MenuItemRow(glyph: .upload, label: "Export as file…") {
+            EditorMenuRow(glyph: .upload, label: "Export as file…") {
                 store.menu = nil
                 store.exportWorkflow(workflow)
             }
-            MenuItemRow(glyph: .trash, label: "Delete Workflow", danger: true) {
-                store.menu = nil
-                store.delete(workflow)
-            }
-        }
-    }
-}
-
-/// The workflow page's More menu.
-struct WorkflowPageMenu: View {
-    let store: WorkflowsStore
-    let workflow: WorkflowDefinition
-
-    var body: some View {
-        DropdownPanel(minWidth: 180) {
-            MenuItemRow(glyph: .settings, label: "Workflow settings") {}
-                .disabled(true)
-            MenuItemRow(glyph: .upload, label: "Export as file…") {}
-                .disabled(true)
-            MenuDivider()
-            MenuItemRow(glyph: .trash, label: "Delete workflow", danger: true) {
+            EditorMenuRow(glyph: .trash2, label: "Delete Workflow", danger: true) {
                 store.menu = nil
                 store.delete(workflow)
             }
