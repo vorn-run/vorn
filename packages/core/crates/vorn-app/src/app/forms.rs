@@ -361,7 +361,10 @@ impl App {
     /// The form controls that are not typing.
     pub(super) fn run_form(&mut self, ui: &mut Ui, act: WfAct) {
         match act {
-            WfAct::Choose(node, path, value) => self.choose_value(node.as_deref(), &path, &value),
+            WfAct::Choose(node, path, value) => {
+                self.choose_value(node.as_deref(), &path, &value);
+                self.agent_facts();
+            }
             WfAct::Advanced(node) => {
                 if !self.st.wf.advanced.remove(&node) {
                     self.st.wf.advanced.insert(node);

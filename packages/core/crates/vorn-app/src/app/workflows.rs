@@ -42,6 +42,10 @@ pub(super) enum WfCall {
     Actions(String),
     /// `webhook:info`.
     Webhook,
+    /// `agent:listModels` for an agent in a project.
+    Models(String, String),
+    /// `git:isGitRepo` for a path.
+    GitRepo(String),
 }
 
 impl App {
@@ -111,6 +115,17 @@ impl App {
                 }
             }
             WfCall::Packs => self.st.wf.lib.packs = list(answer),
+            WfCall::Models(agent, path) => {
+                let choices = answer
+                    .ok()
+                    .and_then(|v| v.get("choices").and_then(Value::as_array).cloned())
+                    .unwrap_or_default();
+                self.st.wf.models.insert((agent, path), choices);
+            }
+            WfCall::GitRepo(path) => {
+                let yes = answer.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+                self.st.wf.git_repo.insert(path, yes);
+            }
             WfCall::Webhook => {
                 self.st.wf.webhook = answer
                     .ok()
@@ -500,6 +515,51 @@ impl App {
         self.st.wf.node = id;
         self.st.wf.ac = None;
         ui.set_focus(None);
+        self.agent_facts();
+    }
+
+    /// What an agent step's form asks of vornd: its agent's models and
+    /// whether its project is a git repository.
+    pub(super) fn agent_facts(&mut self) {
+        let Some(n) = self
+            .st
+            .wf
+            .node
+            .as_deref()
+            .and_then(|id| self.st.wf.editor.as_ref()?.node(id))
+            .filter(|n| s(n, "type") == Some("launchAgent"))
+            .cloned()
+        else {
+            return;
+        };
+        let agent = n
+            .pointer("/config/agentType")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let path = n
+            .pointer("/config/projectPath")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let key = (agent.clone(), path.clone());
+        if matches!(agent.as_str(), "claude" | "copilot" | "opencode" | "codex")
+            && !self.st.wf.models.contains_key(&key)
+        {
+            self.st.wf.models.insert(key.clone(), Vec::new());
+            self.call(
+                Call::Workflow(WfCall::Models(key.0, key.1)),
+                "agent:listModels",
+                json!({ "agentType": agent, "projectPath": path }),
+            );
+        }
+        if !path.is_empty() && !path.contains("{{") && !self.st.wf.git_repo.contains_key(&path) {
+            self.call(
+                Call::Workflow(WfCall::GitRepo(path.clone())),
+                "git:isGitRepo",
+                json!(path),
+            );
+        }
     }
 
     /// The node the form edits: none for the workflow's own properties.

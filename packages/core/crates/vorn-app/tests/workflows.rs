@@ -571,7 +571,8 @@ fn shapes(web: &std::path::Path) -> Value {
             n("j", "script", "Join", sc("echo join")),
             n("l", "loop", "Each item", json!({ "nodeType": "loop", "mode": "forEach", "items": "{{steps.a.output}}", "bodyNodeIds": ["b1"], "maxIterations": 3 })),
             n("b1", "script", "Per item", sc("echo item")),
-            n("h", "httpRequest", "Notify", json!({ "nodeType": "httpRequest", "method": "POST", "url": "https://example.com/hook", "headers": {}, "body": "" }))
+            n("h", "httpRequest", "Notify", json!({ "nodeType": "httpRequest", "method": "POST", "url": "https://example.com/hook", "headers": {}, "body": "" })),
+            n("ag", "launchAgent", "Draft", json!({ "agentType": "claude", "projectName": "web", "projectPath": web, "headless": true, "prompt": "Write it up" }))
         ],
         "edges": [
             { "id": "e1", "source": "t", "target": "a" },
@@ -582,7 +583,8 @@ fn shapes(web: &std::path::Path) -> Value {
             { "id": "e6", "source": "fb", "target": "j" },
             { "id": "e7", "source": "j", "target": "l" },
             { "id": "e8", "source": "l", "target": "b1" },
-            { "id": "e9", "source": "b1", "target": "h" }
+            { "id": "e9", "source": "b1", "target": "h" },
+            { "id": "e10", "source": "h", "target": "ag" }
         ]
     })
 }
@@ -603,6 +605,48 @@ fn the_canvas_lays_out_forks_and_loops_pans_zooms_drags_and_connects() {
     shot.save(&mut app, "c-shapes-fit");
     shot.hover(&mut app, vorn_app::app::canvas::card_id("a"));
     shot.save(&mut app, "c-card-hover");
+    for (id, name) in [
+        ("c", "f-condition"),
+        ("fb", "f-approval"),
+        ("l", "f-loop"),
+        ("h", "f-http"),
+        ("ag", "f-agent"),
+    ] {
+        shot.click(&mut app, vorn_app::app::canvas::card_id(id));
+        assert_eq!(app.st.wf.node.as_deref(), Some(id));
+        shot.save(&mut app, name);
+    }
+
+    // `{{` in the request's body offers the steps above it.
+    let body = field_of(&wf::Bind {
+        node: Some("h".into()),
+        path: "config.body".into(),
+        conv: wf::Conv::Keep,
+        vars: true,
+    });
+    shot.click(&mut app, vorn_app::app::canvas::card_id("h"));
+    shot.click(&mut app, body);
+    shot.type_text(&mut app, "{{");
+    assert!(app.st.wf.ac.is_some(), "the dropdown opens");
+    let items = app.ac_items();
+    assert!(
+        items.iter().any(|i| i.pattern == "{{steps.a.output}}"),
+        "{items:?}"
+    );
+    shot.save(&mut app, "f-autocomplete");
+    shot.type_text(&mut app, "outp");
+    shot.send(&mut app, key("Enter", 0, Some("\r")));
+    assert!(app.st.wf.ac.is_none());
+    let d = app.st.wf.editor.as_ref().expect("editor");
+    let filled = d.node("h").unwrap()["config"]["body"]
+        .as_str()
+        .unwrap_or("")
+        .to_owned();
+    assert!(
+        filled.starts_with("{{steps.") && filled.ends_with(".output}}"),
+        "{filled}"
+    );
+    shot.click(&mut app, control("wf-controls", WfAct::Fit));
     let fitted = app.st.wf.canvas.views["wf-shapes"];
     assert!(
         fitted.zoom < 1.0,

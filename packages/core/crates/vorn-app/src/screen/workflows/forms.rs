@@ -216,9 +216,12 @@ fn var_area(
         ));
     }
     if open && has_vars {
-        boxed = boxed.dropdown(dropdown(s, &groups), Place::BelowStart, 4.0);
+        // As wide as the field, which the last frame measured.
+        let w = s.ui.rect_of(id).map_or(380.0, |r| r.w + 26.0);
+        boxed = boxed.dropdown(dropdown(s, &groups).w(w), Place::BelowStart, 4.0);
     }
-    let mut col = div().col().w_full().child(boxed);
+    // A textarea sits on the text baseline, leaving a few pixels under it.
+    let mut col = div().col().w_full().child(boxed).child(div().h(5.0));
     if value.contains("{{") {
         let p = crate::vars::preview(value, &groups);
         if let Some((token, suggestion)) = p.broken {
@@ -428,7 +431,6 @@ fn dropdown(s: &Screen<'_>, groups: &[crate::vars::StepGroup]) -> El {
     }
     div()
         .col()
-        .w_full()
         .rounded(8.0)
         .border(1.0, white(0.12))
         .bg(c(look::SURFACE_OVERLAY))
@@ -667,8 +669,70 @@ pub fn choice_items(s: &Screen<'_>, t: &str) -> Vec<Item> {
             }
             out
         }
+        "config.model" => {
+            let agent = get("agentType");
+            let path = get("projectPath");
+            let model = get("model");
+            let mut out = vec![pick("Agent default", "", model.is_empty())];
+            for m in s.st.wf.models.get(&(agent, path)).into_iter().flatten() {
+                let mid = sv(m, "id").unwrap_or("");
+                let mut it = pick(sv(m, "label").unwrap_or(mid), mid, mid == model);
+                if sv(m, "label").is_some_and(|l| l != mid) {
+                    it = it.detail(mid.to_owned());
+                }
+                out.push(it);
+            }
+            let b = bind(node, "config.model", Conv::Text, false);
+            let fid = field_of(&b);
+            s.acts
+                .text(fid, Act::Workflow(WfAct::Text(b)), model.as_str());
+            out.push(Item {
+                row: Some(
+                    div()
+                        .row()
+                        .items_center()
+                        .gap(8.0)
+                        .px(12.0)
+                        .py(8.0)
+                        .border_top(1.0, white(0.06))
+                        .child(
+                            text("ID", 10.0, c(look::GRAY_600))
+                                .tracking(0.025)
+                                .line_height(15.0),
+                        )
+                        .child(
+                            div()
+                                .grow()
+                                .min_w0()
+                                .px(8.0)
+                                .py(2.0)
+                                .rounded(4.0)
+                                .bg(white(0.04))
+                                .border(1.0, white(0.08))
+                                .child(
+                                    field(
+                                        fid,
+                                        "Model id",
+                                        "model id",
+                                        TextStyle {
+                                            line_height: 16.5,
+                                            ..TextStyle::mono(11.0)
+                                        },
+                                        c(look::GRAY_200),
+                                    )
+                                    .w_full(),
+                                ),
+                        ),
+                ),
+                ..Item::default()
+            });
+            out
+        }
         "config.agentType" => {
-            let mut list: Vec<(&str, &str)> = crate::screen::menus::AGENTS.to_vec();
+            let mut list: Vec<(&str, &str)> = ["claude", "copilot", "codex", "opencode", "gemini"]
+                .iter()
+                .map(|a| (*a, agent_label(a)))
+                .collect();
             let trig = s.st.wf.editor.as_ref().and_then(|d| {
                 wf::trigger(d.nodes())
                     .and_then(|t| t.pointer("/config/triggerType"))
@@ -679,12 +743,12 @@ pub fn choice_items(s: &Screen<'_>, t: &str) -> Vec<Item> {
             let source_task = cfg.get("taskId").is_some_and(|t| !t.is_null())
                 || cfg.get("taskFromQueue").and_then(Value::as_bool) == Some(true);
             if task_trigger || source_task {
-                list.insert(0, ("fromTask", "From task"));
+                list.insert(0, ("fromTask", "From Task"));
             }
             list.iter()
                 .map(|(v, l)| {
                     let glyph = if *v == "fromTask" {
-                        ico("clipboard-list", 14.0, 2.0, secondary())
+                        ico("clipboard-list", 14.0, 2.0, c(look::BLUE_400))
                     } else {
                         super::super::agent_icon(s, v, 14.0)
                     };
@@ -1062,23 +1126,23 @@ fn arg_fields(s: &Screen<'_>, node: &str) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// A `ToggleSwitch`: 28×16, the knob white.
+/// `ToggleSwitch`: 40×24, blue when on, the knob white.
 fn toggle(s: &Screen<'_>, a: WfAct, on: bool, disabled: bool, label: &str) -> El {
     let id = s.acts.on("wf-toggle", act(a));
     let mut el = div()
         .id(id)
-        .w(28.0)
-        .h(16.0)
-        .rounded(8.0)
-        .bg(if on { c(0x3b82f6) } else { white(0.10) })
-        .opacity(if disabled { 0.5 } else { 1.0 })
+        .w(40.0)
+        .h(24.0)
+        .rounded(12.0)
+        .bg(if on { c(0x2b7fff) } else { white(0.10) })
         .role(Role::Switch, label)
         .toggled(on)
+        .disabled(disabled)
         .child(
             div()
-                .absolute(if on { 14.0 } else { 2.0 }, 2.0)
-                .size(12.0, 12.0)
-                .rounded(6.0)
+                .absolute(if on { 20.0 } else { 4.0 }, 4.0)
+                .size(16.0, 16.0)
+                .rounded(8.0)
                 .bg(c(look::WHITE)),
         );
     if !disabled {
@@ -1289,6 +1353,110 @@ fn block(children: Vec<El>) -> El {
     div().col().w_full().children(children)
 }
 
+/// `AGENT_LABELS` of the form's agent picker.
+fn agent_label(agent: &str) -> &str {
+    match agent {
+        "fromTask" => "From Task",
+        "claude" => "Claude",
+        "copilot" => "Copilot",
+        "codex" => "Codex",
+        "opencode" => "OpenCode",
+        "gemini" => "Gemini",
+        "" => "Unassigned",
+        other => other,
+    }
+}
+
+/// The panel header's glyph: the connector a step calls, else
+/// `NODE_TYPE_ICON`.
+fn header_glyph(s: &Screen<'_>, n: &Value) -> El {
+    let conn = n
+        .pointer("/config/connectionId")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty());
+    if sv(n, "type") == Some("callConnectorAction") {
+        if let Some(look) = conn.and_then(|cid| {
+            let src = crate::library::Sources {
+                connections: &s.st.wf.connections,
+                packs: &s.st.wf.lib.packs,
+                ..crate::library::Sources::default()
+            };
+            crate::library::look_for(&src, cid)
+        }) {
+            return mark(Some(&look), 14.0);
+        }
+    }
+    let glyph = match sv(n, "type").unwrap_or("") {
+        "trigger" | "callConnectorAction" => "zap",
+        "launchAgent" => "play",
+        k => super::super::runs::node_icon(k),
+    };
+    ico(glyph, 14.0, 2.0, secondary())
+}
+
+/// `ModelPicker` (`variant="form"`): the chip, the model or "Agent
+/// default", its menu of listed models and an id field.
+fn model_picker(s: &Screen<'_>, id: &str, n: &Value) -> El {
+    let model = cfg_str(n, "model");
+    let kind = MenuKind::WfChoice(token(380.0, Some(id), "config.model"));
+    let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
+    let bid = s.acts.on("wf-select", Act::Open(kind));
+    let hot = s.ui.hover(bid);
+    let shown = (!model.is_empty()).then(|| {
+        let agent = cfg_str(n, "agentType").to_owned();
+        let path = cfg_str(n, "projectPath").to_owned();
+        s.st.wf
+            .models
+            .get(&(agent, path))
+            .and_then(|l| l.iter().find(|m| sv(m, "id") == Some(model)))
+            .and_then(|m| sv(m, "label"))
+            .unwrap_or(model)
+            .to_owned()
+    });
+    div()
+        .id(bid)
+        .on(Action::Click)
+        .w_full()
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(12.0)
+        .py(8.0)
+        .rounded(6.0)
+        .bg(white(0.06))
+        .border(1.0, white(0.10).mix(white(0.2), hot))
+        .role(Role::Button, shown.as_deref().unwrap_or("Agent default"))
+        .has_popup()
+        .expanded(open)
+        .child(ico(
+            "cpu",
+            14.0,
+            2.0,
+            if shown.is_some() {
+                c(look::GRAY_300)
+            } else {
+                c(look::GRAY_500)
+            },
+        ))
+        .child(
+            div().max_w(170.0).child(
+                text(
+                    shown.as_deref().unwrap_or("Agent default"),
+                    13.0,
+                    if shown.is_some() {
+                        c(look::WHITE)
+                    } else {
+                        c(look::GRAY_500)
+                    },
+                )
+                .line_height(19.5)
+                .truncate()
+                .silent(),
+            ),
+        )
+        .child(ico("chevron-down", 12.0, 2.0, c(look::GRAY_500)))
+}
+
 /// The panel for `n` (`NodeConfigPanel`).
 pub fn node_panel(s: &Screen<'_>, d: &Draft, n: &Value) -> El {
     let id = sv(n, "id").unwrap_or("").to_owned();
@@ -1330,7 +1498,7 @@ pub fn node_panel(s: &Screen<'_>, d: &Draft, n: &Value) -> El {
         .px(20.0)
         .py(12.0)
         .border_bottom(1.0, white(0.08))
-        .child(super::node_glyph(s, n, 14.0))
+        .child(header_glyph(s, n))
         .child(
             div()
                 .grow()
@@ -2231,13 +2399,9 @@ fn script_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
 fn agent_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
     let cfg = n.get("config").cloned().unwrap_or_default();
     let agent = cfg_str(n, "agentType");
-    let agent_label = if agent == "fromTask" {
-        "From task".to_owned()
-    } else {
-        crate::screen::menus::agent_name(agent).to_owned()
-    };
+    let agent_label = agent_label(agent).to_owned();
     let agent_glyph = if agent == "fromTask" {
-        ico("clipboard-list", 14.0, 2.0, secondary())
+        ico("clipboard-list", 14.0, 2.0, c(look::BLUE_400))
     } else {
         super::super::agent_icon(s, agent, 14.0)
     };
@@ -2331,19 +2495,7 @@ fn agent_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
                 Wash::Strong,
             ),
         ]),
-        block(vec![
-            label("Model"),
-            input(
-                s,
-                bind(Some(id), "config.model", Conv::Text, false),
-                cfg_str(n, "model"),
-                "Default",
-                false,
-                Wash::Strong,
-                13.0,
-                12.0,
-            ),
-        ]),
+        block(vec![label("Model"), model_picker(s, id, n)]),
         block(vec![
             label("Project"),
             project(s, id, "agent.project", cfg_str(n, "projectName"), proj_ctx),
@@ -2507,16 +2659,20 @@ fn agent_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
             Wash::Strong,
         ));
     }
-    out.push(
-        div()
-            .col()
-            .w_full()
-            .gap(12.0)
-            .p(12.0)
-            .rounded(8.0)
-            .border(1.0, white(0.06))
-            .children(git),
-    );
+    // A project that is not a git repository has no branch to check out.
+    let path = sv(&cfg, "projectPath").unwrap_or("");
+    if s.st.wf.git_repo.get(path) != Some(&false) {
+        out.push(
+            div()
+                .col()
+                .w_full()
+                .gap(12.0)
+                .p(12.0)
+                .rounded(8.0)
+                .border(1.0, white(0.06))
+                .children(git),
+        );
+    }
     // Execution.
     let headless = cfg.get("headless").and_then(Value::as_bool) == Some(true);
     let mut exec = vec![
@@ -2897,15 +3053,13 @@ fn approval_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
         .unwrap_or("this_gate");
     let steps = crate::vars::ancestors(d.nodes(), d.edges(), id);
     let feedback = n.pointer("/config/feedback").filter(|f| f.is_object());
+    // One run of text, so it wraps the way the paragraph does.
     let code = |before: &str, code: String, after: &str| {
         div().pt(6.0).child(
-            div()
-                .row()
-                .wrap_children()
-                .min_w0()
-                .child(text(before, 11.0, c(look::GRAY_500)).line_height(16.0))
-                .child(text(code, 11.0, c(look::GRAY_400)).mono().line_height(16.0))
-                .child(text(after, 11.0, c(look::GRAY_500)).line_height(16.0)),
+            text(format!("{before}{code}{after}"), 11.0, c(look::GRAY_500))
+                .line_height(16.0)
+                .wrapping()
+                .min_w0(),
         )
     };
     let help2 = |t: &str| {

@@ -233,6 +233,10 @@ pub struct Workflows {
     pub webhook: Option<String>,
     /// The URL just copied, for the check mark.
     pub copied: Option<f64>,
+    /// `agent:listModels`, by agent and project path.
+    pub models: HashMap<(String, String), Vec<Value>>,
+    /// `git:isGitRepo`, by path.
+    pub git_repo: HashMap<String, bool>,
 }
 
 /// The variable dropdown under a field (`VariableAutocomplete`).
