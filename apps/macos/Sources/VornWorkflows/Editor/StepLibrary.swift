@@ -255,7 +255,7 @@ struct StepLibraryPanel: View {
                     Spacer()
                     PanelCloseButton(help: "Close", action: onClose)
                 }
-                .frame(height: 19.5)
+                .frame(height: 22)
                 HStack(spacing: 6) {
                     LucideIcon(.search, size: 12).foregroundStyle(Theme.gray500)
                     TextField("", text: $query, prompt: Text(scope.triggers ? "Search triggers" : "Search steps and actions")

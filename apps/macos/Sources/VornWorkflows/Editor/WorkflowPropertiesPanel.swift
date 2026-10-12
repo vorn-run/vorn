@@ -38,6 +38,7 @@ struct WorkflowPropertiesPanel: View {
                             if !disabled { workflow.autoCleanupWorktrees = $0 }
                         }
                         .opacity(disabled ? 0.5 : 1)
+                        .frame(height: 30, alignment: .top)
                         .help(disabled
                             ? "Cleanup applies only to worktrees this workflow creates. All agents inherit their worktree from context, so there is nothing to clean up."
                             : "")
