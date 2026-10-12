@@ -198,6 +198,21 @@ fn a_workflow_is_built_saved_run_exported_and_imported() {
     });
     shot.save(&mut app, "w-history");
 
+    // The launched run opened at its step, whose full output opens over all.
+    let run_key = vorn_app::runs::key(&done);
+    shot.click(
+        &mut app,
+        App::control(
+            "run-output",
+            &Act::Run(vorn_app::runs::RunAct::Output(run_key, script.clone())),
+        ),
+    );
+    assert_eq!(app.st.dialog, Some(Dialog::Output));
+    assert_eq!(app.st.tasks.output.trim(), "hello");
+    shot.save(&mut app, "w-full-output");
+    shot.send(&mut app, key("Escape", 0, None));
+    assert_eq!(app.st.dialog, None);
+
     // The card's hover toolbar and the canvas after the run.
     shot.click(&mut app, control("wf-editor", WfAct::History));
     shot.hover(
