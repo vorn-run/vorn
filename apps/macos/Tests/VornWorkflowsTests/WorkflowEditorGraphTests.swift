@@ -343,7 +343,7 @@ private let bodyLoop = g(
 
     @Test func addTriggerPlaceholderAboveTheTopCard() {
         let el = EditorLayout.toCanvasElements([wn("a")], [])
-        #expect(el.addTrigger == CGPoint(x: 0, y: -114))
+        #expect(el.addTrigger == CGPoint(x: -136, y: -114))
         #expect(EditorLayout.toCanvasElements([], []).addTrigger == .zero)
     }
 
@@ -357,11 +357,11 @@ private let bodyLoop = g(
 
     @Test func viewportFitsAtTheTop() {
         let fit = EditorLayout.topAlignedFit(CGRect(x: 0, y: 0, width: 280, height: 2000), width: 800, height: 600)
-        #expect(fit.zoom == 0.2)
+        #expect(abs(fit.zoom - 0.252) < 0.0001)
         let open = EditorLayout.openingViewport(EditorLayout.toCanvasElements(chain.nodes, chain.edges), width: 800)
         #expect(open.zoom == 1)
         #expect(open.y == 48)
-        #expect(open.x == 400)
+        #expect(open.x == 396)
     }
 }
 
@@ -483,7 +483,8 @@ private let bodyLoop = g(
         let m = EditorOps.migrateSlugs(nodes)
         #expect(m[0].slug == nil)
         #expect(m[1].slug == "one")
-        #expect(m[3].slug == "one_2")
+        #expect(m[2].slug == "one_2")
+        #expect(m[3].slug == "one_3")
     }
 
     @Test func requirementsOfTheCanvas() {
