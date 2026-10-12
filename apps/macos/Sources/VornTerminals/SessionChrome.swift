@@ -328,29 +328,6 @@ final class IntentHistory {
     func entries(for id: String) -> [String] { byID[id] ?? [] }
 }
 
-/// GitChangesIndicator.tsx: `+N -M` in the status bar, when the tree has uncommitted changes.
-struct GitChangesIndicator: View {
-    let stat: DiffStat
-    let action: () -> Void
-
-    var body: some View {
-        Hovering { hover in
-            Button(action: action) {
-                HStack(spacing: 6) {
-                    Text("+\(stat.insertions)").foregroundStyle(Theme.diffAdd)
-                    Text("-\(stat.deletions)").foregroundStyle(Theme.diffRemove)
-                }
-                .font(.system(size: 11, design: .monospaced))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(RoundedRectangle(cornerRadius: Theme.radius).fill(hover ? Theme.white(0.06) : .clear))
-            }
-            .buttonStyle(.plain)
-            .help("\(stat.filesChanged) file\(stat.filesChanged != 1 ? "s" : "") changed")
-        }
-    }
-}
-
 /// FocusedNavHint.tsx: "2 / 5" with previous and next, when there is somewhere to go.
 public struct FocusedNavHint: View {
     let index: Int

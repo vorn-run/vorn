@@ -35,16 +35,17 @@ extension SettingsModel {
         guard !wtBusy else { return }
         wtBusy = true
         wtConfirming = nil
-        onToast(loading, .info)
+        let center = toasts ?? ToastCenter()
         Task {
-            do {
+            let r = await center.progress(loading: loading, success: success) { () async throws -> WorktreeActionResult in
                 let r = try await fn()
                 if r.succeeded.isEmpty, let first = r.failed.first { throw VornStoreError(first.error) }
+                return r
+            }
+            if let r {
                 let freed = r.freedBytes > 0 ? " · freed \(formatBytes(r.freedBytes))" : ""
                 if !r.succeeded.isEmpty { onToast("\(success) \(r.succeeded.count)\(freed)", .success) }
                 for f in r.failed { onToast("\(f.path.split(separator: "/").last.map(String.init) ?? f.path): \(f.error)", .error) }
-            } catch {
-                onToast(error.localizedDescription, .error)
             }
             wtBusy = false
             wtRescan()

@@ -33,7 +33,10 @@ public final class FeatureStores {
             }
         }
         tasks.onToast = { [weak model] message, _ in model?.lastError = message }
-        settings.onToast = { [weak model] message, kind in model?.toast(message, error: kind == .error) }
+        settings.toasts = model.toasts
+        settings.onToast = { [weak model] message, kind in
+            model?.toasts.show(message, kind == .error ? .error : kind == .success ? .success : .info)
+        }
     }
 
     /// The board follows the sidebar: the active project, else the workspace's projects.

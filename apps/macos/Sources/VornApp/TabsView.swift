@@ -50,8 +50,15 @@ struct TabsView<Empty: View>: View {
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
 
             if let active {
-                SessionStage(session: active, engine: engines.engine, focusRequest: model.focusRequests[active.id] ?? 0,
-                             actions: actions.cardActions, context: context(active))
+                let ctx = context(active)
+                HStack(spacing: 0) {
+                    SessionStage(session: active, engine: engines.engine, focusRequest: model.focusRequests[active.id] ?? 0,
+                                 actions: actions.cardActions, context: ctx)
+                    if let column = ctx.paneColumn {
+                        Rectangle().fill(Theme.hairline).frame(width: 1)
+                        column.frame(width: 380)
+                    }
+                }
             } else {
                 Group {
                     if model.statusFilter != .all { NoMatchingAgents() } else { empty() }

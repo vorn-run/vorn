@@ -1,5 +1,6 @@
 import SwiftUI
 import VornCore
+import VornPanes
 import VornSettings
 import VornTasks
 import VornTerminals
@@ -35,8 +36,22 @@ public struct RootView: View {
                 if showsTopBar {
                     TopBar(model: model, store: store, actions: actions, features: features)
                 }
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack(spacing: 0) {
+                    if !(model.panes.diffMaximized && changesSession != nil) {
+                        content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        Color.clear.frame(width: 48)
+                    }
+                    if let s = changesSession {
+                        ChangesPanel(panes: model.panes, session: s, stat: store.diffStats[s.worktreePath ?? s.projectPath],
+                                     project: model.activeProject.flatMap(store.project(named:)), services: actions.paneServices) {
+                            model.commitOpen = true
+                        }
+                        .id(s.id)
+                        .frame(width: model.panes.diffMaximized ? nil : model.panes.diffWidth)
+                        .frame(maxWidth: model.panes.diffMaximized ? .infinity : nil)
+                    }
+                }
             }
             .background(Theme.surfaceBase)
         }
@@ -46,12 +61,25 @@ public struct RootView: View {
             OverlayHost(model: model, store: store, actions: actions, features: features, anchors: anchors)
         }
         .overlay {
+            if model.commitOpen, let s = changesSession {
+                let cwd = s.worktreePath ?? s.projectPath
+                CommitDialog(cwd: cwd, branch: s.branch, stat: store.diffStats[cwd], client: store.client, toasts: model.toasts,
+                             onClose: { model.commitOpen = false }) {
+                    model.panes.diffSessionID = nil
+                    Task {
+                        await store.refreshDiffStat(cwd)
+                        model.panes.diffSessionID = s.id
+                    }
+                }
+            }
+        }
+        .overlay {
             if model.settingsOpen {
                 SettingsPage(model: features.settings) { model.settingsOpen = false }
                     .transition(.opacity)
             }
         }
-        .overlay(alignment: .bottom) { ErrorToast(model: model) }
+        .overlay(alignment: .bottomTrailing) { ToastStack(center: model.toasts) }
         .workflowsMenuHost(features.workflows)
         .environment(\.colorScheme, .dark)
         .onChange(of: store.endpoint, initial: true) { _, ep in
@@ -59,13 +87,18 @@ public struct RootView: View {
         }
         .onChange(of: store.sessions.map(\.id)) { _, ids in
             let live = Set(ids)
+            if store.phase == .connected { model.panes.prune(liveSessions: live) }
             model.minimizedIDs.formIntersection(live)
             if let s = model.selectedSessionID, !live.contains(s) { model.selectedSessionID = nil }
             if let s = model.expandedSessionID, !live.contains(s) { model.expandedSessionID = nil }
         }
         .onChange(of: features.scope(model, store), initial: true) { _, scope in features.tasks.scope = scope }
         .onChange(of: model.activeWorkspace, initial: true) { _, id in features.workflows.workspaceId = id }
-        .onAppear { features.bind(store: store, model: model) }
+        .onAppear {
+            features.bind(store: store, model: model)
+            store.onWorktreeCleanup = { p, w in actions.offerWorktreeCleanup(projectPath: p, worktreePath: w) }
+            model.panes.onSurfaceCard = { id in model.minimizedIDs.remove(id) }
+        }
         .task(id: diffPaths) {
             // Uncommitted changes have no event; the status bars poll while their trees are on screen.
             while !Task.isCancelled {
@@ -93,8 +126,33 @@ public struct RootView: View {
         return Array(Set(model.visibleSessions(store).map { $0.worktreePath ?? $0.projectPath })).sorted()
     }
 
+    private var changesSession: TerminalSession? {
+        guard model.mainViewMode == .sessions, let id = model.panes.diffSessionID else { return nil }
+        return store.session(id)
+    }
+
     private func cardContext(_ s: TerminalSession) -> CardContext {
-        CardContext(ended: store.ended[s.id], diffStat: store.diffStats[s.worktreePath ?? s.projectPath])
+        var c = CardContext(ended: store.ended[s.id], diffStat: store.diffStats[s.worktreePath ?? s.projectPath])
+        let panes = model.panes
+        let entries = panes.columnEntries(s.id)
+        if !entries.isEmpty {
+            var services = actions.paneServices
+            services.engine = engines.engine
+            c.paneColumn = AnyView(PaneColumn(panes: panes, sessionID: s.id, services: services))
+            c.splitRatio = panes.cardSplits[s.id]?.terminal ?? SplitRatio.default
+            c.onSplitCommit = { panes.setCardSplit(s.id, terminal: $0) }
+            c.paneMaximized = entries.contains { $0.id == panes.maximizedPaneId }
+        }
+        return c
+    }
+
+    /// Files popped out of `s`, as cells after its card.
+    private func cards(after s: TerminalSession) -> [(id: String, view: AnyView)] {
+        var services = actions.paneServices
+        services.engine = engines.engine
+        return model.panes.cards(ownedBy: s.id).filter { !model.minimizedIDs.contains($0) }.map { id in
+            (id, AnyView(EditorCard(panes: model.panes, cardID: id, services: services)))
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -132,6 +190,7 @@ public struct RootView: View {
                                     model.overlay = nil
                                     model.contextMenu = ContextMenuState(target: .grid, point: p)
                                 }) { launcher }
+                    .cards(after: cards(after:))
             }
         }
     }
@@ -156,6 +215,7 @@ public struct RootView: View {
             context.onPrevious = { model.cycleFocus(store, by: -1) }
             context.onNext = { model.cycleFocus(store, by: 1) }
         }
+        if context.paneColumn != nil { context.fixedColumnWidth = 420 }
         if !model.sidebarOpen {
             context.leadingInset = Theme.trafficLightPad
             context.headerLeading = AnyView(AppNavCluster(model: model))
@@ -183,26 +243,3 @@ private struct ConnectionNotice: View {
             .padding(24)
     }
 }
-
-private struct ErrorToast: View {
-    @Bindable var model: AppModel
-
-    var body: some View {
-        if let message = model.lastError {
-            HStack(spacing: 8) {
-                Text(message).font(.ui(12)).foregroundStyle(Theme.gray200).lineLimit(2)
-                IconButton(.x, size: 12, padding: 2, color: Theme.gray500) { model.lastError = nil }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Theme.surfaceOverlay, in: RoundedRectangle(cornerRadius: Theme.radiusLg))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radiusLg).strokeBorder(Theme.white(0.08), lineWidth: 1))
-            .padding(.bottom, 16)
-            .task(id: message) {
-                try? await Task.sleep(for: .seconds(6))
-                if model.lastError == message { model.lastError = nil }
-            }
-        }
-    }
-}
-

@@ -453,7 +453,7 @@ public struct HeadlessSession: Decodable, Identifiable, Hashable, Sendable {
 }
 
 /// Uncommitted changes in a tree (`git:diffStat`).
-public struct DiffStat: Decodable, Hashable, Sendable {
+public struct DiffStat: Codable, Hashable, Sendable {
     public var filesChanged: Int
     public var insertions: Int
     public var deletions: Int

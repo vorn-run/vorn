@@ -54,7 +54,11 @@ public final class VornStore {
     public static let topics = [
         "session:created", "session:updated", "session:reordered", "session-exit",
         "terminal:exit", "config:changed", "widget:status-update", "headless:exit", "headless:data",
+        "worktree:confirmCleanup",
     ]
+
+    /// The last session in a worktree ended (`worktree:confirmCleanup`): project path, worktree path.
+    @ObservationIgnored public var onWorktreeCleanup: (String, String) -> Void = { _, _ in }
 
     public init(
         dataDir: URL = VornEndpoint.defaultDataDir(),
@@ -224,6 +228,9 @@ public final class VornStore {
         case "config:changed":
             guard let config = try? params.decode(AppConfigSummary.self) else { return }
             applyConfig(config)
+        case "worktree:confirmCleanup":
+            guard let p = params["projectPath"]?.stringValue, let w = params["worktreePath"]?.stringValue else { return }
+            onWorktreeCleanup(p, w)
         default:
             break
         }
@@ -357,9 +364,21 @@ public final class VornStore {
     }
 
     /// Re-reads a tree's uncommitted change counts.
+    /// Re-reads a tree's uncommitted change counts, and the branch its sessions are on (useGitDiffPolling).
     public func refreshDiffStat(_ path: String) async {
         if let stat = try? await client.call("git:diffStat", .string(path)).decode(DiffStat?.self) {
             if diffStats[path] != stat { diffStats[path] = stat }
+        }
+        if let branch = try? await client.call("git:getBranch", .string(path)).stringValue,
+           sessions.contains(where: { ($0.worktreePath ?? $0.projectPath) == path && $0.branch != branch }) {
+            setBranch(branch, forCwd: path)
+        }
+    }
+
+    /// setBranchForCwd: every session in that tree is now on `branch`.
+    public func setBranch(_ branch: String, forCwd cwd: String) {
+        for i in sessions.indices where (sessions[i].worktreePath ?? sessions[i].projectPath) == cwd {
+            sessions[i].branch = branch
         }
     }
 

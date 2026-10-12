@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import ServiceManagement
 import VornCore
+import VornUI
 
 /// The settings page's categories, in the order the nav lists them.
 public enum SettingsCategory: String, CaseIterable, Sendable {
@@ -52,6 +53,7 @@ public final class SettingsModel {
     public var restartFacing: (count: Int, running: Bool) = (0, false)
     /// States an offscreen render opens straight into (`host:ID`, `paste`).
     public var renderHints: Set<String> = []
+    @ObservationIgnored public weak var toasts: ToastCenter?
     public var onToast: (String, SettingsToastKind) -> Void = { _, _ in }
     /// Called after a write so the shell can pick up changes (font size, layout).
     public var onDefaultsChanged: ([String: JSONValue]) -> Void = { _ in }
