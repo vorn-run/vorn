@@ -7,6 +7,7 @@ mod cards;
 mod chrome;
 mod composer;
 mod dialogs;
+mod glyph;
 pub mod gates;
 pub mod menus;
 pub mod runs;
@@ -132,7 +133,7 @@ impl Screen<'_> {
     fn body(&self) -> El {
         let st = self.st;
         let body = match st.view {
-            MainView::Sessions if self.store.sessions.is_empty() => composer::empty_state(self),
+            MainView::Sessions if st.composer_inline(self.store) => composer::empty_state(self),
             MainView::Sessions => cards::grid(self),
             MainView::Tasks => tasks::view(self),
             MainView::Workflows => workflows::landing(self),

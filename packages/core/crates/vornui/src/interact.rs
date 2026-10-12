@@ -500,8 +500,22 @@ impl Ui {
         self.st.animating(self.st.now)
     }
 
+    /// The time this frame is drawn at: what a view animates by.
+    pub fn now(&self) -> Instant {
+        self.st.now
+    }
+
+    /// Asks for a frame at `at` (or sooner), for motion the view drives
+    /// itself. Holds for the frame being built only: a view that keeps
+    /// moving asks again each frame.
+    pub fn wake_at(&self, at: Instant) {
+        let next = self.wake.get().map_or(at, |w| w.min(at));
+        self.wake.set(Some(next));
+    }
+
     /// When a frame is next needed without input: a tooltip's delay
-    /// running out, the caret blinking. `None` when nothing is pending.
+    /// running out, the caret blinking, a view's [`Ui::wake_at`]. `None`
+    /// when nothing is pending.
     pub fn next_wake(&self) -> Option<Instant> {
         let now = self.st.now;
         if self.animating() {
@@ -519,7 +533,7 @@ impl Ui {
                 / BLINK.as_millis();
             self.st.blink_from + BLINK * (n as u32 + 1)
         });
-        tip.into_iter().chain(blink).min()
+        tip.into_iter().chain(blink).chain(self.wake.get()).min()
     }
 
     /// Whether keys should go through the IME: a text field has focus.

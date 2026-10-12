@@ -11,7 +11,7 @@ use crate::layout::{self, Mode};
 use crate::look::{self, Rgb};
 use crate::state::MenuKind;
 use crate::ui::{
-    custom, div, field, text, text_input, tooltip, Action, El, Id, Place, Rgba, Role, Sense,
+    custom, div, field, icon, text, text_input, tooltip, Action, El, Id, Place, Rgba, Role, Sense,
     TextStyle,
 };
 
@@ -74,33 +74,14 @@ fn fade(color: Rgb, alpha: f32, dim: f32) -> Rgba {
     Rgba::hexa(color, alpha * dim)
 }
 
-/// AgentStatusIcon: the agent's icon, or the running glyph while an agent
-/// works.
-pub(super) fn status_icon(s: &Session, size: f32, dim: f32) -> El {
-    if s.is_shell() {
-        return ico("terminal", size, 1.5, fade(look::GRAY_400, 1.0, dim));
+/// AgentStatusIcon: the agent's own icon, or the running glyph while an
+/// agent works. A shell is always its terminal icon.
+pub(super) fn status_icon(s: &Screen<'_>, session: &Session, size: f32, dim: f32) -> El {
+    let agent = session.info.agent_type.as_str();
+    if agent != "shell" && session.status() == "running" {
+        return super::glyph::running(s.ui, size, fade(look::WHITE, 0.85, dim));
     }
-    let (color, alpha) = match s.status() {
-        "running" => return running(size, dim),
-        "waiting" => (look::BRONZO, 1.0),
-        "error" => (look::DANGER, 1.0),
-        _ => (look::GRAY_400, 1.0),
-    };
-    ico("bot", size, 2.0, fade(color, alpha, dim))
-}
-
-/// RunningGlyph, still: a dot in `text-white/85` where the glyph spins.
-fn running(size: f32, dim: f32) -> El {
-    div()
-        .size(size, size)
-        .center()
-        .role(Role::Image, "Running")
-        .child(
-            div()
-                .size(8.0, 8.0)
-                .rounded(4.0)
-                .bg(fade(look::WHITE, 0.85, dim)),
-        )
+    super::agent_icon(s, agent, size).opacity(dim)
 }
 
 /// `p-1 rounded hover:bg-white/10 text-ink`, the danger one turning red.
@@ -333,7 +314,7 @@ fn header(s: &Screen<'_>, session: &Session, i: usize, dim: f32, hot: bool) -> E
         .px(12.0)
         .h(look::CARD_HEADER_H - 1.0)
         .shrink0()
-        .child(status_icon(session, 18.0, dim))
+        .child(status_icon(s, session, 18.0, dim))
         .child(
             div()
                 .row()
@@ -430,7 +411,7 @@ fn focused_header(s: &Screen<'_>, session: &Session) -> El {
         row = row.child(chrome::nav_cluster(s)).child(divider());
     }
     row = row
-        .child(status_icon(session, 18.0, 1.0))
+        .child(status_icon(s, session, 18.0, 1.0))
         .child(
             div()
                 .row()
@@ -821,11 +802,16 @@ fn card(s: &Screen<'_>, i: usize, pos: usize, session: &Session) -> El {
 }
 
 /// The grid's empty state when the filter hides every card.
+/// GridView's filtered-out state: a terminal on a monitor, and the
+/// heading over its hint.
+const NO_MATCH_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8l3 3-3 3M12 14h4"/></svg>"##;
+
 fn no_match() -> El {
     div()
         .col()
         .center()
         .grow()
+        .child(icon(NO_MATCH_SVG, 64.0, white(0.2)).mb(24.0))
         .child(
             text("No matching agents", 24.0, c(look::WHITE))
                 .weight(600)
@@ -836,12 +822,13 @@ fn no_match() -> El {
             text("Try changing the status filter", 14.0, c(look::GRAY_500))
                 .line_height(20.0)
                 .mt(8.0)
+                .mb(24.0)
                 .silent(),
         )
 }
 
 pub(super) fn grid(s: &Screen<'_>) -> El {
-    let shown = s.st.visible(s.store);
+    let shown = s.st.gridded(s.store);
     if shown.is_empty() {
         return no_match();
     }
@@ -986,7 +973,7 @@ fn tab(s: &Screen<'_>, n: usize, session: &Session, active: bool) -> El {
                 .pl(12.0)
                 .pr(8.0)
                 .grow()
-                .child(status_icon(session, 16.0, 1.0))
+                .child(status_icon(s, session, 16.0, 1.0))
                 .child(label)
                 .child_if(right),
         )

@@ -290,7 +290,7 @@ fn session_row(s: &Screen<'_>, session: &Session) -> El {
         .bg(white(0.0).mix(white(0.04), if hot { 1.0 } else { 0.0 }))
         .role(Role::Button, session.title())
         .selected(active)
-        .child(super::cards::status_icon(session, 14.0, 1.0))
+        .child(super::cards::status_icon(s, session, 14.0, 1.0))
         .child(name);
     if active {
         row = row.child(div().absolute(0.0, 4.0).size(1.0, 16.0).bg(c(look::WHITE)));

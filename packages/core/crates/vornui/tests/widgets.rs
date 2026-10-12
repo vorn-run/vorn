@@ -287,6 +287,22 @@ fn menu_grows_in_then_settles() {
 }
 
 #[test]
+fn a_view_asked_wake_holds_for_its_frame_only() {
+    let mut r = Rig::new();
+    r.frame(&|_| div());
+    assert_eq!(r.ui.next_wake(), None);
+    let at = r.now + Duration::from_millis(33);
+    r.frame(&|ui: &Ui| {
+        ui.wake_at(ui.now() + Duration::from_millis(50));
+        ui.wake_at(ui.now() + Duration::from_millis(33));
+        div()
+    });
+    assert_eq!(r.ui.next_wake(), Some(at));
+    r.frame(&|_| div());
+    assert_eq!(r.ui.next_wake(), None);
+}
+
+#[test]
 fn tooltip_shows_after_the_delay_and_hides_on_press() {
     let b = Id::new("settings");
     let build = |ui: &Ui| {

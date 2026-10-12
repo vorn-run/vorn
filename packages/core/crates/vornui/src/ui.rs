@@ -3,6 +3,7 @@
 //! records where interactive boxes landed and builds the accessibility
 //! tree; [`Ui::render_offscreen`] or the window then draws the scene.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -90,6 +91,10 @@ pub struct Ui {
     icons: HashMap<(u64, u32), Option<[f32; 4]>>,
     images: Vec<Image>,
     anon: u64,
+    /// The earliest frame a view asked for while building this one, for
+    /// motion that is not a hover fade (a spinner, a pulse). A `Cell` so a
+    /// view holding `&Ui` can ask.
+    pub(crate) wake: Cell<Option<Instant>>,
 }
 
 enum Measure<'a> {
@@ -184,6 +189,7 @@ impl Ui {
             icons: HashMap::new(),
             images: Vec::new(),
             anon: 0,
+            wake: Cell::new(None),
         }
     }
 
@@ -266,6 +272,7 @@ impl Ui {
     /// Starts a frame at `now`: tests drive animations and timers with it.
     pub fn begin_at(&mut self, clear: Rgba, now: Instant) {
         self.st.now = now;
+        self.wake.set(None);
         self.scene.clear();
         self.clear = clear;
     }
