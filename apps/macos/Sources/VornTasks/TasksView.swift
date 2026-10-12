@@ -1,6 +1,7 @@
 import SwiftUI
 import VornCore
 import VornUI
+import VornWorkflows
 
 /// The Tasks screen the shell mounts: the board, its detail panel, and the quick-add dialog.
 public struct TasksView: View {
@@ -15,14 +16,15 @@ public struct TasksView: View {
             board
             if let id = store.selectedTaskId {
                 let task = store.task(id: id)
-                if id == TasksStore.newTaskId || task != nil {
-                    TaskDetailPanel(store: store, task: task).id(id)
+                if id == TasksStore.newTaskId || task != nil, let model = store.detail {
+                    TaskDetailPanel(store: store, task: task, model: model).id(id)
                 }
             }
         }
         .background(Theme.surfaceBase)
         .overlay { dialog }
         .overlay { viewOptions }
+        .overlay { detailOverlays }
         .overlay { PopupLayer(store: store) }
         .animation(.spring(response: 0.25, dampingFraction: 0.85), value: store.dialogOpen)
         .animation(.easeOut(duration: 0.12), value: store.popup?.id)
@@ -56,6 +58,19 @@ public struct TasksView: View {
                     .transition(.opacity)
                 AddTaskDialog(store: store)
                     .transition(.scale(scale: 0.95).combined(with: .opacity))
+            }
+        }
+    }
+
+    /// The commit dialog and a run step's full output, over the whole screen as in TaskDetailPanel.tsx.
+    @ViewBuilder
+    private var detailOverlays: some View {
+        if let detail = store.detail {
+            if detail.commitDialogOpen {
+                CommitDialog(model: detail) { detail.commitDialogOpen = false }
+            }
+            if let logs = detail.fullOutput {
+                LogReplayModal(logs: logs) { detail.fullOutput = nil }
             }
         }
     }

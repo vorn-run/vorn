@@ -51,6 +51,9 @@ done
 for state in list kanban dialog detail options; do
   "$bin/VornTasksPreview" --sample --render "$out/tasks-$state.png" --state "$state"
 done
+for state in detail-review commit; do
+  "$bin/VornTasksPreview" --sample --render "$out/tasks-$state.png" --state "$state" --size 1200x1500
+done
 "$bin/VornTasksPreview" --data-dir "$data" --render "$out/tasks-vornd.png"
 
 for scene in landing review failed page toast menu; do

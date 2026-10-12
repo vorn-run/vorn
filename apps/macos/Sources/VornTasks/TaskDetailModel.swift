@@ -14,7 +14,7 @@ struct PendingImage: Identifiable, Hashable {
 @Observable
 public final class TaskDetailModel {
     /// The extensions vornd's `task:imageSave` takes.
-    public static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "bmp"]
+    nonisolated public static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "bmp"]
 
     let store: TasksStore
     public let taskId: String?
@@ -29,12 +29,14 @@ public final class TaskDetailModel {
 
     public private(set) var diff: GitDiffResult?
     public private(set) var diffLoading = false
+    /// The task and folder the diff was last fetched for; nil while the task shows no changes.
+    private var diffKey: String??
     var showDiff = true
     var selectedFile: String?
     public private(set) var comments: [DiffComment] = []
     /// The line whose comment box is open; its `comment` is unused.
     var commentingLine: DiffComment?
-    var commitDialogOpen = false
+    public var commitDialogOpen = false
 
     public init(store: TasksStore, taskId: String?) {
         self.store = store
@@ -54,7 +56,24 @@ public final class TaskDetailModel {
     /// The changes section shows while the task is being worked on or reviewed.
     public var showsChanges: Bool { task.map { $0.status == .inProgress || $0.status == .inReview } ?? false }
 
-    var hasChanges: Bool { !(diff?.files.isEmpty ?? true) }
+    /// The totals over every file, as the panel's header and the commit dialog show them.
+    var stat: GitDiffResult.Stat? {
+        guard let diff else { return nil }
+        return GitDiffResult.Stat(filesChanged: diff.files.count, insertions: diff.files.reduce(0) { $0 + $1.insertions },
+                                  deletions: diff.files.reduce(0) { $0 + $1.deletions })
+    }
+
+    var hasChanges: Bool { stat.map { $0.insertions > 0 || $0.deletions > 0 } ?? false }
+
+    /// Today's diffKey: the task and folder whose changes show, nil when none do.
+    var currentDiffKey: String? {
+        guard let taskId, showsChanges, !cwd.isEmpty else { return nil }
+        return "\(taskId)|\(cwd)"
+    }
+
+    var taskTitles: [String: String] {
+        Dictionary(store.tasks.map { ($0.id, $0.title) }, uniquingKeysWith: { a, _ in a })
+    }
 
     // MARK: - Images
 
@@ -140,7 +159,9 @@ public final class TaskDetailModel {
     public func loadRuns() async {
         guard let id = taskId, let extras = store.extras else { return }
         if let rows = try? await extras.listTaskRuns(taskId: id, limit: 20) { runs = rows }
-        if !runs.isEmpty, workflows.isEmpty, let all = try? await extras.listWorkflows() { workflows = all }
+        if !runs.isEmpty, workflows.isEmpty, store.workflows == nil, let all = try? await extras.listWorkflows() {
+            workflows = all
+        }
     }
 
     /// Follows the runs while one is still going.
@@ -154,30 +175,44 @@ public final class TaskDetailModel {
     }
 
     func workflow(for run: WorkflowExecution) -> WorkflowDefinition? {
-        workflows.first { $0.id == run.workflowId }
+        store.workflows?.workflow(run.workflowId) ?? workflows.first { $0.id == run.workflowId }
     }
 
     // MARK: - Changes
 
-    /// fetchDiff: the worktree's uncommitted changes.
+    /// Fetches the changes when the task or its folder changed, and drops them when it no longer shows any.
+    public func syncDiff() async {
+        let key = currentDiffKey
+        guard diffKey != .some(key) else { return }
+        diffKey = .some(key)
+        if key == nil {
+            diff = nil
+            resetReview()
+        } else {
+            await loadDiff()
+        }
+    }
+
+    /// fetchDiff: the worktree's uncommitted changes; a new diff starts the review over.
     public func loadDiff() async {
         let cwd = cwd
-        guard showsChanges, !cwd.isEmpty, let extras = store.extras else {
-            diff = nil
-            return
-        }
+        guard showsChanges, !cwd.isEmpty, let extras = store.extras else { return }
         diffLoading = true
         defer { diffLoading = false }
         do {
             diff = try await extras.gitDiff(cwd: cwd)
-        } catch {
-            diff = nil
-        }
-        if let selected = selectedFile, diff?.files.contains(where: { $0.filePath == selected }) != true { selectedFile = nil }
+            resetReview()
+        } catch {}
+    }
+
+    private func resetReview() {
+        selectedFile = nil
+        comments = []
+        commentingLine = nil
     }
 
     /// handleClickLine: a second click on the open line closes it.
-    func clickLine(filePath: String, lineIndex: Int, lineContent: String) {
+    public func clickLine(filePath: String, lineIndex: Int, lineContent: String) {
         if commentingLine?.filePath == filePath, commentingLine?.lineIndex == lineIndex {
             commentingLine = nil
         } else {
@@ -204,28 +239,16 @@ public final class TaskDetailModel {
 
     func clearComments() { comments = [] }
 
-    /// What the send button says: an agent to send to, or the clipboard.
-    var sendsToAgent: Bool {
-        guard let task else { return false }
-        return task.agentSessionId != nil || store.isSessionLive(task)
-    }
+    /// What the send button says: "Send to Agent" when the task has a conversation, else "Copy Feedback".
+    var sendsToAgent: Bool { task?.agentSessionId != nil }
 
-    /// handleSendFeedback: into the live session, else a resumed one, else the clipboard.
+    /// handleSendFeedback: the task's conversation resumed with the review as its prompt, else the clipboard.
     public func sendFeedback() async {
         guard !comments.isEmpty, let task else { return }
         let feedback = DiffReview.feedback(comments)
-        let prompt = DiffReview.prompt(feedback, task: task, projectName: task.projectName)
-        if store.isSessionLive(task), let sid = task.assignedSessionId, let write = store.writeSession {
-            do {
-                try await write(sid, "\u{1b}[200~\(prompt)\u{1b}[201~")
-                try await write(sid, "\r")
-                store.focusSession?(sid)
-                store.onToast("Feedback sent to agent", .success)
-            } catch {
-                store.onToast(error.localizedDescription, .error)
-                return
-            }
-        } else if store.canResume(task) {
+        if task.agentSessionId != nil, let agent = task.assignedAgent, agent.supportsExactSessionResume,
+           store.projects.contains(where: { $0.name == task.projectName }) {
+            let prompt = DiffReview.prompt(feedback, task: task, projectName: task.projectName)
             guard await store.resumeSession(task, initialPrompt: prompt) != nil else { return }
             store.onToast("Feedback sent to agent", .success)
         } else {
@@ -246,7 +269,6 @@ public final class TaskDetailModel {
             if push {
                 let pushed = try await extras.gitPush(cwd: cwd)
                 guard pushed.success else {
-                    await loadDiff()
                     return "Committed, but push failed: \(pushed.error ?? "unknown error")"
                 }
                 store.onToast("Committed and pushed", .success)

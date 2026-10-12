@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import VornCore
+import VornWorkflows
 
 /// Which projects' tasks the board shows: the active project, or every project in the workspace.
 public enum TasksScope: Equatable, Sendable {
@@ -53,7 +54,14 @@ public final class TasksStore {
     public var includeArchived = false
 
     /// The open detail panel: a task id, or `newTaskId` while creating one.
-    public var selectedTaskId: String?
+    public var selectedTaskId: String? {
+        didSet {
+            guard selectedTaskId != oldValue else { return }
+            detail = selectedTaskId.map { TaskDetailModel(store: self, taskId: $0 == Self.newTaskId ? nil : $0) }
+        }
+    }
+    /// The open panel's images, runs and review of changes.
+    public private(set) var detail: TaskDetailModel?
     public static let newTaskId = "new"
 
     /// The quick-add dialog; `dialogTask` is set when it edits rather than creates.
@@ -84,6 +92,9 @@ public final class TasksStore {
     /// The detail panel's extras, when the service answers them.
     var extras: (any TaskExtrasService)? { service as? any TaskExtrasService }
     @ObservationIgnored private var watch: Task<Void, Never>?
+
+    // Task detail extras: the shell's workflows store, which the panel's run cards act through.
+    public var workflows: WorkflowsStore?
 
     public init(service: any TaskService) {
         self.service = service
@@ -346,13 +357,11 @@ public final class TasksStore {
     }
 
     /// Resumes a workflow step's agent conversation (TaskDetailPanel.tsx handleRunResumeSession).
-    func resumeStep(agentSessionId: String, agent: AgentType, projectName: String, projectPath: String,
-                    branch: String?, useWorktree: Bool?) {
-        guard let launch = launchSession, agent != .gemini, agent != .shell else { return }
-        let path = projectPath.isEmpty ? (projects.first { $0.name == projectName }?.path ?? "") : projectPath
-        var payload = CreateTerminalPayload(agentType: agent, projectName: projectName, projectPath: path,
-                                            branch: branch, useWorktree: useWorktree)
-        payload.resumeSessionId = agentSessionId
+    func resumeStep(_ r: RunResumeRequest) {
+        guard let launch = launchSession, r.agentType != .gemini, r.agentType != .shell else { return }
+        var payload = CreateTerminalPayload(agentType: r.agentType, projectName: r.projectName, projectPath: r.projectPath,
+                                            branch: r.branch, useWorktree: r.useWorktree)
+        payload.resumeSessionId = r.agentSessionId
         Task {
             do {
                 let session = try await launch(payload)

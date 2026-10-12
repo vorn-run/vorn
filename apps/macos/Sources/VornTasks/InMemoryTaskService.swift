@@ -9,6 +9,12 @@ public actor InMemoryTaskService: TaskService {
     public private(set) var calls: [String] = []
     private var agents: [AgentKind: Bool]
     private var listeners: [UUID: AsyncStream<Void>.Continuation] = [:]
+    /// The detail panel's extras: image paths by task and name, runs by task, and diffs by folder.
+    public private(set) var imageFiles: [String: [String: String]] = [:]
+    public private(set) var taskRuns: [String: [WorkflowExecution]] = [:]
+    public private(set) var workflowList: [WorkflowDefinition] = []
+    public private(set) var diffs: [String: GitDiffResult] = [:]
+    public private(set) var commits: [String] = []
 
     public init(tasks: [VornTask] = [], projects: [Project] = [], mode: TaskViewMode = .list,
                 agents: [AgentKind: Bool] = [.claude: true, .copilot: true, .codex: true]) {
@@ -113,6 +119,78 @@ public actor InMemoryTaskService: TaskService {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f.string(from: Date())
+    }
+}
+
+extension InMemoryTaskService: TaskExtrasService {
+    /// Gives tasks images, runs and changes, for previews and tests.
+    public func stage(images: [String: [String: String]] = [:], runs: [String: [WorkflowExecution]] = [:],
+                      workflows: [WorkflowDefinition] = [], diffs: [String: GitDiffResult] = [:]) {
+        imageFiles.merge(images) { $1 }
+        taskRuns.merge(runs) { $1 }
+        workflowList += workflows
+        self.diffs.merge(diffs) { $1 }
+    }
+
+    public func saveTaskImage(taskId: String, sourcePath: String) async throws -> String {
+        calls.append("imageSave")
+        let ext = (sourcePath as NSString).pathExtension.lowercased()
+        guard TaskDetailModel.imageExtensions.contains(ext) else { throw VornError.refused("Unsupported image type: .\(ext)") }
+        let name = "\(UUID().uuidString.lowercased()).\(ext)"
+        imageFiles[taskId, default: [:]][name] = sourcePath
+        return name
+    }
+
+    public func uploadTaskImage(taskId: String, data: Data, filename: String) async throws -> String {
+        calls.append("imageUpload")
+        let name = "\(UUID().uuidString.lowercased()).\((filename as NSString).pathExtension)"
+        imageFiles[taskId, default: [:]][name] = ""
+        return name
+    }
+
+    public func deleteTaskImage(taskId: String, filename: String) async throws {
+        calls.append("imageDelete")
+        imageFiles[taskId]?[filename] = nil
+    }
+
+    public func cleanupTaskImages(taskId: String) async throws {
+        calls.append("imageCleanup")
+        imageFiles[taskId] = nil
+    }
+
+    public func taskImagePath(taskId: String, filename: String) async throws -> String {
+        guard let path = imageFiles[taskId]?[filename] else { throw VornError.refused("No image") }
+        return path
+    }
+
+    public func patchTaskConfig(id: String, _ fields: [String: JSONValue]) async throws {
+        calls.append("patch")
+        guard let i = tasks.firstIndex(where: { $0.id == id }) else { throw VornError.refused("That task no longer exists") }
+        var object = try JSONDecoder().decode([String: JSONValue].self, from: JSONEncoder().encode(tasks[i]))
+        for (key, value) in fields {
+            if case .null = value { object.removeValue(forKey: key) } else { object[key] = value }
+        }
+        tasks[i] = try JSONDecoder().decode(VornTask.self, from: JSONEncoder().encode(object))
+        changed()
+    }
+
+    public func listTaskRuns(taskId: String, limit: Int) async throws -> [WorkflowExecution] {
+        Array((taskRuns[taskId] ?? []).prefix(limit))
+    }
+
+    public func listWorkflows() async throws -> [WorkflowDefinition] { workflowList }
+
+    public func gitDiff(cwd: String) async throws -> GitDiffResult? { diffs[cwd] }
+
+    public func gitCommit(cwd: String, message: String, includeUnstaged: Bool) async throws -> GitOutcome {
+        guard diffs[cwd] != nil else { return GitOutcome(success: false, error: "nothing to commit, working tree clean") }
+        commits.append(message)
+        diffs[cwd] = nil
+        return GitOutcome(success: true)
+    }
+
+    public func gitPush(cwd: String) async throws -> GitOutcome {
+        GitOutcome(success: false, error: "No configured push destination.")
     }
 }
 

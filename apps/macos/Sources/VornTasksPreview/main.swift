@@ -3,13 +3,14 @@ import SwiftUI
 import VornCore
 import VornTasks
 import VornUI
+import VornWorkflows
 
 // A window that hosts TasksView on its own, against a test vornd or a sample board.
 //
 //   VornTasksPreview --sample
 //   VornTasksPreview --data-dir DIR --seed           (fills a test vornd with the sample board)
 //   VornTasksPreview --data-dir DIR                  (read-only when DIR is the app's own ~/.vorn)
-//   VornTasksPreview --data-dir DIR --render out.png [--state list|kanban|dialog|detail|options] [--size 1200x700]
+//   VornTasksPreview --data-dir DIR --render out.png [--state list|kanban|dialog|detail|detail-review|commit|options] [--size 1200x700]
 
 struct Options {
     var dataDir: URL?
@@ -177,18 +178,111 @@ private struct WindowConfigurator: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
+// MARK: - Task detail review
+
+/// The repo root, for the screenshots the sample images borrow.
+let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+let reviewTaskId = "f6a8b5e5"
+let fixtures = repoRoot.appendingPathComponent("apps/macos/Tests/VornWorkflowsTests/Fixtures")
+
+/// The sample board with an in-review task that has images, workflow runs and uncommitted changes.
+func reviewService() async throws -> InMemoryTaskService {
+    let service = InMemoryTaskService.sample()
+    let shots = ["tasks.png", "workflows.png", "panes.png"]
+    let images = Dictionary(uniqueKeysWithValues: shots.map { ($0, repoRoot.appendingPathComponent("docs/screenshots/\($0)").path) })
+    let runs = try JSONDecoder().decode([WorkflowExecution].self, from: Data(contentsOf: fixtures.appendingPathComponent("runs.json")))
+    await service.stage(images: [reviewTaskId: images], runs: [reviewTaskId: Array(runs.prefix(2))],
+                        diffs: ["/tmp/vorn": sampleDiff])
+    try await service.patchTaskConfig(id: reviewTaskId, [
+        "images": .array(shots.map(JSONValue.string)), "agentSessionId": .string("5d1c2a9e-claude"),
+        "branch": .string("feat/run-panel"),
+    ])
+    return service
+}
+
+/// Opens the review task with a comment on one line and the comment box open on another.
+@MainActor
+func showReview(_ store: TasksStore) async -> String? {
+    do {
+        let backend = try FixtureWorkflowsBackend(
+            workflowsJSON: Data(contentsOf: fixtures.appendingPathComponent("workflows.json")),
+            runsJSON: Data(contentsOf: fixtures.appendingPathComponent("runs.json")))
+        let workflows = WorkflowsStore(backend: backend)
+        await workflows.reload()
+        store.workflows = workflows
+    } catch {
+        return "fixtures: \(error)"
+    }
+    store.launchSession = { _ in throw VornError.refused("No sessions in the preview") }
+    store.selectedTaskId = reviewTaskId
+    guard let detail = store.detail else { return "no detail model" }
+    await detail.syncDiff()
+    await detail.loadRuns()
+    await detail.loadImagePaths()
+    guard let file = detail.diff?.files.first else { return "no sample diff" }
+    let rows = DiffReview.rows(file.diff).filter { $0.kind == .add }
+    if rows.count >= 2 {
+        detail.comment(filePath: file.filePath, lineIndex: rows[0].index, lineContent: rows[0].text,
+                       "Keep the header pinned while the list scrolls.")
+        detail.clickLine(filePath: file.filePath, lineIndex: rows[1].index, lineContent: rows[1].text)
+    }
+    if options.state == "commit" { detail.commitDialogOpen = true }
+    return nil
+}
+
+let sampleDiff = GitDiffResult(
+    stat: .init(filesChanged: 2, insertions: 9, deletions: 3),
+    files: [
+        GitFileDiff(filePath: "src/renderer/components/RunEntry.tsx", status: .modified, insertions: 6, deletions: 2, diff: """
+        diff --git a/src/renderer/components/RunEntry.tsx b/src/renderer/components/RunEntry.tsx
+        index 3b18e51..a9c4f2d 100644
+        --- a/src/renderer/components/RunEntry.tsx
+        +++ b/src/renderer/components/RunEntry.tsx
+        @@ -12,7 +12,11 @@ export function RunEntry({ execution, nodes }: Props) {
+           const [expanded, setExpanded] = useState(false)
+        -  const steps = nodes.filter((n) => n.type !== 'trigger')
+        +  const steps = useMemo(
+        +    () => nodes.filter((n) => n.type !== 'trigger'),
+        +    [nodes]
+        +  )
+        +  const failed = steps.some((s) => stateOf(s.id) === 'error')
+           return (
+        -    <div className="rounded-lg border">
+        +    <div className={`rounded-lg border ${failed ? 'border-red-500/30' : ''}`}>
+               <Header execution={execution} />
+        """),
+        GitFileDiff(filePath: "src/renderer/stores/workflows.ts", status: .modified, insertions: 3, deletions: 1, diff: """
+        diff --git a/src/renderer/stores/workflows.ts b/src/renderer/stores/workflows.ts
+        --- a/src/renderer/stores/workflows.ts
+        +++ b/src/renderer/stores/workflows.ts
+        @@ -40,3 +40,5 @@ export const useWorkflows = create(() => ({
+           runs: [],
+        -  selected: null
+        +  selected: null,
+        +  filter: 'all',
+        +  page: 0
+         }))
+        """),
+    ])
+
 /// Draws one state of the board offscreen and writes it as a PNG.
 @MainActor
 func render(to path: String) async -> Int32 {
     _ = NSApplication.shared
     let store: TasksStore
+    let review = options.state == "detail-review" || options.state == "commit"
     do {
-        store = TasksStore(service: try await makeService())
+        store = TasksStore(service: review ? try await reviewService() : try await makeService())
     } catch {
         FileHandle.standardError.write(Data("could not reach vornd: \(error)\n".utf8))
         return 1
     }
     await store.reload()
+    if review, let error = await showReview(store) {
+        FileHandle.standardError.write(Data("\(error)\n".utf8))
+        return 1
+    }
     switch options.state {
     case "kanban": store.showViewMode(.kanban)
     case "list": store.showViewMode(.list)
