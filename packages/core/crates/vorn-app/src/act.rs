@@ -98,6 +98,11 @@ pub enum Act {
     Task(crate::tasks::TaskAct),
     Run(crate::runs::RunAct),
     Workflow(crate::workflows::WfAct),
+    /// The settings page's controls.
+    Set(crate::settings::SetAct),
+    Git(crate::git::GitAct),
+    Side(crate::side::SideAct),
+    Edit(crate::editor::EditAct),
     Pane(crate::panes::PaneAct),
     /// Opens a link in the system browser.
     OpenUrl(String),

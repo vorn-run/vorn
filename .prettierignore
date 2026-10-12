@@ -19,6 +19,9 @@ src/renderer/lib/completion-index/LICENSE
 # Google Search Console reads this byte for byte.
 website/google21afb44e7186463c.html
 
+# Shiki's tokens for the desktop app's highlight parity test, written by a script.
+packages/core/crates/vorn-app/tests/fixtures/highlight/
+
 # Rust core build output
 packages/core/target/
 

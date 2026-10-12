@@ -18,6 +18,7 @@ pub const TOPICS: &[&str] = &[
     "widget:status-update",
     "config:changed",
     "workflow:runUpdated",
+    "worktree:confirmCleanup",
     "artifact:published",
     "artifact:commentsChanged",
 ];

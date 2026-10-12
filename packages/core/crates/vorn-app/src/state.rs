@@ -145,6 +145,18 @@ pub enum MenuKind {
     NodeMore(String),
     /// The editor's icon and colour picker.
     WfIcon,
+    /// The settings shell picker's list.
+    SetShell,
+    /// A settings `<select>`, by the default it writes.
+    SetSelect(String),
+    /// A host's stored-key select.
+    SshKey(String),
+    /// A session's branch switcher.
+    Branch(String),
+    /// The editors a session's project opens in.
+    OpenIn(String),
+    /// A Files pane's list of every open tab.
+    FileTabs(String),
 }
 
 impl MenuKind {
@@ -188,6 +200,12 @@ pub enum Dialog {
     WfFile,
     /// GateReviewModal: the review page of a waiting gate.
     GateReview,
+    /// The Changes panel's CommitDialog.
+    GitCommit,
+    /// WorktreeCleanupDialog.
+    RemoveWorktree,
+    /// "Discard unsaved changes?" before a buffer goes.
+    Discard,
 }
 
 /// A toast in the bottom right.
@@ -365,6 +383,12 @@ pub struct State {
     pub tasks: crate::tasks::Tasks,
     pub runs: crate::runs::RunView,
     pub wf: crate::workflows::Workflows,
+    pub settings: crate::settings::Settings,
+    pub git: crate::git::Git,
+    pub side: crate::side::Side,
+    pub editors: crate::editor::Editors,
+    /// The build of the vornd this app talks to, from `server:identity`.
+    pub server_version: Option<String>,
     pub bench: crate::panes::Workbench,
 }
 
@@ -381,6 +405,7 @@ impl State {
                     .as_deref()
                     .is_none_or(|p| s.info.project_name == p)
                     && self.filter.keeps(s)
+                    && self.side.holder(&s.info.id).is_none()
             })
             .map(|(i, _)| i)
             .collect();

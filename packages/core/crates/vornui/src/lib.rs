@@ -20,6 +20,8 @@ pub mod gpu;
 pub mod icons;
 pub mod input;
 mod interact;
+#[cfg(target_os = "macos")]
+mod macos;
 pub mod menu;
 pub mod motion;
 pub mod pace;

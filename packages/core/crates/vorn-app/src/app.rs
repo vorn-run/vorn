@@ -33,6 +33,9 @@ mod browser;
 pub mod canvas;
 pub mod forms;
 mod gates;
+mod git;
+mod settings;
+mod side;
 mod tasks;
 mod workflows;
 
@@ -170,6 +173,11 @@ enum Call {
     Saved(Box<Call>),
     Task(tasks::TaskCall),
     Workflow(workflows::WfCall),
+    Set(settings::SetCall),
+    Git(git::GitCall),
+    Side(side::SideCall),
+    /// Nothing to do with the answer, an error included.
+    Ignore,
     Pane(browser::PaneCall),
 }
 
@@ -205,12 +213,25 @@ pub struct App {
     pub closed: bool,
     /// The app draws its own title bar and window controls.
     pub chrome: bool,
+    /// macOS: the traffic lights sit over the app's top bar.
+    pub traffic: bool,
     /// The last frame's size.
     size: (f32, f32),
     /// vornd's HTTP port, for pages it serves (a gate's review page).
     port: u16,
     /// The sessions the banner offers, with why each ended.
     carried: Vec<(TerminalSession, &'static str)>,
+    /// vornd's data directory, where its session holders announce
+    /// themselves.
+    pub data_dir: Option<std::path::PathBuf>,
+    /// The health check on its way.
+    health: Option<std::sync::mpsc::Receiver<Option<Value>>>,
+    /// The field that had focus last frame, to tell when one loses it.
+    last_focus: Option<Id>,
+    /// Worktree removals waiting for the sessions they closed.
+    removals: Vec<git::Pending>,
+    /// A discard the person agreed to is being run.
+    discarding: bool,
     /// The browser and device panes' web views and calls in flight.
     web: browser::Web,
 }
@@ -231,6 +252,7 @@ impl App {
             sidebar: true,
             layout: LayoutMode::from_config(&store.config),
             tasks: crate::tasks::Tasks::new(&store.config),
+            settings: crate::settings::Settings::new(),
             ..State::default()
         };
         let mut app = App {
@@ -250,15 +272,31 @@ impl App {
             agents: Default::default(),
             closed: false,
             chrome: !cfg!(target_os = "macos"),
+            traffic: cfg!(target_os = "macos"),
             size: look::WINDOW,
             port: ep.port,
             carried: Vec::new(),
+            data_dir: None,
+            health: None,
+            last_focus: None,
+            removals: Vec::new(),
+            discarding: false,
             web,
         };
         app.call(Call::Restored, "sessions:restored", Value::Null);
         app.call(Call::Headless, "headless:list", Value::Null);
         app.call(Call::Installed, "agent:detectInstalled", Value::Null);
         Ok(app)
+    }
+
+    /// Where vornd keeps its data: the session holders announce themselves
+    /// there, and this app keeps its own view of it (open panes, drafts)
+    /// beside them.
+    pub fn set_data_dir(&mut self, dir: std::path::PathBuf) {
+        self.st.side = crate::side::Side::load(Some(crate::side::view_file(&dir)));
+        self.st.editors.drafts =
+            crate::editor::Drafts::load(Some(crate::editor::drafts_file(&dir)));
+        self.data_dir = Some(dir);
     }
 
     /// The vornd connection, for calls the screen does not make itself.
@@ -302,8 +340,19 @@ impl App {
                         self.wf_run_updated(&params);
                     }
                     self.pane_notified(&method, &params);
+                    if method == "server:identity" {
+                        self.st.server_version = params
+                            .get("appVersion")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        continue;
+                    }
                     if method == "scheduler:missed" {
                         self.wf_missed(&params);
+                        continue;
+                    }
+                    if method == "worktree:confirmCleanup" {
+                        self.git_offer(&params);
                         continue;
                     }
                     self.store.apply(&method, params);
@@ -382,6 +431,10 @@ impl App {
             Call::Resumed { id, auto } => self.resumed(&id, auto, answer),
             Call::Task(c) => self.task_answered(c, answer),
             Call::Workflow(c) => self.wf_answered(c, answer),
+            Call::Set(c) => self.set_answered(c, answer),
+            Call::Git(c) => self.git_answered(c, answer),
+            Call::Side(c) => self.side_answered(c, answer),
+            Call::Ignore => {}
             Call::Pane(c) => self.pane_answered(c, answer),
             Call::Saved(call) => {
                 self.saving = false;
@@ -563,6 +616,18 @@ impl App {
         self.st.focused.clone().or_else(|| self.st.selected.clone())
     }
 
+    /// Where typing goes: a panel shell holding the keyboard while its
+    /// owner is the current card, else the current card.
+    fn typing_target(&self) -> Option<String> {
+        let current = self.current();
+        if let Some(t) = &self.st.side.focus {
+            if current.as_deref().is_some() && self.st.side.holder(t) == current.as_deref() {
+                return Some(t.clone());
+            }
+        }
+        current
+    }
+
     /// Moves to the card `id`: onto the stage when one is focused.
     fn go_to(&mut self, id: String) {
         self.st.view = MainView::Sessions;
@@ -667,6 +732,12 @@ impl App {
                 ) =>
             {
                 (r.x + r.w - w, r.y + r.h + 4.0)
+            }
+            // `OpenInButton` opens upwards, its right edge on the chip's.
+            (None, Some(r)) if matches!(kind, MenuKind::OpenIn(_)) => {
+                let n = self.st.git.ides.as_ref().map_or(0, Vec::len);
+                let h = crate::screen::git::open_in_height(n);
+                (r.x + r.w - w, (r.y - h - 4.0).max(8.0))
             }
             (None, Some(r)) => (r.x, r.y + r.h + 4.0),
             (None, None) => (self.size.0 - w - 12.0, look::TOP_BAR_H),
@@ -774,8 +845,12 @@ impl App {
             Act::Select(id) => {
                 self.st.view = MainView::Sessions;
                 self.st.selected = Some(id);
+                self.st.side.focus = None;
                 ui.set_focus(None);
             }
+            Act::Git(a) => self.run_git(ui, a, src),
+            Act::Side(a) => self.run_side(ui, a, src),
+            Act::Edit(a) => self.run_edit(ui, a),
             Act::Expand(id) => {
                 self.st.view = MainView::Sessions;
                 self.st.selected = Some(id.clone());
@@ -853,6 +928,7 @@ impl App {
                 self.start_run(ui, &id, source, None);
             }
             Act::Workflow(a) => self.run_wf(ui, a, src),
+            Act::Set(a) => self.run_set(ui, a),
             Act::Rename(id) => {
                 let Some(title) = self.store.session(&id).map(|s| s.title()) else {
                     return;
@@ -959,8 +1035,13 @@ impl App {
                 self.st.wf.prompt = None;
                 self.st.wf.file = None;
             }
-            // The welcome guide and settings are later surfaces of the port.
-            Act::Welcome | Act::Settings => self.st.dialog = None,
+            Act::Settings => {
+                self.st.dialog = None;
+                let cat = self.st.settings.category;
+                self.open_settings(cat);
+            }
+            // The welcome guide is a later surface of the port.
+            Act::Welcome => self.st.dialog = None,
             Act::Project(p) => {
                 self.st.project = p;
                 if self.st.view == MainView::Workflows {
@@ -1126,7 +1207,8 @@ impl App {
 
     /// Something the UI reported.
     pub fn event(&mut self, ui: &mut Ui, event: UiEvent) {
-        if self.gate_event(ui, &event)
+        if self.settings_event(ui, &event)
+            || self.gate_event(ui, &event)
             || self.canvas_event(ui, &event)
             || self.form_event(ui, &event)
             || self.task_event(ui, &event)
@@ -1245,6 +1327,13 @@ impl App {
                 self.st.confirm_delete = None;
             }
             UiEvent::Submit(id) => self.submit(ui, id),
+            UiEvent::Changed(id) if self.pane_changed(ui, id) => {}
+            UiEvent::Resized { id, ratio } => {
+                self.pane_resized(ui, id, ratio, false);
+            }
+            UiEvent::ResizeEnd { id, ratio } => {
+                self.pane_resized(ui, id, ratio, true);
+            }
             UiEvent::Changed(id) if id == PROJECT_PATH => {
                 // The folder's name, until another name is typed.
                 let name = ui.edit_text(PROJECT_NAME).to_owned();
@@ -1335,6 +1424,25 @@ impl App {
     /// Input before the UI sees it: the global shortcuts, and Escape
     /// closing what is open. True when it was used.
     pub fn intercept(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        if self.settings_key(ui, input) {
+            return true;
+        }
+        if let Input::Key { code, mods: m, .. } = input {
+            let with_mod = *m & MOD != 0;
+            if !self.st.settings.open
+                && (self.git_key(ui, code, with_mod)
+                    || self.pane_key(ui, code, with_mod, *m & mods::SHIFT != 0))
+            {
+                return true;
+            }
+            if self.st.dialog == Some(Dialog::Discard) && code == "Escape" {
+                self.run_edit(ui, crate::editor::EditAct::CancelDiscard);
+                return true;
+            }
+        }
+        if self.st.settings.open {
+            return false;
+        }
         if self.st.menu.is_none() && (self.task_key(ui, input) || self.wf_key(ui, input)) {
             return true;
         }
@@ -1379,7 +1487,7 @@ impl App {
     /// One key or IME event the UI did not use: the composer's or the
     /// terminal's.
     pub fn input(&mut self, input: Input) {
-        if self.st.dialog.is_some() || self.st.menu.is_some() {
+        if self.st.dialog.is_some() || self.st.menu.is_some() || self.st.settings.open {
             return;
         }
         if self.composing() {
@@ -1389,7 +1497,7 @@ impl App {
         if self.st.view != MainView::Sessions {
             return;
         }
-        let (Some(g), Some(id)) = (&self.grid, self.current()) else {
+        let (Some(g), Some(id)) = (&self.grid, self.typing_target()) else {
             return;
         };
         match input {
@@ -1547,6 +1655,7 @@ impl App {
             agents: &self.agents,
             size: self.size,
             chrome: self.chrome,
+            traffic: self.traffic,
         }
     }
 
@@ -1564,7 +1673,25 @@ impl App {
     /// vornd sent.
     pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
         self.pump();
+        self.git_tick();
+        self.panes_tick(ui);
         self.tasks_tick(ui);
+        self.settings_tick(std::time::Instant::now());
+        let focus = ui.focus();
+        if focus != self.last_focus {
+            if let Some(old) = self.last_focus {
+                self.settings_blur(ui, old);
+            }
+            self.last_focus = focus;
+        }
+        // `fontSize` 13 is the size the terminal font was matched at.
+        let font = self
+            .store
+            .config
+            .pointer("/defaults/fontSize")
+            .and_then(Value::as_f64)
+            .map_or(look::TERM_FONT, |f| look::TERM_FONT * f as f32 / 13.0);
+        ui.text.set_term_size(font);
         self.size = size;
         self.agents.load(ui);
         if self.logo.is_none() {
@@ -1610,7 +1737,7 @@ impl App {
     /// sizing the terminal to it.
     pub fn paint(&mut self, ui: &mut Ui, laid: &Laid) {
         let cell = ui.text.cell();
-        let current = self.current();
+        let current = self.typing_target();
         for (id, r) in &laid.customs {
             let Some(session) = card_index(*id).and_then(|i| self.store.sessions.get(i)) else {
                 continue;
@@ -1633,7 +1760,10 @@ impl App {
                     && self.st.dialog.is_none()
                     && ui.focus().is_none();
                 let pre = if focused { self.preedit.as_str() } else { "" };
+                // A screen not yet resized to a narrower box stays inside it.
+                ui.scene.push_clip(*r);
                 paint::pane(ui, v, *r, focused, pre);
+                ui.scene.pop_clip();
             }
         }
         self.paint_web(ui, laid);

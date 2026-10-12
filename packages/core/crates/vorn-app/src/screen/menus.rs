@@ -33,6 +33,11 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::Recent | MenuKind::Headless => 280.0,
         MenuKind::TaskOptions | MenuKind::TaskStatus(_) | MenuKind::TaskAgent(_) => 200.0,
         MenuKind::TaskCard(_) | MenuKind::TaskProject(_) => 180.0,
+        MenuKind::SetShell => 288.0,
+        MenuKind::SetSelect(_) => 128.0,
+        MenuKind::SshKey(_) => 300.0,
+        MenuKind::OpenIn(_) => 180.0,
+        MenuKind::Branch(_) | MenuKind::FileTabs(_) => 220.0,
         _ => 200.0,
     }
 }
@@ -82,7 +87,11 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::LaunchAgent => launch_agents(s),
         MenuKind::LaunchWorktree => launch_worktrees(s),
         MenuKind::LaunchBranch => launch_branches(s),
-        MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon => Vec::new(),
+        MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon | MenuKind::SetShell => Vec::new(),
+        MenuKind::SetSelect(key) => super::settings::select_items(s, key),
+        MenuKind::SshKey(host) => super::settings::ssh_key_items(s, host),
+        MenuKind::FileTabs(owner) => super::side::tab_items(s, owner),
+        MenuKind::Branch(_) | MenuKind::OpenIn(_) => Vec::new(),
         MenuKind::RunStatus
         | MenuKind::WorkflowFilter
         | MenuKind::WorkflowItem(_)

@@ -238,7 +238,7 @@ fn bar(s: &Screen<'_>, d: &Draft) -> El {
         .items_center()
         .justify_between()
         .h(look::TOP_BAR_H - 1.0)
-        .pl(12.0)
+        .pl(s.lead())
         .pr(if s.chrome { 0.0 } else { 12.0 })
         .role(Role::Toolbar, "Workflow editor")
         .child(left)

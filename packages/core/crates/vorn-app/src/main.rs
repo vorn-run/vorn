@@ -81,7 +81,10 @@ fn shot(args: &Args) -> Result<(), String> {
         None => look::WINDOW,
     };
     let mut app = connect(args, Arc::new(|| {}))?;
+    app.set_data_dir(args.data_dir()?);
     app.chrome = args.get("chrome") != Some("off");
+    // Drawn window controls stand in for the traffic lights.
+    app.traffic = cfg!(target_os = "macos") && !app.chrome;
     let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(scale));
     // The startup calls answer before the first frame is drawn.
     let until = Instant::now() + Duration::from_secs(5);
@@ -200,7 +203,7 @@ fn window(args: &Args) -> Result<(), String> {
     // reports a missing vornd before any window appears.
     let waker: Arc<Mutex<Option<Waker>>> = Arc::default();
     let w = Arc::clone(&waker);
-    let app = connect(
+    let mut app = connect(
         args,
         Arc::new(move || {
             if let Some(w) = w.lock().ok().as_ref().and_then(|w| w.as_ref()) {
@@ -208,10 +211,13 @@ fn window(args: &Args) -> Result<(), String> {
             }
         }),
     )?;
+    app.set_data_dir(args.data_dir()?);
     let opts = WindowOptions {
         min_size: Some((800.0, 600.0)),
-        // macOS keeps its title bar; elsewhere the app draws its own.
+        // macOS keeps its traffic lights over the app's top bar, with no
+        // title drawn; elsewhere the app draws its own controls.
         decorations: cfg!(target_os = "macos"),
+        inset_title: cfg!(target_os = "macos").then_some(look::TRAFFIC_LIGHTS),
         ..WindowOptions::sized(look::WINDOW)
     };
     run_with("Vorn", opts, ui_config(1.0), move |_, wake| {

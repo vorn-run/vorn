@@ -212,18 +212,47 @@ pub(in crate::screen) fn add_task(s: &Screen<'_>) -> El {
     backdrop(s, 0.3).center().child(panel)
 }
 
-pub(in crate::screen) fn commit(s: &Screen<'_>) -> El {
-    let cm = &s.st.tasks.commit;
-    let d = &s.st.tasks.diff;
+/// `CommitDialog`, for the selected task or the Changes panel's session.
+pub(in crate::screen) fn commit(s: &Screen<'_>, scope: super::diff::Scope) -> El {
+    use super::diff::Scope;
+    use crate::git::CommitOp;
+    let session = matches!(scope, Scope::Session);
+    let cm = if session {
+        &s.st.git.commit
+    } else {
+        &s.st.tasks.commit
+    };
+    let act = |op: CommitOp| -> Act {
+        if session {
+            return Act::Git(crate::git::GitAct::Commit(op));
+        }
+        match op {
+            CommitOp::Open => Act::Task(TaskAct::OpenCommit),
+            CommitOp::ToggleUnstaged => Act::Task(TaskAct::ToggleUnstaged),
+            CommitOp::Push(p) => Act::Task(TaskAct::CommitPush(p)),
+            CommitOp::Commit => Act::Task(TaskAct::Commit),
+            CommitOp::Close => Act::CloseDialog,
+        }
+    };
+    let field = if session {
+        crate::screen::git::commit_id()
+    } else {
+        commit_id()
+    };
+    let place = |p: &str| format!("{}-{p}", if session { "git" } else { "task" });
+    let owner = s.st.git.panel.as_deref().and_then(|id| s.store.session(id));
     let task =
         s.st.tasks
             .selected
             .as_deref()
             .and_then(|id| s.store.tasks.iter().find(|t| t.id == id));
-    let branch = task
-        .and_then(|t| t.branch.as_deref())
-        .filter(|b| !b.is_empty())
-        .unwrap_or("unknown");
+    let branch = if session {
+        owner.and_then(|o| o.info.branch.as_deref())
+    } else {
+        task.and_then(|t| t.branch.as_deref())
+    }
+    .filter(|b| !b.is_empty())
+    .unwrap_or("unknown");
     let row = |label: &str, value: El| {
         div()
             .row()
@@ -260,8 +289,8 @@ pub(in crate::screen) fn commit(s: &Screen<'_>) -> El {
         )
         .child(head_btn(
             s,
-            "task-commit",
-            Act::CloseDialog,
+            &place("commit"),
+            act(CommitOp::Close),
             "x",
             18.0,
             1.5,
@@ -282,11 +311,20 @@ pub(in crate::screen) fn commit(s: &Screen<'_>) -> El {
                     .silent(),
             ),
     );
-    let (ins, del) = d
-        .files
-        .iter()
-        .fold((0, 0), |(i, x), f| (i + f.insertions, x + f.deletions));
-    let n = d.files.len();
+    let (n, ins, del) = if session {
+        let st = owner
+            .and_then(|o| s.st.git.stats.get(&o.info.id))
+            .copied()
+            .unwrap_or_default();
+        (st.files as usize, st.insertions, st.deletions)
+    } else {
+        let d = &s.st.tasks.diff;
+        let (i, x) = d
+            .files
+            .iter()
+            .fold((0, 0), |(i, x), f| (i + f.insertions, x + f.deletions));
+        (d.files.len(), i, x)
+    };
     let changes = if n > 0 {
         div()
             .row()
@@ -320,7 +358,7 @@ pub(in crate::screen) fn commit(s: &Screen<'_>) -> El {
     };
     let tid = s
         .acts
-        .on("task-commit-unstaged", Act::Task(TaskAct::ToggleUnstaged));
+        .on(&place("commit-unstaged"), act(CommitOp::ToggleUnstaged));
     let toggle = div()
         .row()
         .items_center()
@@ -352,7 +390,7 @@ pub(in crate::screen) fn commit(s: &Screen<'_>) -> El {
                 .line_height(20.0)
                 .silent(),
         );
-    let focus = s.ui.focused(commit_id());
+    let focus = s.ui.focused(field);
     let message = div()
         .col()
         .child(
@@ -374,7 +412,7 @@ pub(in crate::screen) fn commit(s: &Screen<'_>) -> El {
                 .border(1.0, if focus { white(0.16) } else { white(0.08) })
                 .child(
                     area(
-                        commit_id(),
+                        field,
                         "Commit message",
                         "Enter a commit message...",
                         TextStyle {
@@ -393,9 +431,7 @@ pub(in crate::screen) fn commit(s: &Screen<'_>) -> El {
         (true, "Commit and push", "arrow-up"),
     ] {
         let on = cm.push == push;
-        let id = s
-            .acts
-            .on("task-commit-next", Act::Task(TaskAct::CommitPush(push)));
+        let id = s.acts.on(&place("commit-next"), act(CommitOp::Push(push)));
         let hot = s.ui.hover(id);
         let color = if on { c(0xf3f4f6) } else { c(look::GRAY_400) };
         let mut b = div()
@@ -432,8 +468,8 @@ pub(in crate::screen) fn commit(s: &Screen<'_>) -> El {
             ),
         )
         .child(next);
-    let ok = !s.ui.edit_text(commit_id()).trim().is_empty() && !cm.loading;
-    let go = s.acts.on("task-commit-go", Act::Task(TaskAct::Commit));
+    let ok = !s.ui.edit_text(field).trim().is_empty() && !cm.loading;
+    let go = s.acts.on(&place("commit-go"), act(CommitOp::Commit));
     let hot = if ok { s.ui.hover(go) } else { 0.0 };
     let mut cont = div()
         .id(go)

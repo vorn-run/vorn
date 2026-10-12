@@ -529,7 +529,11 @@ fn changes(s: &Screen<'_>, t: &TaskConfig) -> Option<El> {
     let mut col = div().col().border_top(1.0, white(0.06)).child(head);
     if open {
         if !d.comments.is_empty() {
-            col = col.child(diff::feedback_bar(s, t.agent_session_id.is_some()));
+            col = col.child(diff::feedback_bar(
+                s,
+                diff::Scope::Task,
+                t.agent_session_id.is_some(),
+            ));
         }
         col = if d.loading && d.files.is_empty() {
             col.child(div().row().justify_center().py(32.0).child(ico(
@@ -539,8 +543,8 @@ fn changes(s: &Screen<'_>, t: &TaskConfig) -> Option<El> {
                 faint(),
             )))
         } else if !d.files.is_empty() {
-            col.child(diff::file_list(s, &d.files))
-                .child(diff::content(s, &d.files))
+            col.child(diff::file_list(s, diff::Scope::Task, &d.files))
+                .child(diff::content(s, diff::Scope::Task, &d.files))
         } else {
             let msg = if d.cwd.is_empty() {
                 "No project path"

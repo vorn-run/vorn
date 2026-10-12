@@ -1,12 +1,60 @@
-//! The detail panel's changes (`DiffFileList`, `DiffContent`): the files,
-//! their lines with review comments, and the feedback bar.
+//! A diff (`DiffFileList`, `DiffContent`): the files, their lines with
+//! review comments, and the feedback bar, for the task panel and for a
+//! session's Changes panel alike.
 
-use super::{comment_id, faint, ink, primary, secondary};
+use super::{faint, ink, primary, secondary};
 use crate::act::Act;
+use crate::git::{DiffOp, GitAct};
 use crate::look;
+use crate::screen::side::file_icon;
 use crate::screen::{c, ico, white, Screen, MOD_LABEL};
-use crate::tasks::{DiffFile, TaskAct};
-use crate::ui::{area, div, text, Action, El, Rgba, Role, TextStyle};
+use crate::tasks::{Diff, DiffFile, TaskAct};
+use crate::ui::{area, div, text, Action, El, Id, Rgba, Role, TextStyle};
+
+/// Whose diff is drawn: the selected task's, or the Changes panel's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    Task,
+    Session,
+}
+
+impl Scope {
+    pub fn diff<'a>(self, s: &'a Screen<'_>) -> &'a Diff {
+        match self {
+            Scope::Task => &s.st.tasks.diff,
+            Scope::Session => &s.st.git.diff,
+        }
+    }
+
+    pub fn act(self, op: DiffOp) -> Act {
+        match self {
+            Scope::Session => Act::Git(GitAct::Diff(op)),
+            Scope::Task => Act::Task(match op {
+                DiffOp::PickFile(f) => TaskAct::PickFile(f),
+                DiffOp::Line(f, l) => TaskAct::Line(f, l),
+                DiffOp::AddComment => TaskAct::AddComment,
+                DiffOp::CancelComment => TaskAct::CancelComment,
+                DiffOp::RemoveComment(i) => TaskAct::RemoveComment(i),
+                DiffOp::ClearComments => TaskAct::ClearComments,
+                DiffOp::SendFeedback => TaskAct::SendFeedback,
+            }),
+        }
+    }
+
+    fn place(self, p: &str) -> String {
+        match self {
+            Scope::Task => format!("task-{p}"),
+            Scope::Session => format!("git-{p}"),
+        }
+    }
+
+    pub fn comment_id(self) -> Id {
+        match self {
+            Scope::Task => super::comment_id(),
+            Scope::Session => crate::screen::git::comment_id(),
+        }
+    }
+}
 
 const ADD: u32 = 0x7ea96a;
 const REMOVE: u32 = 0xc96f62;
@@ -77,18 +125,18 @@ fn letter(status: &str) -> &'static str {
 }
 
 /// `DiffFileList`.
-pub(super) fn file_list(s: &Screen<'_>, files: &[DiffFile]) -> El {
-    let selected = s.st.tasks.diff.file.as_deref();
+pub(crate) fn file_list(s: &Screen<'_>, scope: Scope, files: &[DiffFile]) -> El {
+    let selected = scope.diff(s).file.as_deref();
     let mut col = div()
-        .id(crate::ui::Id::new("task-diff-files"))
+        .id(crate::ui::Id::new(&scope.place("diff-files")))
         .col()
         .max_h(200.0)
         .scroll_y()
         .border_top(1.0, white(0.0));
     for f in files {
         let id = s.acts.on(
-            "task-diff-file",
-            Act::Task(TaskAct::PickFile(Some(f.path.clone()))),
+            &scope.place("diff-file"),
+            scope.act(DiffOp::PickFile(Some(f.path.clone()))),
         );
         let on = selected == Some(f.path.as_str());
         let bg = if on {
@@ -125,7 +173,7 @@ pub(super) fn file_list(s: &Screen<'_>, files: &[DiffFile]) -> El {
                 .bg(bg)
                 .role(Role::Button, &f.path)
                 .selected(on)
-                .child(ico("file-code", 15.0, 1.5, secondary()))
+                .child(file_icon(crate::state::basename(&f.path), 15.0))
                 .child(
                     div().grow().min_w0().child(
                         text(&f.path, 12.0, c(look::GRAY_300))
@@ -150,10 +198,11 @@ pub(super) fn file_list(s: &Screen<'_>, files: &[DiffFile]) -> El {
         .child(div().h(1.0).w_full().bg(white(0.06)))
 }
 
-fn badge(s: &Screen<'_>, i: usize, comment: &str) -> El {
-    let rm = s
-        .acts
-        .on("task-comment-remove", Act::Task(TaskAct::RemoveComment(i)));
+fn badge(s: &Screen<'_>, scope: Scope, i: usize, comment: &str) -> El {
+    let rm = s.acts.on(
+        &scope.place("comment-remove"),
+        scope.act(DiffOp::RemoveComment(i)),
+    );
     let hot = s.ui.hover(rm);
     div().mx(8.0).pt(2.0).pb(2.0).child(
         div()
@@ -193,15 +242,16 @@ fn badge(s: &Screen<'_>, i: usize, comment: &str) -> El {
 }
 
 /// `InlineCommentInput`.
-fn comment_input(s: &Screen<'_>) -> El {
-    let id = comment_id();
+fn comment_input(s: &Screen<'_>, scope: Scope) -> El {
+    let id = scope.comment_id();
     let empty = s.ui.edit_text(id).trim().is_empty();
-    let cancel = s
-        .acts
-        .on("task-comment-cancel", Act::Task(TaskAct::CancelComment));
+    let cancel = s.acts.on(
+        &scope.place("comment-cancel"),
+        scope.act(DiffOp::CancelComment),
+    );
     let add = s
         .acts
-        .on("task-comment-add", Act::Task(TaskAct::AddComment));
+        .on(&scope.place("comment-add"), scope.act(DiffOp::AddComment));
     let focus = s.ui.focused(id);
     let mut add_btn = div()
         .id(add)
@@ -304,8 +354,8 @@ fn num(n: Option<usize>, color: Rgba) -> El {
 }
 
 /// One file of `DiffContent`: its sticky header and lines.
-fn file(s: &Screen<'_>, f: &DiffFile) -> El {
-    let d = &s.st.tasks.diff;
+fn file(s: &Screen<'_>, scope: Scope, f: &DiffFile) -> El {
+    let d = scope.diff(s);
     let count = d.comments.iter().filter(|c| c.file == f.path).count();
     let mut head = div()
         .row()
@@ -314,7 +364,7 @@ fn file(s: &Screen<'_>, f: &DiffFile) -> El {
         .px(12.0)
         .py(6.0)
         .bg(c(look::SURFACE_OVERLAY))
-        .child(ico("file-code", 14.0, 1.5, secondary()))
+        .child(file_icon(crate::state::basename(&f.path), 14.0))
         .child(
             div().grow().min_w0().child(
                 text(&f.path, 12.0, c(look::GRAY_300))
@@ -390,8 +440,8 @@ fn file(s: &Screen<'_>, f: &DiffFile) -> El {
             }
             Row::Add(i, t, n) => {
                 let id = s.acts.on(
-                    "task-diff-line",
-                    Act::Task(TaskAct::Line(f.path.clone(), i)),
+                    &scope.place("diff-line"),
+                    scope.act(DiffOp::Line(f.path.clone(), i)),
                 );
                 let hot = s.ui.hover(id);
                 (
@@ -422,8 +472,8 @@ fn file(s: &Screen<'_>, f: &DiffFile) -> El {
             }
             Row::Del(i, t, o) => {
                 let id = s.acts.on(
-                    "task-diff-line",
-                    Act::Task(TaskAct::Line(f.path.clone(), i)),
+                    &scope.place("diff-line"),
+                    scope.act(DiffOp::Line(f.path.clone(), i)),
                 );
                 let hot = s.ui.hover(id);
                 (
@@ -456,14 +506,14 @@ fn file(s: &Screen<'_>, f: &DiffFile) -> El {
         col = col.child(line);
         for (ci, cm) in d.comments.iter().enumerate() {
             if cm.file == f.path && cm.line == index {
-                col = col.child(badge(s, ci, &cm.text));
+                col = col.child(badge(s, scope, ci, &cm.text));
             }
         }
         if d.commenting
             .as_ref()
             .is_some_and(|(p, l, _)| p == &f.path && *l == index)
         {
-            col = col.child(comment_input(s));
+            col = col.child(comment_input(s, scope));
         }
     }
     col
@@ -479,28 +529,30 @@ fn body(line: &str) -> String {
 }
 
 /// `DiffContent`: every file, or the selected one first.
-pub(super) fn content(s: &Screen<'_>, files: &[DiffFile]) -> El {
+pub(crate) fn content(s: &Screen<'_>, scope: Scope, files: &[DiffFile]) -> El {
     let mut col = div().col();
-    let first = s.st.tasks.diff.file.as_deref();
+    let first = scope.diff(s).file.as_deref();
     let ordered = first
         .and_then(|p| files.iter().find(|f| f.path == p))
         .into_iter()
         .chain(files.iter().filter(|f| Some(f.path.as_str()) != first));
     for f in ordered {
-        col = col.child(file(s, f));
+        col = col.child(file(s, scope, f));
     }
     col
 }
 
 /// The review feedback bar: the count, Clear and Send.
-pub(super) fn feedback_bar(s: &Screen<'_>, to_agent: bool) -> El {
-    let n = s.st.tasks.diff.comments.len();
-    let clear = s
-        .acts
-        .on("task-comments-clear", Act::Task(TaskAct::ClearComments));
-    let send = s
-        .acts
-        .on("task-comments-send", Act::Task(TaskAct::SendFeedback));
+pub(crate) fn feedback_bar(s: &Screen<'_>, scope: Scope, to_agent: bool) -> El {
+    let n = scope.diff(s).comments.len();
+    let clear = s.acts.on(
+        &scope.place("comments-clear"),
+        scope.act(DiffOp::ClearComments),
+    );
+    let send = s.acts.on(
+        &scope.place("comments-send"),
+        scope.act(DiffOp::SendFeedback),
+    );
     let send_hot = s.ui.hover(send);
     let label = if to_agent {
         "Send to Agent"
