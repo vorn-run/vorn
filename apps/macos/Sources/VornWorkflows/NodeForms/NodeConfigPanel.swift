@@ -111,6 +111,7 @@ public struct NodeConfigPanel: View {
         .background(Theme.surfaceNode)
         .overlay(alignment: .leading) { Hairline(opacity: 0.08, vertical: true) }
         .formPopupHost()
+        .environment(\.formConnections, data.connections)
         .task {
             if loadsData { await data.load() }
         }
@@ -129,6 +130,22 @@ public struct NodeConfigPanel: View {
         switch node.type {
         case .trigger:
             TriggerConfigForm(store: store, data: data, config: $node.config, onOpenLibrary: context.onOpenTriggerLibrary)
+        case .launchAgent:
+            LaunchAgentConfigForm(store: store, data: data, config: $node.config, step: step, nodeId: node.id, nodes: context.nodes)
+        case .script:
+            ScriptConfigForm(store: store, data: data, config: $node.config, step: step)
+        case .condition:
+            ConditionConfigForm(config: $node.config, step: step)
+        case .loop:
+            LoopConfigForm(config: $node.config, step: step)
+        case .approval:
+            ApprovalConfigForm(config: $node.config, step: step, slug: node.slug)
+        case .createTaskFromItem:
+            CreateTaskFromItemNodeForm(store: store, config: $node.config)
+        case .httpRequest:
+            HttpRequestConfigForm(store: store, data: data, config: $node.config, step: step)
+        case .callConnectorAction:
+            CallConnectorActionNodeForm(data: data, config: $node.config, step: step)
         default:
             EmptyView()
         }
@@ -161,7 +178,7 @@ public struct NodeConfigPanel: View {
         if node.type == .callConnectorAction, let conn = data.connection(node.config.str("connectionId")) {
             ConnectorMark(connectorId: conn.realConnectorId, size: 14)
         } else {
-            Icon(Glyph.node(node.type), size: 14)
+            NodeTypeIcon(type: node.type, size: 14)
         }
     }
 
@@ -184,7 +201,7 @@ public struct NodeConfigPanel: View {
     private var moreMenu: some View {
         DropdownPanel(minWidth: 160, verticalPadding: 4) {
             if let replace = context.onOpenReplaceLibrary, FormHelpers.replaceable.contains(node.type) {
-                PanelMenuRow(glyph: .sf("arrow.left.arrow.right"), label: "Replace step") {
+                PanelMenuRow(glyph: .lucide(.replace), label: "Replace step") {
                     menuOpen = false
                     replace(node.id)
                 }
@@ -227,7 +244,7 @@ public struct NodeConfigPanel: View {
                 run(node.id)
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "forward.end").font(.system(size: 10, weight: .semibold))
+                    LucideIcon(.stepForward, size: 12, strokeWidth: 2)
                     Text("Run to this step").font(.system(size: 12))
                 }
                 .foregroundStyle(hovered ? Color.white : Theme.gray300)
