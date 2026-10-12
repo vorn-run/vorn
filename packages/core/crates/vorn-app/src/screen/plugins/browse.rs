@@ -58,7 +58,8 @@ pub(super) fn view(s: &Screen<'_>) -> El {
 fn search(s: &Screen<'_>) -> El {
     let p = &s.st.plugins;
     let id = field_id(&Field::Query);
-    s.acts.text(id, act(PlugAct::Text(Field::Query)), p.query.as_str());
+    s.acts
+        .text(id, act(PlugAct::Text(Field::Query)), p.query.as_str());
     let focus = if s.ui.focused(id) { 1.0 } else { 0.0 };
     let style = TextStyle {
         line_height: 16.0,
@@ -77,9 +78,15 @@ fn search(s: &Screen<'_>) -> El {
         .border(1.0, white(0.1).mix(white(0.2), focus))
         .child(ico("search", 12.0, 2.0, k::GRAY_600))
         .child(
-            field(id, "Search connectors", "Search connectors", style, k::GRAY_200)
-                .grow()
-                .min_w0(),
+            field(
+                id,
+                "Search connectors",
+                "Search connectors",
+                style,
+                k::GRAY_200,
+            )
+            .grow()
+            .min_w0(),
         )
 }
 
@@ -113,7 +120,13 @@ fn filters(s: &Screen<'_>) -> El {
         .category
         .as_ref()
         .and_then(|c| cats.iter().position(|x| x == c));
-    let category = dropdown(Pick::Category, "Filter by category", "All categories", cats, at);
+    let category = dropdown(
+        Pick::Category,
+        "Filter by category",
+        "All categories",
+        cats,
+        at,
+    );
     let ks = kinds(&p.listings);
     let at = p.kind.and_then(|x| ks.iter().position(|y| *y == x));
     let labels = ks.iter().map(|k| k.label().to_owned()).collect();
@@ -138,7 +151,11 @@ fn footer(s: &Screen<'_>) -> El {
     let p = &s.st.plugins;
     let line = |t: &str| text(t, 11.0, k::GRAY_600).line_height(16.0).silent();
     let mut check = div().row().items_center().gap(4.0);
-    let label = if p.refreshing { "Checking" } else { "Check now" };
+    let label = if p.refreshing {
+        "Checking"
+    } else {
+        "Check now"
+    };
     let fg = if p.refreshing {
         check = check.opacity(0.5).role(Role::Button, label);
         k::GRAY_500
@@ -189,7 +206,9 @@ fn facts(s: &Screen<'_>, l: &Listing) -> String {
 fn row(s: &Screen<'_>, l: &Listing) -> El {
     let state = s.st.plugins.state(l);
     let status = describe(&state);
-    let open = s.acts.on("plug-browse-row", act(PlugAct::Select(Some(l.key.clone()))));
+    let open = s
+        .acts
+        .on("plug-browse-row", act(PlugAct::Select(Some(l.key.clone()))));
     let hot = s.ui.hover(open);
     let mut name = div().row().items_center().gap(6.0).min_w0().child(
         text(&l.name, 13.5, k::GRAY_200)
@@ -242,15 +261,16 @@ fn row(s: &Screen<'_>, l: &Listing) -> El {
         .min_w0()
         .role(Role::Button, &format!("About {}", l.name))
         .child(
-            well(32.0, 6.0, white(0.05), glyph(Some(l), &l.id, 17.0, k::GRAY_200)).mt(2.0),
+            well(
+                32.0,
+                6.0,
+                white(0.05),
+                glyph(Some(l), &l.id, 17.0, k::GRAY_200),
+            )
+            .mt(2.0),
         )
         .child(body);
-    let mut buttons = div()
-        .row()
-        .items_center()
-        .self_center()
-        .gap(6.0)
-        .shrink0();
+    let mut buttons = div().row().items_center().self_center().gap(6.0).shrink0();
     if let Some(action) = status.action.filter(|_| l.installable()) {
         let icon = if action == PackAction::Install {
             "download"

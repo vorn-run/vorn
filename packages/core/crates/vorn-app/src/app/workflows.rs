@@ -1021,7 +1021,9 @@ impl App {
             WfAct::Fix(fix) => {
                 self.run(
                     ui,
-                    Act::Set(crate::settings::SetAct::Open(crate::settings::Category::Connectors)),
+                    Act::Set(crate::settings::SetAct::Open(
+                        crate::settings::Category::Connectors,
+                    )),
                     Src::default(),
                 );
                 self.st.plugins.from_editor = true;

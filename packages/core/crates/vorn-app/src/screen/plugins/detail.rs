@@ -8,7 +8,7 @@ use crate::plugins::{
     count, describe, describe_activation, details, not_asked, permission_rows, Kind, Listing,
     PackAction, PackState, PlugAct, Source, Tab,
 };
-use crate::runs::s;
+use crate::runs::s as sv;
 use crate::screen::{ico, white, Screen};
 use crate::ui::theme::color as k;
 use crate::ui::{div, text, Action, El, Role};
@@ -43,7 +43,7 @@ pub(super) fn view(s: &Screen<'_>, l: &Listing) -> El {
     );
 
     let mut sub = entry
-        .and_then(|e| s(e, "packageName"))
+        .and_then(|e| sv(e, "packageName"))
         .map(str::to_owned)
         .unwrap_or_else(|| {
             if l.source == Source::Builtin {
@@ -76,7 +76,12 @@ pub(super) fn view(s: &Screen<'_>, l: &Listing) -> El {
             .row()
             .items_start()
             .gap(12.0)
-            .child(well(40.0, 6.0, white(0.05), glyph(Some(l), &l.id, 21.0, k::GRAY_200)))
+            .child(well(
+                40.0,
+                6.0,
+                white(0.05),
+                glyph(Some(l), &l.id, 21.0, k::GRAY_200),
+            ))
             .child(who),
     );
     if let Some(desc) = l.description.as_deref().filter(|d| !d.is_empty()) {
@@ -113,7 +118,10 @@ pub(super) fn view(s: &Screen<'_>, l: &Listing) -> El {
         col = col
             .child(section(
                 "Starts a workflow when",
-                items(&d.triggers, "Nothing — this one is only called from a step."),
+                items(
+                    &d.triggers,
+                    "Nothing — this one is only called from a step.",
+                ),
             ))
             .child(section(
                 "A step can ask it to",
@@ -134,7 +142,7 @@ pub(super) fn view(s: &Screen<'_>, l: &Listing) -> El {
         }
     }
 
-    let catalog_auth = entry.and_then(|e| s(e, "auth")).filter(|a| !a.is_empty());
+    let catalog_auth = entry.and_then(|e| sv(e, "auth")).filter(|a| !a.is_empty());
     if l.rung.is_some() || catalog_auth.is_some() || l.kind == Kind::Extension {
         let mut lines = Vec::new();
         if let Some(r) = l.rung {
@@ -169,10 +177,10 @@ pub(super) fn view(s: &Screen<'_>, l: &Listing) -> El {
     }
 
     if let Some(pack) = &l.pack {
-        let path = s(pack, "path").unwrap_or("");
+        let path = sv(pack, "path").unwrap_or("");
         let mut facts = vec![fact(
             "Installed",
-            &format!("v{}", s(pack, "version").unwrap_or("")),
+            &format!("v{}", sv(pack, "version").unwrap_or("")),
             false,
         )];
         facts.push(fact("On disk", path, true));
@@ -261,7 +269,7 @@ fn actions(s: &Screen<'_>, l: &Listing, state: &PackState) -> El {
             !busy,
         ));
     }
-    if let Some(pkg) = l.catalog.as_ref().and_then(|c| s(c, "packageName")) {
+    if let Some(pkg) = l.catalog.as_ref().and_then(|c| sv(c, "packageName")) {
         let id = s.acts.on(
             "plug-detail-npm",
             act(PlugAct::OpenUrl(format!(
@@ -300,7 +308,11 @@ fn actions(s: &Screen<'_>, l: &Listing, state: &PackState) -> El {
 /// What an extension adds, may touch, and where it shows.
 fn extension_sections(col: El, l: &Listing) -> El {
     let mut surfaces = Vec::new();
-    for (key, noun) in [("panes", "pane"), ("footers", "footer"), ("linkHandlers", "link")] {
+    for (key, noun) in [
+        ("panes", "pane"),
+        ("footers", "footer"),
+        ("linkHandlers", "link"),
+    ] {
         for c in l
             .contributes
             .as_ref()
@@ -309,9 +321,9 @@ fn extension_sections(col: El, l: &Listing) -> El {
             .into_iter()
             .flatten()
         {
-            let title = format!("{} · {noun}", s(c, "title").unwrap_or(""));
-            let detail = s(c, "description").map(str::to_owned).or_else(|| {
-                s(c, "pattern")
+            let title = format!("{} · {noun}", sv(c, "title").unwrap_or(""));
+            let detail = sv(c, "description").map(str::to_owned).or_else(|| {
+                sv(c, "pattern")
                     .filter(|_| noun == "link")
                     .map(|p| format!("matches {p}"))
             });
@@ -326,8 +338,7 @@ fn extension_sections(col: El, l: &Listing) -> El {
         surfaces.push(quiet("Nothing — this one adds no surface yet."));
     }
     let stated = l.pack.is_some()
-        || l
-            .catalog
+        || l.catalog
             .as_ref()
             .is_some_and(|c| c.get("permissions").is_some());
     let mut asks = Vec::new();
@@ -369,12 +380,7 @@ fn extension_sections(col: El, l: &Listing) -> El {
 
 /// `VerifiedStrip`: the named checks and when they ran.
 fn verified(v: &Value) -> El {
-    let mut row = div()
-        .row()
-        .wrap_children()
-        .items_center()
-        .gap(12.0)
-        .mt(6.0);
+    let mut row = div().row().wrap_children().items_center().gap(12.0).mt(6.0);
     for check in v
         .get("checks")
         .and_then(Value::as_array)
@@ -391,9 +397,16 @@ fn verified(v: &Value) -> El {
                 .child(text(check, 11.0, k::GRAY_500).line_height(16.0)),
         );
     }
-    let day = format_day(s(v, "checkedAt").unwrap_or(""));
-    let version = s(v, "version").unwrap_or("");
-    row.child(text(format!("checked {day} against v{version}"), 11.0, k::GRAY_600).line_height(16.0))
+    let day = format_day(sv(v, "checkedAt").unwrap_or(""));
+    let version = sv(v, "version").unwrap_or("");
+    row.child(
+        text(
+            format!("checked {day} against v{version}"),
+            11.0,
+            k::GRAY_600,
+        )
+        .line_height(16.0),
+    )
 }
 
 /// `formatDay`: "Mar 4, 2025", or the stamp as given.

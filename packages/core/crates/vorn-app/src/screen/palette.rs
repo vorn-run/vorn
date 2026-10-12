@@ -46,12 +46,7 @@ pub(super) fn palette(s: &Screen<'_>) -> El {
         .child(kbd("ESC", (10.0, 15.0), c(look::GRAY_600)));
     // vornui scroll views take no height from their content: cap the list at
     // what the 420 px panel leaves after the search row (45) and footer (33).
-    let mut list = div()
-        .id(PALETTE_LIST)
-        .col()
-        .max_h(342.0)
-        .py(4.0)
-        .scroll_y();
+    let mut list = div().id(PALETTE_LIST).col().max_h(342.0).py(4.0).scroll_y();
     if rows.is_empty() {
         list = list.child(
             div().px(16.0).py(32.0).center().child(

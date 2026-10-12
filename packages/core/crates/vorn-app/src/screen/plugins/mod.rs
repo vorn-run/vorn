@@ -18,7 +18,7 @@ use crate::plugins::{
     count, describe_contributions, details, Activity, Listing, PackStatus, Pending, PlugAct,
     Source, Tab, Tone,
 };
-use crate::runs::s;
+use crate::runs::s as sv;
 use crate::ui::theme::color as k;
 use crate::ui::{div, icon, text, Action, El, Rgba, Role};
 
@@ -332,16 +332,20 @@ fn strs<'a>(v: &'a Value, key: &str) -> Vec<&'a str> {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|e| e.as_str().or_else(|| s(e, "label")).or_else(|| s(e, "type")))
+        .filter_map(|e| {
+            e.as_str()
+                .or_else(|| sv(e, "label"))
+                .or_else(|| sv(e, "type"))
+        })
         .collect()
 }
 
 /// `PackInstallConfirm`: what a checked pack brings, before it is kept.
 pub(super) fn pending_sheet(s: &Screen<'_>, pending: &Pending) -> El {
     let pv = &pending.preview;
-    let name = s(pv, "name").unwrap_or("");
-    let version = s(pv, "version").unwrap_or("");
-    let installed = s(pv, "installedVersion").filter(|v| *v != version);
+    let name = sv(pv, "name").unwrap_or("");
+    let version = sv(pv, "version").unwrap_or("");
+    let installed = sv(pv, "installedVersion").filter(|v| *v != version);
     let listing = s.st.plugins.listing(&pending.key);
     let mut col = div()
         .col()
@@ -351,7 +355,7 @@ pub(super) fn pending_sheet(s: &Screen<'_>, pending: &Pending) -> El {
         .bg(white(0.02));
     let mut head = div().row().items_center().gap(8.0).child(glyph(
         listing,
-        s(pv, "id").unwrap_or(""),
+        sv(pv, "id").unwrap_or(""),
         20.0,
         k::GRAY_200,
     ));
@@ -360,15 +364,11 @@ pub(super) fn pending_sheet(s: &Screen<'_>, pending: &Pending) -> El {
             .row()
             .items_center()
             .gap(6.0)
-            .child(
-                text(name, 13.0, k::GRAY_200)
-                    .weight(500)
-                    .line_height(18.0),
-            )
+            .child(text(name, 13.0, k::GRAY_200).weight(500).line_height(18.0))
             .child(text(format!("v{version}"), 13.0, k::GRAY_500).line_height(18.0)),
     );
     col = col.child(head);
-    if let Some(d) = s(pv, "description").filter(|d| !d.is_empty()) {
+    if let Some(d) = sv(pv, "description").filter(|d| !d.is_empty()) {
         col = col.child(
             text(d, 11.0, k::GRAY_500)
                 .line_height(16.0)
@@ -394,7 +394,7 @@ pub(super) fn pending_sheet(s: &Screen<'_>, pending: &Pending) -> El {
         .into_iter()
         .flatten()
         .filter(|e| e.get("required") == Some(&Value::Bool(true)))
-        .filter_map(|e| s(e, "name"))
+        .filter_map(|e| sv(e, "name"))
         .collect();
     let borrows = crate::plugins::borrowable(pv);
     let probe = pv
@@ -403,14 +403,18 @@ pub(super) fn pending_sheet(s: &Screen<'_>, pending: &Pending) -> El {
         .unwrap_or("");
     let contributes = pv.get("contributes");
     let mut adds = Vec::new();
-    for (key, noun) in [("panes", "pane"), ("footers", "footer"), ("linkHandlers", "link")] {
+    for (key, noun) in [
+        ("panes", "pane"),
+        ("footers", "footer"),
+        ("linkHandlers", "link"),
+    ] {
         for item in contributes
             .and_then(|c| c.get(key))
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
         {
-            adds.push(format!("{} {noun}", s(item, "title").unwrap_or("")));
+            adds.push(format!("{} {noun}", sv(item, "title").unwrap_or("")));
         }
     }
     let asked: Vec<String> = pv
@@ -434,7 +438,10 @@ pub(super) fn pending_sheet(s: &Screen<'_>, pending: &Pending) -> El {
         rows.push(("Needs".into(), required.join(", ")));
     }
     if !borrows.is_empty() {
-        rows.push(("Borrows".into(), format!("{} from {probe}", borrows.join(", "))));
+        rows.push((
+            "Borrows".into(),
+            format!("{} from {probe}", borrows.join(", ")),
+        ));
     }
     if !adds.is_empty() {
         rows.push(("Adds".into(), adds.join(", ")));

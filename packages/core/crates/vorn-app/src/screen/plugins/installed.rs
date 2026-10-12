@@ -91,7 +91,10 @@ fn row(s: &Screen<'_>, l: &Listing) -> El {
     let state = s.st.plugins.state(l);
     let status = describe(&state);
     let extension = l.kind == Kind::Extension;
-    let open = s.acts.on("plug-installed-row", act(PlugAct::Select(Some(l.key.clone()))));
+    let open = s.acts.on(
+        "plug-installed-row",
+        act(PlugAct::Select(Some(l.key.clone()))),
+    );
     let hot = s.ui.hover(open);
     let mut name = div().row().items_center().gap(6.0).min_w0().child(
         text(&l.name, 13.5, k::GRAY_200)
@@ -143,7 +146,13 @@ fn row(s: &Screen<'_>, l: &Listing) -> El {
         .min_w0()
         .role(Role::Button, &format!("About {}", l.name))
         .child(
-            well(32.0, 6.0, white(0.05), glyph(Some(l), &l.id, 17.0, k::GRAY_200)).mt(2.0),
+            well(
+                32.0,
+                6.0,
+                white(0.05),
+                glyph(Some(l), &l.id, 17.0, k::GRAY_200),
+            )
+            .mt(2.0),
         )
         .child(body);
     let mut buttons = div().row().items_center().self_center().gap(6.0).shrink0();

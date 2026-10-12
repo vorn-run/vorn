@@ -9,8 +9,8 @@ use crate::plugins::{
     ProfileForm, Progress, Rung, SdkForm, Tab, Verb,
 };
 use crate::runs::s;
-use crate::settings::SetAct;
 use crate::settings::Category;
+use crate::settings::SetAct;
 use crate::templates::Fix;
 use crate::ui::{widgets, Event as UiEvent, Ui};
 use crate::workflows::WfAct;

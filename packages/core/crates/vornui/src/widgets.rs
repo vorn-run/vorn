@@ -263,6 +263,9 @@ pub enum PickerLook {
     Compact,
     /// `ModelPicker` bordered: a chip with a `white/[0.12]` outline.
     Chip,
+    /// A form's `<select>`: full width, `px-3 py-1.5 text-sm` on
+    /// `white/[0.05]` with a `white/[0.1]` border, the chevron at the end.
+    Field,
 }
 
 /// The menu a picker opens; its entries report `Event::Select` with it as
@@ -291,6 +294,7 @@ pub fn picker(
     let (fg, size) = match look {
         PickerLook::Compact => (color::GRAY_400, crate::theme::text::XS),
         PickerLook::Plain | PickerLook::Chip => (color::GRAY_300, (12.0, 18.0)),
+        PickerLook::Field => (color::GRAY_200, crate::theme::text::SM),
     };
     let chevron = icons::rotated(icons::CHEVRON_DOWN, 180.0 * ui.menu_progress(menu));
     let trigger = div()
@@ -304,7 +308,11 @@ pub fn picker(
         .value(current)
         .has_popup()
         .expanded(open)
-        .child(label(current, size, fg))
+        .child(if look == PickerLook::Field {
+            div().grow().min_w0().child(label(current, size, fg))
+        } else {
+            label(current, size, fg)
+        })
         .child(icon(chevron, 12.0, color::GRAY_500));
     let trigger = match look {
         PickerLook::Plain => trigger
@@ -324,6 +332,16 @@ pub fn picker(
             .rounded(radius::SM)
             .border(1.0, Rgba::white(0.12).mix(Rgba::white(0.25), hot))
             .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.04), hot)),
+        PickerLook::Field => trigger
+            .w_full()
+            .px(12.0)
+            .py(6.0)
+            .rounded(radius::SM)
+            .bg(Rgba::white(0.05))
+            .border(
+                1.0,
+                Rgba::white(0.1).mix(Rgba::white(0.2), if open { 1.0 } else { 0.0 }),
+            ),
     };
     if !open {
         return trigger;

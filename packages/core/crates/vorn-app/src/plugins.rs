@@ -1364,7 +1364,7 @@ impl ProfileForm {
         ProfileForm {
             name: name.to_owned(),
             base_url: String::new(),
-            header: "Authorization: ******".to_owned(),
+            header: "Authorization: Bearer {{secret}}".to_owned(),
             secret: String::new(),
             made: None,
             result: None,

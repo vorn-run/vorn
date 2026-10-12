@@ -35,12 +35,12 @@ pub mod canvas;
 pub mod forms;
 mod gates;
 mod git;
-mod settings;
-mod side;
 mod network;
 mod onboarding;
 mod palette;
 mod plugins;
+mod settings;
+mod side;
 mod tasks;
 mod workflows;
 

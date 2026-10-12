@@ -1680,19 +1680,6 @@ pub(super) fn about(s: &Screen<'_>) -> El {
     col
 }
 
-/// A panel another part of the port brings, under its own header.
-pub(super) fn later(title: &str, description: &str) -> El {
-    div().col().child(header(title, description, None)).child(
-        text(
-            "This page is not in this build yet.",
-            13.0,
-            c(look::GRAY_500),
-        )
-        .line_height(19.5)
-        .silent(),
-    )
-}
-
 /// `ConnectorIcon`: a built-in connector's mark, else the external link.
 fn connector_mark(id: &str, size: f32, color: Rgba) -> El {
     let name = match id {

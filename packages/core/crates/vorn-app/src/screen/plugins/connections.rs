@@ -7,7 +7,7 @@ use super::{act, activity_line, chip_button, dot, glyph, heading, text_button, w
 use crate::plugins::{
     chip_value, count, group_connections, is_implicit, Group, Kind, Listing, PlugAct,
 };
-use crate::runs::s;
+use crate::runs::s as sv;
 use crate::screen::runs::icon_button;
 use crate::screen::{ico, white, Screen};
 use crate::ui::theme::color as k;
@@ -27,12 +27,14 @@ pub(super) fn view(s: &Screen<'_>) -> El {
         col = col.child(group(s, g));
     }
     if !unconnected.is_empty() {
-        let mut list = div().col().child(heading("Installed, no connection yet").pt(0.0));
+        let mut list = div()
+            .col()
+            .child(heading("Installed, no connection yet").pt(0.0));
         for l in unconnected {
             let version = l
                 .pack
                 .as_ref()
-                .and_then(|p| s(p, "version"))
+                .and_then(|p| sv(p, "version"))
                 .map(|v| format!("v{v}"))
                 .unwrap_or_default();
             list = list.child(
@@ -42,7 +44,12 @@ pub(super) fn view(s: &Screen<'_>) -> El {
                     .gap(12.0)
                     .py(10.0)
                     .border_top(1.0, white(0.06))
-                    .child(well(32.0, R, white(0.04), glyph(Some(l), &l.id, 17.0, k::GRAY_200)))
+                    .child(well(
+                        32.0,
+                        R,
+                        white(0.04),
+                        glyph(Some(l), &l.id, 17.0, k::GRAY_200),
+                    ))
                     .child(title(&l.name, &version))
                     .child(div().grow())
                     .child(chip_button(
@@ -121,7 +128,7 @@ fn group(s: &Screen<'_>, g: &Group<'_>) -> El {
         .status_of(&g.connector)
         .filter(|st| st.get("authed") != Some(&Value::Bool(true)))
     {
-        let message = s(st, "message")
+        let message = sv(st, "message")
             .filter(|m| !m.is_empty())
             .unwrap_or("Not signed in.");
         col = col.child(sign_in_warning(message));
@@ -186,10 +193,11 @@ fn row(
     browser: bool,
 ) -> El {
     let p = &s.st.plugins;
-    let id = s(conn, "id").unwrap_or("");
-    let connector = s(conn, "connectorId").unwrap_or("");
-    let name = s(conn, "name").unwrap_or("");
-    let busy = |verb| matches!(p.activity.get(id), Some(crate::plugins::Activity::Busy(v)) if *v == verb);
+    let id = sv(conn, "id").unwrap_or("");
+    let connector = sv(conn, "connectorId").unwrap_or("");
+    let name = sv(conn, "name").unwrap_or("");
+    let busy =
+        |verb| matches!(p.activity.get(id), Some(crate::plugins::Activity::Busy(v)) if *v == verb);
     let mut tools = div().row().items_center().gap(2.0).shrink0();
     tools = tools.child(icon_button(
         s,
@@ -216,7 +224,10 @@ fn row(
             div()
                 .p(4.0)
                 .opacity(0.4)
-                .role(Role::Button, "This connection came with its connector. Remove the pack instead.")
+                .role(
+                    Role::Button,
+                    "This connection came with its connector. Remove the pack instead.",
+                )
                 .disabled(true)
                 .child(ico("trash-2", 12.0, 2.0, k::INK_FAINT)),
         );
@@ -255,7 +266,12 @@ fn row(
                             24.0,
                             R,
                             white(0.04),
-                            glyph(listing, crate::library::connection_connector(conn), 14.0, k::GRAY_200),
+                            glyph(
+                                listing,
+                                crate::library::connection_connector(conn),
+                                14.0,
+                                k::GRAY_200,
+                            ),
                         ))
                         .child(
                             text(name, 14.0, k::GRAY_200)
@@ -271,7 +287,11 @@ fn row(
     }
     if let Some((ok, message)) = p.tested.get(id) {
         let fallback = if *ok { "Reachable" } else { "Failed" };
-        let shown = if message.is_empty() { fallback } else { message };
+        let shown = if message.is_empty() {
+            fallback
+        } else {
+            message
+        };
         col = col.child(
             line11(shown, if *ok { k::GREEN_400 } else { k::RED_400 })
                 .mt(4.0)
@@ -283,7 +303,7 @@ fn row(
     let secret = |key: &str| {
         crate::plugins::manifest_fields(manifest, "auth")
             .iter()
-            .any(|f| s(f, "key") == Some(key) && s(f, "type") == Some("password"))
+            .any(|f| sv(f, "key") == Some(key) && sv(f, "type") == Some("password"))
     };
     let chips: Vec<El> = conn
         .get("filters")
@@ -301,14 +321,7 @@ fn row(
         })
         .collect();
     if !chips.is_empty() {
-        col = col.child(
-            div()
-                .row()
-                .wrap_children()
-                .gap(4.0)
-                .mt(6.0)
-                .children(chips),
-        );
+        col = col.child(div().row().wrap_children().gap(4.0).mt(6.0).children(chips));
     }
     col
 }
@@ -321,7 +334,7 @@ fn browser_line(s: &Screen<'_>, conn: &Value, id: &str) -> El {
         p.activity.get(id),
         Some(crate::plugins::Activity::Busy(crate::plugins::Verb::SignIn))
     );
-    let said = match (signed, s(conn, "signedInAs")) {
+    let said = match (signed, sv(conn, "signedInAs")) {
         (true, Some(who)) => format!("Signed in as {who}"),
         (true, None) => "Signed in".to_owned(),
         _ => "Not signed in".to_owned(),
@@ -377,7 +390,7 @@ fn polls(s: &Screen<'_>, conn: &Value, id: &str, manifest: Option<&Value>) -> El
             .as_array()
             .into_iter()
             .flatten()
-            .find(|n| s(n, "type") == Some("trigger"))
+            .find(|n| sv(n, "type") == Some("trigger"))
             .and_then(|n| n.pointer("/config/cron"))
             .and_then(Value::as_str)
             .unwrap_or("");
@@ -425,12 +438,12 @@ fn polls(s: &Screen<'_>, conn: &Value, id: &str, manifest: Option<&Value>) -> El
         .and_then(|m| m.get("defaultWorkflows"))
         .and_then(Value::as_array);
     for e in defaults.into_iter().flatten() {
-        let event = s(e, "event").unwrap_or("");
+        let event = sv(e, "event").unwrap_or("");
         let wanted = format!("{prefix}{event}");
         if seeded.iter().any(|w| w.id == wanted) {
             continue;
         }
-        let ev_name = s(e, "name").unwrap_or(event);
+        let ev_name = sv(e, "name").unwrap_or(event);
         col = col.child(
             div()
                 .row()
@@ -450,7 +463,7 @@ fn reset(s: &Screen<'_>, conn: &Value, event: &str) -> El {
     let id = s.acts.on(
         "plug-conn-reseed",
         act(PlugAct::Reseed(
-            s(conn, "id").unwrap_or("").to_owned(),
+            sv(conn, "id").unwrap_or("").to_owned(),
             event.to_owned(),
         )),
     );
@@ -483,7 +496,7 @@ fn footer(s: &Screen<'_>, conn: &Value, id: &str) -> El {
         .gap(8.0)
         .mt(4.0)
         .child_if(activity_line(s, id));
-    if let Some(at) = s(conn, "lastSyncAt").filter(|a| !a.is_empty()) {
+    if let Some(at) = sv(conn, "lastSyncAt").filter(|a| !a.is_empty()) {
         row = row.child(line11(
             format!("Last synced {}", crate::tasks::locale_string(at)),
             k::GRAY_600,
@@ -497,7 +510,7 @@ fn footer(s: &Screen<'_>, conn: &Value, id: &str) -> El {
             .child(ico("circle-alert", 10.0, 2.0, k::RED_400))
             .child(line11(e, k::RED_400).wrapping())
     };
-    if let Some(e) = s(conn, "lastSyncError").filter(|e| !e.is_empty()) {
+    if let Some(e) = sv(conn, "lastSyncError").filter(|e| !e.is_empty()) {
         row = row.child(failed(e));
     }
     match p.backfilled.get(id) {
