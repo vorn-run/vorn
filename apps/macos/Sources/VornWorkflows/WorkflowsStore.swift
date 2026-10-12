@@ -314,4 +314,10 @@ public final class WorkflowsStore {
             await self?.reload()
         }
     }
+
+    // Panels: workflow files (WorkflowFiles.swift).
+    /// An import's unbound steps, waiting for the editor to show them.
+    public var importedRequirements: ImportedRequirements?
+    /// The save and open dialogs, replaced in tests and renders.
+    @ObservationIgnored public var workflowFiles: WorkflowFileIO = .panels
 }

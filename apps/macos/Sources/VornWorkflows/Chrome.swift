@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import VornCore
 import VornUI
 
@@ -6,6 +7,7 @@ import VornUI
 public struct WorkflowsHeader: View {
     @Bindable var store: WorkflowsStore
     @State private var filterFrame = CGRect.zero
+    @State private var fileOver = false
 
     public init(store: WorkflowsStore) {
         self.store = store
@@ -85,6 +87,7 @@ public struct WorkflowsHeader: View {
 public struct WorkflowsSidebarSection: View {
     @Bindable var store: WorkflowsStore
     @State private var filterFrame = CGRect.zero
+    @State private var fileOver = false
 
     public init(store: WorkflowsStore) {
         self.store = store
@@ -93,8 +96,10 @@ public struct WorkflowsSidebarSection: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            if store.sidebarSectionOpen {
-                VStack(alignment: .leading, spacing: 2) {
+            // Wraps the list so a dropped file lands anywhere in it, empty included.
+            VStack(alignment: .leading, spacing: 2) {
+                if fileOver { dropHint }
+                if store.sidebarSectionOpen {
                     AllRunsRow(store: store)
                     let list = store.sidebarWorkflows
                     if list.isEmpty {
@@ -107,7 +112,39 @@ public struct WorkflowsSidebarSection: View {
                     ForEach(list) { wf in WorkflowRow(store: store, workflow: wf) }
                 }
             }
+            .onDrop(of: [.fileURL], isTargeted: $fileOver) { providers in
+                Task { store.importDroppedWorkflow(await droppedURLs(providers)) }
+                return true
+            }
         }
+    }
+
+    private var dropHint: some View {
+        Text("Drop to import a workflow file")
+            .font(.system(size: 11))
+            .foregroundStyle(Theme.gray400)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 12)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radius)
+                    .strokeBorder(Theme.white(0.14), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            )
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+    }
+
+    private func droppedURLs(_ providers: [NSItemProvider]) async -> [URL] {
+        var urls: [URL] = []
+        for provider in providers {
+            guard let item = try? await provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) else { continue }
+            if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                urls.append(url)
+            } else if let url = item as? URL {
+                urls.append(url)
+            }
+        }
+        return urls
     }
 
     private var header: some View {
@@ -134,7 +171,7 @@ public struct WorkflowsSidebarSection: View {
                     store.menu = filterOpen ? nil : WorkflowsMenu(kind: .sidebarFilter, anchor: filterFrame, edge: .trailing)
                 }
                 .trackFrame($filterFrame)
-                headerAction(.download, help: "Import workflow file", disabled: true) {}
+                headerAction(.download, help: "Import workflow file") { store.importWorkflow() }
                 headerAction(.workflow, help: "New workflow", disabled: true) {}
             }
         }
@@ -246,7 +283,7 @@ private struct WorkflowRow: View {
                     store.setEnabled(workflow, !workflow.enabled)
                 }
             }
-            Button("Export as file…") {}.disabled(true)
+            Button("Export as file…") { store.exportWorkflow(workflow) }
             Divider()
             Button("Delete Workflow", role: .destructive) { store.delete(workflow) }
         }
