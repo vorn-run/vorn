@@ -467,6 +467,9 @@ pub fn seed_acme(app: &mut App, v: &TestVornd) -> PathBuf {
         "export function greet(name: string): string {\n  return `Hello, ${name}`\n}\n",
     );
     git(&repo, &["init", "-q", "-b", "main"]);
+    // vornd commits here too, with no global identity in a test HOME.
+    git(&repo, &["config", "user.name", "Test"]);
+    git(&repo, &["config", "user.email", "t@e.st"]);
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-qm", "Start the service"]);
     w("src/app.ts", "import { greet } from './lib/greet'\n\nconst names = ['world', 'team']\n\nexport function main(): void {\n  for (const name of names) console.log(greet(name))\n}\n\nmain()\n");

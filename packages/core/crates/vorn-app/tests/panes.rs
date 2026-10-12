@@ -154,6 +154,7 @@ fn git_follows_a_sessions_changes_into_a_commit_and_a_branch() {
         control("git-commit-go", Act::Git(GitAct::Commit(CommitOp::Commit))),
     );
     shot.until(&mut app, "the commit", |a, _| {
+        assert_eq!(a.st.git.commit.error, None, "the commit failed");
         (a.st.dialog.is_none() && a.st.toasts.iter().any(|t| t.text == "Changes committed"))
             .then_some(())
     });
