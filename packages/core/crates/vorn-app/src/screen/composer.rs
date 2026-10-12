@@ -4,9 +4,11 @@
 use super::menus::launch_name;
 use super::{agent_icon, c, ico, truncate, white, Screen, MOD_LABEL};
 use crate::act::Act;
+use crate::app::MODEL_ID;
 use crate::look;
+use crate::models::{footer, rows, selects_models, Listing, Row, Status};
 use crate::state::{basename, MenuKind};
-use crate::ui::{div, image, text, Action, El, Rgba, Role};
+use crate::ui::{div, field, image, text, tooltip, Action, El, Id, Rgba, Role, TextStyle};
 
 /// One of the composer's pickers: `px-2 py-1 rounded-md gap-1.5 text-xs`,
 /// opening its menu above it.
@@ -125,7 +127,7 @@ fn prompt_box(s: &Screen<'_>) -> El {
             "Agent",
             None,
         ))
-        .child(model_chip())
+        .children(model_chip(s, agent))
         .children(git_chips(s))
         .child(div().grow())
         .child(send);
@@ -160,24 +162,287 @@ fn prompt_box(s: &Screen<'_>) -> El {
         .child(bar)
 }
 
-/// The model trigger: the agent's default; listing models is not ported.
-fn model_chip() -> El {
-    div()
+/// What the model picker shows: the launcher's agent, its listing for the
+/// launcher's project, and the model picked for it.
+fn model_state<'a>(s: &'a Screen<'_>) -> (&'a str, Option<&'a Listing>, Option<&'a str>) {
+    let agent =
+        s.st.launch
+            .agent
+            .as_deref()
+            .unwrap_or(s.store.default_agent());
+    let path =
+        s.st.composer
+            .project
+            .as_deref()
+            .and_then(|n| s.store.projects.iter().find(|p| p.name == n))
+            .map_or("", |p| p.path.as_str());
+    let listing = s.st.models.lists.get(&(agent.to_owned(), path.to_owned()));
+    let value = s.st.models.picked.get(agent).map(String::as_str);
+    (agent, listing, value)
+}
+
+/// `ModelPicker`'s compact trigger, for the agents that take a model.
+fn model_chip(s: &Screen<'_>, agent: &str) -> Option<El> {
+    if !selects_models(agent) {
+        return None;
+    }
+    let (_, listing, value) = model_state(s);
+    let label = value.map(|v| listing.map_or(v, |l| l.label(v)));
+    let open =
+        s.st.menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::LaunchModel);
+    let id = s.acts.on("composer", Act::Open(MenuKind::LaunchModel));
+    let hot = if open { 1.0 } else { s.ui.hover(id) };
+    let a11y = label.map_or("Model: agent default".to_owned(), |l| format!("Model: {l}"));
+    let tone = |set: u32| c(if label.is_some() { set } else { look::GRAY_500 });
+    Some(
+        div()
+            .id(id)
+            .on(Action::Click)
+            .row()
+            .items_center()
+            .gap(6.0)
+            .px(8.0)
+            .py(4.0)
+            .rounded(6.0)
+            .bg(white(0.0).mix(white(0.06), hot))
+            .role(Role::Button, &a11y)
+            .has_popup()
+            .expanded(open)
+            .child(ico("cpu", 13.0, 1.75, tone(look::GRAY_300)))
+            .child(
+                div().max_w(170.0).min_w0().child(
+                    text(label.unwrap_or("Default"), 12.0, tone(look::GRAY_400))
+                        .line_height(16.0)
+                        .truncate()
+                        .silent(),
+                ),
+            )
+            .child(ico("chevron-down", 10.0, 2.0, c(look::GRAY_500))),
+    )
+}
+
+/// One of the model menu's choices; `id` is none for the agent's default.
+fn model_row(
+    s: &Screen<'_>,
+    id: Option<&str>,
+    value: Option<&str>,
+    label: &str,
+    tip: Option<&str>,
+) -> El {
+    let current = id == value;
+    let act = s
+        .acts
+        .on("model-pick", Act::PickModel(id.map(str::to_owned)));
+    let hot = s.ui.hover(act);
+    let color = if current {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_300).mix(c(look::WHITE), hot)
+    };
+    let check = if current {
+        ico("check", 11.0, 3.0, color)
+    } else {
+        div().w(11.0).h(11.0)
+    };
+    let mut row = div()
+        .id(act)
+        .on(Action::Click)
         .row()
         .items_center()
-        .gap(6.0)
-        .px(8.0)
-        .py(4.0)
-        .rounded(6.0)
-        .role(Role::Button, "Model")
-        .disabled(true)
-        .child(ico("cpu", 13.0, 1.75, c(look::GRAY_400)))
+        .gap(8.0)
+        .px(12.0)
+        .py(6.0)
+        .bg(if current {
+            white(0.06)
+        } else {
+            white(0.04 * hot)
+        })
+        .role(Role::ListBoxOption, label)
+        .selected(current)
+        .child(check.shrink0())
         .child(
-            text("Default", 12.0, c(look::GRAY_400))
-                .line_height(16.0)
+            div().grow().min_w0().child(
+                text(label, 12.0, color)
+                    .line_height(16.0)
+                    .truncate()
+                    .silent(),
+            ),
+        );
+    if let Some(id) = id.filter(|id| *id != label) {
+        row = row.child(
+            div().max_w(120.0).min_w0().shrink0().child(
+                text(id, 10.0, c(look::GRAY_600))
+                    .mono()
+                    .line_height(15.0)
+                    .truncate()
+                    .silent(),
+            ),
+        );
+    }
+    match tip {
+        Some(t) => tooltip(s.ui, row, act, t, None),
+        None => row,
+    }
+}
+
+/// `ModelPicker`'s menu: the agent's default, its listed models, the id
+/// field, and where the list came from.
+pub(super) fn model_panel(s: &Screen<'_>) -> El {
+    let (agent, listing, value) = model_state(s);
+    let empty = Listing::default();
+    let listing = listing.unwrap_or(&empty);
+    let mut list = div()
+        .id(Id::new("model-list"))
+        .col()
+        .py(4.0)
+        .max_h(240.0)
+        .scroll_y();
+    for r in rows(agent, listing, value, s.ui.edit_text(MODEL_ID)) {
+        list = list.child(match r {
+            Row::Asking => div()
+                .row()
+                .items_center()
+                .gap(8.0)
+                .px(12.0)
+                .py(6.0)
+                .role(Role::Status, "Asking for models")
+                .child(ico("loader-circle", 11.0, 2.0, c(look::GRAY_500)))
+                .child(
+                    text(
+                        format!("Asking {agent} for its models\u{2026}"),
+                        12.0,
+                        c(look::GRAY_500),
+                    )
+                    .line_height(16.0)
+                    .silent(),
+                ),
+            Row::Default => model_row(s, None, value, "Agent default", None),
+            Row::Provider(p) => div().px(12.0).pt(8.0).pb(2.0).child(
+                text(p.to_uppercase(), 10.0, c(look::GRAY_600))
+                    .tracking(0.025)
+                    .line_height(15.0)
+                    .silent(),
+            ),
+            Row::Model {
+                id,
+                label,
+                description,
+            } => model_row(s, Some(id), value, label, description),
+            Row::NoMatch => div().px(12.0).py(6.0).child(
+                text("No listed model matches", 12.0, c(look::GRAY_600))
+                    .line_height(16.0)
+                    .silent(),
+            ),
+        });
+    }
+    let invalid = s.st.models.invalid;
+    let border = if invalid.is_some() {
+        c(look::DANGER)
+    } else if s.ui.focused(MODEL_ID) {
+        white(0.2)
+    } else {
+        white(0.08)
+    };
+    let mut id_box = div()
+        .col()
+        .px(12.0)
+        .py(8.0)
+        .border_top(1.0, white(0.06))
+        .child(
+            div()
+                .row()
+                .items_center()
+                .gap(8.0)
+                .child(
+                    text("ID", 10.0, c(look::GRAY_600))
+                        .tracking(0.025)
+                        .line_height(15.0)
+                        .silent(),
+                )
+                .child(
+                    div()
+                        .grow()
+                        .min_w0()
+                        .px(8.0)
+                        .py(2.0)
+                        .rounded(4.0)
+                        .bg(white(0.04))
+                        .border(1.0, border)
+                        .child(
+                            field(
+                                MODEL_ID,
+                                "Model id",
+                                "type a model id",
+                                TextStyle {
+                                    line_height: 16.5,
+                                    ..TextStyle::mono(11.0)
+                                },
+                                c(look::GRAY_200),
+                            )
+                            .w_full(),
+                        ),
+                ),
+        );
+    if let Some(why) = invalid {
+        id_box = id_box.child(
+            text(why, 11.0, c(look::DANGER))
+                .line_height(16.5)
+                .wrapping()
+                .mt(4.0)
+                .role(Role::Alert, why),
+        );
+    }
+    let (line, spinning) = footer(agent, listing, s.st.models.opened_at);
+    let mut foot = div().row().items_center().gap(8.0).px(12.0).pb(8.0);
+    if spinning {
+        foot = foot.child(ico("loader-circle", 10.0, 2.0, c(look::GRAY_600)));
+    }
+    foot = foot.child(
+        div().grow().min_w0().child(
+            text(line, 10.0, c(look::GRAY_600))
+                .line_height(15.0)
+                .truncate()
                 .silent(),
-        )
-        .child(ico("chevron-down", 10.0, 2.0, c(look::GRAY_400)))
+        ),
+    );
+    let can_refresh = !listing.loading
+        && listing
+            .catalog
+            .as_ref()
+            .is_some_and(|c| c.status != Status::Unavailable);
+    if can_refresh {
+        let id = s.acts.on("model-refresh", Act::RefreshModels);
+        let hot = s.ui.hover(id);
+        let b = div()
+            .id(id)
+            .on(Action::Click)
+            .w(20.0)
+            .h(20.0)
+            .rounded(4.0)
+            .items_center()
+            .justify_center()
+            .bg(white(0.06 * hot))
+            .role(Role::Button, "Refresh models")
+            .child(ico(
+                "refresh-cw",
+                11.0,
+                2.0,
+                c(look::GRAY_500).mix(c(look::GRAY_300), hot),
+            ));
+        foot = foot.child(tooltip(s.ui, b, id, &format!("Ask {agent} again"), None));
+    }
+    div()
+        .col()
+        .w(288.0)
+        .rounded(8.0)
+        .border(1.0, white(0.08))
+        .bg(c(look::SURFACE_OVERLAY))
+        .role(Role::ListBox, "Model")
+        .child(list)
+        .child(id_box)
+        .child(foot)
 }
 
 /// The worktree and branch triggers, once the project is known to be a

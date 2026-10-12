@@ -14,7 +14,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use support::{connect, key, Shot, TestVornd};
 use vorn_app::act::Act;
-use vorn_app::app::{GROUP_NAME, MOD};
+use vorn_app::app::{GROUP_NAME, MOD, MODEL_ID};
 use vorn_app::git::GitAct;
 use vorn_app::screen::menus::MENU;
 use vorn_app::screen::tasks::card_id;
@@ -224,6 +224,51 @@ fn the_sessions_screens() {
         escape(&mut shot, &mut app);
         assert!(app.st.composer_open, "Escape closes the picker first");
     }
+
+    // The model picker: the project's listing is asked for, a bad id is
+    // refused, a typed id is taken.
+    let path = app.store.projects[0].path.clone();
+    let models = ("claude".to_owned(), path);
+    shot.until(&mut app, "the models answered", |app, _| {
+        app.st
+            .models
+            .lists
+            .get(&models)
+            .filter(|l| !l.loading && l.catalog.is_some())
+            .map(|_| ())
+    });
+    let open_model = control("composer", Act::Open(MenuKind::LaunchModel));
+    shot.click(&mut app, open_model);
+    assert_eq!(menu(&app), Some(MenuKind::LaunchModel));
+    assert!(shot.ui.focused(MODEL_ID), "the id field takes the keys");
+    shot.type_line(&mut app, "-bad");
+    assert_eq!(app.st.models.invalid, Some(vorn_app::models::INVALID_ID));
+    assert_eq!(menu(&app), Some(MenuKind::LaunchModel));
+    shot.send(&mut app, key("KeyA", MOD, None));
+    shot.type_line(&mut app, "my-model");
+    assert_eq!(menu(&app), None);
+    assert_eq!(app.st.models.picked.get("claude").map(String::as_str), Some("my-model"));
+    app.st.models.lists.insert(
+        models,
+        vorn_app::models::Listing {
+            catalog: Some(vorn_app::models::Catalog::from_json(&json!({
+                "status": "ready", "fetchedAt": vorn_app::state::now_ms(),
+                "choices": [
+                    { "id": "sonnet", "label": "Sonnet 4.5" },
+                    { "id": "opus", "label": "Opus 4.1" },
+                    { "id": "haiku", "label": "Haiku 4.5" }
+                ]
+            }))),
+            loading: false,
+        },
+    );
+    shot.click(&mut app, open_model);
+    std::thread::sleep(Duration::from_millis(300));
+    park(&mut shot, &mut app);
+    shot.save(&mut app, "launcher-model");
+    shot.click(&mut app, control("model-pick", Act::PickModel(None)));
+    assert_eq!(menu(&app), None);
+    assert!(!app.st.models.picked.contains_key("claude"));
 }
 
 #[test]

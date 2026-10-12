@@ -31,6 +31,7 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::Group(_) | MenuKind::SessionGroups(_) => 176.0,
         MenuKind::GroupIcon(_) => 248.0,
         MenuKind::LaunchAgent => 160.0,
+        MenuKind::LaunchModel => 288.0,
         MenuKind::LaunchProject | MenuKind::LaunchWorktree => 240.0,
         MenuKind::LaunchBranch => 220.0,
         MenuKind::Recent | MenuKind::Headless => 280.0,
@@ -101,7 +102,7 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::SetSelect(key) => super::settings::select_items(s, key),
         MenuKind::SshKey(host) => super::settings::ssh_key_items(s, host),
         MenuKind::FileTabs(owner) => super::side::tab_items(s, owner),
-        MenuKind::Branch(_) | MenuKind::OpenIn(_) => Vec::new(),
+        MenuKind::Branch(_) | MenuKind::OpenIn(_) | MenuKind::LaunchModel => Vec::new(),
         MenuKind::RunStatus
         | MenuKind::WorkflowFilter
         | MenuKind::WorkflowItem(_)

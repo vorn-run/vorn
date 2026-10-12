@@ -126,6 +126,10 @@ pub enum Act {
     /// The launcher's pickers.
     PickProject(String),
     PickAgent(String),
+    /// The launcher's model for its agent; none for the agent's default.
+    PickModel(Option<String>),
+    /// Asks the launcher's agent for its models again.
+    RefreshModels,
     PickWorktree(Option<String>),
     NewWorktree(bool),
     PickBranch(Option<String>),

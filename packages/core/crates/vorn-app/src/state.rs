@@ -159,6 +159,7 @@ pub enum MenuKind {
     /// The launcher's pickers.
     LaunchProject,
     LaunchAgent,
+    LaunchModel,
     LaunchWorktree,
     LaunchBranch,
     /// The Tasks toolbar's view options.
@@ -211,6 +212,7 @@ impl MenuKind {
             self,
             MenuKind::LaunchProject
                 | MenuKind::LaunchAgent
+                | MenuKind::LaunchModel
                 | MenuKind::LaunchWorktree
                 | MenuKind::LaunchBranch
         )
@@ -377,6 +379,21 @@ pub struct Launch {
     pub branch: Option<String>,
 }
 
+/// The launcher's model picker: each agent's model and what was learned
+/// of the models it lists.
+#[derive(Debug, Default)]
+pub struct Models {
+    /// The model picked per agent; kept across launches, as today's
+    /// launch preferences.
+    pub picked: HashMap<String, String>,
+    /// By agent and project path.
+    pub lists: HashMap<(String, String), crate::models::Listing>,
+    /// Why the typed id was refused.
+    pub invalid: Option<&'static str>,
+    /// When the menu opened (ms), which the footer's age is measured from.
+    pub opened_at: u64,
+}
+
 /// Everything the screen shows that vornd does not keep.
 #[derive(Debug, Default)]
 pub struct State {
@@ -426,6 +443,8 @@ pub struct State {
     /// The launcher over the cards (Mod+N).
     pub composer_open: bool,
     pub launch: Launch,
+    /// The launcher's model picker.
+    pub models: Models,
     pub form: ProjectForm,
     /// Agents installed here, when known.
     pub installed: Option<Vec<String>>,

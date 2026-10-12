@@ -14,13 +14,14 @@ use crate::client::rpc::{decode, Wake};
 use crate::client::{Endpoint, Event, Pending, Rpc, RpcError, Store};
 use crate::grid::Grid;
 use crate::look;
+use crate::models::Catalog;
 use crate::paint;
 use crate::screen::{
     card_index, intent_id, menus, rename_id, term_id, Composer, MainView, Screen, PROJECT_NAME,
     PROJECT_PATH, VIEWS, VIEW_ORDER,
 };
 use crate::state::{
-    basename, Dialog, Filter, Headless, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
+    basename, now_ms, Dialog, Filter, Headless, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
 };
 use crate::ui::{
     decode_png, item_id, mods, El, Event as UiEvent, Id, Input, Laid, Rgba, Role, TreeUpdate, Ui,
@@ -169,6 +170,8 @@ enum Call {
     Installed,
     Worktrees(String),
     Branches(String),
+    /// `agent:listModels` for an agent in a project.
+    Models(String, String),
     /// A `config:save`; the next one waits for it.
     Saved(Box<Call>),
     Task(tasks::TaskCall),
@@ -180,6 +183,9 @@ enum Call {
     Ignore,
     Pane(browser::PaneCall),
 }
+
+/// The launcher model picker's id field.
+pub const MODEL_ID: Id = Id(0x6d6f_6465_6c00_0001);
 
 /// The field a group's name is edited in.
 pub const GROUP_NAME: Id = Id(0x6772_6f75_7000_0001);
@@ -515,6 +521,12 @@ impl App {
                     .collect();
                 self.st.worktrees.insert(path, wts);
             }
+            Call::Models(agent, path) => {
+                let catalog = answer.map_or_else(|_| Catalog::failed(), |v| Catalog::from_json(&v));
+                let listing = self.st.models.lists.entry((agent, path)).or_default();
+                listing.catalog = Some(catalog);
+                listing.loading = false;
+            }
             Call::Branches(path) => {
                 let Ok(v) = answer else { return };
                 if v.get("isGitRepo").and_then(Value::as_bool) != Some(true) {
@@ -817,6 +829,12 @@ impl App {
                 );
             }
             MenuKind::Headless => self.call(Call::Headless, "headless:list", Value::Null),
+            MenuKind::LaunchModel => {
+                self.st.models.invalid = None;
+                self.st.models.opened_at = now_ms() as u64;
+                ui.set_edit_text(MODEL_ID, "");
+                self.list_models(false);
+            }
             MenuKind::LaunchWorktree => {
                 if let Some((_, path)) = self.composer_project() {
                     self.call(
@@ -835,6 +853,46 @@ impl App {
             sub: None,
         });
         ui.open_menu(menus::MENU, trigger.unwrap_or(menus::MENU));
+        if self
+            .st
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::LaunchModel)
+        {
+            ui.set_focus(Some(MODEL_ID));
+        }
+    }
+
+    /// Enter in the model picker's id field: the listed model it names,
+    /// else the id as typed once it passes `validate_id`.
+    fn choose_typed_model(&mut self, ui: &mut Ui) {
+        let query = ui.edit_text(MODEL_ID).to_owned();
+        if query.trim().is_empty() {
+            return;
+        }
+        let key = (
+            self.launch_agent().to_owned(),
+            self.composer_project().map(|p| p.1).unwrap_or_default(),
+        );
+        let exact = self
+            .st
+            .models
+            .lists
+            .get(&key)
+            .and_then(|l| l.exact(&query))
+            .map(|c| c.id.clone());
+        let pick = match exact {
+            Some(id) => id,
+            None => match crate::models::validate_id(&query) {
+                Ok(id) => id.to_owned(),
+                Err(why) => {
+                    self.st.models.invalid = Some(why);
+                    return;
+                }
+            },
+        };
+        self.st.models.picked.insert(key.0, pick);
+        self.close_menu(ui);
     }
 
     fn close_menu(&mut self, ui: &mut Ui) {
@@ -863,6 +921,43 @@ impl App {
                 );
             }
         }
+        self.list_models(false);
+    }
+
+    /// The agent the launcher starts.
+    fn launch_agent(&self) -> &str {
+        self.st
+            .launch
+            .agent
+            .as_deref()
+            .unwrap_or(self.store.default_agent())
+    }
+
+    /// Asks the launcher's agent for the models it runs in the launcher's
+    /// project, once unless `refresh`, as the picker prefetches.
+    fn list_models(&mut self, refresh: bool) {
+        let agent = self.launch_agent().to_owned();
+        let Some((_, path)) = self.composer_project() else {
+            return;
+        };
+        if !crate::models::selects_models(&agent) {
+            return;
+        }
+        let listing = self
+            .st
+            .models
+            .lists
+            .entry((agent.clone(), path.clone()))
+            .or_default();
+        if listing.loading || (listing.catalog.is_some() && !refresh) {
+            return;
+        }
+        listing.loading = true;
+        self.call(
+            Call::Models(agent.clone(), path.clone()),
+            "agent:listModels",
+            json!({ "agentType": agent, "projectPath": path, "refresh": refresh }),
+        );
     }
 
     /// `addSessionGroup`: "New group" after the last, its name being
@@ -1372,7 +1467,19 @@ impl App {
             Act::HideHeadless(id) => self.st.headless.retain(|h| h.id != id),
             Act::ToggleHeadless(_) => {}
             Act::PickProject(name) => self.pick_project(name),
-            Act::PickAgent(agent) => self.st.launch.agent = Some(agent),
+            Act::PickAgent(agent) => {
+                self.st.launch.agent = Some(agent);
+                self.list_models(false);
+            }
+            Act::PickModel(model) => {
+                let agent = self.launch_agent().to_owned();
+                match model {
+                    Some(m) => self.st.models.picked.insert(agent, m),
+                    None => self.st.models.picked.remove(&agent),
+                };
+                self.close_menu(ui);
+            }
+            Act::RefreshModels => self.list_models(true),
             Act::PickWorktree(path) => {
                 self.st.launch.worktree = path;
                 self.st.launch.new_worktree = false;
@@ -1582,6 +1689,7 @@ impl App {
             UiEvent::ResizeEnd { id, ratio } => {
                 self.pane_resized(ui, id, ratio, true);
             }
+            UiEvent::Changed(id) if id == MODEL_ID => self.st.models.invalid = None,
             UiEvent::Changed(id) if id == PROJECT_PATH => {
                 // The folder's name, until another name is typed.
                 let name = ui.edit_text(PROJECT_NAME).to_owned();
@@ -1602,6 +1710,10 @@ impl App {
         }
         if id == GROUP_NAME {
             self.rename_group(ui);
+            return;
+        }
+        if id == MODEL_ID {
+            self.choose_typed_model(ui);
             return;
         }
         if let Some(sid) = self.st.renaming.clone().filter(|s| rename_id(s) == id) {
@@ -1891,6 +2003,9 @@ impl App {
         }
         if let Some(b) = &l.branch {
             params["branch"] = json!(b);
+        }
+        if let Some(m) = self.st.models.picked.get(self.launch_agent()) {
+            params["model"] = json!(m);
         }
         let prompt = self.st.composer.text.trim();
         if !prompt.is_empty() {
