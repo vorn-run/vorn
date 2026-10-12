@@ -220,6 +220,30 @@ pub struct Workflows {
     pub lib: LibraryData,
     /// The definition's undo and redo.
     pub undo: Undo,
+    /// The `{{` dropdown, when open.
+    pub ac: Option<Ac>,
+    /// Advanced sections open, by node.
+    pub advanced: HashSet<String>,
+    /// Text kept aside because it is not yet valid (a half-typed schema),
+    /// by node and path.
+    pub raw: HashMap<(String, String), String>,
+    /// Connector arguments shown as a template rather than their list.
+    pub free_args: HashSet<(String, String)>,
+    /// `webhook:info`'s base URL.
+    pub webhook: Option<String>,
+    /// The URL just copied, for the check mark.
+    pub copied: Option<f64>,
+}
+
+/// The variable dropdown under a field (`VariableAutocomplete`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ac {
+    pub bind: Bind,
+    /// Where the `{{` that opened it starts, in bytes.
+    pub start: usize,
+    pub filter: String,
+    pub collapsed: HashSet<String>,
+    pub highlight: usize,
 }
 
 /// A gesture on the canvas.
@@ -792,6 +816,280 @@ pub fn blank(workspace: Option<&str>) -> Value {
     wf
 }
 
+/// How a bound field's text becomes a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Conv {
+    /// Text; empty removes the key.
+    Text,
+    /// Text; empty kept as an empty string.
+    Keep,
+    /// Whitespace-separated words into a list; empty removes it.
+    Words,
+    /// Space-separated words, empties dropped (a script's arguments).
+    Spaces,
+    /// Whole seconds into milliseconds; blank or not positive removes it.
+    Seconds,
+    /// Whole minutes into milliseconds; blank removes it.
+    Minutes,
+    /// A whole number, at least `0`; blank removes it.
+    Count,
+    /// A whole number clamped to 1..=10 (a loop's passes).
+    Passes,
+    /// A whole number clamped to 2..=10 (a gate's rounds).
+    Rounds,
+    /// A JSON object; text that is not one is kept aside, not stored.
+    Schema,
+    /// A run input's key, kept to the template grammar.
+    Key,
+    /// Comma-separated choices into `{value, label}` options.
+    Options,
+}
+
+/// A text field's binding: which node (none for the workflow) and the
+/// dotted path it writes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Bind {
+    pub node: Option<String>,
+    pub path: String,
+    pub conv: Conv,
+    /// Offers `{{` variables as it is typed in.
+    pub vars: bool,
+}
+
+/// Writes `v` at the dotted `path` under `n` (`config.until.value`),
+/// making the objects on the way; `None` removes the key.
+pub fn set_path(n: &mut Value, path: &str, v: Option<Value>) {
+    let parts: Vec<&str> = path.split('.').collect();
+    let Some((last, head)) = parts.split_last() else {
+        return;
+    };
+    let mut cur = n;
+    for p in head {
+        if !cur.get(*p).is_some_and(Value::is_object) {
+            cur[*p] = json!({});
+        }
+        cur = &mut cur[*p];
+    }
+    match v {
+        Some(v) => cur[*last] = v,
+        None => {
+            if let Some(m) = cur.as_object_mut() {
+                m.remove(*last);
+            }
+        }
+    }
+}
+
+/// The value at the dotted `path`.
+pub fn get_path<'a>(n: &'a Value, path: &str) -> Option<&'a Value> {
+    path.split('.').try_fold(n, |cur, p| cur.get(p))
+}
+
+/// What `text` stores under `conv`; `None` removes the key, `Err` keeps
+/// the text aside.
+pub fn convert(conv: Conv, text: &str) -> Result<Option<Value>, String> {
+    let t = text.trim();
+    let whole = |t: &str| {
+        t.parse::<f64>()
+            .ok()
+            .filter(|n| n.is_finite())
+            .map(f64::floor)
+    };
+    Ok(match conv {
+        Conv::Text => (!text.is_empty()).then(|| json!(text)),
+        Conv::Keep => Some(json!(text)),
+        Conv::Words => (!t.is_empty()).then(|| json!(t.split_whitespace().collect::<Vec<_>>())),
+        Conv::Spaces => {
+            let w: Vec<&str> = text.split(' ').filter(|w| !w.is_empty()).collect();
+            Some(json!(w))
+        }
+        Conv::Seconds => t
+            .parse::<f64>()
+            .ok()
+            .filter(|n| n.is_finite() && *n > 0.0)
+            .map(|n| graph::num((n * 1000.0).round())),
+        Conv::Minutes => {
+            if t.is_empty() {
+                None
+            } else {
+                let m = t
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|n| n.is_finite() && *n >= 0.0)
+                    .ok_or("")?;
+                Some(graph::num(m.round() * 60_000.0))
+            }
+        }
+        Conv::Count => {
+            if t.is_empty() {
+                None
+            } else {
+                let n = t.parse::<i64>().ok().filter(|n| *n >= 0).ok_or("")?;
+                Some(json!(n))
+            }
+        }
+        Conv::Passes => Some(json!(whole(t).map_or(1.0, |n| n.clamp(1.0, 10.0)) as i64)),
+        Conv::Rounds => Some(json!(whole(t).ok_or("")?.clamp(2.0, 10.0) as i64)),
+        Conv::Schema => {
+            if t.is_empty() {
+                None
+            } else {
+                match serde_json::from_str::<Value>(t) {
+                    Ok(v @ Value::Object(_)) => Some(v),
+                    Ok(_) => return Err("Schema must be a JSON object".into()),
+                    Err(_) => return Err("Not valid JSON".into()),
+                }
+            }
+        }
+        Conv::Key => {
+            let mut k: String = text
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            if k.starts_with(|c: char| c.is_ascii_digit()) {
+                k.insert(0, '_');
+            }
+            Some(json!(k))
+        }
+        Conv::Options => Some(json!(text
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|v| json!({ "value": v, "label": v }))
+            .collect::<Vec<_>>())),
+    })
+}
+
+/// `handleNodeLabelChange`: the label, a slug of it no other step has,
+/// and every `steps.<old>.` reference renamed.
+pub fn relabel(d: &mut Draft, id: &str, label: &str) {
+    let taken: HashSet<String> = d
+        .nodes()
+        .iter()
+        .filter(|n| s(n, "id") != Some(id))
+        .filter_map(|n| s(n, "slug").map(str::to_owned))
+        .collect();
+    let new_slug = unique_slug(&slugify(label), &taken);
+    let old = d.node(id).and_then(|n| s(n, "slug")).map(str::to_owned);
+    let nodes: Vec<Value> = d
+        .nodes()
+        .iter()
+        .cloned()
+        .map(|mut n| {
+            if s(&n, "id") == Some(id) {
+                n["label"] = json!(label);
+                n["slug"] = json!(new_slug);
+            } else if let Some(o) = old.as_deref().filter(|o| *o != new_slug) {
+                let from = format!("steps.{o}.");
+                if let Some(c) = n.get("config") {
+                    let text = c.to_string();
+                    if text.contains(&from) {
+                        let to = format!("steps.{new_slug}.");
+                        if let Ok(v) = serde_json::from_str(&text.replace(&from, &to)) {
+                            n["config"] = v;
+                        }
+                    }
+                }
+            }
+            n
+        })
+        .collect();
+    let edges = d.edges().to_vec();
+    d.set_graph(nodes, edges);
+}
+
+/// What a step's template fields read: the steps upstream (and a loop's
+/// own body), and the variables its form offers for `path`.
+pub fn var_sources(
+    wf: &Workflows,
+    d: &Draft,
+    node: &str,
+    path: &str,
+) -> (Vec<crate::vars::StepGroup>, Vec<crate::vars::Var>) {
+    use crate::vars::{self as v, Category};
+    let nodes = d.nodes();
+    let Some(n) = d.node(node) else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut up = v::ancestors(nodes, d.edges(), node);
+    if s(n, "type") == Some("loop") {
+        for b in n
+            .pointer("/config/bodyNodeIds")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            if let Some(m) = d.node(b) {
+                up.push(m);
+            }
+        }
+    }
+    let latest = wf.history.iter().max_by(|a, b| {
+        s(a, "startedAt")
+            .unwrap_or("")
+            .cmp(s(b, "startedAt").unwrap_or(""))
+    });
+    let last = latest.map(|r| v::last_run(r, nodes));
+    let groups = v::step_groups(&up, &wf.lib.actions, last.as_ref());
+    let trig = trigger(nodes);
+    let ttype = trig
+        .and_then(|t| t.pointer("/config/triggerType"))
+        .and_then(Value::as_str);
+    let contextual = ttype == Some("manual")
+        && trig
+            .and_then(|t| t.pointer("/config/contextual"))
+            .and_then(Value::as_bool)
+            == Some(true);
+    let inputs: Vec<Value> = if ttype == Some("manual") {
+        trig.and_then(|t| t.pointer("/config/inputs"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let mut node_vars = v::input_vars(&inputs);
+    node_vars.extend(v::loop_vars(nodes, Some(node)));
+    let custom = |connector_item: bool| -> Vec<v::Var> {
+        v::template_variables()
+            .into_iter()
+            .filter(|var| match var.category {
+                Category::Task => matches!(ttype, Some("taskCreated" | "taskStatusChanged")),
+                Category::ConnectorItem => connector_item && ttype == Some("connectorPoll"),
+                Category::Trigger => {
+                    if ttype == Some("webhook") {
+                        ["trigger.body", "trigger.headers", "trigger.query"]
+                            .iter()
+                            .any(|k| var.key.contains(k))
+                    } else {
+                        ttype == Some("taskStatusChanged") && var.key.contains("Status")
+                    }
+                }
+                _ => false,
+            })
+            .collect()
+    };
+    let vars = match s(n, "type").unwrap_or("") {
+        "condition" => [custom(false), node_vars].concat(),
+        "callConnectorAction" => [custom(true), node_vars].concat(),
+        "approval" => node_vars,
+        "loop" if path == "config.items" => node_vars
+            .into_iter()
+            .filter(|x| x.category != Category::Loop)
+            .collect(),
+        "loop" => node_vars,
+        _ => [v::context_vars(ttype, contextual), node_vars].concat(),
+    };
+    (groups, vars)
+}
+
 /// What the step library hands back (`LibraryPick`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Pick {
@@ -1074,7 +1372,7 @@ fn insert(
             .find(|e| s(e, "source") == Some(after) && s(e, "target") == Some(b))
             .and_then(|e| s(e, "id"))
         {
-            Some(eid) => graph::insert_between(&nodes, &edges, &eid.to_owned(), n),
+            Some(eid) => graph::insert_between(&nodes, &edges, eid, n),
             None => graph::append_after(&nodes, &edges, after, n),
         },
         None => graph::append_after(&nodes, &edges, after, n),
@@ -1206,19 +1504,6 @@ fn cfg<'a>(node: &'a Value, key: &str) -> Option<&'a str> {
         .and_then(|c| c.get(key))
         .and_then(Value::as_str)
         .filter(|v| !v.trim().is_empty())
-}
-
-/// A canvas card's glyph.
-pub fn card_icon(node: &Value) -> &'static str {
-    match s(node, "type").unwrap_or("") {
-        "trigger" => trigger_icon(cfg(node, "triggerType").unwrap_or("manual")),
-        "script" => match cfg(node, "scriptType") {
-            Some("python" | "node") => "code",
-            _ => "terminal",
-        },
-        "launchAgent" => "bot",
-        k => crate::screen::runs::node_icon(k),
-    }
 }
 
 /// A canvas card's line under its label.
@@ -1371,73 +1656,6 @@ pub fn footer(node: &Value) -> Option<String> {
     }
 }
 
-/// The choices a config select offers, as value and label.
-pub fn choices(path: &str) -> Vec<(&'static str, &'static str)> {
-    let key = path.rsplit('.').next().unwrap_or(path);
-    match key {
-        "scriptType" => vec![
-            ("bash", "Bash"),
-            ("powershell", "PowerShell"),
-            ("python", "Python"),
-            ("node", "Node"),
-        ],
-        "operator" => vec![
-            ("equals", "equals"),
-            ("notEquals", "not equals"),
-            ("contains", "contains"),
-            ("notContains", "not contains"),
-            ("isEmpty", "is empty"),
-            ("isNotEmpty", "is not empty"),
-        ],
-        "method" if path == "config.method" => vec![
-            ("GET", "GET"),
-            ("POST", "POST"),
-            ("PUT", "PUT"),
-            ("PATCH", "PATCH"),
-            ("DELETE", "DELETE"),
-        ],
-        "fromStatus" | "toStatus" => vec![
-            ("", "Any status"),
-            ("todo", "To Do"),
-            ("in_progress", "In Progress"),
-            ("in_review", "In Review"),
-            ("done", "Done"),
-            ("cancelled", "Cancelled"),
-        ],
-        "type" => vec![
-            ("text", "Text"),
-            ("textarea", "Long text"),
-            ("number", "Number"),
-            ("select", "Select"),
-            ("boolean", "Toggle"),
-            ("project", "Project"),
-            ("branch", "Branch"),
-        ],
-        "mode" => vec![
-            ("count", "A number of times"),
-            ("forEach", "For each in a list"),
-        ],
-        "cron" => vec![
-            ("0 9 * * 1-5", "Weekdays 9am"),
-            ("0 9 * * *", "Daily 9am"),
-            ("0 * * * *", "Every hour"),
-            ("*/30 * * * *", "Every 30min"),
-            ("0 9 * * 1", "Weekly (Mon 9am)"),
-        ],
-        "agentType" => crate::screen::menus::AGENTS.to_vec(),
-        "onError" => vec![("stop", "Stop the run"), ("continue", "Carry on anyway")],
-        _ => Vec::new(),
-    }
-}
-
-/// The label a select shows for `value`.
-pub fn choice_label(path: &str, value: &str) -> String {
-    choices(path)
-        .into_iter()
-        .find(|(v, _)| *v == value)
-        .map_or_else(|| value.to_owned(), |(_, l)| l.to_owned())
-}
-
 /// Sets `path` (`label`, `config.key`, `input.N.key`, `onError`, `name`…)
 /// on the draft's node `node` to `value`.
 pub fn set(d: &mut Draft, node: Option<&str>, path: &str, value: Value) {
@@ -1561,295 +1779,6 @@ pub fn duplicate_keys(defs: &[Value]) -> Vec<String> {
     dup
 }
 
-/// One control of a node's config form.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Field {
-    Text {
-        path: String,
-        label: &'static str,
-        placeholder: &'static str,
-        mono: bool,
-        lines: bool,
-        help: &'static str,
-    },
-    Choice {
-        path: String,
-        label: &'static str,
-        help: &'static str,
-    },
-    Switch {
-        path: String,
-        label: &'static str,
-        help: &'static str,
-    },
-    /// The trigger's kind, its hint and the library link.
-    Kind,
-    /// The manual trigger's run inputs.
-    Inputs,
-}
-
-fn text(path: &str, label: &'static str, placeholder: &'static str) -> Field {
-    Field::Text {
-        path: path.to_owned(),
-        label,
-        placeholder,
-        mono: false,
-        lines: false,
-        help: "",
-    }
-}
-
-fn choice(path: &str, label: &'static str) -> Field {
-    Field::Choice {
-        path: path.to_owned(),
-        label,
-        help: "",
-    }
-}
-
-fn with_help(mut f: Field, h: &'static str) -> Field {
-    match &mut f {
-        Field::Text { help, .. } | Field::Choice { help, .. } | Field::Switch { help, .. } => {
-            *help = h
-        }
-        _ => {}
-    }
-    f
-}
-
-fn lines(mut f: Field, as_mono: bool) -> Field {
-    if let Field::Text { lines, mono, .. } = &mut f {
-        *lines = true;
-        *mono = as_mono;
-    }
-    f
-}
-
-fn mono(mut f: Field) -> Field {
-    if let Field::Text { mono, .. } = &mut f {
-        *mono = true;
-    }
-    f
-}
-
-/// `NodeConfigPanel`'s form for `node`, top to bottom.
-pub fn form(node: &Value) -> Vec<Field> {
-    let c = |k: &str| cfg(node, k).unwrap_or("");
-    let mut out = match s(node, "type").unwrap_or("") {
-        "trigger" => {
-            let mut f = vec![Field::Kind];
-            match c("triggerType") {
-                "manual" => {
-                    f.push(Field::Switch {
-                        path: "config.contextual".into(),
-                        label: "Contextual",
-                        help: "Run this workflow directly from any card or terminal, against that session's folder and branch.",
-                    });
-                    f.push(Field::Inputs);
-                }
-                "once" => f.push(text("config.runAt", "Run At", "2026-01-01T09:00:00.000Z")),
-                "recurring" => {
-                    f.push(choice("config.cron", "Preset"));
-                    f.push(with_help(
-                        mono(text("config.cron", "Cron Expression", "* * * * *")),
-                        "min hour day month weekday",
-                    ));
-                    f.push(text("config.timezone", "Timezone", "UTC"));
-                }
-                "taskCreated" => f.push(with_help(
-                    choice("config.projectFilter", "Project Filter"),
-                    "Only trigger for tasks in this project",
-                )),
-                "taskStatusChanged" => {
-                    f.push(choice("config.projectFilter", "Project Filter"));
-                    f.push(choice("config.fromStatus", "From Status"));
-                    f.push(choice("config.toStatus", "To Status"));
-                }
-                "sessionRestored" => f.push(choice("config.projectFilter", "Project Filter")),
-                "webhook" => f.push(choice("config.method", "Method")),
-                _ => {}
-            }
-            return f;
-        }
-        "script" => vec![
-            choice("config.scriptType", "Type"),
-            choice("config.projectName", "Project"),
-            lines(text("config.scriptContent", "Script", ""), true),
-            text("config.args", "Arguments", "arg1 arg2 --flag"),
-        ],
-        "launchAgent" => vec![
-            choice("config.agentType", "Agent"),
-            text("config.model", "Model", "Default"),
-            choice("config.projectName", "Project"),
-            lines(text("config.prompt", "Prompt", "Enter prompt..."), false),
-            text("config.branch", "Branch", "feature/my-branch"),
-            text("config.displayName", "Tab Name", ""),
-        ],
-        "approval" => vec![
-            with_help(
-                lines(
-                    text(
-                        "config.message",
-                        "Message",
-                        "Shown with the answers, e.g. {{steps.draft.output}}",
-                    ),
-                    false,
-                ),
-                "Step outputs fill in when the gate opens.",
-            ),
-            with_help(
-                text(
-                    "timeout",
-                    "Timeout (seconds, optional)",
-                    "Leave blank to wait forever",
-                ),
-                "Auto-rejects the gate if nobody answers in time. Each round starts a new timeout.",
-            ),
-        ],
-        "condition" => {
-            let mut f = vec![
-                mono(text(
-                    "config.variable",
-                    "Variable",
-                    "e.g. {{steps.build.status}}",
-                )),
-                choice("config.operator", "Operator"),
-            ];
-            if !matches!(c("operator"), "isEmpty" | "isNotEmpty") {
-                f.push(text("config.value", "Value", "Compare against..."));
-            }
-            f
-        }
-        "httpRequest" => vec![
-            choice("config.method", "Method"),
-            mono(text("config.url", "URL", "https://")),
-            with_help(
-                lines(text("config.body", "Body", ""), true),
-                "Sent as-is. GET requests send no body.",
-            ),
-        ],
-        "loop" => {
-            let mut f = vec![choice("config.mode", "Repeat")];
-            if c("mode") == "forEach" {
-                f.push(mono(text(
-                    "config.items",
-                    "Items",
-                    "{{steps.review.items}}",
-                )));
-            } else {
-                f.push(text("config.maxIterations", "Maximum passes", "2"));
-            }
-            f
-        }
-        _ => Vec::new(),
-    };
-    let stop = s(node, "onError").unwrap_or("stop") == "stop";
-    out.push(with_help(
-        choice("onError", "If this step fails"),
-        if stop {
-            "Everything downstream is skipped and the run ends as failed."
-        } else {
-            "Later steps run as if this one had succeeded, and the run still counts as successful \u{2014} for a step whose failure does not invalidate the rest."
-        },
-    ));
-    out
-}
-
-/// The text a field at `path` shows for `node`.
-pub fn field_text(node: &Value, path: &str) -> String {
-    if path == "timeout" {
-        return node
-            .pointer("/config/timeoutMs")
-            .and_then(Value::as_f64)
-            .filter(|ms| *ms > 0.0)
-            .map(|ms| ((ms / 1000.0).round() as u64).to_string())
-            .unwrap_or_default();
-    }
-    let mut parts = path.split('.');
-    match parts.next() {
-        Some("input") => {
-            let i = parts
-                .next()
-                .and_then(|i| i.parse::<usize>().ok())
-                .unwrap_or(0);
-            let prop = parts.next().unwrap_or("");
-            let item = node.pointer(&format!("/config/inputs/{i}"));
-            if prop == "options" {
-                return item
-                    .and_then(|i| i.get("options"))
-                    .and_then(Value::as_array)
-                    .map(|o| {
-                        o.iter()
-                            .filter_map(|o| s(o, "value"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_default();
-            }
-            text_of(item.and_then(|i| i.get(prop)))
-        }
-        Some(head) => {
-            let ptr = std::iter::once(head)
-                .chain(parts)
-                .collect::<Vec<_>>()
-                .join("/");
-            text_of(node.pointer(&format!("/{ptr}")))
-        }
-        None => String::new(),
-    }
-}
-
-/// Every text path the form of `node` edits, inputs included.
-pub fn text_paths(node: &Value) -> Vec<String> {
-    let mut out = vec!["label".to_owned()];
-    for f in form(node) {
-        match f {
-            Field::Text { path, .. } => out.push(path),
-            Field::Inputs => {
-                let defs = node
-                    .pointer("/config/inputs")
-                    .and_then(Value::as_array)
-                    .map_or(0, Vec::len);
-                for i in 0..defs {
-                    for p in ["key", "label", "options", "defaultValue"] {
-                        out.push(format!("input.{i}.{p}"));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
-/// What typing `text` into the field at `path` stores.
-pub fn field_value(path: &str, text: &str) -> (String, Value) {
-    let num = |t: &str| t.trim().parse::<u64>().ok();
-    match path {
-        "timeout" => (
-            "config.timeoutMs".into(),
-            text.trim()
-                .parse::<f64>()
-                .ok()
-                .filter(|v| *v > 0.0 && v.is_finite())
-                .map_or(Value::Null, |v| json!((v * 1000.0).round() as u64)),
-        ),
-        "config.maxIterations" => (path.into(), num(text).map_or(Value::Null, |n| json!(n))),
-        "staggerDelayMs" => (path.into(), num(text).map_or(Value::Null, |n| json!(n))),
-        p if p.ends_with(".options") => (
-            p.into(),
-            Value::Array(
-                text.split(',')
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-                    .map(|v| json!({ "value": v, "label": v }))
-                    .collect(),
-            ),
-        ),
-        p => (p.into(), json!(text)),
-    }
-}
-
 /// What the workflow controls do.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WfAct {
@@ -1883,7 +1812,6 @@ pub enum WfAct {
     Pick(Pick),
     DeleteNode(String),
     RunTo(String),
-    Set(String, String),
     Toggle(String),
     AddInput,
     RemoveInput(usize),
@@ -1911,6 +1839,28 @@ pub enum WfAct {
     Group(String),
     /// The library line under the pointer, for Enter.
     Highlight(usize),
+    /// The icon picker's glyph and colour.
+    Icon(String),
+    IconColor(String),
+    /// Typing in a bound field.
+    Text(Bind),
+    /// A picker's choice: the path it writes and the value.
+    Choose(Option<String>, String, String),
+    /// A form's Advanced section folded open or shut.
+    Advanced(String),
+    /// A variable picked from the `{{` dropdown, by its pattern.
+    Insert(String),
+    /// The `{{` button beside a field.
+    Vars(Bind),
+    /// A variable group folded in the dropdown.
+    VarGroup(String),
+    /// A header row added or removed.
+    AddHeader(String),
+    RemoveHeader(String, usize),
+    /// A connector argument switched between its list and a template.
+    ArgFree(String, String, bool),
+    /// Copies text (the webhook URL).
+    Copy(String),
 }
 
 #[cfg(test)]

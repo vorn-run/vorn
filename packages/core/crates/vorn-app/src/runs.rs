@@ -178,6 +178,14 @@ pub enum RunAct {
     OpenReview(String, String),
 }
 
+/// `toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })`.
+pub fn clock_time(iso: &str) -> String {
+    let t = crate::tasks::long_date(iso);
+    // "Oct 12, 9:05 AM": the time is what follows the comma.
+    t.rsplit_once(", ")
+        .map_or(t.clone(), |(_, time)| time.to_owned())
+}
+
 /// `encodeURIComponent`.
 pub fn encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());

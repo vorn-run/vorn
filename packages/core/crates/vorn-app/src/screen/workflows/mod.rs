@@ -4,6 +4,7 @@
 mod canvas;
 mod dialogs;
 mod editor;
+mod forms;
 mod panels;
 
 use serde_json::Value;
@@ -18,7 +19,7 @@ use crate::look;
 use crate::runs::{self, s as sv, RunAct};
 use crate::state::{now_ms, MenuKind};
 use crate::ui::{div, text, tooltip, Action, El, Id, Rgba, Role, Sense};
-use crate::workflows::{self as wf, Anchor, Bucket, Panel, SideFilter, Tab, WfAct};
+use crate::workflows::{self as wf, Anchor, Bucket, SideFilter, Tab, WfAct};
 
 pub use dialogs::dialog;
 pub use editor::editor;
@@ -134,6 +135,80 @@ pub(super) fn node_glyph(s: &Screen<'_>, n: &Value, size: f32) -> El {
         k => super::runs::node_icon(k),
     };
     ico(glyph, size, 2.0, secondary())
+}
+
+/// The editor's icon picker: `PROJECT_ICON_OPTIONS` eight across, then
+/// `ICON_COLOR_PALETTE`.
+pub fn icon_picker(s: &Screen<'_>) -> El {
+    let Some(d) = &s.st.wf.editor else {
+        return div();
+    };
+    let icon = sv(&d.wf, "icon").unwrap_or("Workflow");
+    let color = sv(&d.wf, "iconColor").unwrap_or("#3b82f6");
+    let tint = hex(Some(color)).unwrap_or(c(0x3b82f6));
+    let mut grid = div().row().wrap_children().gap(4.0);
+    for (name, glyph, label) in look::ICON_OPTIONS {
+        let id = s.acts.on("wf-icon", act(WfAct::Icon(name.to_owned())));
+        let on = icon == name;
+        let hot = s.ui.hover(id);
+        let b = div()
+            .id(id)
+            .on(Action::Click)
+            .size(22.0, 24.0)
+            .center()
+            .rounded(4.0)
+            .bg(if on {
+                white(0.10)
+            } else {
+                white(0.0).mix(white(0.06), hot)
+            })
+            .border(1.0, if on { white(0.2) } else { white(0.0) })
+            .role(Role::Button, label)
+            .selected(on)
+            .child(ico(glyph, 12.0, 1.5, if on { tint } else { c(0x9ca3af) }));
+        grid = grid.child(tooltip(s.ui, b, id, label, None));
+    }
+    let mut swatches = div().row().gap(6.0);
+    for rgb in look::ICON_COLORS {
+        let hexs = format!("#{rgb:06x}");
+        let id = s
+            .acts
+            .on("wf-icon-color", act(WfAct::IconColor(hexs.clone())));
+        let on = color.eq_ignore_ascii_case(&hexs);
+        let hot = s.ui.hover(id);
+        let size = if on { 22.0 } else { 20.0 };
+        swatches = swatches.child(
+            div().size(20.0, 20.0).center().child(
+                div()
+                    .id(id)
+                    .on(Action::Click)
+                    .size(size, size)
+                    .rounded(size / 2.0)
+                    .bg(c(rgb))
+                    .border(
+                        1.0,
+                        if on {
+                            c(look::WHITE)
+                        } else {
+                            white(0.0).mix(white(0.3), hot)
+                        },
+                    )
+                    .role(Role::Button, &hexs)
+                    .selected(on),
+            ),
+        );
+    }
+    div()
+        .col()
+        .gap(8.0)
+        .w(220.0)
+        .p(8.0)
+        .rounded(8.0)
+        .border(1.0, white(0.08))
+        .bg(c(look::SURFACE_OVERLAY))
+        .role(Role::Dialog, "Change icon")
+        .child(grid)
+        .child(swatches)
 }
 
 /// `SOURCE_ICONS`.
@@ -1057,7 +1132,7 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
                 return Vec::new();
             };
             let mut out = vec![Item::new(
-                "settings-2",
+                "settings",
                 "Workflow settings",
                 act(WfAct::Settings),
             )];
@@ -1176,42 +1251,18 @@ fn choice_items(s: &Screen<'_>, path: &str) -> Vec<Item> {
             })
             .collect();
     }
-    let cur = current(s, path);
-    let set = |v: &str| act(WfAct::Set(path.to_owned(), v.to_owned()));
-    if path == "config.projectName" || path == "config.projectFilter" {
-        let mut out = Vec::new();
-        if path == "config.projectFilter" {
-            out.push(Item::option("All projects", cur.is_empty(), set("")));
-        }
-        for p in &s.store.projects {
-            out.push(Item::option(p.name.as_str(), cur == p.name, set(&p.name)));
-        }
-        return out;
-    }
-    wf::choices(path)
-        .into_iter()
-        .map(|(v, label)| Item::option(label, cur == v, set(v)))
-        .collect()
-}
-
-/// The open form's value at `path`.
-fn current(s: &Screen<'_>, path: &str) -> String {
-    let Some(d) = &s.st.wf.editor else {
-        return String::new();
-    };
-    match s.st.wf.node.as_deref().and_then(|n| d.node(n)) {
-        Some(n) if s.st.wf.panel == Panel::Node => wf::field_text(n, path),
-        _ => wf::text_of(d.wf.get(path)),
-    }
+    forms::choice_items(s, path)
 }
 
 /// How wide each workflow menu is.
 pub fn menu_width(kind: &MenuKind) -> Option<f32> {
     Some(match kind {
+        MenuKind::WfChoice(t) if !t.starts_with("prompt.") => forms::choice_width(t),
         MenuKind::RunStatus | MenuKind::WfChoice(_) => 200.0,
         MenuKind::WorkflowFilter | MenuKind::NodeMore(_) => 160.0,
         MenuKind::WorkflowItem(_) | MenuKind::EditorMore => 180.0,
         MenuKind::PromptProject => 240.0,
+        MenuKind::WfIcon => 220.0,
         _ => return None,
     })
 }

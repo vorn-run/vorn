@@ -143,6 +143,8 @@ pub enum MenuKind {
     PromptProject,
     /// The node panel's More menu.
     NodeMore(String),
+    /// The editor's icon and colour picker.
+    WfIcon,
 }
 
 impl MenuKind {

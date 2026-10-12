@@ -11,6 +11,7 @@ mod support;
 use serde_json::{json, Value};
 use support::{add_project, connect, key, Shot, TestVornd};
 use vorn_app::act::Act;
+use vorn_app::app::forms::field_of;
 use vorn_app::app::MOD;
 use vorn_app::gates::{self, GateOp, Mode, Place};
 use vorn_app::screen::menus::MENU;
@@ -124,7 +125,12 @@ fn a_workflow_is_built_saved_run_exported_and_imported() {
     assert_ne!(script, trigger);
     shot.click(
         &mut app,
-        wf::field_id(Some(&script), "config.scriptContent"),
+        field_of(&wf::Bind {
+            node: Some(script.clone()),
+            path: "config.scriptContent".into(),
+            conv: wf::Conv::Keep,
+            vars: true,
+        }),
     );
     shot.send(&mut app, key("KeyA", MOD, None));
     shot.type_text(&mut app, "echo hello");
@@ -132,11 +138,29 @@ fn a_workflow_is_built_saved_run_exported_and_imported() {
         &mut app,
         App::control(
             "wf-select",
-            &Act::Open(MenuKind::WfChoice("onError".into())),
+            &Act::Open(MenuKind::WfChoice(format!("380|{script}|onError"))),
         ),
     );
     choose(&mut shot, &mut app, "Carry on anyway");
     shot.save(&mut app, "w-node-script");
+
+    // The icon picker: a glyph and a colour, kept with the workflow.
+    shot.click(
+        &mut app,
+        App::control("wf-editor", &Act::Open(MenuKind::WfIcon)),
+    );
+    shot.save(&mut app, "w-icon-picker");
+    shot.click(&mut app, control("wf-icon", WfAct::Icon("Rocket".into())));
+    shot.click(
+        &mut app,
+        control("wf-icon-color", WfAct::IconColor("#22c55e".into())),
+    );
+    assert_eq!(
+        app.st.menu.as_ref().map(|m| &m.kind),
+        Some(&MenuKind::WfIcon),
+        "stays open"
+    );
+    shot.send(&mut app, key("Escape", 0, None));
 
     shot.click(&mut app, wf::field_id(None, "name"));
     shot.send(&mut app, key("KeyA", MOD, None));
@@ -154,6 +178,10 @@ fn a_workflow_is_built_saved_run_exported_and_imported() {
         .expect("script");
     assert_eq!(step["config"]["scriptContent"], "echo hello");
     assert_eq!(step["onError"], "continue");
+    assert_eq!(
+        (w["icon"].as_str(), w["iconColor"].as_str()),
+        (Some("Rocket"), Some("#22c55e"))
+    );
     assert_eq!(w["edges"][0]["source"], trigger.as_str());
     assert_eq!(w["edges"][0]["target"], script.as_str());
 
@@ -525,4 +553,96 @@ fn a_gate_is_edited_sent_back_reviewed_and_approved() {
         json!([{ "id": 2, "ok": false, "note": "typo" }]),
         "{g}"
     );
+}
+
+/// Forks, a loop and a request: the canvas from today's layout.
+fn shapes(web: &std::path::Path) -> Value {
+    let sc = |cmd: &str| json!({ "scriptType": "bash", "scriptContent": cmd, "projectName": "web", "projectPath": web });
+    let n = |id: &str, kind: &str, label: &str, config: Value| json!({ "id": id, "type": kind, "label": label, "slug": id, "position": { "x": 0, "y": 0 }, "config": config });
+    json!({
+        "id": "wf-shapes", "name": "Shapes", "icon": "Zap", "iconColor": "#eab308",
+        "enabled": true, "workspaceId": "personal",
+        "nodes": [
+            n("t", "trigger", "Manual Trigger", json!({ "triggerType": "manual" })),
+            n("a", "script", "Fetch", sc("echo a")),
+            n("c", "condition", "Has x", json!({ "variable": "{{steps.a.output}}", "operator": "contains", "value": "x" })),
+            n("tb", "script", "True Branch", sc("echo yes")),
+            n("fb", "approval", "Check it", json!({ "message": "Look at it" })),
+            n("j", "script", "Join", sc("echo join")),
+            n("l", "loop", "Each item", json!({ "nodeType": "loop", "mode": "forEach", "items": "{{steps.a.output}}", "bodyNodeIds": ["b1"], "maxIterations": 3 })),
+            n("b1", "script", "Per item", sc("echo item")),
+            n("h", "httpRequest", "Notify", json!({ "nodeType": "httpRequest", "method": "POST", "url": "https://example.com/hook", "headers": {}, "body": "" }))
+        ],
+        "edges": [
+            { "id": "e1", "source": "t", "target": "a" },
+            { "id": "e2", "source": "a", "target": "c" },
+            { "id": "e3", "source": "c", "target": "tb", "conditionBranch": "true" },
+            { "id": "e4", "source": "c", "target": "fb", "conditionBranch": "false" },
+            { "id": "e5", "source": "tb", "target": "j" },
+            { "id": "e6", "source": "fb", "target": "j" },
+            { "id": "e7", "source": "j", "target": "l" },
+            { "id": "e8", "source": "l", "target": "b1" },
+            { "id": "e9", "source": "b1", "target": "h" }
+        ]
+    })
+}
+
+#[test]
+fn the_canvas_lays_out_forks_and_loops_pans_zooms_drags_and_connects() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let (mut app, mut shot) = workflows_view(&v);
+    seed(&mut app, &mut shot, shapes(&v.home.join("web")));
+    shot.click(
+        &mut app,
+        App::control("wf-side", &Act::Workflow(WfAct::Edit("wf-shapes".into()))),
+    );
+    shot.save(&mut app, "c-shapes");
+    shot.click(&mut app, control("wf-controls", WfAct::Fit));
+    shot.save(&mut app, "c-shapes-fit");
+    shot.hover(&mut app, vorn_app::app::canvas::card_id("a"));
+    shot.save(&mut app, "c-card-hover");
+    let fitted = app.st.wf.canvas.views["wf-shapes"];
+    assert!(
+        fitted.zoom < 1.0,
+        "a tall workflow fits below 100%: {fitted:?}"
+    );
+
+    // Zoom in about the centre, then undo nothing: views are not edits.
+    shot.click(&mut app, control("wf-controls", WfAct::ZoomIn));
+    let zoomed = app.st.wf.canvas.views["wf-shapes"];
+    assert!((zoomed.zoom / fitted.zoom - 1.2).abs() < 1e-9);
+
+    // Dragging a card writes every top-level position on the lattice.
+    let card = vorn_app::app::canvas::card_id("h");
+    shot.frame(&mut app);
+    let r = shot.ui.rect_of(card).expect("the request's card");
+    let (x, y) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+    shot.ui.pointer_move(x, y);
+    shot.ui.pointer_down();
+    app.events(&mut shot.ui);
+    for i in 1..=6 {
+        let f = i as f32 / 6.0;
+        shot.ui.pointer_move(x + 120.0 * f, y + 40.0 * f);
+        app.events(&mut shot.ui);
+        shot.frame(&mut app);
+    }
+    shot.save(&mut app, "c-drag");
+    shot.ui.pointer_up();
+    app.events(&mut shot.ui);
+    let d = app.st.wf.editor.as_ref().expect("editor");
+    let h = d.node("h").expect("request");
+    let hx = h["position"]["x"].as_f64().expect("x");
+    assert_ne!(hx, 0.0, "moved off the seed column");
+    assert_eq!(hx % 8.0, 0.0, "snapped to the lattice");
+    assert!(
+        d.node("t").unwrap()["position"]["x"].as_f64() != Some(0.0),
+        "the layout materialized"
+    );
+
+    // Undo puts the seed positions back.
+    shot.send(&mut app, key("KeyZ", MOD, None));
+    let d = app.st.wf.editor.as_ref().expect("editor");
+    assert_eq!(d.node("h").unwrap()["position"]["x"], 0);
 }

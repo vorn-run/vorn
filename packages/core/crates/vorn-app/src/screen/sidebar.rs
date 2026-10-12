@@ -19,7 +19,7 @@ pub(super) fn project_color(p: &ProjectConfig) -> Rgba {
 }
 
 /// A project's configured icon when the app carries it, else a folder.
-pub(super) fn project_icon(p: &ProjectConfig, size: f32) -> El {
+pub(crate) fn project_icon(p: &ProjectConfig, size: f32) -> El {
     let name = p
         .icon
         .as_deref()

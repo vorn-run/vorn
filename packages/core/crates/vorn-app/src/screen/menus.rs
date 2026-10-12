@@ -35,6 +35,10 @@ pub struct Item {
     pub mono: bool,
     /// A row drawn by the caller (the layout buttons); not a choice.
     pub row: Option<El>,
+    /// A `SelectPicker` row: the check on the left, 30 px tall.
+    pub picker: bool,
+    /// A glyph drawn by the caller (a connector's or a project's mark).
+    pub mark: Option<El>,
 }
 
 impl Item {
@@ -62,6 +66,22 @@ impl Item {
             checked,
             ..Item::default()
         }
+    }
+
+    /// A `SelectPicker` option.
+    pub fn pick(label: impl Into<String>, checked: bool, act: Act) -> Item {
+        Item {
+            label: label.into(),
+            act: Some(act),
+            checked,
+            picker: true,
+            ..Item::default()
+        }
+    }
+
+    pub fn mark(mut self, el: El) -> Item {
+        self.mark = Some(el);
+        self
     }
 
     pub fn sep(mut self) -> Item {
@@ -128,6 +148,9 @@ fn row(ui: &Ui, group: Id, i: usize, item: Item, sub_open: Option<El>) -> El {
         );
     }
     let id = item_id(group, i);
+    if item.picker {
+        return picker_row(ui, group, i, id, item);
+    }
     let hot = ui.hover(id).max(if sub_open.is_some() { 1.0 } else { 0.0 });
     let fg = if item.danger {
         c(look::DANGER)
@@ -197,6 +220,59 @@ fn row(ui: &Ui, group: Id, i: usize, item: Item, sub_open: Option<El>) -> El {
         Some(panel) => r.overlay(panel, Place::Right, 4.0),
         None => r,
     }
+}
+
+/// `SelectPicker`'s option: the check (or its room), the mark, the label
+/// and a hint.
+fn picker_row(ui: &Ui, group: Id, i: usize, id: Id, item: Item) -> El {
+    let hot = ui.hover(id);
+    let fg = if item.checked {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_300).mix(c(look::WHITE), hot)
+    };
+    let bg = if item.checked {
+        white(0.06)
+    } else {
+        white(0.0).mix(white(0.04), hot)
+    };
+    let mut r = div()
+        .id(id)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(12.0)
+        .py(6.0)
+        .bg(bg)
+        .role(Role::MenuItem, item.label.as_str())
+        .selected(item.checked)
+        .child(if item.checked {
+            ico("check", 11.0, 3.0, fg)
+        } else {
+            div().w(11.0).shrink0()
+        });
+    if item.disabled {
+        r = r.opacity(0.4).disabled(true);
+    } else {
+        r = r.on(Action::Select { group, index: i });
+    }
+    if let Some(m) = item.mark {
+        r = r.child(div().shrink0().child(m));
+    } else if let Some((name, color)) = item.icon {
+        r = r.child(ico(name, 12.0, 2.0, c(color)).shrink0());
+    }
+    r = r.child(
+        div().row().grow().min_w(0.0).child(
+            text(&item.label, 12.0, fg)
+                .line_height(18.0)
+                .truncate()
+                .silent(),
+        ),
+    );
+    if let Some(d) = &item.detail {
+        r = r.child(text(d, 10.0, c(look::GRAY_600)).line_height(15.0).silent());
+    }
+    r
 }
 
 /// A panel of `items`: `bg-surface-overlay border-white/10 rounded-lg
@@ -279,7 +355,7 @@ pub fn items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::LaunchAgent => launch_agents(s),
         MenuKind::LaunchWorktree => launch_worktrees(s),
         MenuKind::LaunchBranch => launch_branches(s),
-        MenuKind::Recent | MenuKind::Headless => Vec::new(),
+        MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon => Vec::new(),
         MenuKind::RunStatus
         | MenuKind::WorkflowFilter
         | MenuKind::WorkflowItem(_)

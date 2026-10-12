@@ -40,6 +40,8 @@ pub(super) enum WfCall {
     Connectors,
     /// `connection:listActions` for one connection.
     Actions(String),
+    /// `webhook:info`.
+    Webhook,
 }
 
 impl App {
@@ -109,6 +111,11 @@ impl App {
                 }
             }
             WfCall::Packs => self.st.wf.lib.packs = list(answer),
+            WfCall::Webhook => {
+                self.st.wf.webhook = answer
+                    .ok()
+                    .and_then(|v| s(&v, "baseUrl").map(str::to_owned));
+            }
             WfCall::Connectors => self.st.wf.lib.connectors = list(answer),
             WfCall::SignIn => match answer {
                 Ok(v) => match v.pointer("/browser/signInUrl").and_then(Value::as_str) {
@@ -484,18 +491,6 @@ impl App {
         self.load_library();
     }
 
-    /// The open node's fields filled from it.
-    fn seed(&self, ui: &mut Ui) {
-        let Some(d) = &self.st.wf.editor else { return };
-        let Some(node) = self.st.wf.node.as_deref().and_then(|n| d.node(n)) else {
-            return;
-        };
-        let nid = s(node, "id");
-        for path in wf::text_paths(node) {
-            ui.set_edit_text(wf::field_id(nid, &path), &wf::field_text(node, &path));
-        }
-    }
-
     fn select_node(&mut self, ui: &mut Ui, id: Option<String>) {
         self.st.wf.panel = if id.is_some() {
             Panel::Node
@@ -503,8 +498,8 @@ impl App {
             Panel::Properties
         };
         self.st.wf.node = id;
+        self.st.wf.ac = None;
         ui.set_focus(None);
-        self.seed(ui);
     }
 
     /// The node the form edits: none for the workflow's own properties.
@@ -577,6 +572,7 @@ impl App {
             "connector:listPacks",
             Value::Null,
         );
+        self.call(Call::Workflow(WfCall::Webhook), "webhook:info", Value::Null);
         self.call(
             Call::Workflow(WfCall::Connectors),
             "connector:list",
@@ -793,16 +789,61 @@ impl App {
                 }
             }
             WfAct::Highlight(i) => self.st.wf.lib.highlight = i,
+            WfAct::Choose(..)
+            | WfAct::Advanced(_)
+            | WfAct::AddHeader(_)
+            | WfAct::RemoveHeader(..)
+            | WfAct::ArgFree(..)
+            | WfAct::Copy(_)
+            | WfAct::Vars(_)
+            | WfAct::VarGroup(_)
+            | WfAct::Insert(_) => self.run_form(ui, act),
+            WfAct::Text(_) => {}
+            WfAct::Icon(name) => {
+                if let Some(d) = self.st.wf.editor.as_mut() {
+                    d.wf["icon"] = json!(name);
+                }
+            }
+            WfAct::IconColor(color) => {
+                if let Some(d) = self.st.wf.editor.as_mut() {
+                    d.wf["iconColor"] = json!(color);
+                }
+            }
             WfAct::DeleteNode(id) => {
                 self.edit(|d| wf::remove(d, &id));
                 if self.st.wf.node.as_deref() == Some(id.as_str()) {
                     self.select_node(ui, None);
                 }
             }
-            WfAct::Set(path, value) => {
-                let node = self.form_node();
-                self.set_value(node.as_deref(), &path, &value);
-                self.seed(ui);
+            WfAct::Toggle(path) if path == "config.feedback" => {
+                let Some(n) = self.form_node() else { return };
+                self.edit(|d| {
+                    let on = d
+                        .node(&n)
+                        .and_then(|x| x.pointer("/config/feedback"))
+                        .is_some_and(Value::is_object);
+                    let first = crate::vars::ancestors(d.nodes(), d.edges(), &n)
+                        .first()
+                        .and_then(|u| s(u, "id"))
+                        .unwrap_or("")
+                        .to_owned();
+                    if let Some(x) = d.node_mut(&n) {
+                        let v = (!on).then(
+                            || json!({ "from": first, "maxRounds": crate::gates::DEFAULT_ROUNDS }),
+                        );
+                        wf::set_path(x, "config.feedback", v);
+                    }
+                });
+            }
+            WfAct::Toggle(path) if path == "config.contextual" => {
+                let Some(n) = self.form_node() else { return };
+                self.edit(|d| {
+                    if let Some(x) = d.node_mut(&n) {
+                        let on =
+                            x.pointer("/config/contextual").and_then(Value::as_bool) == Some(true);
+                        wf::set_path(x, "config.contextual", (!on).then(|| json!(true)));
+                    }
+                });
             }
             WfAct::Toggle(path) => {
                 let node = self.form_node();
@@ -823,14 +864,12 @@ impl App {
                     return;
                 };
                 self.edit(|d| wf::add_input(d, &node));
-                self.seed(ui);
             }
             WfAct::RemoveInput(i) => {
                 let Some(node) = self.st.wf.node.clone() else {
                     return;
                 };
                 self.edit(|d| wf::remove_input(d, &node, i));
-                self.seed(ui);
             }
             WfAct::StartBlank => self.st.wf.panel = Panel::Properties,
             WfAct::ClosePanel => {
@@ -884,30 +923,6 @@ impl App {
                 self.st.dialog = None;
             }
         }
-    }
-
-    /// A select's pick: the project's path with its name, and nothing for
-    /// "Any status".
-    fn set_value(&mut self, node: Option<&str>, path: &str, value: &str) {
-        let path_of = |name: &str| {
-            self.store
-                .projects
-                .iter()
-                .find(|p| p.name == name)
-                .map(|p| p.path.clone())
-        };
-        let project = (path == "config.projectName").then(|| path_of(value));
-        self.edit(|d| {
-            let v = if value.is_empty() && path != "config.projectName" {
-                Value::Null
-            } else {
-                json!(value)
-            };
-            wf::set(d, node, path, v);
-            if let Some(p) = project {
-                wf::set(d, node, "config.projectPath", json!(p.unwrap_or_default()));
-            }
-        });
     }
 
     pub(super) fn find_wf_run(&self, key: &str) -> Option<Value> {
@@ -1074,27 +1089,14 @@ impl App {
                     self.st.wf.lib.highlight = 0;
                     return true;
                 }
-                let Some(d) = &self.st.wf.editor else {
-                    return false;
-                };
-                let node = self.form_node();
-                let paths: Vec<String> = match node.as_deref().and_then(|n| d.node(n)) {
-                    Some(n) => wf::text_paths(n),
-                    None => Vec::new(),
-                };
-                let own = ["name", "staggerDelayMs"];
-                let hit = paths
-                    .iter()
-                    .map(|p| (node.as_deref(), p.as_str()))
-                    .chain(own.iter().map(|p| (None, *p)))
-                    .find(|(n, p)| wf::field_id(*n, p) == id)
-                    .map(|(n, p)| (n.map(str::to_owned), p.to_owned()));
-                let Some((n, path)) = hit else {
-                    return false;
-                };
-                let (vpath, value) = wf::field_value(&path, ui.edit_text(id));
-                self.edit(|d| wf::set(d, n.as_deref(), &vpath, value));
-                true
+                if id == wf::field_id(None, "name") {
+                    let name = ui.edit_text(id).to_owned();
+                    if let Some(d) = self.st.wf.editor.as_mut() {
+                        d.wf["name"] = json!(name);
+                    }
+                    return true;
+                }
+                false
             }
             UiEvent::Submit(id) => {
                 if id == wf::file_id() {
@@ -1128,6 +1130,9 @@ impl App {
     /// Keys the workflow views take before the UI: the landing gate's
     /// Mod+Enter and R, and Escape closing the editor's panel.
     pub(super) fn wf_key(&mut self, ui: &mut Ui, input: &Input) -> bool {
+        if self.form_key(ui, input) {
+            return true;
+        }
         let Input::Key { code, mods: m, .. } = input else {
             return false;
         };
@@ -1173,8 +1178,13 @@ impl App {
                     _ => {}
                 }
             }
-            let in_text = ui.focus().is_some_and(|f| f != super::canvas::pane_id());
-            if !in_text && code != "Escape" && self.canvas_key(ui, code, typed, held) {
+            let primary = held & (mods::CTRL | mods::SUPER) != 0;
+            let on_canvas = ui.focus().is_none_or(|f| f == super::canvas::pane_id());
+            let undo = primary && code == "KeyZ" && !ui.wants_ime();
+            if (undo || on_canvas && !ui.wants_ime() && !primary)
+                && code != "Escape"
+                && self.canvas_key(ui, code, typed, held)
+            {
                 return true;
             }
             if code == "Escape"

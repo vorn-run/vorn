@@ -52,7 +52,7 @@ fn bar_button(s: &Screen<'_>, a: WfAct, icon: &str, label: &str, on: bool, disab
 }
 
 fn bar(s: &Screen<'_>, d: &Draft) -> El {
-    let mut left = div().row().items_center().gap(8.0).min_w0();
+    let mut left = div().row().items_center().gap(4.0).min_w0();
     if !s.st.sidebar {
         left = left.child(nav_cluster(s));
     }
@@ -62,24 +62,48 @@ fn bar(s: &Screen<'_>, d: &Draft) -> El {
     } else {
         0.04 * s.ui.hover(name_id)
     };
-    left = left.child(wf_glyph(&d.wf, 16.0)).child(
-        field(
-            name_id,
-            "Workflow name",
-            "Workflow name",
-            TextStyle {
-                weight: 500,
-                line_height: 22.0,
-                ..TextStyle::ui(15.0)
-            },
-            c(look::WHITE),
-        )
-        .w(240.0)
-        .px(8.0)
-        .py(4.0)
+    let picker_id = s.acts.on("wf-editor", Act::Open(MenuKind::WfIcon));
+    let picker_open =
+        s.st.menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::WfIcon);
+    let picker = div()
+        .id(picker_id)
+        .on(Action::Click)
+        .p(6.0)
         .rounded(6.0)
-        .bg(white(hot)),
-    );
+        .bg(white(0.0).mix(
+            white(0.08),
+            if picker_open {
+                1.0
+            } else {
+                s.ui.hover(picker_id)
+            },
+        ))
+        .role(Role::Button, "Change icon")
+        .has_popup()
+        .expanded(picker_open)
+        .child(wf_glyph(&d.wf, 16.0));
+    left = left
+        .child(tooltip(s.ui, picker, picker_id, "Change icon", None))
+        .child(
+            field(
+                name_id,
+                "Workflow name",
+                "Workflow name",
+                TextStyle {
+                    weight: 500,
+                    line_height: 22.5,
+                    ..TextStyle::ui(15.0)
+                },
+                c(look::WHITE),
+            )
+            .w(240.0)
+            .px(8.0)
+            .py(4.0)
+            .rounded(6.0)
+            .bg(white(hot)),
+        );
     let mut right = div().row().items_center().gap(4.0);
     match s.st.wf.running_since(&s.store.runs) {
         Some(since) => {

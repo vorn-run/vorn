@@ -30,6 +30,7 @@ use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
 
 pub mod canvas;
+pub mod forms;
 mod gates;
 mod tasks;
 mod workflows;
@@ -1079,6 +1080,7 @@ impl App {
     pub fn event(&mut self, ui: &mut Ui, event: UiEvent) {
         if self.gate_event(ui, &event)
             || self.canvas_event(ui, &event)
+            || self.form_event(ui, &event)
             || self.task_event(ui, &event)
             || self.wf_event(ui, &event)
         {
@@ -1098,6 +1100,14 @@ impl App {
                     ) || self.st.menu.as_ref().is_some_and(|m| {
                         matches!(m.kind, MenuKind::Recent | MenuKind::Headless)
                             && matches!(act, Act::ToggleHeadless(_))
+                            || m.kind == MenuKind::WfIcon
+                                && matches!(
+                                    act,
+                                    Act::Workflow(
+                                        crate::workflows::WfAct::Icon(_)
+                                            | crate::workflows::WfAct::IconColor(_)
+                                    )
+                                )
                     });
                     if !keep && self.st.menu.is_some() {
                         self.close_menu(ui);
@@ -1531,6 +1541,7 @@ impl App {
         }
         self.acts.clear();
         let root = self.screen(ui).build();
+        self.seed_texts(ui);
         ui.custom_a11y.clear();
         for (i, s) in self.store.sessions.iter().enumerate() {
             let id = crate::screen::CARD_ID_BASE + i as u64;

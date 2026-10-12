@@ -194,6 +194,24 @@ pub fn ms(iso: &str) -> Option<f64> {
     Some((secs as f64 + sec + frac) * 1000.0)
 }
 
+/// `Intl.DateTimeFormat().resolvedOptions().timeZone`: `TZ`, else the
+/// zone `/etc/localtime` points at, else UTC.
+pub fn local_zone() -> &'static str {
+    static ZONE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ZONE.get_or_init(|| {
+        if let Some(tz) = std::env::var("TZ").ok().filter(|t| t.contains('/')) {
+            return tz.trim_start_matches(':').to_owned();
+        }
+        std::fs::read_link("/etc/localtime")
+            .ok()
+            .and_then(|p| {
+                let s = p.to_string_lossy().into_owned();
+                s.split_once("zoneinfo/").map(|(_, z)| z.to_owned())
+            })
+            .unwrap_or_else(|| "UTC".to_owned())
+    })
+}
+
 pub fn now_iso() -> String {
     iso(crate::state::now_ms())
 }

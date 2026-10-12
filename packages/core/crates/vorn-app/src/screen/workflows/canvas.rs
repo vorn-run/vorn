@@ -157,7 +157,7 @@ fn dots(v: Viewport, (w, h): (f32, f32)) -> El {
                     .absolute(f(x) - size / 2.0, f(y) - size / 2.0)
                     .size(size, size)
                     .rounded(size / 2.0)
-                    .bg(white(0.05)),
+                    .bg(white(0.037)),
             );
             x += gap;
         }
@@ -260,7 +260,7 @@ fn edge_pill(s: &Screen<'_>, els: &Elements, e: &canvas::Edge) -> Option<El> {
     let group = div()
         .absolute(f(mid.0) - sw / 2.0, f(mid.1) - sh / 2.0)
         .w(sw)
-        .child(stack);
+        .child(stack.w_full());
     Some(
         div()
             .absolute(0.0, 0.0)
@@ -799,12 +799,12 @@ fn controls(s: &Screen<'_>, h: f32) -> El {
             .center()
             .bg(white(0.0).mix(white(0.06), hot))
             .role(Role::Button, label)
-            .child(ico(
-                icon,
-                12.0,
-                2.0,
-                c(look::GRAY_400).mix(c(look::WHITE), hot),
-            ));
+            .child(if matches!(icon, "plus" | "minus") {
+                // React Flow's own zoom marks: larger and near white.
+                ico(icon, 14.0, 2.75, c(look::GRAY_200).mix(c(look::WHITE), hot))
+            } else {
+                ico(icon, 12.0, 2.0, c(look::GRAY_400).mix(c(look::WHITE), hot))
+            });
         if !last {
             b = b.border_bottom(1.0, white(0.08));
         }

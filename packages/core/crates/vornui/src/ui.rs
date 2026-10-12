@@ -588,24 +588,50 @@ impl Ui {
             } => {
                 // Rounded layout can leave a box up to a pixel short of what its text measured.
                 let room = inner.w + 1.0;
-                let sh = if *truncate {
-                    self.text.shape_truncated(text, *style, room)
+                // Under a zoom, text is shaped at the size it shows, so it stays sharp.
+                let z = cx.xf.scale;
+                let (style, room, at) = if z == 1.0 {
+                    (*style, room, inner)
                 } else {
-                    self.text.shape(text, *style, wrap.then_some(room))
+                    let scaled = TextStyle {
+                        size: style.size * z,
+                        line_height: style.line_height * z,
+                        ..*style
+                    };
+                    (scaled, room * z, cx.xf.apply(inner))
                 };
+                let sh = if *truncate {
+                    self.text.shape_truncated(text, style, room)
+                } else {
+                    self.text.shape(text, style, wrap.then_some(room))
+                };
+                if z != 1.0 {
+                    self.scene.push_transform(1.0, (0.0, 0.0), (0.0, 0.0));
+                }
                 self.text.draw(
                     &mut self.scene,
                     &mut self.atlases,
                     &sh,
-                    (inner.x * k, inner.y * k),
+                    (at.x * k, at.y * k),
                     *color,
                 );
+                if z != 1.0 {
+                    self.scene.pop_transform();
+                }
             }
             Content::Icon { svg, size, color } => {
-                let px = (size * k).round() as u32;
+                let z = cx.xf.scale;
+                let at = if z == 1.0 { inner } else { cx.xf.apply(inner) };
+                let px = (size * k * z).round() as u32;
                 if let Some(uv) = self.icon_raster(svg, px) {
-                    let ir = Rect::new((inner.x * k).round(), (inner.y * k).round(), uv[2], uv[3]);
+                    let ir = Rect::new((at.x * k).round(), (at.y * k).round(), uv[2], uv[3]);
+                    if z != 1.0 {
+                        self.scene.push_transform(1.0, (0.0, 0.0), (0.0, 0.0));
+                    }
                     self.scene.sprite(ir, uv, *color, false);
+                    if z != 1.0 {
+                        self.scene.pop_transform();
+                    }
                 }
             }
             Content::Svg { svg, color } => {

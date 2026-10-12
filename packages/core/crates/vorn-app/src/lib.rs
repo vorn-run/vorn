@@ -25,6 +25,7 @@ pub mod screen;
 pub mod state;
 pub mod tasks;
 pub mod ui;
+pub mod vars;
 pub mod view;
 pub mod workflows;
 

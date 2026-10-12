@@ -25,6 +25,7 @@ use crate::view::PaneView;
 
 pub use cards::{card_index, intent_id, rename_id, term_id, CARD_ID_BASE};
 pub use dialogs::{PROJECT_NAME, PROJECT_PATH};
+pub(crate) use sidebar::project_icon as sidebar_project_icon;
 
 /// The three views the top bar's pills switch between.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -98,6 +99,7 @@ impl Screen<'_> {
             let panel = match menu.kind {
                 crate::state::MenuKind::Recent => chrome::recent_panel(self),
                 crate::state::MenuKind::Headless => chrome::headless_panel(self),
+                crate::state::MenuKind::WfIcon => workflows::icon_picker(self),
                 _ => menus::panel(
                     self.ui,
                     menus::MENU,
