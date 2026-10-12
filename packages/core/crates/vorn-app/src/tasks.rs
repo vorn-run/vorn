@@ -120,6 +120,26 @@ fn parts(iso: &str) -> Option<(u32, usize, u32, u32, u32)> {
     ))
 }
 
+/// `Date.toLocaleString()` in en-US: "1/1/2030, 9:00:00 AM".
+pub fn locale_string(iso: &str) -> String {
+    let sec = iso
+        .get(17..19)
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
+    match parts(iso) {
+        Some((y, m, d, h, min)) => {
+            let (h12, half) = match h {
+                0 => (12, "AM"),
+                1..=11 => (h, "AM"),
+                12 => (12, "PM"),
+                _ => (h - 12, "PM"),
+            };
+            format!("{m}/{d}/{y}, {h12}:{min:02}:{sec:02} {half}")
+        }
+        None => String::new(),
+    }
+}
+
 /// `formatTaskDate`: "Mar 5".
 pub fn short_date(iso: &str) -> String {
     match parts(iso) {

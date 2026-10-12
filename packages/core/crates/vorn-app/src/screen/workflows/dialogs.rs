@@ -9,7 +9,7 @@ use crate::look;
 use crate::runs::s as sv;
 use crate::screen::{c, ico, white, Screen};
 use crate::state::{Dialog, MenuKind};
-use crate::ui::{area, div, field, text, Action, El, Id, Role, TextStyle};
+use crate::ui::{area, div, field, text, Action, El, Id, Rgba, Role, TextStyle};
 use crate::workflows::{self as wf, Prompt, WfAct};
 
 pub fn dialog(s: &Screen<'_>) -> Option<El> {
@@ -55,10 +55,16 @@ fn upper(t: &str, required: bool) -> El {
     let mut row = div().row().pb(8.0).child(
         text(t.to_uppercase(), 11.0, c(look::GRAY_500))
             .weight(500)
-            .line_height(14.0),
+            .tracking(0.05)
+            .line_height(16.5),
     );
     if required {
-        row = row.child(text("*", 11.0, c(look::DANGER)).line_height(14.0).ml(4.0));
+        row = row.child(
+            text("*", 11.0, c(look::DANGER))
+                .weight(500)
+                .line_height(16.5)
+                .ml(4.0),
+        );
     }
     row
 }
@@ -146,22 +152,20 @@ fn picker(s: &Screen<'_>, kind: MenuKind, shown: &str, empty: bool) -> El {
         .child(ico("chevron-down", 12.0, 2.0, c(look::GRAY_500)))
 }
 
+/// A browser's own `<input type=checkbox>`: 13 px, white with a gray edge,
+/// filled with its accent once checked.
+fn browser_checkbox(on: bool, accent: Rgba, mark: Rgba) -> El {
+    let bx = div().size(13.0, 13.0).rounded(2.0).center().shrink0();
+    if on {
+        bx.bg(accent).child(ico("check", 10.0, 3.0, mark))
+    } else {
+        bx.bg(c(look::WHITE)).border(1.0, c(0x767676))
+    }
+}
+
 fn checkbox(s: &Screen<'_>, a: Act, on: bool, label: &str) -> El {
     let id = s.acts.on("wf-dialog-check", a);
-    let hot = s.ui.hover(id);
-    let mut bx = div()
-        .size(14.0, 14.0)
-        .rounded(3.0)
-        .center()
-        .border(1.0, if on { white(0.0) } else { c(look::GRAY_600) })
-        .bg(if on {
-            white(0.80)
-        } else {
-            white(0.05).mix(white(0.08), hot)
-        });
-    if on {
-        bx = bx.child(ico("check", 10.0, 3.0, c(look::SURFACE_BASE)));
-    }
+    let bx = browser_checkbox(on, white(0.8), c(look::SURFACE_BASE));
     div()
         .id(id)
         .on(Action::Click)
@@ -173,7 +177,7 @@ fn checkbox(s: &Screen<'_>, a: Act, on: bool, label: &str) -> El {
         .child(bx)
         .child(
             text(label, 13.0, c(look::GRAY_300))
-                .line_height(18.0)
+                .line_height(19.5)
                 .silent(),
         )
 }
@@ -204,7 +208,7 @@ fn footer_button(s: &Screen<'_>, a: Act, label: &str, primary: bool, ready: bool
                     c(look::GRAY_300).mix(c(look::WHITE), hot)
                 },
             )
-            .line_height(18.0)
+            .line_height(19.5)
             .silent(),
         );
     if ready {
@@ -449,16 +453,8 @@ fn missed(s: &Screen<'_>) -> Option<El> {
     for (i, m) in s.st.wf.missed.iter().enumerate() {
         let id = s.acts.on("wf-missed", act(WfAct::MissedToggle(i)));
         let hot = s.ui.hover(id);
-        let mut bx = div()
-            .size(14.0, 14.0)
-            .rounded(3.0)
-            .center()
-            .border(1.0, if m.on { white(0.0) } else { c(look::GRAY_600) })
-            .bg(if m.on { c(look::BLUE_400) } else { white(0.05) });
-        if m.on {
-            bx = bx.child(ico("check", 10.0, 3.0, c(look::WHITE)));
-        }
-        let when = crate::tasks::long_date(&m.at);
+        let bx = browser_checkbox(m.on, c(0x0075ff), c(look::WHITE));
+        let when = crate::tasks::locale_string(&m.at);
         list = list.child(
             div()
                 .id(id)
