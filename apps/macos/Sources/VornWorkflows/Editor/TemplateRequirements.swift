@@ -191,19 +191,3 @@ extension WorkflowsStore {
     }
 }
 
-extension TemplateRequirements {
-    /// template-requirements.ts requirementsOfDefinition: what the canvas cannot run yet.
-    static func requirementsOfDefinition(_ nodes: [WorkflowNode]) -> [PortableRequirement] {
-        nodes.compactMap { node in
-            guard let key = WorkflowPortability.boundConnectionKey(type: node.type.rawValue, config: OJSON(unordered: node.config).objectValue ?? OObject()) else { return nil }
-            if case .string(let bound)? = node.config[key], !bound.isEmpty { return nil }
-            if key == "profileConnectionId" {
-                guard node.config[key] != nil else { return nil }
-                return PortableRequirement(kind: .httpProfile, nodeId: node.id)
-            }
-            let connectorId = node.config.str("connectorId") ?? ""
-            guard !connectorId.isEmpty else { return nil }
-            return PortableRequirement(kind: .connection, nodeId: node.id, connectorId: connectorId)
-        }
-    }
-}
