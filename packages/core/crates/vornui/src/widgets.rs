@@ -531,6 +531,7 @@ fn edit_look(style: TextStyle, color: Rgba, placeholder: &str, multiline: bool) 
         placeholder_color: color::GRAY_600,
         multiline,
         textarea: false,
+        centered: false,
     }))
 }
 

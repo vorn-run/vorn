@@ -46,6 +46,7 @@ pub mod rgb {
     pub const AMBER_500: u32 = 0xfe9a00;
     pub const BLUE_400: u32 = 0x54a2ff;
     pub const BLUE_500: u32 = 0x2b7fff;
+    pub const SKY_400: u32 = 0x00bcff;
 }
 
 /// Colours from `theme.css` and Tailwind, ready to paint.

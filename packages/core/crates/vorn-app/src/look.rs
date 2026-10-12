@@ -9,8 +9,9 @@ pub type Rgb = u32;
 // The palette lives once, in vornui's tokens.
 pub use crate::ui::theme::rgb::{
     AMBER_400, BLUE_400, BRONZO, DANGER, GRAY_200, GRAY_300, GRAY_400, GRAY_500, GRAY_600,
-    GRAY_700, GREEN_400, GREEN_500, INK, RED_400, RED_500, SURFACE_BASE, SURFACE_OVERLAY,
-    SURFACE_PANEL, SURFACE_RAISED, SURFACE_SUNKEN, WHITE, YELLOW_500,
+    GRAY_700, GREEN_400, GREEN_500, INK, RED_400, RED_500, SKY_400, STATUS_BLUE, STATUS_SLATE,
+    SURFACE_BASE, SURFACE_OVERLAY, SURFACE_PANEL, SURFACE_RAISED, SURFACE_SUNKEN, WHITE,
+    YELLOW_500,
 };
 /// `--color-ink-secondary` and `--color-ink-faint`: white at these alphas.
 pub const INK_SECONDARY: f32 = 0.55;

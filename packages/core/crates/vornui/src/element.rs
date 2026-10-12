@@ -195,6 +195,8 @@ pub struct EditLook {
     /// A `<textarea>`: Enter starts a line and the primary modifier with
     /// Enter submits.
     pub textarea: bool,
+    /// One line drawn mid-field (`text-center`) rather than from the left.
+    pub centered: bool,
 }
 
 /// Accessibility facts beyond role and label.
@@ -332,6 +334,13 @@ impl El {
     pub fn placeholder_color(mut self, c: Rgba) -> El {
         if let Content::Edit(l) = &mut self.content {
             l.placeholder_color = c;
+        }
+        self
+    }
+    /// An edit field's line centred, as `text-center` does.
+    pub fn text_center(mut self) -> El {
+        if let Content::Edit(l) = &mut self.content {
+            l.centered = true;
         }
         self
     }

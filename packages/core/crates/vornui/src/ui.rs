@@ -942,10 +942,18 @@ impl Ui {
             }
             *sx = sx.clamp(0.0, (sh.w / k - inner.w + 1.0).max(0.0));
         }
+        // A centred line sits mid-field while it fits; longer, it scrolls as usual.
+        let centre = |w: f32| {
+            if look.centered && !look.multiline {
+                ((inner.w * k - w) / 2.0).max(0.0)
+            } else {
+                0.0
+            }
+        };
         let (ox, oy) = if look.multiline {
             (inner.x * k, (inner.y - e.scroll_y) * k)
         } else {
-            ((inner.x - e.scroll_y) * k, inner.y * k)
+            ((inner.x - e.scroll_y) * k + centre(sh.w), inner.y * k)
         };
         let anchor_caret = (e.anchor(), e.caret());
         self.scene.push_clip(inner.scaled(k));
@@ -976,7 +984,7 @@ impl Ui {
                 &mut self.scene,
                 &mut self.atlases,
                 &ph,
-                (inner.x * k, inner.y * k),
+                (inner.x * k + centre(ph.w), inner.y * k),
                 look.placeholder_color,
             );
         }

@@ -4,6 +4,7 @@
 //! (`FocusedStage`) and the tabs layout (`TabView`), which show one card.
 
 use super::chrome::{self, divider, draggable};
+use super::panes;
 use super::{c, ico, truncate, white, Screen, MOD_LABEL};
 use crate::act::{Act, Acts};
 use crate::client::Session;
@@ -11,7 +12,7 @@ use crate::layout::{self, Mode};
 use crate::look::{self, Rgb};
 use crate::state::MenuKind;
 use crate::ui::{
-    custom, div, field, icon, text, text_input, tooltip, Action, El, Id, Rgba, Role, Sense,
+    custom, div, field, icon, split, text, text_input, tooltip, Action, El, Id, Rgba, Role, Sense,
     TextStyle,
 };
 
@@ -99,7 +100,7 @@ fn confirm(s: &Screen<'_>, trigger: El, message: &str, ok: Act, cancel: Act, lab
 /// CardActionCluster: more actions, minimize on a grid card, expand or
 /// collapse, and close behind its confirmation.
 fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
-    use crate::components::card::{card_actions, CardActions, CardVariant};
+    use crate::components::card::{card_actions_with, CardActions, CardVariant};
     let sid = session.info.id.clone();
     let (variant, toggle, key) = if focused {
         (CardVariant::Focused, Act::Collapse, 'W')
@@ -112,7 +113,7 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             s.acts.on("confirm", Act::AskClose(String::new())),
         )
     });
-    card_actions(
+    card_actions_with(
         s.ui,
         &CardActions {
             variant,
@@ -123,6 +124,7 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             toggle_key: &format!("{MOD_LABEL}{key}"),
             confirming,
         },
+        panes::card_buttons(s, session, variant),
     )
 }
 
@@ -660,14 +662,41 @@ fn composer(s: &Screen<'_>, session: &Session, compact: bool) -> Option<El> {
 /// The terminal, its composer and status bar: what every layout shows of a
 /// session under its header or tab.
 fn body(s: &Screen<'_>, i: usize, session: &Session, compact: bool, dim: f32) -> El {
+    let sid = session.info.id.as_str();
+    let side = panes::column(s, session);
+    let main = match side {
+        Some(side) if panes::maximized(s, sid) => side.grow().min_h(0.0),
+        Some(side) => {
+            let term = div()
+                .col()
+                .w_full()
+                .h_full()
+                .min_w0()
+                .child(terminal(s, i, session))
+                .child_if(composer(s, session, compact));
+            div().row().grow().min_h(0.0).child(split(
+                s.ui,
+                Id::new("card-split").child(sid),
+                true,
+                0.5,
+                term,
+                side,
+            ))
+        }
+        None => div()
+            .col()
+            .grow()
+            .min_h(0.0)
+            .child(terminal(s, i, session))
+            .child_if(composer(s, session, compact)),
+    };
     div()
         .col()
         .grow()
         .min_h(0.0)
         .bg(c(look::SURFACE_SUNKEN))
         .child(div().h(look::CARD_BODY_PT).shrink0())
-        .child(terminal(s, i, session))
-        .child_if(composer(s, session, compact))
+        .child(main)
         .child(status_bar(s, session, dim))
 }
 

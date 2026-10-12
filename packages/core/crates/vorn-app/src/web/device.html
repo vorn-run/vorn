@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0d0d0f;
+        overflow: hidden;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+      p {
+        color: #6b6b73;
+        font:
+          12px system-ui,
+          sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="wait">Waiting for the device…</p>
+    <img id="f" hidden alt="" />
+    <script>
+      const img = document.getElementById('f')
+      const wait = document.getElementById('wait')
+      const src = location.pathname.replace(/\/$/, '') + '/frame.png'
+      function next() {
+        const probe = new Image()
+        probe.onload = () => {
+          img.src = probe.src
+          img.hidden = false
+          wait.hidden = true
+          setTimeout(next, 250)
+        }
+        probe.onerror = () => setTimeout(next, 500)
+        probe.src = src + '?t=' + Date.now()
+      }
+      next()
+      // `#w=<px>` sets the frame's width (a zoom); without it the frame fits.
+      function size() {
+        const w = Number((location.hash.match(/w=(\d+)/) || [])[1])
+        img.style.width = w ? w + 'px' : ''
+        img.style.maxWidth = img.style.maxHeight = w ? 'none' : ''
+        document.body.style.overflow = w ? 'auto' : ''
+      }
+      size()
+      addEventListener('hashchange', size)
+    </script>
+  </body>
+</html>

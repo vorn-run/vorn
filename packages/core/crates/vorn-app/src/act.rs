@@ -98,6 +98,7 @@ pub enum Act {
     Task(crate::tasks::TaskAct),
     Run(crate::runs::RunAct),
     Workflow(crate::workflows::WfAct),
+    Pane(crate::panes::PaneAct),
     /// Opens a link in the system browser.
     OpenUrl(String),
     /// A control that only takes the press, so nothing under it does.
