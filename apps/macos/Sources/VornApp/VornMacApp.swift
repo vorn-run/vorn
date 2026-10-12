@@ -215,6 +215,7 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
         features.workflows.editorMemory = .ephemeral()
         await features.workflows.reload()
         if args.contains("--new-workflow") {
+            await features.workflows.awaitFreshCatalog()
             features.workflows.newWorkflow()
             if args.contains("--trigger-library") { features.workflows.editor?.driveForRender(triggerLibrary: true) }
         }

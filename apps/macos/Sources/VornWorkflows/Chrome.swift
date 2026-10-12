@@ -152,7 +152,7 @@ public struct WorkflowsSidebarSection: View {
             Hovering { hovered in
                 Button { store.sidebarSectionOpen.toggle() } label: {
                     HStack(spacing: 6) {
-                        Icon(.chevronRight, size: 10, weight: .semibold)
+                        LucideIcon(.chevronRight, size: 10, strokeWidth: 2)
                             .foregroundStyle(Theme.gray600)
                             .rotationEffect(.degrees(store.sidebarSectionOpen ? 90 : 0))
                         Text("WORKFLOWS")
@@ -167,7 +167,7 @@ public struct WorkflowsSidebarSection: View {
             Spacer(minLength: 0)
             HStack(spacing: 2) {
                 let filterOpen = store.menu?.kind == .sidebarFilter
-                headerAction(.filterList, help: "Filter workflows", lit: filterOpen || store.sidebarFilter != .all) {
+                headerAction(.listFilter, help: "Filter workflows", lit: filterOpen || store.sidebarFilter != .all) {
                     store.menu = filterOpen ? nil : WorkflowsMenu(kind: .sidebarFilter, anchor: filterFrame, edge: .trailing)
                 }
                 .trackFrame($filterFrame)
@@ -180,12 +180,12 @@ public struct WorkflowsSidebarSection: View {
     }
 
     private func headerAction(
-        _ glyph: Glyph, help: String, lit: Bool = false, disabled: Bool = false, action: @escaping () -> Void
+        _ glyph: LucideGlyph, help: String, lit: Bool = false, disabled: Bool = false, action: @escaping () -> Void
     ) -> some View {
         Hovering { hovered in
             let hot = hovered && !disabled
             Button(action: action) {
-                Icon(glyph, size: 13, weight: .light)
+                LucideIcon(glyph, size: 13, strokeWidth: 1.5)
                     .foregroundStyle(hot || lit ? Color.white : Theme.gray600)
                     .padding(2)
                     .background(hot || lit ? Theme.white(0.08) : .clear, in: RoundedRectangle(cornerRadius: Theme.radius))
@@ -207,6 +207,7 @@ private struct SidebarRow<Content: View>: View {
 
     var body: some View {
         HStack(spacing: 8) { content(hovered) }
+            .frame(minHeight: 19.5)
             .font(.system(size: 13))
             .foregroundStyle(selected || hovered ? Color.white : Theme.gray300)
             .padding(.horizontal, 8)
@@ -226,7 +227,7 @@ private struct AllRunsRow: View {
 
     var body: some View {
         SidebarRow(selected: store.editingWorkflowId == nil && !store.editorOpen) { _ in
-            Icon(.activity, size: 14, weight: .light).foregroundStyle(Theme.gray400)
+            LucideIcon(.activity, size: 14, strokeWidth: 1.5).foregroundStyle(Theme.gray400)
             Text("All runs").lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             if store.waitingCount > 0 {
                 Text("\(store.waitingCount)")
@@ -260,14 +261,13 @@ private struct WorkflowRow: View {
             selected: store.editingWorkflowId == workflow.id, dimmed: workflow.isScheduled && !workflow.enabled
         ) { hovered in
             ZStack(alignment: .bottomTrailing) {
-                Icon(symbol: WorkflowIcons.symbolOrWorkflow(workflow.icon), size: 14, weight: .light)
-                    .foregroundStyle(WorkflowIcons.color(workflow.iconColor))
+                WorkflowIconView(name: workflow.icon, color: workflow.iconColor, size: 14)
                 if let dot { dotView(dot).offset(x: 2, y: 2) }
             }
             Text(workflow.name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
             Group {
-                rowAction(.play, size: 11, weight: .semibold, help: "Run") { store.runNow(workflow) }
-                rowAction(.more, size: 12, weight: .semibold, help: "More") {
+                rowAction(.play, size: 11, help: "Run") { store.runNow(workflow) }
+                rowAction(.ellipsis, size: 12, help: "More") {
                     store.menu = menuOpen ? nil : WorkflowsMenu(kind: .workflow(workflow.id), anchor: moreFrame, edge: .leading)
                 }
                 .trackFrame($moreFrame)
@@ -303,11 +303,11 @@ private struct WorkflowRow: View {
     }
 
     private func rowAction(
-        _ glyph: Glyph, size: CGFloat, weight: Font.Weight, help: String, action: @escaping () -> Void
+        _ glyph: LucideGlyph, size: CGFloat, help: String, action: @escaping () -> Void
     ) -> some View {
         Hovering { hovered in
             Button(action: action) {
-                Icon(glyph, size: size, weight: weight)
+                LucideIcon(glyph, size: size, strokeWidth: 2)
                     .foregroundStyle(hovered ? Color.white : Theme.gray500)
                     .padding(2)
                     .background(hovered ? Theme.white(0.08) : .clear, in: RoundedRectangle(cornerRadius: Theme.radius))

@@ -114,7 +114,7 @@ struct StartFromPanel: View {
         .background(Theme.surfaceNode)
         .overlay(alignment: .leading) { Rectangle().fill(Theme.white(0.08)).frame(width: 1) }
         .onExitCommand(perform: onClose)
-        .task {
+        .task(id: store.catalogGeneration) {
             guard preloaded == nil else { return }
             loaded = await store.startFromData()
         }

@@ -181,6 +181,15 @@ public enum TemplateRequirements {
 
 extension WorkflowsStore {
     /// connector:catalog's templates, empty when vornd has none to offer.
+    /// Waits up to `seconds` for vornd's background catalog refresh, as a person opening the list would.
+    public func awaitFreshCatalog(seconds: Double = 4) async {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if (try? await backend.rpc("connector:catalog", nil))?["fetchedAt"]?.isNull == false { return }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+    }
+
     func workflowTemplates() async -> [WorkflowTemplate] {
         (try? await backend.rpc("connector:catalog", nil, as: ConnectorCatalog.self))?.templates ?? []
     }

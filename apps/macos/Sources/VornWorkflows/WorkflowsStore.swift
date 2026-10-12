@@ -338,6 +338,8 @@ public final class WorkflowsStore {
             if let list { workflows = list } else { scheduleReload() }
         case .disconnected(let why):
             connectionError = why
+        case .catalogChanged:
+            catalogGeneration += 1
         case .schedulerMissed:
             // App-level: `followMissedSchedules` shows these whether or not this view is open.
             break
@@ -388,6 +390,9 @@ public final class WorkflowsStore {
             await self?.reload()
         }
     }
+
+    /// Bumped when the connector catalog refreshes, so the Start from list reads it again.
+    public var catalogGeneration = 0
 
     // Panels: workflow files (WorkflowFiles.swift).
     /// An import's unbound steps, waiting for the editor to show them.

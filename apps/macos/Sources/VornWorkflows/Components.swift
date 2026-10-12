@@ -78,45 +78,41 @@ public enum Glyph: String, Sendable {
     }
 }
 
-/// The project icon set a workflow picks from (ICON_MAP), as SF Symbols.
+/// The project icon set a workflow picks from (ICON_MAP).
 public enum WorkflowIcons {
-    public static let symbols: [String: String] = [
-        "Folder": "folder",
-        "FolderGit2": "folder.badge.gearshape",
-        "Code": "chevron.left.forwardslash.chevron.right",
-        "Globe": "globe",
-        "Database": "cylinder.split.1x2",
-        "Server": "server.rack",
-        "Smartphone": "iphone",
-        "Package": "shippingbox",
-        "FileCode": "doc.text",
-        "Terminal": "terminal",
-        "Cpu": "cpu",
-        "Cloud": "cloud",
-        "Shield": "shield",
-        "Zap": "bolt",
-        "Workflow": "flowchart",
-        "Gamepad2": "gamecontroller",
-        "Music": "music.note",
-        "Image": "photo",
-        "BookOpen": "book",
-        "FlaskConical": "testtube.2",
-        "Rocket": "paperplane",
-        "Play": "play",
-        "github": "arrow.triangle.branch",
-        "linear": "line.diagonal",
-        "mcp": "puzzlepiece.extension",
+    public static let names: [String] = [
+        "Folder", "FolderGit2", "Code", "Globe", "Database", "Server", "Smartphone", "Package", "FileCode",
+        "Terminal", "Cpu", "Cloud", "Shield", "Zap", "Workflow", "Gamepad2", "Music", "Image", "BookOpen",
+        "FlaskConical", "Rocket", "Play", "github", "linear", "mcp",
     ]
 
-    public static func symbol(_ name: String?) -> String? { name.flatMap { symbols[$0] } }
-
-    /// A workflow's icon, falling back to the Workflow glyph like the sidebar does.
-    public static func symbolOrWorkflow(_ name: String?) -> String { symbol(name) ?? Glyph.workflow.symbol }
+    public static func known(_ name: String?) -> String? { name.flatMap { names.contains($0) ? $0 : nil } }
 
     public static let defaultColor = Color(hex: 0x6B7280)
 
     public static func color(_ css: String?) -> Color {
         css.flatMap { Color(css: $0) } ?? defaultColor
+    }
+}
+
+/// A workflow's ICON_MAP icon in its colour, the Workflow glyph when it names none.
+public struct WorkflowIconView: View {
+    let name: String?
+    let color: String?
+    var size: CGFloat = 14
+
+    public init(name: String?, color: String?, size: CGFloat = 14) {
+        self.name = name
+        self.color = color
+        self.size = size
+    }
+
+    public var body: some View {
+        if let known = WorkflowIcons.known(name) {
+            ProjectIcon(icon: known, color: color ?? "#6b7280", size: size)
+        } else {
+            LucideIcon(.workflow, size: size, strokeWidth: 1.5).foregroundStyle(WorkflowIcons.color(color))
+        }
     }
 }
 
