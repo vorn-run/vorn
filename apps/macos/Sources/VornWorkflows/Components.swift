@@ -304,7 +304,7 @@ struct Scroller<Content: View>: View {
         if isStatic {
             content
                 .fixedSize(horizontal: axes.contains(.horizontal), vertical: true)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
                 .clipped()
         } else {
             ScrollView(axes) { content }

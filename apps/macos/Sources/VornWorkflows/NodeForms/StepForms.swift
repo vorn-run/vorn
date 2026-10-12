@@ -36,8 +36,8 @@ struct QuietField: View {
     var body: some View {
         BareTextInput(placeholder: placeholder, text: $text, size: size, mono: mono, color: Theme.gray200)
             .multilineTextAlignment(center ? .center : .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, vertical)
+            .padding(.horizontal, 13)
+            .padding(.vertical, vertical + 1)
             .background(Theme.white(0.03), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.white(0.08), lineWidth: 1))
     }
@@ -471,7 +471,7 @@ struct LoopConfigForm: View {
                         }
                     }
                 }
-                .padding(2)
+                .padding(3)
                 .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.white(0.08), lineWidth: 1))
             }
             if mode == "forEach" {

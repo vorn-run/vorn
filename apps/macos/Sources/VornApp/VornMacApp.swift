@@ -157,7 +157,7 @@ struct WindowConfigurator: NSViewRepresentable {
 /// Renders the main screen offscreen with live data from vornd (read-only),
 /// terminals included. Options: `--size WxH`, `--project NAME`, `--no-sidebar`, `--tip N`,
 /// `--view sessions|tasks|workflows`, `--layout grid|tabs`, `--focused N`, `--filter STATUS`, `--columns N`,
-/// `--workflow NAME [--history] [--full-output] [--select LABEL] [--library [--library-query Q]] [--icon-picker] [--more]` opens a workflow's page,
+/// `--workflow NAME [--history] [--full-output] [--select LABEL] [--library [--library-query Q]] [--icon-picker] [--more] [--form-open more|agent|model|vars:PLACEHOLDER] [--panel-scroll PT]` opens a workflow's page,
 /// `--new-workflow [--trigger-library]` a blank editor, `--task TITLE` opens a task's detail (`--editor slash|toolbar|link` drives its editor), `--sidebar-mode MODE`, `--overlay NAME`, `--context grid|card:N [--submenu NAME]`.
 @MainActor
 func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 {
@@ -223,7 +223,8 @@ func renderMainScreen(to path: String, arguments args: [String]) async -> Int32 
             features.workflows.historyOpen = args.contains("--history")
             features.workflows.editor?.driveForRender(
                 select: value("--select"), library: args.contains("--library"), query: value("--library-query"),
-                iconPicker: args.contains("--icon-picker"), more: args.contains("--more"))
+                iconPicker: args.contains("--icon-picker"), more: args.contains("--more"),
+                formOpen: value("--form-open"), panelScroll: value("--panel-scroll").flatMap(Double.init) ?? 0)
             if args.contains("--full-output"),
                let logs = features.workflows.workflowRuns.first?.nodeStates.compactMap(\.logs).first(where: { !$0.isEmpty }) {
                 features.workflows.showFullOutput(logs)

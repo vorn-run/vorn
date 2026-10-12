@@ -72,8 +72,11 @@ struct WorkflowPage<Leading: View>: View {
                         editor.openLibrary(InsertAnchor(afterNodeId: id, beforeNodeId: nil, replaceNodeId: id))
                     },
                     onRunToStep: EditorOps.runToStepEligible(editor.nodes, selected.id) ? { editor.run(toStep: $0) } : nil),
+                menuOpen: editor.renderFormOpen == "more",
                 onDelete: { editor.deleteNode(selected.id) },
                 onClose: { editor.selectedNodeId = nil })
+            .environment(\.formRenderOpen, editor.renderFormOpen)
+            .environment(\.formRenderScroll, editor.renderPanelScroll)
             .id(selected.id)
         }
         if selected == nil && !history && pending == nil && !startFrom && editor.showProperties {

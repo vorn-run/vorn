@@ -155,8 +155,8 @@ struct TriggerConfigForm: View {
                 Text(kind?.label ?? triggerType).font(.system(size: 13)).foregroundStyle(Theme.gray200).cssLineHeight(13)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
             .background(Theme.white(0.02), in: RoundedRectangle(cornerRadius: Theme.radiusLg))
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusLg).strokeBorder(Theme.white(0.06), lineWidth: 1))
             if let kind { FormHint(kind.hint, top: 6) }
@@ -282,7 +282,7 @@ private struct WebhookURLRow: View {
                 .foregroundStyle(Theme.gray300)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 16.5, alignment: .leading)
                 .fieldChrome()
             Hovering { hovered in
                 Button {
@@ -295,11 +295,11 @@ private struct WebhookURLRow: View {
                     }
                 } label: {
                     Group {
-                        if copied { LucideIcon(.check, size: 12) } else { Image(systemName: "doc.on.doc").font(.system(size: 10)) }
+                        if copied { LucideIcon(.check, size: 12) } else { LucideIcon(.copy, size: 12) }
                     }
                     .frame(width: 12, height: 12)
                     .foregroundStyle(hovered ? Color.white : Theme.gray400)
-                    .padding(8)
+                    .padding(9)
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.white(hovered ? 0.2 : 0.1), lineWidth: 1))
                     .contentShape(Rectangle())

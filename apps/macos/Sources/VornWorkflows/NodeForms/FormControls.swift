@@ -68,8 +68,8 @@ extension View {
 extension View {
     /// CSS `line-height`: the leading a browser splits above and below each line.
     func cssLineHeight(_ size: CGFloat, _ ratio: CGFloat = 1.5, mono: Bool = false) -> some View {
-        let font = mono ? NSFont.monospacedSystemFont(ofSize: size, weight: .regular) : NSFont.systemFont(ofSize: size)
-        let extra = max(0, size * ratio - (font.ascender - font.descender + font.leading))
+        // SwiftUI sets a system-font line at about size + 3 points, mono or not.
+        let extra = max(0, size * ratio - (size + 3))
         return lineSpacing(extra).padding(.vertical, extra / 2)
     }
 }
@@ -143,8 +143,8 @@ struct FieldChrome: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .padding(.horizontal, horizontal)
-            .padding(.vertical, vertical)
+            .padding(.horizontal, horizontal + 1)
+            .padding(.vertical, vertical + 1)
             .background(Theme.white(0.06), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radiusMd)
@@ -294,8 +294,8 @@ struct PickerTrigger<Leading: View>: View {
                             .rotationEffect(.degrees(open ? 180 : 0))
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 9)
                 .background(Theme.white(tone.fill), in: RoundedRectangle(cornerRadius: Theme.radiusMd))
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.radiusMd)
@@ -484,8 +484,8 @@ struct SwitchCard: View {
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 11)
                 .background(
                     disabled ? Theme.white(0.01) : isOn ? Theme.white(0.04) : Theme.white(0.02),
                     in: RoundedRectangle(cornerRadius: Theme.radiusLg))
@@ -592,7 +592,7 @@ struct FormBox<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) { content }
-            .padding(12)
+            .padding(13)
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusLg).strokeBorder(Theme.white(0.06), lineWidth: 1))
     }

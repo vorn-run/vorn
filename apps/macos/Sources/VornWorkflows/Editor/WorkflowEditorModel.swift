@@ -98,6 +98,9 @@ public final class WorkflowEditorModel {
     public var canvasSize: CGSize = .zero
     /// A search the library opens with, for renders.
     public var renderQuery: String?
+    /// Offscreen renders only: a popup the step panel opens, and how far its form is scrolled.
+    public var renderFormOpen: String?
+    public var renderPanelScroll: Double = 0
 
     @ObservationIgnored private(set) var history = DefinitionHistory(WorkflowGraph(nodes: [], edges: []))
     @ObservationIgnored private var loadedSnapshot: WorkflowDefinition?
@@ -487,8 +490,10 @@ extension WorkflowEditorModel {
     /// Puts the editor in a state a render shows: a selected step, the library, a popover.
     public func driveForRender(
         select: String? = nil, library: Bool = false, query: String? = nil, iconPicker: Bool = false,
-        more: Bool = false, triggerLibrary: Bool = false
+        more: Bool = false, triggerLibrary: Bool = false, formOpen: String? = nil, panelScroll: Double = 0
     ) {
+        renderFormOpen = formOpen
+        renderPanelScroll = panelScroll
         if let select, let node = nodes.first(where: { $0.label == select }) { nodeClick(node.id) }
         if library {
             let outgoing = Set(edges.map(\.source))

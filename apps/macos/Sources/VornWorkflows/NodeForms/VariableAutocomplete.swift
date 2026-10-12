@@ -134,6 +134,8 @@ extension EnvironmentValues {
     @Entry var formConnections: [FormConnection] = []
     /// Offscreen renders only: which popup a form opens on its own (`vars:<placeholder prefix>`, `agent`, `model`...).
     @Entry var formRenderOpen: String?
+    /// Offscreen renders only: how far the step panel's form is scrolled.
+    @Entry var formRenderScroll: Double = 0
 }
 
 /// VariableAutocomplete.tsx: a template textarea with the `{{` picker, its toggle and the step preview.
@@ -150,7 +152,8 @@ struct VariableAutocomplete: View {
     @Environment(\.formRenderOpen) private var renderOpen
 
     private var allItems: [VarPicker.Item] { VarPicker.items(stepGroups: stepGroups, contextVars: contextVars) }
-    private var fontSize: CGFloat { mono ? 12 : 13 }
+    /// `text-[13px]` wins over the mono variant's `text-[12px]`, so every template field is 13pt.
+    private var fontSize: CGFloat { 13 }
 
     var body: some View {
         let items = allItems
@@ -162,6 +165,7 @@ struct VariableAutocomplete: View {
                 state: state, onEdit: edited, onCommand: { command($0, items: items) }
             )
             .overlay(alignment: .topTrailing) { if has { bracesButton } }
+            .padding(.bottom, 6)
             .formPopup(
                 isPresented: Binding(get: { state.open && has }, set: { if !$0 { state.close() } }), minWidth: 0
             ) {

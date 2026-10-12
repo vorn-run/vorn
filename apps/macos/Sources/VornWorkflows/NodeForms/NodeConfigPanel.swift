@@ -71,6 +71,7 @@ public struct NodeConfigPanel: View {
     @State private var data: NodeFormsData
     private let loadsData: Bool
     @State private var menuOpen: Bool
+    @Environment(\.formRenderScroll) private var renderScroll
 
     public init(
         store: WorkflowsStore, node: Binding<WorkflowNode>, context: NodeEditorContext, data: NodeFormsData? = nil,
@@ -103,6 +104,7 @@ public struct NodeConfigPanel: View {
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .offset(y: -renderScroll)
             }
             if let run = context.onRunToStep { runToStep(run) }
         }
@@ -248,9 +250,9 @@ public struct NodeConfigPanel: View {
                     Text("Run to this step").font(.system(size: 12))
                 }
                 .foregroundStyle(hovered ? Color.white : Theme.gray300)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, minHeight: 18)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.white(hovered ? 0.2 : 0.12), lineWidth: 1))
                 .contentShape(Rectangle())

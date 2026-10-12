@@ -160,7 +160,7 @@ private struct InputCard: View {
                         set: { onChange(input.merged(["defaultValue": $0.isEmpty ? nil : .string($0)])) }))
             }
         }
-        .padding(10)
+        .padding(11)
         .background(Theme.white(0.02), in: RoundedRectangle(cornerRadius: Theme.radiusLg))
         .overlay(RoundedRectangle(cornerRadius: Theme.radiusLg).strokeBorder(Theme.white(0.06), lineWidth: 1))
     }
